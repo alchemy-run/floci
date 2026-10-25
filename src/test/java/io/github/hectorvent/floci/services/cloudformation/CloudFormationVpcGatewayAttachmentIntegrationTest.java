@@ -120,23 +120,14 @@ class CloudFormationVpcGatewayAttachmentIntegrationTest {
         throw new AssertionError("stack " + stackName + " never reached " + status + ": " + xml);
     }
 
-    /**
-     * Polls the gateway until it no longer reports the attachment, returning the last response.
-     * Once the stack deletes the gateway, describing it by id is InvalidInternetGatewayID.NotFound,
-     * as in AWS, which also means no attachment remains.
-     */
+    /** Polls the gateway until it no longer reports the attachment, returning the last response. */
     private static String awaitIgwDetached(String igwId, String vpcId) {
         String xml = "";
         long deadline = System.currentTimeMillis() + 10_000;
         while (System.currentTimeMillis() < deadline) {
-            io.restassured.response.Response response = describeIgw(igwId);
-            xml = response.asString();
-            if (response.statusCode() == 400) {
-                assertThat(xml, containsString("InvalidInternetGatewayID.NotFound"));
-                return xml;
-            }
-            assertThat(response.statusCode(), equalTo(200));
-            if (!xml.contains(vpcId)) {
+            // A deleted gateway asked for by id is InvalidInternetGatewayID.NotFound, as on AWS.
+            xml = describeIgw(igwId).then().extract().asString();
+            if (xml.contains("InvalidInternetGatewayID.NotFound") || !xml.contains(vpcId)) {
                 return xml;
             }
             sleepBriefly();

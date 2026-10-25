@@ -5,14 +5,15 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
-import io.github.hectorvent.floci.services.cloudcontrol.CloudControlJsonHandler;
 import io.github.hectorvent.floci.services.bcmpricingcalculator.BcmPricingCalculatorJsonHandler;
+import io.github.hectorvent.floci.services.cloudcontrol.CloudControlJsonHandler;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsJsonHandler;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbRequestShapes;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbResponses;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbStreamsJsonHandler;
-import io.github.hectorvent.floci.services.networkfirewall.NetworkFirewallJsonHandler;
 import io.github.hectorvent.floci.services.marketplace.MarketplaceJsonHandler;
+import io.github.hectorvent.floci.services.networkfirewall.NetworkFirewallJsonHandler;
 import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
 import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsJsonHandler;
@@ -58,7 +59,8 @@ public class AwsJsonController {
     private final VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler;
     private final BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler;
     private final TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler;
-    private final TimestreamJsonHandler timestreamJsonHandler;
+    @Inject
+    TimestreamJsonHandler timestreamJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -74,8 +76,7 @@ public class AwsJsonController {
                              MarketplaceJsonHandler marketplaceJsonHandler,
                              VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler,
                              BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler,
-                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler,
-                             TimestreamJsonHandler timestreamJsonHandler) {
+                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -93,7 +94,28 @@ public class AwsJsonController {
         this.verifiedPermissionsJsonHandler = verifiedPermissionsJsonHandler;
         this.bcmPricingCalculatorJsonHandler = bcmPricingCalculatorJsonHandler;
         this.timestreamInfluxDbJsonHandler = timestreamInfluxDbJsonHandler;
-        this.timestreamJsonHandler = timestreamJsonHandler;
+    }
+
+    /**
+     * Accept plain JSON only for catalog descriptors declaring that format.
+     * Keep the wire headers intact and delegate to the same JSON handler.
+     */
+    @POST
+    @Consumes("application/json")
+    @Produces("application/json")
+    public Response handlePlainJsonRequest(
+            @HeaderParam("X-Amz-Target") String target,
+            @Context HttpHeaders httpHeaders,
+            String body) {
+        if (target == null) {
+            return JsonErrorResponseUtils.createMissingTargetErrorResponse();
+        }
+        if (catalog.matchPlainJsonTarget(target).isEmpty()) {
+            return JsonErrorResponseUtils.createUnknownOperationErrorResponse(target);
+        }
+        return Response.fromResponse(handleJsonRequest(target, httpHeaders, body))
+                .type("application/json")
+                .build();
     }
 
     @POST
@@ -141,6 +163,10 @@ public class AwsJsonController {
                     if (targetMatch.prefix().startsWith("DynamoDBStreams_")) {
                         yield dynamoDbStreamsJsonHandler.handle(action, request, region);
                     }
+                    if (targetMatch.jsonOnly()) {
+                        yield dynamoDbJsonHandler.handleLegacy(action, request, region);
+                    }
+                    DynamoDbRequestShapes.check(action, request);
                     yield dynamoDbJsonHandler.handle(action, request, region);
                 }
                 case "sqs" -> sqsJsonHandler.handle(action, request, region);
@@ -178,7 +204,22 @@ public class AwsJsonController {
         // boundary so other callers of DynamoDbJsonHandler (CBOR, API Gateway proxy,
         // Step Functions tasks) keep their original ObjectNode entity.
         if ("dynamodb".equals(serviceKey)) {
+            if (targetMatch.jsonOnly()) {
+                response = DynamoDbResponses.withLegacyErrorNamespace(response, objectMapper);
+            }
             return DynamoDbResponses.withCrc32(response, objectMapper);
+        }
+        if ("sqs".equals(serviceKey) && response.getEntity() != null
+                && !(response.getEntity() instanceof byte[])) {
+            byte[] bodyBytes = JsonResponseBytes.serializeOrNull(response.getEntity(), objectMapper,
+                    LOG, "Failed to serialize SQS JSON response");
+            if (bodyBytes == null) {
+                return response;
+            }
+            return Response.fromResponse(response)
+                    .entity(bodyBytes)
+                    .type(CONTENT_TYPE_AWS_JSON_1_0)
+                    .build();
         }
         return response;
     }

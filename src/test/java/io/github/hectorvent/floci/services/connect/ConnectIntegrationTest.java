@@ -1,6 +1,8 @@
 package io.github.hectorvent.floci.services.connect;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ExtractableResponse;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -24,7 +26,7 @@ class ConnectIntegrationTest {
     @Test
     @Order(1)
     void createInstance() {
-        var response = given()
+        ExtractableResponse<Response> response = given()
             .contentType("application/json")
             .body("""
                 {
@@ -62,7 +64,12 @@ class ConnectIntegrationTest {
             .body("Instance.InstanceAlias", equalTo("floci-integration"))
             .body("Instance.InboundCallsEnabled", equalTo(true))
             .body("Instance.OutboundCallsEnabled", equalTo(false))
-            .body("Instance.ServiceRole", containsString(":role/"))
+            // The service-linked role name comes from iam/service-linked-roles.tsv, where AWS
+            // mints AmazonConnect rather than the Connect a principal would derive. Asserted in
+            // full: containsString(":role/") passed whatever the name was.
+            .body("Instance.ServiceRole", equalTo("arn:aws:iam::000000000000:role/"
+                    + "aws-service-role/connect.amazonaws.com/"
+                    + "AWSServiceRoleForAmazonConnect_" + instanceId))
             .body("Instance.InstanceAccessUrl", containsString("floci-integration"))
             .body("Instance.CreatedTime", notNullValue())
             .body("Instance.Tags.team", equalTo("cx"));

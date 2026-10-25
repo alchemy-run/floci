@@ -22,6 +22,9 @@ final class S3PostPolicySigner {
     static final String LEGACY_ACCESS_KEY_ID = "test";
     static final String LEGACY_SECRET_KEY = "test";
 
+    /** S3's error list: {@code ExpiredToken}, 400 Bad Request. */
+    static final String EXPIRED_TOKEN_MESSAGE = "The provided token has expired.";
+
     private S3PostPolicySigner() {
     }
 
@@ -33,6 +36,15 @@ final class S3PostPolicySigner {
             return iamService.findSecretKey(accessKeyId, sessionToken);
         }
         return Optional.empty();
+    }
+
+    /**
+     * Whether a credential {@link #resolveSecretKey} found no secret for is a session past its
+     * expiry, sent with its own token. S3 answers it with {@code 400 ExpiredToken}
+     * ({@link #EXPIRED_TOKEN_MESSAGE}), not as a key it does not know.
+     */
+    static boolean isExpiredSession(IamService iamService, String accessKeyId, String sessionToken) {
+        return iamService != null && iamService.isExpiredSessionToken(accessKeyId, sessionToken);
     }
 
     /**

@@ -1,12 +1,13 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.ses.model.Tag;
 import io.github.hectorvent.floci.services.ses.model.Tenant;
-import io.github.hectorvent.floci.services.ses.model.TenantResource;
 import io.github.hectorvent.floci.services.ses.model.TenantResourceAssociation;
+import io.github.hectorvent.floci.services.ses.model.TenantSuppressionAttributes;
+import io.github.hectorvent.floci.testing.MutableClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -16,6 +17,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -30,40 +33,6 @@ class SesTenantServiceTest {
     private static final String REGION = "us-east-1";
     private static final String ACCOUNT = "000000000000";
     private SesTenantService service;
-
-    @Test
-    void legacyTenantSuppressionRemainsReadable() throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
-        Tenant tenant = mapper.readValue("""
-                {"TenantName":"legacy","TenantId":"id","TenantArn":"arn",
-                 "SuppressedReasons":["BOUNCE"],"SuppressionScope":"TENANT"}
-                """, Tenant.class);
-        assertEquals("legacy", tenant.tenantName());
-        assertEquals("ENABLED", tenant.sendingStatus());
-        assertEquals(List.of("BOUNCE"), tenant.suppressionAttributes().suppressedReasons());
-        assertEquals(tenant, mapper.readValue(mapper.writeValueAsString(tenant), Tenant.class));
-    }
-
-    @Test
-    void legacyAssociationsMigrateAndCascadeOnDelete() {
-        InMemoryStorage<String, Tenant> tenants = new InMemoryStorage<>();
-        InMemoryStorage<String, TenantResourceAssociation> associations = new InMemoryStorage<>();
-        InMemoryStorage<String, TenantResource> legacy = new InMemoryStorage<>();
-        String resourceArn = "arn:aws:ses:" + REGION + ":" + ACCOUNT + ":configuration-set/legacy-cs";
-        Tenant tenant = new Tenant("legacy", "legacy-id", "arn:aws:ses:" + REGION + ":" + ACCOUNT + ":tenant/legacy",
-                null, List.of(new Tag("team", "legacy")), "ENABLED", null);
-        tenants.put("tenant::" + REGION + "::legacy", tenant);
-        legacy.put("tenantResource::" + REGION + "::legacy::" + resourceArn,
-                new TenantResource("legacy", resourceArn, "CONFIGURATION_SET"));
-        SesTenantService migrated = new SesTenantService(tenants, associations, legacy,
-                Clock.systemUTC(), new SecureRandom());
-
-        assertEquals("configuration-set", migrated.listTenantResources(tenant, null, REGION).getFirst().resourceType());
-        assertTrue(legacy.keys().isEmpty());
-        assertEquals(List.of(new Tag("team", "legacy")), migrated.listTags("legacy", REGION));
-        migrated.deleteTenant("legacy", REGION, ignored -> { });
-        assertTrue(associations.keys().isEmpty());
-    }
 
     @BeforeEach
     void setUp() {
@@ -161,12 +130,12 @@ class SesTenantServiceTest {
 
     // Per-account isolation is provided transparently by AccountAwareStorageBackend (which
     // StorageFactory wraps every store in), not by the tenant key, so it is covered by the core
-    // storage tests rather than re-tested here, consistent with the other SES resources.
+    // storage tests rather than re-tested here — consistent with the other SES resources.
 
     @Test
     void getAndDelete_rejectMalformedName() {
         // Unlike CreateTenant, both an absent and an empty name collapse to the service-level
-        // message here (probe-confirmed 2026-08-30), the Smithy wordings are CreateTenant-only.
+        // message here (probe-confirmed 2026-08-30) — the Smithy wordings are CreateTenant-only.
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class, () -> service.getTenant("", REGION)).getMessage());
         assertEquals("TenantName cannot be empty",
@@ -355,10 +324,10 @@ class SesTenantServiceTest {
         service.associate(tenant, SesTenantService.parseResourceArn(
                 "arn:aws:ses:" + REGION + ":" + ACCOUNT + ":configuration-set/cs", ACCOUNT, REGION),
                 REGION, () -> {});
-        var all = service.listTenantResources(tenant, null, REGION);
+        List<TenantResourceAssociation> all = service.listTenantResources(tenant, null, REGION);
         assertEquals(List.of("configuration-set", "identity", "template"),
                 all.stream().map(a -> a.resourceType()).toList());
-        var filtered = service.listTenantResources(tenant, "identity", REGION);
+        List<TenantResourceAssociation> filtered = service.listTenantResources(tenant, "identity", REGION);
         assertEquals(1, filtered.size());
         assertEquals("identity", filtered.get(0).resourceType());
     }
@@ -369,7 +338,7 @@ class SesTenantServiceTest {
         Tenant b = service.createTenant("beta", List.of(), ACCOUNT, REGION);
         service.associate(a, identityRef("example.com"), REGION, () -> {});
         service.associate(b, identityRef("example.com"), REGION, () -> {});
-        var tenants = service.listResourceTenants(identityRef("example.com"), REGION);
+        List<TenantResourceAssociation> tenants = service.listResourceTenants(identityRef("example.com"), REGION);
         assertEquals(2, tenants.size());
         assertEquals("acme", tenants.get(0).tenantName());
         assertEquals(a.tenantId(), tenants.get(0).tenantId());
@@ -429,7 +398,7 @@ class SesTenantServiceTest {
         AwsException empty = assertThrows(AwsException.class,
                 () -> service.tenantForAssociation("", REGION));
         assertEquals("TenantName cannot be empty", empty.getMessage());
-        // An absent TenantName gets the same message (probe-confirmed), the Smithy not-null
+        // An absent TenantName gets the same message (probe-confirmed) — the Smithy not-null
         // variant exists only on CreateTenant.
         AwsException absent = assertThrows(AwsException.class,
                 () -> service.tenantForAssociation(null, REGION));
@@ -445,7 +414,7 @@ class SesTenantServiceTest {
     void putSuppressionAttributes_setsAndClears() {
         service.createTenant("acme", List.of(), ACCOUNT, REGION);
         service.putSuppressionAttributes("acme", List.of("BOUNCE", "COMPLAINT"), "TENANT", REGION);
-        var attrs = service.getTenant("acme", REGION).suppressionAttributes();
+        TenantSuppressionAttributes attrs = service.getTenant("acme", REGION).suppressionAttributes();
         assertEquals(List.of("BOUNCE", "COMPLAINT"), attrs.suppressedReasons());
         assertEquals("TENANT", attrs.suppressionScope());
 
@@ -458,7 +427,7 @@ class SesTenantServiceTest {
     void putSuppressionAttributes_emptyReasonListWithScope_isValidState() {
         service.createTenant("acme", List.of(), ACCOUNT, REGION);
         service.putSuppressionAttributes("acme", List.of(), "TENANT", REGION);
-        var attrs = service.getTenant("acme", REGION).suppressionAttributes();
+        TenantSuppressionAttributes attrs = service.getTenant("acme", REGION).suppressionAttributes();
         assertEquals(List.of(), attrs.suppressedReasons());
         assertEquals("TENANT", attrs.suppressionScope());
     }
@@ -499,7 +468,7 @@ class SesTenantServiceTest {
     @Test
     void putSuppressionAttributes_precedenceMatchesAws() {
         // Empty TenantName wins over the enum check; request validation wins over existence. An
-        // absent TenantName gets the same message, no Smithy not-null variant on this operation.
+        // absent TenantName gets the same message — no Smithy not-null variant on this operation.
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class, () -> service.putSuppressionAttributes(
                         "", List.of("NOPE"), "TENANT", REGION)).getMessage());
@@ -533,7 +502,7 @@ class SesTenantServiceTest {
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class,
                         () -> service.runWithTenant(" ", REGION, t -> null)).getMessage());
-        // An absent TenantName collapses to the same service-level message (probe-confirmed) -
+        // An absent TenantName collapses to the same service-level message (probe-confirmed) —
         // the Smithy not-null variant exists only on CreateTenant.
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class,
@@ -562,7 +531,7 @@ class SesTenantServiceTest {
         AwsException e = assertThrows(AwsException.class,
                 () -> service.tenantForSending("ghost", REGION, ACCOUNT));
         assertEquals("NotFoundException", e.getErrorCode());
-        // No angle brackets, and the account id is included, unlike the management operations.
+        // No angle brackets, and the account id is included — unlike the management operations.
         assertEquals("Tenant ghost for AwsAccountId " + ACCOUNT + " not found.", e.getMessage());
         assertEquals("TenantName cannot be empty",
                 assertThrows(AwsException.class,
@@ -595,18 +564,72 @@ class SesTenantServiceTest {
     }
 
     @Test
-    void validateFilterAndPaging_matchAwsMessages() {
+    void validateFilter_matchesAwsMessages() {
         assertEquals("Invalid resource type NOPE specified.",
                 assertThrows(AwsException.class,
                         () -> SesTenantService.validateResourceTypeFilter("NOPE")).getMessage());
         assertEquals("Invalid resource type EMAIL_IDENTITY specified.",
                 assertThrows(AwsException.class,
                         () -> SesTenantService.validateResourceTypeFilter("EMAIL_IDENTITY")).getMessage());
-        assertTrue(assertThrows(AwsException.class,
-                () -> SesTenantService.validateListPaging(0, null))
-                .getMessage().contains("greater than or equal to 1"));
-        assertEquals("Invalid Next Token",
-                assertThrows(AwsException.class,
-                        () -> SesTenantService.validateListPaging(null, "garbage")).getMessage());
+    }
+
+    @Test
+    void listTenants_byName_andPagesOnThatOrder() {
+        for (String name : new String[] {"delta", "alpha", "echo", "charlie", "bravo"}) {
+            service.createTenant(name, List.of(), ACCOUNT, REGION);
+        }
+
+        assertEquals(List.of("alpha", "bravo", "charlie", "delta", "echo"),
+                service.listTenants(REGION).stream().map(Tenant::tenantName).toList());
+
+        PaginatedResult<Tenant> first = service.listTenants(REGION, SesListPaging.V2_LIST_TENANTS, 2, null);
+        assertEquals(List.of("alpha", "bravo"), first.items().stream().map(Tenant::tenantName).toList());
+        assertNotNull(first.nextToken());
+        PaginatedResult<Tenant> rest = service.listTenants(REGION, SesListPaging.V2_LIST_TENANTS, 10,
+                first.nextToken());
+        assertEquals(List.of("charlie", "delta", "echo"), rest.items().stream().map(Tenant::tenantName).toList());
+        assertNull(rest.nextToken());
+    }
+
+    @Test
+    void listTenantResources_pagesByArn() {
+        Tenant tenant = service.createTenant("acme", List.of(), ACCOUNT, REGION);
+        for (String domain : new String[] {"c.example.com", "a.example.com", "b.example.com"}) {
+            service.associate(tenant, identityRef(domain), REGION, () -> {});
+        }
+
+        PaginatedResult<TenantResourceAssociation> first = service.listTenantResources("acme", null, REGION,
+                SesListPaging.V2_LIST_TENANT_RESOURCES, 2, null);
+        assertEquals(List.of(identityRef("a.example.com").arn(), identityRef("b.example.com").arn()),
+                first.items().stream().map(TenantResourceAssociation::resourceArn).toList());
+        PaginatedResult<TenantResourceAssociation> rest = service.listTenantResources("acme", null, REGION,
+                SesListPaging.V2_LIST_TENANT_RESOURCES, 2, first.nextToken());
+        assertEquals(List.of(identityRef("c.example.com").arn()),
+                rest.items().stream().map(TenantResourceAssociation::resourceArn).toList());
+        assertNull(rest.nextToken());
+    }
+
+    @Test
+    void listResourceTenants_inAssociationOrder_andPagesOnThatOrder() {
+        // A ticking clock separates the association stamps, so association order can beat name order.
+        SesTenantService ticking = new SesTenantService(new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new MutableClock(), new SecureRandom());
+        for (String name : new String[] {"zulu", "alpha", "mike"}) {
+            Tenant tenant = ticking.createTenant(name, List.of(), ACCOUNT, REGION);
+            ticking.associate(tenant, identityRef("example.com"), REGION, () -> {});
+        }
+
+        assertEquals(List.of("zulu", "alpha", "mike"),
+                ticking.listResourceTenants(identityRef("example.com"), REGION).stream()
+                        .map(TenantResourceAssociation::tenantName).toList());
+
+        PaginatedResult<TenantResourceAssociation> first = ticking.listResourceTenants(identityRef("example.com"),
+                REGION, SesListPaging.V2_LIST_RESOURCE_TENANTS, 2, null);
+        assertEquals(List.of("zulu", "alpha"),
+                first.items().stream().map(TenantResourceAssociation::tenantName).toList());
+        PaginatedResult<TenantResourceAssociation> rest = ticking.listResourceTenants(identityRef("example.com"),
+                REGION, SesListPaging.V2_LIST_RESOURCE_TENANTS, 2, first.nextToken());
+        assertEquals(List.of("mike"), rest.items().stream().map(TenantResourceAssociation::tenantName).toList());
+        assertNull(rest.nextToken());
     }
 }

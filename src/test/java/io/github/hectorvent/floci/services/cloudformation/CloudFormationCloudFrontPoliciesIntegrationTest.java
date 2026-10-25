@@ -1,13 +1,14 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
-import io.github.hectorvent.floci.core.common.XmlParser;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.XmlParser;
 import io.github.hectorvent.floci.services.cloudfront.CloudFrontService;
 import io.github.hectorvent.floci.services.cloudfront.model.CachePolicy;
 import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
 import io.github.hectorvent.floci.services.cloudfront.model.OriginAccessControl;
 import io.github.hectorvent.floci.services.cloudfront.model.OriginRequestPolicy;
 import io.github.hectorvent.floci.services.cloudfront.model.ResponseHeadersPolicy;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
@@ -266,39 +267,7 @@ class CloudFormationCloudFrontPoliciesIntegrationTest {
             .post("/")
         .then()
             .statusCode(200);
-        awaitStackDeleted(stackName);
-    }
-
-    /**
-     * github.com/floci-io/floci/issues/3365: DeleteStack answers before the stack is actually
-     * gone - deletion runs on an executor (CloudFormationService.deleteStack) - so a DescribeStacks
-     * call made immediately after DeleteStack's 200 races that executor and intermittently still
-     * finds the stack. Polls until DescribeStacks reports the stack unknown, matching the
-     * awaitStackDeleted helper CloudFormationIntegrationTest already uses for the same race.
-     */
-    private static void awaitStackDeleted(String stackName) {
-        long deadline = System.currentTimeMillis() + 10_000;
-        while (System.currentTimeMillis() < deadline) {
-            String body = given()
-                .contentType("application/x-www-form-urlencoded")
-                .header("Authorization", CFN_AUTH)
-                .formParam("Action", "DescribeStacks")
-                .formParam("StackName", stackName)
-            .when()
-                .post("/")
-            .then()
-                .extract().body().asString();
-            if (body.contains("Stack with id " + stackName + " does not exist")) {
-                return;
-            }
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new AssertionError("Interrupted while waiting for stack " + stackName + " to be deleted", e);
-            }
-        }
-        fail("Stack " + stackName + " did not become unknown to DescribeStacks within timeout");
+        CfnStackWaits.awaitStackDeleted(stackName);
     }
 
     private static String describeStacks(String stackName) {

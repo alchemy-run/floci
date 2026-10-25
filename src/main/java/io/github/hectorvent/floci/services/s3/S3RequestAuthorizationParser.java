@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.s3;
 
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.auth.SigV4aSignature;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.UriInfo;
@@ -95,25 +96,28 @@ final class S3RequestAuthorizationParser {
 
     private static String extractAuthorizationHeaderAccessKeyId(String authorization) {
         String trimmed = authorization.trim();
-        if (!trimmed.startsWith(SIGV4_ALGORITHM + " ")) {
+        boolean asymmetric = trimmed.startsWith(SigV4aSignature.ALGORITHM + " ");
+        if (!asymmetric && !trimmed.startsWith(SIGV4_ALGORITHM + " ")) {
             return null;
         }
 
-        Map<String, String> parameters = authorizationParameters(trimmed.substring(SIGV4_ALGORITHM.length()).trim());
+        Map<String, String> parameters = authorizationParameters(trimmed.substring(trimmed.indexOf(' ')).trim());
         if (isBlank(parameters.get("SignedHeaders")) || isBlank(parameters.get("Signature"))) {
             return null;
         }
-        return extractCredentialAccessKeyId(parameters.get("Credential"));
+        return extractCredentialAccessKeyId(parameters.get("Credential"), asymmetric);
     }
 
     private static String extractPresignedAccessKeyId(MultivaluedMap<String, String> queryParameters) {
-        if (!SIGV4_ALGORITHM.equals(queryParameters.getFirst("X-Amz-Algorithm"))) {
+        String algorithm = queryParameters.getFirst("X-Amz-Algorithm");
+        boolean asymmetric = SigV4aSignature.ALGORITHM.equals(algorithm);
+        if (!asymmetric && !SIGV4_ALGORITHM.equals(algorithm)) {
             return null;
         }
         if (isMissingRequiredPresignedParameter(queryParameters)) {
             return null;
         }
-        return extractCredentialAccessKeyId(queryParameters.getFirst("X-Amz-Credential"));
+        return extractCredentialAccessKeyId(queryParameters.getFirst("X-Amz-Credential"), asymmetric);
     }
 
     static boolean isMissingRequiredPresignedParameter(MultivaluedMap<String, String> queryParameters) {
@@ -122,7 +126,8 @@ final class S3RequestAuthorizationParser {
                 return true;
             }
         }
-        return false;
+        return SigV4aSignature.ALGORITHM.equals(queryParameters.getFirst("X-Amz-Algorithm"))
+                && isBlank(queryParameters.getFirst("X-Amz-Region-Set"));
     }
 
     private static Map<String, String> authorizationParameters(String parameters) {
@@ -130,25 +135,31 @@ final class S3RequestAuthorizationParser {
         for (String part : parameters.split(",")) {
             int equals = part.indexOf('=');
             if (equals <= 0) {
-                continue;
+                return Map.of();
             }
-            parsed.put(part.substring(0, equals).trim(), part.substring(equals + 1).trim());
+            String key = part.substring(0, equals).trim();
+            String value = part.substring(equals + 1).trim();
+            if (parsed.putIfAbsent(key, value) != null) {
+                return Map.of();
+            }
         }
         return parsed;
     }
 
-    private static String extractCredentialAccessKeyId(String credential) {
+    /** A SigV4A scope drops the region segment: {@code <akid>/<date>/s3/aws4_request}. */
+    private static String extractCredentialAccessKeyId(String credential, boolean asymmetric) {
         if (isBlank(credential)) {
             return null;
         }
         String[] parts = credential.split("/", -1);
-        if (parts.length != 5) {
+        int serviceIndex = asymmetric ? 2 : 3;
+        if (parts.length != serviceIndex + 2) {
             return null;
         }
-        if (parts[0].isBlank() || !isEightDigitDate(parts[1]) || parts[2].isBlank()) {
+        if (parts[0].isBlank() || !isEightDigitDate(parts[1]) || (!asymmetric && parts[2].isBlank())) {
             return null;
         }
-        if (!"s3".equals(parts[3]) || !"aws4_request".equals(parts[4])) {
+        if (!"s3".equals(parts[serviceIndex]) || !"aws4_request".equals(parts[serviceIndex + 1])) {
             return null;
         }
         return parts[0];

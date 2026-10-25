@@ -1,10 +1,13 @@
 package io.github.hectorvent.floci.services.s3;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.config.LocalStackParity;
+import io.github.hectorvent.floci.core.common.AwsPartitions;
 import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.RequestHost;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
+import io.github.hectorvent.floci.services.apigateway.ApiGatewayCustomDomainFilter;
 import io.github.hectorvent.floci.services.cloudfront.CloudFrontDistributionFilter;
 import io.github.hectorvent.floci.services.cognito.CognitoCustomDomainFilter;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -57,6 +60,7 @@ public class S3VirtualHostFilter implements ContainerRequestFilter {
     private static final Set<String> NON_S3_SERVICE_LABELS = Set.of(
             "execute-api",      // ApiGatewayExecuteApiHostFilter: <api-id>.execute-api[.<region>].<host>
             "lambda-url",       // LambdaUrlRoutingFilter: <url-id>.lambda-url.<region>.<host>
+            "lambda-web",       // LambdaWebDataPlane: <id>.<shard>.lambda-web.<region>.<host>, <id>.lambda-web.global.<host>
             "emr-serverless",   // EmrServerlessRouteFilter: emr-serverless.<host>
             "cloudfront");      // CloudFrontDistributionFilter: <dist-id>.cloudfront.net
 
@@ -73,7 +77,7 @@ public class S3VirtualHostFilter implements ContainerRequestFilter {
                 .orElseGet(() -> containerDetector.isRunningInContainer()
                         ? EmbeddedDnsServer.DEFAULT_SUFFIX
                         : extractHostnameFromUrl(config.baseUrl()));
-        this.serviceHostSuffixes = buildServiceHostSuffixes(config.hostname(), config.dns().extraSuffixes());
+        this.serviceHostSuffixes = buildServiceHostSuffixes(config.hostname(), LocalStackParity.withDnsSuffixes(config.dns().extraSuffixes()));
         this.s3ServiceInstance = s3ServiceInstance;
     }
 
@@ -159,10 +163,11 @@ public class S3VirtualHostFilter implements ContainerRequestFilter {
             return;
         }
 
-        // A higher-priority Host filter (CloudFront, Cognito custom domain) may have already
-        // routed this request. Use its server-side marker rather than trusting a
-        // user-controlled path prefix.
-        if (Boolean.TRUE.equals(requestContext.getProperty(CloudFrontDistributionFilter.ROUTED_PROPERTY))
+        // A higher-priority Host filter (API Gateway custom domain, CloudFront, Cognito custom
+        // domain) may have already routed this request. Use its server-side marker rather than
+        // trusting a user-controlled path prefix.
+        if (Boolean.TRUE.equals(requestContext.getProperty(ApiGatewayCustomDomainFilter.ROUTED_PROPERTY))
+                || Boolean.TRUE.equals(requestContext.getProperty(CloudFrontDistributionFilter.ROUTED_PROPERTY))
                 || requestContext.getProperty(CognitoCustomDomainFilter.POOL_PROPERTY) != null) {
             return;
         }
@@ -170,8 +175,10 @@ public class S3VirtualHostFilter implements ContainerRequestFilter {
         // Rewrite path from /key to /bucket/key
         String newPath = "/" + bucket + (path.startsWith("/") ? "" : "/") + path;
 
+        // RESTEasy keeps the decoded path of the URI it is given and decodes it again to route,
+        // so escape it once more to leave the raw path in place, as a path-style request has it.
         URI newUri = UriBuilder.fromUri(uri)
-                .replacePath(newPath)
+                .replacePath(newPath.replace("%", "%25"))
                 .build();
 
         requestContext.setProperty(ORIGINAL_REQUEST_URI_PROPERTY, uri);
@@ -291,9 +298,12 @@ public class S3VirtualHostFilter implements ContainerRequestFilter {
             return bucketFromPrefix(prefix, false);
         }
 
-        // Fallback: well-known AWS S3 domains, for users who route AWS DNS to Floci. An S3
-        // qualifier is required here, so a plain foo.amazonaws.com is not an S3 bucket.
-        String awsPrefix = stripHostSuffix(hostname, "amazonaws.com");
+        // Fallback: well-known AWS S3 domains in any partition, for users who route AWS DNS to
+        // Floci. Longest suffix first, so a China host keeps its .cn. An S3 qualifier is required
+        // here, so a plain foo.amazonaws.com is not an S3 bucket.
+        String awsPrefix = AwsPartitions.stripKnownDnsSuffix(hostname)
+                .map(AwsPartitions.DnsSuffixMatch::prefix)
+                .orElse(null);
         if (awsPrefix != null) {
             return bucketFromPrefix(awsPrefix, true);
         }

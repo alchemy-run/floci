@@ -6,13 +6,14 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.CloudFormationTemplateEngine;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
-import io.github.hectorvent.floci.services.ec2.model.UserIdGroupPair;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.IpPermission;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroupRule;
+import io.github.hectorvent.floci.services.ec2.model.UserIdGroupPair;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
 import java.util.HashMap;
 import java.util.List;
@@ -238,7 +239,7 @@ class Ec2SecurityGroupRuleCfnProvisionerTest {
 
         provisioner.provision(r, props, ctx());
 
-        var order = inOrder(ec2);
+        InOrder order = inOrder(ec2);
         order.verify(ec2).authorizeSecurityGroupIngress(eq("us-east-1"), eq("sg-123"), anyList());
         order.verify(ec2).deleteSecurityGroupRule("us-east-1", "sgr-old");
         assertEquals("sgr-new", r.getPhysicalId());

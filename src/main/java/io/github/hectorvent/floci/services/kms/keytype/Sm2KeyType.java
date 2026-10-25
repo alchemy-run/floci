@@ -24,16 +24,11 @@ final class Sm2KeyType implements KmsKeyType {
 
     @Override
     public void generateKeyMaterial(KmsKey key, String region) throws GeneralSecurityException {
-        if (!region.equals("cn-north-1") && !region.equals("cn-northwest-1")) {
+        if (!region.equals("cn-north-1") && !region.equals("cn-northwest-1")) { // partition-literal: SM2 keys exist only in the China regions
             throw new AwsException("UnsupportedOperationException",
                     "KeySpec SM2 is not supported in this Region", 400);
         }
-        AsymmetricKeys.store(key, BcEcKeys.generateKeyPair(CURVE));
-    }
-
-    @Override
-    public byte[] deriveSharedSecret(KmsKey key, byte[] publicKeyDer) throws IOException {
-        return BcEcKeys.deriveSharedSecret(key, publicKeyDer, CURVE);
+        BcEcKeys.generateKeyPair(key, CURVE, random);
     }
 
     @Override
@@ -54,5 +49,10 @@ final class Sm2KeyType implements KmsKeyType {
         verifier.init(false, BcEcKeys.publicKeyParameters(key, CURVE));
         verifier.update(message, 0, message.length);
         return verifier.verifySignature(signature);
+    }
+
+    @Override
+    public byte[] deriveSharedSecret(KmsKey key, byte[] publicKeyDer) throws IOException {
+        return BcEcKeys.deriveSharedSecret(key, publicKeyDer, CURVE);
     }
 }

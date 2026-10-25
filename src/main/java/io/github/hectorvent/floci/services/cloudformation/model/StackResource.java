@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.cloudformation.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
@@ -19,10 +20,10 @@ public class StackResource {
     private String updateReplacePolicy;
     private Instant timestamp = Instant.now();
     private Map<String, String> attributes = new HashMap<>();
-    private com.fasterxml.jackson.databind.JsonNode expectedProperties;
+    private JsonNode expectedProperties;
 
-    public com.fasterxml.jackson.databind.JsonNode getExpectedProperties() { return expectedProperties; }
-    public void setExpectedProperties(com.fasterxml.jackson.databind.JsonNode value) { expectedProperties = value; }
+    public JsonNode getExpectedProperties() { return expectedProperties; }
+    public void setExpectedProperties(JsonNode value) { expectedProperties = value; }
 
     public String getLogicalId() { return logicalId; }
     public void setLogicalId(String logicalId) { this.logicalId = logicalId; }

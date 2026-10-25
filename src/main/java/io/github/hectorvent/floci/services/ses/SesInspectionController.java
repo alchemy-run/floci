@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.ses;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.services.ses.model.SentAttachment;
 import io.github.hectorvent.floci.services.ses.model.SentEmail;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.DELETE;
@@ -17,7 +18,9 @@ import java.util.List;
 
 /**
  * LocalStack-compatible REST endpoint for inspecting sent SES emails.
- * Provides GET /_aws/ses and DELETE /_aws/ses for test helpers.
+ * Provides GET /_aws/ses and DELETE /_aws/ses for test helpers. GET lists the messages oldest
+ * first and filters them by {@code id} (message id) and {@code email} (message source); DELETE
+ * removes the message named by {@code id}, or every message without it.
  */
 @Path("/_aws/ses")
 @Produces(MediaType.APPLICATION_JSON)
@@ -35,7 +38,7 @@ public class SesInspectionController {
 
     @GET
     public Response getEmails(@QueryParam("id") String messageId,
-                              @QueryParam("email") String recipient) {
+                              @QueryParam("email") String source) {
         List<SentEmail> emails = sentEmailService.listAll();
 
         ArrayNode messages = objectMapper.createArrayNode();
@@ -43,8 +46,7 @@ public class SesInspectionController {
             if (messageId != null && !messageId.equals(email.getMessageId())) {
                 continue;
             }
-            if (recipient != null && (email.getToAddresses() == null
-                    || !email.getToAddresses().contains(recipient))) {
+            if (source != null && !source.equals(email.getSource())) {
                 continue;
             }
             ObjectNode node = objectMapper.createObjectNode();
@@ -91,6 +93,18 @@ public class SesInspectionController {
                 } else {
                     body.putNull("html_part");
                 }
+
+                // A Simple send with attachments also carries the assembled MIME message, base64
+                // encoded like the RawData of a raw send, and a summary of each attachment.
+                if (email.getAttachments() != null && !email.getAttachments().isEmpty()) {
+                    ArrayNode attachments = node.putArray("Attachments");
+                    for (SentAttachment attachment : email.getAttachments()) {
+                        attachments.add(objectMapper.valueToTree(attachment));
+                    }
+                    if (email.getMimeData() != null) {
+                        node.put("RawData", email.getMimeData());
+                    }
+                }
             }
 
             if (email.getHeaders() != null && !email.getHeaders().isEmpty()) {
@@ -131,8 +145,12 @@ public class SesInspectionController {
     }
 
     @DELETE
-    public Response clearEmails() {
-        sentEmailService.clear();
+    public Response clearEmails(@QueryParam("id") String messageId) {
+        if (messageId != null) {
+            sentEmailService.delete(messageId);
+        } else {
+            sentEmailService.clear();
+        }
         return Response.ok().build();
     }
 }

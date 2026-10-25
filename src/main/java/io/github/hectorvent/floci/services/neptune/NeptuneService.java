@@ -693,9 +693,8 @@ public class NeptuneService {
                 cluster.getDbClusterIdentifier());
     }
 
-    /** The DNS suffix endpoint hostnames are built under, as ELB and the other data planes do. */
-    private String dnsSuffix() {
-        return config.hostname().orElse(EmbeddedDnsServer.DEFAULT_SUFFIX);
+    private String resolveEndpointHost() {
+        return config.hostname().orElse("localhost");
     }
 
     private int allocateProxyPort(Integer requested) {
@@ -723,5 +722,10 @@ public class NeptuneService {
 
     private void releaseProxyPort(int port) {
         usedPorts.remove(port);
+    }
+
+    /** The DNS suffix endpoint hostnames are built under, as ELB and the other data planes do. */
+    private String dnsSuffix() {
+        return config.hostname().orElse(EmbeddedDnsServer.DEFAULT_SUFFIX);
     }
 }

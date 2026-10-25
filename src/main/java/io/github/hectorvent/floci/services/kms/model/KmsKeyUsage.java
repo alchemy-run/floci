@@ -1,6 +1,6 @@
 package io.github.hectorvent.floci.services.kms.model;
 
-import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 @RegisterForReflection
@@ -14,8 +14,8 @@ public enum KmsKeyUsage {
         try {
             return KmsKeyUsage.valueOf(usage);
         } catch (IllegalArgumentException _) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value '" + usage + "' at 'KeyUsage' failed to satisfy constraint", 400);
+            throw SmithyValidationErrors.validationException(
+                    "Value '" + usage + "' at 'KeyUsage' failed to satisfy constraint");
         }
     }
 }

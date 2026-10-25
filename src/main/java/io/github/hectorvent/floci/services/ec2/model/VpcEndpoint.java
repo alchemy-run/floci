@@ -16,6 +16,7 @@ public class VpcEndpoint {
     private String serviceName;
     private String vpcEndpointType = "Gateway";
     private String state = "available";
+    private String ipAddressType = "ipv4";
     private Instant creationTimestamp;
     private String region;
     private List<String> routeTableIds = new ArrayList<>();
@@ -23,9 +24,6 @@ public class VpcEndpoint {
     private List<String> securityGroupIds = new ArrayList<>();
     private boolean privateDnsEnabled;
     private String policyDocument;
-    private String ipAddressType;
-    private String dnsRecordIpType;
-    private Boolean privateDnsOnlyForInboundResolverEndpoint;
     /**
      * The addresses the caller pinned per subnet through {@code SubnetConfiguration}. AWS assigns
      * each one to the endpoint's network interface in that subnet, so this is read back from the
@@ -52,6 +50,9 @@ public class VpcEndpoint {
     public String getState() { return state; }
     public void setState(String state) { this.state = state; }
 
+    public String getIpAddressType() { return ipAddressType; }
+    public void setIpAddressType(String ipAddressType) { this.ipAddressType = ipAddressType; }
+
     public Instant getCreationTimestamp() { return creationTimestamp; }
     public void setCreationTimestamp(Instant creationTimestamp) { this.creationTimestamp = creationTimestamp; }
 
@@ -73,17 +74,6 @@ public class VpcEndpoint {
     public String getPolicyDocument() { return policyDocument; }
     public void setPolicyDocument(String policyDocument) { this.policyDocument = policyDocument; }
 
-    public String getIpAddressType() { return ipAddressType; }
-    public void setIpAddressType(String ipAddressType) { this.ipAddressType = ipAddressType; }
-
-    public String getDnsRecordIpType() { return dnsRecordIpType; }
-    public void setDnsRecordIpType(String dnsRecordIpType) { this.dnsRecordIpType = dnsRecordIpType; }
-
-    public Boolean getPrivateDnsOnlyForInboundResolverEndpoint() { return privateDnsOnlyForInboundResolverEndpoint; }
-    public void setPrivateDnsOnlyForInboundResolverEndpoint(Boolean privateDnsOnlyForInboundResolverEndpoint) {
-        this.privateDnsOnlyForInboundResolverEndpoint = privateDnsOnlyForInboundResolverEndpoint;
-    }
-
     public List<VpcEndpointSubnetConfiguration> getSubnetConfigurations() { return subnetConfigurations; }
     public void setSubnetConfigurations(List<VpcEndpointSubnetConfiguration> subnetConfigurations) {
         this.subnetConfigurations = subnetConfigurations;
@@ -91,4 +81,18 @@ public class VpcEndpoint {
 
     public List<Tag> getTags() { return tags; }
     public void setTags(List<Tag> tags) { this.tags = tags; }
+
+    private String dnsRecordIpType;
+
+    private Boolean privateDnsOnlyForInboundResolverEndpoint;
+
+    public String getDnsRecordIpType() { return dnsRecordIpType; }
+
+    public void setDnsRecordIpType(String dnsRecordIpType) { this.dnsRecordIpType = dnsRecordIpType; }
+
+    public Boolean getPrivateDnsOnlyForInboundResolverEndpoint() { return privateDnsOnlyForInboundResolverEndpoint; }
+
+    public void setPrivateDnsOnlyForInboundResolverEndpoint(Boolean privateDnsOnlyForInboundResolverEndpoint) {
+        this.privateDnsOnlyForInboundResolverEndpoint = privateDnsOnlyForInboundResolverEndpoint;
+    }
 }

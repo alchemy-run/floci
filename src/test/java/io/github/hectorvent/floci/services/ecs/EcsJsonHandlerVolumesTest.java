@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.services.ecs.container.HostVolumePolicy;
 import io.github.hectorvent.floci.services.ecs.model.ContainerDefinition;
 import io.github.hectorvent.floci.services.ecs.model.RegisterTaskDefinitionRequest;
@@ -12,13 +13,12 @@ import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,6 +50,19 @@ class EcsJsonHandlerVolumesTest {
     private ObjectMapper objectMapper;
     private EmulatorConfig config;
     private EcsJsonHandler handler;
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{}", "{\"fileSystemId\":\"\"}", "{\"fileSystemId\":\" \"}", "\"invalid\""})
+    void registerTaskDefinitionRejectsMalformedEfsVolume(String efs) throws Exception {
+        JsonNode request = objectMapper.readTree("""
+                {"family":"invalid-efs","containerDefinitions":[{"name":"app","image":"busybox:stable",
+                 "mountPoints":[{"sourceVolume":"shared","containerPath":"/data"}]}],
+                 "volumes":[{"name":"shared","efsVolumeConfiguration":%s}]}
+                """.formatted(efs));
+        AwsException error = assertThrows(AwsException.class,
+                () -> handler.handle("RegisterTaskDefinition", request, "us-east-1"));
+        assertEquals("InvalidParameterException", error.getErrorCode());
+    }
 
     @BeforeEach
     void setUp() {
@@ -463,8 +476,7 @@ class EcsJsonHandlerVolumesTest {
     private static void writeContextFixture(Path dockerConfigDir, String contextName, String host) throws Exception {
         Files.createDirectories(dockerConfigDir);
         Files.writeString(dockerConfigDir.resolve("config.json"), "{\"currentContext\":\"" + contextName + "\"}");
-        byte[] nameHash = MessageDigest.getInstance("SHA-256").digest(contextName.getBytes(StandardCharsets.UTF_8));
-        Path metaDir = dockerConfigDir.resolve("contexts").resolve("meta").resolve(HexFormat.of().formatHex(nameHash));
+        Path metaDir = dockerConfigDir.resolve("contexts").resolve("meta").resolve(Digests.sha256Hex(contextName));
         Files.createDirectories(metaDir);
         Files.writeString(metaDir.resolve("meta.json"),
                 "{\"Name\":\"" + contextName + "\",\"Metadata\":{},"

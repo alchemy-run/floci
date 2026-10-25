@@ -27,9 +27,6 @@ public class KinesisStream {
     private String keyId;
     private String streamMode = "PROVISIONED";
     private Set<String> enhancedMonitoringMetrics = new HashSet<>();
-    private String resourcePolicy;
-    private Integer warmThroughputTargetMiBps;
-    private Integer warmThroughputCurrentMiBps;
     // AWS's default; streams persisted before this field existed read as the default too.
     private int maxRecordSizeInKiB = 1024;
     /**
@@ -88,21 +85,30 @@ public class KinesisStream {
     public Set<String> getEnhancedMonitoringMetrics() { return enhancedMonitoringMetrics; }
     public void setEnhancedMonitoringMetrics(Set<String> enhancedMonitoringMetrics) { this.enhancedMonitoringMetrics = enhancedMonitoringMetrics; }
 
+    public List<Instant> getShardCountUpdateTimestamps() { return shardCountUpdateTimestamps; }
+    public void setShardCountUpdateTimestamps(List<Instant> shardCountUpdateTimestamps) {
+        this.shardCountUpdateTimestamps = shardCountUpdateTimestamps == null ? new ArrayList<>() : shardCountUpdateTimestamps;
+    }
+
+    private String resourcePolicy;
+
+    private Integer warmThroughputTargetMiBps;
+
+    private Integer warmThroughputCurrentMiBps;
+
     public String getResourcePolicy() { return resourcePolicy; }
+
     public void setResourcePolicy(String resourcePolicy) { this.resourcePolicy = resourcePolicy; }
 
     public Integer getWarmThroughputTargetMiBps() { return warmThroughputTargetMiBps; }
+
     public void setWarmThroughputTargetMiBps(Integer warmThroughputTargetMiBps) {
         this.warmThroughputTargetMiBps = warmThroughputTargetMiBps;
     }
 
     public Integer getWarmThroughputCurrentMiBps() { return warmThroughputCurrentMiBps; }
+
     public void setWarmThroughputCurrentMiBps(Integer warmThroughputCurrentMiBps) {
         this.warmThroughputCurrentMiBps = warmThroughputCurrentMiBps;
-    }
-
-    public List<Instant> getShardCountUpdateTimestamps() { return shardCountUpdateTimestamps; }
-    public void setShardCountUpdateTimestamps(List<Instant> shardCountUpdateTimestamps) {
-        this.shardCountUpdateTimestamps = shardCountUpdateTimestamps == null ? new ArrayList<>() : shardCountUpdateTimestamps;
     }
 }

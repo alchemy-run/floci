@@ -311,7 +311,7 @@ public class Route53ResolverService {
         }
         ArrayNode addresses = objectMapper.createArrayNode();
         try {
-            List<Subnet> subnets = ec2.describeSubnets(region, subnetIds, Map.of());
+            List<Subnet> subnets = ec2.requireSubnets(region, subnetIds);
             String vpcId = subnets.getFirst().getVpcId();
             if (subnets.stream().anyMatch(subnet -> !vpcId.equals(subnet.getVpcId()))) {
                 throw new AwsException(INVALID_PARAMETER, "All endpoint subnets must belong to the same VPC", 400);
@@ -952,5 +952,55 @@ public class Route53ResolverService {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 unavailable", e);
         }
+    }
+
+    /**
+     * The ids of the rules {@code accountId} has associated with {@code vpcId}. The DNS server reads
+     * these off the packet path, where there is no caller, so the account comes from the resource the
+     * query originated on rather than from a request context.
+     *
+     * <p>Scoped to that one account deliberately. A {@code VPCId} is not proof of ownership:
+     * {@code AssociateResolverRule} stores whatever VPC id the caller names, so an association made
+     * by another account naming this account's VPC must not steer its queries. Restricting the
+     * lookup to the querying account's partition is the boundary, and it costs nothing because
+     * {@code AssociateResolverRule} can only reference a rule that exists in the caller's own
+     * partition, so an association and its rule always share an account.
+     *
+     * <p>Returns ids rather than the association nodes so the DNS path does not copy a record per
+     * association on every query when all it needs is which rules to look at.
+     */
+    public List<String> resolverRuleIdsAssociatedWith(String accountId, String vpcId) {
+        if (accountId == null || accountId.isBlank() || vpcId == null || vpcId.isBlank()) {
+            return List.of();
+        }
+        List<String> ruleIds = new ArrayList<>();
+        for (ObjectNode association : ruleAssociationStore.scan(key -> true)) {
+            String ruleId = text(association, "ResolverRuleId");
+            if (ruleId != null && !ruleIds.contains(ruleId) && vpcId.equals(text(association, "VPCId"))) {
+                ruleIds.add(ruleId);
+            }
+        }
+        return List.copyOf(ruleIds);
+    }
+
+    /**
+     * One of an account's resolver rules by id, but only if it belongs to {@code region}. Fetched
+     * rather than scanned for, so the DNS path reads only the rules an association actually named.
+     *
+     * <p>Route 53 Resolver is regional: a rule created in one region governs nothing in another. The
+     * stores carry no region in their keys, so the rule's own region comes from the ARN this service
+     * minted for it, the same place {@link #replayOf} reads it from. A stored rule with no parseable
+     * ARN has no region to claim and is treated as belonging to the region asking, which no create
+     * path can produce and which cannot leak another region's rule.
+     */
+    public Optional<ObjectNode> resolverRuleIn(String accountId, String region, String ruleId) {
+        if (accountId == null || accountId.isBlank() || region == null || region.isBlank()
+                || ruleId == null || ruleId.isBlank()) {
+            return Optional.empty();
+        }
+        return ruleStore.get(ruleId)
+                .filter(rule -> region.equals(io.github.hectorvent.floci.core.common.AwsArnUtils
+                        .regionOrDefault(text(rule, "Arn"), region)))
+                .map(ObjectNode::deepCopy);
     }
 }

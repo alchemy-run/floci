@@ -29,6 +29,7 @@ import io.github.hectorvent.floci.services.redshift.proxy.RedshiftProxyManager;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
 import io.github.hectorvent.floci.services.sns.SnsService;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -119,6 +120,8 @@ class RedshiftServiceTest {
 
         credentialBroker = new RedshiftCredentialBroker();
         ec2Service = mock(Ec2Service.class);
+        // requireSubnets refuses an unknown id over the describeSubnets answers each test stubs.
+        when(ec2Service.requireSubnets(anyString(), anyList())).thenCallRealMethod();
         AccountAwareStorageBackend<RedshiftEvent> eventBackend = mock(AccountAwareStorageBackend.class);
         when(sf.<RedshiftEvent>create(eq("redshift"), eq("redshift-events.json"), any())).thenReturn(eventBackend);
         secretsManagerService = mock(SecretsManagerService.class);
@@ -352,7 +355,7 @@ class RedshiftServiceTest {
         persisted.setClusterStatus("available");
         persisted.setProxyPort(7108);
 
-        var entry = mock(AccountAwareStorageBackend.AccountEntry.class);
+        AccountAwareStorageBackend.AccountEntry entry = InlineMocks.inlineMock(AccountAwareStorageBackend.AccountEntry.class);
         when(entry.value()).thenReturn(persisted);
         when(entry.accountId()).thenReturn("111111111111");
         when(entry.key()).thenReturn("c1");

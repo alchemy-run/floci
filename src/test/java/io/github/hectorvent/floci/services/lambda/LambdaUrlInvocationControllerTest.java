@@ -19,6 +19,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -129,6 +130,37 @@ class LambdaUrlInvocationControllerTest {
 
         assertTrue(eventNode.get("isBase64Encoded").asBoolean());
         assertEquals(Base64.getEncoder().encodeToString(binaryBody), eventNode.get("body").asText());
+    }
+
+    @Test
+    void requestContextTimeUsesEnglishMonthUnderNonEnglishDefaultLocale() {
+        LambdaFunction fn = new LambdaFunction();
+        fn.setFunctionName("my-function");
+        fn.setFunctionArn(FUNCTION_ARN);
+        fn.setAccountId("100000000012");
+
+        LambdaService lambdaService = mock(LambdaService.class);
+        when(lambdaService.getTargetByUrlId("url-id")).thenReturn(fn);
+        InvokeResult invokeResult = new InvokeResult();
+        invokeResult.setStatusCode(200);
+        invokeResult.setPayload("{\"statusCode\":200,\"body\":\"ok\"}".getBytes(StandardCharsets.UTF_8));
+        when(lambdaService.invokeArn(eq(FUNCTION_ARN), any(byte[].class), eq(InvocationType.RequestResponse)))
+                .thenReturn(invokeResult);
+
+        LambdaUrlInvocationController controller = newController(lambdaService);
+        Locale original = Locale.getDefault();
+        try {
+            Locale.setDefault(Locale.JAPAN);
+            controller.handlePost("url-id", "", headersWith("text/plain"),
+                    uriInfoFor("http://localhost/lambda-url/url-id/"), "hi".getBytes(StandardCharsets.UTF_8)).toCompletableFuture().join();
+        } finally {
+            Locale.setDefault(original);
+        }
+
+        ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
+        verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));
+        String time = readTree(event.getValue()).path("requestContext").path("time").asText();
+        assertTrue(time.matches("\\d{2}/[A-Z][a-z]{2}/\\d{4}:\\d{2}:\\d{2}:\\d{2} \\+0000"), time);
     }
 
     @Test
@@ -269,8 +301,7 @@ class LambdaUrlInvocationControllerTest {
         assertNull(response.getEntity());
     }
 
-    @Test
-    void rawQueryStringAndPathArePassedVerbatimAndParametersDecodedOnce() {
+    private JsonNode eventFor(HttpHeaders headers) {
         LambdaFunction fn = new LambdaFunction();
         fn.setFunctionName("my-function");
         fn.setFunctionArn(FUNCTION_ARN);
@@ -280,41 +311,40 @@ class LambdaUrlInvocationControllerTest {
         when(lambdaService.getTargetByUrlId("url-id")).thenReturn(fn);
         InvokeResult invokeResult = new InvokeResult();
         invokeResult.setStatusCode(200);
-        invokeResult.setPayload("{\"statusCode\":200,\"body\":\"ok\"}".getBytes(StandardCharsets.UTF_8));
+        invokeResult.setPayload("{\"statusCode\":200}".getBytes(StandardCharsets.UTF_8));
         when(lambdaService.invokeArn(eq(FUNCTION_ARN), any(byte[].class), eq(InvocationType.RequestResponse)))
                 .thenReturn(invokeResult);
 
-        LambdaUrlInvocationController controller = newController(lambdaService);
-        String rawQuery = "key=presign%2Fa+b%2B%25%3F%23%2F%E9%9B%AA.txt&versionId=v%2B1&versionId=v2";
-
-        controller.handleGet("url-id", "presign/a b", headersWith(null),
-                uriInfoFor("http://localhost/lambda-url/url-id/presign/a%20b?" + rawQuery))
-                .toCompletableFuture().join();
+        newController(lambdaService).handleGet("url-id", "", headers,
+                uriInfoFor("http://localhost/lambda-url/url-id/")).toCompletableFuture().join();
 
         ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
         verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));
-        JsonNode eventNode = readTree(event.getValue());
-
-        assertEquals(rawQuery, eventNode.get("rawQueryString").asText());
-        assertEquals("/presign/a%20b", eventNode.get("rawPath").asText());
-        JsonNode params = eventNode.get("queryStringParameters");
-        assertEquals("presign/a b+%?#/\u96ea.txt", params.get("key").asText());
-        assertEquals("v+1,v2", params.get("versionId").asText());
+        return readTree(event.getValue());
     }
 
     @Test
-    void functionPathStripsOnlyThePathStyleRoutingPrefix() {
-        assertEquals("/", LambdaUrlInvocationController.functionPath("url-id", "/lambda-url/url-id", false));
-        assertEquals("/a%2Bb", LambdaUrlInvocationController.functionPath("url-id", "/lambda-url/url-id/a%2Bb", false));
-        assertEquals("/lambda-url/url-id/a",
-                LambdaUrlInvocationController.functionPath("url-id", "/lambda-url/url-id/a", true));
-        assertEquals("/", LambdaUrlInvocationController.functionPath("url-id", "", true));
+    void cookieHeadersBecomeCookiesArray() {
+        HttpHeaders headers = headersWith(null);
+        headers.getRequestHeaders().add("Cookie", "a=1; b=2;; ");
+        headers.getRequestHeaders().add("cookie", " c=3 ");
+        headers.getRequestHeaders().putSingle("x-other", "v");
+
+        JsonNode eventNode = eventFor(headers);
+
+        assertEquals(3, eventNode.get("cookies").size());
+        assertEquals("a=1", eventNode.get("cookies").get(0).asText());
+        assertEquals("b=2", eventNode.get("cookies").get(1).asText());
+        assertEquals("c=3", eventNode.get("cookies").get(2).asText());
+        assertTrue(eventNode.get("headers").has("cookie"));
+        assertEquals("v", eventNode.get("headers").get("x-other").asText());
     }
 
     @Test
-    void emptyQueryHasNoParameters() {
-        assertTrue(LambdaUrlInvocationController.decodeQueryParameters("").isEmpty());
-        assertEquals(List.of(""), LambdaUrlInvocationController.decodeQueryParameters("flag").get("flag"));
+    void requestWithoutCookiesOmitsCookiesField() {
+        JsonNode eventNode = eventFor(headersWith(null));
+
+        assertFalse(eventNode.has("cookies"));
     }
 
     private JsonNode readTree(byte[] json) {
@@ -323,20 +353,5 @@ class LambdaUrlInvocationControllerTest {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-    }
-
-
-    @Test
-    void hasSigV4_detectsAuthorizationHeader() {
-        assertTrue(LambdaUrlInvocationController.hasSigV4(
-                "AWS4-HMAC-SHA256 Credential=AKIA.../us-east-1/lambda/aws4_request", null));
-        assertFalse(LambdaUrlInvocationController.hasSigV4("Bearer token", null));
-        assertFalse(LambdaUrlInvocationController.hasSigV4((String) null, (String) null));
-    }
-
-    @Test
-    void hasSigV4_detectsQueryStringSigning() {
-        assertTrue(LambdaUrlInvocationController.hasSigV4(null, "AWS4-HMAC-SHA256"));
-        assertFalse(LambdaUrlInvocationController.hasSigV4(null, "none"));
     }
 }

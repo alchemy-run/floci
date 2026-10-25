@@ -101,20 +101,6 @@ public class LambdaConcurrencyLimiter implements Resettable {
         return acquireReserved(functionArn, r);
     }
 
-    /** Strips a trailing version or alias qualifier: {@code arn:...:function:name[:qualifier]}. */
-    private static String unqualifiedArn(String arn) {
-        if (arn == null) {
-            return null;
-        }
-        int delimiters = 0;
-        for (int i = 0; i < arn.length(); i++) {
-            if (arn.charAt(i) == ':' && ++delimiters == 7) {
-                return arn.substring(0, i);
-            }
-        }
-        return arn;
-    }
-
     private Permit acquireReserved(String key, int limit) {
         AtomicInteger counter = inflight.computeIfAbsent(key, k -> new AtomicInteger());
         while (true) {
@@ -364,5 +350,19 @@ public class LambdaConcurrencyLimiter implements Resettable {
     public interface Permit extends AutoCloseable {
         @Override
         void close();
+    }
+
+    /** Strips a trailing version or alias qualifier: {@code arn:...:function:name[:qualifier]}. */
+    private static String unqualifiedArn(String arn) {
+        if (arn == null) {
+            return null;
+        }
+        int delimiters = 0;
+        for (int i = 0; i < arn.length(); i++) {
+            if (arn.charAt(i) == ':' && ++delimiters == 7) {
+                return arn.substring(0, i);
+            }
+        }
+        return arn;
     }
 }

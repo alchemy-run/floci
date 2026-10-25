@@ -30,6 +30,8 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.Executor;
@@ -38,6 +40,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -419,7 +422,7 @@ public class MacieService implements Resettable {
                 end < items.size() ? encodeOffset(end) : null);
     }
 
-    public java.util.Optional<MacieMember> administrator(String region, String callerAccountId) {
+    public Optional<MacieMember> administrator(String region, String callerAccountId) {
         requireSessionForAccount(region, callerAccountId);
         return membershipRecords(region, callerAccountId).stream()
                 .filter(member -> isCurrentMember(member.relationshipStatus()))
@@ -1473,7 +1476,7 @@ public class MacieService implements Resettable {
         });
     }
 
-    private void updateJob(JobRun run, java.util.function.Consumer<ObjectNode> change) {
+    private void updateJob(JobRun run, Consumer<ObjectNode> change) {
         MacieState state = states.getForAccount(run.accountId, run.region).orElse(null);
         ObjectNode job = state == null || !state.isEnabled() ? null : state.getDocuments().get(JOB + "/" + run.jobId);
         if (job != null) {
@@ -1606,7 +1609,7 @@ public class MacieService implements Resettable {
         List<MacieClassificationJobs.Candidate> shuffled = new ArrayList<>(candidates);
         long seed = (job.path("jobId").asText() + "/" + job.path("statistics").path("numberOfRuns").asLong())
                 .hashCode();
-        java.util.Collections.shuffle(shuffled, new java.util.Random(seed));
+        java.util.Collections.shuffle(shuffled, new Random(seed));
         List<MacieClassificationJobs.Candidate> selected =
                 new ArrayList<>(shuffled.subList(0, (int) ((long) candidates.size() * percentage / 100)));
         selected.sort(Comparator.comparing(MacieClassificationJobs.Candidate::id));
@@ -1795,7 +1798,7 @@ public class MacieService implements Resettable {
         }
     }
 
-    static AwsException validation(String message) {
+static AwsException validation(String message) {
         return new AwsException("ValidationException", message, 400);
     }
 
@@ -1803,7 +1806,7 @@ public class MacieService implements Resettable {
         return new AwsException("ConflictException", message, 409);
     }
 
-    static AwsException notFound(String message) {
+static AwsException notFound(String message) {
         return new AwsException("ResourceNotFoundException", message, 404);
     }
 

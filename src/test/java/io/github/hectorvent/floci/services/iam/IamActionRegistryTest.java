@@ -1,22 +1,28 @@
 package io.github.hectorvent.floci.services.iam;
 
+import io.github.hectorvent.floci.core.common.AwsProtocolClaimFilter;
+import io.github.hectorvent.floci.core.common.ProtocolClaim;
+import io.github.hectorvent.floci.core.common.WireProtocol;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.UriInfo;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvFileSource;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
@@ -29,6 +35,66 @@ import static org.mockito.Mockito.when;
 class IamActionRegistryTest {
 
     private final IamActionRegistry registry = new IamActionRegistry();
+
+    @ParameterizedTest
+    @CsvSource({"PUT,PutProvisionedConcurrencyConfig", "GET,GetProvisionedConcurrencyConfig",
+            "DELETE,DeleteProvisionedConcurrencyConfig"})
+    void provisionedConcurrencyRoutesResolveTheirActions(String method, String operation) {
+        ContainerRequestContext ctx = mockCtx(method, "/2019-09-30/functions/example/provisioned-concurrency",
+                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}");
+        assertEquals("lambda:" + operation, registry.resolveRoute("lambda", ctx));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"ALL,ListProvisionedConcurrencyConfigs", "all,GetProvisionedConcurrencyConfig",
+            "OTHER,GetProvisionedConcurrencyConfig"})
+    void provisionedConcurrencyListMarkerSelectsItsOwnAction(String marker, String operation) {
+        MultivaluedMap<String, String> query = new MultivaluedHashMap<>();
+        query.add("List", marker);
+        query.add("Qualifier", "live");
+        ContainerRequestContext ctx = mockCtx("GET", "/2019-09-30/functions/example/provisioned-concurrency",
+                query, null, "");
+        assertEquals("lambda:" + operation, registry.resolveRoute("lambda", ctx));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"groups,CreateGroup", "get-group,GetGroup", "delete-group,DeleteGroup",
+            "group-resources,GroupResources", "list-group-resources,ListGroupResources"})
+    void resourceGroupsManagementRoutesResolveTheirOwnActions(String path, String operation) {
+        ContainerRequestContext ctx = mockCtx("POST", "/_rg/" + path,
+                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}");
+        assertEquals("resource-groups:" + operation, registry.resolveRoute("resource-groups", ctx));
+        assertNull(registry.resolveRoute("resource-groups", mockCtx("GET", "/_rg/" + path,
+                new MultivaluedHashMap<>(), null, "")));
+        assertNull(registry.resolveRoute("resource-groups", mockCtx("POST", "/_rg/" + path + "/extra",
+                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")));
+    }
+
+    @Test
+    void cloudWatchGetUsesQueryActionAndOperationPrecedence() {
+        MultivaluedMap<String, String> query = new MultivaluedHashMap<>();
+        query.add("Action", "GetMetricStatistics");
+        query.add("Operation", "ListMetrics");
+        query.add("Version", "2010-08-01");
+        ContainerRequestContext ctx = mockCtx("GET", "/", query, null, "");
+        when(ctx.getProperty(AwsProtocolClaimFilter.CLAIM_PROPERTY))
+                .thenReturn(new ProtocolClaim(WireProtocol.AWS_QUERY, null, "GetMetricStatistics", null));
+        assertEquals("monitoring:GetMetricStatistics", registry.resolve("monitoring", ctx));
+        assertEquals("GetMetricStatistics", registry.queryAction(ctx));
+        assertEquals("2010-08-01", registry.queryVersion(ctx));
+        query.remove("Action");
+        assertEquals("monitoring:ListMetrics", registry.resolve("monitoring", ctx));
+    }
+
+    @Test
+    void getRequiresTheQueryClaimRatherThanQueryParametersAlone() {
+        MultivaluedMap<String, String> query = new MultivaluedHashMap<>();
+        query.add("Action", "ListMetrics");
+        ContainerRequestContext ctx = mockCtx("GET", "/", query, null, "");
+        assertEquals(false, IamActionRegistry.isQueryRequest(ctx));
+        when(ctx.getProperty(AwsProtocolClaimFilter.CLAIM_PROPERTY)).thenReturn(new ProtocolClaim(WireProtocol.REST, null, null, null));
+        assertEquals(false, IamActionRegistry.isQueryRequest(ctx));
+    }
 
     @Test
     void resolvesActionFromFormEncodedBody() {
@@ -43,6 +109,53 @@ class IamActionRegistryTest {
     }
 
     @Test
+    void resolvesOperationFromFormEncodedBody() {
+        ContainerRequestContext ctx = mockCtx(
+                "POST", "/",
+                new MultivaluedHashMap<>(),
+                MediaType.APPLICATION_FORM_URLENCODED_TYPE,
+                "Operation=CreateUser&Version=2010-05-08&UserName=alice");
+        assertEquals("CreateUser", registry.queryAction(ctx));
+    }
+
+    @Test
+    void actionTakesPrecedenceOverOperation() {
+        ContainerRequestContext ctx = mockCtx(
+                "POST", "/",
+                new MultivaluedHashMap<>(),
+                MediaType.APPLICATION_FORM_URLENCODED_TYPE,
+                "Action=ListUsers&Operation=CreateUser");
+        assertEquals("ListUsers", registry.queryAction(ctx));
+    }
+
+    @Test
+    void restActionIgnoresOperationFromFormBody() {
+        ContainerRequestContext ctx = mockCtx(
+                "PUT", "/bucket/key",
+                new MultivaluedHashMap<>(),
+                MediaType.APPLICATION_FORM_URLENCODED_TYPE,
+                "Operation=ListBucket");
+        assertEquals("s3:PutObject", registry.resolve("s3", ctx));
+    }
+
+    @Test
+    void restActionIgnoresActionFromUrl() {
+        MultivaluedMap<String, String> query = new MultivaluedHashMap<>();
+        query.add("Action", "ListBucket");
+        ContainerRequestContext ctx = mockCtx(
+                "PUT", "/bucket/key", query, null, "");
+        assertEquals("s3:PutObject", registry.resolve("s3", ctx));
+    }
+
+    @Test
+    void restActionIgnoresActionFromFormBody() {
+        ContainerRequestContext ctx = mockCtx(
+                "PUT", "/bucket/key", new MultivaluedHashMap<>(),
+                MediaType.APPLICATION_FORM_URLENCODED_TYPE, "Action=ListBucket");
+        assertEquals("s3:PutObject", registry.resolve("s3", ctx));
+    }
+
+    @Test
     void resolvesUrlEncodedActionValueFromFormBody() {
         ContainerRequestContext ctx = mockCtx(
                 "POST", "/",
@@ -53,9 +166,8 @@ class IamActionRegistryTest {
     }
 
     @Test
-    void prefersUrlQueryActionOverFormBody() {
-        // Some clients (older AWS CLI, curl) send Query-protocol requests with
-        // Action in the URL query string; that path must keep working.
+    void formBodyActionTakesPrecedenceOverUrlQueryAction() {
+        // The controller dispatches the form body, even when the URL names another action.
         MultivaluedMap<String, String> query = new MultivaluedHashMap<>();
         query.add("Action", "ListUsers");
         ContainerRequestContext ctx = mockCtx(
@@ -63,7 +175,17 @@ class IamActionRegistryTest {
                 query,
                 MediaType.APPLICATION_FORM_URLENCODED_TYPE,
                 "Action=DeleteUser");
-        assertEquals("iam:ListUsers", registry.resolve("iam", ctx));
+        assertEquals("iam:DeleteUser", registry.resolve("iam", ctx));
+    }
+
+    @Test
+    void urlQueryActionDoesNotAuthorizeAnAbsentFormAction() {
+        MultivaluedMap<String, String> query = new MultivaluedHashMap<>();
+        query.add("Action", "ListUsers");
+        ContainerRequestContext ctx = mockCtx(
+                "POST", "/", query, MediaType.APPLICATION_FORM_URLENCODED_TYPE,
+                "Version=2010-05-08");
+        assertNull(registry.queryAction(ctx));
     }
 
     @Test
@@ -113,114 +235,172 @@ class IamActionRegistryTest {
                 mockCtx("POST", "/RollbackTransaction", new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")));
     }
 
+    /**
+     * The table is generated from the SES v2 model and AWS's service reference, not from the rule
+     * table, so it checks the rules rather than restating them: each operation's path has to
+     * resolve to the action AWS lists for it, and to no other operation's.
+     */
+    @ParameterizedTest(name = "{0}")
+    @CsvFileSource(resources = "/iam/sesv2-operation-actions.csv")
+    void resolvesEverySesV2OperationToItsAction(String operation, String method, String path, String action) {
+        assertEquals(action, registry.resolve("ses",
+                mockCtx(method, path, new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")));
+    }
+
     @Test
-    void resolvesAndEnforcesEmrServerlessApplicationAndSubresourceActions() {
-        String[][] routes = {
-                {"GET", "/applications/app", "GetApplication"},
-                {"PATCH", "/applications/app", "UpdateApplication"},
-                {"POST", "/applications/app/start", "StartApplication"},
-                {"GET", "/applications/app/jobruns", "ListJobRuns"},
-                {"POST", "/applications/app/jobruns", "StartJobRun"},
-                {"GET", "/applications/app/jobruns/run", "GetJobRun"},
-                {"DELETE", "/applications/app/jobruns/run", "CancelJobRun"},
-                {"GET", "/applications/app/jobruns/run/attempts", "ListJobRunAttempts"},
-                {"GET", "/applications/app/jobruns/run/dashboard", "GetDashboardForJobRun"},
-                {"GET", "/applications/app/sessions", "ListSessions"},
-                {"POST", "/applications/app/sessions", "StartSession"},
-                {"GET", "/applications/app/sessions/session/endpoint", "GetSessionEndpoint"},
-                {"DELETE", "/applications/app/sessions/session", "TerminateSession"},
-                {"POST", "/tags/arn:aws:emr-serverless:us-east-1:000000000000:/applications/app", "TagResource"}
-        };
-        for (String[] route : routes) {
-            for (String prefix : new String[]{"", "/_emrserverless"}) {
-                String action = registry.resolve("emr-serverless", mockCtx(route[0], prefix + route[1],
-                        new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}"));
-                assertEquals("emr-serverless:" + route[2], action);
-                assertTrue(registry.isRoleEnforcedAction(action));
+    void sesV2RulesMatchTheWholePath() {
+        // A rule for /v2/email/configuration-sets must not also claim a path below it.
+        assertEquals("ses:ListConfigurationSets", registry.resolve("ses",
+                mockCtx("GET", "/v2/email/configuration-sets", new MultivaluedHashMap<>(),
+                        MediaType.APPLICATION_JSON_TYPE, "{}")));
+        assertEquals("ses:GetConfigurationSetEventDestinations", registry.resolve("ses",
+                mockCtx("GET", "/v2/email/configuration-sets/my-set/event-destinations/", new MultivaluedHashMap<>(),
+                        MediaType.APPLICATION_JSON_TYPE, "{}")));
+        assertNull(registry.resolve("ses",
+                mockCtx("GET", "/v2/email/configuration-sets/my-set/unknown", new MultivaluedHashMap<>(),
+                        MediaType.APPLICATION_JSON_TYPE, "{}")));
+    }
+
+    @Test
+    void aRestRouteIsNotRenamedByATargetHeader() {
+        // The route decides a REST request's action; a caller-supplied target must not name another.
+        ContainerRequestContext send = mockCtx("POST", "/v2/email/outbound-emails", new MultivaluedHashMap<>(),
+                MediaType.APPLICATION_JSON_TYPE, "{}");
+        when(send.getHeaderString("X-Amz-Target")).thenReturn("SES.GetAccount");
+        assertEquals("ses:SendEmail", registry.resolveRoute("ses", send));
+
+        ContainerRequestContext invoke = mockCtx("POST", "/2015-03-31/functions/f/invocations",
+                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}");
+        when(invoke.getHeaderString("X-Amz-Target")).thenReturn("AWSLambda.GetFunction");
+        assertEquals("lambda:InvokeFunction", registry.resolveRoute("lambda", invoke));
+    }
+
+    @Test
+    void aRuleNamingAQueryParameterMatchesOnlyARequestCarryingItWithItsValue() {
+        // GET /layers?find=LayerVersion is GetLayerVersionByArn, while GET /layers is ListLayers.
+        MultivaluedHashMap<String, String> byArn = new MultivaluedHashMap<>();
+        byArn.putSingle("find", "LayerVersion");
+        assertEquals("lambda:GetLayerVersion", registry.resolveRoute("lambda",
+                mockCtx("GET", "/2018-10-31/layers", byArn, MediaType.APPLICATION_JSON_TYPE, "{}")));
+        MultivaluedHashMap<String, String> other = new MultivaluedHashMap<>();
+        other.putSingle("find", "Layer");
+        assertEquals("lambda:ListLayers", registry.resolveRoute("lambda",
+                mockCtx("GET", "/2018-10-31/layers", other, MediaType.APPLICATION_JSON_TYPE, "{}")));
+        assertEquals("lambda:ListLayers", lambdaAction("GET", "/2018-10-31/layers"));
+    }
+
+    @Test
+    void schedulerAndPipesTaggingIsCheckedOnBothTagRoutes() {
+        for (String scope : List.of("scheduler", "pipes")) {
+            for (String path : List.of("/tags/arn:aws:" + scope + ":us-east-1:000000000000:x", "/tags")) {
+                String prefix = scope + ":";
+                assertEquals(prefix + "ListTagsForResource", registry.resolveRoute(scope,
+                        mockCtx("GET", path, new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")), path);
+                assertEquals(prefix + "TagResource", registry.resolveRoute(scope,
+                        mockCtx("POST", path, new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")), path);
+                assertEquals(prefix + "UntagResource", registry.resolveRoute(scope,
+                        mockCtx("DELETE", path, new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")), path);
             }
         }
-        assertFalse(registry.isRoleEnforcedAction("emr-serverless:UnknownAction"));
     }
 
     @Test
-    void resolvesAndEnforcesGuardDutyAndInspector2Routes() {
+    void durableExecutionRoutesResolveToTheirActions() {
+        String arn = "arn%3Aaws%3Alambda%3Aus-east-1%3A000000000000%3Afunction%3Af%3A%24LATEST"
+                + "%2Fdurable-execution%2Fname%2Fid";
+        String base = "/2025-12-01/durable-executions/" + arn;
+        assertEquals("lambda:CheckpointDurableExecution", lambdaAction("POST", base + "/checkpoint"));
+        assertEquals("lambda:GetDurableExecutionState", lambdaAction("GET", base + "/state"));
+        assertEquals("lambda:GetDurableExecutionHistory", lambdaAction("GET", base + "/history"));
+        assertEquals("lambda:StopDurableExecution", lambdaAction("POST", base + "/stop"));
+        assertEquals("lambda:GetDurableExecution", lambdaAction("GET", base));
+        assertEquals("lambda:ListDurableExecutionsByFunction",
+                lambdaAction("GET", "/2025-12-01/functions/f/durable-executions"));
+        String callback = "/2025-12-01/durable-execution-callbacks/QUJD%2BREVG%2FR0g%3D";
+        assertEquals("lambda:SendDurableExecutionCallbackSuccess", lambdaAction("POST", callback + "/succeed"));
+        assertEquals("lambda:SendDurableExecutionCallbackFailure", lambdaAction("POST", callback + "/fail"));
+        assertEquals("lambda:SendDurableExecutionCallbackHeartbeat", lambdaAction("POST", callback + "/heartbeat"));
+    }
+
+    @Test
+    void lambdaWebRoutesResolveToTheirActions() {
+        String arn = "arn%3Aaws%3Alambda%3Aus-east-1%3A000000000000%3Aweb-function%2Fapp";
+        assertEquals("lambda:CreateWebFunction", lambdaAction("PUT", "/2025-03-07/web-functions"));
+        assertEquals("lambda:ListWebFunctions", lambdaAction("POST", "/2025-03-07/web-functions"));
+        assertEquals("lambda:GetWebFunction", lambdaAction("GET", "/2025-03-07/web-functions/" + arn));
+        assertEquals("lambda:DeleteWebFunction", lambdaAction("DELETE", "/2025-03-07/web-functions/app"));
+        assertEquals("lambda:CreateWebFunctionRevision", lambdaAction("POST", "/2025-03-07/web-functions/app/revisions"));
+        assertEquals("lambda:ListWebFunctionRevisions", lambdaAction("POST", "/2025-03-07/web-functions/app/list-revisions"));
+        assertEquals("lambda:GetWebFunctionRevision", lambdaAction("GET", "/2025-03-07/web-functions/app/revisions/rev-aaaaa"));
+        assertEquals("lambda:DeleteWebFunctionRevision",
+                lambdaAction("DELETE", "/2025-03-07/web-functions/app/revisions/rev-aaaaa"));
+        assertEquals("lambda:CreateWebFunctionEndpoint", lambdaAction("PUT", "/2025-03-07/web-functions/app/endpoints"));
+        assertEquals("lambda:ListWebFunctionEndpoints", lambdaAction("POST", "/2025-03-07/web-functions/app/list-endpoints"));
+        assertEquals("lambda:GetWebFunctionEndpoint", lambdaAction("GET", "/2025-03-07/web-functions/app/endpoints/dev"));
+        assertEquals("lambda:UpdateWebFunctionEndpoint", lambdaAction("PATCH", "/2025-03-07/web-functions/app/endpoints/dev"));
+        assertEquals("lambda:DeleteWebFunctionEndpoint", lambdaAction("DELETE", "/2025-03-07/web-functions/app/endpoints/dev"));
+        assertEquals("lambda:GetWebAccountSettings", lambdaAction("GET", "/2025-03-07/web-account-settings"));
+        assertEquals("lambda:ListTags", lambdaAction("GET", "/2025-03-07/tags/" + arn));
+        assertEquals("lambda:TagResource", lambdaAction("POST", "/2025-03-07/tags/" + arn));
+        assertEquals("lambda:UntagResource", lambdaAction("DELETE", "/2025-03-07/tags/" + arn));
+        assertEquals("lambda:PutResourcePolicy", lambdaAction("PUT", "/2025-03-07/resource-policy/" + arn));
+        assertEquals("lambda:GetResourcePolicy", lambdaAction("GET", "/2025-03-07/resource-policy/" + arn));
+        assertEquals("lambda:DeleteResourcePolicy", lambdaAction("DELETE", "/2025-03-07/resource-policy/" + arn));
+    }
+
+    private String lambdaAction(String method, String path) {
+        return registry.resolveRoute("lambda",
+                mockCtx(method, path, new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}"));
+    }
+
+    @Test
+    void anEncodedSlashStaysInsideItsPathParameter() {
+        assertEquals("ses:GetSuppressedDestination", registry.resolveRoute("ses",
+                mockCtx("GET", "/v2/email/suppression/addresses/a%2Fb@example.com", new MultivaluedHashMap<>(),
+                        MediaType.APPLICATION_JSON_TYPE, "{}")));
+        assertEquals("ses:DeleteSuppressedDestination", registry.resolveRoute("ses",
+                mockCtx("DELETE", "/v2/email/suppression/addresses/a%2Fb@example.com", new MultivaluedHashMap<>(),
+                        MediaType.APPLICATION_JSON_TYPE, "{}")));
+    }
+
+    @Test
+    void aTrailingSlashIsCheckedAsTheRouteWithoutIt() {
+        // The router matches /clusters/ as /clusters, so the rule ending at the route's last segment covers it.
+        // An S3 path is matched as sent, as before: a key may end in a slash.
         String[][] routes = {
-                {"guardduty", "GET", "/detector", "ListDetectors"},
-                {"guardduty", "POST", "/detector", "CreateDetector"},
-                {"guardduty", "POST", "/detector/d/filter", "CreateFilter"},
-                {"guardduty", "GET", "/detector/d/filter", "ListFilters"},
-                {"guardduty", "GET", "/detector/d/filter/n", "GetFilter"},
-                {"guardduty", "POST", "/detector/d/filter/n", "UpdateFilter"},
-                {"guardduty", "DELETE", "/detector/d/filter/n", "DeleteFilter"},
-                {"guardduty", "GET", "/detector/d/ipset/i", "GetIPSet"},
-                {"guardduty", "DELETE", "/detector/d/threatintelset/i", "DeleteThreatIntelSet"},
-                {"guardduty", "POST", "/detector/d/findings/create", "CreateSampleFindings"},
-                {"guardduty", "POST", "/detector/d/findings/get", "GetFindings"},
-                {"guardduty", "POST", "/detector/d/usage/statistics", "GetUsageStatistics"},
-                {"guardduty", "POST", "/detector/d/coverage", "ListCoverage"},
-                {"guardduty", "GET", "/invitation/count", "GetInvitationsCount"},
-                {"guardduty", "POST", "/detector/d/member/invite", "InviteMembers"},
-                {"guardduty", "GET", "/tags/arn:aws:guardduty:r:a:detector/d/filter/n", "ListTagsForResource"},
-                {"guardduty", "GET", "/admin", "ListOrganizationAdminAccounts"},
-                {"guardduty", "GET", "/organization/statistics", "GetOrganizationStatistics"},
-                {"guardduty", "GET", "/detector/d/administrator", "GetAdministratorAccount"},
-                {"guardduty", "GET", "/detector/d/malware-scan-settings", "GetMalwareScanSettings"},
-                {"guardduty", "POST", "/detector/d/malware-scan-settings", "UpdateMalwareScanSettings"},
-                {"guardduty", "POST", "/detector/d/investigation/list", "ListInvestigations"},
-                {"inspector2", "POST", "/filters/create", "CreateFilter"},
-                {"inspector2", "POST", "/filters/update", "UpdateFilter"},
-                {"inspector2", "POST", "/filters/delete", "DeleteFilter"},
-                {"inspector2", "POST", "/filters/list", "ListFilters"},
-                {"inspector2", "POST", "/ec2deepinspectionconfiguration/get", "GetEc2DeepInspectionConfiguration"},
-                {"inspector2", "POST", "/cis/scan-configuration/list", "ListCisScanConfigurations"},
-                {"inspector2", "POST", "/status/batch/get", "BatchGetAccountStatus"},
-                {"inspector2", "POST", "/findings/list", "ListFindings"},
-                {"inspector2", "POST", "/coverage/list", "ListCoverage"},
-                {"inspector2", "POST", "/vulnerabilities/search", "SearchVulnerabilities"},
-                {"inspector2", "POST", "/usage/list", "ListUsageTotals"},
-                {"inspector2", "POST", "/accountpermissions/list", "ListAccountPermissions"},
-                {"inspector2", "POST", "/freetrialinfo/batchget", "BatchGetFreeTrialInfo"},
-                {"inspector2", "POST", "/configuration/get", "GetConfiguration"},
-                {"inspector2", "GET", "/encryptionkey/get", "GetEncryptionKey"},
-                {"inspector2", "POST", "/cis/scan/list", "ListCisScans"},
-                {"inspector2", "POST", "/members/list", "ListMembers"},
-                {"inspector2", "POST", "/delegatedadminaccounts/get", "GetDelegatedAdminAccount"},
-                {"inspector2", "POST", "/reporting/status/get", "GetFindingsReportStatus"},
-                {"inspector2", "DELETE", "/tags/arn:aws:inspector2:r:a:owner/a/filter/f", "UntagResource"}
+            {"eks", "POST", "/clusters/", "eks:CreateCluster"},
+            {"eks", "GET", "/clusters/c/node-groups/ng/", "eks:DescribeNodegroup"},
+            {"scheduler", "GET", "/schedules/", "scheduler:ListSchedules"},
+            {"pipes", "GET", "/v1/pipes/p/", "pipes:DescribePipe"},
+            {"lambda", "GET", "/2015-03-31/functions/fn/", "lambda:GetFunction"},
+            {"s3", "GET", "/bucket/", "s3:ListBucket"},
+            {"s3", "GET", "/bucket/folder/", "s3:GetObject"},
+            {"s3", "PUT", "/bucket//", "s3:PutObject"},
+            {"s3", "GET", "/bucket//", "s3:GetObject"},
+            {"s3", "DELETE", "/bucket//", "s3:DeleteObject"},
         };
         for (String[] route : routes) {
-            String action = registry.resolve(route[0], mockCtx(route[1], route[2],
-                    new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}"));
-            assertEquals(route[0] + ":" + route[3], action);
-            assertTrue(registry.isRoleEnforcedAction(action));
+            assertEquals(route[3], registry.resolveRoute(route[0], mockCtx(route[1], route[2],
+                    new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")), route[2]);
         }
-        assertFalse(registry.isRoleEnforcedAction("guardduty:UnknownAction"));
-        assertFalse(registry.isRoleEnforcedAction("inspector2:UnknownAction"));
-        assertNull(registry.resolve("inspector2", mockCtx("POST", "/detector/d/filter",
-                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")));
     }
 
     @Test
-    void resolvesSesV2SendRoutes() {
-        assertEquals("ses:SendEmail", registry.resolve("ses",
-                mockCtx("POST", "/v2/email/outbound-emails", new MultivaluedHashMap<>(),
-                        MediaType.APPLICATION_JSON_TYPE, "{\"FromEmailAddress\":\"a@b.test\"}")));
-        assertEquals("ses:SendEmail", registry.resolve("ses",
-                mockCtx("POST", "/v2/email/outbound-bulk-emails", new MultivaluedHashMap<>(),
-                        MediaType.APPLICATION_JSON_TYPE, "{\"FromEmailAddress\":\"a@b.test\"}")));
-    }
-
-    @Test
-    void roleEnforcedActionsCoverSesSendAndKmsGetKeyRotationStatus() {
-        assertTrue(registry.isRoleEnforcedAction("ses:SendEmail"));
-        assertTrue(registry.isRoleEnforcedAction("ses:SendRawEmail"));
-        assertTrue(registry.isRoleEnforcedAction("ses:SendBulkEmail"));
-        assertTrue(registry.isRoleEnforcedAction("kms:GetKeyRotationStatus"));
-        assertFalse(registry.isRoleEnforcedAction("kms:Encrypt"));
-        assertFalse(registry.isRoleEnforcedAction("dynamodb:PutItem"));
-        assertTrue(registry.isRoleEnforcedAction("secretsmanager:GetSecretValue"));
-        assertTrue(registry.isRoleEnforcedAction("secretsmanager:DescribeSecret"));
-        assertFalse(registry.isRoleEnforcedAction(null));
+    void anEksAccessEntryRouteTakesThePrincipalAsTheRestOfThePath() {
+        // EKS reads the principal greedily, so a GET or DELETE under an entry reads or deletes an entry.
+        String entry = "/clusters/c/access-entries/arn:aws:iam::000000000000:role/team/worker";
+        String[][] routes = {
+            {"GET", entry, "eks:DescribeAccessEntry"},
+            {"GET", entry + "/access-policies", "eks:DescribeAccessEntry"},
+            {"DELETE", entry + "/access-policies/arn:aws:eks::aws:cluster-access-policy/Admin", "eks:DeleteAccessEntry"},
+            {"POST", entry + "/access-policies", "eks:AssociateAccessPolicy"},
+            {"POST", entry, "eks:UpdateAccessEntry"},
+            {"GET", "/clusters/c/access-entries", "eks:ListAccessEntries"},
+        };
+        for (String[] route : routes) {
+            assertEquals(route[2], registry.resolveRoute("eks", mockCtx(route[0], route[1],
+                    new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")), route[1]);
+        }
     }
 
     @Test
@@ -284,6 +464,108 @@ class IamActionRegistryTest {
                 registry.resolve("s3", mockCtx("GET", "/bucket/secret.txt", accelerate, null, "")));
         assertEquals("s3:PutObject",
                 registry.resolve("s3", mockCtx("PUT", "/bucket/key.txt", accelerate, null, "")));
+    }
+
+    @Test
+    void s3PostOperationsResolveToTheActionsAwsChecks() {
+        assertEquals("s3:PutObject", s3Action("POST", "/bucket/key", "uploads"));
+        assertEquals("s3:PutObject", s3Action("POST", "/bucket/key", "uploadId=u1"));
+        assertEquals("s3:RestoreObject", s3Action("POST", "/bucket/key", "restore"));
+        assertEquals("s3:GetObject", s3Action("POST", "/bucket/key", "select", "select-type=2"));
+        // No bucket-level multipart POST is checked: S3VirtualHostFilter moves a virtual-hosted
+        // upload's bucket into the path before IAM sees it, so the upload reaches the object rules.
+        assertNull(s3Action("POST", "/key", "uploads"));
+        assertNull(s3Action("POST", "/key", "uploadId=u1"));
+        // DeleteObjects and a browser-form PostObject are checked per key in S3Controller.
+        assertNull(s3Action("POST", "/bucket", "delete"));
+        assertNull(s3Action("POST", "/bucket"));
+    }
+
+    @Test
+    void s3MultipartUploadOperationsResolveToTheirOwnActions() {
+        assertEquals("s3:ListMultipartUploadParts", s3Action("GET", "/bucket/key", "uploadId=u1"));
+        assertEquals("s3:AbortMultipartUpload", s3Action("DELETE", "/bucket/key", "uploadId=u1"));
+        assertEquals("s3:PutObject", s3Action("PUT", "/bucket/key", "uploadId=u1", "partNumber=1"));
+        assertEquals("s3:ListBucketMultipartUploads", s3Action("GET", "/bucket", "uploads"));
+    }
+
+    @Test
+    void s3ObjectLockAndAnnotationSubresourcesResolveToTheirOwnActions() {
+        assertEquals("s3:GetObjectRetention", s3Action("GET", "/bucket/key", "retention"));
+        assertEquals("s3:PutObjectRetention", s3Action("PUT", "/bucket/key", "retention"));
+        assertEquals("s3:GetObjectLegalHold", s3Action("GET", "/bucket/key", "legal-hold"));
+        assertEquals("s3:PutObjectLegalHold", s3Action("PUT", "/bucket/key", "legal-hold"));
+        assertEquals("s3:GetObjectAnnotation", s3Action("GET", "/bucket/key", "annotation", "annotationName=n"));
+        assertEquals("s3:ListObjectAnnotations", s3Action("GET", "/bucket/key", "annotation"));
+        assertEquals("s3:ListObjectAnnotations", s3Action("GET", "/bucket/key", "annotation", "annotationName="));
+        assertEquals("s3:GetObjectAnnotation", s3Action("HEAD", "/bucket/key", "annotation", "annotationName=n"));
+        assertEquals("s3:PutObjectAnnotation", s3Action("PUT", "/bucket/key", "annotation"));
+        assertEquals("s3:DeleteObjectAnnotation", s3Action("DELETE", "/bucket/key", "annotation"));
+    }
+
+    @Test
+    void s3ObjectSubresourcesFollowTheOrderTheControllerDispatchesThem() {
+        assertEquals("s3:GetObjectTagging", s3Action("GET", "/bucket/key", "acl", "tagging"));
+        assertEquals("s3:PutObjectTagging", s3Action("PUT", "/bucket/key", "acl", "tagging"));
+        assertEquals("s3:ListMultipartUploadParts", s3Action("GET", "/bucket/key", "acl", "uploadId=u1"));
+        assertEquals("s3:GetObjectRetention", s3Action("GET", "/bucket/key", "acl", "retention"));
+        assertEquals("s3:DeleteObjectTagging", s3Action("DELETE", "/bucket/key", "acl", "tagging"));
+        assertEquals("s3:DeleteObjectAnnotation", s3Action("DELETE", "/bucket/key", "annotation", "uploadId=u1"));
+        assertEquals("s3:PutObject", s3Action("POST", "/bucket/key", "uploads", "restore"));
+        assertEquals("s3:RestoreObject", s3Action("POST", "/bucket/key", "restore", "uploadId=u1"));
+        assertEquals("s3:GetObject", s3Action("POST", "/bucket/key", "select", "uploadId=u1"));
+    }
+
+    @Test
+    void s3VersionedObjectRequestsResolveToTheVersionActions() {
+        assertEquals("s3:GetObjectVersion", s3Action("GET", "/bucket/key", "versionId=v1"));
+        assertEquals("s3:GetObjectVersion", s3Action("HEAD", "/bucket/key", "versionId=v1"));
+        assertEquals("s3:DeleteObjectVersion", s3Action("DELETE", "/bucket/key", "versionId=v1"));
+        assertEquals("s3:GetObjectVersionAcl", s3Action("GET", "/bucket/key", "acl", "versionId=v1"));
+        assertEquals("s3:PutObjectVersionAcl", s3Action("PUT", "/bucket/key", "acl", "versionId=v1"));
+        assertEquals("s3:GetObjectVersionTagging", s3Action("GET", "/bucket/key", "tagging", "versionId=v1"));
+        assertEquals("s3:PutObjectVersionTagging", s3Action("PUT", "/bucket/key", "tagging", "versionId=v1"));
+        assertEquals("s3:DeleteObjectVersionTagging",
+                s3Action("DELETE", "/bucket/key", "tagging", "versionId=v1"));
+        // "null" names the null version, which is a version as any other.
+        assertEquals("s3:GetObjectVersionTagging", s3Action("GET", "/bucket/key", "tagging", "versionId=null"));
+        assertEquals("s3:GetObjectVersionAnnotation",
+                s3Action("GET", "/bucket/key", "annotation", "annotationName=n", "versionId=v1"));
+        assertEquals("s3:GetObjectVersionAnnotation",
+                s3Action("HEAD", "/bucket/key", "annotation", "annotationName=n", "versionId=v1"));
+        assertEquals("s3:ListObjectVersionAnnotations",
+                s3Action("GET", "/bucket/key", "annotation", "versionId=v1"));
+        assertEquals("s3:PutObjectVersionAnnotation",
+                s3Action("PUT", "/bucket/key", "annotation", "annotationName=n", "versionId=v1"));
+        assertEquals("s3:DeleteObjectVersionAnnotation",
+                s3Action("DELETE", "/bucket/key", "annotation", "annotationName=n", "versionId=v1"));
+        // GetObjectAttributes of a version is checked as the read of that version.
+        assertEquals("s3:GetObjectVersion", s3Action("GET", "/bucket/key", "attributes", "versionId=v1"));
+        // S3Controller selects from the version a versionId names.
+        assertEquals("s3:GetObjectVersion", s3Action("POST", "/bucket/key", "select", "versionId=v1"));
+        // Retention and legal hold have no version action; the upload operations take no version.
+        assertEquals("s3:GetObjectRetention", s3Action("GET", "/bucket/key", "retention", "versionId=v1"));
+        assertEquals("s3:PutObjectLegalHold", s3Action("PUT", "/bucket/key", "legal-hold", "versionId=v1"));
+        assertEquals("s3:RestoreObject", s3Action("POST", "/bucket/key", "restore", "versionId=v1"));
+        assertEquals("s3:GetObject", s3Action("GET", "/bucket/key"));
+    }
+
+    @Test
+    void s3BucketConfigurationsResolveToTheirOwnActions() {
+        for (String config : List.of("analytics", "inventory", "intelligent-tiering")) {
+            String name = switch (config) {
+                case "analytics" -> "Analytics";
+                case "inventory" -> "Inventory";
+                default -> "IntelligentTiering";
+            };
+            assertEquals("s3:Get" + name + "Configuration", s3Action("GET", "/bucket", config, "id=c1"));
+            assertEquals("s3:Get" + name + "Configuration", s3Action("GET", "/bucket", config));
+            assertEquals("s3:Put" + name + "Configuration", s3Action("PUT", "/bucket", config, "id=c1"));
+            // AWS checks removing a configuration as the Put action that sets it.
+            assertEquals("s3:Put" + name + "Configuration", s3Action("DELETE", "/bucket", config, "id=c1"));
+        }
+        // s3:DeleteBucketTagging is not an IAM action; AWS checks DeleteBucketTagging as PutBucketTagging.
+        assertEquals("s3:PutBucketTagging", s3Action("DELETE", "/bucket", "tagging"));
     }
 
     @Test
@@ -398,7 +680,7 @@ class IamActionRegistryTest {
         MultivaluedMap<String, String> withTagging = new MultivaluedHashMap<>();
         withTagging.add("replication", "");
         withTagging.add("tagging", "");
-        assertEquals("s3:DeleteBucketTagging",
+        assertEquals("s3:PutBucketTagging",
                 registry.resolve("s3", mockCtx("DELETE", "/bucket", withTagging, null, "")));
     }
 
@@ -480,6 +762,16 @@ class IamActionRegistryTest {
 
     // -------------------------------------------------------------------------
 
+    /** The action of an S3 request whose query names {@code params}, each {@code name} or {@code name=value}. */
+    private String s3Action(String method, String path, String... params) {
+        MultivaluedMap<String, String> query = new MultivaluedHashMap<>();
+        for (String param : params) {
+            int eq = param.indexOf('=');
+            query.add(eq < 0 ? param : param.substring(0, eq), eq < 0 ? "" : param.substring(eq + 1));
+        }
+        return registry.resolve("s3", mockCtx(method, path, query, null, ""));
+    }
+
     private static ContainerRequestContext mockCtx(String method, String path,
                                                    MultivaluedMap<String, String> queryParams,
                                                    MediaType mediaType, String body) {
@@ -496,6 +788,8 @@ class IamActionRegistryTest {
         UriInfo uriInfo = Mockito.mock(UriInfo.class);
         when(uriInfo.getQueryParameters()).thenReturn(queryParams);
         when(uriInfo.getPath()).thenReturn(path);
+        when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:4566" + path));
+        when(uriInfo.getBaseUri()).thenReturn(URI.create("http://localhost:4566/"));
         when(ctx.getUriInfo()).thenReturn(uriInfo);
         when(ctx.getMediaType()).thenReturn(mediaType);
         when(ctx.getMethod()).thenReturn(method);

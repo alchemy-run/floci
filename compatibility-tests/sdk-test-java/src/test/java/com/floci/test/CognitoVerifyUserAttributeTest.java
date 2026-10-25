@@ -4,8 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.services.cognitoidentityprovider.CognitoIdentityProviderClient;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AliasAttributeType;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.AttributeType;
@@ -18,6 +20,8 @@ import software.amazon.awssdk.services.cognitoidentityprovider.model.MessageActi
 import software.amazon.awssdk.services.cognitoidentityprovider.model.UpdateUserAttributesResponse;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.UserNotFoundException;
 import software.amazon.awssdk.services.cognitoidentityprovider.model.VerifiedAttributeType;
+import software.amazon.awssdk.services.lambda.LambdaClient;
+import software.amazon.awssdk.services.lambda.model.Runtime;
 
 import java.net.URI;
 import java.net.URLEncoder;
@@ -45,18 +49,23 @@ class CognitoVerifyUserAttributeTest {
     private static final String PASSWORD = "Verify1234!";
 
     private static CognitoIdentityProviderClient cognito;
+    private static LambdaClient lambda;
 
     private String poolId;
 
     @BeforeAll
     static void setUpClient() {
         cognito = TestFixtures.cognitoClient();
+        lambda = TestFixtures.lambdaClient();
     }
 
     @AfterAll
     static void closeClient() {
         if (cognito != null) {
             cognito.close();
+        }
+        if (lambda != null) {
+            lambda.close();
         }
     }
 
@@ -258,6 +267,80 @@ class CognitoVerifyUserAttributeTest {
         assertThat(authenticate(clientId, newPhone)).isNotBlank();
     }
 
+    /**
+     * Measured on Cognito (eu-west-1, 2026-10-21 and 2026-10-22): both calls hand their code to the
+     * CustomMessage trigger with the request's ClientMetadata and the user as stored, whose email
+     * stays the verified one until the new one is verified, and the function's message is the one
+     * delivered. Each code is used before the next is asked for.
+     */
+    @Test
+    void customMessageShapesTheCodesOfAnEmailUpdate() throws Exception {
+        Assumptions.assumeTrue(TestFixtures.isLambdaDispatchAvailable(),
+                "skipping: Lambda dispatch (Docker) not available in this environment");
+        String functionName = TestFixtures.uniqueName("compat-custom-message");
+        String functionArn = lambda.createFunction(b -> b
+                        .functionName(functionName)
+                        .runtime(Runtime.NODEJS20_X)
+                        .role("arn:aws:iam::000000000000:role/lambda-role")
+                        .handler("index.handler")
+                        .timeout(10)
+                        .code(c -> c.zipFile(SdkBytes.fromByteArray(LambdaUtils.cognitoCustomMessageZip()))))
+                .functionArn();
+        try {
+            poolId = cognito.createUserPool(b -> b
+                            .poolName("custom-message-update-" + UUID.randomUUID())
+                            .autoVerifiedAttributes(VerifiedAttributeType.EMAIL)
+                            .userAttributeUpdateSettings(s -> s
+                                    .attributesRequireVerificationBeforeUpdate(VerifiedAttributeType.EMAIL))
+                            .lambdaConfig(l -> l.customMessage(functionArn)))
+                    .userPool()
+                    .id();
+            String clientId = createClient();
+            String username = "custom-message-" + UUID.randomUUID();
+            String oldEmail = "old+" + UUID.randomUUID() + "@example.com";
+            String newEmail = "new+" + UUID.randomUUID() + "@example.com";
+            createConfirmedUser(username,
+                    AttributeType.builder().name("email").value(oldEmail).build(),
+                    AttributeType.builder().name("email_verified").value("true").build(),
+                    AttributeType.builder().name("name").value("Original").build());
+            String accessToken = authenticate(clientId, username);
+
+            clearInspectionEndpoint("/_aws/ses");
+            cognito.getUserAttributeVerificationCode(b -> b
+                    .accessToken(accessToken)
+                    .attributeName("email")
+                    .clientMetadata(Map.of("source", "settings")));
+            JsonNode verify = latestSesMessageTo(oldEmail);
+            assertThat(verify.path("Subject").asText()).isEqualTo("CustomMessage_VerifyUserAttribute");
+            String verifyText = verify.path("Body").path("text_part").asText();
+            assertThat(verifyText).matches("\\d{6} for " + Pattern.quote(oldEmail) + ", Original, from settings");
+            cognito.verifyUserAttribute(b -> b
+                    .accessToken(accessToken)
+                    .attributeName("email")
+                    .code(extractVerificationCode(verifyText)));
+
+            clearInspectionEndpoint("/_aws/ses");
+            cognito.updateUserAttributes(b -> b
+                    .accessToken(accessToken)
+                    .userAttributes(AttributeType.builder().name("email").value(newEmail).build(),
+                            AttributeType.builder().name("name").value("Renamed").build())
+                    .clientMetadata(Map.of("source", "profile")));
+            JsonNode update = latestSesMessageTo(newEmail);
+            assertThat(update.path("Subject").asText()).isEqualTo("CustomMessage_UpdateUserAttribute");
+            String updateText = update.path("Body").path("text_part").asText();
+            assertThat(updateText).matches("\\d{6} for " + Pattern.quote(oldEmail) + ", Renamed, from profile");
+            assertThat(userAttribute(username, "email")).isEqualTo(oldEmail);
+
+            cognito.verifyUserAttribute(b -> b
+                    .accessToken(accessToken)
+                    .attributeName("email")
+                    .code(extractVerificationCode(updateText)));
+            assertThat(userAttribute(username, "email")).isEqualTo(newEmail);
+        } finally {
+            lambda.deleteFunction(b -> b.functionName(functionName));
+        }
+    }
+
     private String createClient() {
         return cognito.createUserPoolClient(b -> b
                         .userPoolId(poolId)
@@ -316,10 +399,21 @@ class CognitoVerifyUserAttributeTest {
     }
 
     private static String fetchLatestSesVerificationCode(String recipient) throws Exception {
-        URI uri = TestFixtures.endpoint()
-                .resolve("/_aws/ses?email=" + URLEncoder.encode(recipient, StandardCharsets.UTF_8));
-        JsonNode messages = getInspectionMessages(uri);
-        return extractVerificationCode(messages.get(0).path("Body").path("text_part").asText());
+        return extractVerificationCode(latestSesMessageTo(recipient).path("Body").path("text_part").asText());
+    }
+
+    private static JsonNode latestSesMessageTo(String recipient) throws Exception {
+        // The mailbox's email parameter filters by message source, so the message sent to the
+        // recipient is picked out of the full list.
+        JsonNode messages = getInspectionMessages(TestFixtures.endpoint().resolve("/_aws/ses"));
+        for (JsonNode message : messages) {
+            for (JsonNode to : message.path("Destination").path("ToAddresses")) {
+                if (recipient.equals(to.asText())) {
+                    return message;
+                }
+            }
+        }
+        throw new AssertionError("SES should have received a verification email for " + recipient);
     }
 
     private static String fetchLatestSnsVerificationCode(String phoneNumber) throws Exception {

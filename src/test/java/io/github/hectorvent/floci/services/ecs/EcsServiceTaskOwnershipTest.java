@@ -68,28 +68,6 @@ class EcsServiceTaskOwnershipTest {
     }
 
     @Test
-    void taskProtectionRequiresStampedServiceOwnershipRatherThanASpoofedGroup() {
-        EcsService service = newMockModeService();
-        service.createCluster("protection-cluster", REGION);
-        registerTaskDef(service);
-        service.createService("protection-cluster", "web", "own-fam", 1, LaunchType.FARGATE,
-                List.of(), null, REGION);
-        service.reconcileServices();
-        EcsTask owned = ownedTasks(service, "protection-cluster", "web").getFirst();
-        EcsTask intruder = service.runTask("protection-cluster", "own-fam", 1, LaunchType.FARGATE,
-                "web", "me", null, null, REGION).getFirst();
-
-        EcsService.TaskProtectionResult result = service.updateTaskProtectionDetailed("protection-cluster",
-                List.of(owned.getTaskArn(), intruder.getTaskArn()), true, 60, REGION);
-
-        assertEquals(1, result.protectedTasks().size());
-        assertEquals(owned.getTaskArn(), result.protectedTasks().getFirst().taskArn());
-        assertEquals(1, result.failures().size());
-        assertEquals("TASK_NOT_VALID", result.failures().getFirst().reason());
-        assertEquals(intruder.getTaskArn(), result.failures().getFirst().arn());
-    }
-
-    @Test
     void scaleInDoesNotStopATaskThatMerelyNamesTheServiceAsItsGroup() {
         EcsService service = newMockModeService();
         service.createCluster("scale-cluster", REGION);
@@ -169,6 +147,29 @@ class EcsServiceTaskOwnershipTest {
         assertEquals(1, listed.size(), "only the service's own task is listed");
         assertTrue(listed.stream().noneMatch(arn -> arn.equals(intruder.getTaskArn())),
                 "a task that merely names the service as its group is not service-owned");
+    }
+
+    @Test
+    void listTasksByServiceArnListsTheSameTasksAsByServiceName() {
+        EcsService service = newMockModeService();
+        service.createCluster("arn-cluster", REGION);
+        registerTaskDef(service);
+        String serviceArn = service.createService("arn-cluster", "svc", "own-fam", 1, LaunchType.FARGATE,
+                List.of(), null, REGION).getServiceArn();
+        String idleArn = service.createService("arn-cluster", "idle", "own-fam", 0, LaunchType.FARGATE,
+                List.of(), null, REGION).getServiceArn();
+        service.reconcileServices();
+
+        List<String> byName = service.listTasks("arn-cluster", null, null, "svc", REGION);
+        String shortArn = serviceArn.replace("service/arn-cluster/", "service/");
+
+        assertEquals(1, byName.size(), "the service runs its one task");
+        assertEquals(byName, service.listTasks("arn-cluster", null, null, serviceArn, REGION),
+                "the service ARN selects the same tasks as the service name");
+        assertEquals(byName, service.listTasks("arn-cluster", null, null, shortArn, REGION),
+                "the old service/<name> ARN format selects them too");
+        assertEquals(List.of(), service.listTasks("arn-cluster", null, null, idleArn, REGION),
+                "another service's ARN does not select this service's tasks");
     }
 
     @Test

@@ -9,6 +9,7 @@ import io.vertx.core.Future;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServer;
 import io.vertx.core.http.HttpServerOptions;
+import io.vertx.core.http.HttpServerResponse;
 import io.vertx.core.json.JsonObject;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
@@ -24,6 +25,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -84,9 +86,6 @@ public class RuntimeApiServer {
     private static final String EXTENSION_INIT_ERROR_PATH = "/" + EXTENSIONS_API_VERSION + "/extension/init/error";
     private static final String EXTENSION_EXIT_ERROR_PATH = "/" + EXTENSIONS_API_VERSION + "/extension/exit/error";
 
-    /** Set by runtime clients that stream their response (awslambda.streamifyResponse). */
-    private static final String RESPONSE_MODE_HEADER = "Lambda-Runtime-Function-Response-Mode";
-
     private static final String EXTENSION_NAME_HEADER = "Lambda-Extension-Name";
     private static final String EXTENSION_ID_HEADER = "Lambda-Extension-Identifier";
     private static final String EXTENSION_EVENT_ID_HEADER = "Lambda-Extension-Event-Identifier";
@@ -115,6 +114,8 @@ public class RuntimeApiServer {
     // Guards stopped, pendingQueue, waitingContexts, extensions, closeFuture, and every
     // RegisteredExtension's pendingEvents/waitingContext. See class doc for the discipline.
     private final Object lock = new Object();
+    private final CompletableFuture<Void> initialization = new CompletableFuture<>();
+    private boolean runtimeNextReceived;
 
     // Invocations queued before a /next poller arrived. Guarded by lock.
     private final ArrayDeque<PendingInvocation> pendingQueue = new ArrayDeque<>();
@@ -255,7 +256,6 @@ public class RuntimeApiServer {
     private volatile String functionVersion = "$LATEST";
     private volatile String handler = "";
     private volatile String accountId = DEFAULT_ACCOUNT_ID;
-    private volatile Consumer<String> platformLogSink = line -> {};
 
     RuntimeApiServer(Vertx vertx, int port) {
         this.vertx = vertx;
@@ -268,14 +268,6 @@ public class RuntimeApiServer {
         this.functionVersion = functionVersion != null ? functionVersion : "$LATEST";
         this.handler = handler != null ? handler : "";
         this.accountId = accountId != null && !accountId.isBlank() ? accountId : DEFAULT_ACCOUNT_ID;
-    }
-
-    /**
-     * Optional sink for AWS-shaped platform log lines (e.g. {@code EXTENSION Name: …}).
-     * Wired by {@code ContainerLauncher} onto the function's CloudWatch stream.
-     */
-    public void setPlatformLogSink(Consumer<String> sink) {
-        this.platformLogSink = sink != null ? sink : line -> {};
     }
 
     public int getPort() {
@@ -303,6 +295,32 @@ public class RuntimeApiServer {
         return faulted;
     }
 
+    /** Waits for runtime and extension initialization, without enqueuing an invocation. */
+    public void awaitInitialization(long timeoutMs) throws Exception {
+        initialization.get(timeoutMs, TimeUnit.MILLISECONDS);
+        synchronized (lock) {
+            if (stopped || faulted) {
+                throw new IllegalStateException("Lambda execution environment is no longer ready");
+            }
+        }
+    }
+
+    public boolean isInitialized() {
+        synchronized (lock) {
+            return initialization.isDone() && !initialization.isCompletedExceptionally() && !stopped && !faulted;
+        }
+    }
+
+    private void completeInitializationIfReady() {
+        synchronized (lock) {
+            CountDownLatch latch = extensionsReady;
+            if (runtimeNextReceived && !stopped && !faulted && latch != null && latch.getCount() == 0
+                    && extensions.values().stream().allMatch(RegisteredExtension::hasReceivedFirstNext)) {
+                initialization.complete(null);
+            }
+        }
+    }
+
     /**
      * Declares how many extension binaries were launched for this container, arming the
      * init-readiness barrier that {@link #awaitExtensionsReady(long)} waits on.
@@ -312,7 +330,10 @@ public class RuntimeApiServer {
      * no {@code /opt/extensions} directory) leaves the barrier permanently open.
      */
     public void expectExtensions(int count) {
-        extensionsReady = new CountDownLatch(Math.max(0, count));
+        synchronized (lock) {
+            extensionsReady = new CountDownLatch(Math.max(0, count));
+            completeInitializationIfReady();
+        }
     }
 
     /**
@@ -390,6 +411,8 @@ public class RuntimeApiServer {
                     // AWS Lambda tears an environment down.
                     waitingContexts.add(ctx);
                 } else {
+                    runtimeNextReceived = true;
+                    completeInitializationIfReady();
                     toDispatch = pendingQueue.poll();
                     if (toDispatch == null) {
                         waitingContexts.add(ctx);
@@ -449,7 +472,7 @@ public class RuntimeApiServer {
                 return;
             }
             List<String> events = List.of("INVOKE", "SHUTDOWN");
-            var body = ctx.body().asJsonObject();
+            JsonObject body = ctx.body().asJsonObject();
             if (body != null && body.getJsonArray("events") != null) {
                 events = body.getJsonArray("events").stream().map(String::valueOf).toList();
             }
@@ -558,6 +581,7 @@ public class RuntimeApiServer {
             if (readyLatch != null) {
                 readyLatch.countDown();
             }
+            completeInitializationIfReady();
             if (unknownExtension) {
                 ctx.response().setStatusCode(403)
                         .putHeader("Content-Type", "application/json")
@@ -639,6 +663,7 @@ public class RuntimeApiServer {
                 return;
             }
             stopped = true;
+            initialization.completeExceptionally(new IllegalStateException("Lambda execution environment stopped"));
             extensionWritesFlushed = writesFuture;
 
             ExtensionEvent shutdownEvent = ExtensionEvent.shutdown(System.currentTimeMillis() + 2000, "SPINDOWN");
@@ -944,6 +969,7 @@ public class RuntimeApiServer {
         List<PendingInvocation> stranded;
         synchronized (lock) {
             faulted = true;
+            initialization.completeExceptionally(new IllegalStateException("Lambda runtime initialization failed"));
             // Retained for a possible later enqueue(): the invocation that triggered this cold
             // start may not exist yet (see fatalRuntimeErrorPayload's doc), in which case
             // `stranded` below is empty and this is the only place the real error survives.
@@ -967,56 +993,6 @@ public class RuntimeApiServer {
                 .end(STATUS_OK_BODY);
     }
 
-    /**
-     * POST /runtime/invocation/{requestId}/response with
-     * {@code Lambda-Runtime-Function-Response-Mode: streaming}: completes the
-     * invocation future as soon as the response headers arrive, then forwards body
-     * chunks through a {@link StreamingPayload} pipe as they land on the wire.
-     * Buffered consumers still see the full payload via
-     * {@link InvokeResult#getPayload()}, which drains the pipe.
-     */
-    private void handleStreamingResponse(RoutingContext ctx) {
-        String requestId = ctx.pathParam("requestId");
-        PendingInvocation invocation = inFlight.remove(requestId);
-        if (invocation == null) {
-            // Unknown/expired invocation: consume the body and acknowledge anyway,
-            // mirroring the buffered route's tolerance.
-            ctx.request().handler(buffer -> { });
-            ctx.request().endHandler(v -> sendStatusOk(ctx));
-            ctx.request().resume();
-            return;
-        }
-
-        StreamingPayload stream = new StreamingPayload(ctx.request().getHeader("Content-Type"));
-        // Wire the chunk handlers before completing the future so no data races the consumer.
-        ctx.request().handler(buffer -> stream.offer(buffer.getBytes()));
-        ctx.request().endHandler(v -> {
-            stream.close();
-            sendStatusOk(ctx);
-        });
-        ctx.request().exceptionHandler(t -> {
-            LOG.warnv("Streaming response for {0} aborted: {1}", requestId, t.getMessage());
-            stream.close();
-        });
-        // Vert.x 5 delivers the request paused. Setting handler/endHandler does not
-        // resume; without this, later chunks sit in the inbound queue until EOF.
-        ctx.request().resume();
-
-        InvokeResult result = new InvokeResult(200, null, null, null, requestId);
-        result.setStream(stream);
-        invocation.getResultFuture().complete(result);
-        emitQuotedRequestFinalized();
-    }
-
-    /**
-     * CloudWatch FilterLogEvents currently does {@code message.contains(filterPattern)}.
-     * Alchemy's Shutdown suite searches for the quoted phrase
-     * {@code "ALCHEMY_REQUEST_FINALIZED"} that AWS Insights-style filters use.
-     */
-    private void emitQuotedRequestFinalized() {
-        platformLogSink.accept("\"ALCHEMY_REQUEST_FINALIZED\"");
-    }
-
     private void sendInvocation(RoutingContext ctx, PendingInvocation invocation) {
         beforeSendInvocationWrite(invocation.getRequestId());
         invocation.prepareForDispatch();
@@ -1031,13 +1007,16 @@ public class RuntimeApiServer {
         // failed Future if the socket dies mid-flush. Funnel both into one handler.
         Future<Void> write;
         try {
-            write = ctx.response()
+            HttpServerResponse response = ctx.response()
                     .setStatusCode(200)
                     .putHeader("Content-Type", "application/json")
                     .putHeader("Lambda-Runtime-Aws-Request-Id", invocation.getRequestId())
                     .putHeader("Lambda-Runtime-Invoked-Function-Arn", invocation.getFunctionArn())
-                    .putHeader("Lambda-Runtime-Deadline-Ms", String.valueOf(invocation.getDeadlineMs()))
-                    .end(body);
+                    .putHeader("Lambda-Runtime-Deadline-Ms", String.valueOf(invocation.getDeadlineMs()));
+            if (invocation.getClientContext() != null) {
+                response.putHeader("Lambda-Runtime-Client-Context", invocation.getClientContext());
+            }
+            write = response.end(body);
         } catch (IllegalStateException alreadyEnded) {
             write = Future.failedFuture(alreadyEnded);
         }
@@ -1117,6 +1096,7 @@ public class RuntimeApiServer {
                 return;
             }
             faulted = true;
+            initialization.completeExceptionally(new IllegalStateException("Lambda runtime exited: " + exitCode));
             // Retained for a possible later enqueue(): the invocation that would have hit this
             // container may not exist yet (see fatalRuntimeErrorPayload's doc), so this generic,
             // requestId-free payload is built here rather than only per-stranded-invocation below.
@@ -1185,6 +1165,7 @@ public class RuntimeApiServer {
                 // Set under the lock alongside the unregistration so both land as one atomic
                 // change.
                 faulted = true;
+                initialization.completeExceptionally(new IllegalStateException("Lambda extension initialization failed"));
 
                 // Anything already queued or parked would otherwise wait forever, since the guards
                 // in enqueue()/NEXT_PATH now refuse to move work through a condemned environment.
@@ -1250,5 +1231,69 @@ public class RuntimeApiServer {
                 .setStatusCode(202)
                 .putHeader("Content-Type", "application/json")
                 .end(STATUS_OK_BODY);
+    }
+
+
+    private volatile Consumer<String> platformLogSink = line -> {};
+
+    /**
+     * Optional sink for AWS-shaped platform log lines (e.g. {@code EXTENSION Name: …}).
+     * Wired by {@code ContainerLauncher} onto the function's CloudWatch stream.
+     */
+    public void setPlatformLogSink(Consumer<String> sink) {
+        this.platformLogSink = sink != null ? sink : line -> {};
+    }
+
+    /** Set by runtime clients that stream their response (awslambda.streamifyResponse). */
+    private static final String RESPONSE_MODE_HEADER = "Lambda-Runtime-Function-Response-Mode";
+
+    /**
+     * CloudWatch FilterLogEvents currently does {@code message.contains(filterPattern)}.
+     * Alchemy's Shutdown suite searches for the quoted phrase
+     * {@code "ALCHEMY_REQUEST_FINALIZED"} that AWS Insights-style filters use.
+     */
+    private void emitQuotedRequestFinalized() {
+        platformLogSink.accept("\"ALCHEMY_REQUEST_FINALIZED\"");
+    }
+
+    /**
+     * POST /runtime/invocation/{requestId}/response with
+     * {@code Lambda-Runtime-Function-Response-Mode: streaming}: completes the
+     * invocation future as soon as the response headers arrive, then forwards body
+     * chunks through a {@link StreamingPayload} pipe as they land on the wire.
+     * Buffered consumers still see the full payload via
+     * {@link InvokeResult#getPayload()}, which drains the pipe.
+     */
+    private void handleStreamingResponse(RoutingContext ctx) {
+        String requestId = ctx.pathParam("requestId");
+        PendingInvocation invocation = inFlight.remove(requestId);
+        if (invocation == null) {
+            // Unknown/expired invocation: consume the body and acknowledge anyway,
+            // mirroring the buffered route's tolerance.
+            ctx.request().handler(buffer -> { });
+            ctx.request().endHandler(v -> sendStatusOk(ctx));
+            ctx.request().resume();
+            return;
+        }
+
+        StreamingPayload stream = new StreamingPayload(ctx.request().getHeader("Content-Type"));
+        // Wire the chunk handlers before completing the future so no data races the consumer.
+        ctx.request().handler(buffer -> stream.offer(buffer.getBytes()));
+        ctx.request().endHandler(v -> {
+            stream.close();
+            sendStatusOk(ctx);
+        });
+        ctx.request().exceptionHandler(t -> {
+            LOG.warnv("Streaming response for {0} aborted: {1}", requestId, t.getMessage());
+            stream.close();
+        });
+        // Vert.x 5 delivers the request paused. Setting handler/endHandler does not
+        // resume; without this, later chunks sit in the inbound queue until EOF.
+        ctx.request().resume();
+
+        InvokeResult result = new InvokeResult(200, null, null, null, requestId);
+        result.setStream(stream);
+        invocation.getResultFuture().complete(result);
+        emitQuotedRequestFinalized();
     }
 }

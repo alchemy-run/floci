@@ -7,6 +7,8 @@ import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
@@ -20,6 +22,13 @@ import static org.hamcrest.Matchers.equalTo;
  * Verifies that a slow backend response is surfaced as ModelTimeoutException (408),
  * not the generic ModelErrorException (424) - the AWS SDKs' default retry strategy
  * treats 408 as retryable and 424 as terminal.
+ *
+ * <p>Its profile leaves passthrough off and the default model unset, so this class also checks that
+ * a model id with no mapping is refused before any backend call. It stays apart from
+ * {@code BedrockProxyBackendProfile}, which the other proxy classes share: that profile turns
+ * passthrough on, and a one-second timeout there would also close the upstreams that
+ * {@code BedrockProxyCancellationIntegrationTest} stalls before their headers, so those tests
+ * would pass without a disconnect closing them.
  */
 @QuarkusTest
 @TestProfile(BedrockProxyTimeoutIntegrationTest.SlowProxyBackendProfile.class)
@@ -57,8 +66,9 @@ class BedrockProxyTimeoutIntegrationTest {
         backend.stop(0);
     }
 
-    @Test
-    void converse_backendTimesOut_returnsModelTimeoutException() {
+    @ParameterizedTest
+    @ValueSource(strings = {"converse", "converse-stream"})
+    void backendTimesOut_returnsModelTimeoutException(String operation) {
         given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
@@ -66,10 +76,25 @@ class BedrockProxyTimeoutIntegrationTest {
                 {"messages": [{"role": "user", "content": [{"text": "hi"}]}]}
                 """)
         .when()
-            .post("/model/" + MAPPED_MODEL_ID + "/converse")
+            .post("/model/" + MAPPED_MODEL_ID + "/" + operation)
         .then()
             .statusCode(408)
             .body("__type", equalTo("ModelTimeoutException"));
+    }
+
+    @Test
+    void converse_noMappingNoDefaultNoPassthrough_returns400() {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {"messages": [{"role": "user", "content": [{"text": "hi"}]}]}
+                """)
+        .when()
+            .post("/model/unmapped.model-v1:0/converse")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"));
     }
 
     public static final class SlowProxyBackendProfile implements QuarkusTestProfile {

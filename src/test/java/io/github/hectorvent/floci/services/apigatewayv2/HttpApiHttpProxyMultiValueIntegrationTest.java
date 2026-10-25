@@ -3,7 +3,6 @@ package io.github.hectorvent.floci.services.apigatewayv2;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import io.quarkus.test.junit.QuarkusTest;
-import io.restassured.http.ContentType;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -84,34 +83,7 @@ class HttpApiHttpProxyMultiValueIntegrationTest {
      * the fixture backend, deployed to stage {@code test}.
      */
     private String createProxyApi(String name) {
-        String apiId = given()
-                .contentType(ContentType.JSON)
-                .body("{\"name\":\"" + name + "\",\"protocolType\":\"HTTP\"}")
-                .when().post("/v2/apis")
-                .then().statusCode(201)
-                .extract().path("apiId");
-
-        given()
-                .contentType(ContentType.JSON)
-                .body("{\"stageName\":\"test\"}")
-                .when().post("/v2/apis/" + apiId + "/stages")
-                .then().statusCode(201);
-
-        String integrationId = given()
-                .contentType(ContentType.JSON)
-                .body("{\"integrationType\":\"HTTP_PROXY\",\"integrationUri\":\"http://127.0.0.1:"
-                        + backendPort + "/orders\",\"payloadFormatVersion\":\"1.0\"}")
-                .when().post("/v2/apis/" + apiId + "/integrations")
-                .then().statusCode(201)
-                .extract().path("integrationId");
-
-        given()
-                .contentType(ContentType.JSON)
-                .body("{\"routeKey\":\"GET /orders\",\"target\":\"integrations/" + integrationId + "\"}")
-                .when().post("/v2/apis/" + apiId + "/routes")
-                .then().statusCode(201);
-
-        return apiId;
+        return HttpProxyApiFixtures.createProxyApi(name, "", "test", backendPort, "/orders");
     }
 
     @Test

@@ -93,7 +93,7 @@ class SnsFirehoseIntegrationTest {
 
         // Subscribe envelope delivery stream
         String envelopeStreamArn = "arn:aws:firehose:us-east-1:000000000000:deliverystream/" + ENVELOPE_STREAM;
-        envelopeSubArn = given()
+        given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "Subscribe")
             .formParam("TopicArn", topicArn)
@@ -102,9 +102,34 @@ class SnsFirehoseIntegrationTest {
         .when()
             .post("/")
         .then()
+            .statusCode(400)
+            .body(containsString("SubscriptionRoleArn"));
+
+        envelopeSubArn = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "Subscribe")
+            .formParam("TopicArn", topicArn)
+            .formParam("Protocol", "firehose")
+            .formParam("Endpoint", envelopeStreamArn)
+            .formParam("Attributes.entry.1.key", "SubscriptionRoleArn")
+            .formParam("Attributes.entry.1.value", "arn:aws:iam::000000000000:role/firehose-role")
+        .when()
+            .post("/")
+        .then()
             .statusCode(200)
             .body(containsString("<SubscriptionArn>"))
             .extract().xmlPath().getString("SubscribeResponse.SubscribeResult.SubscriptionArn");
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "GetSubscriptionAttributes")
+            .formParam("SubscriptionArn", envelopeSubArn)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("SubscriptionRoleArn"))
+            .body(containsString("arn:aws:iam::000000000000:role/firehose-role"));
 
         // Subscribe raw delivery stream
         String rawStreamArn = "arn:aws:firehose:us-east-1:000000000000:deliverystream/" + RAW_STREAM;
@@ -114,6 +139,8 @@ class SnsFirehoseIntegrationTest {
             .formParam("TopicArn", topicArn)
             .formParam("Protocol", "firehose")
             .formParam("Endpoint", rawStreamArn)
+            .formParam("Attributes.entry.1.key", "SubscriptionRoleArn")
+            .formParam("Attributes.entry.1.value", "arn:aws:iam::000000000000:role/firehose-role")
         .when()
             .post("/")
         .then()

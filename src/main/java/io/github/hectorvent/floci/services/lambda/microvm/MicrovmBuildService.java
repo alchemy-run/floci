@@ -15,6 +15,7 @@ import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.attribute.FileTime;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Set;
@@ -63,7 +64,7 @@ public class MicrovmBuildService {
      * "now" mtimes invalidated every layer from the first COPY onward on
      * every build, so identical content never cached.
      */
-    private static final java.nio.file.attribute.FileTime FIXED_MTIME =
+    private static final FileTime FIXED_MTIME =
             java.nio.file.attribute.FileTime.fromMillis(0L);
 
     private final S3Service s3Service;

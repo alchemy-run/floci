@@ -1,13 +1,12 @@
 package io.github.hectorvent.floci.services.scheduler;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.util.List;
 
@@ -18,6 +17,45 @@ import static org.hamcrest.Matchers.*;
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class SchedulerIntegrationTest {
+
+    @Test
+    @Order(44)
+    void directScheduleRequestsRejectInvalidExpressionAndRoleArn() {
+        String validTarget = """
+                {"Arn":"arn:aws:sqs:us-east-1:000000000000:queue",
+                 "RoleArn":"arn:aws:iam::000000000000:role/scheduler-role"}
+                """;
+        String invalidExpression = """
+                {"ScheduleExpression":"cron(invalid)",
+                 "FlexibleTimeWindow":{"Mode":"OFF"},"Target":%s}
+                """.formatted(validTarget);
+        given().contentType("application/json").body(invalidExpression)
+                .when().post("/schedules/invalid-expression")
+                .then().statusCode(400).body("__type", containsString("ValidationException"));
+
+        String invalidRole = """
+                {"ScheduleExpression":"rate(1 hour)",
+                 "FlexibleTimeWindow":{"Mode":"OFF"},
+                 "Target":{"Arn":"arn:aws:sqs:us-east-1:000000000000:queue",
+                           "RoleArn":"not-a-role-arn"}}
+                """;
+        given().contentType("application/json").body(invalidRole)
+                .when().post("/schedules/invalid-role")
+                .then().statusCode(400).body("__type", containsString("ValidationException"));
+
+        String valid = """
+                {"ScheduleExpression":"rate(1 hour)",
+                 "FlexibleTimeWindow":{"Mode":"OFF"},"Target":%s}
+                """.formatted(validTarget);
+        given().contentType("application/json").body(valid)
+                .when().post("/schedules/validation-update")
+                .then().statusCode(200);
+        given().contentType("application/json").body(invalidExpression)
+                .when().put("/schedules/validation-update")
+                .then().statusCode(400).body("__type", containsString("ValidationException"));
+        given().when().get("/schedules/validation-update")
+                .then().statusCode(200).body("ScheduleExpression", equalTo("rate(1 hour)"));
+    }
 
     @Test
     @Order(1)
@@ -689,7 +727,7 @@ class SchedulerIntegrationTest {
                 {
                     "ScheduleExpression": "rate(1 hour)",
                     "FlexibleTimeWindow": {"Mode": "OFF"},
-                    "Target": {"Arn": "arn:t", "RoleArn": "arn:r"}
+                    "Target": {"Arn": "arn:t", "RoleArn": "arn:aws:iam::000000000000:role/r"}
                 }
                 """)
         .when()
@@ -930,7 +968,7 @@ class SchedulerIntegrationTest {
                 {
                     "ScheduleExpression": "rate(1 hour)",
                     "FlexibleTimeWindow": {"Mode": "OFF"},
-                    "Target": {"Arn": "arn:t", "RoleArn": "arn:r"}
+                    "Target": {"Arn": "arn:t", "RoleArn": "arn:aws:iam::000000000000:role/r"}
                 }
                 """)
         .when()
@@ -1123,7 +1161,7 @@ class SchedulerIntegrationTest {
         // Every EcsParameters list field answers 400 SerializationException "Expected list or null"
         // on AWS when it holds a scalar, measured through the Scheduler API for all six.
         record ListField(String path, String body) { }
-        var fields = List.of(
+        List<ListField> fields = List.of(
                 new ListField("CapacityProviderStrategy", "\"CapacityProviderStrategy\": \"FARGATE\""),
                 new ListField("PlacementConstraints", "\"PlacementConstraints\": \"distinctInstance\""),
                 new ListField("PlacementStrategy", "\"PlacementStrategy\": \"spread\""),

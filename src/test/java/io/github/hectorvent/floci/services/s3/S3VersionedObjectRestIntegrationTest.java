@@ -150,7 +150,8 @@ class S3VersionedObjectRestIntegrationTest {
     @Test
     void notificationConfigurationsWithoutAnIdAreAssignedOne() {
         String bucket = versionedBucket("notif-id");
-        given().body("""
+        // The queue does not exist; the header skips that check, as on S3.
+        given().header("x-amz-skip-destination-validation", "true").body("""
                         <NotificationConfiguration>
                           <QueueConfiguration>
                             <Queue>arn:aws:sqs:us-east-1:000000000000:notif-id</Queue>

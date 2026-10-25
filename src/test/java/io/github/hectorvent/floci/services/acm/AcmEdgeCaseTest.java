@@ -1,7 +1,9 @@
 package io.github.hectorvent.floci.services.acm;
 
+import io.github.hectorvent.floci.testing.AcmDnsRecordValidationProfile;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import io.restassured.path.json.JsonPath;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -21,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
  * Tests for edge cases: wildcard domains, max SANs (100), max tags (50).
  */
 @QuarkusTest
+@TestProfile(AcmDnsRecordValidationProfile.class)
 class AcmEdgeCaseTest {
 
     private static final String ACM_CONTENT_TYPE = "application/x-amz-json-1.1";

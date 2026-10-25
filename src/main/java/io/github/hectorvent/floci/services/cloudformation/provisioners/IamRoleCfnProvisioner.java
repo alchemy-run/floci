@@ -14,14 +14,16 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
  * CloudFormation provisioning for {@code AWS::IAM::Role}, moved out of the
- * {@code CloudFormationResourceProvisioner} switch. The other IAM types (User, AccessKey, Policy,
+ * former CloudFormation monolith's switch. The other IAM types (User, AccessKey, Policy,
  * ManagedPolicy, InstanceProfile) still live there and share {@link CfnRollback} with this class.
  */
 @ApplicationScoped
@@ -69,6 +71,8 @@ public class IamRoleCfnProvisioner implements CfnResourceProvisioner {
         }
         String description = ctx.resolveOptional(props, "Description");
         List<String> managedPolicyArns = ctx.resolveStringList(props, "ManagedPolicyArns");
+        // Blank means absent: Fn::If with Ref AWS::NoValue resolves to "" (CDK bootstrap does this).
+        String permissionsBoundary = ctx.resolveOrDefault(props, "PermissionsBoundary", null);
 
         IamRole role;
         boolean createdRole = false;
@@ -79,8 +83,11 @@ public class IamRoleCfnProvisioner implements CfnResourceProvisioner {
         // replacement that took the name in the meantime.
         String priorAssumeRolePolicyDocument = null;
         String priorAssumeRoleId = null;
+        // The adopted role's boundary before this attempt, restored on failure like the trust policy.
+        String priorPermissionsBoundary = null;
         try {
-            role = iamService.createRole(resolvedRoleName, path, assumeDoc, description, 3600, Map.of());
+            role = iamService.createRole(resolvedRoleName, path, assumeDoc, description, 3600, Map.of(),
+                    permissionsBoundary);
             createdRole = true;
             r.getAttributes().put(CfnRollback.ROLLBACK_OWNED_ATTR, "true");
         } catch (AwsException e) {
@@ -113,6 +120,7 @@ public class IamRoleCfnProvisioner implements CfnResourceProvisioner {
             // meant for the role this stack actually owns.
             priorAssumeRolePolicyDocument = role.getAssumeRolePolicyDocument();
             priorAssumeRoleId = existingRoleId;
+            priorPermissionsBoundary = role.getPermissionsBoundaryArn();
             iamService.updateAssumeRolePolicy(resolvedRoleName, assumeDoc, existingRoleId);
         }
 
@@ -137,7 +145,21 @@ public class IamRoleCfnProvisioner implements CfnResourceProvisioner {
         LinkedHashSet<String> inlineWrittenByThisAttempt = new LinkedHashSet<>();
         final String documentToRestore = priorAssumeRolePolicyDocument;
         final String roleIdToRestore = priorAssumeRoleId;
+        final String boundaryToRestore = priorPermissionsBoundary;
+        boolean boundaryChangedByThisAttempt = false;
         try {
+            // createRole() only applies PermissionsBoundary on first create. On adoption, set a
+            // changed boundary, and remove one only if the role has one and the template dropped it.
+            // ID-verified like the trust-policy write, here and in the rollback restore.
+            if (!createdRole && !Objects.equals(permissionsBoundary, boundaryToRestore)) {
+                if (permissionsBoundary != null) {
+                    iamService.putRolePermissionsBoundary(resolvedRoleName, permissionsBoundary, roleIdToRestore);
+                } else {
+                    iamService.deleteRolePermissionsBoundary(resolvedRoleName, roleIdToRestore);
+                }
+                boundaryChangedByThisAttempt = true;
+            }
+
             for (String policyArn : managedPolicyArns) {
                 iamService.attachRolePolicy(resolvedRoleName, policyArn);
                 if (!originalPolicyArns.contains(policyArn)) {
@@ -148,6 +170,7 @@ public class IamRoleCfnProvisioner implements CfnResourceProvisioner {
             // Inline policies run inside the same protected block: a failure here used to leave
             // the created role, its managed attachments and any earlier inline writes behind,
             // because rollback only deletes resources that reached CREATE_COMPLETE.
+            Map<String, String> desiredInlinePolicies = new LinkedHashMap<>();
             if (props != null && props.has("Policies")) {
                 for (JsonNode policy : props.get("Policies")) {
                     String declaredName = ctx.resolveOptional(policy, "PolicyName");
@@ -167,9 +190,7 @@ public class IamRoleCfnProvisioner implements CfnResourceProvisioner {
                                 "Inline policy '" + policyName + "' on role " + resolvedRoleName
                                 + " has no PolicyDocument.", 400);
                     }
-                    iamService.putRolePolicy(resolvedRoleName, policyName,
-                            ctx.engine().resolveJsonAttributeStrict(document));
-                    inlineWrittenByThisAttempt.add(policyName);
+                    desiredInlinePolicies.put(policyName, ctx.engine().resolveJsonAttributeStrict(document));
                 }
             }
 
@@ -180,11 +201,16 @@ public class IamRoleCfnProvisioner implements CfnResourceProvisioner {
             // calls raise NoSuchEntity on an absent target, which would fail an update whose desired
             // end state, the policy not being on the role, already holds.
             for (String stale : previousInlineNames) {
-                if (!inlineWrittenByThisAttempt.contains(stale)
+                if (!desiredInlinePolicies.containsKey(stale)
                         && originalInlinePolicies.containsKey(stale)) {
                     iamService.deleteRolePolicy(resolvedRoleName, stale);
                     inlineRemovedByThisAttempt.add(stale);
                 }
+            }
+            // Free the quota held by renamed policies before writing their replacements.
+            for (Map.Entry<String, String> policy : desiredInlinePolicies.entrySet()) {
+                iamService.putRolePolicy(resolvedRoleName, policy.getKey(), policy.getValue());
+                inlineWrittenByThisAttempt.add(policy.getKey());
             }
             for (String stale : previousManagedArns) {
                 if (!managedPolicyArns.contains(stale) && originalPolicyArns.contains(stale)) {
@@ -195,19 +221,6 @@ public class IamRoleCfnProvisioner implements CfnResourceProvisioner {
         } catch (RuntimeException failure) {
             boolean cleanupSucceeded = true;
 
-            // Reconciliation runs last, so unwinding it comes first. A policy this attempt took out
-            // because the template stopped declaring it goes back with the document it had.
-            for (String policyName : inlineRemovedByThisAttempt) {
-                String prior = originalInlinePolicies.get(policyName);
-                if (prior == null) {
-                    continue;
-                }
-                if (!CfnRollback.attemptIamCleanup(failure,
-                        "restore inline policy " + policyName + " on role " + resolvedRoleName,
-                        () -> iamService.putRolePolicy(resolvedRoleName, policyName, prior))) {
-                    cleanupSucceeded = false;
-                }
-            }
             for (String policyArn : detachedByThisAttempt) {
                 if (!CfnRollback.attemptIamCleanup(failure,
                         "reattach policy " + policyArn + " to role " + resolvedRoleName,
@@ -216,19 +229,24 @@ public class IamRoleCfnProvisioner implements CfnResourceProvisioner {
                 }
             }
 
+            // Remove this attempt's writes before restoring earlier documents, so temporary
+            // overlap cannot exceed the role quota during rollback either.
             List<String> inlineRollback = new ArrayList<>(inlineWrittenByThisAttempt);
             Collections.reverse(inlineRollback);
             for (String policyName : inlineRollback) {
+                if (!CfnRollback.attemptIamCleanup(failure,
+                        "remove inline policy " + policyName + " on role " + resolvedRoleName,
+                        () -> iamService.deleteRolePolicy(resolvedRoleName, policyName))) {
+                    cleanupSucceeded = false;
+                }
+            }
+            Set<String> inlineToRestore = new LinkedHashSet<>(inlineRollback);
+            inlineToRestore.addAll(inlineRemovedByThisAttempt);
+            for (String policyName : inlineToRestore) {
                 String prior = originalInlinePolicies.get(policyName);
-                String cleanupDescription = (prior == null ? "remove" : "restore")
-                        + " inline policy " + policyName + " on role " + resolvedRoleName;
-                if (!CfnRollback.attemptIamCleanup(failure, cleanupDescription, () -> {
-                    if (prior == null) {
-                        iamService.deleteRolePolicy(resolvedRoleName, policyName);
-                    } else {
-                        iamService.putRolePolicy(resolvedRoleName, policyName, prior);
-                    }
-                })) {
+                if (prior != null && !CfnRollback.attemptIamCleanup(failure,
+                        "restore inline policy " + policyName + " on role " + resolvedRoleName,
+                        () -> iamService.putRolePolicy(resolvedRoleName, policyName, prior))) {
                     cleanupSucceeded = false;
                 }
             }
@@ -239,6 +257,18 @@ public class IamRoleCfnProvisioner implements CfnResourceProvisioner {
                 String cleanupDescription = "detach policy " + policyArn + " from role " + resolvedRoleName;
                 if (!CfnRollback.attemptIamCleanup(failure, cleanupDescription,
                         () -> iamService.detachRolePolicy(resolvedRoleName, policyArn))) {
+                    cleanupSucceeded = false;
+                }
+            }
+            if (boundaryChangedByThisAttempt) {
+                if (!CfnRollback.attemptIamCleanup(failure,
+                        "restore prior permissions boundary on role " + resolvedRoleName, () -> {
+                            if (boundaryToRestore == null) {
+                                iamService.deleteRolePermissionsBoundary(resolvedRoleName, roleIdToRestore);
+                            } else {
+                                iamService.putRolePermissionsBoundary(resolvedRoleName, boundaryToRestore, roleIdToRestore);
+                            }
+                        })) {
                     cleanupSucceeded = false;
                 }
             }

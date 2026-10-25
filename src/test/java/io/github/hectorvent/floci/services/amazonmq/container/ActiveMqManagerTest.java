@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.C
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.services.amazonmq.model.Broker;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -66,9 +67,9 @@ class ActiveMqManagerTest {
         when(dockerClient.copyArchiveToContainerCmd(anyString())).thenReturn(copyCmd);
 
         containerBuilder = Mockito.mock(ContainerBuilder.class);
-        builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
+        builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(Mockito.mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
         RegionResolver regionResolver = Mockito.mock(RegionResolver.class);
         when(regionResolver.getAccountId()).thenReturn("000000000000");

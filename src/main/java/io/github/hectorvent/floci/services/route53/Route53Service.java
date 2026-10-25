@@ -863,7 +863,7 @@ public class Route53Service {
                 + TimeUnit.MILLISECONDS.toNanos(vpcAssociationControlPlaneDelayMs));
     }
 
-    private static String normalizeName(String name) {
+    static String normalizeName(String name) {
         if (name == null || name.isEmpty()) return name;
         return name.endsWith(".") ? name : name + ".";
     }

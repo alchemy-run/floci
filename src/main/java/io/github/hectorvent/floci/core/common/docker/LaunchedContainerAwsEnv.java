@@ -87,7 +87,12 @@ public class LaunchedContainerAwsEnv {
      * the container reaches Floci.
      */
     public String flociEndpoint() {
-        return reachableEndpoint.baseUrl();
+        return flociEndpoint(true);
+    }
+
+    /** Selects an endpoint compatible with the container's DNS configuration. */
+    public String flociEndpoint(boolean useEmbeddedDns) {
+        return reachableEndpoint.baseUrl(useEmbeddedDns);
     }
 
     /**
@@ -138,7 +143,7 @@ public class LaunchedContainerAwsEnv {
     public List<String> sdkBaselineEnv(String region, Optional<String> awsConfigMountDir,
                                        String flociEndpoint, Optional<SessionCreds> injectedCredentials,
                                        String ownerAccountId) {
-        List<String> env = new ArrayList<>();
+        ArrayList<String> env = new ArrayList<>();
         env.add("AWS_DEFAULT_REGION=" + region);
         env.add("AWS_REGION=" + region);
         if (awsConfigMountDir.isPresent() && !awsConfigMountDir.get().isBlank()) {

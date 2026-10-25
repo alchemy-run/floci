@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.glue.schemaregistry;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -16,13 +17,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.NavigableMap;
@@ -43,6 +40,7 @@ public class GlueSchemaRegistryService {
     private static final int DEFAULT_MAX_RESULTS = 100;
     private static final int MAX_MAX_RESULTS = 100;
     private static final int MAX_DELETE_SCHEMA_VERSIONS = 25;
+    private static final int MAX_LOOKUP_FORMAT_ATTEMPTS = 4;
     private static final int MAX_SCHEMA_DEFINITION_LENGTH = 170_000;
 
     private static final Set<String> DATA_FORMATS = Set.of("AVRO", "JSON", "PROTOBUF");
@@ -424,8 +422,15 @@ public class GlueSchemaRegistryService {
             byNumber.remove(v);
             if (hash != null) {
                 Map<String, String> hashIndex = versionByDefinitionHash.get(key);
-                if (hashIndex != null) {
-                    hashIndex.remove(hash);
+                if (hashIndex != null && hashIndex.remove(hash, id)) {
+                    for (String remainingId : byNumber.values()) {
+                        SchemaVersion remaining = versionStore.get(remainingId).orElse(null);
+                        if (remaining != null && hash.equals(canonicalHash(
+                                remaining.getSchemaDefinition(), remaining.getDataFormat()))) {
+                            hashIndex.putIfAbsent(hash, remainingId);
+                            break;
+                        }
+                    }
                 }
             }
             if (v.equals(latestRemaining)) {
@@ -482,7 +487,7 @@ public class GlueSchemaRegistryService {
                     info.getOtherMetadataValueList() != null
                             ? new ArrayList<>(info.getOtherMetadataValueList())
                             : new ArrayList<>();
-            for (var item : history) {
+            for (MetadataInfo.OtherMetadataValueListItem item : history) {
                 if (value.equals(item.getMetadataValue())) {
                     throw new AwsException("AlreadyExistsException",
                             "Metadata key/value pair already exists: " + key + "=" + value, 400);
@@ -563,7 +568,7 @@ public class GlueSchemaRegistryService {
             return stored;
         }
         Map<String, MetadataInfo> filtered = new java.util.LinkedHashMap<>();
-        for (var f : metadataList) {
+        for (MetadataKeyValueFilter f : metadataList) {
             MetadataInfo info = stored.get(f.metadataKey());
             if (info == null) continue;
             if (f.metadataValue() == null || f.metadataValue().isBlank()) {
@@ -571,7 +576,7 @@ public class GlueSchemaRegistryService {
             } else if (f.metadataValue().equals(info.getMetadataValue())) {
                 filtered.put(f.metadataKey(), info);
             } else if (info.getOtherMetadataValueList() != null) {
-                for (var item : info.getOtherMetadataValueList()) {
+                for (MetadataInfo.OtherMetadataValueListItem item : info.getOtherMetadataValueList()) {
                     if (f.metadataValue().equals(item.getMetadataValue())) {
                         filtered.put(f.metadataKey(), info);
                         break;
@@ -639,16 +644,31 @@ public class GlueSchemaRegistryService {
         validateDefinitionRequired(definition);
         Schema schema = resolveSchema(schemaId, region);
         String schemaKey = schemaKey(schema.getRegistryName(), schema.getSchemaName());
-        String hash = canonicalHash(definition, schema.getDataFormat());
-        Map<String, String> hashIndex = versionByDefinitionHash.get(schemaKey);
-        String id = hashIndex != null ? hashIndex.get(hash) : null;
-        if (id == null) {
-            throw new AwsException("EntityNotFoundException",
-                    "Schema version is not found. Definition not found in " + schemaKey, 400);
+        String dataFormat = schema.getDataFormat();
+        for (int attempt = 0; attempt < MAX_LOOKUP_FORMAT_ATTEMPTS; attempt++) {
+            String hash = canonicalHash(definition, dataFormat);
+            synchronized (this) {
+                String currentFormat = schemaStore.get(schemaKey)
+                        .orElseThrow(() -> new AwsException("EntityNotFoundException",
+                                "Schema is not found. " + schema.getRegistryName() + "/" + schema.getSchemaName(), 400))
+                        .getDataFormat();
+                if (!dataFormat.equals(currentFormat)) {
+                    dataFormat = currentFormat;
+                    continue;
+                }
+                Map<String, String> hashIndex = versionByDefinitionHash.get(schemaKey);
+                String id = hashIndex != null ? hashIndex.get(hash) : null;
+                if (id == null) {
+                    throw new AwsException("EntityNotFoundException",
+                            "Schema version is not found. Definition not found in " + schemaKey, 400);
+                }
+                return versionStore.get(id)
+                        .orElseThrow(() -> new AwsException("EntityNotFoundException",
+                                "Schema version vanished: " + id, 400));
+            }
         }
-        return versionStore.get(id)
-                .orElseThrow(() -> new AwsException("EntityNotFoundException",
-                        "Schema version vanished: " + id, 400));
+        throw new AwsException("InternalServiceException",
+                "Schema format changed repeatedly during definition lookup: " + schemaKey, 500);
     }
 
     // ---- Helpers ---------------------------------------------------------
@@ -933,7 +953,7 @@ public class GlueSchemaRegistryService {
         String hash = canonicalHash(version.getSchemaDefinition(), version.getDataFormat());
         versionByDefinitionHash
                 .computeIfAbsent(schemaKey, k -> new ConcurrentHashMap<>())
-                .put(hash, version.getSchemaVersionId());
+                .putIfAbsent(hash, version.getSchemaVersionId());
     }
 
     private void rebuildVersionIndexes() {
@@ -943,7 +963,9 @@ public class GlueSchemaRegistryService {
         for (Schema s : schemaStore.scan(k -> true)) {
             arnToSchemaKey.put(s.getSchemaArn(), schemaKey(s.getRegistryName(), s.getSchemaName()));
         }
-        for (SchemaVersion v : versionStore.scan(k -> true)) {
+        List<SchemaVersion> versions = new ArrayList<>(versionStore.scan(k -> true));
+        versions.sort(Comparator.comparing(SchemaVersion::getVersionNumber));
+        for (SchemaVersion v : versions) {
             String schemaKey = arnToSchemaKey.get(v.getSchemaArn());
             if (schemaKey == null) {
                 continue;
@@ -959,16 +981,7 @@ public class GlueSchemaRegistryService {
         } catch (RuntimeException e) {
             canonical = definition;
         }
-        return sha256Hex(canonical);
-    }
-
-    private static String sha256Hex(String input) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(md.digest(input.getBytes(StandardCharsets.UTF_8)));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 not available", e);
-        }
+        return Digests.sha256Hex(canonical);
     }
 
     private Registry autoCreateDefaultRegistry(String region) {

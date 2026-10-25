@@ -1,12 +1,12 @@
 package io.github.hectorvent.floci.services.stepfunctions;
 
-import io.github.hectorvent.floci.core.common.AwsErrorResponse;
-import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.PaginatedResult;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsErrorResponse;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.services.stepfunctions.model.Activity;
 import io.github.hectorvent.floci.services.stepfunctions.model.ActivityTask;
 import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
@@ -15,6 +15,7 @@ import io.github.hectorvent.floci.services.stepfunctions.model.MapRun;
 import io.github.hectorvent.floci.services.stepfunctions.model.RoutingConfiguration;
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachine;
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachineAlias;
+import io.github.hectorvent.floci.services.stepfunctions.model.StateMachineVersion;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -55,14 +56,16 @@ public class StepFunctionsJsonHandler {
             case "UpdateStateMachineAlias" -> handleUpdateStateMachineAlias(request);
             case "DeleteStateMachineAlias" -> handleDeleteStateMachineAlias(request);
             case "ValidateStateMachineDefinition" -> handleValidateStateMachineDefinition(request);
-            case "TestState" -> handleTestState(request);
             case "RedriveExecution" -> handleRedriveExecution(request);
+            case "TestState" -> handleTestState(request);
             case "StartExecution" -> handleStartExecution(request, region);
             case "StartSyncExecution" -> handleStartSyncExecution(request, region);
             case "DescribeExecution" -> handleDescribeExecution(request);
             case "ListExecutions" -> handleListExecutions(request);
             case "StopExecution" -> handleStopExecution(request);
             case "GetExecutionHistory" -> handleGetExecutionHistory(request);
+            case "DescribeMapRun" -> handleDescribeMapRun(request);
+            case "UpdateMapRun" -> handleUpdateMapRun(request);
             case "SendTaskSuccess" -> handleSendTaskSuccess(request);
             case "SendTaskFailure" -> handleSendTaskFailure(request);
             case "SendTaskHeartbeat" -> handleSendTaskHeartbeat(request);
@@ -72,8 +75,6 @@ public class StepFunctionsJsonHandler {
             case "ListActivities" -> handleListActivities(request, region);
             case "GetActivityTask" -> handleGetActivityTask(request);
             case "ListMapRuns" -> handleListMapRuns(request);
-            case "DescribeMapRun" -> handleDescribeMapRun(request);
-            case "UpdateMapRun" -> handleUpdateMapRun(request);
             case "ListTagsForResource" -> handleListTagsForResource(request);
             case "TagResource" -> handleTagResource(request);
             case "UntagResource" -> handleUntagResource(request);
@@ -145,7 +146,7 @@ public class StepFunctionsJsonHandler {
     }
 
     private Response handlePublishStateMachineVersion(JsonNode request) {
-        var version = service.publishStateMachineVersion(
+        StateMachineVersion version = service.publishStateMachineVersion(
                 requiredText(request, "stateMachineArn"),
                 optionalText(request, "revisionId"),
                 optionalText(request, "description"));
@@ -156,10 +157,10 @@ public class StepFunctionsJsonHandler {
     }
 
     private Response handleListStateMachineVersions(JsonNode request) {
-        var versions = service.listStateMachineVersions(request.path("stateMachineArn").asText());
+        List<StateMachineVersion> versions = service.listStateMachineVersions(request.path("stateMachineArn").asText());
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = response.putArray("stateMachineVersions");
-        for (var v : versions) {
+        for (StateMachineVersion v : versions) {
             ObjectNode item = array.addObject();
             item.put("stateMachineVersionArn", v.getStateMachineVersionArn());
             item.put("creationDate", v.getCreationDate());
@@ -424,13 +425,13 @@ public class StepFunctionsJsonHandler {
     }
 
     /** A failed item's result counts as written, as on AWS. */
-    private static void putMapRunCounts(ObjectNode counts, int total, int succeeded, int failed, boolean running) {
-        counts.put("pending", running ? total - succeeded - failed : 0);
+    private static void putMapRunCounts(ObjectNode counts, int total, int succeeded, int failed) {
+        counts.put("pending", 0);
         counts.put("running", 0);
         counts.put("succeeded", succeeded);
         counts.put("failed", failed);
         counts.put("timedOut", 0);
-        counts.put("aborted", running ? 0 : total - succeeded - failed);
+        counts.put("aborted", total - succeeded - failed);
         counts.put("total", total);
         counts.put("resultsWritten", succeeded + failed);
         counts.put("failuresNotRedrivable", 0);
@@ -471,12 +472,12 @@ public class StepFunctionsJsonHandler {
     }
 
     private Response handleGetExecutionHistory(JsonNode request) {
-        var arn = request.path("executionArn").asText();
-        var includeExecutionData = request.path("includeExecutionData").asBoolean(true);
-        var reverseOrder = request.path("reverseOrder").asBoolean(false);
+        String arn = request.path("executionArn").asText();
+        boolean includeExecutionData = request.path("includeExecutionData").asBoolean(true);
+        boolean reverseOrder = request.path("reverseOrder").asBoolean(false);
         Integer maxResults = parseOptionalInt(request, "maxResults");
 
-        var live = service.getExecutionHistory(arn);
+        List<HistoryEvent> live = service.getExecutionHistory(arn);
         List<HistoryEvent> events;
         // Branch and iteration threads append under the history's own monitor while a client reads.
         synchronized (live) {
@@ -497,9 +498,9 @@ public class StepFunctionsJsonHandler {
             item.put("type", e.getType());
             if (e.getPreviousEventId() != null) item.put("previousEventId", e.getPreviousEventId());
             if (e.getDetails() != null) {
-                var details = e.getDetails();
+                Map<String, Object> details = e.getDetails();
                 if (!includeExecutionData) {
-                    var filtered = new LinkedHashMap<>(details);
+                    LinkedHashMap<String, Object> filtered = new LinkedHashMap<>(details);
                     filtered.keySet().removeAll(EXECUTION_DATA_FIELDS);
                     details = filtered;
                 }
@@ -520,59 +521,6 @@ public class StepFunctionsJsonHandler {
             return "stateExitedEventDetails";
         }
         return Character.toLowerCase(type.charAt(0)) + type.substring(1) + "EventDetails";
-    }
-
-    private Response handleTestState(JsonNode request) {
-        StepFunctionsService.TestStateResult result = service.testState(
-                request.path("definition").asText(null),
-                request.path("input").asText(null)
-        );
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("status", result.status());
-        if (result.output() != null) {
-            response.put("output", result.output());
-        }
-        if (result.error() != null) {
-            response.put("error", result.error());
-        }
-        if (result.cause() != null) {
-            response.put("cause", result.cause());
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleRedriveExecution(JsonNode request) {
-        double redriveDate = service.redriveExecution(request.path("executionArn").asText());
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("redriveDate", redriveDate);
-        return Response.ok(response).build();
-    }
-
-    private Response handleListMapRuns(JsonNode request) {
-        List<MapRun> runs = service.listMapRuns(request.path("executionArn").asText());
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode array = response.putArray("mapRuns");
-        for (MapRun run : runs) {
-            ObjectNode item = array.addObject();
-            item.put("mapRunArn", run.getMapRunArn());
-            item.put("executionArn", run.getExecutionArn());
-            item.put("status", run.getStatus());
-            item.put("startDate", run.getStartDate());
-            if (run.getStopDate() > 0) {
-                item.put("stopDate", run.getStopDate());
-            }
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleUpdateMapRun(JsonNode request) {
-        service.updateMapRun(
-                request.path("mapRunArn").asText(),
-                parseOptionalInt(request, "maxConcurrency"),
-                parseOptionalLong(request, "toleratedFailureCount"),
-                parseOptionalDouble(request, "toleratedFailurePercentage")
-        );
-        return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     private Response handleSendTaskSuccess(JsonNode request) {
@@ -619,14 +567,18 @@ public class StepFunctionsJsonHandler {
     }
 
     private Response handleListActivities(JsonNode request, String region) {
-        List<Activity> list = service.listActivities(region);
+        PaginatedResult<Activity> page = service.listActivities(region,
+                parseOptionalInt(request, "maxResults"), optionalText(request, "nextToken"));
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = response.putArray("activities");
-        for (Activity a : list) {
+        for (Activity a : page.items()) {
             ObjectNode item = array.addObject();
             item.put("activityArn", a.getActivityArn());
             item.put("name", a.getName());
             item.put("creationDate", a.getCreationDate());
+        }
+        if (page.nextToken() != null) {
+            response.put("nextToken", page.nextToken());
         }
         return Response.ok(response).build();
     }
@@ -763,9 +715,9 @@ public class StepFunctionsJsonHandler {
 
     /**
      * Reads an optional integer field from the JSON request, rejecting wrong types
-     * with a typed ValidationException. JsonNode.asInt() silently coerces strings,
-     * fractional numbers, and explicit nulls to 0, which would let invalid payloads
-     * slip through as 0 (and thus be treated as "use default" by the service).
+     * with a typed ValidationException. JsonNode.intValue() silently truncates
+     * out-of-range integers, while asInt() also coerces wrong types to 0; either
+     * can make an invalid value look like "use default" to the service.
      * Returns null when the field is absent or explicitly null in the JSON.
      */
     private static Integer parseOptionalInt(JsonNode request, String fieldName) {
@@ -773,13 +725,71 @@ public class StepFunctionsJsonHandler {
         if (node == null || node.isNull()) {
             return null;
         }
-        if (!node.isIntegralNumber()) {
+        if (!node.isIntegralNumber() || !node.canConvertToInt()) {
             throw new AwsException("ValidationException",
                     "Value '" + node + "' at '" + fieldName
                             + "' failed to satisfy constraint: Member must be an integer.", 400);
         }
         return node.intValue();
     }
+
+    /** A failed item's result counts as written, as on AWS. */
+    private static void putMapRunCounts(ObjectNode counts, int total, int succeeded, int failed, boolean running) {
+        counts.put("pending", running ? total - succeeded - failed : 0);
+        counts.put("running", 0);
+        counts.put("succeeded", succeeded);
+        counts.put("failed", failed);
+        counts.put("timedOut", 0);
+        counts.put("aborted", running ? 0 : total - succeeded - failed);
+        counts.put("total", total);
+        counts.put("resultsWritten", succeeded + failed);
+        counts.put("failuresNotRedrivable", 0);
+        counts.put("pendingRedrive", 0);
+    }
+
+    private Response handleTestState(JsonNode request) {
+        StepFunctionsService.TestStateResult result = service.testState(
+                request.path("definition").asText(null),
+                request.path("input").asText(null)
+        );
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("status", result.status());
+        if (result.output() != null) {
+            response.put("output", result.output());
+        }
+        if (result.error() != null) {
+            response.put("error", result.error());
+        }
+        if (result.cause() != null) {
+            response.put("cause", result.cause());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleRedriveExecution(JsonNode request) {
+        double redriveDate = service.redriveExecution(request.path("executionArn").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("redriveDate", redriveDate);
+        return Response.ok(response).build();
+    }
+
+    private Response handleListMapRuns(JsonNode request) {
+        List<MapRun> runs = service.listMapRuns(request.path("executionArn").asText());
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode array = response.putArray("mapRuns");
+        for (MapRun run : runs) {
+            ObjectNode item = array.addObject();
+            item.put("mapRunArn", run.getMapRunArn());
+            item.put("executionArn", run.getExecutionArn());
+            item.put("status", run.getStatus());
+            item.put("startDate", run.getStartDate());
+            if (run.getStopDate() > 0) {
+                item.put("stopDate", run.getStopDate());
+            }
+        }
+        return Response.ok(response).build();
+    }
+
 
     private static Long parseOptionalLong(JsonNode request, String fieldName) {
         JsonNode node = request.get(fieldName);
@@ -807,4 +817,13 @@ public class StepFunctionsJsonHandler {
         return node.doubleValue();
     }
 
+    private Response handleUpdateMapRun(JsonNode request) {
+        service.updateMapRun(
+                request.path("mapRunArn").asText(),
+                parseOptionalInt(request, "maxConcurrency"),
+                parseOptionalLong(request, "toleratedFailureCount"),
+                parseOptionalDouble(request, "toleratedFailurePercentage")
+        );
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
 }

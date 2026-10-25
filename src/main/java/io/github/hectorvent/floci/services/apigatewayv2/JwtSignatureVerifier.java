@@ -2,7 +2,9 @@ package io.github.hectorvent.floci.services.apigatewayv2;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.config.ContainerCaBundle;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.PublicKeys;
 import io.github.hectorvent.floci.core.common.SsrfProtection;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -15,10 +17,13 @@ import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManager;
 import org.apache.hc.client5.http.impl.io.PoolingHttpClientConnectionManagerBuilder;
+import org.apache.hc.client5.http.ssl.ClientTlsStrategyBuilder;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.support.ClassicRequestBuilder;
 import org.apache.hc.core5.util.Timeout;
 import org.jboss.logging.Logger;
+
+import javax.net.ssl.SSLContext;
 
 import java.io.IOException;
 import java.math.BigInteger;
@@ -27,10 +32,8 @@ import java.net.URI;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
-import java.security.KeyFactory;
 import java.security.Signature;
 import java.security.interfaces.RSAPublicKey;
-import java.security.spec.RSAPublicKeySpec;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -45,6 +48,11 @@ import java.util.concurrent.ConcurrentHashMap;
  * and verify. Nothing here is Floci-specific — this is a generic OIDC-relying-party check against
  * whatever issuer a JWT authorizer is configured with (Cognito, Auth0, Okta, ...), not a lookup
  * against Floci's own emulated Cognito keys.
+ *
+ * <p>With TLS on, an issuer Floci serves itself (a Cognito pool's URL) presents a certificate of
+ * Floci's CA, which the JVM's default trust store does not hold. The issuer is fetched trusting the
+ * CA bundle Floci gives every container it launches, so a JWT authorizer on a Floci pool verifies
+ * its tokens as API Gateway verifies a Cognito pool's on AWS.
  *
  * <p>Per-issuer JWKS are cached (see {@link #CACHE_TTL}) so repeat requests to the same route
  * don't refetch the discovery document and key set on every call.
@@ -70,7 +78,7 @@ public class JwtSignatureVerifier implements AutoCloseable {
     @Inject
     public JwtSignatureVerifier(ObjectMapper objectMapper, EmulatorConfig config) {
         this(objectMapper, SystemDefaultDnsResolver.INSTANCE,
-                config.security().allowPrivateJwtTargets());
+                config.security().allowPrivateJwtTargets(), ContainerCaBundle.sslContext(config).orElse(null));
     }
 
     /**
@@ -81,6 +89,19 @@ public class JwtSignatureVerifier implements AutoCloseable {
             DnsResolver dnsResolver,
             boolean allowPrivateNetworkTargets
     ) {
+        this(objectMapper, dnsResolver, allowPrivateNetworkTargets, null);
+    }
+
+    /**
+     * As above, trusting {@code sslContext}'s anchors over HTTPS, or the JVM's default ones when it
+     * is null.
+     */
+    JwtSignatureVerifier(
+            ObjectMapper objectMapper,
+            DnsResolver dnsResolver,
+            boolean allowPrivateNetworkTargets,
+            SSLContext sslContext
+    ) {
         this.objectMapper = objectMapper;
         this.allowPrivateNetworkTargets = allowPrivateNetworkTargets;
 
@@ -88,10 +109,15 @@ public class JwtSignatureVerifier implements AutoCloseable {
                 .setConnectTimeout(Timeout.of(HTTP_TIMEOUT))
                 .setSocketTimeout(Timeout.of(HTTP_TIMEOUT))
                 .build();
-        PoolingHttpClientConnectionManager connectionManager = PoolingHttpClientConnectionManagerBuilder.create()
+        PoolingHttpClientConnectionManagerBuilder connectionManagerBuilder = PoolingHttpClientConnectionManagerBuilder.create()
                 .setDnsResolver(new JwtDnsResolver(dnsResolver, allowPrivateNetworkTargets))
-                .setDefaultConnectionConfig(connectionConfig)
-                .build();
+                .setDefaultConnectionConfig(connectionConfig);
+        if (sslContext != null) {
+            connectionManagerBuilder.setTlsSocketStrategy(ClientTlsStrategyBuilder.create()
+                    .setSslContext(sslContext)
+                    .buildClassic());
+        }
+        PoolingHttpClientConnectionManager connectionManager = connectionManagerBuilder.build();
         RequestConfig requestConfig = RequestConfig.custom()
                 .setConnectionRequestTimeout(Timeout.of(HTTP_TIMEOUT))
                 .setResponseTimeout(Timeout.of(HTTP_TIMEOUT))
@@ -316,10 +342,8 @@ public class JwtSignatureVerifier implements AutoCloseable {
     }
 
     private RSAPublicKey toRsaPublicKey(String n, String e) throws GeneralSecurityException {
-        BigInteger modulus = new BigInteger(1, Base64.getUrlDecoder().decode(padBase64(n)));
-        BigInteger exponent = new BigInteger(1, Base64.getUrlDecoder().decode(padBase64(e)));
-        RSAPublicKeySpec spec = new RSAPublicKeySpec(modulus, exponent);
-        return (RSAPublicKey) KeyFactory.getInstance("RSA").generatePublic(spec);
+        return PublicKeys.rsa(new BigInteger(1, Base64.getUrlDecoder().decode(padBase64(n))),
+                new BigInteger(1, Base64.getUrlDecoder().decode(padBase64(e))));
     }
 
     private boolean signatureValid(String signingInput, String encodedSignature, RSAPublicKey publicKey) {

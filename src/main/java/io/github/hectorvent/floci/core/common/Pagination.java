@@ -34,14 +34,48 @@ public final class Pagination {
                                                     Integer maxResults, String nextToken,
                                                     int defaultPageSize, int maxResultsLimit,
                                                     String errorCode) {
+        return paginate(all, cursorOf, maxResults, nextToken, defaultPageSize, maxResultsLimit, errorCode,
+                "nextToken");
+    }
+
+    /**
+     * As above, naming the token parameter in the invalid-token message: query-protocol and DMS
+     * operations call it {@code Marker}, and an error naming {@code nextToken} points the caller
+     * at a parameter the operation does not have.
+     */
+    public static <T> PaginatedResult<T> paginate(List<T> all, Function<T, String> cursorOf,
+                                                    Integer maxResults, String nextToken,
+                                                    int defaultPageSize, int maxResultsLimit,
+                                                    String errorCode, String tokenName) {
         if (maxResults != null && (maxResults < 1 || maxResults > maxResultsLimit)) {
             throw new AwsException(errorCode,
                     "maxResults must be between 1 and " + maxResultsLimit, 400);
         }
         int limit = maxResults != null ? maxResults : defaultPageSize;
+        return slice(all, cursorOf, limit,
+                decodeCursor(nextToken, "", token -> new AwsException(errorCode, "Invalid " + tokenName + ".", 400)), "");
+    }
 
+    /**
+     * For callers that validate the page size and render token errors themselves, because the
+     * wording differs per operation. Every cursor is prefixed with {@code namespace}, so a token
+     * minted for another namespace is refused instead of being read as a position in this list,
+     * while two operations listing the same resources can share one namespace and accept each
+     * other's tokens.
+     */
+    public static <T> PaginatedResult<T> paginate(List<T> all, Function<T, String> cursorOf,
+                                                  int limit, String nextToken, String namespace,
+                                                  Function<String, AwsException> invalidToken) {
+        if (limit < 1) {
+            throw new IllegalArgumentException("limit must be at least 1, was " + limit);
+        }
+        String prefix = namespace + ":";
+        return slice(all, cursorOf, limit, decodeCursor(nextToken, prefix, invalidToken), prefix);
+    }
+
+    private static <T> PaginatedResult<T> slice(List<T> all, Function<T, String> cursorOf, int limit,
+                                                String after, String tokenPrefix) {
         List<T> sorted = all.stream().sorted(Comparator.comparing(cursorOf)).collect(Collectors.toList());
-        String after = decodeToken(nextToken, errorCode);
         int start = 0;
         if (after != null) {
             for (int i = 0; i < sorted.size(); i++) {
@@ -54,8 +88,8 @@ public final class Pagination {
         }
         List<T> page = sorted.stream().skip(start).limit(limit).collect(Collectors.toList());
         String token = null;
-        if (start + limit < sorted.size() && !page.isEmpty()) {
-            token = encodeToken(cursorOf.apply(page.get(page.size() - 1)));
+        if (limit < sorted.size() - start && !page.isEmpty()) {
+            token = encodeToken(tokenPrefix + cursorOf.apply(page.get(page.size() - 1)));
         }
         return new PaginatedResult<>(page, token);
     }
@@ -79,17 +113,23 @@ public final class Pagination {
     }
 
     private static String encodeToken(String cursor) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(cursor.getBytes(StandardCharsets.UTF_8));
+        return Base64Url.encode(cursor);
     }
 
-    private static String decodeToken(String token, String errorCode) {
+    private static String decodeCursor(String token, String prefix,
+                                       Function<String, AwsException> invalidToken) {
         if (token == null || token.isEmpty()) {
             return null;
         }
+        String decoded;
         try {
-            return new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
+            decoded = new String(Base64.getUrlDecoder().decode(token), StandardCharsets.UTF_8);
         } catch (IllegalArgumentException e) {
-            throw new AwsException(errorCode, "Invalid nextToken.", 400);
+            throw invalidToken.apply(token);
         }
+        if (!decoded.startsWith(prefix)) {
+            throw invalidToken.apply(token);
+        }
+        return decoded.substring(prefix.length());
     }
 }

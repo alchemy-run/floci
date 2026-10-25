@@ -2,6 +2,8 @@ package io.github.hectorvent.floci.core.common;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
 
 import java.util.Locale;
 import java.util.Optional;
@@ -15,10 +17,11 @@ import java.util.regex.Pattern;
  * first protocol whose "identification for claiming" signals match claims the
  * request.
  * <p>
- * Claiming uses non-payload signals only (method, path, headers) so it is safe
+ * Claiming uses non-payload signals only (method, path, headers, query parameters) so it is safe
  * to run in a pre-matching filter without touching the entity stream. As a
- * consequence the awsQuery claim is narrowed to POST {@code /} with the form
- * content type; the spec's body-level {@code Action}/{@code Version} checks
+ * consequence the awsQuery claim covers POST {@code /} with the form
+ * content type and the signed Query GET requests the dispatcher accepts.
+ * The spec's body-level {@code Action}/{@code Version} checks
  * stay downstream in {@code AwsQueryController}, which already rejects a
  * missing {@code Action} with the AWS {@code MissingAction} error. Nothing
  * below awsQuery in the precision order claims such requests, so the narrowed
@@ -26,7 +29,8 @@ import java.util.regex.Pattern;
  * <p>
  * An empty result means the request carries an RPC signal that no supported
  * protocol claims — per the guide such input must be rejected (enforced only
- * when {@code floci.protocols.strict-claiming} is enabled).
+ * when {@code floci.protocols.strict-claiming} is enabled). With it disabled the
+ * request is served, and {@link #routeClaim} claims it by the route it reaches.
  * <p>
  * Intentional deviation from pure precedence iteration: a present
  * Smithy-Protocol header is treated as an exclusive rpcv2 signal. If its value
@@ -92,6 +96,17 @@ public class ProtocolClaimer {
             return Optional.of(rpcV2Claim(WireProtocol.RPCV2_CBOR, rpcV2Path));
         }
 
+        if ("GET".equalsIgnoreCase(signals.method()) && isRootPath(path)
+                && isQueryGet(signals)) {
+            String authorization = IamEnforcementFilter.requestAuthorization(
+                    signals.authorization(), signals.queryParameters());
+            ServiceDescriptor service = SigV4CredentialScope.serviceName(authorization)
+                    .flatMap(catalog::byCredentialScope)
+                    .orElseGet(() -> catalog.byCredentialScope("monitoring").orElse(null));
+            return Optional.of(new ProtocolClaim(WireProtocol.AWS_QUERY, service,
+                    AwsQueryServiceResolver.action(signals.queryParameters()), null));
+        }
+
         if (post && isRootPath(path)) {
             String target = signals.xAmzTarget();
             if (target != null) {
@@ -101,27 +116,72 @@ public class ProtocolClaimer {
                 if (CONTENT_TYPE_JSON_1_1.equals(mediaType)) {
                     return Optional.of(targetClaim(WireProtocol.AWS_JSON_1_1, target));
                 }
+                if ("application/json".equals(mediaType) && catalog.matchPlainJsonTarget(target).isPresent()) {
+                    return Optional.of(targetClaim(WireProtocol.AWS_JSON_1_0, target));
+                }
                 if (isCbor(mediaType)) {
                     return Optional.of(targetClaim(WireProtocol.AWS_CBOR_TARGET, target));
                 }
                 return Optional.empty();
             }
             if (CONTENT_TYPE_FORM_URLENCODED.equals(mediaType)) {
-                ServiceDescriptor service = SigV4CredentialScope.serviceName(signals.authorization())
-                        .flatMap(catalog::byCredentialScope)
-                        .orElse(null);
-                return Optional.of(new ProtocolClaim(WireProtocol.AWS_QUERY, service, null, null));
+                return Optional.of(queryClaim(signals));
             }
         }
 
         return Optional.of(ProtocolClaim.rest());
     }
 
-    private ProtocolClaim rpcV2Claim(WireProtocol protocol, Matcher rpcV2Path) {
-        String serviceName = rpcV2Path.group(1);
-        String operation = rpcV2Path.group(2);
+    /**
+     * The claim of a request {@link #claim} could not claim, made from the route JAX-RS matched it
+     * to. With strict claiming off such a request is still served, by a route that dispatches it the
+     * same way whatever its {@code Smithy-Protocol} header or content type says: the JSON, CBOR and
+     * Query endpoints on {@code X-Amz-Target}, the rpcv2 path and the form, and every other route as
+     * its REST operation. Claimed this way, every check that reads the claim sees the call that runs.
+     */
+    public ProtocolClaim routeClaim(Class<?> resourceClass, ClaimSignals signals,
+                                    MultivaluedMap<String, String> pathParameters) {
+        if (resourceClass == AwsJsonController.class) {
+            return targetClaim(WireProtocol.AWS_JSON_1_0, signals.xAmzTarget());
+        }
+        if (resourceClass == AwsJson11Controller.class) {
+            return targetClaim(WireProtocol.AWS_JSON_1_1, signals.xAmzTarget());
+        }
+        if (resourceClass == AwsJsonCborController.class) {
+            ProtocolClaim rpcV2 = rpcV2RouteClaim(catalog, pathParameters);
+            return rpcV2 != null ? rpcV2 : targetClaim(WireProtocol.AWS_CBOR_TARGET, signals.xAmzTarget());
+        }
+        if (resourceClass == AwsQueryController.class && "POST".equalsIgnoreCase(signals.method())) {
+            return queryClaim(signals);
+        }
+        // The Query endpoint's GET route serves only the Query GET that claim() rewrites onto it;
+        // reached directly it is no Query call, as claim() would say without the header.
+        return ProtocolClaim.rest();
+    }
+
+    /**
+     * The claim of a call routed to the Smithy RPC v2 endpoint, made from the service and operation
+     * in the route's path parameters, which are what that endpoint dispatches. Null when the
+     * parameters do not name both, as on the endpoint's {@code X-Amz-Target} route.
+     */
+    static ProtocolClaim rpcV2RouteClaim(ResolvedServiceCatalog catalog,
+                                         MultivaluedMap<String, String> pathParameters) {
+        String serviceId = pathParameters.getFirst(AwsJsonCborController.RPC_V2_SERVICE_PARAMETER);
+        String operation = pathParameters.getFirst(AwsJsonCborController.RPC_V2_OPERATION_PARAMETER);
+        if (serviceId == null || operation == null) {
+            return null;
+        }
+        return rpcV2Claim(catalog, WireProtocol.RPCV2_CBOR, serviceId, operation);
+    }
+
+    private static ProtocolClaim rpcV2Claim(ResolvedServiceCatalog catalog, WireProtocol protocol,
+                                            String serviceName, String operation) {
         ServiceDescriptor service = catalog.byCborSdkServiceId(serviceName).orElse(null);
         return new ProtocolClaim(protocol, service, operation, null);
+    }
+
+    private ProtocolClaim rpcV2Claim(WireProtocol protocol, Matcher rpcV2Path) {
+        return rpcV2Claim(catalog, protocol, rpcV2Path.group(1), rpcV2Path.group(2));
     }
 
     private ProtocolClaim targetClaim(WireProtocol protocol, String target) {
@@ -130,8 +190,29 @@ public class ProtocolClaimer {
                 .orElseGet(() -> new ProtocolClaim(protocol, null, null, target));
     }
 
+    private ProtocolClaim queryClaim(ClaimSignals signals) {
+        ServiceDescriptor service = SigV4CredentialScope.serviceName(signals.authorization())
+                .flatMap(catalog::byCredentialScope)
+                .orElse(null);
+        return new ProtocolClaim(WireProtocol.AWS_QUERY, service, null, null);
+    }
+
     static boolean isRpcV2Path(String path) {
         return path != null && RPC_V2_PATH.matcher(path).matches();
+    }
+
+    private boolean isQueryGet(ClaimSignals signals) {
+        String authorization = IamEnforcementFilter.requestAuthorization(
+                signals.authorization(), signals.queryParameters());
+        if (authorization != null) {
+            return SigV4CredentialScope.serviceName(authorization).flatMap(catalog::byCredentialScope)
+                    .filter(service -> service.supportsProtocol(ServiceProtocol.QUERY)).isPresent();
+        }
+        String action = AwsQueryServiceResolver.action(signals.queryParameters());
+        return signals.xAmzTarget() == null
+                && (signals.accept() == null || !signals.accept().contains(MediaType.TEXT_HTML))
+                && action != null && "monitoring".equals(AwsQueryController.inferServiceFromAction(
+                    action, signals.queryParameters().getFirst("Version")));
     }
 
     private static boolean isRootPath(String path) {

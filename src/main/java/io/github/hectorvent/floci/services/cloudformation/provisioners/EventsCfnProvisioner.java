@@ -10,9 +10,13 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
+import io.github.hectorvent.floci.services.eventbridge.model.ApiDestination;
 import io.github.hectorvent.floci.services.eventbridge.model.BatchParameters;
+import io.github.hectorvent.floci.services.eventbridge.model.EcsParameters;
 import io.github.hectorvent.floci.services.eventbridge.model.EventBus;
+import io.github.hectorvent.floci.services.eventbridge.model.HttpParameters;
 import io.github.hectorvent.floci.services.eventbridge.model.InputTransformer;
+import io.github.hectorvent.floci.services.eventbridge.model.Rule;
 import io.github.hectorvent.floci.services.eventbridge.model.RuleState;
 import io.github.hectorvent.floci.services.eventbridge.model.SqsParameters;
 import io.github.hectorvent.floci.services.eventbridge.model.Target;
@@ -28,14 +32,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
-import java.util.stream.Collectors;
 import java.util.TreeSet;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 /**
  * CloudFormation provisioning for EventBridge: {@code AWS::Events::Rule},
  * {@code AWS::Events::EventBus} and {@code AWS::Events::EventBusPolicy}. Extracted from
- * {@code CloudFormationResourceProvisioner}.
+ * the former CloudFormation monolith.
  *
  * <p>Two of these types need the resource's stored attributes to delete, not just the physical
  * id, so they are served by the {@link #delete(StackResource, String)} override rather than the
@@ -47,6 +51,9 @@ public class EventsCfnProvisioner implements CfnResourceProvisioner {
 
     private static final Logger LOG = Logger.getLogger(EventsCfnProvisioner.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    /** The shape AWS::Events::Rule's resource schema declares for its targets. */
+    private static final String TARGETS = CfnPropertyTypes.propertyShape("AWS::Events::Rule", "Targets");
 
     private static final String EVENT_BUS_CREATED_TIME_ATTR = "FlociEventBusCreatedTime";
     private static final String EVENT_BUS_MANAGED_TAG_KEYS_ATTR = "FlociEventBusManagedTagKeys";
@@ -67,7 +74,8 @@ public class EventsCfnProvisioner implements CfnResourceProvisioner {
 
     @Override
     public Set<String> resourceTypes() {
-        return Set.of("AWS::Events::Rule", "AWS::Events::EventBus", "AWS::Events::EventBusPolicy");
+        return Set.of("AWS::Events::Rule", "AWS::Events::EventBus", "AWS::Events::EventBusPolicy",
+                "AWS::Events::ApiDestination");
     }
 
     @Override
@@ -76,6 +84,7 @@ public class EventsCfnProvisioner implements CfnResourceProvisioner {
             case "AWS::Events::Rule" -> provisionRule(r, props, ctx);
             case "AWS::Events::EventBus" -> provisionEventBus(r, props, ctx);
             case "AWS::Events::EventBusPolicy" -> provisionEventBusPolicy(r, props, ctx);
+            case "AWS::Events::ApiDestination" -> provisionApiDestination(r, props, ctx);
             default -> throw new IllegalStateException(
                     "EventsCfnProvisioner cannot handle " + r.getResourceType());
         }
@@ -106,6 +115,7 @@ public class EventsCfnProvisioner implements CfnResourceProvisioner {
             case "AWS::Events::Rule" -> deleteEventBridgeRuleSafe(physicalId, null, region);
             case "AWS::Events::EventBus" -> deleteEventBusSafe(physicalId, region);
             case "AWS::Events::EventBusPolicy" -> removeEventBusPolicySafe(physicalId, region);
+            case "AWS::Events::ApiDestination" -> deleteApiDestinationSafe(physicalId, region);
             default -> {
                 // no other type reaches this provisioner
             }
@@ -137,7 +147,11 @@ public class EventsCfnProvisioner implements CfnResourceProvisioner {
         String stateStr = ctx.resolveOptional(props, "State");
         RuleState state = "DISABLED".equals(stateStr) ? RuleState.DISABLED : RuleState.ENABLED;
 
-        var rule = eventBridgeService.putRule(ruleName, busName, eventPattern, scheduleExpression,
+        // Read before the rule exists, as CloudFormation refuses a target of the wrong type before it
+        // touches the rule.
+        List<Target> targets = declaredTargets(props, ctx);
+
+        Rule rule = eventBridgeService.putRule(ruleName, busName, eventPattern, scheduleExpression,
                 state, description, roleArn, Map.of(), ctx.region());
         r.setPhysicalId(ruleName);
         r.getAttributes().put("Arn", rule.getArn());
@@ -148,45 +162,6 @@ public class EventsCfnProvisioner implements CfnResourceProvisioner {
             r.getAttributes().put("EventBusName", busName);
         }
 
-        // Provision inline targets
-        List<Target> targets = new ArrayList<>();
-        if (props != null && props.has("Targets") && props.get("Targets").isArray()) {
-            for (JsonNode targetNode : props.get("Targets")) {
-                JsonNode resolved = ctx.engine().resolveNode(targetNode);
-                String targetId = resolved.path("Id").asText(null);
-                String targetArn = resolved.path("Arn").asText(null);
-                String input = resolved.path("Input").asText(null);
-                String inputPath = resolved.path("InputPath").asText(null);
-                if (targetId != null && targetArn != null) {
-                    Target target = new Target(targetId, targetArn, input, inputPath);
-                    target.setInputTransformer(InputTransformer.fromJson(resolved.path("InputTransformer")));
-                    JsonNode sqsParamsNode = resolved.path("SqsParameters");
-                    if (!sqsParamsNode.isMissingNode() && sqsParamsNode.isObject()) {
-                        String messageGroupId = sqsParamsNode.path("MessageGroupId").asText(null);
-                        if (messageGroupId != null) {
-                            SqsParameters sqsParameters = new SqsParameters();
-                            sqsParameters.setMessageGroupId(messageGroupId);
-                            target.setSqsParameters(sqsParameters);
-                        }
-                    }
-                    JsonNode batchParamsNode = resolved.path("BatchParameters");
-                    if (!batchParamsNode.isMissingNode() && batchParamsNode.isObject()) {
-                        JsonNode arrayProperties = batchParamsNode.path("ArrayProperties");
-                        BatchParameters batchParameters = new BatchParameters();
-                        batchParameters.setJobDefinition(batchParamsNode.path("JobDefinition").asText(null));
-                        batchParameters.setJobName(batchParamsNode.path("JobName").asText(null));
-                        if (arrayProperties.isObject()) {
-                            batchParameters.setArrayProperties(jsonObjectToMap(arrayProperties));
-                        }
-                        if (batchParamsNode.has("RetryStrategy")) {
-                            batchParameters.setRetryStrategy(batchParamsNode.get("RetryStrategy"));
-                        }
-                        target.setBatchParameters(batchParameters);
-                    }
-                    targets.add(target);
-                }
-            }
-        }
         if (ctx.isUpdate()) {
             snapshotTargetsBeforeUpdate(r, ruleName, busName, ctx.region());
         }
@@ -199,6 +174,79 @@ public class EventsCfnProvisioner implements CfnResourceProvisioner {
             restoreTargetsAfterFailedUpdate(r, updateFailure);
             throw updateFailure;
         }
+    }
+
+    /**
+     * The rule's {@code Targets}, each carrying what PutTargets would set. An Fn::If that chooses the
+     * whole list works, and AWS::NoValue is left out wherever it stands for a member, a list item or
+     * an Fn::If branch, as CloudFormation leaves them out of the PutTargets call, while a literal ""
+     * stays. Every member is read against the type the resource schema declares for it.
+     */
+    private List<Target> declaredTargets(JsonNode props, ProvisionContext ctx) {
+        List<Target> targets = new ArrayList<>();
+        if (props == null || !props.has("Targets")) {
+            return targets;
+        }
+        CfnPropertyTypes.Reader types = new CfnPropertyTypes.Reader(ctx.engine());
+        JsonNode targetNodes = types.read("Targets", props.get("Targets"), TARGETS);
+        types.finish();
+        if (targetNodes == null || !targetNodes.isArray()) {
+            return targets;
+        }
+        for (JsonNode resolved : targetNodes) {
+            String targetId = resolved.path("Id").asText(null);
+            String targetArn = resolved.path("Arn").asText(null);
+            String input = resolved.path("Input").asText(null);
+            String inputPath = resolved.path("InputPath").asText(null);
+            if (targetId == null || targetArn == null) {
+                continue;
+            }
+            Target target = new Target(targetId, targetArn, input, inputPath);
+            target.setInputTransformer(InputTransformer.fromJson(resolved.path("InputTransformer")));
+            JsonNode httpParamsNode = resolved.path("HttpParameters");
+            if (httpParamsNode.isObject()) {
+                target.setHttpParameters(MAPPER.convertValue(httpParamsNode, HttpParameters.class));
+            }
+            JsonNode sqsParamsNode = resolved.path("SqsParameters");
+            if (!sqsParamsNode.isMissingNode() && sqsParamsNode.isObject()) {
+                String messageGroupId = sqsParamsNode.path("MessageGroupId").asText(null);
+                if (messageGroupId != null) {
+                    SqsParameters sqsParameters = new SqsParameters();
+                    sqsParameters.setMessageGroupId(messageGroupId);
+                    target.setSqsParameters(sqsParameters);
+                }
+            }
+            JsonNode batchParamsNode = resolved.path("BatchParameters");
+            if (!batchParamsNode.isMissingNode() && batchParamsNode.isObject()) {
+                JsonNode arrayProperties = batchParamsNode.path("ArrayProperties");
+                BatchParameters batchParameters = new BatchParameters();
+                batchParameters.setJobDefinition(batchParamsNode.path("JobDefinition").asText(null));
+                batchParameters.setJobName(batchParamsNode.path("JobName").asText(null));
+                if (arrayProperties.isObject()) {
+                    batchParameters.setArrayProperties(jsonObjectToMap(arrayProperties));
+                }
+                if (batchParamsNode.has("RetryStrategy")) {
+                    batchParameters.setRetryStrategy(batchParamsNode.get("RetryStrategy"));
+                }
+                target.setBatchParameters(batchParameters);
+            }
+            target.setRoleArn(resolved.path("RoleArn").asText(null));
+            JsonNode ecsParamsNode = resolved.path("EcsParameters");
+            if (ecsParamsNode.isObject()) {
+                target.setEcsParameters(MAPPER.convertValue(
+                        ecsParametersInApiShape(ecsParamsNode), EcsParameters.class));
+            }
+            JsonNode retryPolicyNode = resolved.path("RetryPolicy");
+            if (retryPolicyNode.isObject()) {
+                target.setRetryPolicy(MAPPER.convertValue(retryPolicyNode, Target.RetryPolicy.class));
+            }
+            JsonNode deadLetterConfigNode = resolved.path("DeadLetterConfig");
+            if (deadLetterConfigNode.isObject()) {
+                target.setDeadLetterConfig(MAPPER.convertValue(deadLetterConfigNode, Target.DeadLetterConfig.class));
+            }
+            targets.add(target);
+        }
+        return targets;
     }
 
     /**
@@ -268,6 +316,9 @@ public class EventsCfnProvisioner implements CfnResourceProvisioner {
      */
     @Override
     public boolean rollbackUpdate(StackResource resource) {
+        if ("AWS::Events::ApiDestination".equals(resource.getResourceType())) {
+            return rollbackApiDestinationUpdate(resource);
+        }
         String rawSnapshot = resource.getAttributes().get(CfnRollback.RULE_TARGETS_SNAPSHOT_ATTR);
         if (rawSnapshot == null) {
             return false;
@@ -580,7 +631,7 @@ public class EventsCfnProvisioner implements CfnResourceProvisioner {
     private void deleteEventBridgeRuleSafe(String ruleName, String busName, String region) {
         try {
             // Remove all targets before deleting the rule (busName scopes the lookup to the rule's bus).
-            var targets = eventBridgeService.listTargetsByRule(ruleName, busName, region);
+            List<Target> targets = eventBridgeService.listTargetsByRule(ruleName, busName, region);
             if (!targets.isEmpty()) {
                 List<String> targetIds = targets.stream().map(Target::getId).toList();
                 eventBridgeService.removeTargets(ruleName, busName, targetIds, region);
@@ -728,6 +779,132 @@ public class EventsCfnProvisioner implements CfnResourceProvisioner {
         CfnDeletes.safeDelete("Event bus policy statement", physicalId,
                 () -> eventBridgeService.removePermission(busName, statementId, false, region),
                 "ResourceNotFoundException");
+    }
+
+    private void provisionApiDestination(StackResource r, JsonNode props, ProvisionContext ctx) {
+        String name = ctx.stablePhysicalName(
+                ctx.resolveOptional(props, "Name"), r.getLogicalId(), 64, false);
+        if (ctx.isUpdate() && ctx.priorPhysicalId() != null && !ctx.priorPhysicalId().equals(name)) {
+            throw new AwsException("ValidationError",
+                    "Updating ApiDestination Name requires resource replacement, which is not supported.", 400);
+        }
+
+        String connectionArn = ctx.resolveOptional(props, "ConnectionArn");
+        String invocationEndpoint = ctx.resolveOptional(props, "InvocationEndpoint");
+        String httpMethod = ctx.resolveOptional(props, "HttpMethod");
+        String description = ctx.resolveOptional(props, "Description");
+        Integer rateLimit = null;
+        if (props != null && props.has("InvocationRateLimitPerSecond") && !props.get("InvocationRateLimitPerSecond").isNull()) {
+            rateLimit = props.get("InvocationRateLimitPerSecond").asInt();
+        }
+
+        // A snapshot describes the update in flight; one an earlier update left behind is stale
+        r.getAttributes().remove(CfnRollback.API_DESTINATION_UPDATE_SNAPSHOT_ATTR);
+        ApiDestination destination;
+        if (ctx.reusesPriorEntity(name)) {
+            snapshotApiDestinationBeforeUpdate(r, eventBridgeService.describeApiDestination(name, ctx.region()),
+                    ctx.region());
+            destination = eventBridgeService.updateApiDestination(
+                    name, description, connectionArn, invocationEndpoint, httpMethod, rateLimit, ctx.region());
+        } else {
+            destination = eventBridgeService.createApiDestination(
+                    name, description, connectionArn, invocationEndpoint, httpMethod, rateLimit, ctx.region());
+        }
+
+        r.setPhysicalId(name);
+        String arn = destination.getArn();
+        r.getAttributes().put("Arn", arn);
+        String arnForPolicy = arn;
+        int lastSlash = arn.lastIndexOf('/');
+        int secondLastSlash = arn.lastIndexOf('/', lastSlash - 1);
+        if (secondLastSlash >= 0 && lastSlash > secondLastSlash) {
+            arnForPolicy = arn.substring(0, lastSlash);
+        }
+        r.getAttributes().put("ArnForPolicy", arnForPolicy);
+        r.getAttributes().put("Name", name);
+    }
+
+    private void snapshotApiDestinationBeforeUpdate(StackResource r, ApiDestination current, String region) {
+        ObjectNode snapshot = MAPPER.createObjectNode();
+        snapshot.put("region", region);
+        snapshot.put("name", current.getName());
+        snapshot.put("description", current.getDescription());
+        snapshot.put("connectionArn", current.getConnectionArn());
+        snapshot.put("invocationEndpoint", current.getInvocationEndpoint());
+        snapshot.put("httpMethod", current.getHttpMethod());
+        if (current.getInvocationRateLimitPerSecond() != null) {
+            snapshot.put("invocationRateLimitPerSecond", current.getInvocationRateLimitPerSecond());
+        }
+        r.getAttributes().put(CfnRollback.API_DESTINATION_UPDATE_SNAPSHOT_ATTR, snapshot.toString());
+    }
+
+    // The snapshot is spent only once the restore succeeded: a restore that throws leaves it for the next attempt
+    private boolean rollbackApiDestinationUpdate(StackResource resource) {
+        String raw = resource.getAttributes().get(CfnRollback.API_DESTINATION_UPDATE_SNAPSHOT_ATTR);
+        if (raw == null) {
+            return false;
+        }
+        JsonNode snapshot;
+        try {
+            snapshot = MAPPER.readTree(raw);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Could not read the API destination update snapshot for "
+                    + resource.getLogicalId(), e);
+        }
+        eventBridgeService.restoreApiDestination(snapshot.path("name").asText(),
+                snapshotText(snapshot, "description"),
+                snapshotText(snapshot, "connectionArn"),
+                snapshotText(snapshot, "invocationEndpoint"),
+                snapshotText(snapshot, "httpMethod"),
+                snapshot.hasNonNull("invocationRateLimitPerSecond")
+                        ? snapshot.get("invocationRateLimitPerSecond").asInt() : null,
+                snapshot.path("region").asText());
+        resource.getAttributes().remove(CfnRollback.API_DESTINATION_UPDATE_SNAPSHOT_ATTR);
+        return true;
+    }
+
+    private void deleteApiDestinationSafe(String name, String region) {
+        CfnDeletes.safeDelete("EventBridge API destination", name,
+                () -> eventBridgeService.deleteApiDestination(name, region),
+                "ResourceNotFoundException");
+    }
+
+    /**
+     * A template's {@code EcsParameters} in the shape PutTargets takes. The resource schema
+     * capitalizes members the EventBridge API spells in camel case ({@code AwsVpcConfiguration},
+     * the placement and capacity provider items) and names two lists differently
+     * ({@code PlacementStrategies}, {@code TagList}); the rest is the same.
+     */
+    private static ObjectNode ecsParametersInApiShape(JsonNode template) {
+        ObjectNode api = template.deepCopy();
+        rename(api, "PlacementStrategies", "PlacementStrategy");
+        rename(api, "TagList", "Tags");
+        if (api.get("NetworkConfiguration") instanceof ObjectNode network) {
+            rename(network, "AwsVpcConfiguration", "awsvpcConfiguration");
+        }
+        renameInItems(api.get("PlacementStrategy"), Map.of("Type", "type", "Field", "field"));
+        renameInItems(api.get("PlacementConstraints"), Map.of("Type", "type", "Expression", "expression"));
+        renameInItems(api.get("CapacityProviderStrategy"),
+                Map.of("CapacityProvider", "capacityProvider", "Weight", "weight", "Base", "base"));
+        return api;
+    }
+
+    private static void renameInItems(JsonNode items, Map<String, String> names) {
+        if (items == null || !items.isArray()) {
+            return;
+        }
+        for (JsonNode item : items) {
+            if (item instanceof ObjectNode object) {
+                names.forEach((from, to) -> rename(object, from, to));
+            }
+        }
+    }
+
+    private static void rename(ObjectNode node, String from, String to) {
+        JsonNode value = node.remove(from);
+        if (value != null) {
+            node.set(to, value);
+        }
     }
 
     /** Copied from the monolith: the shared original serves six other callers and stays there. */

@@ -3,21 +3,31 @@ package io.github.hectorvent.floci.services.cloudformation.provisioners;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.docker.UserDataPipeline;
 import io.github.hectorvent.floci.services.cloudformation.CloudFormationTemplateEngine;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplate;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplateData;
-import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.zip.GZIPOutputStream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -46,6 +56,7 @@ class Ec2LaunchTemplateCfnProvisionerTest {
             return node == null ? null : node.asText();
         });
         when(engine.resolveNode(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(engine.omitNoValue(any())).thenAnswer(inv -> inv.getArgument(0));
         return new ProvisionContext(engine, "us-east-1", "000000000000", "my-stack");
     }
 
@@ -61,6 +72,38 @@ class Ec2LaunchTemplateCfnProvisionerTest {
         LaunchTemplate lt = new LaunchTemplate();
         lt.setLaunchTemplateId(id);
         return lt;
+    }
+
+    @Test
+    void retainsCapacityReservationPreferenceAndTarget() throws Exception {
+        when(ec2.createLaunchTemplate(eq("us-east-1"), eq("my-lt"), any(), any()))
+                .thenReturn(template("lt-capacity"));
+        JsonNode props = mapper.readTree("""
+                {"LaunchTemplateName":"my-lt","LaunchTemplateData":{
+                  "ImageId":"ami-test","CapacityReservationSpecification":{
+                    "CapacityReservationPreference":"open",
+                    "CapacityReservationTarget":{"CapacityReservationId":"cr-0123456789abcdef0"}}}}
+                """);
+
+        provisioner.provision(resource("Template"), props, ctx());
+
+        ArgumentCaptor<LaunchTemplateData> data = ArgumentCaptor.forClass(LaunchTemplateData.class);
+        verify(ec2).createLaunchTemplate(eq("us-east-1"), eq("my-lt"), data.capture(), any());
+        assertEquals("open", data.getValue().getCapacityReservationSpecification().getCapacityReservationPreference());
+        assertEquals("cr-0123456789abcdef0", data.getValue().getCapacityReservationSpecification()
+                .getCapacityReservationTarget().getCapacityReservationId());
+    }
+
+    @Test
+    void refusesMalformedCapacityReservationDeclarationBeforeCreatingTemplate() throws Exception {
+        JsonNode props = mapper.readTree("""
+                {"LaunchTemplateName":"my-lt","LaunchTemplateData":{
+                  "CapacityReservationSpecification":{"CapacityReservationPreference":["none"]}}}
+                """);
+
+        assertThrows(AwsException.class, () -> provisioner.provision(resource("Template"), props, ctx()));
+
+        verify(ec2, never()).createLaunchTemplate(any(), any(), any(), any());
     }
 
     @Test
@@ -195,5 +238,73 @@ class Ec2LaunchTemplateCfnProvisionerTest {
                 captor.getValue().getIamInstanceProfile().getArn());
         assertNull(captor.getValue().getIamInstanceProfile().getName());
         assertEquals(List.of("sg-1", "sg-2"), captor.getValue().getSecurityGroupIds());
+    }
+
+    @Test
+    void rollbackUpdateDeletesCreatedVersionAndRestoresAttributes() {
+        LaunchTemplate existing = template("lt-abc123");
+        existing.setLaunchTemplateName("my-lt");
+        existing.setLatestVersionNumber("1");
+        existing.setDefaultVersionNumber("1");
+        when(ec2.describeLaunchTemplates(eq("us-east-1"), eq(List.of("lt-abc123")), eq(List.of()), any()))
+                .thenReturn(List.of(existing));
+
+        LaunchTemplate updated = template("lt-abc123");
+        updated.setLaunchTemplateName("my-lt");
+        updated.setLatestVersionNumber("2");
+        updated.setDefaultVersionNumber("1");
+        when(ec2.createLaunchTemplateVersion(eq("us-east-1"), eq("lt-abc123"), isNull(), isNull(), any()))
+                .thenReturn(updated);
+
+        ObjectNode props = mapper.createObjectNode().put("LaunchTemplateName", "my-lt");
+        props.set("LaunchTemplateData", mapper.createObjectNode().put("ImageId", "ami-v2"));
+        StackResource r = resource("Lt");
+        r.setPhysicalId("lt-abc123");
+
+        provisioner.provision(r, props, ctx());
+        assertEquals("2", r.getAttributes().get("LatestVersionNumber"));
+
+        boolean rolledBack = provisioner.rollbackUpdate(r);
+        assertTrue(rolledBack);
+        verify(ec2).deleteLaunchTemplateVersion("us-east-1", "lt-abc123", "2");
+        assertEquals("1", r.getAttributes().get("LatestVersionNumber"));
+        assertEquals("1", r.getAttributes().get("DefaultVersionNumber"));
+
+        // Second rollback without snapshot should return false
+        assertFalse(provisioner.rollbackUpdate(r));
+    }
+
+    @Test
+    void provisionedUserDataIsDecodedForInstanceLaunch() {
+        when(ec2.createLaunchTemplate(any(), any(), any(), any())).thenReturn(template("lt-userdata"));
+        String script = "#!/bin/bash\necho from-cfn\n";
+        String encoded = Base64.getEncoder().encodeToString(script.getBytes(StandardCharsets.UTF_8));
+        ObjectNode data = mapper.createObjectNode().put("UserData", encoded);
+        ObjectNode props = mapper.createObjectNode();
+        props.set("LaunchTemplateData", data);
+
+        provisioner.provision(resource("Lt"), props, ctx());
+
+        ArgumentCaptor<LaunchTemplateData> captor = ArgumentCaptor.forClass(LaunchTemplateData.class);
+        verify(ec2).createLaunchTemplate(eq("us-east-1"), anyString(), captor.capture(), isNull());
+        assertEquals(encoded, captor.getValue().getEncodedUserData());
+        assertEquals(script, captor.getValue().getUserData());
+    }
+
+    @Test
+    void oversizedGzippedUserDataIsRejectedBeforeTemplateCreation() throws IOException {
+        ByteArrayOutputStream compressed = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzip = new GZIPOutputStream(compressed)) {
+            gzip.write("A".repeat(UserDataPipeline.MAX_DECOMPRESSED_USER_DATA_BYTES + 1)
+                    .getBytes(StandardCharsets.UTF_8));
+        }
+        ObjectNode props = mapper.createObjectNode();
+        props.set("LaunchTemplateData", mapper.createObjectNode()
+                .put("UserData", Base64.getEncoder().encodeToString(compressed.toByteArray())));
+
+        AwsException error = assertThrows(AwsException.class,
+                () -> provisioner.provision(resource("Lt"), props, ctx()));
+        assertEquals("InvalidParameterValue", error.getErrorCode());
+        verify(ec2, never()).createLaunchTemplate(any(), any(), any(), any());
     }
 }

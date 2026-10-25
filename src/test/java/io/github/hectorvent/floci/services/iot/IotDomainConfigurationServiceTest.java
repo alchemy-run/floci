@@ -1,8 +1,8 @@
 package io.github.hectorvent.floci.services.iot;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.config.TlsCertificateManager;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -52,9 +52,9 @@ class IotDomainConfigurationServiceTest {
 
     private static EmulatorConfig endpointConfig(AtomicReference<String> endpointAddress) {
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
+        when(config.iotEndpointAddress()).thenAnswer(invocation -> endpointAddress.get());
         when(config.services().iot().endpointAddress())
                 .thenAnswer(invocation -> Optional.ofNullable(endpointAddress.get()));
-        when(config.iotEndpointAddress()).thenAnswer(invocation -> endpointAddress.get());
         return config;
     }
 
@@ -210,23 +210,6 @@ class IotDomainConfigurationServiceTest {
         assertEquals("JOBS", service.describeDomainConfiguration("iot:Jobs", REGION).getServiceType());
         assertTrue(service.describeDomainConfiguration("iot:Jobs", "eu-west-1").getDomainConfigurationArn()
                 .startsWith("arn:aws:iot:eu-west-1:"));
-    }
-
-    @Test
-    void awsManagedConfigurationsCarryTheAwsShapedEndpointPerTypeWhenNoAddressIsConfigured() {
-        endpointAddress.set(null);
-        String prefix = IotEndpoints.accountPrefix("000000000000");
-
-        assertEquals(prefix + "-ats.iot." + REGION + ".amazonaws.com",
-                service.describeDomainConfiguration("iot:Data-ATS", REGION).getDomainName());
-        assertEquals(prefix + ".iot." + REGION + ".amazonaws.com",
-                service.describeDomainConfiguration("iot:Data", REGION).getDomainName());
-        assertEquals(prefix + ".credentials.iot." + REGION + ".amazonaws.com",
-                service.describeDomainConfiguration("iot:CredentialProvider", REGION).getDomainName());
-        assertEquals(prefix + ".jobs.iot." + REGION + ".amazonaws.com",
-                service.describeDomainConfiguration("iot:Jobs", REGION).getDomainName());
-        assertEquals(prefix + "-ats.iot.eu-west-1.amazonaws.com",
-                service.describeDomainConfiguration("iot:Data-ATS", "eu-west-1").getDomainName());
     }
 
     @Test

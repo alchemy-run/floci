@@ -55,14 +55,6 @@ public class UserPoolDomain {
     public Integer getManagedLoginVersion() { return managedLoginVersion; }
     public void setManagedLoginVersion(Integer managedLoginVersion) { this.managedLoginVersion = managedLoginVersion; }
 
-    @JsonProperty("customDomainConfig")
-    public void restoreCustomDomainConfig(Map<String, Object> config) {
-        if (config != null) {
-            certificateArn = (String) config.get("CertificateArn");
-            securityPolicy = (String) config.get("SecurityPolicy");
-        }
-    }
-
     public String getCertificateArn() { return certificateArn; }
     public void setCertificateArn(String certificateArn) { this.certificateArn = certificateArn; }
 
@@ -76,4 +68,12 @@ public class UserPoolDomain {
 
     public long getLastModifiedDate() { return lastModifiedDate; }
     public void setLastModifiedDate(long lastModifiedDate) { this.lastModifiedDate = lastModifiedDate; }
+
+    @JsonProperty("customDomainConfig")
+    public void restoreCustomDomainConfig(Map<String, Object> config) {
+        if (config != null) {
+            certificateArn = (String) config.get("CertificateArn");
+            securityPolicy = (String) config.get("SecurityPolicy");
+        }
+    }
 }

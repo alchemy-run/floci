@@ -14,6 +14,8 @@ import io.github.hectorvent.floci.services.resourceexplorer2.model.View;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -132,6 +134,17 @@ class ResourceExplorer2ListVsSearchCapTest {
         assertEquals(1000, seen.size());
         assertFalse(lastComplete);
         assertEquals(1000, lastTotal);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"999,999,true", "1000,1000,true", "1001,1000,false"})
+    void searchCountDistinguishesExactCapFromTruncation(int resourceCount, int expectedTotal, boolean complete) {
+        ObjectNode result = newServiceWith(resourceCount).search("", 1000, null, null, REGION);
+
+        assertEquals(expectedTotal, result.path("Resources").size());
+        assertEquals(expectedTotal, result.path("Count").path("TotalResources").asInt());
+        assertEquals(complete, result.path("Count").path("Complete").asBoolean());
+        assertFalse(result.has("NextToken"));
     }
 
     @Test

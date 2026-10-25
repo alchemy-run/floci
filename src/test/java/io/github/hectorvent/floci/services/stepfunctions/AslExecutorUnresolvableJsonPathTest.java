@@ -22,13 +22,16 @@ class AslExecutorUnresolvableJsonPathTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     private AslExecutor newExecutor() {
-        return new AslExecutor(null, null, null, null, null, null, null, null, null,
-                null, null, null, null, null, mapper, null, null, null, null, null);
+        return AslExecutorFixture.builder()
+                .objectMapper(mapper)
+                .config(null)
+                .customResourceLiveness(null)
+                .build();
     }
 
     @Test
     void unresolvableNestedPathFailsWithTheCauseAwsWrites() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"missing.$\":\"$.nope.deep\"}", "{\"other\":1}"));
 
         assertEquals("States.Runtime", failure.error);
@@ -38,7 +41,7 @@ class AslExecutorUnresolvableJsonPathTest {
 
     @Test
     void unresolvableTopLevelPathFails() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"missing.$\":\"$.nope\"}", "{\"other\":1}"));
 
         assertEquals("The JSONPath '$.nope' specified for the field 'missing.$' could not be "
@@ -48,7 +51,7 @@ class AslExecutorUnresolvableJsonPathTest {
     /** A field that resolves fine must be unaffected. */
     @Test
     void resolvablePathStillSucceeds() throws Exception {
-        var resolved = resolve("{\"picked.$\":\"$.other\"}", "{\"other\":1}");
+        JsonNode resolved = resolve("{\"picked.$\":\"$.other\"}", "{\"other\":1}");
 
         assertEquals(1, resolved.path("picked").asInt());
     }
@@ -60,7 +63,7 @@ class AslExecutorUnresolvableJsonPathTest {
      */
     @Test
     void outOfRangeArrayIndexStillResolvesToNull() throws Exception {
-        var resolved = resolve("{\"idx.$\":\"$.items[5]\"}", "{\"items\":[1,2]}");
+        JsonNode resolved = resolve("{\"idx.$\":\"$.items[5]\"}", "{\"items\":[1,2]}");
 
         assertEquals("null", resolved.path("idx").toString());
     }
@@ -71,7 +74,7 @@ class AslExecutorUnresolvableJsonPathTest {
      */
     @Test
     void indexBeyondIntRangeStillResolvesToNull() throws Exception {
-        var resolved = resolve("{\"idx.$\":\"$.items[99999999999999999999]\"}", "{\"items\":[1,2]}");
+        JsonNode resolved = resolve("{\"idx.$\":\"$.items[99999999999999999999]\"}", "{\"items\":[1,2]}");
 
         assertEquals("null", resolved.path("idx").toString());
     }
@@ -79,7 +82,7 @@ class AslExecutorUnresolvableJsonPathTest {
     /** An explicit null value is present, not missing, so it must not fail. */
     @Test
     void explicitNullValueStillSucceeds() throws Exception {
-        var resolved = resolve("{\"v.$\":\"$.nul\"}", "{\"nul\":null}");
+        JsonNode resolved = resolve("{\"v.$\":\"$.nul\"}", "{\"nul\":null}");
 
         assertEquals("null", resolved.path("v").toString());
     }
@@ -87,7 +90,7 @@ class AslExecutorUnresolvableJsonPathTest {
     /** A miss at any nesting depth inside the template fails, not only at the top level. */
     @Test
     void unresolvablePathFailsAtAnyNestingDepth() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"outer\":{\"missing.$\":\"$.a.b.c\"}}", "{\"a\":{\"x\":1}}"));
 
         assertEquals("The JSONPath '$.a.b.c' specified for the field 'missing.$' could not be "
@@ -97,7 +100,7 @@ class AslExecutorUnresolvableJsonPathTest {
     /** ResultSelector and ItemSelector run through the same resolver, so they fail the same way. */
     @Test
     void resultSelectorFailsOnAnUnresolvablePath() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"missing.$\":\"$.nope\"}", "[{\"other\":1}]"));
 
         assertEquals("The JSONPath '$.nope' specified for the field 'missing.$' could not be "
@@ -107,7 +110,7 @@ class AslExecutorUnresolvableJsonPathTest {
     /** Indexing through a value that is not an array or object fails, matching AWS. */
     @Test
     void navigatingThroughANonContainerValueFails() throws Exception {
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> resolve("{\"v.$\":\"$.other.x\"}", "{\"other\":1}"));
 
         assertEquals("States.Runtime", failure.error);
@@ -118,7 +121,7 @@ class AslExecutorUnresolvableJsonPathTest {
     /** A wildcard projection matching nothing is an empty array, not a failure. */
     @Test
     void wildcardMatchingNothingStaysAnEmptyArray() throws Exception {
-        var resolved = resolve("{\"names.$\":\"$.items[*].name\"}", "{\"items\":[1,2]}");
+        JsonNode resolved = resolve("{\"names.$\":\"$.items[*].name\"}", "{\"items\":[1,2]}");
 
         assertEquals(0, resolved.path("names").size());
     }
@@ -129,10 +132,10 @@ class AslExecutorUnresolvableJsonPathTest {
      */
     @Test
     void unresolvableContextReferenceFailsAndNamesTheContextObject() throws Exception {
-        var context = mapper.readTree("{\"State\":{\"Name\":\"P\"}}");
-        var template = mapper.readTree("{\"missing.$\":\"$$.Nope.Deep\"}");
+        JsonNode context = mapper.readTree("{\"State\":{\"Name\":\"P\"}}");
+        JsonNode template = mapper.readTree("{\"missing.$\":\"$$.Nope.Deep\"}");
 
-        var failure = assertThrows(AslExecutor.FailStateException.class,
+        AslExecutor.FailStateException failure = assertThrows(AslExecutor.FailStateException.class,
                 () -> newExecutor().resolveParameters(template, mapper.readTree("{\"other\":1}"), context));
 
         assertEquals("States.Runtime", failure.error);
@@ -143,10 +146,10 @@ class AslExecutorUnresolvableJsonPathTest {
     /** A resolvable Context Object reference is unaffected. */
     @Test
     void resolvableContextReferenceStillSucceeds() throws Exception {
-        var context = mapper.readTree("{\"Execution\":{\"Name\":\"exec1\"}}");
-        var template = mapper.readTree("{\"name.$\":\"$$.Execution.Name\"}");
+        JsonNode context = mapper.readTree("{\"Execution\":{\"Name\":\"exec1\"}}");
+        JsonNode template = mapper.readTree("{\"name.$\":\"$$.Execution.Name\"}");
 
-        var resolved = newExecutor().resolveParameters(template, mapper.readTree("{}"), context);
+        JsonNode resolved = newExecutor().resolveParameters(template, mapper.readTree("{}"), context);
 
         assertEquals("exec1", resolved.path("name").asText());
     }

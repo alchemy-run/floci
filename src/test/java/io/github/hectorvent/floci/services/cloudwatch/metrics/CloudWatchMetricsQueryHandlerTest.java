@@ -1,8 +1,10 @@
 package io.github.hectorvent.floci.services.cloudwatch.metrics;
 
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.CloudWatchDashboardsService;
-import io.github.hectorvent.floci.services.cloudwatch.metricstreams.CloudWatchMetricStreamsService;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
+import io.github.hectorvent.floci.services.cloudwatch.metricstreams.CloudWatchMetricStreamsService;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.MultivaluedMap;
 import org.junit.jupiter.api.Test;
@@ -11,13 +13,16 @@ import org.mockito.ArgumentCaptor;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -122,5 +127,129 @@ class CloudWatchMetricsQueryHandlerTest {
         verify(metricsService).getMetricStatistics(any(), any(), any(), any(), any(),
                 anyInt(), any(), unitCaptor.capture(), any());
         assertEquals("Count", unitCaptor.getValue());
+    }
+
+    // The Query serialization of EntityMetricData nests each datum two lists deep;
+    // floci-io/floci#6066 is the JSON-side report of the same dropped datums.
+    @Test
+    void putMetricDataStoresTopLevelAndEntityMetricDataUnderTheRequestNamespace() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("Namespace", "CWAgent");
+        params.putSingle("MetricData.member.1.MetricName", "TopLevel");
+        params.putSingle("MetricData.member.1.Value", "1");
+        params.putSingle("EntityMetricData.member.1.Entity.KeyAttributes.entry.1.key", "Type");
+        params.putSingle("EntityMetricData.member.1.Entity.KeyAttributes.entry.1.value", "AWS::Resource");
+        params.putSingle("EntityMetricData.member.1.MetricData.member.1.MetricName", "mem_used_percent");
+        params.putSingle("EntityMetricData.member.1.MetricData.member.1.Value", "6.5");
+        params.putSingle("EntityMetricData.member.1.MetricData.member.1.Unit", "Percent");
+        params.putSingle("EntityMetricData.member.1.MetricData.member.1.Dimensions.member.1.Name", "host");
+        params.putSingle("EntityMetricData.member.1.MetricData.member.1.Dimensions.member.1.Value", "h1");
+        params.putSingle("EntityMetricData.member.2.MetricData.member.1.MetricName", "disk_used_percent");
+        params.putSingle("EntityMetricData.member.2.MetricData.member.1.Value", "0.75");
+        params.putSingle("StrictEntityValidation", "false");
+
+        handler.handle("PutMetricData", params, REGION);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<MetricDatum>> captor = ArgumentCaptor.forClass(List.class);
+        verify(metricsService).putMetricData(eq("CWAgent"), captor.capture(), eq(REGION));
+        List<MetricDatum> datums = captor.getValue();
+        assertEquals(List.of("TopLevel", "mem_used_percent", "disk_used_percent"),
+                datums.stream().map(MetricDatum::getMetricName).toList());
+        MetricDatum entityDatum = datums.get(1);
+        assertEquals(6.5, entityDatum.getValue());
+        assertEquals("Percent", entityDatum.getUnit());
+        assertEquals("host", entityDatum.getDimensions().get(0).name());
+        assertEquals("h1", entityDatum.getDimensions().get(0).value());
+    }
+
+    @Test
+    void putMetricDataStoresEntityMetricDataAfterAnEmptyEntityEntry() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("Namespace", "CWAgent");
+        params.putSingle("EntityMetricData.member.2.MetricData.member.1.MetricName", "M");
+        params.putSingle("EntityMetricData.member.2.MetricData.member.1.Value", "1");
+        params.putSingle("EntityMetricData.member.10.MetricData.member.1.MetricName", "N");
+        params.putSingle("EntityMetricData.member.10.MetricData.member.1.Value", "2");
+        params.putSingle("StrictEntityValidation", "false");
+
+        handler.handle("PutMetricData", params, REGION);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<MetricDatum>> captor = ArgumentCaptor.forClass(List.class);
+        verify(metricsService).putMetricData(eq("CWAgent"), captor.capture(), eq(REGION));
+        List<MetricDatum> datums = captor.getValue();
+        assertEquals(List.of("M", "N"), datums.stream().map(MetricDatum::getMetricName).toList());
+        assertEquals(1.0, datums.get(0).getValue());
+        assertEquals(2.0, datums.get(1).getValue());
+    }
+
+    @Test
+    void putMetricDataRejectsAMemberWithoutMetricNameBeforeStoringAnything() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("Namespace", "NS");
+        params.putSingle("MetricData.member.1.Value", "1");
+        params.putSingle("MetricData.member.2.MetricName", "Valid");
+        params.putSingle("MetricData.member.2.Value", "2");
+
+        AwsException e = assertThrows(AwsException.class,
+                () -> handler.handle("PutMetricData", params, REGION));
+        assertEquals("MissingParameter", e.getErrorCode());
+        assertEquals("MissingRequiredParameterException", e.jsonType());
+        assertEquals(400, e.getHttpStatus());
+        assertEquals("The parameter MetricData.member.1.MetricName is required.", e.getMessage());
+        verify(metricsService, never()).putMetricData(any(), any(), any());
+    }
+
+    @Test
+    void putMetricDataRejectsANestedMemberWithoutMetricNameBeforeStoringAnything() {
+        MultivaluedMap<String, String> params = new MultivaluedHashMap<>();
+        params.putSingle("Namespace", "NS");
+        params.putSingle("MetricData.member.1.MetricName", "TopLevel");
+        params.putSingle("MetricData.member.1.Value", "1");
+        params.putSingle("EntityMetricData.member.1.MetricData.member.1.Unit", "Percent");
+        params.putSingle("EntityMetricData.member.1.MetricData.member.2.MetricName", "Valid");
+
+        AwsException e = assertThrows(AwsException.class,
+                () -> handler.handle("PutMetricData", params, REGION));
+        assertEquals("The parameter EntityMetricData.member.1.MetricData.member.1.MetricName is required.",
+                e.getMessage());
+        verify(metricsService, never()).putMetricData(any(), any(), any());
+    }
+
+    @Test
+    void putMetricDataRejectsAnEmptyMetricNameButAcceptsWhitespace() {
+        MultivaluedMap<String, String> empty = new MultivaluedHashMap<>();
+        empty.putSingle("Namespace", "NS");
+        empty.putSingle("MetricData.member.1.MetricName", "");
+        empty.putSingle("MetricData.member.1.Value", "1");
+
+        AwsException e = assertThrows(AwsException.class,
+                () -> handler.handle("PutMetricData", empty, REGION));
+        assertEquals("The parameter MetricData.member.1.MetricName is required.", e.getMessage());
+        verify(metricsService, never()).putMetricData(any(), any(), any());
+
+        MultivaluedMap<String, String> whitespace = new MultivaluedHashMap<>();
+        whitespace.putSingle("Namespace", "NS");
+        whitespace.putSingle("MetricData.member.1.MetricName", " ");
+        whitespace.putSingle("MetricData.member.1.Value", "1");
+
+        handler.handle("PutMetricData", whitespace, REGION);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<MetricDatum>> captor = ArgumentCaptor.forClass(List.class);
+        verify(metricsService).putMetricData(eq("NS"), captor.capture(), eq(REGION));
+        assertEquals(List.of(" "), captor.getValue().stream().map(MetricDatum::getMetricName).toList());
+    }
+
+    @Test
+    void describeAlarmsReturnsEmptyCompositeAndLogAlarmCollections() {
+        when(metricsService.describeAlarms(any(), any(), eq(REGION))).thenReturn(List.of());
+
+        String xml = (String) handler.handle("DescribeAlarms", new MultivaluedHashMap<>(), REGION).getEntity();
+
+        assertTrue(xml.contains("<MetricAlarms></MetricAlarms>"), xml);
+        assertTrue(xml.contains("<CompositeAlarms></CompositeAlarms>"), xml);
+        assertTrue(xml.contains("<LogAlarms></LogAlarms>"), xml);
     }
 }

@@ -24,6 +24,7 @@ import io.github.hectorvent.floci.services.codebuild.model.ProjectSource;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.secretsmanager.SecretsManagerService;
 import io.github.hectorvent.floci.services.ssm.SsmService;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
@@ -200,8 +201,8 @@ class CodeBuildRunnerTest {
     private static final class Harness {
         final DockerClient docker = mock(DockerClient.class);
         final ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        final ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
-        final ContainerSpec spec = mock(ContainerSpec.class);
+        final ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        final ContainerSpec spec = InlineMocks.inlineMock(ContainerSpec.class);
         final ContainerLifecycleManager lifecycle = mock(ContainerLifecycleManager.class);
         final ContainerLogStreamer logStreamer = mock(ContainerLogStreamer.class);
         final ExecCreateCmd execCreate = mock(ExecCreateCmd.class, RETURNS_SELF);

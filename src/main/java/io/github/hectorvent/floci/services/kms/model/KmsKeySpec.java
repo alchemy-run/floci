@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.kms.model;
 
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.ArrayList;
@@ -64,8 +65,8 @@ public enum KmsKeySpec {
         try {
             return KmsKeySpec.valueOf(keySpec);
         } catch (IllegalArgumentException _) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value '" + keySpec + "' at 'KeySpec' failed to satisfy constraint", 400);
+            throw SmithyValidationErrors.validationException(
+                    "Value '" + keySpec + "' at 'KeySpec' failed to satisfy constraint");
         }
     }
 

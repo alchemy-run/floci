@@ -1,11 +1,6 @@
 package io.github.hectorvent.floci.services.ec2.portforward;
 
 import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.command.InspectContainerCmd;
-import com.github.dockerjava.api.command.InspectContainerResponse;
-import com.github.dockerjava.api.model.ContainerNetwork;
-import com.github.dockerjava.api.model.HostConfig;
-import com.github.dockerjava.api.model.NetworkSettings;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
@@ -21,14 +16,11 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -40,49 +32,6 @@ import static org.mockito.Mockito.when;
 class Ec2PortForwardManagerTest {
 
     private static final int MAX = 20;
-
-    @Test
-    void sharedNamespaceForwardsUseRetainedTransportNetworkAndMuxUsesHelperBridge() {
-        DockerClient dockerClient = mock(DockerClient.class);
-        InspectContainerResponse worker = mock(InspectContainerResponse.class);
-        when(worker.getHostConfig()).thenReturn(HostConfig.newHostConfig().withNetworkMode("container:helper"));
-        InspectContainerResponse helper = mock(InspectContainerResponse.class);
-        NetworkSettings settings = mock(NetworkSettings.class);
-        when(helper.getNetworkSettings()).thenReturn(settings);
-        Map<String, ContainerNetwork> networks = new LinkedHashMap<>();
-        networks.put("vpc-transport", new ContainerNetwork().withIpv4Address("10.240.1.77"));
-        networks.put("bridge", new ContainerNetwork().withIpv4Address("172.17.0.7"));
-        when(settings.getNetworks()).thenReturn(networks);
-        InspectContainerCmd workerInspect = mock(InspectContainerCmd.class);
-        InspectContainerCmd helperInspect = mock(InspectContainerCmd.class);
-        when(dockerClient.inspectContainerCmd("worker")).thenReturn(workerInspect);
-        when(dockerClient.inspectContainerCmd("helper")).thenReturn(helperInspect);
-        when(workerInspect.exec()).thenReturn(worker);
-        when(helperInspect.exec()).thenReturn(helper);
-        ContainerLifecycleManager lifecycle = mock(ContainerLifecycleManager.class);
-        ContainerBuilder builder = mock(ContainerBuilder.class);
-        PortAllocator ports = mock(PortAllocator.class);
-        Ec2PortForwardManager manager = new Ec2PortForwardManager(dockerClient, builder, lifecycle,
-                ports, mock(EmulatorConfig.class), null);
-        Ec2HttpPortMux mux = new Ec2HttpPortMux(dockerClient, builder, lifecycle, ports);
-        Instance instance = new Instance();
-        instance.setDockerContainerId("worker");
-        instance.setLogicalPrivateIpAddress("10.0.1.77");
-        instance.setContainerBridgeIp("10.240.1.77");
-        try {
-            Ec2PortForwardManager.NetworkTarget target = manager.resolveInstanceTarget(instance);
-            assertEquals("vpc-transport", target.network());
-            assertEquals("10.240.1.77", target.ip());
-            assertEquals("172.17.0.7", mux.inspectContainerIp("worker"));
-            networks.remove("vpc-transport");
-            assertNull(manager.resolveInstanceTarget(instance));
-            assertEquals("172.17.0.7", mux.inspectContainerIp("worker"));
-            networks.clear();
-            assertNull(mux.inspectContainerIp("worker"));
-        } finally {
-            manager.stop();
-        }
-    }
 
     @Test
     void extractsTcpPortsFromCidrSourcedRules() {
@@ -190,8 +139,15 @@ class Ec2PortForwardManagerTest {
 
     @Test
     void forwardContainerNameIsDeterministic() {
+        assertEquals("floci-aws-ec2-fwd-i-123-80",
+                Ec2PortForwardManager.forwardContainerName(null, "i-123", 80));
+    }
+
+    @Test
+    void legacyForwardContainerNameKeepsThePreMigrationShape() {
+        // Frozen: it is how a sidecar created before the rename is found and cleared.
         assertEquals("floci-ec2-fwd-i-123-80",
-                Ec2PortForwardManager.forwardContainerName("i-123", 80));
+                Ec2PortForwardManager.legacyForwardContainerName(null, "i-123", 80));
     }
 
     @Test
@@ -211,7 +167,7 @@ class Ec2PortForwardManagerTest {
         when(ec2.mock()).thenReturn(false);
 
         Ec2PortForwardManager manager = new Ec2PortForwardManager(
-                dockerClient, mock(ContainerBuilder.class), lifecycleManager, portAllocator, config, null);
+                dockerClient, mock(ContainerBuilder.class), lifecycleManager, portAllocator, config);
         List<String> persisted = new ArrayList<>();
         manager.setPersister(inst -> persisted.add(inst.getInstanceId()));
 
@@ -235,7 +191,7 @@ class Ec2PortForwardManagerTest {
         ContainerLifecycleManager lifecycleManager = mock(ContainerLifecycleManager.class);
         Ec2PortForwardManager manager = new Ec2PortForwardManager(
                 mock(DockerClient.class), mock(ContainerBuilder.class), lifecycleManager,
-                portAllocator, mock(EmulatorConfig.class), null);
+                portAllocator, mock(EmulatorConfig.class));
 
         Instance instance = new Instance();
         instance.setInstanceId("i-1");
@@ -266,7 +222,7 @@ class Ec2PortForwardManagerTest {
 
         Ec2PortForwardManager manager = new Ec2PortForwardManager(
                 dockerClient, mock(ContainerBuilder.class), mock(ContainerLifecycleManager.class),
-                portAllocator, config, null);
+                portAllocator, config);
 
         Instance instance = new Instance();
         instance.setInstanceId("i-1");

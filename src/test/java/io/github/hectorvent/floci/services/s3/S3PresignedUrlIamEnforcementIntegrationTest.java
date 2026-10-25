@@ -1,10 +1,15 @@
 package io.github.hectorvent.floci.services.s3;
 
+import io.github.hectorvent.floci.testing.EnforcementFixtures;
 import io.github.hectorvent.floci.testing.IamEnforcementProfile;
+import io.github.hectorvent.floci.testing.PartitionCleanup;
+import io.quarkus.test.common.http.TestHTTPResource;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.RegisterExtension;
 
+import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
@@ -12,6 +17,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.UUID;
 
+import static io.github.hectorvent.floci.testing.EnforcementFixtures.auth;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 
@@ -32,6 +38,12 @@ import static org.hamcrest.Matchers.containsString;
 @TestProfile(IamEnforcementProfile.class)
 class S3PresignedUrlIamEnforcementIntegrationTest {
 
+    @TestHTTPResource("/")
+    static URI baseUri;
+
+    @RegisterExtension
+    final PartitionCleanup cleanup = new PartitionCleanup();
+
     private static final String REGION = "us-east-1";
     private static final DateTimeFormatter AMZ_DATE_FMT =
             DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
@@ -43,7 +55,8 @@ class S3PresignedUrlIamEnforcementIntegrationTest {
         String userName = "presigned-denied-user-" + suffix;
 
         createBucketAsRoot(bucket);
-        String accessKeyId = createUser(userName);
+        String accessKeyId = EnforcementFixtures.createUser(cleanup, baseUri.getPort(),
+                auth("test", "iam"), userName).accessKeyId();
         putUserPolicy(userName, "DenyPutObject", """
                 {"Version":"2012-10-17","Statement":[
                   {"Effect":"Deny","Action":"s3:PutObject","Resource":"*"}
@@ -67,7 +80,8 @@ class S3PresignedUrlIamEnforcementIntegrationTest {
         String userName = "presigned-nogrant-user-" + suffix;
 
         createBucketAsRoot(bucket);
-        String accessKeyId = createUser(userName);
+        String accessKeyId = EnforcementFixtures.createUser(cleanup, baseUri.getPort(),
+                auth("test", "iam"), userName).accessKeyId();
         // No PutUserPolicy call at all: a real IAM user with no grants, matching the issue's
         // reproduction (a user with an explicit Deny or, equally, simply no grant).
 
@@ -89,7 +103,8 @@ class S3PresignedUrlIamEnforcementIntegrationTest {
         String userName = "presigned-allowed-user-" + suffix;
 
         createBucketAsRoot(bucket);
-        String accessKeyId = createUser(userName);
+        String accessKeyId = EnforcementFixtures.createUser(cleanup, baseUri.getPort(),
+                auth("test", "iam"), userName).accessKeyId();
         putUserPolicy(userName, "AllowPutObject", """
                 {"Version":"2012-10-17","Statement":[
                   {"Effect":"Allow","Action":"s3:PutObject","Resource":"arn:aws:s3:::%1$s/*"}
@@ -119,35 +134,15 @@ class S3PresignedUrlIamEnforcementIntegrationTest {
                 + "&X-Amz-Signature=fakesig";
     }
 
-    private static void createBucketAsRoot(String bucket) {
+    private void createBucketAsRoot(String bucket) {
+        cleanup.register(() -> EnforcementFixtures.removeBucket(baseUri.getPort(),
+                auth("test", "s3"), bucket));
         given()
                 .header("Authorization", auth("test", "s3"))
         .when()
                 .put("/" + bucket)
         .then()
                 .statusCode(200);
-    }
-
-    private static String createUser(String userName) {
-        given()
-                .formParam("Action", "CreateUser")
-                .formParam("UserName", userName)
-                .header("Authorization", auth("test", "iam"))
-        .when()
-                .post("/")
-        .then()
-                .statusCode(200);
-
-        return given()
-                .formParam("Action", "CreateAccessKey")
-                .formParam("UserName", userName)
-                .header("Authorization", auth("test", "iam"))
-        .when()
-                .post("/")
-        .then()
-                .statusCode(200)
-                .extract()
-                .path("CreateAccessKeyResponse.CreateAccessKeyResult.AccessKey.AccessKeyId");
     }
 
     private static void putUserPolicy(String userName, String policyName, String policyDocument) {
@@ -163,8 +158,4 @@ class S3PresignedUrlIamEnforcementIntegrationTest {
                 .statusCode(200);
     }
 
-    private static String auth(String accessKeyId, String service) {
-        return "AWS4-HMAC-SHA256 Credential=" + accessKeyId + "/20260629/" + REGION + "/" + service
-                + "/aws4_request, SignedHeaders=host, Signature=abc";
-    }
 }

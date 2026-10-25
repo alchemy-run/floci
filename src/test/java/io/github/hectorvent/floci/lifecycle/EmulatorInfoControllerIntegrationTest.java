@@ -1,15 +1,20 @@
 package io.github.hectorvent.floci.lifecycle;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.config.FlociVersion;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.JsonNode;
+import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
-import org.junit.jupiter.api.Test;
 
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
 import java.util.List;
+import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -53,7 +58,7 @@ class EmulatorInfoControllerIntegrationTest {
         JsonNode tree = MAPPER.readTree(body);
         assertEquals("community", tree.get("edition").asText());
         assertEquals("floci-always-free", tree.get("original_edition").asText());
-        assertEquals("dev", tree.get("version").asText());
+        assertEquals(FlociVersion.current(), tree.get("version").asText());
 
         JsonNode services = tree.get("services");
         assertNotNull(services, "services field must be present");
@@ -90,7 +95,8 @@ class EmulatorInfoControllerIntegrationTest {
                 .statusCode(200)
                 .contentType("application/json")
                 .body("edition", equalTo("community"))
-                .body("version", notNullValue());
+                .body("version", allOf(equalTo(FlociVersion.current()), not(equalTo("dev"))))
+                .body("dynamodb_backend", equalTo("native"));
     }
 
     @ParameterizedTest
@@ -115,7 +121,7 @@ class EmulatorInfoControllerIntegrationTest {
                 .contentType(startsWith("text/plain"))
                 .extract().body().asString();
 
-        var cert = (java.security.cert.X509Certificate) java.security.cert.CertificateFactory.getInstance("X.509")
+        X509Certificate cert = (X509Certificate) CertificateFactory.getInstance("X.509")
                 .generateCertificate(new java.io.ByteArrayInputStream(pem.getBytes(java.nio.charset.StandardCharsets.US_ASCII)));
         assertTrue(cert.getBasicConstraints() >= 0, "must be a CA certificate");
         assertEquals(cert.getSubjectX500Principal(), cert.getIssuerX500Principal());
@@ -153,33 +159,32 @@ class EmulatorInfoControllerIntegrationTest {
     }
 
     @Test
-    void stateReset_leavesEveryRegionWithItsDefaultVpc() {
-        // Every account and Region has a default VPC on AWS. The reset wipes the EC2 stores that
-        // hold it, so the next request must seed it again rather than find nothing.
-        String ec2Auth = "AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/ec2/aws4_request";
-        given()
-            .formParam("Action", "DescribeVpcs")
-            .header("Authorization", ec2Auth)
-        .when()
-            .post("/")
-        .then()
+    void stateResetClearsDynamoDbStreams() {
+        String tableName = "reset-streams-" + UUID.randomUUID();
+        dynamoDb("DynamoDB_20120810.CreateTable", """
+                {"TableName": "%s",
+                 "KeySchema": [{"AttributeName": "id", "KeyType": "HASH"}],
+                 "AttributeDefinitions": [{"AttributeName": "id", "AttributeType": "S"}],
+                 "BillingMode": "PAY_PER_REQUEST",
+                 "StreamSpecification": {"StreamEnabled": true, "StreamViewType": "KEYS_ONLY"}}
+                """.formatted(tableName))
             .statusCode(200);
+        String listStreams = "{\"TableName\": \"" + tableName + "\"}";
+        dynamoDb("DynamoDBStreams_20120810.ListStreams", listStreams).body("Streams", hasSize(1));
 
-        given()
-            .when().post("/_floci/state/reset")
-            .then()
-                .statusCode(200);
+        given().when().post("/_floci/state/reset").then().statusCode(200);
 
-        given()
-            .formParam("Action", "DescribeSubnets")
-            .formParam("SubnetId.1", "subnet-default-us-east-1-a")
-            .header("Authorization", ec2Auth)
+        dynamoDb("DynamoDBStreams_20120810.ListStreams", listStreams).statusCode(200).body("Streams", hasSize(0));
+    }
+
+    private static ValidatableResponse dynamoDb(String target, String body) {
+        return given()
+            .header("X-Amz-Target", target)
+            .contentType("application/x-amz-json-1.0")
+            .body(body)
         .when()
             .post("/")
-        .then()
-            .statusCode(200)
-            .body("DescribeSubnetsResponse.subnetSet.item[0].subnetId", equalTo("subnet-default-us-east-1-a"))
-            .body("DescribeSubnetsResponse.subnetSet.item[0].defaultForAz", equalTo("true"));
+        .then();
     }
 
     @Test

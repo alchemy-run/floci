@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.rum;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -115,7 +116,7 @@ public class RumController {
         RumService.Page page = service.listAppMonitors(
                 regionResolver.resolveRegion(headers), maxResults, nextToken);
         ObjectNode response = objectMapper.createObjectNode();
-        var summaries = response.putArray("AppMonitorSummaries");
+        ArrayNode summaries = response.putArray("AppMonitorSummaries");
         for (AppMonitor monitor : page.monitors()) {
             ObjectNode summary = objectMapper.createObjectNode();
             summary.put("Created", monitor.getCreated());
@@ -147,7 +148,7 @@ public class RumController {
         RumService.Slice<String> page = service.getAppMonitorData(
                 regionResolver.resolveRegion(headers), name, parse(body));
         ObjectNode response = objectMapper.createObjectNode();
-        var events = response.putArray("Events");
+        ArrayNode events = response.putArray("Events");
         page.items().forEach(events::add);
         putNextToken(response, page.nextToken());
         return Response.ok(response).build();
@@ -207,7 +208,7 @@ public class RumController {
         RumService.Slice<RumMetricsDestination> page = service.listRumMetricsDestinations(
                 regionResolver.resolveRegion(headers), name, maxResults, nextToken);
         ObjectNode response = objectMapper.createObjectNode();
-        var destinations = response.putArray("Destinations");
+        ArrayNode destinations = response.putArray("Destinations");
         for (RumMetricsDestination destination : page.items()) {
             ObjectNode summary = destinations.addObject();
             summary.put("Destination", destination.getDestination());
@@ -241,14 +242,14 @@ public class RumController {
         RumService.BatchCreateResult result = service.batchCreateRumMetricDefinitions(
                 regionResolver.resolveRegion(headers), name, parse(body));
         ObjectNode response = objectMapper.createObjectNode();
-        var errors = response.putArray("Errors");
+        ArrayNode errors = response.putArray("Errors");
         for (RumService.BatchCreateError error : result.errors()) {
             ObjectNode entry = errors.addObject();
             entry.set("MetricDefinition", error.metricDefinition());
             entry.put("ErrorCode", error.errorCode());
             entry.put("ErrorMessage", error.errorMessage());
         }
-        var created = response.putArray("MetricDefinitions");
+        ArrayNode created = response.putArray("MetricDefinitions");
         result.metricDefinitions().forEach(definition -> created.add(objectMapper.<JsonNode>valueToTree(definition)));
         return Response.ok(response).build();
     }
@@ -266,7 +267,7 @@ public class RumController {
         RumService.Slice<RumMetricDefinition> page = service.batchGetRumMetricDefinitions(
                 regionResolver.resolveRegion(headers), name, destination, destinationArn, maxResults, nextToken);
         ObjectNode response = objectMapper.createObjectNode();
-        var definitions = response.putArray("MetricDefinitions");
+        ArrayNode definitions = response.putArray("MetricDefinitions");
         page.items().forEach(definition -> definitions.add(objectMapper.<JsonNode>valueToTree(definition)));
         putNextToken(response, page.nextToken());
         return Response.ok(response).build();
@@ -284,14 +285,14 @@ public class RumController {
         RumService.BatchDeleteResult result = service.batchDeleteRumMetricDefinitions(
                 regionResolver.resolveRegion(headers), name, destination, destinationArn, metricDefinitionIds);
         ObjectNode response = objectMapper.createObjectNode();
-        var errors = response.putArray("Errors");
+        ArrayNode errors = response.putArray("Errors");
         for (RumService.BatchDeleteError error : result.errors()) {
             ObjectNode entry = errors.addObject();
             entry.put("MetricDefinitionId", error.metricDefinitionId());
             entry.put("ErrorCode", error.errorCode());
             entry.put("ErrorMessage", error.errorMessage());
         }
-        var deleted = response.putArray("MetricDefinitionIds");
+        ArrayNode deleted = response.putArray("MetricDefinitionIds");
         result.metricDefinitionIds().forEach(deleted::add);
         return Response.ok(response).build();
     }

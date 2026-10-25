@@ -39,7 +39,6 @@ public class StateMachine {
 
     public StateMachine() {
         this.creationDate = System.currentTimeMillis() / 1000.0;
-        this.revisionId = UUID.randomUUID().toString();
     }
 
     public String getStateMachineArn() { return stateMachineArn; }

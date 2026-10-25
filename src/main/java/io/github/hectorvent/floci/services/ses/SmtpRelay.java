@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.ses;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.services.ses.model.MessageAttachment;
 import io.github.hectorvent.floci.services.ses.model.MessageHeader;
 import io.github.hectorvent.floci.services.ses.model.MessageTag;
 import io.vertx.core.buffer.Buffer;
@@ -9,6 +10,7 @@ import io.vertx.ext.mail.MailClient;
 import io.vertx.ext.mail.MailConfig;
 import io.vertx.ext.mail.MailMessage;
 import io.vertx.ext.mail.StartTLSOptions;
+import io.vertx.ext.mail.mailencoder.MailEncoder;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -31,6 +33,8 @@ import org.jboss.logging.Logger;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.net.URLConnection;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -65,7 +69,11 @@ public class SmtpRelay {
 
     private static final String X_SES_PREFIX = "x-ses-";
     private static final String HEADER_RETURN_PATH = "Return-Path";
+    private static final String HEADER_SOURCE_ARN = "X-SES-SOURCE-ARN";
+    private static final String HEADER_FROM_ARN = "X-SES-FROM-ARN";
+    private static final String HEADER_RETURN_PATH_ARN = "X-SES-RETURN-PATH-ARN";
     private static final String MESSAGE_ID_DOMAIN = "email.amazonses.com";
+    private static final String DEFAULT_ATTACHMENT_CONTENT_TYPE = "application/octet-stream";
 
     /**
      * Top-level headers of a raw message that are not copied onto the relayed message. The MIME
@@ -175,7 +183,8 @@ public class SmtpRelay {
                                List<String> replyTo,
                                String subject, String bodyText, String bodyHtml,
                                List<MessageHeader> headers,
-                               String messageId) {
+                               String messageId,
+                               List<MessageAttachment> attachments) {
 
         public static Builder builder(String from) {
             return new Builder(from);
@@ -193,6 +202,7 @@ public class SmtpRelay {
             private String bodyHtml;
             private List<MessageHeader> headers;
             private String messageId;
+            private List<MessageAttachment> attachments;
 
             private Builder(String from) {
                 this.from = from;
@@ -208,10 +218,14 @@ public class SmtpRelay {
             public Builder bodyHtml(String bodyHtml) { this.bodyHtml = bodyHtml; return this; }
             public Builder headers(List<MessageHeader> headers) { this.headers = headers; return this; }
             public Builder messageId(String messageId) { this.messageId = messageId; return this; }
+            public Builder attachments(List<MessageAttachment> attachments) {
+                this.attachments = attachments;
+                return this;
+            }
 
             public RelayMessage build() {
                 return new RelayMessage(from, returnPath, to, cc, bcc, replyTo,
-                        subject, bodyText, bodyHtml, headers, messageId);
+                        subject, bodyText, bodyHtml, headers, messageId, attachments);
             }
         }
     }
@@ -240,46 +254,7 @@ public class SmtpRelay {
 
     private void doRelay(RelayMessage message) {
         try {
-            MailMessage mail = new MailMessage();
-            mail.setFrom(message.from());
-            applyBounceAddress(mail, message.returnPath(), message.from());
-            if (message.to() != null) {
-                mail.setTo(message.to());
-            }
-            if (message.cc() != null) {
-                mail.setCc(message.cc());
-            }
-            if (message.bcc() != null) {
-                mail.setBcc(message.bcc());
-            }
-            if (message.replyTo() != null && !message.replyTo().isEmpty()) {
-                mail.addHeader("Reply-To", String.join(", ", message.replyTo()));
-            }
-            if (message.headers() != null) {
-                for (MessageHeader header : message.headers()) {
-                    if (!header.isSafe()) {
-                        LOG.warnv("SMTP relay: skipping a header with a blank name or CR/LF in its "
-                                + "name/value (possible header injection) for from={0}", message.from());
-                        continue;
-                    }
-                    if (FieldName.MESSAGE_ID.equalsIgnoreCase(header.name())) {
-                        // AWS overrides a caller-supplied Message-ID, and rejects it outright as a
-                        // custom header on Simple / Templated content.
-                        continue;
-                    }
-                    mail.addHeader(header.name(), header.value());
-                }
-            }
-            applyMessageId(mail, message.messageId());
-            mail.setSubject(message.subject() != null ? message.subject() : "");
-            if (message.bodyText() != null) {
-                mail.setText(message.bodyText());
-            }
-            if (message.bodyHtml() != null) {
-                mail.setHtml(message.bodyHtml());
-            }
-
-            send(mail);
+            send(toMailMessage(message));
             LOG.debugv("SMTP relay: sent from={0}, to={1}, subject={2}",
                     message.from(), message.to(), message.subject());
         } catch (InterruptedException e) {
@@ -291,6 +266,130 @@ public class SmtpRelay {
         } catch (Exception e) {
             LOG.warnv(e, "SMTP relay failed for from={0}, to={1}", message.from(), message.to());
         }
+    }
+
+    /**
+     * Encodes a structured message into the RFC 5322 bytes the relay delivers, with the encoder the
+     * mail client itself uses on the wire. The send path stores these bytes for a Simple send with
+     * attachments and runs the content scan over them.
+     */
+    static byte[] encodeMime(RelayMessage message) {
+        return new MailEncoder(toMailMessage(message), MESSAGE_ID_DOMAIN).encode()
+                .getBytes(StandardCharsets.UTF_8);
+    }
+
+    static MailMessage toMailMessage(RelayMessage message) {
+        MailMessage mail = new MailMessage();
+        mail.setFrom(message.from());
+        applyBounceAddress(mail, message.returnPath(), message.from());
+        if (message.to() != null) {
+            mail.setTo(message.to());
+        }
+        if (message.cc() != null) {
+            mail.setCc(message.cc());
+        }
+        if (message.bcc() != null) {
+            mail.setBcc(message.bcc());
+        }
+        if (message.replyTo() != null && !message.replyTo().isEmpty()) {
+            mail.addHeader("Reply-To", String.join(", ", message.replyTo()));
+        }
+        if (message.headers() != null) {
+            for (MessageHeader header : message.headers()) {
+                if (!header.isSafe()) {
+                    LOG.warnv("SMTP relay: skipping a header with a blank name or CR/LF in its "
+                            + "name/value (possible header injection) for from={0}", message.from());
+                    continue;
+                }
+                if (FieldName.MESSAGE_ID.equalsIgnoreCase(header.name())) {
+                    // AWS overrides a caller-supplied Message-ID, and rejects it outright as a
+                    // custom header on Simple / Templated content.
+                    continue;
+                }
+                mail.addHeader(header.name(), header.value());
+            }
+        }
+        applyMessageId(mail, message.messageId());
+        mail.setSubject(message.subject() != null ? message.subject() : "");
+        if (message.bodyText() != null) {
+            mail.setText(message.bodyText());
+        }
+        if (message.bodyHtml() != null) {
+            mail.setHtml(message.bodyHtml());
+        }
+        applyAttachments(mail, message.attachments());
+        return mail;
+    }
+
+    /**
+     * Maps {@code Content.Simple.Attachments} onto the outgoing message. An INLINE part with a
+     * {@code ContentId} joins the related part next to the HTML body so {@code cid:} references
+     * resolve. The encoder emits that related part only alongside an HTML body, so without one, or
+     * without a {@code ContentId}, the part travels as a regular attachment that keeps its inline
+     * disposition.
+     */
+    private static void applyAttachments(MailMessage mail, List<MessageAttachment> attachments) {
+        if (attachments == null || attachments.isEmpty()) {
+            return;
+        }
+        List<MailAttachment> regular = new ArrayList<>();
+        List<MailAttachment> related = new ArrayList<>();
+        for (MessageAttachment attachment : attachments) {
+            MailAttachment part = toMailAttachment(attachment);
+            boolean inline = attachment.effectiveDisposition() == MessageAttachment.Disposition.INLINE
+                    && part.getContentId() != null
+                    && mail.getHtml() != null;
+            if (inline) {
+                related.add(part);
+            } else {
+                regular.add(part);
+            }
+        }
+        if (!related.isEmpty()) {
+            mail.setInlineAttachment(related);
+        }
+        if (!regular.isEmpty()) {
+            mail.setAttachment(regular);
+        }
+    }
+
+    private static MailAttachment toMailAttachment(MessageAttachment attachment) {
+        byte[] data = attachment.rawContent() == null ? new byte[0] : attachment.rawContent();
+        MailAttachment part = MailAttachment.create()
+                .setData(Buffer.buffer(data))
+                .setContentType(attachmentContentType(attachment))
+                .setName(attachment.fileName())
+                .setDisposition(attachment.effectiveDisposition().name().toLowerCase(Locale.ROOT));
+        if (attachment.contentDescription() != null && !attachment.contentDescription().isBlank()) {
+            part.setDescription(attachment.contentDescription());
+        }
+        if (attachment.contentId() != null && !attachment.contentId().isBlank()) {
+            part.setContentId(formatContentId(attachment.contentId()));
+        }
+        return part;
+    }
+
+    /**
+     * The Content-Type written for an attachment: the caller's, else one guessed from the file
+     * name, else {@code application/octet-stream}.
+     */
+    static String attachmentContentType(MessageAttachment attachment) {
+        if (attachment.contentType() != null && !attachment.contentType().isBlank()) {
+            return attachment.contentType();
+        }
+        String guessed = attachment.fileName() == null
+                ? null
+                : URLConnection.guessContentTypeFromName(attachment.fileName());
+        return guessed != null ? guessed : DEFAULT_ATTACHMENT_CONTENT_TYPE;
+    }
+
+    /** The Content-ID header value, angle-bracketed as RFC 2392 requires. */
+    static String formatContentId(String contentId) {
+        String trimmed = contentId.trim();
+        if (trimmed.startsWith("<") && trimmed.endsWith(">")) {
+            return trimmed;
+        }
+        return "<" + trimmed + ">";
     }
 
     /**
@@ -310,8 +409,8 @@ public class SmtpRelay {
     private void doRelayRaw(RawRelayMessage relayMessage) {
         try {
             byte[] mimeBytes = tryBase64Decode(relayMessage.rawMessage());
-            var builder = new DefaultMessageBuilder();
-            var message = builder.parseMessage(new ByteArrayInputStream(mimeBytes));
+            DefaultMessageBuilder builder = new DefaultMessageBuilder();
+            Message message = builder.parseMessage(new ByteArrayInputStream(mimeBytes));
 
             MailMessage mail = new MailMessage();
 
@@ -573,7 +672,7 @@ public class SmtpRelay {
                             textBody.getMimeCharset());
                 }
             }
-            try (var is = textBody.getInputStream()) {
+            try (InputStream is = textBody.getInputStream()) {
                 return new String(is.readAllBytes(), charset);
             }
         } catch (Exception e) {
@@ -585,18 +684,23 @@ public class SmtpRelay {
     // ──────────────────────────── Raw header parsing ────────────────────────────
 
     /**
-     * Structured headers extracted from a raw RFC 5322 MIME message: the From address, subject,
-     * separate To / Cc / Bcc address lists, the {@code Return-Path} envelope sender, and the
-     * {@code X-SES-CONFIGURATION-SET} / {@code X-SES-MESSAGE-TAGS} control headers. Empty fields
-     * when the corresponding header is missing.
+     * Structured headers extracted from a raw RFC 5322 MIME message: the first From address, the
+     * subject, separate To / Cc / Bcc address lists, the {@code Return-Path} envelope sender, the
+     * {@code X-SES-CONFIGURATION-SET} / {@code X-SES-MESSAGE-TAGS} control headers, every
+     * mailbox the From header names, the Sender mailbox, and the sending-authorization headers
+     * {@code X-SES-SOURCE-ARN}, {@code X-SES-FROM-ARN} and {@code X-SES-RETURN-PATH-ARN}. Of a
+     * header given more than once, only the first is read, as SES does for the X-headers. Empty
+     * fields when the corresponding header is missing.
      */
     public record RawMessageHeaders(String from, String subject,
                                     List<String> to, List<String> cc, List<String> bcc,
                                     String returnPath, String configurationSet,
-                                    List<MessageTag> messageTags) {
+                                    List<MessageTag> messageTags, List<String> fromAddresses,
+                                    String sender, String sourceArn, String fromArn,
+                                    String returnPathArn) {
         public static RawMessageHeaders empty() {
             return new RawMessageHeaders("", "", List.of(), List.of(), List.of(),
-                    "", "", List.of());
+                    "", "", List.of(), List.of(), "", "", "", "");
         }
     }
 
@@ -652,10 +756,15 @@ public class SmtpRelay {
             String configurationSet = headerValue(message, HEADER_CONFIGURATION_SET);
             List<MessageTag> messageTags = parseMessageTagsHeader(
                     headerValue(message, HEADER_MESSAGE_TAGS));
+            Mailbox sender = message.getSender();
             return new RawMessageHeaders(from.isEmpty() ? "" : from.get(0), subject, to, cc, bcc,
                     returnPath == null ? "" : returnPath,
                     configurationSet == null ? "" : configurationSet,
-                    messageTags);
+                    messageTags, from,
+                    sender == null ? "" : sender.getAddress(),
+                    headerValueOrEmpty(message, HEADER_SOURCE_ARN),
+                    headerValueOrEmpty(message, HEADER_FROM_ARN),
+                    headerValueOrEmpty(message, HEADER_RETURN_PATH_ARN));
         } catch (Exception ignored) {
             // A message whose addresses cannot be read is treated like one without headers.
             return RawMessageHeaders.empty();
@@ -709,6 +818,11 @@ public class SmtpRelay {
         }
         String value = field.getBody().trim();
         return value.isEmpty() ? null : value;
+    }
+
+    private static String headerValueOrEmpty(Entity entity, String name) {
+        String value = headerValue(entity, name);
+        return value == null ? "" : value;
     }
 
     /** Unwraps the {@code <addr@example.com>} form used by Return-Path and friends. */

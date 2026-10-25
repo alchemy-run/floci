@@ -1,10 +1,10 @@
 package io.github.hectorvent.floci.services.lambda;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.lambda.model.EventSourceMapping;
-import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -67,7 +67,7 @@ public class EsmStore {
 
     public List<EventSourceMapping> listByFunction(String functionKey) {
         return backend.scan(k -> {
-            var esm = backend.get(k).orElse(null);
+            EventSourceMapping esm = backend.get(k).orElse(null);
             if (esm == null) return false;
             // Match by full ARN or by short function name
             return functionKey.equals(esm.getFunctionArn()) || functionKey.equals(esm.getFunctionName());

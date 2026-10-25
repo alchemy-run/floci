@@ -1,80 +1,77 @@
 package io.github.hectorvent.floci.services.lambda.durable.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.fasterxml.jackson.annotation.JsonInclude;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
-import java.util.Map;
-
 /**
- * One entry in a durable execution's checkpointed operation log.
- *
- * <p>Operation ids are opaque strings chosen by the client SDK (it hashes its
- * deterministic step ids before checkpointing), except for the EXECUTION
- * operation which Floci mints when the execution starts. Floci never
- * interprets ids beyond map lookup.
- *
- * <p>Timestamps are stored as epoch milliseconds internally and serialized to
- * the AWS wire format (epoch seconds) by the service.
+ * One checkpointed operation of a durable execution. A single flat class serves every operation
+ * type. The wire mapping emits only the details block that belongs to {@link #getType()}.
+ * Timestamps are epoch millis.
  */
 @RegisterForReflection
+@JsonIgnoreProperties(ignoreUnknown = true)
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class DurableOperation {
-
-    /** Operation types (subset of the AWS model Floci understands). */
-    public static final String TYPE_EXECUTION = "EXECUTION";
-    public static final String TYPE_CONTEXT = "CONTEXT";
-    public static final String TYPE_STEP = "STEP";
-    public static final String TYPE_WAIT = "WAIT";
-    public static final String TYPE_CALLBACK = "CALLBACK";
-    public static final String TYPE_CHAINED_INVOKE = "CHAINED_INVOKE";
-
-    /** Operation statuses. */
-    public static final String STATUS_STARTED = "STARTED";
-    public static final String STATUS_PENDING = "PENDING";
-    public static final String STATUS_READY = "READY";
-    public static final String STATUS_SUCCEEDED = "SUCCEEDED";
-    public static final String STATUS_FAILED = "FAILED";
-    public static final String STATUS_CANCELLED = "CANCELLED";
-    public static final String STATUS_TIMED_OUT = "TIMED_OUT";
 
     private String id;
     private String parentId;
     private String name;
-    private String type;
+    private DurableOperationType type;
     private String subType;
-    private String status;
-    private long startTimestampMillis;
-    private Long endTimestampMillis;
-
-    /** EXECUTION only: the customer input payload (raw string). */
+    private DurableOperationStatus status;
+    private long startTimestamp;
+    private Long endTimestamp;
     private String inputPayload;
-
-    /** STEP only. */
-    private Integer attempt;
-    private Long nextAttemptTimestampMillis;
-
-    /** WAIT (wait end) and CALLBACK (timeout deadline). */
-    private Long scheduledEndTimestampMillis;
-    /** WAIT only: {@code WaitOptions.WaitSeconds}. */
-    private Long waitSeconds;
-
-    /** CALLBACK only. */
-    private String callbackId;
-    /** CALLBACK only: {@code CallbackOptions.TimeoutSeconds} / {@code HeartbeatTimeoutSeconds}. */
-    private Long callbackTimeoutSeconds;
-    private Long callbackHeartbeatTimeoutSeconds;
-
-    /**
-     * CHAINED_INVOKE only: the FunctionName (name, name:qualifier, or ARN)
-     * from {@code ChainedInvokeOptions}, persisted so a restart can re-dispatch.
-     */
-    private String chainedFunctionName;
-    /** CHAINED_INVOKE only: the child durable-execution ARN once started. */
-    private String chainedChildExecutionArn;
-
-    /** Result payload for STEP / CONTEXT / CALLBACK / EXECUTION / CHAINED_INVOKE operations. */
+    private Boolean replayChildren;
     private String result;
+    private DurableErrorObject error;
+    private Integer attempt;
+    private Long nextAttemptTimestamp;
+    private Long scheduledEndTimestamp;
+    private String callbackId;
+    private Integer heartbeatTimeoutSeconds;
+    private Long callbackDeadline;
+    /** Moves forward on every SendDurableExecutionCallbackHeartbeat. */
+    private Long heartbeatDeadline;
+    /** The FunctionName of a chained invoke, as the function sent it. */
+    private String chainedFunctionName;
+    private String chainedTenantId;
+    /** Set when a chained invoke runs a durable function. Unset, the function runs as a plain invocation. */
+    private String childExecutionArn;
+    /** Position in the execution's change log. The handler is only shown operations newer than it has seen. */
+    private long changeSequence;
 
-    /** AWS ErrorObject shape ({@code ErrorMessage}, {@code ErrorType}, ...). */
-    private Map<String, Object> error;
+    public DurableOperation() {
+    }
+
+    public DurableOperation copy() {
+        DurableOperation copy = new DurableOperation();
+        copy.id = id;
+        copy.parentId = parentId;
+        copy.name = name;
+        copy.type = type;
+        copy.subType = subType;
+        copy.status = status;
+        copy.startTimestamp = startTimestamp;
+        copy.endTimestamp = endTimestamp;
+        copy.inputPayload = inputPayload;
+        copy.replayChildren = replayChildren;
+        copy.result = result;
+        copy.error = error;
+        copy.attempt = attempt;
+        copy.nextAttemptTimestamp = nextAttemptTimestamp;
+        copy.scheduledEndTimestamp = scheduledEndTimestamp;
+        copy.callbackId = callbackId;
+        copy.heartbeatTimeoutSeconds = heartbeatTimeoutSeconds;
+        copy.callbackDeadline = callbackDeadline;
+        copy.heartbeatDeadline = heartbeatDeadline;
+        copy.chainedFunctionName = chainedFunctionName;
+        copy.chainedTenantId = chainedTenantId;
+        copy.childExecutionArn = childExecutionArn;
+        copy.changeSequence = changeSequence;
+        return copy;
+    }
 
     public String getId() { return id; }
     public void setId(String id) { this.id = id; }
@@ -85,56 +82,65 @@ public class DurableOperation {
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
 
-    public String getType() { return type; }
-    public void setType(String type) { this.type = type; }
+    public DurableOperationType getType() { return type; }
+    public void setType(DurableOperationType type) { this.type = type; }
 
     public String getSubType() { return subType; }
     public void setSubType(String subType) { this.subType = subType; }
 
-    public String getStatus() { return status; }
-    public void setStatus(String status) { this.status = status; }
+    public DurableOperationStatus getStatus() { return status; }
+    public void setStatus(DurableOperationStatus status) { this.status = status; }
 
-    public long getStartTimestampMillis() { return startTimestampMillis; }
-    public void setStartTimestampMillis(long startTimestampMillis) { this.startTimestampMillis = startTimestampMillis; }
+    public long getStartTimestamp() { return startTimestamp; }
+    public void setStartTimestamp(long startTimestamp) { this.startTimestamp = startTimestamp; }
 
-    public Long getEndTimestampMillis() { return endTimestampMillis; }
-    public void setEndTimestampMillis(Long endTimestampMillis) { this.endTimestampMillis = endTimestampMillis; }
+    public Long getEndTimestamp() { return endTimestamp; }
+    public void setEndTimestamp(Long endTimestamp) { this.endTimestamp = endTimestamp; }
 
     public String getInputPayload() { return inputPayload; }
     public void setInputPayload(String inputPayload) { this.inputPayload = inputPayload; }
 
-    public Integer getAttempt() { return attempt; }
-    public void setAttempt(Integer attempt) { this.attempt = attempt; }
-
-    public Long getNextAttemptTimestampMillis() { return nextAttemptTimestampMillis; }
-    public void setNextAttemptTimestampMillis(Long nextAttemptTimestampMillis) { this.nextAttemptTimestampMillis = nextAttemptTimestampMillis; }
-
-    public Long getScheduledEndTimestampMillis() { return scheduledEndTimestampMillis; }
-    public void setScheduledEndTimestampMillis(Long scheduledEndTimestampMillis) { this.scheduledEndTimestampMillis = scheduledEndTimestampMillis; }
-
-    public Long getWaitSeconds() { return waitSeconds; }
-    public void setWaitSeconds(Long waitSeconds) { this.waitSeconds = waitSeconds; }
-
-    public String getCallbackId() { return callbackId; }
-    public void setCallbackId(String callbackId) { this.callbackId = callbackId; }
-
-    public Long getCallbackTimeoutSeconds() { return callbackTimeoutSeconds; }
-    public void setCallbackTimeoutSeconds(Long callbackTimeoutSeconds) { this.callbackTimeoutSeconds = callbackTimeoutSeconds; }
-
-    public Long getCallbackHeartbeatTimeoutSeconds() { return callbackHeartbeatTimeoutSeconds; }
-    public void setCallbackHeartbeatTimeoutSeconds(Long callbackHeartbeatTimeoutSeconds) {
-        this.callbackHeartbeatTimeoutSeconds = callbackHeartbeatTimeoutSeconds;
-    }
-
-    public String getChainedFunctionName() { return chainedFunctionName; }
-    public void setChainedFunctionName(String chainedFunctionName) { this.chainedFunctionName = chainedFunctionName; }
-
-    public String getChainedChildExecutionArn() { return chainedChildExecutionArn; }
-    public void setChainedChildExecutionArn(String chainedChildExecutionArn) { this.chainedChildExecutionArn = chainedChildExecutionArn; }
+    public Boolean getReplayChildren() { return replayChildren; }
+    public void setReplayChildren(Boolean replayChildren) { this.replayChildren = replayChildren; }
 
     public String getResult() { return result; }
     public void setResult(String result) { this.result = result; }
 
-    public Map<String, Object> getError() { return error; }
-    public void setError(Map<String, Object> error) { this.error = error; }
+    public DurableErrorObject getError() { return error; }
+    public void setError(DurableErrorObject error) { this.error = error; }
+
+    public Integer getAttempt() { return attempt; }
+    public void setAttempt(Integer attempt) { this.attempt = attempt; }
+
+    public Long getNextAttemptTimestamp() { return nextAttemptTimestamp; }
+    public void setNextAttemptTimestamp(Long nextAttemptTimestamp) { this.nextAttemptTimestamp = nextAttemptTimestamp; }
+
+    public Long getScheduledEndTimestamp() { return scheduledEndTimestamp; }
+    public void setScheduledEndTimestamp(Long scheduledEndTimestamp) { this.scheduledEndTimestamp = scheduledEndTimestamp; }
+
+    public String getCallbackId() { return callbackId; }
+    public void setCallbackId(String callbackId) { this.callbackId = callbackId; }
+
+    public Integer getHeartbeatTimeoutSeconds() { return heartbeatTimeoutSeconds; }
+    public void setHeartbeatTimeoutSeconds(Integer heartbeatTimeoutSeconds) {
+        this.heartbeatTimeoutSeconds = heartbeatTimeoutSeconds;
+    }
+
+    public Long getCallbackDeadline() { return callbackDeadline; }
+    public void setCallbackDeadline(Long callbackDeadline) { this.callbackDeadline = callbackDeadline; }
+
+    public Long getHeartbeatDeadline() { return heartbeatDeadline; }
+    public void setHeartbeatDeadline(Long heartbeatDeadline) { this.heartbeatDeadline = heartbeatDeadline; }
+
+    public String getChainedFunctionName() { return chainedFunctionName; }
+    public void setChainedFunctionName(String chainedFunctionName) { this.chainedFunctionName = chainedFunctionName; }
+
+    public String getChainedTenantId() { return chainedTenantId; }
+    public void setChainedTenantId(String chainedTenantId) { this.chainedTenantId = chainedTenantId; }
+
+    public String getChildExecutionArn() { return childExecutionArn; }
+    public void setChildExecutionArn(String childExecutionArn) { this.childExecutionArn = childExecutionArn; }
+
+    public long getChangeSequence() { return changeSequence; }
+    public void setChangeSequence(long changeSequence) { this.changeSequence = changeSequence; }
 }

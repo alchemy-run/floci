@@ -34,12 +34,10 @@ import java.util.Map;
 public class MwaaController {
 
     private final MwaaService mwaaService;
-    private final MwaaRestApiInvoker restApiInvoker;
 
     @Inject
-    public MwaaController(MwaaService mwaaService, MwaaRestApiInvoker restApiInvoker) {
+    public MwaaController(MwaaService mwaaService) {
         this.mwaaService = mwaaService;
-        this.restApiInvoker = restApiInvoker;
     }
 
     @PUT
@@ -88,6 +86,9 @@ public class MwaaController {
     public Response createCliToken(@PathParam("name") String name) {
         return Response.ok(mwaaService.createCliToken(name)).build();
     }
+
+    @Inject
+    MwaaRestApiInvoker restApiInvoker;
 
     @POST
     @Path("/restapi/{name}")

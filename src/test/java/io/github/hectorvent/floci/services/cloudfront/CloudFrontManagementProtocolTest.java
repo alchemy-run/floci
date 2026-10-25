@@ -110,6 +110,38 @@ class CloudFrontManagementProtocolTest {
     }
 
     @Test
+    void createFunctionRejectsAnUnknownRuntime() {
+        String name = "runtime-test-" + UUID.randomUUID();
+        String createBody = """
+                <CreateFunctionRequest xmlns="http://cloudfront.amazonaws.com/doc/2020-05-31/">
+                  <Name>%s</Name>
+                  <FunctionConfig>
+                    <Comment>routing function</Comment>
+                    <Runtime>python3</Runtime>
+                  </FunctionConfig>
+                  <FunctionCode>function handler(event) { return event.request; }</FunctionCode>
+                </CreateFunctionRequest>
+                """.formatted(name);
+
+        given()
+            .contentType("application/xml")
+            .body(createBody)
+        .when()
+            .post(API + "function")
+        .then()
+            .statusCode(400)
+            .body(hasXPath(
+                    "//*[local-name()='Code']/text()",
+                    equalTo("InvalidArgument")));
+
+        given()
+        .when()
+            .get(API + "function/" + name + "/describe")
+        .then()
+            .statusCode(404);
+    }
+
+    @Test
     void describeAndPublishFunctionPreserveBothStages() {
         String name = "describe-test-" + UUID.randomUUID();
         String createBody = """
@@ -208,7 +240,15 @@ class CloudFrontManagementProtocolTest {
             .statusCode(400)
             .body(hasXPath(
                     "//*[local-name()='Code']/text()",
-                    equalTo("InvalidArgument")));
+                    equalTo("MalformedXML")))
+            .body(hasXPath(
+                    "//*[local-name()='Message']/text()",
+                    equalTo("3 validation errors detected: Value null at"
+                            + " 'originAccessControlConfig.originAccessControlOriginType' failed to satisfy"
+                            + " constraint: Member must not be null; Value null at"
+                            + " 'originAccessControlConfig.signingProtocol' failed to satisfy constraint: Member"
+                            + " must not be null; Value null at 'originAccessControlConfig.signingBehavior' failed"
+                            + " to satisfy constraint: Member must not be null")));
     }
 
     @Test
@@ -407,6 +447,42 @@ class CloudFrontManagementProtocolTest {
                         .then().statusCode(204);
             }
         }
+    }
+
+    @Test
+    void managedOriginRequestPoliciesAreReadableListableAndImmutable() {
+        String exceptHost = "b689b0a8-53d0-40ab-baf2-68738e2966ac";
+        given()
+            .when()
+                .get(API + "origin-request-policy/" + exceptHost)
+            .then()
+                .statusCode(200)
+                .body(hasXPath("//*[local-name()='Name']/text()",
+                        equalTo("Managed-AllViewerExceptHostHeader")))
+                .body(hasXPath("//*[local-name()='HeaderBehavior']/text()", equalTo("allExcept")))
+                .body(hasXPath("//*[local-name()='Headers']//*[local-name()='Name']/text()",
+                        equalTo("Host")))
+                .body(hasXPath("//*[local-name()='CookieBehavior']/text()", equalTo("all")))
+                .body(hasXPath("//*[local-name()='QueryStringBehavior']/text()", equalTo("all")));
+
+        given()
+                .queryParam("Type", "managed")
+            .when()
+                .get(API + "origin-request-policy")
+            .then()
+                .statusCode(200)
+                .body(hasXPath("/*/*[local-name()='Quantity']/text()", equalTo("8")))
+                .body(hasXPath("//*[local-name()='OriginRequestPolicySummary']"
+                        + "[.//*[local-name()='Id' and text()='" + exceptHost + "']]"
+                        + "/*[local-name()='Type']/text()", equalTo("managed")));
+
+        given()
+                .header("If-Match", "E23ZP02F085DFQ")
+            .when()
+                .delete(API + "origin-request-policy/" + exceptHost)
+            .then()
+                .statusCode(400)
+                .body(hasXPath("//*[local-name()='Code']/text()", equalTo("IllegalDelete")));
     }
 
     private static String cachePolicyBody(String name, String comment, String defaultTtl, String cookie) {

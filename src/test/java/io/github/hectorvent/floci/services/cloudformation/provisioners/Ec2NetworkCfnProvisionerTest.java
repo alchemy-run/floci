@@ -2,7 +2,9 @@ package io.github.hectorvent.floci.services.cloudformation.provisioners;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.CloudFormationTemplateEngine;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
@@ -14,12 +16,14 @@ import io.github.hectorvent.floci.services.ec2.model.RouteTable;
 import io.github.hectorvent.floci.services.ec2.model.RouteTableAssociation;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.ec2.model.Tag;
-import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -29,8 +33,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import io.github.hectorvent.floci.core.common.AwsException;
-import java.util.Map;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -191,7 +193,30 @@ class Ec2NetworkCfnProvisionerTest {
         provisioner.provision(r, mapper.createObjectNode().put("SubnetId", SUBNET_ID).put("AllocationId", ALLOC_ID), ctx());
 
         assertEquals(NAT_ID, r.getPhysicalId());
-        assertEquals(Set.of("NatGatewayId"), r.getAttributes().keySet());
+        assertEquals(Set.of("NatGatewayId"), r.getAttributes().keySet().stream()
+                .filter(key -> !key.startsWith("__Floci")).collect(Collectors.toSet()));
+    }
+
+    /**
+     * A gateway records the subnet and the Elastic IP it holds under hidden keys, by their physical
+     * ids, so a stack that no longer names it still deletes it before them.
+     */
+    @Test
+    void natGatewayRecordsTheSubnetAndElasticIpItUsesUnderHiddenKeys() {
+        NatGateway nat = new NatGateway();
+        nat.setNatGatewayId(NAT_ID);
+        nat.setSubnetId(SUBNET_ID);
+        when(ec2.createNatGateway(REGION, SUBNET_ID, ALLOC_ID, "public", List.of())).thenReturn(nat);
+        Address addr = new Address();
+        addr.setAllocationId(ALLOC_ID);
+        addr.setPublicIp(PUBLIC_IP);
+        when(ec2.describeAddresses(REGION, List.of(ALLOC_ID), Map.of())).thenReturn(List.of(addr));
+        StackResource r = resource("AWS::EC2::NatGateway", "Nat");
+
+        provisioner.provision(r, mapper.createObjectNode().put("SubnetId", SUBNET_ID).put("AllocationId", ALLOC_ID), ctx());
+
+        assertEquals(SUBNET_ID, r.getAttributes().get(CfnRollback.USES_ATTR_PREFIX + "SubnetId"));
+        assertEquals(PUBLIC_IP, r.getAttributes().get(CfnRollback.USES_ATTR_PREFIX + "PublicIp"));
     }
 
     @Test
@@ -293,6 +318,57 @@ class Ec2NetworkCfnProvisionerTest {
         assertTrue(provisioner.rollbackUpdate(r), "the prior MapPublicIpOnLaunch is restored from the snapshot");
         verify(ec2).modifySubnetAttribute(REGION, SUBNET_ID, "mapPublicIpOnLaunch", "false");
         assertFalse(r.getAttributes().containsKey(Ec2NetworkCfnProvisioner.IN_PLACE_PRIOR_ATTR));
+    }
+
+    @Test
+    void aRestoreThatThrowsKeepsTheSnapshotForTheRetry() {
+        when(ec2.describeSubnets(REGION, List.of(SUBNET_ID), Map.of())).thenReturn(List.of(subnet()));
+        StackResource r = prior("AWS::EC2::Subnet", "Subnet", SUBNET_ID, Map.of("SubnetId", SUBNET_ID, "VpcId", VPC_ID, "AvailabilityZone", "us-east-1a"));
+        ObjectNode props = mapper.createObjectNode().put("VpcId", VPC_ID).put("CidrBlock", "10.0.1.0/24")
+                .put("AvailabilityZone", "us-east-1a").put("MapPublicIpOnLaunch", true);
+        provisioner.provision(r, props, ctx(SUBNET_ID));
+        String snapshot = r.getAttributes().get(Ec2NetworkCfnProvisioner.IN_PLACE_PRIOR_ATTR);
+        assertTrue(snapshot != null, "the prior MapPublicIpOnLaunch is snapshotted");
+        doThrow(new AwsException("InternalError", "ec2 is down", 500))
+                .when(ec2).modifySubnetAttribute(REGION, SUBNET_ID, "mapPublicIpOnLaunch", "false");
+
+        AwsException failure = assertThrows(AwsException.class, () -> provisioner.rollbackUpdate(r));
+
+        assertEquals("InternalError", failure.getErrorCode());
+        assertEquals(snapshot, r.getAttributes().get(Ec2NetworkCfnProvisioner.IN_PLACE_PRIOR_ATTR),
+                "a failed restore keeps the snapshot for a ContinueUpdateRollback retry");
+    }
+
+    @Test
+    void anUnchangedSubnetWhoseTemplateCidrHasHostBitsIsKept() {
+        Subnet current = subnet();
+        current.setCidrBlock("10.0.1.0/24");
+        when(ec2.describeSubnets(REGION, List.of(SUBNET_ID), Map.of())).thenReturn(List.of(current));
+        StackResource r = prior("AWS::EC2::Subnet", "Subnet", SUBNET_ID, Map.of("SubnetId", SUBNET_ID));
+        ObjectNode props = mapper.createObjectNode().put("VpcId", VPC_ID).put("CidrBlock", "10.0.1.9/24");
+
+        provisioner.provision(r, props, ctx(SUBNET_ID));
+
+        verify(ec2, never()).createSubnet(any(), any(), any(), any());
+        assertEquals(SUBNET_ID, r.getPhysicalId());
+        assertFalse(provisioner.hasReplacementUpdate(r));
+    }
+
+    @Test
+    void aSubnetSavedWithHostBitsBeforeCanonicalizationIsKept() {
+        // State persisted by an older build can still hold the template's spelling, host bits and all.
+        Subnet current = subnet();
+        current.setCidrBlock("10.0.1.9/24");
+        when(ec2.describeSubnets(REGION, List.of(SUBNET_ID), Map.of())).thenReturn(List.of(current));
+        StackResource r = prior("AWS::EC2::Subnet", "Subnet", SUBNET_ID, Map.of("SubnetId", SUBNET_ID));
+        ObjectNode props = mapper.createObjectNode().put("VpcId", VPC_ID).put("CidrBlock", "10.0.1.9/24")
+                .put("MapPublicIpOnLaunch", true);
+
+        provisioner.provision(r, props, ctx(SUBNET_ID));
+
+        verify(ec2, never()).createSubnet(any(), any(), any(), any());
+        assertEquals(SUBNET_ID, r.getPhysicalId());
+        assertFalse(provisioner.hasReplacementUpdate(r));
     }
 
     @Test
@@ -478,7 +554,7 @@ class Ec2NetworkCfnProvisionerTest {
     }
 
     private static ObjectNode withTags(ObjectNode props, String... keyValues) {
-        var tags = props.putArray("Tags");
+        ArrayNode tags = props.putArray("Tags");
         for (int i = 0; i + 1 < keyValues.length; i += 2) {
             tags.addObject().put("Key", keyValues[i]).put("Value", keyValues[i + 1]);
         }
@@ -569,7 +645,8 @@ class Ec2NetworkCfnProvisionerTest {
     @Test
     void aReusedSubnetDropsTheTagKeysTheTemplateRemovedAndWritesTheRest() {
         Subnet current = subnet();
-        current.setTags(List.of(new Tag("Name", "old"), new Tag("team", "net")));
+        current.setTags(List.of(new Tag("Name", "old"), new Tag("team", "net"),
+                new Tag("aws:cloudformation:stack-id", "stack"), new Tag("AWS:service", "owner")));
         when(ec2.describeSubnets(REGION, List.of(SUBNET_ID), Map.of())).thenReturn(List.of(current));
         StackResource r = prior("AWS::EC2::Subnet", "Subnet", SUBNET_ID, Map.of("SubnetId", SUBNET_ID));
         ObjectNode props = withTags(mapper.createObjectNode().put("VpcId", VPC_ID).put("CidrBlock", "10.0.1.0/24"), "Name", "new");
@@ -588,7 +665,8 @@ class Ec2NetworkCfnProvisionerTest {
         RouteTable rt = new RouteTable();
         rt.setRouteTableId(RTB_ID);
         rt.setVpcId(VPC_ID);
-        rt.setTags(List.of(new Tag("Name", "old"), new Tag("team", "net")));
+        rt.setTags(List.of(new Tag("Name", "old"), new Tag("team", "net"),
+                new Tag("aws:cloudformation:stack-id", "stack")));
         when(ec2.describeRouteTables(REGION, List.of(RTB_ID), Map.of())).thenReturn(List.of(rt));
         StackResource r = prior("AWS::EC2::RouteTable", "Rtb", RTB_ID, Map.of("RouteTableId", RTB_ID));
 
@@ -714,7 +792,7 @@ class Ec2NetworkCfnProvisionerTest {
         when(ec2.allocateAddress(REGION)).thenReturn(addr);
         doThrow(new AwsException("TagLimitExceeded", "too many tags", 400)).when(ec2).createTags(any(), any(), any());
 
-        for (var attempt : List.of(
+        for (Map.Entry<String, ObjectNode> attempt : List.of(
                 Map.entry("AWS::EC2::Subnet", withTags(mapper.createObjectNode().put("VpcId", VPC_ID).put("CidrBlock", "10.0.1.0/24"), "k", "v")),
                 Map.entry("AWS::EC2::RouteTable", withTags(mapper.createObjectNode().put("VpcId", VPC_ID), "k", "v")),
                 Map.entry("AWS::EC2::InternetGateway", withTags(mapper.createObjectNode(), "k", "v")),

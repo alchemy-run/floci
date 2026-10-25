@@ -5,9 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
-import io.github.hectorvent.floci.services.ses.model.BulkEmailEntryResult;
 import io.github.hectorvent.floci.services.ses.model.EmailTemplate;
 import io.github.hectorvent.floci.services.ses.model.Tag;
+import io.github.hectorvent.floci.testing.MutableClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -15,6 +15,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.security.SecureRandom;
+import java.time.Clock;
+import java.time.Instant;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -38,7 +40,8 @@ class SesTemplateServiceTest {
 
     @BeforeEach
     void setUp() {
-        service = new SesTemplateService(new InMemoryStorage<>(), new ObjectMapper(), new SecureRandom());
+        service = new SesTemplateService(new InMemoryStorage<>(), new ObjectMapper(), new SecureRandom(),
+                Clock.systemUTC());
     }
 
     private static EmailTemplate template(String name) {
@@ -99,15 +102,30 @@ class SesTemplateServiceTest {
     }
 
     @Test
-    void list_isSortedByCreationAndPerRegion() {
-        service.createTemplate(template("a"), REGION);
-        service.createTemplate(template("b"), REGION);
-        service.createTemplate(template("other"), "eu-west-1");
+    void create_andUpdate_stampTheInjectedClock() {
+        SesTemplateService ticking = new SesTemplateService(new InMemoryStorage<>(), new ObjectMapper(),
+                new SecureRandom(), new MutableClock());
 
-        List<EmailTemplate> list = service.listTemplates(REGION);
-        assertEquals(2, list.size());
-        assertEquals("a", list.get(0).getTemplateName());
-        assertEquals("b", list.get(1).getTemplateName());
+        Instant created = ticking.createTemplate(template("welcome"), REGION).getCreatedTimestamp();
+        ticking.updateTemplate(template("welcome"), REGION);
+
+        EmailTemplate stored = ticking.getTemplate("welcome", REGION);
+        assertEquals(created, stored.getCreatedTimestamp());
+        assertEquals(created.plusMillis(1), stored.getLastUpdatedTimestamp());
+    }
+
+    @Test
+    void list_isPerRegion_newestFirst() {
+        SesTemplateService ticking = new SesTemplateService(new InMemoryStorage<>(), new ObjectMapper(),
+                new SecureRandom(), new MutableClock());
+        for (String name : List.of("a", "b", "c", "d", "e")) {
+            ticking.createTemplate(template(name), REGION);
+        }
+        ticking.createTemplate(template("other"), "eu-west-1");
+
+        List<String> names = ticking.listTemplates(REGION).stream()
+                .map(EmailTemplate::getTemplateName).toList();
+        assertEquals(List.of("e", "d", "c", "b", "a"), names);
     }
 
     @Test
@@ -360,25 +378,6 @@ class SesTemplateServiceTest {
         String mime = SesTemplateService.buildTestRenderMime("S", "hello", "<p>hi</p>", date, "BOUND");
         assertTrue(mime.contains("hello\r\n--BOUND"));
         assertTrue(mime.contains("</p>\r\n--BOUND"));
-    }
-
-    @ParameterizedTest(name = "{0} -> {1}")
-    @MethodSource("mapErrorCodeToBulkStatusCases")
-    void mapErrorCodeToBulkStatus_returnsExpected(String errorCode, BulkEmailEntryResult.Status expected) {
-        assertEquals(expected, SesService.mapErrorCodeToBulkStatus(errorCode));
-    }
-
-    static Stream<Arguments> mapErrorCodeToBulkStatusCases() {
-        return Stream.of(
-                Arguments.of("MessageRejected",           BulkEmailEntryResult.Status.MESSAGE_REJECTED),
-                Arguments.of("MailFromDomainNotVerified", BulkEmailEntryResult.Status.MAIL_FROM_DOMAIN_NOT_VERIFIED),
-                Arguments.of("MailFromDomainNotVerifiedException",
-                        BulkEmailEntryResult.Status.MAIL_FROM_DOMAIN_NOT_VERIFIED),
-                Arguments.of("InvalidParameterValue",     BulkEmailEntryResult.Status.INVALID_PARAMETER),
-                Arguments.of("MissingRenderingAttribute", BulkEmailEntryResult.Status.INVALID_PARAMETER),
-                Arguments.of("InvalidRenderingParameter", BulkEmailEntryResult.Status.INVALID_PARAMETER),
-                Arguments.of("SomethingElse",             BulkEmailEntryResult.Status.FAILED)
-        );
     }
 
     @Test

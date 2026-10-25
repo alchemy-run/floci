@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.cloudwatch.logs;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
@@ -492,6 +493,11 @@ public class CloudWatchLogsService implements ResourceProvider {
         groupStore.put(key, group);
     }
 
+    /** The log group a tagging request's resourceArn names, refused when it is another account's or region's. */
+    public LogGroupTagTarget resolveTagTarget(String resourceArn, String region) {
+        return LogGroupTagTarget.resolve(resourceArn, region, regionResolver.getAccountId(), regionResolver.getPartition());
+    }
+
     public void tagLogGroup(String groupName, Map<String, String> tags, String region) {
         String key = groupKey(region, groupName);
         LogGroup group = groupStore.get(key)
@@ -925,12 +931,16 @@ public class CloudWatchLogsService implements ResourceProvider {
                 maxEventsPerQuery);
 
         String eventPrefix = eventKeyPrefix(region, groupName, streamName);
-        List<LogEvent> all = eventStore.scan(k -> k.startsWith(eventPrefix));
-        all.sort(EVENT_ORDER);
+        String groupPrefix = streamKeyPrefix(region, groupName);
+        List<LogEvent> all = eventStore.scan(k -> k.startsWith(eventPrefix)
+                && streamName.equals(streamNameFromEventKey(k, groupPrefix)));
 
+        // Filter before sorting so a narrow time window only pays the comparison cost for
+        // the events it keeps, instead of sorting the whole stream and discarding most of it.
         List<LogEvent> filtered = all.stream()
                 .filter(e -> (startTime == null || e.getTimestamp() >= startTime)
                         && (endTime == null || e.getTimestamp() <= endTime))
+                .sorted(EVENT_ORDER)
                 .toList();
 
         int total = filtered.size();
@@ -997,6 +1007,11 @@ public class CloudWatchLogsService implements ResourceProvider {
         requireLogGroup(groupName, region);
         int maxEvents = Math.min(limit > 0 ? limit : Integer.MAX_VALUE,
                 maxEventsPerQuery);
+        // The filter pattern syntax metric and subscription filters use: terms, quoted phrases,
+        // ?alternatives, -exclusions, JSON and space-delimited patterns. Parsed before the scan,
+        // so an invalid pattern is refused whatever the group holds.
+        FilterPattern pattern = filterPattern == null || filterPattern.isBlank()
+                ? null : requireFilterPattern(filterPattern);
 
         String groupPrefix = groupKeyPrefix(region) + groupName + "::";
         List<String> requested = streamNames == null ? List.of() : streamNames;
@@ -1017,12 +1032,13 @@ public class CloudWatchLogsService implements ResourceProvider {
             eventStore.get(key).ifPresent(e -> all.add(new FilteredEvent(streamName, e)));
         }
 
-        all.sort(Comparator.comparing(FilteredEvent::event, EVENT_ORDER));
-
+        // Filter before sorting so a narrow time window or pattern only pays the comparison
+        // cost for the events it keeps, instead of sorting every stored event up front.
         List<FilteredEvent> matches = all.stream()
                 .filter(f -> (startTime == null || f.event().getTimestamp() >= startTime)
                         && (endTime == null || f.event().getTimestamp() <= endTime))
                 .filter(f -> matchesFilterPattern(f.event().getMessage(), filterPattern))
+                .sorted(Comparator.comparing(FilteredEvent::event, EVENT_ORDER))
                 .toList();
 
         // The cursor indexes matches rather than stored events, which is why the window is applied
@@ -1478,7 +1494,7 @@ public class CloudWatchLogsService implements ResourceProvider {
                 names.add("@logStream");
             }
             try {
-                var node = PAYLOAD_MAPPER.readTree(event.getMessage() != null ? event.getMessage() : "");
+                JsonNode node = PAYLOAD_MAPPER.readTree(event.getMessage() != null ? event.getMessage() : "");
                 if (node.isObject()) {
                     node.fieldNames().forEachRemaining(names::add);
                 }
@@ -1754,8 +1770,10 @@ public class CloudWatchLogsService implements ResourceProvider {
 
     private void deleteEventsForStream(String region, String groupName, String streamName) {
         String eventPrefix = eventKeyPrefix(region, groupName, streamName);
+        String groupPrefix = streamKeyPrefix(region, groupName);
         List<String> keys = eventStore.keys().stream()
-                .filter(k -> k.startsWith(eventPrefix))
+                .filter(k -> k.startsWith(eventPrefix)
+                        && streamName.equals(streamNameFromEventKey(k, groupPrefix)))
                 .toList();
         keys.forEach(eventStore::delete);
     }
@@ -1805,7 +1823,7 @@ public class CloudWatchLogsService implements ResourceProvider {
                 : eventKey.substring(groupPrefix.length(), timestampSeparator);
     }
 
-    private static String subscriptionFilterKeyPrefix(String region, String logGroupName) {
+    static String subscriptionFilterKeyPrefix(String region, String logGroupName) {
         return region + "::" + logGroupName + "::filter::";
     }
 

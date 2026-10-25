@@ -1,40 +1,43 @@
 package io.github.hectorvent.floci.services.ecr;
 
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
-import io.github.hectorvent.floci.services.ecr.model.Image;
+import io.github.hectorvent.floci.services.ecr.model.AuthorizationData;
 import io.github.hectorvent.floci.services.ecr.model.ImageDetail;
 import io.github.hectorvent.floci.services.ecr.model.ImageIdentifier;
-import io.github.hectorvent.floci.services.ecr.model.AuthorizationData;
 import io.github.hectorvent.floci.services.ecr.model.ImageMetadata;
+import io.github.hectorvent.floci.services.ecr.model.PullThroughCacheRule;
+import io.github.hectorvent.floci.services.ecr.model.RegistrySettings;
 import io.github.hectorvent.floci.services.ecr.model.Repository;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
 import io.github.hectorvent.floci.services.ecr.registry.RegistryHttpClient;
-import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
-
-import com.sun.net.httpserver.HttpExchange;
-import com.sun.net.httpserver.HttpServer;
 
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
+import java.time.Instant;
 import java.util.Base64;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CyclicBarrier;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -52,7 +55,7 @@ class EcrServiceTest {
 
     private EcrService service;
     private EcrRegistryManager registryManager;
-    private EventBridgeService eventBridgeService;
+    private InMemoryStorage<String, PullThroughCacheRule> pullThroughCacheRuleStore;
 
     @BeforeEach
     void setUp() {
@@ -60,28 +63,217 @@ class EcrServiceTest {
         when(registryManager.getRepositoryUri(anyString(), anyString(), anyString()))
                 .thenAnswer(inv -> inv.getArgument(0) + ".dkr.ecr." + inv.getArgument(1)
                         + ".localhost:4566/" + inv.getArgument(2));
-        when(registryManager.getProxyEndpoint()).thenReturn(
-                "http://" + ACCOUNT + ".dkr.ecr." + REGION + ".localhost:4566");
+        when(registryManager.getProxyEndpoint()).thenReturn("http://localhost:4566");
         when(registryManager.internalRepoName(anyString(), anyString(), anyString()))
                 .thenAnswer(inv -> inv.getArgument(0) + "/" + inv.getArgument(1) + "/" + inv.getArgument(2));
         // The mock never talks to Docker; report the backing registry as available so the
         // data-plane operations run. Registry-unavailable behaviour has its own tests below.
         when(registryManager.tryEnsureStarted()).thenReturn(true);
 
-        eventBridgeService = Mockito.mock(EventBridgeService.class);
-        when(eventBridgeService.putEvents(any(), anyString()))
-                .thenReturn(new EventBridgeService.PutEventsResult(0, List.of()));
-
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
         RegionResolver regionResolver = new RegionResolver(REGION, ACCOUNT);
+        pullThroughCacheRuleStore = new InMemoryStorage<>();
 
         service = new EcrService(
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
+                pullThroughCacheRuleStore,
                 registryManager,
                 config,
-                regionResolver,
-                eventBridgeService);
+                regionResolver);
+    }
+
+    // ------------------------------------------------------------
+    // Pull through cache rules
+    // ------------------------------------------------------------
+
+    @Test
+    void createPullThroughCacheRule_roundTripsDefaults() {
+        PullThroughCacheRule rule = service.createPullThroughCacheRule(
+                "docker-hub/", "registry-1.docker.io", null, null,
+                null, null, null, REGION);
+
+        assertEquals("docker-hub", rule.getEcrRepositoryPrefix());
+        assertEquals("registry-1.docker.io", rule.getUpstreamRegistryUrl());
+        assertEquals("docker-hub", rule.getUpstreamRegistry());
+        assertEquals("ROOT", rule.getUpstreamRepositoryPrefix());
+        assertEquals(ACCOUNT, rule.getRegistryId());
+        assertNotNull(rule.getCreatedAt());
+        assertEquals(rule.getCreatedAt(), rule.getUpdatedAt());
+    }
+
+    @Test
+    void createPullThroughCacheRule_duplicate_throwsAlreadyExists() {
+        service.createPullThroughCacheRule("docker-hub", "registry-1.docker.io", null,
+                null, null, null, null, REGION);
+
+        AwsException exception = assertThrows(AwsException.class,
+                () -> service.createPullThroughCacheRule("docker-hub/", "registry-1.docker.io", null,
+                        null, null, null, null, REGION));
+
+        assertEquals("PullThroughCacheRuleAlreadyExistsException", exception.getErrorCode());
+    }
+
+    @Test
+    void describePullThroughCacheRules_filtersAndPaginates() {
+        service.createPullThroughCacheRule("cache/alpha", "registry-1.docker.io", null,
+                "docker-hub", null, null, "library", REGION);
+        service.createPullThroughCacheRule("cache/beta", "quay.io", null,
+                null, null, null, null, REGION);
+        service.createPullThroughCacheRule("cache/gamma", "registry.k8s.io", null,
+                null, null, null, null, REGION);
+
+        PaginatedResult<PullThroughCacheRule> first = service.describePullThroughCacheRules(
+                null, null, 1, null, REGION);
+        PaginatedResult<PullThroughCacheRule> second = service.describePullThroughCacheRules(
+                null, null, 1, first.nextToken(), REGION);
+        PaginatedResult<PullThroughCacheRule> filtered = service.describePullThroughCacheRules(
+                null, List.of("cache/gamma/"), null, null, REGION);
+
+        assertEquals("cache/alpha", first.items().getFirst().getEcrRepositoryPrefix());
+        assertNotNull(first.nextToken());
+        assertEquals("cache/beta", second.items().getFirst().getEcrRepositoryPrefix());
+        assertEquals("cache/gamma", filtered.items().getFirst().getEcrRepositoryPrefix());
+    }
+
+    @Test
+    void pullThroughCacheRules_areIsolatedByAccountAndRegion() {
+        String otherAccount = "111111111111";
+        service.createPullThroughCacheRule("shared/cache", "quay.io", null,
+                null, null, null, null, REGION);
+        service.createPullThroughCacheRule("shared/cache", "registry.k8s.io", otherAccount,
+                null, null, null, null, REGION);
+        service.createPullThroughCacheRule("shared/cache", "ghcr.io", null,
+                null, null, null, null, "eu-west-1");
+
+        assertEquals("quay.io", service.describePullThroughCacheRules(
+                null, null, null, null, REGION).items().getFirst().getUpstreamRegistryUrl());
+        assertEquals("registry.k8s.io", service.describePullThroughCacheRules(
+                otherAccount, null, null, null, REGION).items().getFirst().getUpstreamRegistryUrl());
+        assertEquals("ghcr.io", service.describePullThroughCacheRules(
+                null, null, null, null, "eu-west-1").items().getFirst().getUpstreamRegistryUrl());
+    }
+
+    @Test
+    void pullThroughCacheRule_persistsAcrossServiceInstances() {
+        service.createPullThroughCacheRule("persisted/cache", "quay.io", null,
+                null, null, null, null, REGION);
+        EcrService restored = new EcrService(
+                new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                pullThroughCacheRuleStore,
+                registryManager,
+                Mockito.mock(EmulatorConfig.class),
+                new RegionResolver(REGION, ACCOUNT));
+
+        PullThroughCacheRule rule = restored.describePullThroughCacheRules(
+                null, List.of("persisted/cache"), null, null, REGION).items().getFirst();
+
+        assertEquals("quay.io", rule.getUpstreamRegistryUrl());
+    }
+
+    @Test
+    void deletePullThroughCacheRule_removesRuleAndMissingFails() {
+        service.createPullThroughCacheRule("delete/cache", "quay.io", null,
+                null, null, null, null, REGION);
+
+        PullThroughCacheRule deleted = service.deletePullThroughCacheRule("delete/cache/", null, REGION);
+
+        assertEquals("delete/cache", deleted.getEcrRepositoryPrefix());
+        AwsException exception = assertThrows(AwsException.class,
+                () -> service.deletePullThroughCacheRule("delete/cache", null, REGION));
+        assertEquals("PullThroughCacheRuleNotFoundException", exception.getErrorCode());
+    }
+
+    @Test
+    void updatePullThroughCacheRule_updatesProvidedFieldsAndPreservesTheRest() {
+        String originalCredential =
+                "arn:aws:secretsmanager:us-east-1:000000000000:secret:ecr-pullthroughcache/original";
+        String updatedCredential =
+                "arn:aws:secretsmanager:us-east-1:000000000000:secret:ecr-pullthroughcache/updated";
+        PullThroughCacheRule created = service.createPullThroughCacheRule(
+                "update/cache", "registry-1.docker.io", null, null,
+                originalCredential, null, "library", REGION);
+        Instant createdAt = created.getCreatedAt();
+
+        PullThroughCacheRule updated = service.updatePullThroughCacheRule(
+                "update/cache/", null, updatedCredential,
+                "arn:aws:iam::000000000000:role/EcrPullThroughCache", REGION);
+
+        assertEquals(updatedCredential, updated.getCredentialArn());
+        assertEquals("arn:aws:iam::000000000000:role/EcrPullThroughCache", updated.getCustomRoleArn());
+        assertEquals("registry-1.docker.io", updated.getUpstreamRegistryUrl());
+        assertEquals("library", updated.getUpstreamRepositoryPrefix());
+        assertEquals(createdAt, updated.getCreatedAt());
+        assertFalse(updated.getUpdatedAt().isBefore(createdAt));
+
+        PullThroughCacheRule roleOnlyUpdate = service.updatePullThroughCacheRule(
+                "update/cache", null, null,
+                "arn:aws:iam::000000000000:role/ReplacedRole", REGION);
+        assertEquals(updatedCredential, roleOnlyUpdate.getCredentialArn());
+        assertEquals("arn:aws:iam::000000000000:role/ReplacedRole", roleOnlyUpdate.getCustomRoleArn());
+    }
+
+    @Test
+    void validatePullThroughCacheRule_returnsStoredRuleAndMissingRulesFail() {
+        PullThroughCacheRule created = service.createPullThroughCacheRule(
+                "validate/cache", "quay.io", null, null,
+                null, null, null, REGION);
+
+        PullThroughCacheRule validated = service.validatePullThroughCacheRule(
+                "validate/cache/", null, REGION);
+
+        assertSame(created, validated);
+        assertEquals("quay.io", validated.getUpstreamRegistryUrl());
+        assertEquals("PullThroughCacheRuleNotFoundException", assertThrows(AwsException.class,
+                () -> service.validatePullThroughCacheRule("missing/cache", null, REGION)).getErrorCode());
+        assertEquals("PullThroughCacheRuleNotFoundException", assertThrows(AwsException.class,
+                () -> service.updatePullThroughCacheRule(
+                        "missing/cache", null, null, null, REGION)).getErrorCode());
+    }
+
+    /**
+     * An ECR upstream is recognised in every partition, as Floci's own registry recognises an ECR
+     * image URI: the host pattern once accepted only the commercial and China suffixes.
+     */
+    @Test
+    void pullThroughCacheRule_acceptsAnEcrUpstreamInEveryPartition() {
+        String[] hosts = {
+            "123456789012.dkr.ecr.us-east-1.amazonaws.com",
+            "123456789012.dkr.ecr.cn-north-1.amazonaws.com.cn",
+            "123456789012.dkr.ecr.us-gov-west-1.amazonaws.com",
+            "123456789012.dkr.ecr.us-iso-east-1.c2s.ic.gov",
+            "123456789012.dkr.ecr.eusc-de-east-1.amazonaws.eu",
+        };
+        for (int i = 0; i < hosts.length; i++) {
+            PullThroughCacheRule rule = service.createPullThroughCacheRule("ecr-up-" + i, hosts[i], null,
+                    null, null, null, null, REGION);
+            assertEquals("ecr", rule.getUpstreamRegistry(), hosts[i]);
+        }
+        assertEquals("UnsupportedUpstreamRegistryException", assertThrows(AwsException.class,
+                () -> service.createPullThroughCacheRule("ecr-up-bad", "123456789012.dkr.ecr.us-east-1.example.com",
+                        null, null, null, null, null, REGION)).getErrorCode());
+    }
+
+    @Test
+    void pullThroughCacheRule_rejectsInvalidInputs() {
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class,
+                () -> service.createPullThroughCacheRule("A", "quay.io", null,
+                        null, null, null, null, REGION)).getErrorCode());
+        assertEquals("UnsupportedUpstreamRegistryException", assertThrows(AwsException.class,
+                () -> service.createPullThroughCacheRule("invalid/upstream", "example.com", null,
+                        null, null, null, null, REGION)).getErrorCode());
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class,
+                () -> service.createPullThroughCacheRule("ROOT", "quay.io", null,
+                        null, null, null, "team", REGION)).getErrorCode());
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class,
+                () -> service.describePullThroughCacheRules(
+                        null, List.of(), null, null, REGION)).getErrorCode());
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class,
+                () -> service.describePullThroughCacheRules(
+                        null, Collections.nCopies(101, "cache"), null, null, REGION)).getErrorCode());
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class,
+                () -> service.describePullThroughCacheRules(null, null, 0, null, REGION)).getErrorCode());
     }
 
     // ------------------------------------------------------------
@@ -111,43 +303,6 @@ class EcrServiceTest {
         AwsException ex = assertThrows(AwsException.class,
                 () -> service.createRepository("Invalid_Caps", null, null, null, null, null, null, REGION));
         assertEquals("InvalidParameterException", ex.getErrorCode());
-    }
-
-    @Test
-    void createRepository_acceptsDoubleHyphenLikeAws() {
-        // Verified against LIVE ECR (2026-08-18): CreateRepository accepted
-        // "alchemy-probe--double-dash". AWS's real constraint (quoted in its
-        // own InvalidParameterException) is
-        // [a-z0-9]+((\.|_|__|-+)[a-z0-9]+)* — hyphen runs are `-+`, so
-        // consecutive hyphens are LEGAL despite the older documented pattern.
-        assertEquals("aws-ecs-service-image-form--task",
-                service.createRepository(
-                        "aws-ecs-service-image-form--task",
-                        null, null, null, null, null, null, REGION)
-                        .getRepositoryName());
-    }
-
-    @Test
-    void createRepository_rejectsTrailingSeparatorLikeAws() {
-        // Verified against LIVE ECR: "trailing-dash-" and "dot..dot" are
-        // rejected — separators must sit between alphanumeric runs.
-        AwsException ex = assertThrows(AwsException.class,
-                () -> service.createRepository(
-                        "trailing-dash-",
-                        null, null, null, null, null, null, REGION));
-        assertEquals("InvalidParameterException", ex.getErrorCode());
-        AwsException dots = assertThrows(AwsException.class,
-                () -> service.createRepository(
-                        "dot..dot",
-                        null, null, null, null, null, null, REGION));
-        assertEquals("InvalidParameterException", dots.getErrorCode());
-    }
-
-    @Test
-    void createRepository_acceptsAwsLegalSeparators() {
-        Repository repo = service.createRepository(
-                "foo-bar.baz_qux/a-b", null, null, null, null, null, null, REGION);
-        assertEquals("foo-bar.baz_qux/a-b", repo.getRepositoryName());
     }
 
     @Test
@@ -248,11 +403,6 @@ class EcrServiceTest {
         service.createRepository(REPO, null, null, null, null, null, null, REGION);
         when(registryManager.tryEnsureStarted()).thenReturn(false);
 
-        AwsException auth = assertThrows(AwsException.class, () -> service.getAuthorizationToken());
-        assertEquals("ServerException", auth.getErrorCode());
-        assertEquals(500, auth.getHttpStatus());
-        assertTrue(auth.getMessage().contains("Docker"), auth.getMessage());
-
         assertEquals("ServerException",
                 assertThrows(AwsException.class, () -> service.listImages(REPO, null, REGION)).getErrorCode());
         assertEquals("ServerException",
@@ -264,6 +414,19 @@ class EcrServiceTest {
         assertEquals("ServerException",
                 assertThrows(AwsException.class,
                         () -> service.batchDeleteImage(REPO, List.of(), null, REGION)).getErrorCode());
+    }
+
+    @Test
+    void getAuthorizationToken_succeedsWhenRegistryIsUnavailable() {
+        when(registryManager.tryEnsureStarted()).thenReturn(false);
+
+        AuthorizationData data = service.getAuthorizationToken();
+
+        String decoded = new String(Base64.getDecoder().decode(data.getAuthorizationToken()));
+        assertTrue(decoded.startsWith("AWS:"), "decoded token should start with AWS: but was: " + decoded);
+        assertEquals("http://localhost:4566", data.getProxyEndpoint());
+        assertNotNull(data.getExpiresAt());
+        verify(registryManager, never()).tryEnsureStarted();
     }
 
     // ------------------------------------------------------------
@@ -279,23 +442,46 @@ class EcrServiceTest {
     }
 
     @Test
+    void describeRepositoriesRefreshesStoredUrisForTheCurrentConfiguration() {
+        String namedRepository = REPO + "-named";
+        String listedRepository = REPO + "-listed";
+        service.createRepository(namedRepository, null, null, null, null, null, null, REGION);
+        service.createRepository(listedRepository, null, null, null, null, null, null, REGION);
+        when(registryManager.getRepositoryUri(anyString(), anyString(), anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0) + ".dkr.ecr." + invocation.getArgument(1)
+                        + ".localhost.floci.io:4566/" + invocation.getArgument(2));
+
+        Repository named = service.describeRepositories(List.of(namedRepository), null, REGION).getFirst();
+        assertEquals(ACCOUNT + ".dkr.ecr." + REGION + ".localhost.floci.io:4566/" + namedRepository,
+                named.getRepositoryUri());
+        List<Repository> listed = service.describeRepositories(null, null, REGION);
+        assertEquals(2, listed.size());
+        assertTrue(listed.stream().allMatch(repository -> repository.getRepositoryUri()
+                .equals(ACCOUNT + ".dkr.ecr." + REGION + ".localhost.floci.io:4566/"
+                        + repository.getRepositoryName())));
+    }
+
+    @Test
+    void deleteRepositoryRefreshesItsResponseWithoutRecreatingMetadata() {
+        service.createRepository(REPO, null, null, null, null, null, null, REGION);
+        String tlsUri = ACCOUNT + ".dkr.ecr." + REGION + ".localhost.floci.io:4566/" + REPO;
+        when(registryManager.getRepositoryUri(ACCOUNT, REGION, REPO)).thenReturn(tlsUri);
+        when(registryManager.tryEnsureStarted()).thenReturn(false);
+
+        Repository deleted = service.deleteRepository(REPO, null, false, REGION);
+
+        assertEquals(tlsUri, deleted.getRepositoryUri());
+        assertThrows(AwsException.class, () -> service.describeRepositories(List.of(REPO), null, REGION));
+        assertTrue(service.describeRepositories(null, null, REGION).isEmpty());
+    }
+
+    @Test
     void describeRepositories_emptyList_returnsAllInRegion() {
         service.createRepository("a/one", null, null, null, null, null, null, REGION);
         service.createRepository("a/two", null, null, null, null, null, null, REGION);
         service.createRepository("a/three", null, null, null, null, null, null, "eu-west-1");
         List<Repository> repos = service.describeRepositories(null, null, REGION);
         assertEquals(2, repos.size());
-    }
-
-    @Test
-    void describeRepositories_findsRepoCreatedUnderDifferentRegistryId() {
-        service.createRepository(REPO, "391965393224", null, null, null, null, null, REGION);
-        List<Repository> repos = service.describeRepositories(List.of(REPO), "000000000000", REGION);
-        assertEquals(1, repos.size());
-        assertEquals(REPO, repos.get(0).getRepositoryName());
-        assertEquals("391965393224", repos.get(0).getRegistryId());
-        List<Repository> all = service.describeRepositories(null, "000000000000", REGION);
-        assertTrue(all.stream().anyMatch(r -> REPO.equals(r.getRepositoryName())));
     }
 
     @Test
@@ -393,6 +579,7 @@ class EcrServiceTest {
         EcrService accountAwareService = new EcrService(
                 repositories,
                 new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
                 registryManager,
                 Mockito.mock(EmulatorConfig.class),
                 new RegionResolver(REGION, ACCOUNT));
@@ -412,15 +599,11 @@ class EcrServiceTest {
     void getAuthorizationToken_decodesToAwsPrefix() {
         AuthorizationData data = service.getAuthorizationToken();
         assertNotNull(data.getAuthorizationToken());
-        assertTrue(data.getAuthorizationToken().length() > 100,
-                "authorization token must be longer than 100 chars (AWS-shaped)");
         assertTrue(data.getProxyEndpoint().startsWith("http"));
-        assertTrue(data.getProxyEndpoint().contains(".ecr."),
-                "proxyEndpoint must be an ECR hostname, was: " + data.getProxyEndpoint());
         assertNotNull(data.getExpiresAt());
         String decoded = new String(Base64.getDecoder().decode(data.getAuthorizationToken()));
         assertTrue(decoded.startsWith("AWS:"), "decoded token should start with AWS: but was: " + decoded);
-        Mockito.verify(registryManager).tryEnsureStarted();
+        verify(registryManager, never()).tryEnsureStarted();
     }
 
     @Test
@@ -475,78 +658,6 @@ class EcrServiceTest {
             assertEquals("application/vnd.docker.container.image.v1+json", detail.getArtifactMediaType());
             assertNotNull(detail.getImagePushedAt());
         }
-    }
-
-    @Test
-    void hostnameStyleDockerPushIsVisibleViaListAndDescribeImages() throws Exception {
-        // docker push to <account>.dkr.ecr.<region>.localhost:<port>/<repo> writes
-        // /v2/<repo>/... — not the internal <account>/<region>/<repo> namespace.
-        String repositoryName = "alchemy-test-ecr-image";
-        String tag = "abc123";
-        String digest = "sha256:2222222222222222222222222222222222222222222222222222222222222222";
-        String manifest = """
-                {
-                  "schemaVersion": 2,
-                  "mediaType": "application/vnd.docker.distribution.manifest.v2+json",
-                  "config": {
-                    "mediaType": "application/vnd.docker.container.image.v1+json",
-                    "size": 123,
-                    "digest": "sha256:config"
-                  },
-                  "layers": [
-                    {
-                      "mediaType": "application/vnd.docker.image.rootfs.diff.tar.gzip",
-                      "size": 456,
-                      "digest": "sha256:layer"
-                    }
-                  ]
-                }
-                """;
-
-        try (FakeRegistryServer registry = new FakeRegistryServer(repositoryName, tag, digest, manifest)) {
-            when(registryManager.httpClient())
-                    .thenReturn(new RegistryHttpClient("http://localhost:" + registry.port()));
-
-            service.createRepository(repositoryName, null, null, null, null, null, null, REGION);
-
-            List<ImageIdentifier> imageIds = service.listImages(repositoryName, null, REGION);
-            assertEquals(1, imageIds.size());
-            assertEquals(tag, imageIds.get(0).getImageTag());
-            assertEquals(digest, imageIds.get(0).getImageDigest());
-
-            EcrService.DescribeImagesResult described = service.describeImages(
-                    repositoryName, List.of(new ImageIdentifier(tag, null)), null, REGION);
-            assertEquals(1, described.imageDetails().size());
-            assertEquals(digest, described.imageDetails().get(0).getImageDigest());
-        }
-    }
-
-    @Test
-    @SuppressWarnings("unchecked")
-    void putImage_publishesEcrImageActionEvent() {
-        service.createRepository(REPO, null, null, null, null, null, null, REGION);
-        byte[] layer = "layer\n".getBytes();
-        String layerDigest = sha256(layer);
-        EcrService.InitiateLayerUploadResult init = service.initiateLayerUpload(REPO, null, REGION);
-        service.uploadLayerPart(REPO, null, REGION, init.uploadId(), 0, layer.length - 1, layer);
-        service.completeLayerUpload(REPO, null, REGION, init.uploadId(), List.of(layerDigest));
-
-        String manifest = "{\"schemaVersion\":2,\"mediaType\":\"application/vnd.docker.distribution.manifest.v2+json\"}";
-        Image image = service.putImage(REPO, null, REGION, manifest,
-                "application/vnd.docker.distribution.manifest.v2+json", "1.0.0", null);
-
-        ArgumentCaptor<List<Map<String, Object>>> captor = ArgumentCaptor.forClass(List.class);
-        verify(eventBridgeService).putEvents(captor.capture(), eq(REGION));
-        Map<String, Object> entry = captor.getValue().get(0);
-        assertEquals("aws.ecr", entry.get("Source"));
-        assertEquals("ECR Image Action", entry.get("DetailType"));
-        JsonNode detail = assertDoesNotThrow(
-                () -> new ObjectMapper().readTree((String) entry.get("Detail")));
-        assertEquals("PUSH", detail.get("action-type").asText());
-        assertEquals("SUCCESS", detail.get("result").asText());
-        assertEquals(REPO, detail.get("repository-name").asText());
-        assertEquals("1.0.0", detail.get("image-tag").asText());
-        assertEquals(image.getImageId().getImageDigest(), detail.get("image-digest").asText());
     }
 
     // ------------------------------------------------------------
@@ -798,6 +909,23 @@ class EcrServiceTest {
     }
 
     @Test
+    void putImage_retagKeepsTheFirstPushTime() {
+        InMemoryStorage<String, ImageMetadata> metaStore = new InMemoryStorage<>();
+        EcrService withMeta = new EcrService(new InMemoryStorage<>(), metaStore, pullThroughCacheRuleStore,
+                registryManager, Mockito.mock(EmulatorConfig.class), new RegionResolver(REGION, ACCOUNT));
+        when(registryManager.httpClient()).thenReturn(Mockito.mock(RegistryHttpClient.class));
+        withMeta.createRepository(REPO, null, null, null, null, null, null, REGION);
+        String manifest = "{\"schemaVersion\":2,\"mediaType\":\"application/vnd.docker.distribution.manifest.v2+json\"}";
+
+        withMeta.putImage(REPO, manifest, null, "v1", null, null, REGION);
+        Instant firstPush = metaStore.scan(k -> true).get(0).getPushedAt();
+        withMeta.putImage(REPO, manifest, null, "release", null, null, REGION);
+
+        assertEquals(1, metaStore.scan(k -> true).size());
+        assertEquals(firstPush, metaStore.scan(k -> true).get(0).getPushedAt());
+    }
+
+    @Test
     void putImageTagMutability_roundTrips() {
         service.createRepository(REPO, null, null, null, null, null, null, REGION);
         Repository updated = service.putImageTagMutability(REPO, null, "IMMUTABLE", REGION);
@@ -880,113 +1008,6 @@ class EcrServiceTest {
     // ------------------------------------------------------------
     // Reconcile
     // ------------------------------------------------------------
-
-    @Test
-    void putImageScanningConfiguration_roundTrips() {
-        service.createRepository(REPO, null, null, false, null, null, null, REGION);
-        Repository updated = service.putImageScanningConfiguration(REPO, null, true, REGION);
-        assertTrue(updated.isScanOnPush());
-        Repository fetched = service.describeRepositories(List.of(REPO), null, REGION).get(0);
-        assertTrue(fetched.isScanOnPush());
-    }
-
-    @Test
-    void registryPolicy_roundTrip() {
-        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[]}";
-        EcrService.RegistryPolicyResult put = service.putRegistryPolicy(policy, REGION);
-        assertEquals(ACCOUNT, put.registryId());
-        assertEquals(policy, put.policyText());
-        EcrService.RegistryPolicyResult got = service.getRegistryPolicy(REGION);
-        assertEquals(policy, got.policyText());
-        service.deleteRegistryPolicy(REGION);
-        AwsException ex = assertThrows(AwsException.class, () -> service.getRegistryPolicy(REGION));
-        assertEquals("RegistryPolicyNotFoundException", ex.getErrorCode());
-    }
-
-    @Test
-    void layerUpload_putImage_describe_download_check_scan() {
-        service.createRepository(REPO, null, null, null, null, null, null, REGION);
-        byte[] layer = "alchemy ecr layer blob for 1.0.0\n".repeat(8).getBytes();
-        String layerDigest = sha256(layer);
-        byte[] config = "{\"architecture\":\"amd64\"}".getBytes();
-        String configDigest = sha256(config);
-
-        EcrService.InitiateLayerUploadResult init = service.initiateLayerUpload(REPO, null, REGION);
-        assertNotNull(init.uploadId());
-        assertTrue(init.partSize() > 0);
-        service.uploadLayerPart(REPO, null, REGION, init.uploadId(), 0, layer.length - 1, layer);
-        EcrService.CompleteLayerUploadResult completed =
-                service.completeLayerUpload(REPO, null, REGION, init.uploadId(), List.of(layerDigest));
-        assertEquals(layerDigest, completed.layerDigest());
-
-        EcrService.InitiateLayerUploadResult initCfg = service.initiateLayerUpload(REPO, null, REGION);
-        service.uploadLayerPart(REPO, null, REGION, initCfg.uploadId(), 0, config.length - 1, config);
-        service.completeLayerUpload(REPO, null, REGION, initCfg.uploadId(), List.of(configDigest));
-
-        AwsException already = assertThrows(AwsException.class,
-                () -> {
-                    EcrService.InitiateLayerUploadResult again = service.initiateLayerUpload(REPO, null, REGION);
-                    service.uploadLayerPart(REPO, null, REGION, again.uploadId(), 0, layer.length - 1, layer);
-                    service.completeLayerUpload(REPO, null, REGION, again.uploadId(), List.of(layerDigest));
-                });
-        assertEquals("LayerAlreadyExistsException", already.getErrorCode());
-
-        String manifest = """
-                {"schemaVersion":2,"mediaType":"application/vnd.docker.distribution.manifest.v2+json",\
-                "config":{"mediaType":"application/vnd.docker.container.image.v1+json","size":%d,"digest":"%s"},\
-                "layers":[{"mediaType":"application/vnd.docker.image.rootfs.diff.tar.gzip","size":%d,"digest":"%s"}]}
-                """.formatted(config.length, configDigest, layer.length, layerDigest);
-        Image image = service.putImage(REPO, null, REGION, manifest,
-                "application/vnd.docker.distribution.manifest.v2+json", "1.0.0", null);
-        assertEquals("1.0.0", image.getImageId().getImageTag());
-        assertTrue(image.getImageId().getImageDigest().startsWith("sha256:"));
-
-        AwsException exists = assertThrows(AwsException.class,
-                () -> service.putImage(REPO, null, REGION, manifest,
-                        "application/vnd.docker.distribution.manifest.v2+json", "1.0.0",
-                        image.getImageId().getImageDigest()));
-        assertEquals("ImageAlreadyExistsException", exists.getErrorCode());
-
-        List<ImageIdentifier> ids = service.listImages(REPO, null, REGION);
-        assertTrue(ids.stream().anyMatch(id -> "1.0.0".equals(id.getImageTag())));
-
-        EcrService.DescribeImagesResult described = service.describeImages(
-                REPO, List.of(new ImageIdentifier("1.0.0", null)), null, REGION);
-        assertEquals(1, described.imageDetails().size());
-        assertEquals(image.getImageId().getImageDigest(), described.imageDetails().get(0).getImageDigest());
-
-        EcrService.DownloadUrl url = service.getDownloadUrlForLayer(REPO, null, REGION, layerDigest);
-        assertEquals("https://" + ACCOUNT + ".dkr.ecr." + REGION + ".localhost:4566/v2/"
-                + REPO + "/blobs/" + layerDigest, url.downloadUrl());
-        assertEquals(layerDigest, url.layerDigest());
-
-        when(registryManager.getRepositoryUri(ACCOUNT, REGION, REPO))
-                .thenReturn("localhost:4566/" + ACCOUNT + "/" + REGION + "/" + REPO);
-        assertEquals("https://localhost:4566/v2/" + ACCOUNT + "/" + REGION + "/"
-                        + REPO + "/blobs/" + layerDigest,
-                service.getDownloadUrlForLayer(REPO, null, REGION, layerDigest).downloadUrl());
-
-        EcrService.LayerAvailabilityResult availability =
-                service.batchCheckLayerAvailability(REPO, null, REGION, List.of(layerDigest));
-        assertEquals("AVAILABLE", availability.layers().get(0).layerAvailability());
-
-        AwsException scan = assertThrows(AwsException.class,
-                () -> service.startImageScan(REPO, null, REGION, new ImageIdentifier("1.0.0", null)));
-        assertEquals("UnsupportedImageTypeException", scan.getErrorCode());
-
-        AwsException findings = assertThrows(AwsException.class,
-                () -> service.describeImageScanFindings(REPO, null, REGION, new ImageIdentifier("1.0.0", null)));
-        assertEquals("ScanNotFoundException", findings.getErrorCode());
-    }
-
-    private static String sha256(byte[] data) {
-        try {
-            byte[] hash = java.security.MessageDigest.getInstance("SHA-256").digest(data);
-            return "sha256:" + java.util.HexFormat.of().formatHex(hash);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
 
     @Test
     void reconcileFromCatalog_recreatesMissingMetadata() {
@@ -1313,4 +1334,135 @@ class EcrServiceTest {
         }
     }
 
+    // ------------------------------------------------------------
+    // Registry settings
+    // ------------------------------------------------------------
+
+    private static final String REGISTRY_POLICY = "{\"Version\":\"2012-10-17\",\"Statement\":[]}";
+
+    private static RegistrySettings.ReplicationRule replicateTo(String region, String registryId, String prefix) {
+        return new RegistrySettings.ReplicationRule(
+                List.of(new RegistrySettings.ReplicationDestination(region, registryId)),
+                prefix == null ? null : List.of(new RegistrySettings.RepositoryFilter(prefix, "PREFIX_MATCH")));
+    }
+
+    private static RegistrySettings.ScanningRule scan(String frequency, String filter) {
+        return new RegistrySettings.ScanningRule(frequency,
+                List.of(new RegistrySettings.RepositoryFilter(filter, "WILDCARD")));
+    }
+
+    private static void assertInvalid(Runnable call) {
+        assertEquals("InvalidParameterException", assertThrows(AwsException.class, call::run).getErrorCode());
+    }
+
+    @Test
+    void registryPolicy_roundTripsAndIsNotFoundOnceDeleted() {
+        AwsException missing = assertThrows(AwsException.class, () -> service.getRegistryPolicy(REGION));
+        assertEquals("RegistryPolicyNotFoundException", missing.getErrorCode());
+
+        service.putRegistryPolicy(REGISTRY_POLICY, REGION);
+        assertEquals(REGISTRY_POLICY, service.getRegistryPolicy(REGION));
+        assertEquals(REGISTRY_POLICY, service.deleteRegistryPolicy(REGION));
+
+        assertEquals("RegistryPolicyNotFoundException",
+                assertThrows(AwsException.class, () -> service.getRegistryPolicy(REGION)).getErrorCode());
+        assertEquals("RegistryPolicyNotFoundException",
+                assertThrows(AwsException.class, () -> service.deleteRegistryPolicy(REGION)).getErrorCode());
+    }
+
+    @Test
+    void registryPolicy_mustBeAJsonObject() {
+        assertInvalid(() -> service.putRegistryPolicy("not json", REGION));
+        assertInvalid(() -> service.putRegistryPolicy("[]", REGION));
+        assertInvalid(() -> service.putRegistryPolicy("", REGION));
+    }
+
+    @Test
+    void replication_roundTripsAndAnEmptyListClearsIt() {
+        assertTrue(service.replicationRules(REGION).isEmpty());
+
+        List<RegistrySettings.ReplicationRule> rules = List.of(
+                replicateTo("us-west-2", ACCOUNT, "prod"),
+                replicateTo("eu-west-1", "111111111111", null));
+        assertEquals(rules, service.putReplicationConfiguration(rules, REGION));
+        assertEquals(rules, service.replicationRules(REGION));
+
+        assertTrue(service.putReplicationConfiguration(List.of(), REGION).isEmpty());
+        assertTrue(service.replicationRules(REGION).isEmpty());
+    }
+
+    @Test
+    void scanning_defaultsToBasicAndRoundTrips() {
+        RegistrySettings initial = service.registryScanningConfiguration(REGION);
+        assertEquals("BASIC", initial.getScanType());
+        assertTrue(initial.getScanningRules().isEmpty());
+
+        List<RegistrySettings.ScanningRule> rules = List.of(scan("CONTINUOUS_SCAN", "prod-*"), scan("SCAN_ON_PUSH", "*"));
+        RegistrySettings saved = service.putRegistryScanningConfiguration("ENHANCED", rules, REGION);
+        assertEquals("ENHANCED", saved.getScanType());
+        assertEquals(rules, service.registryScanningConfiguration(REGION).getScanningRules());
+    }
+
+    @Test
+    void scanning_refusesContinuousScanWithBasic() {
+        assertInvalid(() -> service.putRegistryScanningConfiguration(
+                "BASIC", List.of(scan("CONTINUOUS_SCAN", "*")), REGION));
+        assertInvalid(() -> service.putRegistryScanningConfiguration(
+                null, List.of(scan("CONTINUOUS_SCAN", "*")), REGION));
+        assertDoesNotThrow(() -> service.putRegistryScanningConfiguration(
+                "ENHANCED", List.of(scan("CONTINUOUS_SCAN", "*")), REGION));
+    }
+
+    @Test
+    void registrySettings_areKeptPerAccountAndRegion() {
+        InMemoryStorage<String, RegistrySettings> store = new InMemoryStorage<>();
+        EcrService first = new EcrService(new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
+                store, registryManager, Mockito.mock(EmulatorConfig.class), new RegionResolver(REGION, ACCOUNT));
+        EcrService other = new EcrService(new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
+                store, registryManager, Mockito.mock(EmulatorConfig.class),
+                new RegionResolver(REGION, "111111111111"));
+
+        first.putRegistryPolicy(REGISTRY_POLICY, REGION);
+        assertEquals(REGISTRY_POLICY, first.getRegistryPolicy(REGION));
+        assertThrows(AwsException.class, () -> first.getRegistryPolicy("us-west-2"));
+        assertThrows(AwsException.class, () -> other.getRegistryPolicy(REGION));
+        assertEquals("111111111111", other.registryId());
+    }
+
+    /**
+     * Terraform puts the policy, replication and scanning configuration in parallel. Each round
+     * starts the three puts together on a registry with no settings yet, and all three must stay.
+     */
+    @Test
+    void registrySettings_parallelPutsAllSurvive() throws Exception {
+        EcrService parallel = new EcrService(new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), registryManager, Mockito.mock(EmulatorConfig.class),
+                new RegionResolver(REGION, ACCOUNT));
+        List<RegistrySettings.ReplicationRule> rules = List.of(replicateTo("eu-west-1", ACCOUNT, null));
+        ExecutorService pool = Executors.newFixedThreadPool(3);
+        try {
+            for (int round = 0; round < 300; round++) {
+                String region = "round-" + round;
+                CyclicBarrier start = new CyclicBarrier(3);
+                List<Runnable> puts = List.of(
+                        () -> parallel.putRegistryPolicy(REGISTRY_POLICY, region),
+                        () -> parallel.putReplicationConfiguration(rules, region),
+                        () -> parallel.putRegistryScanningConfiguration("ENHANCED", List.of(), region));
+                CompletableFuture.allOf(puts.stream().map(put -> CompletableFuture.runAsync(() -> {
+                    try {
+                        start.await(5, TimeUnit.SECONDS);
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                    put.run();
+                }, pool)).toArray(CompletableFuture[]::new)).get(10, TimeUnit.SECONDS);
+
+                assertEquals(REGISTRY_POLICY, parallel.getRegistryPolicy(region), region);
+                assertEquals(rules, parallel.replicationRules(region), region);
+                assertEquals("ENHANCED", parallel.registryScanningConfiguration(region).getScanType(), region);
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
 }

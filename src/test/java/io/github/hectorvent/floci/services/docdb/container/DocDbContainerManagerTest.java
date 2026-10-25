@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.docdb.container;
 
+import com.github.dockerjava.api.DockerClient;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -7,7 +8,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
-import com.github.dockerjava.api.DockerClient;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -104,9 +105,9 @@ class DocDbContainerManagerTest {
                             new ContainerLifecycleManager.EndpointInfo("127.0.0.1", mongod.port()))));
 
             ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-            ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
+            ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(mock(ContainerSpec.class));
+            when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
             DocDbContainerManager manager = new DocDbContainerManager(containerBuilder, lifecycleManager,
                     logStreamer(), mock(ContainerDetector.class), docdbConfig(),
@@ -155,9 +156,9 @@ class DocDbContainerManagerTest {
 
     private DocDbContainerManager newManager(ContainerLifecycleManager lifecycleManager) {
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
         return new DocDbContainerManager(containerBuilder, lifecycleManager, logStreamer(),
                 mock(ContainerDetector.class), docdbConfig(), new RegionResolver("us-east-1", "000000000000"));

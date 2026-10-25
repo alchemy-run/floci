@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.pipes;
 
 import com.sun.net.httpserver.HttpServer;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
@@ -10,7 +11,6 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.E
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.PortAllocator;
-import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -116,6 +116,25 @@ class KarapaceManagerTest {
         assertTrue(spec.env().contains("KARAPACE_BOOTSTRAP_URI=broker-1:9092"),
                 "Karapace must be pointed at the target cluster's bootstrap servers");
         assertEquals(Integer.valueOf(hostPort), spec.portBindings().get(REST_PORT));
+    }
+
+    @Test
+    void bridgeContainerCarriesThePipesIdentityAndItsComponent() throws Exception {
+        int hostPort = startFakeRestServer();
+        when(containerDetector.isRunningInContainer()).thenReturn(false);
+        when(portAllocator.allocate(9500, 9599)).thenReturn(hostPort);
+        when(lifecycleManager.createAndStart(any())).thenReturn(new ContainerInfo("container-1",
+                Map.of(REST_PORT, new EndpointInfo("localhost", hostPort))));
+
+        manager.ensureStarted("broker-1:9092");
+
+        ArgumentCaptor<ContainerSpec> specCaptor = ArgumentCaptor.forClass(ContainerSpec.class);
+        verify(lifecycleManager).createAndStart(specCaptor.capture());
+        // The legacy floci.component alias is added where every container is created, not here.
+        assertEquals(
+                Map.of("io.floci", "aws", "io.floci.service", "pipes",
+                        "io.floci.component", "pipes-kafka-rest-bridge"),
+                specCaptor.getValue().labels());
     }
 
     @Test

@@ -87,8 +87,8 @@ class KinesisAnalyticsV2ServiceTest {
                 .create(Mockito.anyString(), Mockito.anyString(), Mockito.any());
 
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        var kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
+        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.KinesisAnalyticsServiceConfig kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.kinesisAnalytics()).thenReturn(kaConfig);
         when(kaConfig.mock()).thenReturn(true);
@@ -637,8 +637,8 @@ class KinesisAnalyticsV2ServiceTest {
                 .create(Mockito.anyString(), Mockito.anyString(), Mockito.any());
 
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        var kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
+        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.KinesisAnalyticsServiceConfig kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.kinesisAnalytics()).thenReturn(kaConfig);
         when(kaConfig.mock()).thenReturn(false);
@@ -693,8 +693,8 @@ class KinesisAnalyticsV2ServiceTest {
                 .thenReturn(AccountAwareStorageBackend.inMemory("000000000000"));
 
         EmulatorConfig config = Mockito.mock(EmulatorConfig.class);
-        var servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
-        var kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
+        EmulatorConfig.ServicesConfig servicesConfig = Mockito.mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.KinesisAnalyticsServiceConfig kaConfig = Mockito.mock(EmulatorConfig.KinesisAnalyticsServiceConfig.class);
         when(config.services()).thenReturn(servicesConfig);
         when(servicesConfig.kinesisAnalytics()).thenReturn(kaConfig);
         when(kaConfig.mock()).thenReturn(mock);

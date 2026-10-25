@@ -20,7 +20,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
  *
  * <p>Such a record sits under the key {@code ""} while reporting {@code (none)} from its own field,
  * because {@link BasePathMapping} normalises in its constructor. No endpoint can create one now, so
- * the state is seeded through the same storage backend the service uses, the factory hands out one
+ * the state is seeded through the same storage backend the service uses — the factory hands out one
  * backend per file.
  */
 @QuarkusTest
@@ -42,9 +42,8 @@ class LegacyBasePathMappingIntegrationTest {
 
     private void seedLegacyState() {
         service.createDomainName(REGION, Map.of("domainName", DOMAIN));
-        // Both records predate persisted mapping IDs, including the canonical root.
-        mappings().put(REGION + "::" + DOMAIN + "::(none)",
-                new BasePathMapping("(none)", "api-canonical", "prod"));
+        // The canonical root, as writes produce it today.
+        service.createBasePathMapping(REGION, DOMAIN, Map.of("restApiId", "api-canonical", "stage", "prod"));
         // And one the old write path left under the empty key; its field still reads "(none)".
         mappings().put(REGION + "::" + DOMAIN + "::", new BasePathMapping("", "api-legacy", "prod"));
     }
@@ -53,8 +52,8 @@ class LegacyBasePathMappingIntegrationTest {
     void eachRecordKeepsItsOwnIdAndDeletesItself() {
         seedLegacyState();
 
-        String canonicalId = ApiGatewayController.apiMappingId("(none)");
-        String legacyId = ApiGatewayController.apiMappingId("");
+        String canonicalId = ApiGatewayService.apiMappingId("(none)");
+        String legacyId = ApiGatewayService.apiMappingId("");
         assertNotEquals(canonicalId, legacyId);
 
         given()

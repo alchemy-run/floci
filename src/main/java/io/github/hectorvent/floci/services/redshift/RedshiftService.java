@@ -1574,7 +1574,7 @@ public class RedshiftService {
         }
         List<Subnet> observed;
         try {
-            observed = ec2Service.describeSubnets(regionResolver.getRegion(), subnetIds, Map.of());
+            observed = ec2Service.requireSubnets(regionResolver.getRegion(), subnetIds);
         } catch (AwsException exception) {
             if (!"InvalidSubnetID.NotFound".equals(exception.getErrorCode())) {
                 throw exception;

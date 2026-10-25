@@ -2,17 +2,19 @@ package io.github.hectorvent.floci.services.ses;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ses.model.Contact;
 import io.github.hectorvent.floci.services.ses.model.ContactList;
+import io.github.hectorvent.floci.services.ses.model.ListManagementOptions;
 import io.github.hectorvent.floci.services.ses.model.Tag;
 import io.github.hectorvent.floci.services.ses.model.Topic;
 import io.github.hectorvent.floci.services.ses.model.TopicPreference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
-import io.github.hectorvent.floci.services.ses.model.ListManagementOptions;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -24,8 +26,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.function.UnaryOperator;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 
 /**
@@ -40,7 +42,7 @@ import java.util.regex.Pattern;
  * with the facade's address extractor injected as a callback.
  */
 @ApplicationScoped
-public class SesContactService {
+public class SesContactService implements SesTaggable {
 
     private static final Logger LOG = Logger.getLogger(SesContactService.class);
 
@@ -109,6 +111,7 @@ public class SesContactService {
                 .orElseThrow(() -> contactListNotFound(name));
     }
 
+    @Override
     public List<Tag> listTags(String name, String region) {
         ContactList list = contactListStore.get(contactListKey(region, name))
                 .orElseThrow(() -> tagTargetNotFound(name));
@@ -120,6 +123,7 @@ public class SesContactService {
      * used by deletion, so tagging can't resurrect a concurrently deleted list or overwrite a
      * concurrent mutation with a stale object.
      */
+    @Override
     public void tag(String name, String region, List<Tag> newTags) {
         String key = contactListKey(region, name);
         synchronized (contactMutationLock) {
@@ -130,6 +134,7 @@ public class SesContactService {
         LOG.infov("Tagged SES contact list: {0} in region {1} (+{2} tags)", name, region, newTags.size());
     }
 
+    @Override
     public void untag(String name, String region, List<String> tagKeys) {
         String key = contactListKey(region, name);
         synchronized (contactMutationLock) {
@@ -149,6 +154,12 @@ public class SesContactService {
         // (probe-confirmed), unlike the CRUD "List with name: X doesn't exist."
         return new AwsException("NotFoundException",
                 "No ContactList present with name: " + name, 404);
+    }
+
+    public PaginatedResult<ContactList> listContactLists(String region, SesListPaging paging, Integer pageSize,
+                                                         String nextToken) {
+        return paging.page(region, listContactLists(region), ContactList::getContactListName, pageSize,
+                nextToken);
     }
 
     public List<ContactList> listContactLists(String region) {
@@ -207,9 +218,8 @@ public class SesContactService {
     // SES V2 surfaces missing/invalid input as Smithy validation errors. Field paths and the
     // enum value order are taken verbatim from real AWS.
     private static AwsException validationError(String fieldPath, String constraint) {
-        return new AwsException("BadRequestException",
-                "1 validation error detected: Value at '" + fieldPath
-                        + "' failed to satisfy constraint: " + constraint, 400);
+        return SmithyValidationErrors.badRequest(
+                "Value at '" + fieldPath + "' failed to satisfy constraint: " + constraint);
     }
 
     private static void validateContactListName(String name) {
@@ -351,14 +361,90 @@ public class SesContactService {
         return new ContactWithList(contact, list);
     }
 
+    public record ContactPage(PaginatedResult<Contact> contacts, ContactList list) {
+    }
+
+    /** A ListContacts {@code Filter}; {@code topicFilter} is null when the request has none. */
+    public record ContactFilter(String filteredStatus, TopicFilter topicFilter) {
+    }
+
+    public record TopicFilter(String topicName, boolean useDefaultIfPreferenceUnavailable) {
+    }
+
+    /**
+     * SES checks the status enum, then the page size, then the filter's shape, then the token, the
+     * list and last the topic. SES cuts the page before it filters, so its filtered pages come back
+     * short or empty; Floci filters first and returns exact pages. The token is a position in the
+     * list, not bound to the filter, so SES and Floci both take one across filters.
+     */
+    public ContactPage listContacts(String listName, String region, SesListPaging paging, Integer pageSize,
+                                    String nextToken, ContactFilter filter) {
+        if (filter != null && filter.filteredStatus() != null
+                && !SUBSCRIPTION_STATUSES.contains(filter.filteredStatus())) {
+            throw validationError("filter.filteredStatus",
+                    "Member must satisfy enum value set: [OPT_OUT, OPT_IN]");
+        }
+        // Validated here as well as in page() so the size error wins over the filter's shape.
+        paging.pageSize(pageSize);
+        if (filter != null) {
+            if (filter.filteredStatus() == null) {
+                throw new AwsException("BadRequestException", "Invalid FilteredStatus <null>", 400);
+            }
+            if (filter.topicFilter() != null && (filter.topicFilter().topicName() == null
+                    || filter.topicFilter().topicName().isBlank())) {
+                throw new AwsException("BadRequestException", "TopicName can't be blank in TopicFilter.", 400);
+            }
+        }
+        ContactList list = contactListStore.get(contactListKey(region, listName)).orElse(null);
+        String topicName = filter == null || filter.topicFilter() == null ? null : filter.topicFilter().topicName();
+        boolean topicFound = topicName == null || (list != null && defaultTopicStatus(list, topicName) != null);
+        List<Contact> contacts = list == null || !topicFound ? List.of()
+                : contactsOf(listName, region).stream().filter(c -> matchesFilter(c, list, filter)).toList();
+        PaginatedResult<Contact> page = paging.page(region, contacts, Contact::getEmailAddress, pageSize,
+                nextToken);
+        if (list == null) {
+            throw contactListNotFound(listName);
+        }
+        if (!topicFound) {
+            throw new AwsException("NotFoundException",
+                    "List: " + listName + " doesn't contain Topic: " + topicName, 404);
+        }
+        return new ContactPage(page, list);
+    }
+
+    // UnsubscribeAll is OPT_OUT for every topic. Without a topic it is the only thing a status
+    // matches; with one, an explicit preference decides, and the topic default only when asked for.
+    private boolean matchesFilter(Contact contact, ContactList list, ContactFilter filter) {
+        if (filter == null) {
+            return true;
+        }
+        TopicFilter topicFilter = filter.topicFilter();
+        String status;
+        if (contact.isUnsubscribeAll()) {
+            status = "OPT_OUT";
+        } else if (topicFilter == null) {
+            status = "OPT_IN";
+        } else if (explicitTopicStatus(contact, topicFilter.topicName()) != null) {
+            status = explicitTopicStatus(contact, topicFilter.topicName());
+        } else if (topicFilter.useDefaultIfPreferenceUnavailable()) {
+            status = defaultTopicStatus(list, topicFilter.topicName());
+        } else {
+            return false;
+        }
+        return filter.filteredStatus().equals(status);
+    }
+
     public ContactsWithList listContacts(String listName, String region) {
         ContactList list = getContactList(listName, region);
+        return new ContactsWithList(contactsOf(listName, region), list);
+    }
+
+    private List<Contact> contactsOf(String listName, String region) {
         String prefix = "contact::" + region + "::" + listName + "::";
-        List<Contact> contacts = contactStore.scan(k -> k.startsWith(prefix)).stream()
+        return contactStore.scan(k -> k.startsWith(prefix)).stream()
                 .sorted(Comparator.comparing(Contact::getEmailAddress,
                         Comparator.nullsFirst(Comparator.naturalOrder())))
                 .toList();
-        return new ContactsWithList(contacts, list);
     }
 
     public Contact updateContact(String listName, String emailAddress, List<TopicPreference> topicPreferences,

@@ -7,6 +7,7 @@ import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.XmlBuilder;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.CloudWatchDashboardsService;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.model.Dashboard;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.AlarmMetricDataQuery;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
@@ -26,17 +27,20 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.SortedSet;
+import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class CloudWatchMetricsQueryHandler {
 
     private static final Logger LOG = Logger.getLogger(CloudWatchMetricsQueryHandler.class);
+    private static final Pattern ENTITY_METRIC_DATA_MEMBER = Pattern.compile("EntityMetricData\\.member\\.(\\d{1,9})\\.");
 
     private CloudWatchMetricsService metricsService;
     private final CloudWatchDashboardsService dashboardsService;
     private final CloudWatchMetricStreamsService metricStreamsService;
-    @Inject
-    CloudWatchMetricsJsonHandler jsonHandler;
 
     @Inject
     public CloudWatchMetricsQueryHandler(CloudWatchMetricsService metricsService,
@@ -50,7 +54,7 @@ public class CloudWatchMetricsQueryHandler {
     public Response handle(String action, MultivaluedMap<String, String> params, String region) {
         String normalizedAction = action.substring(0, 1).toUpperCase() + action.substring(1);
         if (jsonHandler != null && java.util.Set.of(
-                "PutMetricData", "PutMetricAlarm", "DescribeAlarms", "DeleteAlarms", "SetAlarmState",
+                "PutMetricAlarm", "DescribeAlarms", "DeleteAlarms", "SetAlarmState",
                 "ListTagsForResource", "TagResource", "UntagResource", "PutCompositeAlarm",
                 "PutAnomalyDetector", "DescribeAnomalyDetectors", "DeleteAnomalyDetector",
                 "PutAlarmMuteRule", "GetAlarmMuteRule", "ListAlarmMuteRules", "DeleteAlarmMuteRule",
@@ -102,9 +106,9 @@ public class CloudWatchMetricsQueryHandler {
         List<CloudWatchMetricsService.MetricIdentity> metrics =
                 metricsService.listMetrics(namespace, metricName, dimensions, region);
 
-        var xml = new XmlBuilder().start("Metrics");
-        for (var m : metrics) {
-            var member = xml.start("member")
+        XmlBuilder xml = new XmlBuilder().start("Metrics");
+        for (CloudWatchMetricsService.MetricIdentity m : metrics) {
+            XmlBuilder member = xml.start("member")
                     .elem("Namespace", m.namespace())
                     .elem("MetricName", m.metricName())
                     .start("Dimensions");
@@ -144,10 +148,10 @@ public class CloudWatchMetricsQueryHandler {
                         startTime, endTime, period, statistics, unit, region);
 
         DateTimeFormatter fmt = DateTimeFormatter.ISO_INSTANT;
-        var xml = new XmlBuilder()
+        XmlBuilder xml = new XmlBuilder()
                 .elem("Label", metricName)
                 .start("Datapoints");
-        for (var dp : datapoints) {
+        for (CloudWatchMetricsService.Datapoint dp : datapoints) {
             xml.start("member").elem("Timestamp", fmt.format(dp.timestamp()));
             if (statistics.contains("Average")) {
                 xml.elem("Average", String.valueOf(dp.average()));
@@ -180,8 +184,8 @@ public class CloudWatchMetricsQueryHandler {
                 metricsService.getMetricData(queries, startTime, endTime, region);
 
         DateTimeFormatter fmt = DateTimeFormatter.ISO_INSTANT;
-        var xml = new XmlBuilder().start("MetricDataResults");
-        for (var r : results) {
+        XmlBuilder xml = new XmlBuilder().start("MetricDataResults");
+        for (CloudWatchMetricsService.MetricDataResult r : results) {
             xml.start("member")
                     .elem("Id", r.id())
                     .elem("Label", r.label())
@@ -262,11 +266,13 @@ public class CloudWatchMetricsQueryHandler {
 
         List<MetricAlarm> alarms = metricsService.describeAlarms(alarmNames, prefix, region);
 
-        var xml = new XmlBuilder().start("MetricAlarms");
+        XmlBuilder xml = new XmlBuilder().start("MetricAlarms");
         for (MetricAlarm a : alarms) {
             toAlarmXml(xml, a);
         }
         xml.end("MetricAlarms");
+        xml.start("CompositeAlarms").end("CompositeAlarms");
+        xml.start("LogAlarms").end("LogAlarms");
         return Response.ok(AwsQueryResponse.envelope("DescribeAlarms", null, xml.build())).build();
     }
 
@@ -383,7 +389,7 @@ public class CloudWatchMetricsQueryHandler {
                 dashboardsService.listDashboards(params.getFirst("DashboardNamePrefix"), region);
 
         DateTimeFormatter fmt = DateTimeFormatter.ISO_INSTANT;
-        var xml = new XmlBuilder().start("DashboardEntries");
+        XmlBuilder xml = new XmlBuilder().start("DashboardEntries");
         for (Dashboard d : dashboards) {
             xml.start("member")
                     .elem("DashboardName", d.getDashboardName())
@@ -532,7 +538,7 @@ public class CloudWatchMetricsQueryHandler {
         xml.start("StatisticsConfigurations");
         for (MetricStreamStatisticsConfiguration configuration : configurations) {
             xml.start("member").start("IncludeMetrics");
-            for (var metric : configuration.getIncludeMetrics()) {
+            for (MetricStreamStatisticsConfiguration.IncludeMetric metric : configuration.getIncludeMetrics()) {
                 xml.start("member")
                         .elem("Namespace", metric.namespace())
                         .elem("MetricName", metric.metricName())
@@ -605,42 +611,63 @@ public class CloudWatchMetricsQueryHandler {
     // ──────────────────────────── Parsing Helpers ────────────────────────────
 
     private List<MetricDatum> parseMetricData(MultivaluedMap<String, String> params) {
-        LOG.infov("Query PutMetricData params: {0}", params);
+        List<MetricDatum> datums = parseMetricData(params, "MetricData");
+        // An empty EntityMetricData entry serializes to no keys, so its index is absent
+        // while later entries keep theirs: iterate the indexes present, not 1..first gap.
+        SortedSet<Integer> entityIndexes = new TreeSet<>();
+        for (String key : params.keySet()) {
+            Matcher matcher = ENTITY_METRIC_DATA_MEMBER.matcher(key);
+            if (matcher.lookingAt()) {
+                entityIndexes.add(Integer.parseInt(matcher.group(1)));
+            }
+        }
+        for (int index : entityIndexes) {
+            datums.addAll(parseMetricData(params, "EntityMetricData.member." + index + ".MetricData"));
+        }
+        LOG.debugv("Query PutMetricData parsed {0} datums", datums.size());
+        return datums;
+    }
+
+    private List<MetricDatum> parseMetricData(MultivaluedMap<String, String> params, String listPrefix) {
         List<MetricDatum> datums = new ArrayList<>();
         for (int i = 1; ; i++) {
-            String metricName = params.getFirst("MetricData.member." + i + ".MetricName");
-            if (metricName == null) {
-                break;
+            String memberPrefix = listPrefix + ".member." + i + ".";
+            String metricName = params.getFirst(memberPrefix + "MetricName");
+            if (metricName == null || metricName.isEmpty()) {
+                if (metricName == null && params.keySet().stream().noneMatch(key -> key.startsWith(memberPrefix))) {
+                    break;
+                }
+                throw CloudWatchMetricsException.missingParameter(memberPrefix + "MetricName");
             }
             MetricDatum datum = new MetricDatum();
             datum.setMetricName(metricName);
-            datum.setUnit(params.getFirst("MetricData.member." + i + ".Unit"));
+            datum.setUnit(params.getFirst(listPrefix + ".member." + i + ".Unit"));
 
-            String valueStr = params.getFirst("MetricData.member." + i + ".Value");
+            String valueStr = params.getFirst(listPrefix + ".member." + i + ".Value");
             if (valueStr != null) {
                 datum.setValue(parseDouble(valueStr, 0));
             }
 
-            String tsStr = params.getFirst("MetricData.member." + i + ".Timestamp");
+            String tsStr = params.getFirst(listPrefix + ".member." + i + ".Timestamp");
             if (tsStr != null) {
                 Instant ts = parseInstant(tsStr);
                 datum.setTimestamp(ts != null ? ts.getEpochSecond() : 0);
             }
 
             // StatisticValues
-            String sc = params.getFirst("MetricData.member." + i + ".StatisticValues.SampleCount");
+            String sc = params.getFirst(listPrefix + ".member." + i + ".StatisticValues.SampleCount");
             if (sc != null) {
                 datum.setSampleCount(parseDouble(sc, 0));
-                datum.setSum(parseDouble(params.getFirst("MetricData.member." + i + ".StatisticValues.Sum"), 0));
-                datum.setMinimum(parseDouble(params.getFirst("MetricData.member." + i + ".StatisticValues.Minimum"), 0));
-                datum.setMaximum(parseDouble(params.getFirst("MetricData.member." + i + ".StatisticValues.Maximum"), 0));
+                datum.setSum(parseDouble(params.getFirst(listPrefix + ".member." + i + ".StatisticValues.Sum"), 0));
+                datum.setMinimum(parseDouble(params.getFirst(listPrefix + ".member." + i + ".StatisticValues.Minimum"), 0));
+                datum.setMaximum(parseDouble(params.getFirst(listPrefix + ".member." + i + ".StatisticValues.Maximum"), 0));
             }
 
             // Dimensions
             List<Dimension> dims = new ArrayList<>();
             for (int j = 1; ; j++) {
-                String dimName = params.getFirst("MetricData.member." + i + ".Dimensions.member." + j + ".Name");
-                String dimValue = params.getFirst("MetricData.member." + i + ".Dimensions.member." + j + ".Value");
+                String dimName = params.getFirst(listPrefix + ".member." + i + ".Dimensions.member." + j + ".Name");
+                String dimValue = params.getFirst(listPrefix + ".member." + i + ".Dimensions.member." + j + ".Value");
                 if (dimName == null) {
                     break;
                 }
@@ -675,7 +702,8 @@ public class CloudWatchMetricsQueryHandler {
         a.setMetricName(params.getFirst("MetricName"));
         a.setNamespace(params.getFirst("Namespace"));
         a.setStatistic(params.getFirst("Statistic"));
-        a.setPeriod(parseIntParam(params, "Period", 60));
+        a.setMetrics(parseAlarmMetricQueries(params));
+        a.setPeriod(a.getMetrics().isEmpty() ? parseIntParam(params, "Period", 60) : null);
         a.setUnit(params.getFirst("Unit"));
         a.setEvaluationPeriods(parseIntParam(params, "EvaluationPeriods", 1));
         String datapointsToAlarm = params.getFirst("DatapointsToAlarm");
@@ -724,6 +752,50 @@ public class CloudWatchMetricsQueryHandler {
         return a;
     }
 
+    private List<AlarmMetricDataQuery> parseAlarmMetricQueries(MultivaluedMap<String, String> params) {
+        List<AlarmMetricDataQuery> queries = new ArrayList<>();
+        for (int index = 1; ; index++) {
+            String prefix = "Metrics.member." + index;
+            String id = params.getFirst(prefix + ".Id");
+            if (id == null) {
+                break;
+            }
+            AlarmMetricDataQuery.MetricStat metricStat = null;
+            String metricPrefix = prefix + ".MetricStat.Metric";
+            if (params.getFirst(metricPrefix + ".Namespace") != null) {
+                List<AlarmMetricDataQuery.MetricDimension> dimensions = null;
+                for (int dimensionIndex = 1; ; dimensionIndex++) {
+                    String dimensionPrefix = metricPrefix + ".Dimensions.member." + dimensionIndex;
+                    String name = params.getFirst(dimensionPrefix + ".Name");
+                    if (name == null) {
+                        break;
+                    }
+                    if (dimensions == null) {
+                        dimensions = new ArrayList<>();
+                    }
+                    dimensions.add(new AlarmMetricDataQuery.MetricDimension(
+                            name, params.getFirst(dimensionPrefix + ".Value")));
+                }
+                AlarmMetricDataQuery.Metric metric = new AlarmMetricDataQuery.Metric(
+                        params.getFirst(metricPrefix + ".Namespace"),
+                        params.getFirst(metricPrefix + ".MetricName"), dimensions);
+                metricStat = new AlarmMetricDataQuery.MetricStat(metric,
+                        optionalInteger(params.getFirst(prefix + ".MetricStat.Period")),
+                        params.getFirst(prefix + ".MetricStat.Stat"), params.getFirst(prefix + ".MetricStat.Unit"));
+            }
+            String returnData = params.getFirst(prefix + ".ReturnData");
+            queries.add(new AlarmMetricDataQuery(id, params.getFirst(prefix + ".Expression"),
+                    params.getFirst(prefix + ".Label"), returnData == null ? null : Boolean.valueOf(returnData),
+                    optionalInteger(params.getFirst(prefix + ".Period")),
+                    params.getFirst(prefix + ".AccountId"), metricStat));
+        }
+        return queries;
+    }
+
+    private static Integer optionalInteger(String value) {
+        return value == null ? null : Integer.valueOf(value);
+    }
+
     private void toAlarmXml(XmlBuilder xml, MetricAlarm a) {
         xml.start("member")
                 .elem("AlarmName", a.getAlarmName())
@@ -741,21 +813,25 @@ public class CloudWatchMetricsQueryHandler {
         xml.start("InsufficientDataActions");
         a.getInsufficientDataActions().forEach(act -> xml.elem("member", act));
         xml.end("InsufficientDataActions");
-        xml.start("Dimensions");
-        for (Dimension d : a.getDimensions()) {
-            xml.start("member").elem("Name", d.name()).elem("Value", d.value()).end("member");
+        if (!a.getMetrics().isEmpty()) {
+            toAlarmMetricsXml(xml, a.getMetrics());
+        } else {
+            xml.start("Dimensions");
+            for (Dimension d : a.getDimensions()) {
+                xml.start("member").elem("Name", d.name()).elem("Value", d.value()).end("member");
+            }
+            xml.end("Dimensions")
+                    .elem("MetricName", a.getMetricName())
+                    .elem("Namespace", a.getNamespace())
+                    .elem("Statistic", a.getStatistic())
+                    .elem("Period", a.getPeriod() == null ? null : a.getPeriod().toString())
+                    .elem("Unit", a.getUnit());
         }
-        xml.end("Dimensions");
 
         xml.elem("StateValue", a.getStateValue())
                 .elem("StateReason", a.getStateReason())
                 .elem("StateReasonData", a.getStateReasonData())
                 .elem("StateUpdatedTimestamp", Instant.ofEpochSecond(a.getStateUpdatedTimestamp()).toString())
-                .elem("MetricName", a.getMetricName())
-                .elem("Namespace", a.getNamespace())
-                .elem("Statistic", a.getStatistic())
-                .elem("Period", String.valueOf(a.getPeriod()))
-                .elem("Unit", a.getUnit())
                 .elem("EvaluationPeriods", String.valueOf(a.getEvaluationPeriods()))
                 .elem("Threshold", String.valueOf(a.getThreshold()))
                 .elem("ComparisonOperator", a.getComparisonOperator())
@@ -766,6 +842,37 @@ public class CloudWatchMetricsQueryHandler {
         }
 
         xml.end("member");
+    }
+
+    private void toAlarmMetricsXml(XmlBuilder xml, List<AlarmMetricDataQuery> metrics) {
+        xml.start("Metrics");
+        for (AlarmMetricDataQuery query : metrics) {
+            xml.start("member").elem("Id", query.id()).elem("Expression", query.expression())
+                    .elem("Label", query.label()).elem("AccountId", query.accountId())
+                    .elem("Period", query.period() == null ? null : query.period().toString())
+                    .elem("ReturnData", query.returnData() == null ? null : query.returnData().toString());
+            AlarmMetricDataQuery.MetricStat stat = query.metricStat();
+            if (stat != null) {
+                xml.start("MetricStat");
+                AlarmMetricDataQuery.Metric metric = stat.metric();
+                if (metric != null) {
+                    xml.start("Metric").elem("Namespace", metric.namespace()).elem("MetricName", metric.metricName());
+                    if (metric.dimensions() != null) {
+                        xml.start("Dimensions");
+                        for (AlarmMetricDataQuery.MetricDimension dimension : metric.dimensions()) {
+                            xml.start("member").elem("Name", dimension.name()).elem("Value", dimension.value())
+                                    .end("member");
+                        }
+                        xml.end("Dimensions");
+                    }
+                    xml.end("Metric");
+                }
+                xml.elem("Period", stat.period() == null ? null : stat.period().toString())
+                        .elem("Stat", stat.stat()).elem("Unit", stat.unit()).end("MetricStat");
+            }
+            xml.end("member");
+        }
+        xml.end("Metrics");
     }
 
     private Instant parseInstant(String value) {
@@ -805,4 +912,7 @@ public class CloudWatchMetricsQueryHandler {
             return defaultValue;
         }
     }
+
+    @Inject
+    CloudWatchMetricsJsonHandler jsonHandler;
 }

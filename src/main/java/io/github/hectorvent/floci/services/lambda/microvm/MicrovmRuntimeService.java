@@ -2,11 +2,11 @@ package io.github.hectorvent.floci.services.lambda.microvm;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
-import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.services.lambda.microvm.model.MicrovmImageRecord;
 import io.github.hectorvent.floci.services.lambda.microvm.model.MicrovmImageVersionRecord;
 import io.github.hectorvent.floci.services.lambda.microvm.model.MicrovmRecord;

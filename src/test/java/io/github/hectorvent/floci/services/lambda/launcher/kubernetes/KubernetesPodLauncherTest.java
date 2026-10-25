@@ -1,6 +1,8 @@
 package io.github.hectorvent.floci.services.lambda.launcher.kubernetes;
 
+import io.fabric8.kubernetes.api.model.ConfigMap;
 import io.fabric8.kubernetes.api.model.EnvVar;
+import io.fabric8.kubernetes.api.model.Pod;
 import io.fabric8.kubernetes.api.model.PodBuilder;
 import io.fabric8.kubernetes.api.model.PodStatusBuilder;
 import io.fabric8.kubernetes.client.KubernetesClient;
@@ -9,18 +11,24 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.config.TlsConfigSource;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
+import io.github.hectorvent.floci.services.lambda.LambdaLayerFixtures;
 import io.github.hectorvent.floci.services.lambda.LambdaLayerService;
 import io.github.hectorvent.floci.services.lambda.launcher.ContainerHandle;
 import io.github.hectorvent.floci.services.lambda.launcher.ImageResolver;
 import io.github.hectorvent.floci.services.lambda.model.ContainerState;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
+import io.github.hectorvent.floci.services.lambda.model.LambdaLayerVersion;
 import io.github.hectorvent.floci.services.lambda.runtime.RuntimeApiServer;
 import io.github.hectorvent.floci.services.lambda.runtime.RuntimeApiServerFactory;
+import io.github.hectorvent.floci.services.s3.PreSignedUrlGenerator;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
@@ -36,6 +44,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -79,15 +88,16 @@ class KubernetesPodLauncherTest {
     private LambdaLayerService layerService;
     private KubernetesPodLogStreamer logStreamer;
     private S3Service s3Service;
+    private PreSignedUrlGenerator presignGenerator;
     private KubernetesPodLauncher launcher;
 
     @BeforeEach
     void setUp() {
         config = mock(EmulatorConfig.class);
-        var services = mock(EmulatorConfig.ServicesConfig.class);
-        var lambda = mock(EmulatorConfig.LambdaServiceConfig.class);
-        var kubernetes = mock(EmulatorConfig.LambdaServiceConfig.KubernetesExecutor.class);
-        var tls = mock(EmulatorConfig.TlsConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.LambdaServiceConfig lambda = mock(EmulatorConfig.LambdaServiceConfig.class);
+        EmulatorConfig.LambdaServiceConfig.KubernetesExecutor kubernetes = mock(EmulatorConfig.LambdaServiceConfig.KubernetesExecutor.class);
+        EmulatorConfig.TlsConfig tls = mock(EmulatorConfig.TlsConfig.class);
         lenient().when(config.services()).thenReturn(services);
         lenient().when(services.lambda()).thenReturn(lambda);
         lenient().when(lambda.kubernetes()).thenReturn(kubernetes);
@@ -121,27 +131,70 @@ class KubernetesPodLauncherTest {
         logStreamer = mock(KubernetesPodLogStreamer.class);
         lenient().when(logStreamer.attachForAccount(anyString(), anyString(), anyString(), anyString(),
                 anyString(), anyString(), anyString())).thenReturn(() -> { });
-        lenient().when(logStreamer.logStreamName(anyString())).thenReturn("2026/07/25/[$LATEST]test");
+        lenient().when(logStreamer.logStreamName(any(), anyString())).thenReturn("2026/07/25/[$LATEST]test");
         s3Service = mock(S3Service.class);
+        presignGenerator = mock(PreSignedUrlGenerator.class);
+        lenient().when(presignGenerator.generatePresignedUrl(anyString(), anyString(), anyString(),
+                eq("GET"), eq(0), anyString(), anyString())).thenAnswer(invocation ->
+                invocation.getArgument(0) + "/" + invocation.getArgument(1) + "/"
+                        + invocation.getArgument(2) + "?X-Amz-Algorithm=AWS4-HMAC-SHA256");
 
         apiClient = new KubernetesApiClient(
                 URI.create(client.getConfiguration().getMasterUrl()), trustAllHttpClient(), null);
         launcher = new KubernetesPodLauncher(apiClient, config, runtimeApiServerFactory, imageResolver,
                 addressResolver, awsEnv, layerService, new LambdaPodSpecFactory(config),
-                logStreamer, s3Service);
+                logStreamer, s3Service, presignGenerator);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"000000000000", "123456789012"})
+    void backgroundColdStartDownloadsOnlyTheFunctionsOwnedLayer(String account) throws Exception {
+        String defaultAccount = "000000000000";
+        String owner = "123456789012";
+        String region = "eu-west-1";
+        LambdaLayerVersion defaultLayer = LambdaLayerFixtures.layer(defaultAccount, region, "shared", 1);
+        LambdaLayerVersion ownerLayer = LambdaLayerFixtures.layer(owner, region, "shared", 1);
+        LambdaLayerService layers = LambdaLayerFixtures.accountScopedService(
+                defaultAccount, region, Map.of(defaultAccount, defaultLayer, owner, ownerLayer));
+        KubernetesPodLauncher backgroundLauncher = new KubernetesPodLauncher(
+                apiClient, config, runtimeApiServerFactory, imageResolver, addressResolver, awsEnv,
+                layers, new LambdaPodSpecFactory(config), logStreamer, s3Service, presignGenerator);
+        LambdaFunction fn = function();
+        fn.setAccountId(account);
+        fn.setFunctionArn("arn:aws:lambda:" + region + ":" + account + ":function:my-fn");
+        fn.setLayers(List.of((defaultAccount.equals(account) ? defaultLayer : ownerLayer).getLayerVersionArn()));
+        markPodPhaseInBackground("floci-lambda-my-fn-", "Running");
+
+        ContainerHandle handle = CompletableFuture.supplyAsync(() -> backgroundLauncher.launch(fn))
+                .get(10, TimeUnit.SECONDS);
+        try {
+            Pod pod = client.pods().inNamespace("default").withName(handle.getContainerId()).get();
+            String initScript = pod.getSpec().getInitContainers().getFirst().getCommand().get(2);
+            assertThat(initScript).contains("/awslambda-" + region + "-tasks/layers/"
+                    + account + "/shared/1?X-Amz-Algorithm=AWS4-HMAC-SHA256")
+                    .contains("unzip -oq /tmp/layer0.zip -d /opt");
+            String otherAccount = defaultAccount.equals(account) ? owner : defaultAccount;
+            assertThat(initScript).doesNotContain("/layers/" + otherAccount + "/");
+            verify(presignGenerator).generatePresignedUrl(
+                    eq("http://10.0.0.5:4566"), eq("awslambda-" + region + "-tasks"),
+                    eq("layers/" + account + "/shared/1"), eq("GET"), eq(0), eq(region), eq(account));
+        } finally {
+            backgroundLauncher.stop(handle);
+        }
+        assertThat(client.pods().inNamespace("default").withName(handle.getContainerId()).get()).isNull();
     }
 
     /** The mock server's cert is self-signed and generated per run; trust it, not the JVM default. */
     private static HttpClient trustAllHttpClient() {
         try {
-            var trustAll = new X509TrustManager() {
+            X509TrustManager trustAll = new X509TrustManager() {
                 public void checkClientTrusted(X509Certificate[] chain, String authType) { }
                 public void checkServerTrusted(X509Certificate[] chain, String authType) { }
                 public X509Certificate[] getAcceptedIssuers() {
                     return new X509Certificate[0];
                 }
             };
-            var context = SSLContext.getInstance("TLS");
+            SSLContext context = SSLContext.getInstance("TLS");
             context.init(null, new TrustManager[]{trustAll}, new SecureRandom());
             return HttpClient.newBuilder().sslContext(context).build();
         } catch (Exception e) {
@@ -150,7 +203,7 @@ class KubernetesPodLauncherTest {
     }
 
     private LambdaFunction function() {
-        var fn = new LambdaFunction();
+        LambdaFunction fn = new LambdaFunction();
         fn.setFunctionName("my-fn");
         fn.setAccountId("000000000000");
         fn.setFunctionArn("arn:aws:lambda:us-east-1:000000000000:function:my-fn");
@@ -167,12 +220,31 @@ class KubernetesPodLauncherTest {
             Awaitility.await().atMost(Duration.ofSeconds(5)).until(
                     () -> client.pods().inNamespace("default").list().getItems().stream()
                             .anyMatch(p -> p.getMetadata().getName().startsWith(namePrefix)));
-            var pod = client.pods().inNamespace("default").list().getItems().stream()
+            Pod pod = client.pods().inNamespace("default").list().getItems().stream()
                     .filter(p -> p.getMetadata().getName().startsWith(namePrefix))
                     .findFirst().orElseThrow();
             pod.setStatus(new PodStatusBuilder().withPhase(phase).build());
             client.pods().inNamespace("default").resource(pod).updateStatus();
         });
+    }
+
+    @ParameterizedTest
+    @CsvSource({"$LATEST, $$LATEST", "1, 1", "7, 7"})
+    void launchExposesTheExecutingVersionInThePodAndRuntimeApi(String version, String podValue) {
+        markPodPhaseInBackground("floci-lambda-my-fn-", "Running");
+        LambdaFunction fn = function();
+        fn.setVersion(version);
+        fn.setEnvironment(Map.of("AWS_LAMBDA_FUNCTION_VERSION", "user-override"));
+
+        ContainerHandle handle = launcher.launch(fn);
+
+        Pod pod = client.pods().inNamespace("default").withName(handle.getContainerId()).get();
+        // The pod spec escapes dollars for kubelet expansion; the runtime receives literal $LATEST.
+        assertThat(pod.getSpec().getContainers().getFirst().getEnv())
+                .filteredOn(variable -> "AWS_LAMBDA_FUNCTION_VERSION".equals(variable.getName()))
+                .extracting(EnvVar::getValue)
+                .containsExactly(podValue);
+        verify(runtimeApiServer).setFunctionMetadata("my-fn", version, "index.handler", "000000000000");
     }
 
     @Test
@@ -181,7 +253,7 @@ class KubernetesPodLauncherTest {
         // Docker-launched one: without the owning account it resolves to the emulator's
         // default account and reads the wrong partition.
         markPodPhaseInBackground("floci-lambda-my-fn-", "Running");
-        var fn = function();
+        LambdaFunction fn = function();
         fn.setAccountId("222222222222");
         fn.setFunctionArn("arn:aws:lambda:us-east-1:222222222222:function:my-fn");
 
@@ -203,15 +275,15 @@ class KubernetesPodLauncherTest {
                         "AWS_ACCESS_KEY_ID=000000000000",
                         "AWS_SECRET_ACCESS_KEY=test",
                         "AWS_SESSION_TOKEN=test"));
-        var fn = function();
+        LambdaFunction fn = function();
         fn.setEnvironment(Map.of("AWS_ACCESS_KEY_ID", "user-partial-key"));
 
         launcher.launch(fn);
 
-        var pod = client.pods().inNamespace("default").list().getItems().stream()
+        Pod pod = client.pods().inNamespace("default").list().getItems().stream()
                 .filter(p -> p.getMetadata().getName().startsWith("floci-lambda-my-fn-"))
                 .findFirst().orElseThrow();
-        var envVars = pod.getSpec().getContainers().getFirst().getEnv();
+        List<EnvVar> envVars = pod.getSpec().getContainers().getFirst().getEnv();
         assertThat(envVars).extracting(EnvVar::getName, EnvVar::getValue)
                 .contains(tuple("AWS_ACCESS_KEY_ID", "000000000000"))
                 .doesNotContain(tuple("AWS_ACCESS_KEY_ID", "user-partial-key"));
@@ -221,13 +293,13 @@ class KubernetesPodLauncherTest {
     void launchCreatesPodAndReturnsHandle() {
         markPodPhaseInBackground("floci-lambda-my-fn-", "Running");
 
-        var handle = launcher.launch(function());
+        ContainerHandle handle = launcher.launch(function());
 
         assertThat(handle).isNotNull();
         assertThat(handle.getFunctionName()).isEqualTo("my-fn");
         assertThat(handle.getContainerId()).startsWith("floci-lambda-my-fn-");
 
-        var pod = client.pods().inNamespace("default").withName(handle.getContainerId()).get();
+        Pod pod = client.pods().inNamespace("default").withName(handle.getContainerId()).get();
         assertThat(pod).isNotNull();
         assertThat(pod.getMetadata().getLabels())
                 .containsEntry("app.kubernetes.io/managed-by", "floci");
@@ -245,18 +317,21 @@ class KubernetesPodLauncherTest {
 
     @Test
     void downloadUrlCarriesTheOwningAccountForNonDefaultAccounts() {
-        var fn = function();
+        LambdaFunction fn = function();
         fn.setAccountId("111122223333");
         fn.setFunctionArn("arn:aws:lambda:us-east-1:111122223333:function:my-fn");
         markPodPhaseInBackground("floci-lambda-my-fn-", "Running");
 
-        var handle = launcher.launch(fn);
+        ContainerHandle handle = launcher.launch(fn);
 
-        // The init container fetches unauthenticated, so the download URL must carry the
-        // owning account or the object resolves under the default account and 404s.
-        var pod = client.pods().inNamespace("default").withName(handle.getContainerId()).get();
+        // The init container fetches without an Authorization header. The presigner
+        // must register its temporary credential in the owning account.
+        Pod pod = client.pods().inNamespace("default").withName(handle.getContainerId()).get();
         assertThat(pod.getSpec().getInitContainers().getFirst().getCommand().get(2))
-                .contains("snapshots/111122223333/my-fn?X-Amz-Credential=111122223333%2F");
+                .contains("snapshots/111122223333/my-fn?X-Amz-Algorithm=AWS4-HMAC-SHA256");
+        verify(presignGenerator).generatePresignedUrl(eq("http://10.0.0.5:4566"),
+                eq("awslambda-us-east-1-tasks"), anyString(), eq("GET"), eq(0),
+                eq("us-east-1"), eq("111122223333"));
     }
 
     @Test
@@ -279,11 +354,11 @@ class KubernetesPodLauncherTest {
         // the cleanup delete can never confirm the pod is gone. The pod could still reach
         // Running later and poll AWS_LAMBDA_RUNTIME_API, so the port must stay reserved
         // instead of going back to the pool for another environment.
-        var failingApiClient = spy(apiClient);
+        KubernetesApiClient failingApiClient = spy(apiClient);
         doThrow(new RuntimeException("kube api down")).when(failingApiClient).deletePod(anyString(), anyString());
-        var failingLauncher = new KubernetesPodLauncher(failingApiClient, config,
+        KubernetesPodLauncher failingLauncher = new KubernetesPodLauncher(failingApiClient, config,
                 runtimeApiServerFactory, imageResolver, addressResolver, awsEnv, layerService,
-                new LambdaPodSpecFactory(config), logStreamer, s3Service);
+                new LambdaPodSpecFactory(config), logStreamer, s3Service, presignGenerator);
         markPodPhaseInBackground("floci-lambda-my-fn-", "Failed");
 
         assertThatThrownBy(() -> failingLauncher.launch(function()))
@@ -310,7 +385,7 @@ class KubernetesPodLauncherTest {
 
     @Test
     void hotReloadIsRejectedBeforeAllocatingAnything() {
-        var fn = function();
+        LambdaFunction fn = function();
         fn.setHotReloadHostPath("/tmp/code");
 
         assertThatThrownBy(() -> launcher.launch(fn))
@@ -332,12 +407,12 @@ class KubernetesPodLauncherTest {
 
     @Test
     void stopDeletesPodAndReleasesRuntimeApiPort() {
-        var pod = new PodBuilder()
+        Pod pod = new PodBuilder()
                 .withNewMetadata().withName("floci-lambda-my-fn-abc12345").endMetadata()
                 .build();
         client.pods().inNamespace("default").resource(pod).create();
 
-        var handle = new ContainerHandle("floci-lambda-my-fn-abc12345", "my-fn",
+        ContainerHandle handle = new ContainerHandle("floci-lambda-my-fn-abc12345", "my-fn",
                 runtimeApiServer, ContainerState.WARM);
         launcher.stop(handle);
 
@@ -350,11 +425,11 @@ class KubernetesPodLauncherTest {
 
     @Test
     void isAliveReflectsPodPhase() {
-        var running = new PodBuilder()
+        Pod running = new PodBuilder()
                 .withNewMetadata().withName("pod-running").endMetadata()
                 .withStatus(new PodStatusBuilder().withPhase("Running").build())
                 .build();
-        var pending = new PodBuilder()
+        Pod pending = new PodBuilder()
                 .withNewMetadata().withName("pod-pending").endMetadata()
                 .withStatus(new PodStatusBuilder().withPhase("Pending").build())
                 .build();
@@ -368,14 +443,14 @@ class KubernetesPodLauncherTest {
 
     @Test
     void orphanSweepDeletesOnlyManagedPods() {
-        var orphan = new PodBuilder()
+        Pod orphan = new PodBuilder()
                 .withNewMetadata().withName("floci-lambda-old-fn-dead1234")
                 .withLabels(Map.of(
                         "app.kubernetes.io/managed-by", "floci",
                         "floci.io/service", "lambda"))
                 .endMetadata()
                 .build();
-        var unrelated = new PodBuilder()
+        Pod unrelated = new PodBuilder()
                 .withNewMetadata().withName("some-other-pod").endMetadata()
                 .build();
         client.pods().inNamespace("default").resource(orphan).create();
@@ -393,14 +468,14 @@ class KubernetesPodLauncherTest {
 
     @Test
     void stopDeletesPodEvenWhenPortReleaseThrows() {
-        var pod = new PodBuilder()
+        Pod pod = new PodBuilder()
                 .withNewMetadata().withName("floci-lambda-my-fn-abc12345").endMetadata()
                 .build();
         client.pods().inNamespace("default").resource(pod).create();
         doThrow(new IllegalStateException("release failed"))
                 .when(runtimeApiServerFactory).release(runtimeApiServer);
-        var streamClosed = new AtomicBoolean();
-        var handle = new ContainerHandle("floci-lambda-my-fn-abc12345", "my-fn",
+        AtomicBoolean streamClosed = new AtomicBoolean();
+        ContainerHandle handle = new ContainerHandle("floci-lambda-my-fn-abc12345", "my-fn",
                 runtimeApiServer, ContainerState.WARM);
         handle.setLogStream(() -> streamClosed.set(true));
 
@@ -413,7 +488,7 @@ class KubernetesPodLauncherTest {
 
     @Test
     void failedOrphanSweepIsRetriedWithoutKillingOwnPods() {
-        var orphan = new PodBuilder()
+        Pod orphan = new PodBuilder()
                 .withNewMetadata().withName("floci-lambda-old-fn-dead1234")
                 .withLabels(Map.of(
                         "app.kubernetes.io/managed-by", "floci",
@@ -423,20 +498,20 @@ class KubernetesPodLauncherTest {
         client.pods().inNamespace("default").resource(orphan).create();
 
         // First Kubernetes API access (the sweep's pod list) fails once.
-        var failedOnce = new AtomicBoolean();
-        var flakyApiClient = spy(apiClient);
+        AtomicBoolean failedOnce = new AtomicBoolean();
+        KubernetesApiClient flakyApiClient = spy(apiClient);
         doAnswer(invocation -> {
             if (failedOnce.compareAndSet(false, true)) {
                 throw new RuntimeException("kube api down");
             }
             return invocation.callRealMethod();
         }).when(flakyApiClient).listPods(anyString(), anyMap());
-        var retryingLauncher = new KubernetesPodLauncher(flakyApiClient, config,
+        KubernetesPodLauncher retryingLauncher = new KubernetesPodLauncher(flakyApiClient, config,
                 runtimeApiServerFactory, imageResolver, addressResolver, awsEnv, layerService,
-                new LambdaPodSpecFactory(config), logStreamer, s3Service);
+                new LambdaPodSpecFactory(config), logStreamer, s3Service, presignGenerator);
 
         markPodPhaseInBackground("floci-lambda-my-fn-", "Running");
-        var handle = retryingLauncher.launch(function());
+        ContainerHandle handle = retryingLauncher.launch(function());
         assertThat(client.pods().inNamespace("default").withName("floci-lambda-old-fn-dead1234").get())
                 .as("orphan survives the failed sweep")
                 .isNotNull();
@@ -462,14 +537,14 @@ class KubernetesPodLauncherTest {
     void tlsOnPublishesTheCaBundleAsAConfigMapAndTheFunctionEnvWins() throws Exception {
         String bundlePem = enableTlsWithBundle();
         markPodPhaseInBackground("floci-lambda-my-fn-", "Running");
-        var fn = function();
+        LambdaFunction fn = function();
         fn.setEnvironment(Map.of("SSL_CERT_FILE", "/my/own.pem"));
 
-        var handle = launcher.launch(fn);
+        ContainerHandle handle = launcher.launch(fn);
 
-        var configMap = client.configMaps().inNamespace("default").withName(KubernetesPodLauncher.CA_CONFIG_MAP_NAME).get();
+        ConfigMap configMap = client.configMaps().inNamespace("default").withName(KubernetesPodLauncher.CA_CONFIG_MAP_NAME).get();
         assertThat(configMap.getData()).containsEntry(KubernetesPodLauncher.CA_CONFIG_MAP_KEY, bundlePem);
-        var env = client.pods().inNamespace("default").withName(handle.getContainerId()).get()
+        List<EnvVar> env = client.pods().inNamespace("default").withName(handle.getContainerId()).get()
                 .getSpec().getContainers().getFirst().getEnv();
         assertThat(env).extracting(EnvVar::getName, EnvVar::getValue).contains(
                 tuple("SSL_CERT_FILE", "/my/own.pem"),
@@ -485,8 +560,8 @@ class KubernetesPodLauncherTest {
         System.setProperty("floci.tls.enabled", "false");
         new TlsConfigSource(); // forgets the static directory a TLS-on bootstrap in another test class left behind
         System.clearProperty("floci.tls.enabled");
-        var tls = mock(EmulatorConfig.TlsConfig.class);
-        var storage = mock(EmulatorConfig.StorageConfig.class);
+        EmulatorConfig.TlsConfig tls = mock(EmulatorConfig.TlsConfig.class);
+        EmulatorConfig.StorageConfig storage = mock(EmulatorConfig.StorageConfig.class);
         when(config.tls()).thenReturn(tls);
         when(tls.enabled()).thenReturn(true);
         when(config.storage()).thenReturn(storage);

@@ -1,10 +1,25 @@
 package io.github.hectorvent.floci.services.apigateway;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.config.TlsCertificateManager;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsPartition;
+import io.github.hectorvent.floci.core.common.AwsPartitions;
+import io.github.hectorvent.floci.core.common.AwsRegionFacts;
+import io.github.hectorvent.floci.core.common.AwsRegions;
+import io.github.hectorvent.floci.core.common.CloudFrontEdgeDomain;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.ReservedTags;
+import io.github.hectorvent.floci.core.resource.ExplorerResource;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.apigateway.model.Account;
@@ -14,6 +29,7 @@ import io.github.hectorvent.floci.services.apigateway.model.Authorizer;
 import io.github.hectorvent.floci.services.apigateway.model.BasePathMapping;
 import io.github.hectorvent.floci.services.apigateway.model.CustomDomain;
 import io.github.hectorvent.floci.services.apigateway.model.Deployment;
+import io.github.hectorvent.floci.services.apigateway.model.DeploymentExportSnapshot;
 import io.github.hectorvent.floci.services.apigateway.model.EndpointConfiguration;
 import io.github.hectorvent.floci.services.apigateway.model.EndpointType;
 import io.github.hectorvent.floci.services.apigateway.model.GatewayResponse;
@@ -31,19 +47,24 @@ import io.github.hectorvent.floci.services.apigateway.model.Stage;
 import io.github.hectorvent.floci.services.apigateway.model.ThrottleSettings;
 import io.github.hectorvent.floci.services.apigateway.model.UsagePlan;
 import io.github.hectorvent.floci.services.apigateway.model.UsagePlanKey;
-import io.github.hectorvent.floci.services.apigateway.model.V2DomainName;
 import io.github.hectorvent.floci.services.apigateway.model.VpcLink;
+import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2Service;
+import io.swagger.parser.OpenAPIParser;
+import io.swagger.v3.core.util.Json;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
 import io.swagger.v3.oas.models.PathItem;
+import io.swagger.v3.oas.models.parameters.Parameter;
 import io.swagger.v3.oas.models.security.SecurityRequirement;
 import io.swagger.v3.oas.models.security.SecurityScheme;
 import io.swagger.v3.parser.core.models.SwaggerParseResult;
+import io.swagger.v3.parser.util.OpenAPIDeserializer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
@@ -54,16 +75,29 @@ import java.util.HashSet;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
-public class ApiGatewayService {
+public class ApiGatewayService implements ResourceProvider {
+
+    /** The only partition where API Gateway offers edge-optimized APIs and custom domain names. */
+    private static final Set<String> EDGE_OPTIMIZED_PARTITIONS = Set.of("aws");
+
+    /**
+     * The regional hosted zone a custom domain reports in a region with no published one. Only
+     * the two GovCloud regions have a sourced zone ({@link AwsRegionFacts#apiGatewayRegionalHostedZoneId}).
+     */
+    private static final String UNSOURCED_REGIONAL_HOSTED_ZONE_ID = "Z2FDTNDATAQYL2"; // partition-literal: placeholder kept where no per-region source exists
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     /** Documented default page size for GetUsage. */
     private static final int DEFAULT_USAGE_LIMIT = 25;
@@ -76,9 +110,10 @@ public class ApiGatewayService {
 
     private static final Logger LOG = Logger.getLogger(ApiGatewayService.class);
 
-    private final StorageBackend<String, RestApi> apiStore;
+    private final AccountAwareStorageBackend<RestApi> apiStore;
     private final StorageBackend<String, ApiGatewayResource> resourceStore;
     private final StorageBackend<String, Deployment> deploymentStore;
+    private final StorageBackend<String, Map<String, String>> deploymentModelStore;
     private final StorageBackend<String, Stage> stageStore;
     private final StorageBackend<String, Authorizer> authorizerStore;
     private final StorageBackend<String, ApiKey> apiKeyStore;
@@ -87,10 +122,10 @@ public class ApiGatewayService {
     private final StorageBackend<String, RequestValidator> requestValidatorStore;
     private final StorageBackend<String, GatewayResponse> gatewayResponseStore;
     private final StorageBackend<String, Model> modelStore;
-    private final StorageBackend<String, Account> accountStore;
-    private final StorageBackend<String, CustomDomain> domainStore;
-    private final StorageBackend<String, BasePathMapping> basePathMappingStore;
     private final StorageBackend<String, VpcLink> vpcLinkStore;
+    private final StorageBackend<String, Account> accountStore;
+    private final AccountAwareStorageBackend<CustomDomain> domainStore;
+    private final AccountAwareStorageBackend<BasePathMapping> basePathMappingStore;
     /**
      * Guards every change to a custom domain or a base path mapping. The stores hand out live
      * objects, so a patch or a tag write is a read-modify-write; two of them on one domain at the
@@ -98,17 +133,55 @@ public class ApiGatewayService {
      * also keeps a mapping from being created under a domain that is being deleted at that moment.
      */
     private final Object domainNameLock = new Object();
+    private final Object vpcLinkTagLock = new Object();
     private final TlsCertificateManager certificateManager;
+    private final EmulatorConfig config;
+    private final RegionResolver regionResolver;
+    /** The v2 APIs an API mapping can point at; a custom domain is shared by both APIs. */
+    private final ApiGatewayV2Service apiGatewayV2Service;
 
     // Constants
     private static final String EPC_KEY = "endpointConfiguration";
     private static final String EPC_TYPES_KEY = "types";
     private static final String EPC_VPC_IDS_KEY = "vpcEndpointIds";
+    private static final String EPC_TYPES_PATH = "/endpointConfiguration/types/";
+    private static final String EPC_VPC_IDS_PATH = "/endpointConfiguration/vpcEndpointIds";
+    private static final String TLS_1_2 = "TLS_1_2";
+    /** The API type a mapping to a REST API is stored with, beside a v2 API's protocol type. */
+    private static final String REST_API_TYPE = "REST";
+    /** What AWS answers for a v2 API mapping call on an edge-optimized domain. */
+    private static final String V2_EDGE_DOMAIN_MESSAGE = "Only REGIONAL domain names can be managed through the "
+            + "API Gateway V2 API. For EDGE domain names, please use the API Gateway V1 API. Also note that only REST "
+            + "APIs can be attached to EDGE domain names.";
+    /** What AWS answers for a v2 domain created or updated with the EDGE endpoint type. */
+    private static final String V2_EDGE_ENDPOINT_TYPE_MESSAGE =
+            "EDGE endpoint type is not supported for APIGatewayV2 domainName";
+    /** The characters AWS allows in an API mapping key, its level separator included, and the most it takes. */
+    private static final Pattern API_MAPPING_KEY = Pattern.compile("[A-Za-z0-9$\\-_.+!*'(),/]+");
+    private static final int MAX_API_MAPPING_KEY_LENGTH = 300;
+    private static final String MAPPING_KEY_SLASHES_MESSAGE =
+            "API mapping key should not start with a '/' or have consecutive '/'s.";
+
+    ApiGatewayService(StorageFactory storageFactory, EmulatorConfig config,
+                      TlsCertificateManager certificateManager) {
+        this(storageFactory, config, certificateManager,
+                new RegionResolver(config.defaultRegion(), config.defaultAccountId()));
+    }
+
+    ApiGatewayService(StorageFactory storageFactory, EmulatorConfig config,
+                      TlsCertificateManager certificateManager, RegionResolver regionResolver) {
+        this(storageFactory, config, certificateManager, regionResolver,
+                new ApiGatewayV2Service(storageFactory, config, regionResolver));
+    }
 
     @Inject
     public ApiGatewayService(StorageFactory storageFactory, EmulatorConfig config,
-                             TlsCertificateManager certificateManager) {
+                             TlsCertificateManager certificateManager, RegionResolver regionResolver,
+                             ApiGatewayV2Service apiGatewayV2Service) {
         this.certificateManager = certificateManager;
+        this.config = config;
+        this.regionResolver = regionResolver;
+        this.apiGatewayV2Service = apiGatewayV2Service;
         this.apiStore = storageFactory.create("apigateway", "apigateway-apis.json",
                 new TypeReference<>() {
                 });
@@ -116,6 +189,9 @@ public class ApiGatewayService {
                 new TypeReference<>() {
                 });
         this.deploymentStore = storageFactory.create("apigateway", "apigateway-deployments.json",
+                new TypeReference<>() {
+                });
+        this.deploymentModelStore = storageFactory.create("apigateway", "apigateway-deployment-models.json",
                 new TypeReference<>() {
                 });
         this.stageStore = storageFactory.create("apigateway", "apigateway-stages.json",
@@ -142,6 +218,9 @@ public class ApiGatewayService {
         this.modelStore = storageFactory.create("apigateway", "apigateway-models.json",
                 new TypeReference<>() {
                 });
+        this.vpcLinkStore = storageFactory.create("apigateway", "apigateway-vpclinks.json",
+                new TypeReference<>() {
+                });
         this.accountStore = storageFactory.create("apigateway", "apigateway-account.json",
             new TypeReference<>() {
             });
@@ -149,9 +228,6 @@ public class ApiGatewayService {
                 new TypeReference<>() {
                 });
         this.basePathMappingStore = storageFactory.create("apigateway", "apigateway-mappings.json",
-                new TypeReference<>() {
-                });
-        this.vpcLinkStore = storageFactory.create("apigateway", "apigateway-vpclinks.json",
                 new TypeReference<>() {
                 });
     }
@@ -235,6 +311,9 @@ public class ApiGatewayService {
         if (request.get("policy") instanceof String policy && !policy.isEmpty()) {
             api.setPolicy(policy);
         }
+        if (request.get("policy") instanceof String policy && !policy.isEmpty()) {
+            api.setPolicy(policy);
+        }
 
         EndpointConfiguration endpointConfiguration = new EndpointConfiguration();
         if (request.get(EPC_KEY) instanceof Map<?, ?> epMap) {
@@ -244,15 +323,7 @@ public class ApiGatewayService {
                         List<EndpointType> types = list.stream()
                                 .filter(String.class::isInstance)
                                 .map(String.class::cast)
-                                .map(String::toUpperCase)
-                                .map(typeStr -> {
-                                    try {
-                                        return EndpointType.valueOf(typeStr);
-                                    } catch (IllegalArgumentException e) {
-                                        throw new AwsException("BadRequestException",
-                                                "Endpoint configuration type must be REGIONAL, EDGE, or PRIVATE.", 400);
-                                    }
-                                })
+                                .map(ApiGatewayService::endpointType)
                                 .toList();
                         endpointConfiguration.setTypes(types);
                     } else if (EPC_VPC_IDS_KEY.equals(ks)) {
@@ -276,19 +347,10 @@ public class ApiGatewayService {
             throw new AwsException("BadRequestException",
                     "Endpoint configuration types must contain exactly one value.", 400);
         }
+        requireEndpointTypeAvailable(endpointConfiguration.getTypes().getFirst().name(), region);
 
-        EndpointType type = endpointConfiguration.getTypes().getFirst();
-        if (EndpointType.PRIVATE.equals(type)) {
-            if (endpointConfiguration.getVpcEndpointIds().isEmpty()) {
-                throw new AwsException("BadRequestException",
-                        "At least one vpcEndpointId is required for PRIVATE APIs.", 400);
-            }
-        } else {
-            // Reject/ignore vpcEndpointIds for REGIONAL and EDGE
-            endpointConfiguration.setVpcEndpointIds(new ArrayList<>());
-        }
-
-        api.setEndpointConfiguration(endpointConfiguration);
+        api.setEndpointConfiguration(endpointConfigurationOf(endpointConfiguration.getTypes().getFirst(),
+                endpointConfiguration.getVpcEndpointIds()));
         api.setBinaryMediaTypes(readStringList(request.get("binaryMediaTypes")));
 
         // Create root resource "/"
@@ -303,10 +365,71 @@ public class ApiGatewayService {
         return api;
     }
 
+    /** The endpoint type {@code value} names, in any case. */
+    private static EndpointType endpointType(String value) {
+        try {
+            return EndpointType.valueOf(value.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new AwsException("BadRequestException",
+                    "Endpoint configuration type must be REGIONAL, EDGE, or PRIVATE.", 400);
+        }
+    }
+
+    /** An endpoint configuration of {@code type}: a PRIVATE API needs a VPC endpoint, the other types take none. */
+    private static EndpointConfiguration endpointConfigurationOf(EndpointType type, List<String> vpcEndpointIds) {
+        EndpointConfiguration endpointConfiguration = new EndpointConfiguration();
+        endpointConfiguration.setTypes(new ArrayList<>(List.of(type)));
+        if (EndpointType.PRIVATE.equals(type)) {
+            if (vpcEndpointIds.isEmpty()) {
+                throw new AwsException("BadRequestException",
+                        "At least one vpcEndpointId is required for PRIVATE APIs.", 400);
+            }
+            endpointConfiguration.setVpcEndpointIds(new ArrayList<>(vpcEndpointIds));
+        }
+        return endpointConfiguration;
+    }
+
     public RestApi getRestApi(String region, String apiId) {
         return apiStore.get(apiKey(region, apiId))
                 .orElseThrow(() -> new AwsException("NotFoundException", "Invalid API id specified", 404));
     }
+
+    public boolean hasRestApi(String apiId) {
+        return apiStore.keys().stream().anyMatch(key -> key.endsWith("::" + apiId));
+    }
+
+    public boolean hasRestApi(String region, String apiId) {
+        return apiStore.get(apiKey(region, apiId)).isPresent();
+    }
+
+    public record ApiOwner(String accountId, String region) {}
+
+    /** Resolve resource ownership for data-plane URLs without changing management isolation. */
+    public Optional<ApiOwner> findRestApiOwner(String apiId) {
+        return findRestApiOwner(apiId, null, null);
+    }
+
+    public Optional<ApiOwner> findRestApiOwner(String apiId, String callerAccount, String callerRegion) {
+        List<AccountAwareStorageBackend.AccountEntry<RestApi>> matches =
+                apiStore.scanAllAccountEntries(key -> key.endsWith("::" + apiId));
+        if (matches.size() > 1 && callerAccount != null
+                && matches.stream().anyMatch(entry -> callerAccount.equals(entry.accountId())
+                        && (callerRegion + "::" + apiId).equals(entry.key()))) {
+            return Optional.of(new ApiOwner(callerAccount, callerRegion));
+        }
+        if (matches.size() > 1) {
+            throw new AwsException("ConflictException",
+                    "REST API id '" + apiId + "' is ambiguous across accounts", 409);
+        }
+        return matches.stream().findFirst().map(entry -> {
+            int delimiter = entry.key().indexOf("::");
+            if (delimiter <= 0) {
+                throw new IllegalStateException("Invalid REST API storage key: " + entry.key());
+            }
+            return new ApiOwner(entry.accountId(), entry.key().substring(0, delimiter));
+        });
+    }
+
 
     public String resolveRestApiRegion(String preferredRegion, String apiId) {
         if (apiStore.get(apiKey(preferredRegion, apiId)).isPresent()) {
@@ -332,6 +455,7 @@ public class ApiGatewayService {
         String prefix = region + "::" + apiId + "::";
         resourceStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(resourceStore::delete);
         deploymentStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(deploymentStore::delete);
+        deploymentModelStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(deploymentModelStore::delete);
         stageStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(stageStore::delete);
         modelStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(modelStore::delete);
         requestValidatorStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(requestValidatorStore::delete);
@@ -464,6 +588,10 @@ public class ApiGatewayService {
         method.setHttpMethod(httpMethod.toUpperCase());
         method.setAuthorizationType((String) request.getOrDefault("authorizationType", "NONE"));
         method.setAuthorizerId((String) request.get("authorizerId"));
+        Object authorizationScopes = request.get("authorizationScopes");
+        if (authorizationScopes instanceof List<?> scopes) {
+            method.setAuthorizationScopes(scopes.stream().map(String::valueOf).toList());
+        }
         method.setRequestValidatorId((String) request.get("requestValidatorId"));
         method.setApiKeyRequired(Boolean.TRUE.equals(request.get("apiKeyRequired")));
 
@@ -496,11 +624,14 @@ public class ApiGatewayService {
         resourceStore.put(resourceKey(region, apiId, resourceId), resource);
     }
 
-    public MethodResponse putMethodResponse(String region, String apiId, String resourceId,
+    public synchronized MethodResponse putMethodResponse(String region, String apiId, String resourceId,
                                             String httpMethod, String statusCode,
                                             Map<String, Object> request) {
         MethodConfig method = getMethod(region, apiId, resourceId, httpMethod);
-        MethodResponse mr = new MethodResponse(statusCode, new HashMap<>());
+        @SuppressWarnings("unchecked")
+        Map<String, Boolean> responseParameters = (Map<String, Boolean>) request.get("responseParameters");
+        MethodResponse mr = new MethodResponse(statusCode,
+                responseParameters != null ? responseParameters : new HashMap<>());
         method.getMethodResponses().put(statusCode, mr);
         resourceStore.put(resourceKey(region, apiId, resourceId), getResource(region, apiId, resourceId));
         return mr;
@@ -516,7 +647,41 @@ public class ApiGatewayService {
         return mr;
     }
 
-    public void deleteMethodResponse(String region, String apiId, String resourceId,
+    public synchronized MethodResponse updateMethodResponse(String region, String apiId, String resourceId,
+                                               String httpMethod, String statusCode,
+                                               List<Map<String, String>> patchOperations) {
+        MethodResponse response = getMethodResponse(region, apiId, resourceId, httpMethod, statusCode);
+        Map<String, Boolean> parameters = new HashMap<>(
+                response.responseParameters() != null ? response.responseParameters() : Map.of());
+        if (patchOperations != null) {
+            for (Map<String, String> patch : patchOperations) {
+                String path = patch.get("path");
+                if (path == null || !path.startsWith("/responseParameters/method.response.header.")
+                        || path.length() == "/responseParameters/method.response.header.".length()) {
+                    throw new AwsException("BadRequestException", "Invalid patch operation", 400);
+                }
+                String name = unescapeJsonPointer(path.substring("/responseParameters/".length()));
+                String op = patch.get("op");
+                if ("remove".equals(op)) {
+                    parameters.remove(name);
+                } else if ("add".equals(op) || "replace".equals(op)) {
+                    String value = patch.get("value");
+                    if (!"true".equals(value) && !"false".equals(value)) {
+                        throw new AwsException("BadRequestException", "Invalid patch operation", 400);
+                    }
+                    parameters.put(name, Boolean.parseBoolean(value));
+                } else {
+                    throw new AwsException("BadRequestException", "Invalid patch operation", 400);
+                }
+            }
+        }
+        MethodResponse updated = new MethodResponse(statusCode, parameters);
+        getMethod(region, apiId, resourceId, httpMethod).getMethodResponses().put(statusCode, updated);
+        resourceStore.put(resourceKey(region, apiId, resourceId), getResource(region, apiId, resourceId));
+        return updated;
+    }
+
+    public synchronized void deleteMethodResponse(String region, String apiId, String resourceId,
                                      String httpMethod, String statusCode) {
         MethodConfig method = getMethod(region, apiId, resourceId, httpMethod);
         if (method.getMethodResponses().remove(statusCode) == null) {
@@ -542,20 +707,17 @@ public class ApiGatewayService {
 
         integration.setContentHandling((String) request.get("contentHandling"));
         integration.setCredentials((String) request.get("credentials"));
-        integration.setCacheNamespace((String) request.get("cacheNamespace"));
+        integration.setCacheNamespace(request.get("cacheNamespace") != null
+                ? (String) request.get("cacheNamespace") : resourceId);
+        integration.setResponseTransferMode(transferMode(request.get("responseTransferMode")));
+        validateTransferMode(integration.getResponseTransferMode(), integration.getType());
         if (request.get("connectionType") != null) {
             integration.setConnectionType((String) request.get("connectionType"));
         }
         integration.setConnectionId((String) request.get("connectionId"));
 
         if (request.get("timeoutInMillis") instanceof Number timeout) {
-            // AWS accepts 50ms upward; the 29s ceiling applies only to edge-optimized APIs, and
-            // Regional/private APIs (Floci's default) may exceed it, so only the floor is enforced.
-            if (timeout.intValue() < 50) {
-                throw new AwsException("BadRequestException",
-                        "Invalid timeout value: " + timeout.intValue(), 400);
-            }
-            integration.setTimeoutInMillis(timeout.intValue());
+            integration.setTimeoutInMillis(parseIntegrationTimeout(timeout));
         }
 
         if (request.get("cacheKeyParameters") instanceof List<?> cacheKeys) {
@@ -666,7 +828,19 @@ public class ApiGatewayService {
     public Deployment createDeployment(String region, String apiId, Map<String, Object> request) {
         getRestApi(region, apiId);
         String description = (String) request.getOrDefault("description", "");
-        Deployment deployment = new Deployment(shortId(10), description, System.currentTimeMillis() / 1000L);
+        String snapshot;
+        Map<String, String> schemas;
+        try {
+            snapshot = JSON.writeValueAsString(new DeploymentExportSnapshot(getRestApi(region, apiId),
+                    getResources(region, apiId), getModels(region, apiId), getAuthorizers(region, apiId),
+                    getRequestValidators(region, apiId), getGatewayResponses(region, apiId).stream()
+                            .filter(response -> !response.isDefaultResponse()).toList()));
+            schemas = modelSchemas(JSON.readValue(snapshot, DeploymentExportSnapshot.class).models());
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Cannot capture REST API deployment", e);
+        }
+        Deployment deployment = new Deployment(shortId(10), description, System.currentTimeMillis() / 1000L, snapshot);
+        deploymentModelStore.put(deploymentKey(region, apiId, deployment.id()), schemas);
         deploymentStore.put(deploymentKey(region, apiId, deployment.id()), deployment);
         LOG.infov("Created deployment {0} for API {1}", deployment.id(), apiId);
 
@@ -721,6 +895,32 @@ public class ApiGatewayService {
     public void deleteDeployment(String region, String apiId, String deploymentId) {
         getDeployment(region, apiId, deploymentId);
         deploymentStore.delete(deploymentKey(region, apiId, deploymentId));
+        deploymentModelStore.delete(deploymentKey(region, apiId, deploymentId));
+    }
+
+    Map<String, String> getDeploymentModelSchemas(String region, String apiId, String deploymentId) {
+        if (deploymentId != null) {
+            Optional<Map<String, String>> schemas = deploymentModelStore.get(deploymentKey(region, apiId, deploymentId));
+            if (schemas.isPresent()) {
+                return schemas.get();
+            }
+        }
+        // Deployments persisted before model snapshots were introduced retain their existing behavior.
+        return currentModelSchemas(region, apiId);
+    }
+
+    private Map<String, String> currentModelSchemas(String region, String apiId) {
+        return modelSchemas(getModels(region, apiId));
+    }
+
+    private Map<String, String> modelSchemas(List<Model> models) {
+        Map<String, String> schemas = new HashMap<>();
+        for (Model model : models) {
+            if (model.getSchema() != null) {
+                schemas.put(model.getName(), model.getSchema());
+            }
+        }
+        return Map.copyOf(schemas);
     }
 
     public Deployment updateDeployment(String region, String apiId, String deploymentId, List<Map<String, String>> patchOperations) {
@@ -742,11 +942,46 @@ public class ApiGatewayService {
                 }
                 newDescription = "remove".equals(operation) ? null : value;
             }
-            Deployment updated = new Deployment(existing.id(), newDescription, existing.createdDate());
+            Deployment updated = new Deployment(existing.id(), newDescription, existing.createdDate(), existing.exportSnapshot());
             deploymentStore.put(deploymentKey(region, apiId, deploymentId), updated);
             return updated;
         }
         return existing;
+    }
+
+    public ObjectNode exportRestApi(String region, String apiId, String stageName, String exportType,
+                                    String extensions) {
+        Stage stage = getStage(region, apiId, stageName);
+        if (!"oas30".equals(exportType) && !"swagger".equals(exportType)) {
+            throw new AwsException("BadRequestException", "Invalid export type: " + exportType, 400);
+        }
+        Set<String> selected = extensions == null || extensions.isBlank()
+                ? Set.of() : new HashSet<>(List.of(extensions.split(",")));
+        if (!Set.of("integrations", "authorizers", "apigateway").containsAll(selected)) {
+            throw new AwsException("BadRequestException", "Unsupported export extensions: " + extensions, 400);
+        }
+        Deployment deployment = getDeployment(region, apiId, stage.getDeploymentId());
+        if (deployment.exportSnapshot() == null) {
+            throw new AwsException("BadRequestException",
+                    "This deployment predates export snapshots. Redeploy the API before exporting it.", 400);
+        }
+        try {
+            DeploymentExportSnapshot snapshot = JSON.readValue(deployment.exportSnapshot(), DeploymentExportSnapshot.class);
+            boolean all = selected.contains("apigateway");
+            ObjectNode document = RestApiOpenApiExporter.export(snapshot, "swagger".equals(exportType),
+                    all || selected.contains("integrations"), all || selected.contains("authorizers"), all);
+            String host = apiId + ".execute-api." + region + "." + AwsRegions.dnsSuffixFor(region);
+            if ("swagger".equals(exportType)) {
+                document.put("host", host);
+                document.put("basePath", "/" + stageName);
+                document.putArray("schemes").add("https");
+            } else {
+                document.putArray("servers").addObject().put("url", "https://" + host + "/" + stageName);
+            }
+            return document;
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Cannot read REST API deployment snapshot", e);
+        }
     }
 
     // ──────────────────────────── Stages ────────────────────────────
@@ -921,27 +1156,6 @@ public class ApiGatewayService {
         }
     }
 
-    public Map<String, String> getStageTags(String region, String apiId, String stageName) {
-        return new HashMap<>(getStage(region, apiId, stageName).getTags());
-    }
-
-    public void tagStage(String region, String apiId, String stageName, Map<String, String> tags) {
-        Stage stage = getStage(region, apiId, stageName);
-        ReservedTags.rejectApiGatewayReservedTagsOnUpdate(tags);
-        Map<String, String> merged = new HashMap<>(stage.getTags());
-        merged.putAll(tags);
-        stage.setTags(merged);
-        stageStore.put(stageKey(region, apiId, stageName), stage);
-    }
-
-    public void untagStage(String region, String apiId, String stageName, List<String> tagKeys) {
-        Stage stage = getStage(region, apiId, stageName);
-        Map<String, String> remaining = new HashMap<>(stage.getTags());
-        tagKeys.forEach(remaining::remove);
-        stage.setTags(remaining);
-        stageStore.put(stageKey(region, apiId, stageName), stage);
-    }
-
     public void deleteStage(String region, String apiId, String stageName) {
         getStage(region, apiId, stageName);
         stageStore.delete(stageKey(region, apiId, stageName));
@@ -951,8 +1165,15 @@ public class ApiGatewayService {
 
     public Authorizer createAuthorizer(String region, String apiId, Map<String, Object> request) {
         getRestApi(region, apiId);
+        Authorizer authorizer = saveAuthorizer(region, apiId, shortId(6), request);
+        LOG.infov("Created authorizer {0} for API {1}", authorizer.getId(), apiId);
+        return authorizer;
+    }
+
+    private Authorizer saveAuthorizer(String region, String apiId, String authorizerId,
+                                      Map<String, Object> request) {
         Authorizer authorizer = new Authorizer();
-        authorizer.setId(shortId(6));
+        authorizer.setId(authorizerId);
         authorizer.setName((String) request.get("name"));
         authorizer.setType((String) request.get("type"));
         authorizer.setAuthorizerUri((String) request.get("authorizerUri"));
@@ -962,6 +1183,8 @@ public class ApiGatewayService {
         authorizer.setIdentitySource((String) request.get("identitySource"));
         Object ttl = request.get("authorizerResultTtlInSeconds");
         authorizer.setAuthorizerResultTtlInSeconds(validateAuthorizerTtl(ttl == null ? "300" : ttl.toString()));
+        validateRequestAuthorizerIdentitySource(authorizer.getType(), authorizer.getIdentitySource(),
+                authorizer.getAuthorizerResultTtlInSeconds());
         // COGNITO_USER_POOLS authorizers carry the pool ARNs; keep them so get-authorizer reflects them.
         if (request.get("providerARNs") instanceof List<?> arns) {
             List<String> providerArns = new ArrayList<>();
@@ -974,7 +1197,6 @@ public class ApiGatewayService {
         }
 
         authorizerStore.put(authorizerKey(region, apiId, authorizer.getId()), authorizer);
-        LOG.infov("Created authorizer {0} for API {1}", authorizer.getId(), apiId);
         return authorizer;
     }
 
@@ -1037,6 +1259,7 @@ public class ApiGatewayService {
                 }
             }
         }
+        validateRequestAuthorizerIdentitySource(newType, newIdentitySource, newTtl);
         authorizer.setType(newType);
         authorizer.setAuthType(newAuthType);
         authorizer.setName(newName);
@@ -1049,17 +1272,20 @@ public class ApiGatewayService {
         return authorizer;
     }
 
-    private static String validateAuthorizerTtl(String value) {
-        int ttl;
+    private static void validateRequestAuthorizerIdentitySource(String type, String identitySource, String ttl) {
+        if (!"REQUEST".equals(type)) {
+            return;
+        }
+        int ttlSeconds;
         try {
-            ttl = Integer.parseInt(value.trim());
-        } catch (NumberFormatException e) {
+            ttlSeconds = Integer.parseInt(ttl);
+        } catch (NumberFormatException exception) {
             throw new AwsException("BadRequestException", "authorizerResultTtlInSeconds must be an integer", 400);
         }
-        if (ttl < 0 || ttl > 3600) {
-            throw new AwsException("BadRequestException", "authorizerResultTtlInSeconds must be between 0 and 3600", 400);
+        if (ttlSeconds > 0 && (identitySource == null || identitySource.isBlank())) {
+            throw new AwsException("BadRequestException",
+                    "Identity source is required for a REQUEST authorizer when caching is enabled", 400);
         }
-        return Integer.toString(ttl);
     }
 
     // ──────────────────────────── API Keys ────────────────────────────
@@ -1067,7 +1293,7 @@ public class ApiGatewayService {
     public ApiKey createApiKey(String region, Map<String, Object> request) {
         ApiKey apiKey = new ApiKey();
         apiKey.setName((String) request.get("name"));
-        apiKey.setEnabled(!Boolean.FALSE.equals(request.get("enabled")));
+        apiKey.setEnabled(Boolean.TRUE.equals(request.get("enabled")));
         apiKey.setCreatedDate(System.currentTimeMillis() / 1000L);
         apiKey.setLastUpdatedDate(apiKey.getCreatedDate());
         apiKey.setDescription((String) request.get("description"));
@@ -1247,10 +1473,35 @@ public class ApiGatewayService {
             }
         });
         ReservedTags.rejectApiGatewayReservedTagsOnUpdate(changed);
+        return storeApiKeyTags(region, key, tags);
+    }
+
+    /**
+     * Sets an API key's tags to exactly the given ones, reserved tags included. It is for putting
+     * back the tags a key had before a failed stack update, which may include a reserved tag the
+     * key was created with and the update removed, so it skips the reserved-tag check.
+     */
+    public ApiKey restoreApiKeyTags(String region, String apiKeyId, Map<String, String> tags) {
+        return storeApiKeyTags(region, getApiKey(region, apiKeyId), tags);
+    }
+
+    private ApiKey storeApiKeyTags(String region, ApiKey key, Map<String, String> tags) {
         key.setTags(new HashMap<>(tags));
         key.setLastUpdatedDate(System.currentTimeMillis() / 1000L);
-        apiKeyStore.put(apiKeyGlobalKey(region, apiKeyId), key);
+        apiKeyStore.put(apiKeyGlobalKey(region, key.getId()), key);
         return key;
+    }
+
+    public void tagApiKey(String region, String apiKeyId, Map<String, String> tags) {
+        Map<String, String> merged = new HashMap<>(getApiKey(region, apiKeyId).getTags());
+        merged.putAll(tags);
+        replaceApiKeyTags(region, apiKeyId, merged);
+    }
+
+    public void untagApiKey(String region, String apiKeyId, List<String> tagKeys) {
+        Map<String, String> remaining = new HashMap<>(getApiKey(region, apiKeyId).getTags());
+        tagKeys.forEach(remaining::remove);
+        replaceApiKeyTags(region, apiKeyId, remaining);
     }
 
     // ──────────────────────────── Usage Plans ────────────────────────────
@@ -1431,6 +1682,19 @@ public class ApiGatewayService {
         return plan;
     }
 
+    public void tagUsagePlan(String region, String usagePlanId, Map<String, String> tags) {
+        ReservedTags.rejectApiGatewayReservedTagsOnUpdate(tags);
+        Map<String, String> merged = new HashMap<>(getUsagePlan(region, usagePlanId).getTags());
+        merged.putAll(tags);
+        replaceUsagePlanTags(region, usagePlanId, merged);
+    }
+
+    public void untagUsagePlan(String region, String usagePlanId, List<String> tagKeys) {
+        Map<String, String> remaining = new HashMap<>(getUsagePlan(region, usagePlanId).getTags());
+        tagKeys.forEach(remaining::remove);
+        replaceUsagePlanTags(region, usagePlanId, remaining);
+    }
+
     // ──────────────────────────── Usage Plan Keys ────────────────────────────
 
     public UsagePlanKey createUsagePlanKey(String region, String usagePlanId, Map<String, Object> request) {
@@ -1570,38 +1834,6 @@ public class ApiGatewayService {
     public void deleteUsagePlanKey(String region, String usagePlanId, String keyId) {
         getUsagePlanKey(region, usagePlanId, keyId);
         usagePlanKeyStore.delete(usagePlanKeyPathKey(region, usagePlanId, keyId));
-    }
-
-    public record UsageSnapshot(
-            String usagePlanId,
-            String startDate,
-            String endDate,
-            Map<String, List<List<Integer>>> values
-    ) {}
-
-    public UsageSnapshot getUsage(String region, String usagePlanId, String keyId,
-                                  String startDate, String endDate) {
-        UsagePlan plan = getUsagePlan(region, usagePlanId);
-        if (startDate == null || startDate.isBlank() || endDate == null || endDate.isBlank()) {
-            throw new AwsException("BadRequestException",
-                    "startDate and endDate are required", 400);
-        }
-        Map<String, List<List<Integer>>> values = new LinkedHashMap<>();
-        if (keyId != null && !keyId.isBlank()) {
-            values.put(keyId, List.of(List.of(0, 0)));
-        }
-        return new UsageSnapshot(plan.getId(), startDate, endDate, values);
-    }
-
-    public UsageSnapshot updateUsage(String region, String usagePlanId, String keyId,
-                                     List<Map<String, String>> patchOperations) {
-        UsagePlan plan = getUsagePlan(region, usagePlanId);
-        getUsagePlanKey(region, usagePlanId, keyId);
-        if (plan.getQuota() == null || plan.getQuota().getLimit() == null) {
-            throw new AwsException("BadRequestException",
-                    "Usage plan does not have a quota limit", 400);
-        }
-        return new UsageSnapshot(plan.getId(), null, null, Map.of(keyId, List.of(List.of(0, 0))));
     }
 
 
@@ -1836,14 +2068,20 @@ public class ApiGatewayService {
 
     public RequestValidator createRequestValidator(String region, String apiId, Map<String, Object> request) {
         getRestApi(region, apiId);
+        RequestValidator validator = saveRequestValidator(region, apiId, shortId(6), request);
+        LOG.infov("Created request validator {0} for API {1}", validator.getId(), apiId);
+        return validator;
+    }
+
+    private RequestValidator saveRequestValidator(String region, String apiId, String validatorId,
+                                                  Map<String, Object> request) {
         RequestValidator validator = new RequestValidator();
-        validator.setId(shortId(6));
+        validator.setId(validatorId);
         validator.setName((String) request.get("name"));
         validator.setValidateRequestBody(Boolean.TRUE.equals(request.get("validateRequestBody")));
         validator.setValidateRequestParameters(Boolean.TRUE.equals(request.get("validateRequestParameters")));
 
         requestValidatorStore.put(requestValidatorKey(region, apiId, validator.getId()), validator);
-        LOG.infov("Created request validator {0} for API {1}", validator.getId(), apiId);
         return validator;
     }
 
@@ -1992,11 +2230,15 @@ public class ApiGatewayService {
 
     // ──────────────────────────── Custom Domains ────────────────────────────
 
-    public CustomDomain createDomainName(String region, Map<String, Object> request) {
-        return createDomainName(region, request, null);
+    /**
+     * A public custom domain's ARN, {@code arn:<partition>:apigateway:<region>::/domainnames/<name>},
+     * which both APIs report and CloudFormation's {@code DomainNameArn} returns.
+     */
+    public static String domainNameArn(String region, String domainName) {
+        return AwsArnUtils.Arn.of("apigateway", region, "", "/domainnames/" + domainName).toString();
     }
 
-    private CustomDomain createDomainName(String region, Map<String, Object> request, Map<String, Object> v2Request) {
+    public CustomDomain createDomainName(String region, Map<String, Object> request) {
         String domainName = (String) request.get("domainName");
         if (domainName == null) throw new AwsException("BadRequestException", "domainName is required", 400);
         String endpointType = endpointTypeOf(request);
@@ -2005,6 +2247,7 @@ public class ApiGatewayService {
             // neither regional nor edge-optimized, which nothing here could route or describe.
             throw new AwsException("BadRequestException", "Invalid value for endpoint type: " + endpointType, 400);
         }
+        requireEndpointTypeAvailable(endpointType, region);
 
         CustomDomain domain = new CustomDomain();
         domain.setDomainName(domainName);
@@ -2013,8 +2256,9 @@ public class ApiGatewayService {
         domain.setRegionalCertificateName((String) request.get("regionalCertificateName"));
         domain.setRegionalCertificateArn((String) request.get("regionalCertificateArn"));
         domain.setRegionalDomainName(domainName + ".regional.local");
-        domain.setRegionalHostedZoneId("Z2FDTNDATAQYL2");
-        applyEndpointType(domain, endpointType);
+        domain.setRegionalHostedZoneId(AwsRegionFacts.apiGatewayRegionalHostedZoneId(region)
+                .orElse(UNSOURCED_REGIONAL_HOSTED_ZONE_ID));
+        applyEndpointType(domain, endpointType, region);
         domain.setSecurityPolicy((String) request.getOrDefault("securityPolicy", "TLS_1_2"));
         // Nothing is provisioned behind the domain, so it is usable as soon as it exists.
         domain.setDomainNameStatus("AVAILABLE");
@@ -2022,10 +2266,6 @@ public class ApiGatewayService {
             Map<String, String> copied = new java.util.LinkedHashMap<>();
             tags.forEach((key, value) -> copied.put(String.valueOf(key), String.valueOf(value)));
             domain.setTags(copied);
-        }
-
-        if (v2Request != null) {
-            applyV2DomainSettings(domain, v2Request);
         }
 
         // AWS enforces global uniqueness of custom domain names across all regions. The check and
@@ -2045,20 +2285,35 @@ public class ApiGatewayService {
     }
 
     /**
-     * An edge-optimized domain fronts a CloudFront distribution, and a DNS alias points at the
-     * distribution's name in the fixed CloudFront hosted zone AWS documents for every region. A
-     * regional domain has none, so a move to {@code REGIONAL} drops the distribution again while a
-     * move to {@code EDGE} puts one in front of the domain, as the migration does on AWS.
+     * Edge-optimized APIs and domains exist only in the commercial partition: GovCloud and the
+     * ISO partitions have no CloudFront, and China has CloudFront but no edge-optimized API Gateway
+     * (https://docs.amazonaws.cn/en_us/aws/latest/userguide/api-gateway.html). No source shows
+     * AWS's message for the refusal, so the wording is Floci's own.
      */
-    private static void applyEndpointType(CustomDomain domain, String endpointType) {
+    private static void requireEndpointTypeAvailable(String endpointType, String region) {
+        AwsPartition partition = AwsPartitions.forRegionOrCommercial(region);
+        if ("EDGE".equals(endpointType) && !EDGE_OPTIMIZED_PARTITIONS.contains(partition.id())) {
+            throw new AwsException("BadRequestException",
+                    "Endpoint type EDGE is not available in partition " + partition.id() + ".", 400);
+        }
+    }
+
+    /**
+     * An edge-optimized domain fronts a CloudFront distribution, and a DNS alias points at the
+     * distribution's name in the CloudFront hosted zone of its partition. A regional domain has
+     * none, so a move to {@code REGIONAL} drops the distribution again while a move to {@code EDGE}
+     * puts one in front of the domain, as the migration does on AWS.
+     */
+    private void applyEndpointType(CustomDomain domain, String endpointType, String region) {
         domain.setEndpointConfigurationType(endpointType);
         if (!"EDGE".equals(endpointType)) {
             domain.setDistributionDomainName(null);
             domain.setDistributionHostedZoneId(null);
         } else if (domain.getDistributionDomainName() == null) {
-            domain.setDistributionDomainName(
-                    "d" + UUID.randomUUID().toString().replace("-", "").substring(0, 13) + ".cloudfront.net");
-            domain.setDistributionHostedZoneId("Z2FDTNDATAQYW2");
+            CloudFrontEdgeDomain edge = CloudFrontEdgeDomain.create(regionResolver.partitionForRegion(region),
+                    config.services().cloudfront().domainSuffix().orElse(null));
+            domain.setDistributionDomainName(edge.domainName());
+            domain.setDistributionHostedZoneId(edge.hostedZoneId());
         }
     }
 
@@ -2090,8 +2345,6 @@ public class ApiGatewayService {
         String prefix = region + "::";
         return domainStore.scan(k -> k.startsWith(prefix));
     }
-
-
 
     public void deleteDomainName(String region, String domainName) {
         synchronized (domainNameLock) {
@@ -2174,13 +2427,20 @@ public class ApiGatewayService {
                 throw new AwsException("BadRequestException", "Unsupported path: " + path, 400);
             }
         }
+        if (!Objects.equals(newSecurityPolicy, domain.getSecurityPolicy())) {
+            requireMappingsAllowSecurityPolicy(region, domainName, newSecurityPolicy);
+        }
+        // Only a change of type is held to the partition: an EDGE domain stored before the rule
+        // existed must still take certificate or security-policy updates.
+        if (!Objects.equals(newEndpointConfigurationType, domain.getEndpointConfigurationType())) {
+            requireEndpointTypeAvailable(newEndpointConfigurationType, region);
+        }
         domain.setCertificateName(newCertificateName);
         domain.setCertificateArn(newCertificateArn);
         domain.setRegionalCertificateName(newRegionalCertificateName);
         domain.setRegionalCertificateArn(newRegionalCertificateArn);
         domain.setSecurityPolicy(newSecurityPolicy);
-        applyEndpointType(domain, newEndpointConfigurationType);
-        domain.synchronizePrimaryConfiguration();
+        applyEndpointType(domain, newEndpointConfigurationType, region);
         domainStore.put(domainKey, domain);
         return domain;
     }
@@ -2198,16 +2458,26 @@ public class ApiGatewayService {
     }
 
     public BasePathMapping createBasePathMapping(String region, String domainName, Map<String, Object> request) {
+        return createBasePathMapping(region, domainName, request, REST_API_TYPE, Set.of());
+    }
+
+    private BasePathMapping createBasePathMapping(String region, String domainName, Map<String, Object> request,
+                                                  String apiType, Set<String> excludedIds) {
         String basePath = canonicalBasePath((String) request.get("basePath"));
         String apiId = (String) request.get("restApiId");
         String stage = (String) request.get("stage");
 
         BasePathMapping mapping = new BasePathMapping(basePath, apiId, stage);
-        // New IDs use a separate namespace from the legacy path-encoded IDs.
-        mapping.setApiMappingId("a" + UUID.randomUUID().toString().replace("-", ""));
+        mapping.setApiType(apiType);
         synchronized (domainNameLock) {
-            requireMappingPathAvailable(region, domainName, basePath, null);
-            basePathMappingStore.put(mappingKey(region, domainName, basePath), mapping);
+            getDomainName(region, domainName);
+            String key = mappingKey(region, domainName, basePath);
+            if (basePathMappingStore.get(key).isPresent()) {
+                throw new AwsException("ConflictException", "Base path already exists for this domain name", 409);
+            }
+            requireProtocolTypesCompatible(region, domainName, apiType, null);
+            mapping.setApiMappingId(unusedApiMappingId(region, domainName, basePath, excludedIds));
+            basePathMappingStore.put(key, mapping);
         }
         LOG.infov("Created mapping for {0} path={1} -> API {2}", domainName, basePath, apiId);
         return mapping;
@@ -2229,22 +2499,16 @@ public class ApiGatewayService {
     }
 
     public BasePathMapping getBasePathMapping(String region, String domainName, String basePath) {
-        synchronized (domainNameLock) {
-            String path = (basePath == null || basePath.isEmpty() || "/" .equals(basePath)) ? "(none)" : basePath;
-            return basePathMappingStore.get(mappingKey(region, domainName, path))
-                    .orElseThrow(() -> new AwsException("NotFoundException", "Base path mapping not found", 404));
-        }
+        String path = (basePath == null || basePath.isEmpty() || "/" .equals(basePath)) ? "(none)" : basePath;
+        return basePathMappingStore.get(mappingKey(region, domainName, path))
+                .orElseThrow(() -> new AwsException("NotFoundException", "Base path mapping not found", 404));
     }
 
     public List<BasePathMapping> getBasePathMappings(String region, String domainName) {
-        synchronized (domainNameLock) {
-            getDomainName(region, domainName);
-            String prefix = region + "::" + domainName + "::";
-            return basePathMappingStore.scan(k -> k.startsWith(prefix));
-        }
+        getDomainName(region, domainName);
+        String prefix = region + "::" + domainName + "::";
+        return basePathMappingStore.scan(k -> k.startsWith(prefix));
     }
-
-
 
     public void deleteBasePathMapping(String region, String domainName, String basePath) {
         synchronized (domainNameLock) {
@@ -2254,89 +2518,26 @@ public class ApiGatewayService {
         }
     }
 
-    /** Maps exact stored paths to records, preserving distinct legacy root spellings. */
+    /**
+     * The mappings on a domain, keyed by the base path each record is stored under.
+     *
+     * <p>That path is the record's identity, and it is not always what the record reports:
+     * {@link BasePathMapping} normalises an empty base path to {@code (none)} in its constructor,
+     * so a record written before writes were canonicalised can sit under the key {@code ""} while
+     * its own field reads {@code (none)}. Anything identifying a record — an id derived from it, a
+     * delete aimed at it — has to use the key rather than the field.
+     */
     public Map<String, BasePathMapping> basePathMappingsByStoredPath(String region, String domainName) {
-        synchronized (domainNameLock) {
-            getDomainName(region, domainName);
-            String prefix = region + "::" + domainName + "::";
-            Map<String, BasePathMapping> byStoredPath = new LinkedHashMap<>();
-            for (String key : basePathMappingStore.keys()) {
-                if (key.startsWith(prefix)) {
-                    basePathMappingStore.get(key)
-                            .ifPresent(mapping -> byStoredPath.put(key.substring(prefix.length()), mapping));
-                }
+        getDomainName(region, domainName);
+        String prefix = region + "::" + domainName + "::";
+        Map<String, BasePathMapping> byStoredPath = new LinkedHashMap<>();
+        for (String key : basePathMappingStore.keys()) {
+            if (key.startsWith(prefix)) {
+                basePathMappingStore.get(key)
+                        .ifPresent(mapping -> byStoredPath.put(key.substring(prefix.length()), mapping));
             }
-            return byStoredPath;
         }
-    }
-
-    static String legacyApiMappingId(String storedPath) {
-        return "m" + HexFormat.of().formatHex(
-                (storedPath == null ? "" : storedPath).getBytes(StandardCharsets.UTF_8));
-    }
-
-    static String apiMappingId(String storedPath, BasePathMapping mapping) {
-        return mapping.getApiMappingId() == null ? legacyApiMappingId(storedPath) : mapping.getApiMappingId();
-    }
-
-    public record StoredMapping(String storedPath, BasePathMapping mapping) {}
-
-    public StoredMapping getApiMapping(String region, String domainName, String apiMappingId) {
-        synchronized (domainNameLock) {
-            return basePathMappingsByStoredPath(region, domainName).entrySet().stream()
-                    .filter(entry -> apiMappingId(entry.getKey(), entry.getValue()).equals(apiMappingId))
-                    .map(entry -> new StoredMapping(entry.getKey(), entry.getValue()))
-                    .findFirst()
-                    .orElseThrow(() -> new AwsException("NotFoundException",
-                            "Unable to find ApiMapping with ID " + apiMappingId, 404));
-        }
-    }
-
-    public void deleteApiMapping(String region, String domainName, String apiMappingId) {
-        synchronized (domainNameLock) {
-            StoredMapping found = getApiMapping(region, domainName, apiMappingId);
-            deleteBasePathMappingRecord(region, domainName, found.storedPath());
-        }
-    }
-
-    public StoredMapping updateApiMapping(String region, String domainName, String apiMappingId,
-                                          Map<String, Object> request, BiConsumer<String, String> validateTarget) {
-        synchronized (domainNameLock) {
-            StoredMapping found = getApiMapping(region, domainName, apiMappingId);
-            if (request == null || !(request.get("apiId") instanceof String apiId) || apiId.isBlank()) {
-                throw new AwsException("BadRequestException", "apiId is required", 400);
-            }
-            for (String field : List.of("stage", "apiMappingKey")) {
-                if (request.containsKey(field) && !(request.get(field) instanceof String)) {
-                    throw new AwsException("BadRequestException", field + " must be a string", 400);
-                }
-            }
-            String stage = request.containsKey("stage") ? (String) request.get("stage") : found.mapping().getStage();
-            String path = request.containsKey("apiMappingKey")
-                    ? canonicalBasePath((String) request.get("apiMappingKey")) : found.storedPath();
-            if (!path.equals(found.storedPath())) {
-                requireMappingPathAvailable(region, domainName, path, found.storedPath());
-            }
-            validateTarget.accept(apiId, stage);
-
-            BasePathMapping updated = new BasePathMapping(
-                    path.equals(found.storedPath()) ? found.mapping().getBasePath() : path, apiId, stage);
-            updated.setApiMappingId(apiMappingId(found.storedPath(), found.mapping()));
-            basePathMappingStore.put(mappingKey(region, domainName, path), updated);
-            if (!path.equals(found.storedPath())) {
-                basePathMappingStore.delete(mappingKey(region, domainName, found.storedPath()));
-            }
-            return new StoredMapping(path, updated);
-        }
-    }
-
-    private void requireMappingPathAvailable(String region, String domainName, String path, String currentPath) {
-        boolean taken = basePathMappingsByStoredPath(region, domainName).keySet().stream()
-                .anyMatch(existing -> !existing.equals(currentPath)
-                        && canonicalBasePath(existing).equals(canonicalBasePath(path)));
-        if (taken) {
-            throw new AwsException("ConflictException", "Base path already exists for this domain name", 409);
-        }
+        return byStoredPath;
     }
 
     /**
@@ -2397,21 +2598,477 @@ public class ApiGatewayService {
             }
         }
 
-        BasePathMapping updated = new BasePathMapping(mapping.getBasePath(), newRestApiId, newStage);
-        updated.setApiMappingId(apiMappingId(normalizedPath, mapping));
-        basePathMappingStore.put(mappingKey(region, domainName, normalizedPath), updated);
-        return updated;
+        mapping.setRestApiId(newRestApiId);
+        mapping.setStage(newStage);
+        basePathMappingStore.put(mappingKey(region, domainName, normalizedPath), mapping);
+        return mapping;
+    }
+
+    // ──────────────────────────── Custom Domains and API Mappings (v2) ────────────────────────────
+    //
+    // A custom domain is one resource in AWS, reachable through both APIs, so the v2 operations read
+    // and write the same records the v1 ones do. The rules live here rather than in the controller
+    // because CloudFormation's AWS::ApiGatewayV2 types go through them too.
+
+    /** {@code CreateDomainName} through the v2 API, from its request body. */
+    public CustomDomain createV2DomainName(String region, Map<String, Object> request) {
+        return createDomainName(region, toV1DomainRequest(request));
+    }
+
+    /**
+     * {@code UpdateDomainName} through the v2 API: a body with a configuration replaces the domain's
+     * as {@link #replaceV2DomainConfiguration} does. One without changes nothing, after the same
+     * refusals: of what Floci does not emulate, and of an edge-optimized domain, which the v2 API
+     * does not manage.
+     */
+    public CustomDomain updateV2DomainName(String region, String domainName, Map<String, Object> request) {
+        if (request.get("domainNameConfigurations") != null) {
+            return replaceV2DomainConfiguration(region, domainName, request);
+        }
+        rejectUnemulatedDomainInputs(request, Map.of());
+        CustomDomain domain = getDomainName(region, domainName);
+        requireRegionalDomain(domain);
+        return domain;
+    }
+
+    /**
+     * Drives a domain's configuration to the one in a v2 {@code CreateDomainName} body, validated the
+     * same way. This is what an update of {@code DomainNameConfigurations} does on AWS: the list is
+     * replaced as a whole, so a certificate the body leaves out is cleared and a security policy it
+     * leaves out takes the {@code TLS_1_2} default. The domain is regional, so its certificate goes to
+     * the regional fields, and one left in the edge-optimized fields by an earlier v2 write is
+     * cleared with the rest. Tags are not touched.
+     */
+    public CustomDomain replaceV2DomainConfiguration(String region, String domainName,
+                                                     Map<String, Object> request) {
+        Map<String, Object> v1Request = toV1DomainRequest(request);
+        String securityPolicy = (String) v1Request.getOrDefault("securityPolicy", TLS_1_2);
+        synchronized (domainNameLock) {
+            CustomDomain domain = getDomainName(region, domainName);
+            requireRegionalDomain(domain);
+            if (!Objects.equals(securityPolicy, domain.getSecurityPolicy())) {
+                requireMappingsAllowSecurityPolicy(region, domainName, securityPolicy);
+            }
+            domain.setCertificateArn(null);
+            domain.setCertificateName(null);
+            domain.setRegionalCertificateArn((String) v1Request.get("regionalCertificateArn"));
+            domain.setRegionalCertificateName((String) v1Request.get("regionalCertificateName"));
+            domain.setSecurityPolicy(securityPolicy);
+            applyEndpointType(domain, endpointTypeOf(v1Request), region);
+            domainStore.put(domainKey(region, domainName), domain);
+            return domain;
+        }
+    }
+
+    /**
+     * Flattens a v2 {@code CreateDomainName} body onto the keys the shared custom-domain store is
+     * written with, after refusing what floci does not emulate.
+     */
+    private static Map<String, Object> toV1DomainRequest(Map<String, Object> request) {
+        // HTTP APIs require exactly one configuration, where the REST API takes none at all. It has
+        // to be an object: a scalar or a list there is still a body AWS would not have accepted.
+        if (!(request.get("domainNameConfigurations") instanceof List<?> configurations)
+                || configurations.size() != 1
+                || !(configurations.getFirst() instanceof Map<?, ?> configuration)) {
+            throw new AwsException("BadRequestException",
+                    "Invalid input. Expected one domain name configuration", 400);
+        }
+        if ("EDGE".equals(configuration.get("endpointType"))) {
+            throw new AwsException("BadRequestException", V2_EDGE_ENDPOINT_TYPE_MESSAGE, 400);
+        }
+        rejectUnemulatedDomainInputs(request, configuration);
+        Map<String, Object> v1Request = new HashMap<>();
+        v1Request.put("domainName", request.get("domainName"));
+        copyIfPresent(request, v1Request, "tags", "tags");
+        // An HTTP API domain is regional: API Gateway creates or keeps any other endpoint type it is
+        // given, PRIVATE or one it does not know, as REGIONAL (measured, eu-west-1, 2026-10-04). Its
+        // certificate is the regional one, which the v1 API reports as regionalCertificateArn.
+        copyIfPresent(configuration, v1Request, "certificateArn", "regionalCertificateArn");
+        copyIfPresent(configuration, v1Request, "certificateName", "regionalCertificateName");
+        v1Request.put("endpointType", "REGIONAL");
+        copyIfPresent(configuration, v1Request, "securityPolicy", "securityPolicy");
+        return v1Request;
+    }
+
+    /**
+     * Refuses the parts of a domain that floci does not emulate, rather than accepting them and
+     * answering with a domain that behaves differently from the one that was asked for.
+     */
+    private static void rejectUnemulatedDomainInputs(Map<String, Object> request, Map<?, ?> configuration) {
+        Object routingMode = request.get("routingMode");
+        if (routingMode != null && !"API_MAPPING_ONLY".equals(routingMode)) {
+            throw new AwsException("BadRequestException",
+                    "Only API_MAPPING_ONLY routing is supported", 400);
+        }
+        if (request.get("mutualTlsAuthentication") != null) {
+            throw new AwsException("BadRequestException",
+                    "Mutual TLS authentication is not supported", 400);
+        }
+        Object ipAddressType = configuration.get("ipAddressType");
+        if (ipAddressType != null && !"ipv4".equals(ipAddressType)) {
+            throw new AwsException("BadRequestException",
+                    "Only the ipv4 address type is supported", 400);
+        }
+        if (configuration.get("ownershipVerificationCertificateArn") != null) {
+            throw new AwsException("BadRequestException",
+                    "Ownership verification certificates are not supported", 400);
+        }
+    }
+
+    private static void copyIfPresent(Map<?, ?> source, Map<String, Object> target, String from, String to) {
+        Object value = source.get(from);
+        if (value != null) {
+            target.put(to, value);
+        }
+    }
+
+    /** A v2 API mapping: the base path mapping record, with the base path it is stored under. */
+    public record StoredMapping(String storedPath, BasePathMapping mapping) {
+
+        /** The id stored on the record, or for a record persisted before ids were stored, the derived one. */
+        public String apiMappingId() {
+            return mapping.getApiMappingId() != null
+                    ? mapping.getApiMappingId()
+                    : ApiGatewayService.apiMappingId(storedPath);
+        }
+    }
+
+    /** What a mapping routes to: an API, one of its stages, and the type of API it is routed as. */
+    private record MappingTarget(String apiId, String stage, String apiType) {}
+
+    /** The mappings of a domain, refused for an edge-optimized one as AWS refuses every v2 call on it. */
+    public List<StoredMapping> getApiMappings(String region, String domainName) {
+        requireRegionalDomain(getDomainName(region, domainName));
+        List<StoredMapping> mappings = new ArrayList<>();
+        basePathMappingsByStoredPath(region, domainName)
+                .forEach((storedPath, mapping) -> mappings.add(new StoredMapping(storedPath, mapping)));
+        return mappings;
+    }
+
+    /**
+     * Creates a v2 API mapping, stored as a base path mapping that remembers the type of API it
+     * routes to.
+     */
+    public StoredMapping createApiMapping(String region, String domainName, String apiMappingKey,
+                                          String apiId, String stage) {
+        return createApiMapping(region, domainName, apiMappingKey, apiId, stage, Set.of());
+    }
+
+    /**
+     * As above, with ids the new mapping must not be given. A caller that still tracks a mapping on
+     * another domain under one of them would otherwise hold two mappings it cannot tell apart; on
+     * AWS a new mapping never takes the id of another.
+     */
+    public StoredMapping createApiMapping(String region, String domainName, String apiMappingKey,
+                                          String apiId, String stage, Set<String> excludedIds) {
+        // A mapping to an API or stage that does not exist would route nowhere, so AWS refuses it
+        // rather than answering 201 with something unusable.
+        requireValidApiMappingKey(apiMappingKey, false);
+        MappingTarget target = requireMappingTarget(region, apiId, stage);
+        String basePath = canonicalBasePath(apiMappingKey);
+        synchronized (domainNameLock) {
+            requireMappingAllowed(getDomainName(region, domainName), basePath, target.apiType());
+            requireApiMappingKeyFree(region, domainName, basePath);
+
+            Map<String, Object> v1Request = new HashMap<>();
+            v1Request.put("restApiId", target.apiId());
+            v1Request.put("stage", target.stage());
+            v1Request.put("basePath", basePath);
+            return new StoredMapping(basePath,
+                    createBasePathMapping(region, domainName, v1Request, target.apiType(), excludedIds));
+        }
+    }
+
+    /**
+     * The v2 {@code UpdateApiMapping} from its request body: what the body leaves out keeps its value,
+     * as on AWS. The values it keeps are read under the lock the update takes, so two updates naming
+     * different fields of one mapping cannot write back each other's old values.
+     */
+    public StoredMapping updateApiMapping(String region, String domainName, String apiMappingId,
+                                          Map<String, Object> request) {
+        synchronized (domainNameLock) {
+            StoredMapping current = getApiMapping(region, domainName, apiMappingId);
+            String currentKey = canonicalBasePath(current.storedPath());
+            String apiMappingKey = request.containsKey("apiMappingKey")
+                    ? Objects.toString(request.get("apiMappingKey"), null)
+                    : ("(none)".equals(currentKey) ? null : currentKey);
+            String apiId = Objects.toString(request.get("apiId"), current.mapping().getRestApiId());
+            String stage = Objects.toString(request.get("stage"), current.mapping().getStage());
+            return updateApiMapping(region, domainName, apiMappingId, apiMappingKey, apiId, stage);
+        }
+    }
+
+    /**
+     * Points a v2 API mapping at a new key, API and stage, the v2 {@code UpdateApiMapping}. The id
+     * names the mapping rather than its key, so it stays with the record when the key changes, as on
+     * AWS.
+     */
+    public StoredMapping updateApiMapping(String region, String domainName, String apiMappingId,
+                                          String apiMappingKey, String apiId, String stage) {
+        requireValidApiMappingKey(apiMappingKey, true);
+        MappingTarget target = requireMappingTarget(region, apiId, stage);
+        String basePath = canonicalBasePath(apiMappingKey);
+        synchronized (domainNameLock) {
+            CustomDomain domain = getDomainName(region, domainName);
+            StoredMapping found = getApiMapping(region, domainName, apiMappingId);
+            requireMappingAllowed(domain, basePath, target.apiType());
+            requireProtocolTypesCompatible(region, domainName, target.apiType(), found.storedPath());
+            BasePathMapping mapping = found.mapping();
+            String storedPath = found.storedPath();
+            if (!basePath.equals(canonicalBasePath(storedPath))) {
+                requireApiMappingKeyFree(region, domainName, basePath);
+                // Pinned before the record leaves the path a legacy id was derived from.
+                mapping.setApiMappingId(found.apiMappingId());
+                basePathMappingStore.delete(mappingKey(region, domainName, storedPath));
+                mapping.setBasePath(basePath);
+                storedPath = basePath;
+            }
+            mapping.setRestApiId(target.apiId());
+            mapping.setStage(target.stage());
+            mapping.setApiType(target.apiType());
+            basePathMappingStore.put(mappingKey(region, domainName, storedPath), mapping);
+            return new StoredMapping(storedPath, mapping);
+        }
+    }
+
+    /**
+     * The API and stage a v2 API mapping points at. AWS takes a REST API here as well as an HTTP or
+     * WebSocket API, which is how a REST API gets a mapping with more than one level, and refuses an
+     * API or stage that does not exist rather than creating a mapping that routes nowhere. A v2 API
+     * answers first, as it did before REST APIs were accepted.
+     */
+    private MappingTarget requireMappingTarget(String region, String apiId, String stageName) {
+        String apiType = v2ApiType(region, apiId);
+        boolean restApi = apiType == null && restApiExists(region, apiId);
+        if (apiType == null && !restApi) {
+            throw new AwsException("BadRequestException", "Invalid API identifier specified: " + apiId, 400);
+        }
+        try {
+            if (restApi) {
+                getStage(region, apiId, stageName);
+            } else {
+                apiGatewayV2Service.getStage(region, apiId, stageName);
+            }
+        } catch (AwsException e) {
+            throw new AwsException("BadRequestException", "Invalid stage identifier specified", 400);
+        }
+        return new MappingTarget(apiId, stageName, restApi ? REST_API_TYPE : apiType);
+    }
+
+    private String v2ApiType(String region, String apiId) {
+        try {
+            return apiGatewayV2Service.getApi(region, apiId).getProtocolType();
+        } catch (AwsException notAV2Api) {
+            LOG.debugv("{0} is not an HTTP or WebSocket API in {1}: {2}", apiId, region, notAV2Api.getMessage());
+            return null;
+        }
+    }
+
+    private boolean restApiExists(String region, String apiId) {
+        try {
+            getRestApi(region, apiId);
+            return true;
+        } catch (AwsException notARestApi) {
+            LOG.debugv("{0} is not a REST API in {1}: {2}", apiId, region, notARestApi.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Refuses an API mapping key that API Gateway refuses, with its messages (measured, eu-west-1,
+     * 2026-10-04). No key or an empty one is the root mapping, and so is a key of whitespace only
+     * on a create; an update refuses that one.
+     */
+    private static void requireValidApiMappingKey(String apiMappingKey, boolean update) {
+        if (apiMappingKey == null || apiMappingKey.isEmpty()) {
+            return;
+        }
+        if (apiMappingKey.isBlank()) {
+            if (update) {
+                throw new AwsException("BadRequestException", MAPPING_KEY_SLASHES_MESSAGE, 400);
+            }
+            return;
+        }
+        if (apiMappingKey.length() > MAX_API_MAPPING_KEY_LENGTH) {
+            throw new AwsException("BadRequestException",
+                    "ApiMapping key length must be under " + MAX_API_MAPPING_KEY_LENGTH + " characters.", 400);
+        }
+        if (apiMappingKey.endsWith("/")) {
+            throw new AwsException("BadRequestException", "API mapping key should not end with a '/'.", 400);
+        }
+        if (apiMappingKey.startsWith("/") || apiMappingKey.contains("//")) {
+            throw new AwsException("BadRequestException", MAPPING_KEY_SLASHES_MESSAGE, 400);
+        }
+        if (!API_MAPPING_KEY.matcher(apiMappingKey).matches()) {
+            throw new AwsException("BadRequestException",
+                    "An API mapping key may contain only letters, numbers and one of $-_.+!*'(), characters.", 400);
+        }
+    }
+
+    /**
+     * The restrictions AWS puts on an API mapping's domain: only a regional domain is reachable
+     * through the v2 API, and an HTTP API or a key with more than one level needs a domain on the
+     * TLS 1.2 security policy.
+     */
+    private static void requireMappingAllowed(CustomDomain domain, String basePath, String apiType) {
+        requireRegionalDomain(domain);
+        boolean root = "(none)".equals(basePath);
+        if (!TLS_1_2.equals(securityPolicyOf(domain))) {
+            if ("HTTP".equals(apiType)) {
+                throw new AwsException("BadRequestException",
+                        "HTTP APIs can only be mapped to a regional custom domain name with the TLS 1.2 security policy",
+                        400);
+            }
+            if (!root && basePath.contains("/")) {
+                throw new AwsException("BadRequestException",
+                        "API mappings with multiple levels require a regional custom domain name with the TLS 1.2 "
+                                + "security policy", 400);
+            }
+        }
+    }
+
+    private static void requireRegionalDomain(CustomDomain domain) {
+        if ("EDGE".equals(domain.getEndpointConfigurationType())) {
+            throw new AwsException("BadRequestException", V2_EDGE_DOMAIN_MESSAGE, 400);
+        }
+    }
+
+    /**
+     * A domain whose mappings need TLS 1.2, an HTTP API or a key with more than one level, cannot be
+     * moved to another security policy: the mappings AWS accepted would no longer be allowed on it.
+     */
+    private void requireMappingsAllowSecurityPolicy(String region, String domainName, String securityPolicy) {
+        if (TLS_1_2.equals(securityPolicy == null ? TLS_1_2 : securityPolicy)) {
+            return;
+        }
+        for (Map.Entry<String, BasePathMapping> entry : basePathMappingsByStoredPath(region, domainName).entrySet()) {
+            String basePath = canonicalBasePath(entry.getKey());
+            if ("HTTP".equals(entry.getValue().getApiType())
+                    || (!"(none)".equals(basePath) && basePath.contains("/"))) {
+                throw new AwsException("BadRequestException", "Custom domain name " + domainName
+                        + " has HTTP API mappings or API mappings with multiple levels, which require the TLS 1.2 "
+                        + "security policy", 400);
+            }
+        }
+    }
+
+    /**
+     * AWS keeps WebSocket APIs off a custom domain name that an HTTP or REST API is mapped to, and the
+     * other way round. {@code ignoredStoredPath} is the mapping being changed, if any. A record
+     * persisted before mappings remembered their API type is not held against either.
+     */
+    private void requireProtocolTypesCompatible(String region, String domainName, String apiType,
+                                                String ignoredStoredPath) {
+        boolean webSocket = "WEBSOCKET".equals(apiType);
+        for (Map.Entry<String, BasePathMapping> entry : basePathMappingsByStoredPath(region, domainName).entrySet()) {
+            String otherType = entry.getValue().getApiType();
+            if (otherType == null || entry.getKey().equals(ignoredStoredPath)) {
+                continue;
+            }
+            if (webSocket != "WEBSOCKET".equals(otherType)) {
+                throw new AwsException("BadRequestException",
+                        "WebSocket APIs can't be mapped to the same custom domain name as an HTTP API or REST API",
+                        400);
+            }
+        }
+    }
+
+    private static String securityPolicyOf(CustomDomain domain) {
+        return domain.getSecurityPolicy() == null ? TLS_1_2 : domain.getSecurityPolicy();
+    }
+
+    /** Whichever spelling an earlier record was written under, "" and an omitted key are one key. */
+    private void requireApiMappingKeyFree(String region, String domainName, String basePath) {
+        boolean keyTaken = basePathMappingsByStoredPath(region, domainName).keySet().stream()
+                .anyMatch(existing -> canonicalBasePath(existing).equals(basePath));
+        if (keyTaken) {
+            throw new AwsException("ConflictException",
+                    "ApiMapping key already exists for this domain name", 409);
+        }
+    }
+
+    public StoredMapping getApiMapping(String region, String domainName, String apiMappingId) {
+        requireRegionalDomain(getDomainName(region, domainName));
+        return basePathMappingsByStoredPath(region, domainName).entrySet().stream()
+                .map(entry -> new StoredMapping(entry.getKey(), entry.getValue()))
+                .filter(stored -> stored.apiMappingId().equals(apiMappingId))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("NotFoundException",
+                        "Unable to find ApiMapping with ID " + apiMappingId, 404));
+    }
+
+    /**
+     * The id a new mapping on {@code basePath} is given: the one derived from the path, so a mapping
+     * gets the id it always had, unless a mapping whose key changed since it was created still holds
+     * it, or the caller excludes it. Then a numbered variant, so no two mappings on a domain share one.
+     */
+    private String unusedApiMappingId(String region, String domainName, String basePath, Set<String> excludedIds) {
+        Set<String> taken = new HashSet<>(excludedIds);
+        basePathMappingsByStoredPath(region, domainName)
+                .forEach((storedPath, mapping) -> taken.add(new StoredMapping(storedPath, mapping).apiMappingId()));
+        String derived = apiMappingId(basePath);
+        String id = derived;
+        for (int n = 2; taken.contains(id); n++) {
+            id = derived + "-" + n;
+        }
+        return id;
+    }
+
+    public void deleteApiMapping(String region, String domainName, String apiMappingId) {
+        // Deleted by the path the selected record is stored under, so the record that answered the
+        // lookup is the record that goes.
+        StoredMapping found = getApiMapping(region, domainName, apiMappingId);
+        deleteBasePathMappingRecord(region, domainName, found.storedPath());
+    }
+
+    /**
+     * Derives a mapping id from the path the mapping is stored under. A new mapping is given this id
+     * and stores it, so the id outlives a later change of key; a record persisted before ids were
+     * stored is still read under it. The base path is encoded rather than hashed: two base paths
+     * sharing a hash would share an id, and a read or delete by that id would pick between them.
+     */
+    public static String apiMappingId(String storedPath) {
+        // Encoded from the key the record is stored under: not its canonical form, and not the
+        // record's own field, which BasePathMapping normalises on construction. State written
+        // before writes were canonicalised can sit under "" or "/" beside "(none)", and reading
+        // identity from anywhere but the key hands several records one id for a read or a delete
+        // to choose between. The prefix keeps an empty stored path from producing an empty id.
+        return "m" + HexFormat.of().formatHex(
+                (storedPath == null ? "" : storedPath).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** The certificate a v2 domain configuration reports, see {@link #v2CertificateIsRegional}. */
+    public static String v2CertificateArn(CustomDomain domain) {
+        return v2CertificateIsRegional(domain) ? domain.getRegionalCertificateArn() : domain.getCertificateArn();
+    }
+
+    /** The certificate name a v2 domain configuration reports, see {@link #v2CertificateIsRegional}. */
+    public static String v2CertificateName(CustomDomain domain) {
+        return v2CertificateIsRegional(domain) ? domain.getRegionalCertificateName() : domain.getCertificateName();
+    }
+
+    /**
+     * The v1 model keeps an edge-optimized domain's certificate apart from a regional one's, and the
+     * v2 API reports whichever the domain uses. A regional domain the v2 API wrote before its
+     * certificate went to the regional fields still holds it in the edge-optimized ones, so those
+     * answer while the regional ones are empty.
+     */
+    private static boolean v2CertificateIsRegional(CustomDomain domain) {
+        return !"EDGE".equals(domain.getEndpointConfigurationType())
+                && (domain.getRegionalCertificateArn() != null || domain.getRegionalCertificateName() != null);
     }
 
     // ──────────────────────────── Custom Domain Resolution ────────────────────────────
+
+    public record CustomDomainRoute(String accountId, String region, String domainName) {}
 
     /**
      * Resolves a custom domain by its regionalDomainName (e.g., "my-domain.regional.local").
      * Derives the domain name from the regionalDomainName and performs a key-based lookup.
      *
-     * @return the CustomDomain if found, or null if no domain matches
+     * @return the domain's routing scope if found, or null if no domain matches
      */
-    public CustomDomain findDomainByRegionalHostname(String regionalDomainName) {
+    public CustomDomainRoute findDomainByRegionalHostname(String regionalDomainName) {
         if (!regionalDomainName.endsWith(".regional.local")) {
             return null;
         }
@@ -2421,30 +3078,41 @@ public class ApiGatewayService {
     }
 
     /**
-     * Resolves a custom domain by its actual domain name (e.g., "api.example.com").
-     * Domain names are globally unique across regions.
+     * Resolves data-plane ownership before the caller's account context is initialized.
+     * Management reads keep their account-scoped lookup.
      *
-     * @return the CustomDomain if found, or null if no domain matches
+     * @return the domain's routing scope if found, or null if no domain matches
      */
-    public CustomDomain findDomainByName(String domainName) {
-        List<CustomDomain> results = domainStore.scan(k -> k.endsWith("::" + domainName));
-        return results.isEmpty() ? null : results.get(0);
+    public CustomDomainRoute findDomainByName(String domainName) {
+        List<AccountAwareStorageBackend.AccountEntry<CustomDomain>> matches =
+                domainStore.scanAllAccountEntries(key -> key.endsWith("::" + domainName));
+        if (matches.size() > 1) {
+            throw new AwsException("ConflictException",
+                    "Custom domain '" + domainName + "' is ambiguous across accounts or regions", 409);
+        }
+        if (matches.isEmpty()) {
+            return null;
+        }
+        AccountAwareStorageBackend.AccountEntry<CustomDomain> entry = matches.getFirst();
+        int delimiter = entry.key().indexOf("::");
+        if (delimiter <= 0) {
+            throw new IllegalStateException("Invalid custom domain storage key: " + entry.key());
+        }
+        return new CustomDomainRoute(entry.accountId(), entry.key().substring(0, delimiter), domainName);
     }
 
     /**
      * Resolves the base path mapping for a given domain and request path.
      * Uses longest-prefix matching on the base path.
      *
-     * @param domainName the custom domain name
+     * @param domain the exact custom domain owner and region
      * @param requestPath the incoming request path (e.g., "/v1/items/123")
      * @return the matching BasePathMapping, or null if none matches
      */
-    public BasePathMapping resolveBasePathMapping(String domainName, String requestPath) {
-        // Get all mappings across all regions for this domain
-        List<BasePathMapping> allMappings;
-        synchronized (domainNameLock) {
-            allMappings = basePathMappingStore.scan(k -> k.contains("::" + domainName + "::"));
-        }
+    public BasePathMapping resolveBasePathMapping(CustomDomainRoute domain, String requestPath) {
+        String mappingPrefix = domainKey(domain.region(), domain.domainName()) + "::";
+        List<BasePathMapping> allMappings =
+                basePathMappingStore.scanForAccount(domain.accountId(), key -> key.startsWith(mappingPrefix));
 
         if (allMappings.isEmpty()) {
             return null;
@@ -2496,6 +3164,9 @@ public class ApiGatewayService {
     public RestApi updateRestApi(String region, String apiId, List<Map<String, String>> patchOperations) {
         RestApi api = getRestApi(region, apiId);
         if (patchOperations != null) {
+            // Worked out before anything is set: the store hands back the live API, and a rejected
+            // endpoint change must leave it as it was.
+            EndpointConfiguration endpointConfiguration = patchEndpointConfiguration(api, patchOperations, region);
             for (Map<String, String> op : patchOperations) {
                 String opType = op.get("op");
                 String path = op.getOrDefault("path", "");
@@ -2515,9 +3186,61 @@ public class ApiGatewayService {
                     }
                 }
             }
+            if (endpointConfiguration != null) {
+                api.setEndpointConfiguration(endpointConfiguration);
+            }
         }
         apiStore.put(apiKey(region, apiId), api);
         return api;
+    }
+
+    /**
+     * The endpoint configuration {@code patchOperations} leave {@code api} with, or null when none of
+     * them touches it. {@code replace /endpointConfiguration/types/<type>} changes the type: the path
+     * names the type the API has now, as for a domain name, or its index, {@code 0}, which is what
+     * Terraform sends. {@code add} and {@code remove /endpointConfiguration/vpcEndpointIds} associate
+     * and disassociate a VPC endpoint.
+     */
+    private static EndpointConfiguration patchEndpointConfiguration(RestApi api,
+                                                                    List<Map<String, String>> patchOperations,
+                                                                    String region) {
+        EndpointConfiguration current = api.getEndpointConfiguration();
+        // An API stored without one is REGIONAL, which is also what GetRestApi reports for it.
+        EndpointType currentType = current == null || current.getTypes().isEmpty()
+                ? EndpointType.REGIONAL : current.getTypes().getFirst();
+        EndpointType type = currentType;
+        List<String> vpcEndpointIds = new ArrayList<>(current == null ? List.of() : current.getVpcEndpointIds());
+        boolean patched = false;
+        for (Map<String, String> op : patchOperations) {
+            String operation = op.get("op");
+            String path = op.getOrDefault("path", "");
+            String value = op.get("value");
+            if ("replace".equals(operation) && path.startsWith(EPC_TYPES_PATH)) {
+                // An API has exactly one type, so its index is always 0.
+                String typeRef = path.substring(EPC_TYPES_PATH.length());
+                if (!typeRef.equals(type.name()) && !typeRef.equals("0")) {
+                    throw new AwsException("BadRequestException", "Invalid patch path " + path
+                            + ": the path must name the API's current endpoint type, " + type
+                            + ", or its index, 0", 400);
+                }
+                type = endpointType(Objects.toString(value, ""));
+                patched = true;
+            } else if (EPC_VPC_IDS_PATH.equals(path) && value != null) {
+                if ("add".equals(operation)) {
+                    if (!vpcEndpointIds.contains(value)) {
+                        vpcEndpointIds.add(value);
+                    }
+                    patched = true;
+                } else if ("remove".equals(operation)) {
+                    vpcEndpointIds.remove(value);
+                    patched = true;
+                }
+            }
+        }
+        if (type != currentType) {
+            requireEndpointTypeAvailable(type.name(), region);
+        }
+        return patched ? endpointConfigurationOf(type, vpcEndpointIds) : null;
     }
 
     public ApiGatewayResource updateResource(String region, String apiId, String resourceId, List<Map<String, String>> patchOperations) {
@@ -2702,6 +3425,14 @@ public class ApiGatewayService {
                 if (!"replace".equals(opType)) continue;
                 if ("/authorizationType".equals(path)) method.setAuthorizationType(value);
                 else if ("/authorizerId".equals(path)) method.setAuthorizerId(value);
+                else if ("/authorizationScopes".equals(path)) {
+                    try {
+                        method.setAuthorizationScopes(value == null || value.isBlank()
+                                ? List.of() : JSON.readValue(value, new TypeReference<List<String>>() {}));
+                    } catch (Exception e) {
+                        throw new AwsException("BadRequestException", "Invalid authorizationScopes", 400);
+                    }
+                }
                 else if ("/apiKeyRequired".equals(path)) method.setApiKeyRequired(Boolean.parseBoolean(value));
                 else if ("/requestValidatorId".equals(path)) {
                     method.setRequestValidatorId(value == null || value.isEmpty() ? null : value);
@@ -2715,6 +3446,8 @@ public class ApiGatewayService {
     public Integration updateIntegration(String region, String apiId, String resourceId, String httpMethod, List<Map<String, String>> patchOperations) {
         Integration integration = getIntegration(region, apiId, resourceId, httpMethod);
         if (patchOperations != null) {
+            String nextType = integration.getType();
+            String nextTransferMode = integration.getResponseTransferMode();
             for (Map<String, String> op : patchOperations) {
                 String opType = op.get("op");
                 if (!"add".equals(opType) && !"replace".equals(opType)) {
@@ -2727,14 +3460,23 @@ public class ApiGatewayService {
                 }
                 switch (path) {
                     case "/type":
+                        nextType = value;
+                        break;
                     case "/httpMethod":
                     case "/uri":
                     case "/passthroughBehavior":
+                        break;
+                    case "/timeoutInMillis":
+                        parseIntegrationTimeout(value);
+                        break;
+                    case "/responseTransferMode":
+                        nextTransferMode = transferMode(value);
                         break;
                     default:
                         throw new AwsException("BadRequestException", "Unsupported path: " + path, 400);
                 }
             }
+            validateTransferMode(nextTransferMode, nextType);
             for (Map<String, String> op : patchOperations) {
                 String path = op.get("path");
                 String value = op.get("value");
@@ -2751,6 +3493,12 @@ public class ApiGatewayService {
                     case "/passthroughBehavior":
                         integration.setPassthroughBehavior(value);
                         break;
+                    case "/timeoutInMillis":
+                        integration.setTimeoutInMillis(parseIntegrationTimeout(value));
+                        break;
+                    case "/responseTransferMode":
+                        integration.setResponseTransferMode(transferMode(value));
+                        break;
                     default:
                         throw new IllegalStateException("Unreachable: validated above");
                 }
@@ -2758,6 +3506,36 @@ public class ApiGatewayService {
         }
         resourceStore.put(resourceKey(region, apiId, resourceId), getResource(region, apiId, resourceId));
         return integration;
+    }
+
+    private int parseIntegrationTimeout(Object value) {
+        try {
+            int timeout = Integer.parseInt(String.valueOf(value));
+            if (timeout >= 50) {
+                return timeout;
+            }
+        } catch (NumberFormatException ignored) {
+            // Return the same AWS-style error for non-numeric and out-of-range values.
+        }
+        throw new AwsException("BadRequestException", "Invalid timeout value: " + value, 400);
+    }
+
+    private String transferMode(Object value) {
+        if (value == null) {
+            return "BUFFERED";
+        }
+        if ("BUFFERED".equals(value) || "STREAM".equals(value)) {
+            return (String) value;
+        }
+        throw new AwsException("BadRequestException", "Invalid response transfer mode: " + value, 400);
+    }
+
+    private void validateTransferMode(String mode, String type) {
+        if ("STREAM".equals(mode) && !"HTTP_PROXY".equalsIgnoreCase(type)
+                && !"AWS_PROXY".equalsIgnoreCase(type)) {
+            throw new AwsException("BadRequestException",
+                    "Response transfer mode STREAM requires HTTP_PROXY or AWS_PROXY integration type", 400);
+        }
     }
 
     // ──────────────────────────── Tags ────────────────────────────
@@ -2777,6 +3555,22 @@ public class ApiGatewayService {
         RestApi api = getRestApi(region, apiId);
         tagKeys.forEach(api.getTags()::remove);
         apiStore.put(apiKey(region, apiId), api);
+    }
+
+    public Map<String, String> getStageTags(String region, String apiId, String stageName) {
+        return getStage(region, apiId, stageName).getTags();
+    }
+
+    public void tagStage(String region, String apiId, String stageName, Map<String, String> tags) {
+        Stage stage = getStage(region, apiId, stageName);
+        stage.getTags().putAll(tags);
+        stageStore.put(stageKey(region, apiId, stageName), stage);
+    }
+
+    public void untagStage(String region, String apiId, String stageName, List<String> tagKeys) {
+        Stage stage = getStage(region, apiId, stageName);
+        tagKeys.forEach(stage.getTags()::remove);
+        stageStore.put(stageKey(region, apiId, stageName), stage);
     }
 
     public Map<String, String> getDomainNameTags(String region, String domainName) {
@@ -2815,10 +3609,70 @@ public class ApiGatewayService {
         }
     }
 
+    // ──────────────────────────── Resource Explorer 2 ────────────────────────────
+
+    @Override
+    public List<ExplorerResource> getResources() {
+        String account = regionResolver.getAccountId();
+        List<ExplorerResource> resources = new ArrayList<>();
+        for (String key : apiStore.keys()) {
+            apiStore.get(key).ifPresent(api -> resources.add(explorerResource(key, account,
+                    "/restapis/" + api.getId(), "apigateway:restapis", api.getCreatedDate(), api.getTags())));
+        }
+        for (String key : stageStore.keys()) {
+            String[] parts = key.split("::", 3);
+            if (parts.length == 3) {
+                stageStore.get(key).ifPresent(stage -> resources.add(explorerResource(key, account,
+                        "/restapis/" + parts[1] + "/stages/" + stage.getStageName(), "apigateway:restapis/stages",
+                        stage.getCreatedDate(), stage.getTags())));
+            }
+        }
+        for (String key : apiKeyStore.keys()) {
+            apiKeyStore.get(key).ifPresent(apiKey -> resources.add(explorerResource(key, account,
+                    "/apikeys/" + apiKey.getId(), "apigateway:apikeys", apiKey.getCreatedDate(), apiKey.getTags())));
+        }
+        for (String key : usagePlanStore.keys()) {
+            usagePlanStore.get(key).ifPresent(plan -> resources.add(explorerResource(key, account,
+                    "/usageplans/" + plan.getId(), "apigateway:usageplans", 0, plan.getTags())));
+        }
+        for (String key : domainStore.keys()) {
+            domainStore.get(key).ifPresent(domain -> resources.add(explorerResource(key, account,
+                    "/domainnames/" + domain.getDomainName(), "apigateway:domainnames", 0, domain.getTags())));
+        }
+        return resources;
+    }
+
+    @Override
+    public Set<SupportedResourceType> getSupportedResourceTypes() {
+        return Set.of(
+                new SupportedResourceType("apigateway:restapis", "apigateway", true),
+                new SupportedResourceType("apigateway:restapis/stages", "apigateway", true),
+                new SupportedResourceType("apigateway:apikeys", "apigateway", true),
+                new SupportedResourceType("apigateway:usageplans", "apigateway", true),
+                new SupportedResourceType("apigateway:domainnames", "apigateway", true));
+    }
+
+    /** API Gateway ARNs carry no account: {@code arn:<partition>:apigateway:<region>::<path>}. */
+    private static ExplorerResource explorerResource(String storeKey, String account, String path,
+                                                     String resourceType, long createdEpochSeconds,
+                                                     Map<String, String> tags) {
+        String region = storeKey.substring(0, storeKey.indexOf("::"));
+        return new ExplorerResource(
+                AwsArnUtils.Arn.of("apigateway", region, "", path).toString(),
+                resourceType, "apigateway", region, account,
+                createdEpochSeconds > 0 ? Instant.ofEpochSecond(createdEpochSeconds) : Instant.now(),
+                tags != null ? tags : Map.of());
+    }
+
     // ──────────────────────────── OpenAPI Import ────────────────────────────
 
     public RestApi importRestApi(String region, String specBody) {
-        OpenAPI openAPI = parseOpenApiSpec(specBody);
+        return importRestApi(region, specBody, false);
+    }
+
+    public RestApi importRestApi(String region, String specBody, boolean failOnWarnings) {
+        ParsedOpenApi parsed = parseOpenApiSpec(region, specBody, failOnWarnings);
+        OpenAPI openAPI = parsed.openAPI();
 
         String name = openAPI.getInfo() != null ? openAPI.getInfo().getTitle() : "Imported API";
         String description = openAPI.getInfo() != null ? openAPI.getInfo().getDescription() : null;
@@ -2828,16 +3682,58 @@ public class ApiGatewayService {
         request.put("description", description);
         RestApi api = createRestApi(region, request);
 
-        applyOpenApiSpec(region, api.getId(), openAPI);
+        try {
+            applyOpenApiSpec(region, api.getId(), openAPI);
+            api.setWarnings(parsed.warnings());
+            apiStore.put(apiKey(region, api.getId()), api);
+        } catch (RuntimeException e) {
+            // AWS creates nothing when an import fails, and the error carries no id to clean up with.
+            restoreRestApi(region, api.getId(), RestApiSnapshot.empty());
+            throw e;
+        }
         LOG.infov("Imported REST API from OpenAPI spec: {0} ({1})", name, api.getId());
         return api;
     }
 
     public RestApi putRestApi(String region, String apiId, String mode, String specBody) {
-        // Note: mode=merge is accepted but treated as overwrite (merge semantics not yet implemented)
-        RestApi api = getRestApi(region, apiId);
-        OpenAPI openAPI = parseOpenApiSpec(specBody);
+        return putRestApi(region, apiId, mode, specBody, false);
+    }
 
+    public RestApi putRestApi(String region, String apiId, String mode, String specBody, boolean failOnWarnings) {
+        getRestApi(region, apiId);
+        if (mode != null && !"merge".equals(mode) && !"overwrite".equals(mode)) {
+            // AWS PutRestApi accepts only merge (the default) and overwrite; reject anything
+            // else before parsing or mutating so a typo cannot take the destructive overwrite path.
+            throw new AwsException("BadRequestException",
+                    "Invalid mode specified. Valid modes are 'merge' and 'overwrite'.", 400);
+        }
+        ParsedOpenApi parsed = parseOpenApiSpec(region, specBody, failOnWarnings);
+        RestApiSnapshot snapshot = snapshotRestApi(region, apiId);
+        try {
+            RestApi api = mode == null || "merge".equals(mode)
+                    ? updateRestApiFromOpenApi(region, apiId, parsed.openAPI())
+                    : overwriteRestApi(region, apiId, parsed.openAPI());
+            api.setWarnings(parsed.warnings());
+            apiStore.put(apiKey(region, apiId), api);
+            return api;
+        } catch (RuntimeException e) {
+            // A failed PutRestApi leaves the API as it was, including changes made during import.
+            restoreRestApi(region, apiId, snapshot);
+            throw e;
+        }
+    }
+
+    private String resolveOpenApiAwsVariables(String region, String value) {
+        if (value == null) {
+            return null;
+        }
+        return value
+                .replace("${AWS::Region}", region)
+                .replace("${AWS::AccountId}", regionResolver.getAccountId())
+                .replace("${AWS::Partition}", regionResolver.partitionForRegion(region));
+    }
+
+    private RestApi overwriteRestApi(String region, String apiId, OpenAPI openAPI) {
         // Delete all non-root resources
         List<ApiGatewayResource> existing = getResources(region, apiId);
         for (ApiGatewayResource r : existing) {
@@ -2860,7 +3756,11 @@ public class ApiGatewayService {
         authorizerStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(authorizerStore::delete);
         gatewayResponseStore.keys().stream().filter(k -> k.startsWith(prefix)).forEach(gatewayResponseStore::delete);
 
-        // Update API metadata from spec
+        return updateRestApiFromOpenApi(region, apiId, openAPI);
+    }
+
+    private RestApi updateRestApiFromOpenApi(String region, String apiId, OpenAPI openAPI) {
+        RestApi api = getRestApi(region, apiId);
         if (openAPI.getInfo() != null) {
             if (openAPI.getInfo().getTitle() != null) api.setName(openAPI.getInfo().getTitle());
             if (openAPI.getInfo().getDescription() != null) api.setDescription(openAPI.getInfo().getDescription());
@@ -2872,27 +3772,127 @@ public class ApiGatewayService {
         return api;
     }
 
-    private OpenAPI parseOpenApiSpec(String specBody) {
-        SwaggerParseResult result = new io.swagger.parser.OpenAPIParser().readContents(specBody, null, null);
+    /**
+     * The API-scoped state an OpenAPI import writes, deep-copied so a failed import can put it back:
+     * the stores hand out live objects, and the import mutates some of them in place.
+     */
+    private record RestApiSnapshot(Map<String, RestApi> apis,
+                                   Map<String, ApiGatewayResource> resources,
+                                   Map<String, Model> models,
+                                   Map<String, RequestValidator> requestValidators,
+                                   Map<String, Authorizer> authorizers,
+                                   Map<String, GatewayResponse> gatewayResponses) {
+
+        static RestApiSnapshot empty() {
+            return new RestApiSnapshot(Map.of(), Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
+        }
+    }
+
+    private RestApiSnapshot snapshotRestApi(String region, String apiId) {
+        String prefix = region + "::" + apiId + "::";
+        String apiKey = apiKey(region, apiId);
+        return new RestApiSnapshot(
+                copyEntries(apiStore, apiKey::equals, RestApi.class),
+                copyEntries(resourceStore, k -> k.startsWith(prefix), ApiGatewayResource.class),
+                copyEntries(modelStore, k -> k.startsWith(prefix), Model.class),
+                copyEntries(requestValidatorStore, k -> k.startsWith(prefix), RequestValidator.class),
+                copyEntries(authorizerStore, k -> k.startsWith(prefix), Authorizer.class),
+                copyEntries(gatewayResponseStore, k -> k.startsWith(prefix), GatewayResponse.class));
+    }
+
+    private void restoreRestApi(String region, String apiId, RestApiSnapshot snapshot) {
+        String prefix = region + "::" + apiId + "::";
+        String apiKey = apiKey(region, apiId);
+        replaceEntries(apiStore, apiKey::equals, snapshot.apis());
+        replaceEntries(resourceStore, k -> k.startsWith(prefix), snapshot.resources());
+        replaceEntries(modelStore, k -> k.startsWith(prefix), snapshot.models());
+        replaceEntries(requestValidatorStore, k -> k.startsWith(prefix), snapshot.requestValidators());
+        replaceEntries(authorizerStore, k -> k.startsWith(prefix), snapshot.authorizers());
+        replaceEntries(gatewayResponseStore, k -> k.startsWith(prefix), snapshot.gatewayResponses());
+    }
+
+    private static <T> Map<String, T> copyEntries(StorageBackend<String, T> store, Predicate<String> keyFilter,
+                                                  Class<T> type) {
+        Map<String, T> copies = new LinkedHashMap<>();
+        for (String key : store.keys()) {
+            if (keyFilter.test(key)) {
+                store.get(key).ifPresent(value -> copies.put(key, JSON.convertValue(value, type)));
+            }
+        }
+        return copies;
+    }
+
+    private static <T> void replaceEntries(StorageBackend<String, T> store, Predicate<String> keyFilter,
+                                           Map<String, T> entries) {
+        store.keys().stream().filter(keyFilter).toList().forEach(store::delete);
+        entries.forEach(store::put);
+    }
+
+    private record ParsedOpenApi(OpenAPI openAPI, List<String> warnings) {}
+
+    private ParsedOpenApi parseOpenApiSpec(String region, String specBody, boolean failOnWarnings) {
+        SwaggerParseResult result = new OpenAPIParser()
+                .readContents(resolveOpenApiAwsVariables(region, specBody), null, null);
         if (result.getOpenAPI() == null) {
             String errors = result.getMessages() != null ? String.join(", ", result.getMessages()) : "unknown error";
             throw new AwsException("BadRequestException", "Failed to parse OpenAPI spec: " + errors, 400);
         }
         OpenAPI openAPI = result.getOpenAPI();
         validateImportedAuthorizers(openAPI);
-        return openAPI;
+        List<String> warnings = result.getMessages() != null ? new ArrayList<>(result.getMessages()) : new ArrayList<>();
+        if (openAPI.getPaths() != null) {
+            for (Map.Entry<String, PathItem> entry : openAPI.getPaths().entrySet()) {
+                PathItem pathItem = entry.getValue();
+                for (Map.Entry<PathItem.HttpMethod, Operation> operation : pathItem.readOperationsMap().entrySet()) {
+                    addImportedIntegrationWarning(entry.getKey(), operation.getKey().name(),
+                            operation.getValue(), warnings);
+                }
+                Object anyMethod = pathItem.getExtensions() != null
+                        ? pathItem.getExtensions().get("x-amazon-apigateway-any-method") : null;
+                if (anyMethod != null) {
+                    OpenAPIDeserializer.ParseResult anyResult = new OpenAPIDeserializer.ParseResult();
+                    Operation operation = parseAnyMethodOperation(entry.getKey(), anyMethod, anyResult);
+                    warnings.addAll(anyResult.getMessages());
+                    addImportedIntegrationWarning(entry.getKey(), "ANY", operation, warnings);
+                }
+            }
+        }
+        if (failOnWarnings && !warnings.isEmpty()) {
+            throw new AwsException("BadRequestException",
+                    "Warnings found during import:\n\t" + String.join("\n\t", warnings), 400);
+        }
+        return new ParsedOpenApi(openAPI, List.copyOf(warnings));
+    }
+
+    private static void addImportedIntegrationWarning(String path, String httpMethod,
+                                                       Operation operation, List<String> warnings) {
+        Object extension = operation.getExtensions() == null
+                ? null : operation.getExtensions().get("x-amazon-apigateway-integration");
+        if (extension instanceof Map<?, ?> integration
+                && integration.get("type") instanceof String type
+                && ApiGatewayIntegrationTypes.canonical(type) == null) {
+            warnings.add("Unknown integration type '" + type + "' for '" + httpMethod + " " + path + "'. Ignoring.");
+        }
     }
 
     private void validateImportedAuthorizers(OpenAPI openAPI) {
         if (openAPI.getComponents() == null || openAPI.getComponents().getSecuritySchemes() == null) {
             return;
         }
-        for (var entry : openAPI.getComponents().getSecuritySchemes().entrySet()) {
+        Set<String> referencedSchemes = referencedSecuritySchemes(openAPI);
+        for (Map.Entry<String, SecurityScheme> entry : openAPI.getComponents().getSecuritySchemes().entrySet()) {
             String schemeName = entry.getKey();
             SecurityScheme scheme = entry.getValue();
-            importedAuthorizationType(scheme, schemeName);
+            String authorizationType = importedAuthorizationType(scheme, schemeName);
             Map<String, Object> authDef = importedAuthorizerDefinition(scheme, schemeName);
             if (authDef == null) {
+                if (referencedSchemes.contains(schemeName)
+                        && ("custom".equalsIgnoreCase(authorizationType)
+                        || "cognito_user_pools".equalsIgnoreCase(authorizationType))) {
+                    throw new AwsException("BadRequestException",
+                            "Missing authorizer definition for security scheme " + schemeName
+                                    + ". Export with extensions=authorizers or extensions=apigateway before importing.", 400);
+                }
                 continue;
             }
             String type = importedAuthorizerType(authDef, schemeName);
@@ -2908,6 +3908,30 @@ public class ApiGatewayService {
                         400);
             }
         }
+    }
+
+    private Set<String> referencedSecuritySchemes(OpenAPI openAPI) {
+        Set<String> schemes = new HashSet<>();
+        if (openAPI.getPaths() == null) {
+            return schemes;
+        }
+        for (Map.Entry<String, PathItem> entry : openAPI.getPaths().entrySet()) {
+            PathItem path = entry.getValue();
+            List<Operation> operations = new ArrayList<>(path.readOperations());
+            Object anyMethod = path.getExtensions() == null
+                    ? null : path.getExtensions().get("x-amazon-apigateway-any-method");
+            if (anyMethod != null) {
+                operations.add(parseAnyMethodOperation(entry.getKey(), anyMethod));
+            }
+            for (Operation operation : operations) {
+                List<SecurityRequirement> requirements = operation.getSecurity() != null
+                        ? operation.getSecurity() : openAPI.getSecurity();
+                if (requirements != null) {
+                    requirements.forEach(requirement -> schemes.addAll(requirement.keySet()));
+                }
+            }
+        }
+        return schemes;
     }
 
     @SuppressWarnings("unchecked")
@@ -3073,7 +4097,7 @@ public class ApiGatewayService {
                 modelReq.put("contentType", "application/json");
                 try {
                     // Use swagger's own JSON serializer to produce clean JSON Schema
-                    modelReq.put("schema", io.swagger.v3.core.util.Json.mapper().writeValueAsString(schema));
+                    modelReq.put("schema", Json.mapper().writeValueAsString(schema));
                 } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
                     modelReq.put("schema", "{}");
                 }
@@ -3083,8 +4107,24 @@ public class ApiGatewayService {
 
         // Import x-amazon-apigateway-request-validators as RequestValidators
         Map<String, String> validatorNameToId = new HashMap<>();
+        for (RequestValidator validator : getRequestValidators(region, apiId)) {
+            if (validator.getName() != null) {
+                validatorNameToId.putIfAbsent(validator.getName(), validator.getId());
+            }
+        }
+        String defaultValidatorId = null;
         Map<String, Object> topExtensions = openAPI.getExtensions();
         if (topExtensions != null) {
+            RestApi api = getRestApi(region, apiId);
+            Object binaryTypes = topExtensions.get("x-amazon-apigateway-binary-media-types");
+            if (binaryTypes instanceof List<?> types) {
+                api.setBinaryMediaTypes(types.stream().filter(String.class::isInstance).map(String.class::cast).toList());
+            }
+            Object policy = topExtensions.get("x-amazon-apigateway-policy");
+            if (policy != null) {
+                api.setPolicy(JSON.valueToTree(policy).toString());
+            }
+            apiStore.put(apiKey(region, apiId), api);
             Map<String, Object> validators = (Map<String, Object>) topExtensions
                     .get("x-amazon-apigateway-request-validators");
             if (validators != null) {
@@ -3097,37 +4137,75 @@ public class ApiGatewayService {
                             Boolean.TRUE.equals(validatorDef.get("validateRequestBody")));
                     valReq.put("validateRequestParameters",
                             Boolean.TRUE.equals(validatorDef.get("validateRequestParameters")));
-                    RequestValidator rv = createRequestValidator(region, apiId, valReq);
+                    String existingId = validatorNameToId.get(validatorName);
+                    RequestValidator rv = existingId == null
+                            ? createRequestValidator(region, apiId, valReq)
+                            : saveRequestValidator(region, apiId, existingId, valReq);
                     validatorNameToId.put(validatorName, rv.getId());
                 }
             }
 
             // API-level default validator
             String defaultValidator = (String) topExtensions.get("x-amazon-apigateway-request-validator");
-            if (defaultValidator != null && validatorNameToId.containsKey(defaultValidator)) {
-                validatorNameToId.put("__default__", validatorNameToId.get(defaultValidator));
+            if (defaultValidator != null) {
+                defaultValidatorId = validatorNameToId.get(defaultValidator);
             }
 
             importGatewayResponses(region, apiId, topExtensions.get("x-amazon-apigateway-gateway-responses"));
         }
 
-        // Import security schemes: create an Authorizer for each x-amazon-apigateway-authorizer scheme
+        // Import security schemes: upsert an Authorizer for each x-amazon-apigateway-authorizer scheme
         // and record how each scheme name maps to a method authorizationType, so per-operation/root
         // `security` requirements can be applied to methods below. Without this, imported APIs with a
         // Lambda authorizer land as authorizationType=NONE and are silently open at runtime.
         Map<String, String> schemeToAuthorizerId = new HashMap<>();
         Map<String, String> schemeToAuthType = new HashMap<>();
+        Set<String> apiKeySchemes = new HashSet<>();
+        Map<String, String> authorizerNameToId = new HashMap<>();
+        for (Authorizer authorizer : getAuthorizers(region, apiId)) {
+            if (authorizer.getName() != null) {
+                authorizerNameToId.putIfAbsent(authorizer.getName(), authorizer.getId());
+                String methodType = methodAuthorizationType(authorizer.getType());
+                if (methodType != null) {
+                    schemeToAuthType.putIfAbsent(authorizer.getName(), methodType);
+                    schemeToAuthorizerId.putIfAbsent(authorizer.getName(), authorizer.getId());
+                }
+            }
+        }
         if (openAPI.getComponents() != null && openAPI.getComponents().getSecuritySchemes() != null) {
             for (var schemeEntry : openAPI.getComponents().getSecuritySchemes().entrySet()) {
                 String schemeName = schemeEntry.getKey();
                 SecurityScheme scheme = schemeEntry.getValue();
                 String authtype = importedAuthorizationType(scheme, schemeName);
                 Map<String, Object> authDef = importedAuthorizerDefinition(scheme, schemeName);
+                if (authDef == null && scheme != null
+                        && SecurityScheme.Type.APIKEY.equals(scheme.getType())
+                        && scheme.getIn() != null && "header".equalsIgnoreCase(scheme.getIn().toString())
+                        && scheme.getName() != null && "x-api-key".equalsIgnoreCase(scheme.getName())) {
+                    apiKeySchemes.add(schemeName);
+                }
                 if (authDef != null) {
                     String t = importedAuthorizerType(authDef, schemeName); // token | request | cognito_user_pools
                     Map<String, Object> req = new HashMap<>();
                     req.put("name", schemeName);
-                    req.put("authorizerUri", importedAuthorizerUri(authDef, schemeName));
+                    String authorizerUri = importedAuthorizerUri(authDef, schemeName);
+                    String existingId = authorizerNameToId.get(schemeName);
+                    Authorizer existing = existingId == null ? null : getAuthorizer(region, apiId, existingId);
+                    if (existing != null && "COGNITO_USER_POOLS".equals(existing.getType())
+                            && ("token".equals(t) || "request".equals(t))
+                            && (authorizerUri == null || authorizerUri.isBlank())) {
+                        throw new AwsException("BadRequestException",
+                                "Lambda authorizer " + schemeName
+                                        + " must specify authorizerUri when replacing a Cognito authorizer.",
+                                400);
+                    }
+                    if (authorizerUri == null && existing != null
+                            && ("token".equals(t) || "request".equals(t))) {
+                        if ("TOKEN".equals(existing.getType()) || "REQUEST".equals(existing.getType())) {
+                            authorizerUri = existing.getAuthorizerUri();
+                        }
+                    }
+                    req.put("authorizerUri", authorizerUri);
                     req.put("authorizerResultTtlInSeconds", importedAuthorizerTtl(authDef, schemeName));
                     String identitySource = resolveImportedIdentitySource(scheme, authDef, t, schemeName);
                     if (identitySource != null) {
@@ -3137,6 +4215,10 @@ public class ApiGatewayService {
                         req.put("type", "COGNITO_USER_POOLS");
                         // Cognito user-pool authorizers carry the pool ARNs in the authorizer extension.
                         List<String> providerArns = importedProviderArns(authDef, schemeName);
+                        if (providerArns == null && existing != null
+                                && "COGNITO_USER_POOLS".equals(existing.getType())) {
+                            providerArns = existing.getProviderARNs();
+                        }
                         if (providerArns != null) {
                             req.put("providerARNs", providerArns);
                         }
@@ -3145,12 +4227,25 @@ public class ApiGatewayService {
                         req.put("type", t == null ? "TOKEN" : t.toUpperCase());
                         schemeToAuthType.put(schemeName, "CUSTOM");
                     }
-                    Authorizer created = createAuthorizer(region, apiId, req);
+                    Authorizer created = existingId == null
+                            ? createAuthorizer(region, apiId, req)
+                            : saveAuthorizer(region, apiId, existingId, req);
+                    authorizerNameToId.put(schemeName, created.getId());
                     schemeToAuthorizerId.put(schemeName, created.getId());
+                    if (existing != null) {
+                        String oldMethodType = methodAuthorizationType(existing.getType());
+                        String newMethodType = schemeToAuthType.get(schemeName);
+                        if (oldMethodType != null && !oldMethodType.equals(newMethodType)) {
+                            alignRetainedAuthorizerMethods(region, apiId, existingId,
+                                    oldMethodType, newMethodType);
+                        }
+                    }
                 } else if ("awsSigv4".equalsIgnoreCase(authtype)) {
                     schemeToAuthType.put(schemeName, "AWS_IAM");
+                    schemeToAuthorizerId.remove(schemeName);
                 } else {
                     schemeToAuthType.put(schemeName, "NONE"); // plain apiKey scheme
+                    schemeToAuthorizerId.remove(schemeName);
                 }
             }
         }
@@ -3163,9 +4258,11 @@ public class ApiGatewayService {
                 .filter(r -> "/".equals(r.getPath())).findFirst().orElse(null);
         if (rootResource == null) return;
 
-        // Map of full path → resource ID for creating nested resources
+        // Reuse existing paths when importing into an API; overwrite has already removed them.
         Map<String, String> pathToResourceId = new HashMap<>();
-        pathToResourceId.put("/", rootResource.getId());
+        for (ApiGatewayResource resource : resources) {
+            pathToResourceId.put(resource.getPath(), resource.getId());
+        }
 
         for (Map.Entry<String, PathItem> pathEntry : openAPI.getPaths().entrySet()) {
             String path = pathEntry.getKey();
@@ -3181,7 +4278,8 @@ public class ApiGatewayService {
                     String httpMethod = opEntry.getKey().name().toUpperCase();
                     try {
                         applyOperation(region, apiId, resourceId, httpMethod, opEntry.getValue(), openAPI,
-                                schemeToAuthorizerId, schemeToAuthType, validatorNameToId);
+                                schemeToAuthorizerId, schemeToAuthType, apiKeySchemes,
+                                validatorNameToId, defaultValidatorId);
                     } catch (AwsException e) {
                         if (PARAMETER_NAME_ERROR.equals(e.getMessage())) {
                             throw importParameterNameFailure(httpMethod, path, e);
@@ -3199,27 +4297,582 @@ public class ApiGatewayService {
             if (pathItem.getExtensions() != null) {
                 Object anyMethodExt = pathItem.getExtensions().get("x-amazon-apigateway-any-method");
                 if (anyMethodExt != null) {
+                    Operation anyOperation = parseAnyMethodOperation(path, anyMethodExt);
                     try {
-                        Operation anyOperation = io.swagger.v3.core.util.Json.mapper()
-                                .convertValue(anyMethodExt, Operation.class);
-                        try {
-                            applyOperation(region, apiId, resourceId, "ANY", anyOperation, openAPI,
-                                    schemeToAuthorizerId, schemeToAuthType, validatorNameToId);
-                        } catch (AwsException e) {
-                            if (PARAMETER_NAME_ERROR.equals(e.getMessage())) {
-                                throw importParameterNameFailure("ANY", path, e);
-                            }
-                            throw e;
+                        applyOperation(region, apiId, resourceId, "ANY", anyOperation, openAPI,
+                                schemeToAuthorizerId, schemeToAuthType, apiKeySchemes,
+                                validatorNameToId, defaultValidatorId);
+                    } catch (AwsException e) {
+                        if (PARAMETER_NAME_ERROR.equals(e.getMessage())) {
+                            throw importParameterNameFailure("ANY", path, e);
                         }
-                    } catch (IllegalArgumentException e) {
-                        throw new AwsException("BadRequestException",
-                                "Invalid x-amazon-apigateway-any-method definition for path " + path + ": "
-                                        + e.getMessage(),
-                                400);
+                        throw e;
                     }
                 }
             }
         }
+    }
+
+    private static String methodAuthorizationType(String authorizerType) {
+        if ("TOKEN".equals(authorizerType) || "REQUEST".equals(authorizerType)) {
+            return "CUSTOM";
+        }
+        return "COGNITO_USER_POOLS".equals(authorizerType) ? "COGNITO_USER_POOLS" : null;
+    }
+
+    private void alignRetainedAuthorizerMethods(String region, String apiId, String authorizerId,
+                                                 String oldType, String newType) {
+        for (ApiGatewayResource resource : getResources(region, apiId)) {
+            boolean changed = false;
+            for (MethodConfig method : resource.getResourceMethods().values()) {
+                if (authorizerId.equals(method.getAuthorizerId())
+                        && oldType.equals(method.getAuthorizationType())) {
+                    method.setAuthorizationType(newType);
+                    changed = true;
+                }
+            }
+            if (changed) {
+                resourceStore.put(resourceKey(region, apiId, resource.getId()), resource);
+            }
+        }
+    }
+
+    /**
+     * Builds the typed Operation for an ANY pseudo-operation with the swagger parser's own
+     * Operation reader, the one that already parses the real verbs. Binding the untyped extension
+     * map with Jackson bean deserialization instead needs reflection metadata for the whole
+     * swagger model graph, which the native image does not have.
+     */
+    private Operation parseAnyMethodOperation(String path, Object anyMethodExt) {
+        return parseAnyMethodOperation(path, anyMethodExt, new OpenAPIDeserializer.ParseResult());
+    }
+
+    private Operation parseAnyMethodOperation(String path, Object anyMethodExt,
+                                               OpenAPIDeserializer.ParseResult result) {
+        JsonNode node = Json.mapper().valueToTree(anyMethodExt);
+        if (!(node instanceof ObjectNode operationNode)) {
+            throw new AwsException("BadRequestException",
+                    "Invalid x-amazon-apigateway-any-method definition for path " + path
+                            + ": expected an Operation object",
+                    400);
+        }
+        return new OpenAPIDeserializer().getOperation(operationNode,
+                "paths.'" + path + "'.x-amazon-apigateway-any-method", result);
+    }
+
+    private void applyOperation(String region, String apiId, String resourceId, String httpMethod,
+            Operation operation, OpenAPI openAPI, Map<String, String> schemeToAuthorizerId,
+            Map<String, String> schemeToAuthType, Set<String> apiKeySchemes,
+            Map<String, String> validatorNameToId,
+            String defaultValidatorId) {
+        // Create the method
+        Map<String, Object> methodRequest = new HashMap<>();
+        // Apply the operation's (or the API root's) security requirement, resolving the scheme
+        // to a method authorizationType (CUSTOM/AWS_IAM/COGNITO_USER_POOLS) + authorizerId.
+        List<SecurityRequirement> secReqs = operation.getSecurity() != null
+                ? operation.getSecurity() : openAPI.getSecurity();
+        boolean apiKeyRequired = secReqs != null && !secReqs.isEmpty()
+                && secReqs.stream().anyMatch(requirement -> requirement.keySet().stream()
+                        .anyMatch(apiKeySchemes::contains));
+        String authType = "NONE";
+        String authorizerId = null;
+        List<String> authorizationScopes = List.of();
+        if (secReqs != null) {
+            for (SecurityRequirement secReq : secReqs) {
+                for (String schemeName : secReq.keySet()) {
+                    String mapped = schemeToAuthType.get(schemeName);
+                    if (mapped == null || "NONE".equals(mapped)) {
+                        continue;
+                    }
+                    if (!"NONE".equals(authType)) {
+                        throw new AwsException("BadRequestException",
+                                "Only one Authorizer or IAM authorization is allowed per operation", 400);
+                    }
+                    authType = mapped;
+                    authorizerId = schemeToAuthorizerId.get(schemeName);
+                    List<String> requestedScopes = secReq.get(schemeName);
+                    if (requestedScopes != null) {
+                        authorizationScopes = requestedScopes;
+                    }
+                }
+            }
+        }
+        methodRequest.put("authorizationType", authType);
+        methodRequest.put("apiKeyRequired", apiKeyRequired);
+        if (authorizerId != null) {
+            methodRequest.put("authorizerId", authorizerId);
+        }
+        if (!authorizationScopes.isEmpty()) {
+            methodRequest.put("authorizationScopes", authorizationScopes);
+        }
+
+        // Link request models from operation requestBody
+        if (operation.getRequestBody() != null && operation.getRequestBody().getContent() != null) {
+            Map<String, String> requestModels = new HashMap<>();
+            for (var contentEntry : operation.getRequestBody().getContent().entrySet()) {
+                String contentType = contentEntry.getKey();
+                var mediaType = contentEntry.getValue();
+                if (mediaType.getSchema() != null && mediaType.getSchema().get$ref() != null) {
+                    String ref = mediaType.getSchema().get$ref();
+                    // Extract model name from #/components/schemas/ModelName
+                    String modelName = ref.substring(ref.lastIndexOf('/') + 1);
+                    requestModels.put(contentType, modelName);
+                }
+            }
+            if (!requestModels.isEmpty()) {
+                methodRequest.put("requestModels", requestModels);
+            }
+        }
+
+        // Map OpenAPI parameters to requestParameters
+        if (operation.getParameters() != null && !operation.getParameters().isEmpty()) {
+            Map<String, Boolean> requestParameters = new HashMap<>();
+            for (Parameter declared : operation.getParameters()) {
+                Parameter param = resolveParameter(declared, openAPI);
+                if (param == null) {
+                    continue;
+                }
+                String location = switch (param.getIn()) {
+                    case "query" -> "method.request.querystring." + param.getName();
+                    case "header" -> "method.request.header." + param.getName();
+                    case "path" -> "method.request.path." + param.getName();
+                    default -> null;
+                };
+                if (location != null) {
+                    requestParameters.put(location, param.getRequired() != null && param.getRequired());
+                }
+            }
+            if (!requestParameters.isEmpty()) {
+                methodRequest.put("requestParameters", requestParameters);
+            }
+        }
+
+        // Link request validator (operation-level overrides API-level default)
+        String opValidator = null;
+        if (operation.getExtensions() != null) {
+            opValidator = (String) operation.getExtensions()
+                    .get("x-amazon-apigateway-request-validator");
+        }
+        if (opValidator != null && validatorNameToId.containsKey(opValidator)) {
+            methodRequest.put("requestValidatorId", validatorNameToId.get(opValidator));
+        } else if (defaultValidatorId != null) {
+            methodRequest.put("requestValidatorId", defaultValidatorId);
+        }
+
+        putMethod(region, apiId, resourceId, httpMethod, methodRequest);
+
+        // Extract x-amazon-apigateway-integration extension
+        Map<String, Object> integrationExt = null;
+        Object rawIntegrationExt = operation.getExtensions() == null
+                ? null
+                : operation.getExtensions().get("x-amazon-apigateway-integration");
+        if (rawIntegrationExt != null) {
+            if (rawIntegrationExt instanceof Map<?, ?> map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> typed = (Map<String, Object>) map;
+                integrationExt = typed;
+            } else {
+                throw new AwsException("BadRequestException",
+                        "Invalid x-amazon-apigateway-integration definition for method " + httpMethod
+                                + ": expected an object",
+                        400);
+            }
+        }
+
+        if (integrationExt != null) {
+            applyIntegration(region, apiId, resourceId, httpMethod, integrationExt);
+        }
+        if (operation.getResponses() != null) {
+            operation.getResponses().forEach((status, response) -> {
+                if (!status.matches("[1-5][0-9]{2}")) {
+                    return;
+                }
+                Map<String, Boolean> headers = new HashMap<>();
+                if (response.getHeaders() != null) {
+                    response.getHeaders().forEach((name, header) ->
+                            headers.put("method.response.header." + name, Boolean.TRUE.equals(header.getRequired())));
+                }
+                putMethodResponse(region, apiId, resourceId, httpMethod, status, Map.of("responseParameters", headers));
+            });
+        }
+    }
+
+    private static final String PARAMETER_REF_PREFIX = "#/components/parameters/";
+    private static final String SWAGGER2_PARAMETER_REF_PREFIX = "#/parameters/";
+
+    /**
+     * Returns the parameter a local {@code #/components/parameters/} reference names, following a
+     * component that is itself a reference. The document is parsed without reference resolution, so
+     * a referenced parameter arrives carrying only its {@code $ref}. A Swagger 2 document is converted
+     * to OpenAPI 3, but an ANY method is read from its raw vendor extension, so its references keep
+     * the Swagger 2 form {@code #/parameters/}; they name the same converted components. A Swagger 2
+     * body or form data reference returns null, because the converter files it as a request body or a
+     * {@code formData_} schema, and is skipped like the in-place form.
+     *
+     * @throws AwsException if the reference names no component, or the references form a cycle
+     */
+    private static Parameter resolveParameter(Parameter param, OpenAPI openAPI) {
+        Map<String, Parameter> components = openAPI.getComponents() == null
+                ? null : openAPI.getComponents().getParameters();
+        Set<String> seen = new HashSet<>();
+        Parameter current = param;
+        while (current.get$ref() != null) {
+            String ref = current.get$ref();
+            String prefix = ref.startsWith(SWAGGER2_PARAMETER_REF_PREFIX)
+                    ? SWAGGER2_PARAMETER_REF_PREFIX : PARAMETER_REF_PREFIX;
+            Parameter target = components != null && ref.startsWith(prefix) && seen.add(ref)
+                    ? components.get(unescapeJsonPointer(ref.substring(prefix.length()))) : null;
+            if (target == null) {
+                if (ref.startsWith(SWAGGER2_PARAMETER_REF_PREFIX) && isSwagger2BodyOrFormDataParameter(openAPI,
+                        unescapeJsonPointer(ref.substring(SWAGGER2_PARAMETER_REF_PREFIX.length())))) {
+                    return null;
+                }
+                throw new AwsException("BadRequestException",
+                        "Unable to resolve parameter reference: " + ref, 400);
+            }
+            current = target;
+        }
+        return current;
+    }
+
+    private static boolean isSwagger2BodyOrFormDataParameter(OpenAPI openAPI, String name) {
+        if (openAPI.getComponents() == null) {
+            return false;
+        }
+        boolean body = openAPI.getComponents().getRequestBodies() != null
+                && openAPI.getComponents().getRequestBodies().containsKey(name);
+        // The converter keys a form data parameter's schema as formData_<name> so it cannot overwrite a model.
+        boolean formData = openAPI.getComponents().getSchemas() != null
+                && openAPI.getComponents().getSchemas().containsKey("formData_" + name);
+        return body || formData;
+    }
+
+    private String ensureResourcePath(String region, String apiId, String path,
+                                      Map<String, String> pathToResourceId) {
+        if (pathToResourceId.containsKey(path)) {
+            return pathToResourceId.get(path);
+        }
+
+        // Split path into segments and create each one
+        String[] segments = path.split("/");
+        StringBuilder currentPath = new StringBuilder();
+        String parentId = pathToResourceId.get("/");
+
+        for (int i = 1; i < segments.length; i++) {
+            String segment = segments[i];
+            if (segment.isEmpty()) continue;
+            currentPath.append("/").append(segment);
+            String fullPath = currentPath.toString();
+
+            if (!pathToResourceId.containsKey(fullPath)) {
+                Map<String, Object> request = new HashMap<>();
+                request.put("pathPart", segment);
+                ApiGatewayResource resource = createResource(region, apiId, parentId, request);
+                pathToResourceId.put(fullPath, resource.getId());
+            }
+            parentId = pathToResourceId.get(fullPath);
+        }
+
+        return parentId;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void applyIntegration(String region, String apiId, String resourceId,
+                                  String httpMethod, Map<String, Object> integrationExt) {
+        Map<String, Object> integrationRequest = new HashMap<>();
+        Object integrationType = integrationExt.get("type");
+        if (integrationType instanceof String type) {
+            integrationType = ApiGatewayIntegrationTypes.canonical(type);
+            if (integrationType == null) {
+                return;
+            }
+        }
+        integrationRequest.put("type", integrationType);
+        integrationRequest.put("httpMethod", integrationExt.get("httpMethod"));
+        integrationRequest.put("uri", integrationExt.get("uri"));
+        Object passthrough = integrationExt.get("passthroughBehavior");
+        integrationRequest.put("passthroughBehavior", passthrough instanceof String behavior ? behavior.toUpperCase(Locale.ROOT) : passthrough);
+        for (String field : List.of("contentHandling", "timeoutInMillis", "connectionType",
+                "connectionId", "credentials", "cacheNamespace", "cacheKeyParameters", "tlsConfig",
+                "responseTransferMode")) {
+            if (integrationExt.get(field) != null) {
+                integrationRequest.put(field, integrationExt.get(field));
+            }
+        }
+
+        Map<String, String> reqParams = (Map<String, String>) integrationExt.get("requestParameters");
+        if (reqParams != null) integrationRequest.put("requestParameters", reqParams);
+
+        Map<String, String> reqTemplates = (Map<String, String>) integrationExt.get("requestTemplates");
+        if (reqTemplates != null) integrationRequest.put("requestTemplates", reqTemplates);
+
+        putIntegration(region, apiId, resourceId, httpMethod, integrationRequest);
+
+        // Process integration responses
+        Map<String, Object> responses = (Map<String, Object>) integrationExt.get("responses");
+        if (responses != null) {
+            for (Map.Entry<String, Object> respEntry : responses.entrySet()) {
+                String selectionPattern = respEntry.getKey();
+                Map<String, Object> respDef = (Map<String, Object>) respEntry.getValue();
+
+                String statusCode = String.valueOf(respDef.getOrDefault("statusCode", "200"));
+                String pattern = "default".equals(selectionPattern) ? "" : selectionPattern;
+
+                Map<String, Object> irRequest = new HashMap<>();
+                irRequest.put("selectionPattern", pattern);
+                irRequest.put("responseParameters", respDef.get("responseParameters"));
+                irRequest.put("responseTemplates", respDef.get("responseTemplates"));
+                irRequest.put("contentHandling", respDef.get("contentHandling"));
+
+                putIntegrationResponse(region, apiId, resourceId, httpMethod, statusCode, irRequest);
+
+                // Ensure method response exists for this status code
+                putMethodResponse(region, apiId, resourceId, httpMethod, statusCode, new HashMap<>());
+            }
+        }
+    }
+
+    // ──────────────────────────── Key helpers ────────────────────────────
+
+    private String apiKey(String region, String apiId) {
+        return region + "::" + apiId;
+    }
+
+    private String resourceKey(String region, String apiId, String resourceId) {
+        return region + "::" + apiId + "::" + resourceId;
+    }
+
+    private String deploymentKey(String region, String apiId, String deploymentId) {
+        return region + "::" + apiId + "::" + deploymentId;
+    }
+
+    private String stageKey(String region, String apiId, String stageName) {
+        return region + "::" + apiId + "::" + stageName;
+    }
+
+    private String authorizerKey(String region, String apiId, String authorizerId) {
+        return region + "::" + apiId + "::" + authorizerId;
+    }
+
+    private String requestValidatorKey(String region, String apiId, String validatorId) {
+        return region + "::" + apiId + "::" + validatorId;
+    }
+
+    private String gatewayResponseKey(String region, String apiId, GatewayResponseType type) {
+        return region + "::" + apiId + "::" + type.name();
+    }
+
+    private String modelKey(String region, String apiId, String modelName) {
+        return region + "::" + apiId + "::" + modelName;
+    }
+
+    private String accountKey(String region) {
+        return region + "::account";
+    }
+
+    private String apiKeyGlobalKey(String region, String apiKeyId) {
+        return region + "::" + apiKeyId;
+    }
+
+    private String usagePlanKey(String region, String usagePlanId) {
+        return region + "::" + usagePlanId;
+    }
+
+    private String usagePlanKeyPathKey(String region, String usagePlanId, String keyId) {
+        return region + "::" + usagePlanId + "::" + keyId;
+    }
+
+    private String domainKey(String region, String domainName) {
+        return region + "::" + domainName;
+    }
+
+    private String mappingKey(String region, String domainName, String basePath) {
+        return region + "::" + domainName + "::" + basePath;
+    }
+
+    // ──────────────────────────── VPC Links (v1) ────────────────────────────
+
+    public VpcLink createVpcLink(String region, Map<String, Object> request) {
+        String name = (String) request.get("name");
+        if (name == null || name.isBlank()) {
+            throw new AwsException("BadRequestException", "Vpc link name must be specified", 400);
+        }
+
+        @SuppressWarnings("unchecked")
+        List<String> targetArns = request.get("targetArns") instanceof List<?> arns
+                ? (List<String>) arns : List.of();
+        if (targetArns.isEmpty()) {
+            throw new AwsException("BadRequestException",
+                    "At least one target ARN must be specified", 400);
+        }
+
+        VpcLink link = new VpcLink();
+        link.setId(shortId(10));
+        link.setName(name);
+        link.setDescription((String) request.get("description"));
+        link.setTargetArns(targetArns);
+        // Floci has no real VPC to provision against, so the link is immediately usable rather
+        // than transitioning PENDING → AVAILABLE as it does in AWS.
+        link.setStatus("AVAILABLE");
+
+        if (request.get("tags") instanceof Map<?, ?> tags) {
+            Map<String, String> stringTags = new HashMap<>();
+            tags.forEach((k, v) -> {
+                if (k != null && v != null) stringTags.put(k.toString(), v.toString());
+            });
+            link.setTags(stringTags);
+        }
+
+        vpcLinkStore.put(vpcLinkKey(region, link.getId()), link);
+        LOG.infov("Created VPC Link: {0} ({1}) in {2}", link.getName(), link.getId(), region);
+        return link;
+    }
+
+    public VpcLink getVpcLink(String region, String vpcLinkId) {
+        return vpcLinkStore.get(vpcLinkKey(region, vpcLinkId))
+                .orElseThrow(() -> new AwsException("NotFoundException", "Invalid VPC link identifier specified", 404));
+    }
+
+    /**
+     * Serialize tag writers and replace the map so readers and persistence can safely iterate
+     * previously returned maps, as with custom-domain tags.
+     */
+    public void tagVpcLink(String region, String vpcLinkId, Map<String, String> tags) {
+        ReservedTags.rejectApiGatewayReservedTagsOnUpdate(tags);
+        synchronized (vpcLinkTagLock) {
+            VpcLink link = getVpcLink(region, vpcLinkId);
+            Map<String, String> merged = new LinkedHashMap<>(link.getTags());
+            merged.putAll(tags);
+            link.setTags(merged);
+            vpcLinkStore.put(vpcLinkKey(region, vpcLinkId), link);
+        }
+    }
+
+    public void untagVpcLink(String region, String vpcLinkId, List<String> tagKeys) {
+        synchronized (vpcLinkTagLock) {
+            VpcLink link = getVpcLink(region, vpcLinkId);
+            Map<String, String> remaining = new LinkedHashMap<>(link.getTags());
+            tagKeys.forEach(remaining::remove);
+            link.setTags(remaining);
+            vpcLinkStore.put(vpcLinkKey(region, vpcLinkId), link);
+        }
+    }
+
+    public List<VpcLink> getVpcLinks(String region) {
+        return vpcLinkStore.scan(k -> k.startsWith(region + "::"));
+    }
+
+    /**
+     * AWS's patch-operation table for a VPC link supports only {@code replace}, and only on
+     * {@code /name} and {@code /description}. Applying anything else is an error rather than a
+     * no-op: silently accepting {@code op=remove,path=/name} would have set the name to the
+     * supplied value, and silently ignoring an unknown path would report success for a change that
+     * never happened.
+     */
+    public VpcLink updateVpcLink(String region, String vpcLinkId, List<Map<String, String>> patchOperations) {
+        VpcLink link = getVpcLink(region, vpcLinkId);
+        if (patchOperations != null) {
+            for (Map<String, String> op : patchOperations) {
+                String operation = op.get("op");
+                String path = op.get("path");
+                String value = op.get("value");
+                if (!"replace".equals(operation)) {
+                    throw new AwsException("BadRequestException", "Unsupported operation", 400);
+                }
+                if (path == null) {
+                    throw new AwsException("BadRequestException", "Missing path", 400);
+                }
+                switch (path) {
+                    case "/name" -> link.setName(value);
+                    case "/description" -> link.setDescription(value);
+                    default -> throw new AwsException("BadRequestException",
+                            "Invalid patch path  '" + path + "' specified for op 'replace'. "
+                                    + "Must be one of: [/name, /description]", 400);
+                }
+            }
+        }
+        vpcLinkStore.put(vpcLinkKey(region, vpcLinkId), link);
+        return link;
+    }
+
+    public void deleteVpcLink(String region, String vpcLinkId) {
+        getVpcLink(region, vpcLinkId);
+        vpcLinkStore.delete(vpcLinkKey(region, vpcLinkId));
+    }
+
+    private String vpcLinkKey(String region, String vpcLinkId) {
+        return region + "::" + vpcLinkId;
+    }
+
+    private static String shortId(int length) {
+        return UUID.randomUUID().toString().replace("-", "").substring(0, length);
+    }
+
+
+    public record UsageSnapshot(
+            String usagePlanId,
+            String startDate,
+            String endDate,
+            Map<String, List<List<Integer>>> values
+    ) {}
+
+    public UsageSnapshot getUsage(String region, String usagePlanId, String keyId,
+                                  String startDate, String endDate) {
+        UsagePlan plan = getUsagePlan(region, usagePlanId);
+        if (startDate == null || startDate.isBlank() || endDate == null || endDate.isBlank()) {
+            throw new AwsException("BadRequestException",
+                    "startDate and endDate are required", 400);
+        }
+        Map<String, List<List<Integer>>> values = new LinkedHashMap<>();
+        if (keyId != null && !keyId.isBlank()) {
+            values.put(keyId, List.of(List.of(0, 0)));
+        }
+        return new UsageSnapshot(plan.getId(), startDate, endDate, values);
+    }
+
+    public UsageSnapshot updateUsage(String region, String usagePlanId, String keyId,
+                                     List<Map<String, String>> patchOperations) {
+        UsagePlan plan = getUsagePlan(region, usagePlanId);
+        getUsagePlanKey(region, usagePlanId, keyId);
+        if (plan.getQuota() == null || plan.getQuota().getLimit() == null) {
+            throw new AwsException("BadRequestException",
+                    "Usage plan does not have a quota limit", 400);
+        }
+        return new UsageSnapshot(plan.getId(), null, null, Map.of(keyId, List.of(List.of(0, 0))));
+    }
+
+
+    /**
+     * An edge-optimized domain fronts a CloudFront distribution, and a DNS alias points at the
+     * distribution's name in the fixed CloudFront hosted zone AWS documents for every region. A
+     * regional domain has none, so a move to {@code REGIONAL} drops the distribution again while a
+     * move to {@code EDGE} puts one in front of the domain, as the migration does on AWS.
+     */
+    private static void applyEndpointType(CustomDomain domain, String endpointType) {
+        domain.setEndpointConfigurationType(endpointType);
+        if (!"EDGE".equals(endpointType)) {
+            domain.setDistributionDomainName(null);
+            domain.setDistributionHostedZoneId(null);
+        } else if (domain.getDistributionDomainName() == null) {
+            domain.setDistributionDomainName(
+                    "d" + UUID.randomUUID().toString().replace("-", "").substring(0, 13) + ".cloudfront.net");
+            domain.setDistributionHostedZoneId("Z2FDTNDATAQYW2");
+        }
+    }
+
+
+
+
+
+    private OpenAPI parseOpenApiSpec(String specBody) {
+        SwaggerParseResult result = new io.swagger.parser.OpenAPIParser().readContents(specBody, null, null);
+        if (result.getOpenAPI() == null) {
+            String errors = result.getMessages() != null ? String.join(", ", result.getMessages()) : "unknown error";
+            throw new AwsException("BadRequestException", "Failed to parse OpenAPI spec: " + errors, 400);
+        }
+        OpenAPI openAPI = result.getOpenAPI();
+        validateImportedAuthorizers(openAPI);
+        return openAPI;
     }
 
     private void applyOperation(String region, String apiId, String resourceId, String httpMethod,
@@ -3328,278 +4981,13 @@ public class ApiGatewayService {
         }
     }
 
-    private String ensureResourcePath(String region, String apiId, String path,
-                                      Map<String, String> pathToResourceId) {
-        if (pathToResourceId.containsKey(path)) {
-            return pathToResourceId.get(path);
-        }
-
-        // Split path into segments and create each one
-        String[] segments = path.split("/");
-        StringBuilder currentPath = new StringBuilder();
-        String parentId = pathToResourceId.get("/");
-
-        for (int i = 1; i < segments.length; i++) {
-            String segment = segments[i];
-            if (segment.isEmpty()) continue;
-            currentPath.append("/").append(segment);
-            String fullPath = currentPath.toString();
-
-            if (!pathToResourceId.containsKey(fullPath)) {
-                Map<String, Object> request = new HashMap<>();
-                request.put("pathPart", segment);
-                ApiGatewayResource resource = createResource(region, apiId, parentId, request);
-                pathToResourceId.put(fullPath, resource.getId());
-            }
-            parentId = pathToResourceId.get(fullPath);
-        }
-
-        return parentId;
-    }
-
-    @SuppressWarnings("unchecked")
-    private void applyIntegration(String region, String apiId, String resourceId,
-                                  String httpMethod, Map<String, Object> integrationExt) {
-        Map<String, Object> integrationRequest = new HashMap<>();
-        integrationRequest.put("type", integrationExt.get("type"));
-        integrationRequest.put("httpMethod", integrationExt.get("httpMethod"));
-        integrationRequest.put("uri", integrationExt.get("uri"));
-        integrationRequest.put("passthroughBehavior", integrationExt.get("passthroughBehavior"));
-        for (String field : List.of("contentHandling", "timeoutInMillis", "connectionType",
-                "connectionId", "credentials", "cacheNamespace", "cacheKeyParameters", "tlsConfig")) {
-            if (integrationExt.get(field) != null) {
-                integrationRequest.put(field, integrationExt.get(field));
-            }
-        }
-
-        Map<String, String> reqParams = (Map<String, String>) integrationExt.get("requestParameters");
-        if (reqParams != null) integrationRequest.put("requestParameters", reqParams);
-
-        Map<String, String> reqTemplates = (Map<String, String>) integrationExt.get("requestTemplates");
-        if (reqTemplates != null) integrationRequest.put("requestTemplates", reqTemplates);
-
-        putIntegration(region, apiId, resourceId, httpMethod, integrationRequest);
-
-        // Process integration responses
-        Map<String, Object> responses = (Map<String, Object>) integrationExt.get("responses");
-        if (responses != null) {
-            for (Map.Entry<String, Object> respEntry : responses.entrySet()) {
-                String selectionPattern = respEntry.getKey();
-                Map<String, Object> respDef = (Map<String, Object>) respEntry.getValue();
-
-                String statusCode = String.valueOf(respDef.getOrDefault("statusCode", "200"));
-                String pattern = "default".equals(selectionPattern) ? "" : selectionPattern;
-
-                Map<String, Object> irRequest = new HashMap<>();
-                irRequest.put("selectionPattern", pattern);
-                irRequest.put("responseParameters", respDef.get("responseParameters"));
-                irRequest.put("responseTemplates", respDef.get("responseTemplates"));
-
-                putIntegrationResponse(region, apiId, resourceId, httpMethod, statusCode, irRequest);
-
-                // Ensure method response exists for this status code
-                putMethodResponse(region, apiId, resourceId, httpMethod, statusCode, new HashMap<>());
-            }
-        }
-    }
-
-    // ──────────────────────────── Gateway Responses ────────────────────────────
 
 
-    // ──────────────────────────── VPC Links (v1) ────────────────────────────
 
-    // ──────────────────────────── v2 Domain Names ────────────────────────────
 
-    public V2DomainName createV2DomainName(String region, Map<String, Object> request) {
-        validateV2DomainRequest(request, true);
-        if (!(request.get("domainName") instanceof String domainName) || domainName.isBlank()) {
-            throw new AwsException("BadRequestException", "domainName is required", 400);
-        }
-        Map<String, Object> sharedRequest = new LinkedHashMap<>();
-        sharedRequest.put("domainName", domainName);
-        sharedRequest.put("tags", request.get("tags"));
-        Map<String, Object> primary = domainConfigurations(request, true).getFirst();
-        for (String field : List.of("certificateArn", "certificateName", "endpointType", "securityPolicy")) {
-            if (primary.get(field) != null) {
-                sharedRequest.put(field, primary.get(field));
-            }
-        }
-        return toV2DomainName(region, createDomainName(region, sharedRequest, request));
-    }
 
-    public V2DomainName getV2DomainName(String region, String domainName) {
-        synchronized (domainNameLock) {
-            return toV2DomainName(region, getDomainName(region, domainName));
-        }
-    }
 
-    public List<V2DomainName> getV2DomainNames(String region) {
-        synchronized (domainNameLock) {
-            return getDomainNames(region).stream().map(domain -> toV2DomainName(region, domain)).toList();
-        }
-    }
 
-    public V2DomainName updateV2DomainName(String region, String domainName, Map<String, Object> request) {
-        synchronized (domainNameLock) {
-            CustomDomain domain = getDomainName(region, domainName);
-            validateV2DomainRequest(request, false);
-            applyV2DomainSettings(domain, request);
-            domainStore.put(domainKey(region, domainName), domain);
-            return toV2DomainName(region, domain);
-        }
-    }
-
-    public void deleteV2DomainName(String region, String domainName) {
-        deleteDomainName(region, domainName);
-    }
-
-    private static void validateV2DomainRequest(Map<String, Object> request, boolean create) {
-        if (request == null) {
-            throw new AwsException("BadRequestException", "Expected a domain request object", 400);
-        }
-        Object routingMode = request.get("routingMode");
-        if (routingMode != null && !List.of("API_MAPPING_ONLY", "ROUTING_RULE_ONLY", "ROUTING_RULE_THEN_API_MAPPING")
-                .contains(routingMode)) {
-            throw new AwsException("BadRequestException", "Invalid routingMode", 400);
-        }
-        validateDomainString(request, "apiMappingSelectionExpression");
-        Object authentication = request.get("mutualTlsAuthentication");
-        if (authentication != null) {
-            if (!(authentication instanceof Map<?, ?> settings)) {
-                throw new AwsException("BadRequestException", "mutualTlsAuthentication must be an object", 400);
-            }
-            validateDomainString(settings, "truststoreUri");
-            validateDomainString(settings, "truststoreVersion");
-        }
-        domainConfigurations(request, create);
-    }
-
-    private static List<Map<String, Object>> domainConfigurations(Map<String, Object> request, boolean required) {
-        Object value = request.get("domainNameConfigurations");
-        if (value == null && !required) {
-            return new ArrayList<>();
-        }
-        if (!(value instanceof List<?> configurations) || (required && configurations.isEmpty())) {
-            throw new AwsException("BadRequestException", "Expected one or more domain name configurations", 400);
-        }
-        List<Map<String, Object>> copies = new ArrayList<>();
-        for (Object item : configurations) {
-            if (!(item instanceof Map<?, ?> configuration)) {
-                throw new AwsException("BadRequestException", "Each domain name configuration must be an object", 400);
-            }
-            for (String field : List.of("certificateArn", "certificateName", "endpointType", "securityPolicy",
-                    "apiGatewayDomainName", "hostedZoneId", "domainNameStatus", "ipAddressType",
-                    "ownershipVerificationCertificateArn")) {
-                validateDomainString(configuration, field);
-            }
-            if (configuration.get("endpointType") != null
-                    && !List.of("REGIONAL", "EDGE").contains(configuration.get("endpointType"))) {
-                throw new AwsException("BadRequestException", "Invalid value for endpoint type", 400);
-            }
-            if (configuration.get("ipAddressType") != null
-                    && !List.of("ipv4", "dualstack").contains(configuration.get("ipAddressType"))) {
-                throw new AwsException("BadRequestException", "Invalid ipAddressType", 400);
-            }
-            Map<String, Object> copy = new LinkedHashMap<>();
-            configuration.forEach((key, entry) -> copy.put(String.valueOf(key), entry));
-            copies.add(copy);
-        }
-        return copies;
-    }
-
-    private static void validateDomainString(Map<?, ?> values, String field) {
-        Object value = values.get(field);
-        if (value != null && (!(value instanceof String text) || text.isBlank())) {
-            throw new AwsException("BadRequestException", field + " must be a non-empty string", 400);
-        }
-    }
-
-    /** These v2 settings are control-plane metadata; routing remains shared with v1. */
-    private static void applyV2DomainSettings(CustomDomain domain, Map<String, Object> request) {
-        if (request.containsKey("routingMode") || domain.getRoutingMode() == null) {
-            domain.setRoutingMode(request.get("routingMode") == null
-                    ? "API_MAPPING_ONLY" : (String) request.get("routingMode"));
-        }
-        if (request.containsKey("apiMappingSelectionExpression") || domain.getApiMappingSelectionExpression() == null) {
-            domain.setApiMappingSelectionExpression(request.get("apiMappingSelectionExpression") == null
-                    ? "$request.basepath" : (String) request.get("apiMappingSelectionExpression"));
-        }
-        if (request.containsKey("mutualTlsAuthentication")) {
-            Map<String, Object> settings = null;
-            if (request.get("mutualTlsAuthentication") instanceof Map<?, ?> values) {
-                settings = new LinkedHashMap<>();
-                for (Map.Entry<?, ?> entry : values.entrySet()) {
-                    settings.put(String.valueOf(entry.getKey()), entry.getValue());
-                }
-            }
-            domain.setMutualTlsAuthentication(settings);
-        }
-        if (request.containsKey("domainNameConfigurations")) {
-            List<Map<String, Object>> configurations = domainConfigurations(request, false);
-            if (!configurations.isEmpty()) {
-                Map<String, Object> primary = configurations.getFirst();
-                if (primary.containsKey("certificateArn")) {
-                    domain.setCertificateArn((String) primary.get("certificateArn"));
-                }
-                if (primary.containsKey("certificateName")) {
-                    domain.setCertificateName((String) primary.get("certificateName"));
-                }
-                if (primary.get("securityPolicy") != null) {
-                    domain.setSecurityPolicy((String) primary.get("securityPolicy"));
-                }
-                if (primary.get("apiGatewayDomainName") != null) {
-                    domain.setRegionalDomainName((String) primary.get("apiGatewayDomainName"));
-                }
-                if (primary.get("hostedZoneId") != null) {
-                    domain.setRegionalHostedZoneId((String) primary.get("hostedZoneId"));
-                }
-                if (primary.get("domainNameStatus") != null) {
-                    domain.setDomainNameStatus((String) primary.get("domainNameStatus"));
-                }
-                if (primary.get("endpointType") != null) {
-                    applyEndpointType(domain, (String) primary.get("endpointType"));
-                }
-                if ("REGIONAL".equals(domain.getEndpointConfigurationType())) {
-                    domain.setRegionalCertificateArn(domain.getCertificateArn());
-                    domain.setRegionalCertificateName(domain.getCertificateName());
-                }
-            }
-            for (Map<String, Object> configuration : configurations) {
-                configuration.putIfAbsent("endpointType", "REGIONAL");
-                configuration.putIfAbsent("securityPolicy", "TLS_1_2");
-                configuration.putIfAbsent("domainNameStatus", "AVAILABLE");
-                configuration.putIfAbsent("ipAddressType", "ipv4");
-                configuration.putIfAbsent("apiGatewayDomainName", domain.getRegionalDomainName());
-                configuration.putIfAbsent("hostedZoneId", domain.getRegionalHostedZoneId());
-            }
-            domain.setDomainNameConfigurations(configurations);
-        }
-        domain.synchronizePrimaryConfiguration();
-    }
-
-    private static V2DomainName toV2DomainName(String region, CustomDomain source) {
-        V2DomainName domain = new V2DomainName();
-        domain.setDomainName(source.getDomainName());
-        domain.setDomainNameArn("arn:aws:apigateway:" + region + "::/domainnames/" + source.getDomainName());
-        domain.setRoutingMode(source.getRoutingMode() == null ? "API_MAPPING_ONLY" : source.getRoutingMode());
-        domain.setApiMappingSelectionExpression(source.getApiMappingSelectionExpression() == null
-                ? "$request.basepath" : source.getApiMappingSelectionExpression());
-        domain.setMutualTlsAuthentication(source.getMutualTlsAuthentication() == null
-                ? null : new LinkedHashMap<>(source.getMutualTlsAuthentication()));
-        List<Map<String, Object>> configurations = new ArrayList<>();
-        if (source.getDomainNameConfigurations() == null) {
-            configurations.add(source.primaryConfiguration());
-        } else {
-            source.getDomainNameConfigurations().forEach(configuration ->
-                    configurations.add(new LinkedHashMap<>(configuration)));
-            if (!configurations.isEmpty()) {
-                configurations.set(0, source.primaryConfiguration());
-            }
-        }
-        domain.setDomainNameConfigurations(configurations);
-        domain.setTags(source.getTags() == null ? Map.of() : new LinkedHashMap<>(source.getTags()));
-        return domain;
-    }
 
     public void flushStageCache(String region, String apiId, String stageName) {
         getStage(region, apiId, stageName);
@@ -3609,211 +4997,22 @@ public class ApiGatewayService {
         getStage(region, apiId, stageName);
     }
 
-    // ──────────────────────────── Key helpers ────────────────────────────
-
-    private String apiKey(String region, String apiId) {
-        return region + "::" + apiId;
-    }
-
-    private String resourceKey(String region, String apiId, String resourceId) {
-        return region + "::" + apiId + "::" + resourceId;
-    }
-
-    private String deploymentKey(String region, String apiId, String deploymentId) {
-        return region + "::" + apiId + "::" + deploymentId;
-    }
-
-    private String stageKey(String region, String apiId, String stageName) {
-        return region + "::" + apiId + "::" + stageName;
-    }
-
-    private String authorizerKey(String region, String apiId, String authorizerId) {
-        return region + "::" + apiId + "::" + authorizerId;
-    }
-
-    private String requestValidatorKey(String region, String apiId, String validatorId) {
-        return region + "::" + apiId + "::" + validatorId;
-    }
-
-    private String gatewayResponseKey(String region, String apiId, GatewayResponseType type) {
-        return region + "::" + apiId + "::" + type.name();
-    }
-
-    private String modelKey(String region, String apiId, String modelName) {
-        return region + "::" + apiId + "::" + modelName;
-    }
-
-    private String accountKey(String region) {
-        return region + "::account";
-    }
-
-    private String apiKeyGlobalKey(String region, String apiKeyId) {
-        return region + "::" + apiKeyId;
-    }
-
-    private String usagePlanKey(String region, String usagePlanId) {
-        return region + "::" + usagePlanId;
-    }
-
-    private String usagePlanKeyPathKey(String region, String usagePlanId, String keyId) {
-        return region + "::" + usagePlanId + "::" + keyId;
-    }
-
-    private String domainKey(String region, String domainName) {
-        return region + "::" + domainName;
-    }
-
-    private String mappingKey(String region, String domainName, String basePath) {
-        return region + "::" + domainName + "::" + basePath;
-    }
-
-    private String gatewayResponseKey(String region, String apiId, String responseType) {
-        return region + "::" + apiId + "::" + responseType;
-    }
-
-    // ──────────────────────────── VPC Links (v1) ────────────────────────────
-
-    public VpcLink createVpcLink(String region, Map<String, Object> request) {
-        String name = (String) request.get("name");
-        if (name == null || name.isBlank()) {
-            throw new AwsException("BadRequestException", "Vpc link name must be specified", 400);
+    private static void applyThrottlePatch(ThrottleSettings throttle, String path, String opType, String value) {
+        if ("/throttle/burstLimit".equals(path)) {
+            throttle.setBurstLimit("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
+        } else if ("/throttle/rateLimit".equals(path)) {
+            throttle.setRateLimit("remove".equals(opType) || value == null ? null : Double.parseDouble(value));
         }
+    }
 
-        @SuppressWarnings("unchecked")
-        List<String> targetArns = request.get("targetArns") instanceof List<?> arns
-                ? (List<String>) arns : List.of();
-        if (targetArns.isEmpty()) {
-            throw new AwsException("BadRequestException",
-                    "At least one target ARN must be specified", 400);
+    private static void applyQuotaPatch(QuotaSettings quota, String path, String opType, String value) {
+        if ("/quota/limit".equals(path)) {
+            quota.setLimit("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
+        } else if ("/quota/offset".equals(path)) {
+            quota.setOffset("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
+        } else if ("/quota/period".equals(path)) {
+            quota.setPeriod("remove".equals(opType) ? null : value);
         }
-
-        VpcLink link = new VpcLink();
-        link.setId(shortId(10));
-        link.setName(name);
-        link.setDescription((String) request.get("description"));
-        link.setTargetArns(targetArns);
-        // Floci has no real VPC to provision against, so the link is immediately usable rather
-        // than transitioning PENDING → AVAILABLE as it does in AWS.
-        link.setStatus("AVAILABLE");
-
-        if (request.get("tags") instanceof Map<?, ?> tags) {
-            Map<String, String> stringTags = new HashMap<>();
-            tags.forEach((k, v) -> {
-                if (k != null && v != null) stringTags.put(k.toString(), v.toString());
-            });
-            link.setTags(stringTags);
-        }
-
-        vpcLinkStore.put(vpcLinkKey(region, link.getId()), link);
-        LOG.infov("Created VPC Link: {0} ({1}) in {2}", link.getName(), link.getId(), region);
-        return link;
-    }
-
-    public VpcLink getVpcLink(String region, String vpcLinkId) {
-        return vpcLinkStore.get(vpcLinkKey(region, vpcLinkId))
-                .orElseThrow(() -> new AwsException("NotFoundException", "Invalid VPC link identifier specified", 404));
-    }
-
-    public List<VpcLink> getVpcLinks(String region) {
-        return vpcLinkStore.scan(k -> k.startsWith(region + "::"));
-    }
-
-    /**
-     * AWS's patch-operation table for a VPC link supports only {@code replace}, and only on
-     * {@code /name} and {@code /description}. Applying anything else is an error rather than a
-     * no-op: silently accepting {@code op=remove,path=/name} would have set the name to the
-     * supplied value, and silently ignoring an unknown path would report success for a change that
-     * never happened.
-     */
-    public VpcLink updateVpcLink(String region, String vpcLinkId, List<Map<String, String>> patchOperations) {
-        VpcLink link = getVpcLink(region, vpcLinkId);
-        if (patchOperations != null) {
-            for (Map<String, String> op : patchOperations) {
-                String operation = op.get("op");
-                String path = op.get("path");
-                String value = op.get("value");
-                if (!"replace".equals(operation)) {
-                    throw new AwsException("BadRequestException", "Unsupported operation", 400);
-                }
-                if (path == null) {
-                    throw new AwsException("BadRequestException", "Missing path", 400);
-                }
-                switch (path) {
-                    case "/name" -> link.setName(value);
-                    case "/description" -> link.setDescription(value);
-                    default -> throw new AwsException("BadRequestException",
-                            "Invalid patch path  '" + path + "' specified for op 'replace'. "
-                                    + "Must be one of: [/name, /description]", 400);
-                }
-            }
-        }
-        vpcLinkStore.put(vpcLinkKey(region, vpcLinkId), link);
-        return link;
-    }
-
-    public void deleteVpcLink(String region, String vpcLinkId) {
-        getVpcLink(region, vpcLinkId);
-        vpcLinkStore.delete(vpcLinkKey(region, vpcLinkId));
-    }
-
-    private String vpcLinkKey(String region, String vpcLinkId) {
-        return region + "::" + vpcLinkId;
-    }
-
-
-    private static String shortId(int length) {
-        return UUID.randomUUID().toString().replace("-", "").substring(0, length);
-    }
-
-    private static String decodeJsonPointerSegment(String segment) {
-        return segment.replace("~1", "/").replace("~0", "~");
-    }
-
-    @SuppressWarnings("unchecked")
-    private static List<String> readStringList(Object raw) {
-        if (!(raw instanceof List<?> list)) {
-            return new ArrayList<>();
-        }
-        List<String> values = new ArrayList<>();
-        for (Object item : list) {
-            if (item != null) {
-                values.add(String.valueOf(item));
-            }
-        }
-        return values;
-    }
-
-    @SuppressWarnings("unchecked")
-    private static Map<String, String> readStringMap(Object raw) {
-        Map<String, String> values = new HashMap<>();
-        if (raw instanceof Map<?, ?> map) {
-            map.forEach((key, value) -> {
-                if (key != null && value != null) {
-                    values.put(String.valueOf(key), String.valueOf(value));
-                }
-            });
-        }
-        return values;
-    }
-
-    private static ThrottleSettings readThrottle(Object raw) {
-        if (!(raw instanceof Map<?, ?> map)) {
-            return null;
-        }
-        ThrottleSettings throttle = new ThrottleSettings();
-        throttle.setBurstLimit(null);
-        throttle.setRateLimit(null);
-        if (map.get("burstLimit") instanceof Number n) {
-            throttle.setBurstLimit(n.intValue());
-        } else if (map.get("burstLimit") != null) {
-            throttle.setBurstLimit(Integer.parseInt(String.valueOf(map.get("burstLimit"))));
-        }
-        if (map.get("rateLimit") instanceof Number n) {
-            throttle.setRateLimit(n.doubleValue());
-        } else if (map.get("rateLimit") != null) {
-            throttle.setRateLimit(Double.parseDouble(String.valueOf(map.get("rateLimit"))));
-        }
-        return throttle;
     }
 
     private static QuotaSettings readQuota(Object raw) {
@@ -3837,41 +5036,54 @@ public class ApiGatewayService {
         return quota;
     }
 
-    private static void applyThrottlePatch(ThrottleSettings throttle, String path, String opType, String value) {
-        if ("/throttle/burstLimit".equals(path)) {
-            throttle.setBurstLimit("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
-        } else if ("/throttle/rateLimit".equals(path)) {
-            throttle.setRateLimit("remove".equals(opType) || value == null ? null : Double.parseDouble(value));
+    private static ThrottleSettings readThrottle(Object raw) {
+        if (!(raw instanceof Map<?, ?> map)) {
+            return null;
         }
-    }
-
-    private static void applyQuotaPatch(QuotaSettings quota, String path, String opType, String value) {
-        if ("/quota/limit".equals(path)) {
-            quota.setLimit("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
-        } else if ("/quota/offset".equals(path)) {
-            quota.setOffset("remove".equals(opType) || value == null ? null : Integer.parseInt(value));
-        } else if ("/quota/period".equals(path)) {
-            quota.setPeriod("remove".equals(opType) ? null : value);
+        ThrottleSettings throttle = new ThrottleSettings();
+        throttle.setBurstLimit(null);
+        throttle.setRateLimit(null);
+        if (map.get("burstLimit") instanceof Number n) {
+            throttle.setBurstLimit(n.intValue());
+        } else if (map.get("burstLimit") != null) {
+            throttle.setBurstLimit(Integer.parseInt(String.valueOf(map.get("burstLimit"))));
         }
+        if (map.get("rateLimit") instanceof Number n) {
+            throttle.setRateLimit(n.doubleValue());
+        } else if (map.get("rateLimit") != null) {
+            throttle.setRateLimit(Double.parseDouble(String.valueOf(map.get("rateLimit"))));
+        }
+        return throttle;
     }
 
-    private static GatewayResponse defaultGatewayResponse(String responseType) {
-        GatewayResponse response = new GatewayResponse();
-        response.setResponseType(responseType);
-        response.setStatusCode(defaultStatusCode(responseType));
-        response.setDefaultResponse(true);
-        return response;
+    private static String decodeJsonPointerSegment(String segment) {
+        return segment.replace("~1", "/").replace("~0", "~");
     }
 
-    private static String defaultStatusCode(String responseType) {
-        return switch (responseType) {
-            case "DEFAULT_4XX", "BAD_REQUEST_BODY", "BAD_REQUEST_PARAMETERS" -> "400";
-            case "UNAUTHORIZED" -> "401";
-            case "ACCESS_DENIED", "WAF_FILTERED" -> "403";
-            case "RESOURCE_NOT_FOUND" -> "404";
-            case "DEFAULT_5XX", "API_CONFIGURATION_ERROR", "AUTHORIZER_FAILURE",
-                    "AUTHORIZER_CONFIGURATION_ERROR", "INTEGRATION_FAILURE", "INTEGRATION_TIMEOUT" -> "500";
-            default -> "500";
-        };
+    @SuppressWarnings("unchecked")
+    private static List<String> readStringList(Object raw) {
+        if (!(raw instanceof List<?> list)) {
+            return new ArrayList<>();
+        }
+        List<String> values = new ArrayList<>();
+        for (Object item : list) {
+            if (item != null) {
+                values.add(String.valueOf(item));
+            }
+        }
+        return values;
+    }
+
+    private static String validateAuthorizerTtl(String value) {
+        int ttl;
+        try {
+            ttl = Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            throw new AwsException("BadRequestException", "authorizerResultTtlInSeconds must be an integer", 400);
+        }
+        if (ttl < 0 || ttl > 3600) {
+            throw new AwsException("BadRequestException", "authorizerResultTtlInSeconds must be between 0 and 3600", 400);
+        }
+        return Integer.toString(ttl);
     }
 }

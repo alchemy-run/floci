@@ -1,9 +1,10 @@
 package io.github.hectorvent.floci.testutil;
 
+import io.github.hectorvent.floci.core.common.Digests;
+
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -50,12 +51,12 @@ public final class AppSyncRequestSigner {
                 + "x-amz-date:" + amzDate + "\n"
                 + "\n"
                 + signedHeaderNames + "\n"
-                + sha256Hex(body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8));
+                + Digests.sha256Hex(body == null ? new byte[0] : body.getBytes(StandardCharsets.UTF_8));
 
         String stringToSign = "AWS4-HMAC-SHA256\n"
                 + amzDate + "\n"
                 + credentialScope + "\n"
-                + sha256Hex(canonicalRequest.getBytes(StandardCharsets.UTF_8));
+                + Digests.sha256Hex(canonicalRequest.getBytes(StandardCharsets.UTF_8));
         byte[] signingKey = deriveSigningKey(secretKey, scopeDate, region);
         String signature = hexEncode(hmacSha256(signingKey, stringToSign));
 
@@ -81,10 +82,6 @@ public final class AppSyncRequestSigner {
         Mac mac = Mac.getInstance("HmacSHA256");
         mac.init(new SecretKeySpec(key, "HmacSHA256"));
         return mac.doFinal(data.getBytes(StandardCharsets.UTF_8));
-    }
-
-    private static String sha256Hex(byte[] input) throws Exception {
-        return hexEncode(MessageDigest.getInstance("SHA-256").digest(input));
     }
 
     private static String hexEncode(byte[] bytes) {

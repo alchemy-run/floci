@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.s3;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -81,10 +82,8 @@ class S3PresignedPostIntegrationTest {
         String wildcardQueueUrl = createQueue(wildcardQueueName);
 
         try {
-            // Skip the s3:TestEvent so each queue holds only object notifications.
             given()
                 .contentType("application/xml")
-                .header("x-amz-skip-destination-validation", "true")
                 .queryParam("notification", "")
                 .body("""
                     <NotificationConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
@@ -109,6 +108,10 @@ class S3PresignedPostIntegrationTest {
                 .put("/" + BUCKET)
             .then()
                 .statusCode(200);
+
+            consumeValidationEvent(postQueueUrl);
+            consumeValidationEvent(putQueueUrl);
+            consumeValidationEvent(wildcardQueueUrl);
 
             given()
                 .multiPart("key", "uploads/notified.txt")
@@ -171,6 +174,34 @@ class S3PresignedPostIntegrationTest {
                 containsString("\"eventName\":\"ObjectCreated:Post\""));
     }
 
+    private void consumeValidationEvent(String queueUrl) {
+        String receiptHandle = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "ReceiveMessage")
+            .formParam("QueueUrl", queueUrl)
+            .formParam("MaxNumberOfMessages", "1")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ReceiveMessageResponse.ReceiveMessageResult.Message.Body",
+                containsString("\"Event\":\"s3:TestEvent\""))
+            .body("ReceiveMessageResponse.ReceiveMessageResult.Message.Body",
+                containsString("\"Bucket\":\"" + BUCKET + "\""))
+            .body("ReceiveMessageResponse.ReceiveMessageResult.Message.Body", not(containsString("\"Records\"")))
+            .extract().xmlPath().getString("ReceiveMessageResponse.ReceiveMessageResult.Message.ReceiptHandle");
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DeleteMessage")
+            .formParam("QueueUrl", queueUrl)
+            .formParam("ReceiptHandle", receiptHandle)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+    }
+
     private void deleteQueue(String queueUrl) {
         given()
             .contentType("application/x-www-form-urlencoded")
@@ -224,26 +255,87 @@ class S3PresignedPostIntegrationTest {
         // Create data that exceeds the max content-length-range of 10 bytes
         String fileContent = "This content is definitely longer than 10 bytes";
 
-        String policy = buildPolicy(BUCKET, key, "text/plain", 0, 10);
-        String policyBase64 = Base64.getEncoder().encodeToString(policy.getBytes(StandardCharsets.UTF_8));
-
-        given()
-            .multiPart("key", key)
-            .multiPart("Content-Type", "text/plain")
-            .multiPart("policy", policyBase64)
-            .multiPart("x-amz-algorithm", "AWS4-HMAC-SHA256")
-            .multiPart("x-amz-credential", "AKIAIOSFODNN7EXAMPLE/20260330/us-east-1/s3/aws4_request")
-            .multiPart("x-amz-date", AMZ_DATE_FORMAT.format(Instant.now()))
-            .multiPart("x-amz-signature", "dummysignature")
-            .multiPart("file", "too-large.txt", fileContent.getBytes(StandardCharsets.UTF_8), "text/plain")
-        .when()
-            .post("/" + BUCKET)
-        .then()
+        postTextWithPolicy(key, buildPolicy(BUCKET, key, "text/plain", 0, 10), fileContent)
             .statusCode(400)
             .contentType("application/xml")
             .body(hasXPath("/Error/Code", equalTo("EntityTooLarge")))
             .body(hasXPath("/Error/Message", equalTo(
-                    "Your proposed upload exceeds the maximum allowed size.")));
+                    "Your proposed upload exceeds the maximum allowed size")))
+            .body(hasXPath("/Error/ProposedSize", equalTo(String.valueOf(fileContent.length()))))
+            .body(hasXPath("/Error/MaxSizeAllowed", equalTo("10")));
+    }
+
+    @Test
+    @Order(31)
+    void presignedPostRejectsContentBelowMinimumLength() {
+        String key = "uploads/too-small.txt";
+        // 5 bytes, below the min content-length-range of 10 bytes
+        String fileContent = "12345";
+
+        postTextWithPolicy(key, buildPolicy(BUCKET, key, "text/plain", 10, 20), fileContent)
+            .statusCode(400)
+            .contentType("application/xml")
+            .body(hasXPath("/Error/Code", equalTo("EntityTooSmall")))
+            .body(hasXPath("/Error/Message", equalTo(
+                    "Your proposed upload is smaller than the minimum allowed size")))
+            .body(hasXPath("/Error/ProposedSize", equalTo("5")))
+            .body(hasXPath("/Error/MinSizeAllowed", equalTo("10")));
+
+        given()
+        .when()
+            .head("/" + BUCKET + "/" + key)
+        .then()
+            .statusCode(404);
+    }
+
+    @Test
+    @Order(32)
+    void presignedPostAcceptsContentLengthRangeWrittenAsStrings() {
+        String key = "uploads/string-range.txt";
+
+        postTextWithPolicy(key, buildPolicy(BUCKET, key, "text/plain", "\"5\", \"10\""), "1234567890")
+            .statusCode(204);
+    }
+
+    @Test
+    @Order(33)
+    void presignedPostRejectsContentLengthRangeThatIsNotANumber() {
+        String key = "uploads/not-a-number-range.txt";
+
+        postTextWithPolicy(key, buildPolicy(BUCKET, key, "text/plain", "\"test\", \"10\""), "1234567890")
+            .statusCode(403)
+            .contentType("application/xml")
+            .body(hasXPath("/Error/Code", equalTo("AccessDenied")))
+            .body(hasXPath("/Error/Message", equalTo(
+                    "Invalid according to Policy: Policy Condition failed: "
+                            + "[\"content-length-range\", \"test\", \"10\"]")));
+
+        given()
+        .when()
+            .head("/" + BUCKET + "/" + key)
+        .then()
+            .statusCode(404);
+    }
+
+    @Test
+    @Order(34)
+    void presignedPostRejectsContentLengthRangeBoundPastALong() {
+        String key = "uploads/past-a-long-range.txt";
+
+        // 2^64 - 1 would wrap to -1 as a long, refusing every upload as too large.
+        postTextWithPolicy(key, buildPolicy(BUCKET, key, "text/plain", "0, 18446744073709551615"), "1234567890")
+            .statusCode(403)
+            .contentType("application/xml")
+            .body(hasXPath("/Error/Code", equalTo("AccessDenied")))
+            .body(hasXPath("/Error/Message", equalTo(
+                    "Invalid according to Policy: Policy Condition failed: "
+                            + "[\"content-length-range\", 0, 18446744073709551615]")));
+
+        given()
+        .when()
+            .head("/" + BUCKET + "/" + key)
+        .then()
+            .statusCode(404);
     }
 
     @Test
@@ -630,6 +722,7 @@ class S3PresignedPostIntegrationTest {
         given().delete("/" + BUCKET + "/uploads/no-policy.txt");
         given().delete("/" + BUCKET + "/uploads/typed-file.json");
         given().delete("/" + BUCKET + "/uploads/within-range.txt");
+        given().delete("/" + BUCKET + "/uploads/string-range.txt");
         given().delete("/" + BUCKET + "/uploads/prefix-test.txt");
         given().delete("/" + BUCKET + "/uploads/capital-p-ok.txt");
         given().delete("/" + BUCKET + "/uploads/with-metadata.txt");
@@ -641,7 +734,27 @@ class S3PresignedPostIntegrationTest {
             .statusCode(204);
     }
 
+    private ValidatableResponse postTextWithPolicy(String key, String policy, String fileContent) {
+        String fileName = key.substring(key.lastIndexOf('/') + 1);
+        return given()
+            .multiPart("key", key)
+            .multiPart("Content-Type", "text/plain")
+            .multiPart("policy", Base64.getEncoder().encodeToString(policy.getBytes(StandardCharsets.UTF_8)))
+            .multiPart("x-amz-algorithm", "AWS4-HMAC-SHA256")
+            .multiPart("x-amz-credential", "AKIAIOSFODNN7EXAMPLE/20260330/us-east-1/s3/aws4_request")
+            .multiPart("x-amz-date", AMZ_DATE_FORMAT.format(Instant.now()))
+            .multiPart("x-amz-signature", "dummysignature")
+            .multiPart("file", fileName, fileContent.getBytes(StandardCharsets.UTF_8), "text/plain")
+        .when()
+            .post("/" + BUCKET)
+        .then();
+    }
+
     private String buildPolicy(String bucket, String key, String contentType, long minSize, long maxSize) {
+        return buildPolicy(bucket, key, contentType, minSize + ", " + maxSize);
+    }
+
+    private String buildPolicy(String bucket, String key, String contentType, String contentLengthRange) {
         String expiration = Instant.now().plusSeconds(3600)
                 .atZone(ZoneOffset.UTC)
                 .format(DateTimeFormatter.ISO_INSTANT);
@@ -652,10 +765,10 @@ class S3PresignedPostIntegrationTest {
                     {"bucket": "%s"},
                     {"key": "%s"},
                     {"Content-Type": "%s"},
-                    ["content-length-range", %d, %d]
+                    ["content-length-range", %s]
                   ]
                 }
-                """.formatted(expiration, bucket, key, contentType, minSize, maxSize);
+                """.formatted(expiration, bucket, key, contentType, contentLengthRange);
     }
 
     private String buildStartsWithPolicy(String bucket, String keyPrefix, String contentTypePrefix,

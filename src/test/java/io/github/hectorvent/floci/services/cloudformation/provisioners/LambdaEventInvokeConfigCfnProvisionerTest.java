@@ -2,7 +2,8 @@ package io.github.hectorvent.floci.services.cloudformation.provisioners;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.TextNode;
+import com.fasterxml.jackson.databind.node.MissingNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.CloudFormationTemplateEngine;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
@@ -60,6 +61,7 @@ class LambdaEventInvokeConfigCfnProvisionerTest {
             return node == null || node.isMissingNode() || node.isNull() ? null : node.asText();
         });
         when(engine.resolveNode(any())).thenAnswer(i -> i.getArgument(0));
+        when(engine.resolveNodeOmittingNoValue(any())).thenAnswer(i -> i.getArgument(0));
         // The service never answers null: a missing configuration throws. Tests that care about
         // the settings before an update stub their own.
         when(lambda.getEventInvokeConfig(anyString(), anyString(), anyString()))
@@ -421,9 +423,9 @@ class LambdaEventInvokeConfigCfnProvisionerTest {
     /** A conditional DestinationConfig that resolves to AWS::NoValue is omitted, not sent as an empty set. */
     @Test
     void aDestinationConfigResolvingToNoValueIsNotSent() {
-        when(engine.resolveNode(any())).thenAnswer(i -> {
+        when(engine.resolveNodeOmittingNoValue(any())).thenAnswer(i -> {
             JsonNode node = i.getArgument(0);
-            return node.has("Ref") ? TextNode.valueOf("") : node;
+            return node.has("Ref") ? MissingNode.getInstance() : node;
         });
 
         provision("""
@@ -438,10 +440,10 @@ class LambdaEventInvokeConfigCfnProvisionerTest {
 
     @Test
     void aDestinationSideResolvingToNoValueIsNotSent() {
-        when(engine.resolveNode(any())).thenAnswer(i -> {
+        when(engine.resolveNodeOmittingNoValue(any())).thenAnswer(i -> {
             JsonNode node = i.getArgument(0);
             if (node.isObject() && node.has("OnSuccess")) {
-                ((com.fasterxml.jackson.databind.node.ObjectNode) node).set("OnSuccess", TextNode.valueOf(""));
+                ((ObjectNode) node).remove("OnSuccess");
             }
             return node;
         });
@@ -456,6 +458,31 @@ class LambdaEventInvokeConfigCfnProvisionerTest {
         verify(lambda).putEventInvokeConfig(eq(REGION), eq("orders"), eq("$LATEST"), request.capture());
         assertEquals(Map.of("OnFailure", Map.of("Destination", "arn:aws:sqs:us-east-1:000000000000:dlq")),
                 request.getValue().get("DestinationConfig"));
+    }
+
+    /**
+     * A Destination that resolves to AWS::NoValue leaves its side without one, which the registry
+     * schema does not allow. CloudFormation fails such a template's validation rather than
+     * creating a configuration with an empty destination.
+     */
+    @Test
+    void aDestinationResolvingToNoValueIsRejectedRatherThanSentEmpty() {
+        when(engine.resolveNodeOmittingNoValue(any())).thenAnswer(i -> {
+            JsonNode node = i.getArgument(0);
+            JsonNode onFailure = node.path("OnFailure");
+            if (onFailure.isObject() && onFailure.path("Destination").has("Ref")) {
+                ((ObjectNode) onFailure).remove("Destination");
+            }
+            return node;
+        });
+
+        AwsException e = assertThrows(AwsException.class, () -> provision("""
+                {"FunctionName": "orders", "Qualifier": "$LATEST",
+                 "DestinationConfig": {"OnFailure": {"Destination": {"Ref": "AWS::NoValue"}}}}
+                """, null));
+
+        assertTrue(e.getMessage().contains("DestinationConfig.OnFailure requires Destination"), e.getMessage());
+        verify(lambda, never()).putEventInvokeConfig(anyString(), anyString(), anyString(), any());
     }
 
     private static FunctionEventInvokeConfig config(Integer retries, Integer eventAge,

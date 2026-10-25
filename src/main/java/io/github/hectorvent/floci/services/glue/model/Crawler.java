@@ -9,7 +9,6 @@ import java.time.Instant;
 import java.util.List;
 
 @RegisterForReflection
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class Crawler {
     @JsonProperty("Classifiers")
     private List<String> classifiers;

@@ -1,11 +1,12 @@
 package io.github.hectorvent.floci.services.iam;
 
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.iam.model.IamPolicy;
 import org.junit.jupiter.api.DynamicTest;
-import org.junit.jupiter.api.TestFactory;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestFactory;
 
 import java.util.HashSet;
 import java.util.List;
@@ -15,6 +16,8 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.IntConsumer;
 import java.util.function.ToIntFunction;
 import java.util.stream.Stream;
@@ -344,6 +347,226 @@ class IamConcurrencyTest {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    /**
+     * Every racing ChangePassword presents the same valid old password, so exactly one can be
+     * right: once the first write lands, the old password the others hold is no longer the current
+     * one. A request told it succeeded has to be the one whose password is in the store, since the
+     * caller has no way to find out otherwise, the operation echoing nothing back.
+     */
+    @Test
+    void concurrentPasswordChangesLeaveExactlyOneWinner() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(THREADS);
+        try {
+            for (int trial = 0; trial < TRIALS; trial++) {
+                IamService iam = newIamService();
+                iam.createUser("racer", "/");
+                iam.createLoginProfile("racer", "Passw0rd$start", false);
+                CountDownLatch start = new CountDownLatch(1);
+                CountDownLatch done = new CountDownLatch(N);
+                List<String> winners = new CopyOnWriteArrayList<>();
+                List<String> unexpected = new CopyOnWriteArrayList<>();
+
+                for (int i = 0; i < N; i++) {
+                    String candidate = "Passw0rd$" + i;
+                    pool.execute(() -> {
+                        try {
+                            start.await(10, TimeUnit.SECONDS);
+                            iam.changePassword("racer", "Passw0rd$start", candidate);
+                            winners.add(candidate);
+                        } catch (io.github.hectorvent.floci.core.common.AwsException e) {
+                            if (!"InvalidParameterValue".equals(e.getErrorCode())) {
+                                unexpected.add(e.getErrorCode());
+                            }
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        } finally {
+                            done.countDown();
+                        }
+                    });
+                }
+                start.countDown();
+                assertTrue(done.await(30, TimeUnit.SECONDS), "password workers stalled");
+
+                String stored = iam.getLoginProfile("racer").getPassword();
+                if (winners.size() != 1 || !winners.contains(stored) || !unexpected.isEmpty()) {
+                    fail("changePassword trial " + trial + ": winners=" + winners
+                            + " stored=" + stored + " unexpectedErrors=" + unexpected);
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void anUpdateCannotResurrectADeletedAccessKey() throws Exception {
+        // UpdateAccessKey reads a key, sets its status and writes it back, so without a lock the
+        // write lands after a delete that ran in between and the credential comes back. Measured
+        // at 80 of 2000 trials before the lock.
+        ExecutorService pool = Executors.newFixedThreadPool(THREADS);
+        try {
+            for (int trial = 0; trial < 2000; trial++) {
+                IamService iam = newIamService();
+                iam.createUser("racer", "/");
+                String keyId = iam.createAccessKey("racer").getAccessKeyId();
+                CountDownLatch start = new CountDownLatch(1);
+                CountDownLatch done = new CountDownLatch(2);
+                List<String> unexpected = new CopyOnWriteArrayList<>();
+
+                pool.execute(raceStep(start, done, unexpected,
+                        () -> iam.updateAccessKey("racer", keyId, "Inactive")));
+                pool.execute(raceStep(start, done, unexpected,
+                        () -> iam.deleteAccessKey("racer", keyId)));
+                start.countDown();
+                assertTrue(done.await(30, TimeUnit.SECONDS), "access key workers stalled");
+
+                if (!iam.listAccessKeys("racer").isEmpty() || !unexpected.isEmpty()) {
+                    fail("access key trial " + trial + ": the deleted key is still listed"
+                            + ", unexpectedErrors=" + unexpected);
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void concurrentAccessKeyCreatesStayInsideTheQuota() throws Exception {
+        // AccessKeysPerUser is 2, counted and then written, so without a lock four callers racing
+        // the count all pass it. Measured at 226 of 500 trials before the lock.
+        ExecutorService pool = Executors.newFixedThreadPool(THREADS);
+        try {
+            for (int trial = 0; trial < 500; trial++) {
+                IamService iam = newIamService();
+                iam.createUser("racer", "/");
+                CountDownLatch start = new CountDownLatch(1);
+                CountDownLatch done = new CountDownLatch(4);
+                List<String> unexpected = new CopyOnWriteArrayList<>();
+
+                for (int i = 0; i < 4; i++) {
+                    pool.execute(raceStep(start, done, unexpected, () -> iam.createAccessKey("racer")));
+                }
+                start.countDown();
+                assertTrue(done.await(30, TimeUnit.SECONDS), "access key workers stalled");
+
+                int stored = iam.listAccessKeys("racer").size();
+                if (stored != 2 || !unexpected.isEmpty()) {
+                    fail("access key quota trial " + trial + ": stored=" + stored
+                            + " unexpectedErrors=" + unexpected);
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void aRenameCannotResurrectADeletedAccessKey() throws Exception {
+        // UpdateUser rewrites each key's owner. Reading that list before taking the lock lets a
+        // DeleteAccessKey land in between, and the loop then writes the deleted key back under the
+        // new name, where it authenticates again.
+        ExecutorService pool = Executors.newFixedThreadPool(THREADS);
+        try {
+            for (int trial = 0; trial < 2000; trial++) {
+                IamService iam = newIamService();
+                iam.createUser("racer", "/");
+                String keyId = iam.createAccessKey("racer").getAccessKeyId();
+                CountDownLatch start = new CountDownLatch(1);
+                CountDownLatch done = new CountDownLatch(2);
+                List<String> unexpected = new CopyOnWriteArrayList<>();
+                AtomicBoolean deleted = new AtomicBoolean();
+
+                pool.execute(raceStep(start, done, unexpected,
+                        () -> iam.updateUser("racer", "renamed", null)));
+                pool.execute(raceStep(start, done, unexpected, () -> {
+                    iam.deleteAccessKey("racer", keyId);
+                    deleted.set(true);
+                }));
+                start.countDown();
+                assertTrue(done.await(30, TimeUnit.SECONDS), "rename workers stalled");
+
+                // The delete can lose the race, the key having moved to the new name before it
+                // looked, and then the key is meant to still be there. What may never happen is a
+                // delete that answered 200 and a key that is still stored.
+                boolean stored = iam.findUserNameByAccessKeyId(keyId).isPresent();
+                if ((deleted.get() && stored) || !unexpected.isEmpty()) {
+                    fail("rename trial " + trial + ": deleted=" + deleted.get()
+                            + " stillStored=" + stored + " unexpectedErrors=" + unexpected);
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void anAccessKeyCannotBeCreatedForAUserBeingDeleted() throws Exception {
+        // CreateAccessKey confirming the user before taking the lock, and DeleteUser checking for
+        // keys without holding it, leaves the pair free to interleave: the create passes the check
+        // and stores a key for a user the delete has just removed.
+        ExecutorService pool = Executors.newFixedThreadPool(THREADS);
+        try {
+            for (int trial = 0; trial < 2000; trial++) {
+                IamService iam = newIamService();
+                iam.createUser("racer", "/");
+                CountDownLatch start = new CountDownLatch(1);
+                CountDownLatch done = new CountDownLatch(2);
+                List<String> unexpected = new CopyOnWriteArrayList<>();
+                AtomicReference<String> created = new AtomicReference<>();
+
+                pool.execute(raceStep(start, done, unexpected,
+                        () -> created.set(iam.createAccessKey("racer").getAccessKeyId())));
+                pool.execute(raceStep(start, done, unexpected, () -> iam.deleteUser("racer")));
+                start.countDown();
+                assertTrue(done.await(30, TimeUnit.SECONDS), "delete-user workers stalled");
+
+                boolean userGone = userIsGone(iam);
+                boolean orphan = userGone && created.get() != null
+                        && iam.findUserNameByAccessKeyId(created.get()).isPresent();
+                if (orphan || !unexpected.isEmpty()) {
+                    fail("delete-user trial " + trial + ": a key is stored for a user that is gone"
+                            + ", unexpectedErrors=" + unexpected);
+                }
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private static boolean userIsGone(IamService iam) {
+        try {
+            iam.getUser("racer");
+            return false;
+        } catch (AwsException e) {
+            return true;
+        }
+    }
+
+    /**
+     * One racer: waits for the start, runs the step, and keeps any error that is not one of the
+     * refusals the race is allowed to produce, a key already gone, a quota already full or a user
+     * that still has a key when the delete looks.
+     */
+    private static Runnable raceStep(CountDownLatch start, CountDownLatch done,
+                                     List<String> unexpected, Runnable step) {
+        return () -> {
+            try {
+                start.await(10, TimeUnit.SECONDS);
+                step.run();
+            } catch (AwsException e) {
+                if (!"NoSuchEntity".equals(e.getErrorCode())
+                        && !"LimitExceeded".equals(e.getErrorCode())
+                        && !"DeleteConflict".equals(e.getErrorCode())) {
+                    unexpected.add(e.getErrorCode());
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            } finally {
+                done.countDown();
+            }
+        };
     }
 
     private static String[] createPolicies(IamService iam, String prefix) {

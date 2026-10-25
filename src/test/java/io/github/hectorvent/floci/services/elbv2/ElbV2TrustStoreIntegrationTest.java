@@ -198,6 +198,8 @@ class ElbV2TrustStoreIntegrationTest {
                 .formParam("LoadBalancerArn", loadBalancerArn)
                 .formParam("Protocol", "HTTPS")
                 .formParam("Port", "443")
+                // An HTTPS listener needs a default certificate.
+                .formParam("Certificates.member.1.CertificateArn", requestAcmCertificate())
                 .formParam("DefaultActions.member.1.Type", "authenticate-oidc")
                 .formParam("DefaultActions.member.1.AuthenticateOidcConfig.Issuer",
                         "https://idp.elbv2-test.alchemy.internal")
@@ -241,5 +243,16 @@ class ElbV2TrustStoreIntegrationTest {
                         equalTo("604800"))
                 .body("DescribeListenersResponse.DescribeListenersResult.Listeners.member.DefaultActions.member[0].AuthenticateOidcConfig.OnUnauthenticatedRequest",
                         equalTo("deny"));
+    }
+
+    private static String requestAcmCertificate() {
+        return given().header("Authorization", "AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/acm/aws4_request")
+                .header("X-Amz-Target", "CertificateManager.RequestCertificate")
+                .contentType("application/x-amz-json-1.1")
+                .config(RestAssured.config().encoderConfig(EncoderConfig.encoderConfig()
+                        .encodeContentTypeAs("application/x-amz-json-1.1", ContentType.TEXT)))
+                .body("{\"DomainName\": \"truststore-oidc.example.com\", \"ValidationMethod\": \"DNS\"}")
+            .when().post("/").then().statusCode(200)
+                .extract().path("CertificateArn");
     }
 }

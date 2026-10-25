@@ -230,7 +230,7 @@ class RedpandaManagerTest {
 
         int flagIndex = spec.cmd().indexOf("--advertise-kafka-addr");
         assertTrue(flagIndex >= 0, "cmd should contain --advertise-kafka-addr");
-        assertEquals("floci-msk-abc123:9092", spec.cmd().get(flagIndex + 1));
+        assertEquals("floci-aws-msk-abc123:9092", spec.cmd().get(flagIndex + 1));
 
         assertFalse(spec.portBindings().containsKey(KAFKA_PORT), "container mode should not publish ports to host");
         assertTrue(spec.exposedPorts().contains(KAFKA_PORT));

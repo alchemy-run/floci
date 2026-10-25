@@ -22,6 +22,7 @@ Compatibility tests for [Floci](https://github.com/hectorvent/floci) using **bot
 | `cloudwatch-metrics`    | PutMetricData, ListMetrics, GetMetricStatistics, alarms                  |
 | `cloudformation-naming` | Auto physical name generation, explicit name precedence, cross-reference |
 | `cognito`               | User pools, clients, AdminCreateUser, InitiateAuth, GetUser              |
+| `elbv2`                 | Listener certificates resolved against IAM and ACM                       |
 
 ## Requirements
 
@@ -41,6 +42,35 @@ pytest tests/test_s3.py
 
 # Via just (from compatibility-tests/)
 just test-python
+```
+
+## Legacy DynamoDB client
+
+`legacy/test_dynamodb_20111205.py` exercises the 2011-12-05 API with Boto 2,
+including paginated queries and batch cleanup of tables created by Boto 3.
+Public Boto 2.49.0 needs Python 3.9: it uses retired collections and import
+interfaces. Run this suite in a separate environment; the ordinary Python
+3.12 suite retains its existing dependencies.
+
+```bash
+python3.9 -m venv .venv-legacy
+.venv-legacy/bin/pip install -r requirements-legacy.txt
+FLOCI_ENDPOINT=http://localhost:4566 .venv-legacy/bin/python -m pytest legacy/
+```
+
+`tests/test_ec2_subnet_ipv6.py` checks that expanded IPv6 subnet CIDRs are
+stored and returned in canonical form through Boto 3.
+
+## Legacy Query GET
+
+`legacy/test_elb_query_get.py` checks that public Boto 2 Query GET reads and
+deletes Classic load balancers created through Boto 3 POST, including the
+missing-resource error. Boto 2.49.0 requires a separate Python 3.9 environment:
+
+```bash
+python3.9 -m venv .venv-legacy
+.venv-legacy/bin/pip install boto==2.49.0 boto3 pytest cryptography
+FLOCI_ENDPOINT=http://localhost:4566 .venv-legacy/bin/python -m pytest legacy/test_elb_query_get.py
 ```
 
 ## Configuration

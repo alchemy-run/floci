@@ -54,59 +54,6 @@ class LaunchedContainerAwsEnvTest {
     }
 
     @Test
-    void injectsRoleCredentialsInsteadOfPlaceholders() {
-        LaunchedContainerAwsEnv awsEnv = awsEnvWithEndpoint("http://localhost:4566");
-
-        List<String> env = awsEnv.sdkExecutionRoleEnv("us-east-1", Optional.empty(),
-                Optional.of(new SessionCreds("ASIAROLEKEY", "role-secret", "role-token")), null);
-
-        assertTrue(env.contains("AWS_ACCESS_KEY_ID=ASIAROLEKEY"));
-        assertTrue(env.contains("AWS_SECRET_ACCESS_KEY=role-secret"));
-        assertTrue(env.contains("AWS_SESSION_TOKEN=role-token"));
-        assertTrue(env.stream().noneMatch(e -> e.equals("AWS_ACCESS_KEY_ID=test")));
-    }
-
-    @Test
-    void injectedRoleCredentialsWinAlongsideMountedConfigDir() {
-        LaunchedContainerAwsEnv awsEnv = awsEnvWithEndpoint("http://localhost:4566");
-
-        List<String> env = awsEnv.sdkExecutionRoleEnv("us-east-1", Optional.of("/opt/aws-config"),
-                Optional.of(new SessionCreds("ASIAROLEKEY", "role-secret", "role-token")), null);
-
-        assertTrue(env.contains("AWS_SHARED_CREDENTIALS_FILE=/opt/aws-config/credentials"));
-        assertTrue(env.contains("AWS_ACCESS_KEY_ID=ASIAROLEKEY"));
-        assertTrue(env.contains("AWS_SECRET_ACCESS_KEY=role-secret"));
-        assertTrue(env.contains("AWS_SESSION_TOKEN=role-token"));
-    }
-
-    @Test
-    void executionRolePathKeepsOwnerAccountFallback() {
-        LaunchedContainerAwsEnv awsEnv = awsEnvWithHostEnv("http://localhost:4566",
-                Map.of("AWS_ACCESS_KEY_ID", "test"));
-
-        List<String> env = awsEnv.sdkExecutionRoleEnv(
-                "us-east-1", Optional.empty(), Optional.empty(), "041922743467");
-
-        assertTrue(env.contains("AWS_ACCESS_KEY_ID=041922743467"));
-        assertTrue(env.contains("AWS_SECRET_ACCESS_KEY=test"));
-        assertTrue(env.contains("AWS_SESSION_TOKEN=test"));
-    }
-
-    @Test
-    void executionRolePathInjectsOneCredentialSetAlongsideMountedConfig() {
-        LaunchedContainerAwsEnv awsEnv = awsEnvWithEndpoint("http://localhost:4566");
-        SessionCreds credentials = new SessionCreds("ASIAROLEKEY", "role-secret", null);
-
-        List<String> env = awsEnv.sdkExecutionRoleEnv(
-                "us-east-1", Optional.of("/opt/aws-config"), Optional.of(credentials), "041922743467");
-
-        assertTrue(env.contains("AWS_ACCESS_KEY_ID=ASIAROLEKEY"));
-        assertTrue(env.contains("AWS_SESSION_TOKEN="));
-        assertTrue(env.contains("AWS_CONFIG_FILE=/opt/aws-config/config"));
-        assertEquals(1, env.stream().filter(e -> e.startsWith("AWS_ACCESS_KEY_ID=")).count());
-    }
-
-    @Test
     void pointsSdkAtMountedConfigDirAndSkipsPlaceholderCredentials() {
         LaunchedContainerAwsEnv awsEnv = awsEnvWithEndpoint("http://localhost:4566");
 

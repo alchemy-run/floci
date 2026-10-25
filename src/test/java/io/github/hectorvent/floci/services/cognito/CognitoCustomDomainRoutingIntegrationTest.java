@@ -208,6 +208,7 @@ class CognitoCustomDomainRoutingIntegrationTest {
                 .get("/" + poolA + "/.well-known/openid-configuration")
         .then()
                 .statusCode(200)
+                // The issuer stays AWS-shaped; the keys and endpoints are Floci's.
                 .body("issuer", equalTo("https://cognito-idp.us-east-1.amazonaws.com/" + poolA))
                 .body("jwks_uri", equalTo(FLOCI_URL + "/" + poolA + "/.well-known/jwks.json"))
                 .body("token_endpoint", equalTo("https://" + DOMAIN + "/oauth2/token"))

@@ -79,7 +79,8 @@ class ApiGatewayV2DomainNameIntegrationTest {
     @Test
     @Order(3)
     void aDomainNameConfigurationIsRequired() {
-        // V2 requires configuration objects; v1 also supports an omitted configuration.
+        // AWS: "Invalid input. Expected one domain name configuration" — the REST API takes none,
+        // so the two endpoints do not share this rule.
         given()
             .contentType(ContentType.JSON)
             .body("{\"domainName\":\"no-configuration.example.com\"}")
@@ -87,7 +88,7 @@ class ApiGatewayV2DomainNameIntegrationTest {
             .post("/v2/domainnames")
         .then()
             .statusCode(400)
-            .body(containsString("Expected one or more domain name configurations"));
+            .body(containsString("Expected one domain name configuration"));
     }
 
     @Test
@@ -117,99 +118,21 @@ class ApiGatewayV2DomainNameIntegrationTest {
 
     @Test
     @Order(3)
-    void anInvalidRoutingModeIsRefused() {
+    void anUnsupportedRoutingModeIsRefused() {
+        // floci does not emulate routing rules, so it says so rather than quietly creating a
+        // domain that routes by API mapping regardless.
         given()
             .contentType(ContentType.JSON)
             .body("""
                     {"domainName":"routing.example.com",
                      "domainNameConfigurations":[{"endpointType":"REGIONAL"}],
-                     "routingMode":"INVALID_MODE"}
+                     "routingMode":"ROUTING_RULE_ONLY"}
                     """)
         .when()
             .post("/v2/domainnames")
         .then()
             .statusCode(400)
-            .body(containsString("Invalid routingMode"));
-    }
-
-    @Test
-    @Order(3)
-    void controlPlaneSettingsRoundTripWithoutSplittingTheSharedDomain() {
-        String domain = "v2-control-plane.example.com";
-        String path = "/v2/domainnames/" + domain;
-        given().contentType(ContentType.JSON).body("""
-                {"domainName":"%s","routingMode":"ROUTING_RULE_ONLY",
-                 "apiMappingSelectionExpression":"$request.header.original",
-                 "mutualTlsAuthentication":{"truststoreUri":"s3://trust/original.pem","truststoreVersion":"1"},
-                 "domainNameConfigurations":[
-                   {"certificateArn":"arn:primary","endpointType":"REGIONAL","ipAddressType":"dualstack",
-                    "ownershipVerificationCertificateArn":"arn:ownership"},
-                   {"certificateArn":"arn:secondary","endpointType":"EDGE","securityPolicy":"TLS_1_0",
-                    "apiGatewayDomainName":"secondary.example.com"}]}
-                """.formatted(domain))
-                .post("/v2/domainnames").then().statusCode(201)
-                .body("routingMode", is("ROUTING_RULE_ONLY"))
-                .body("apiMappingSelectionExpression", is("$request.header.original"))
-                .body("mutualTlsAuthentication.truststoreUri", is("s3://trust/original.pem"))
-                .body("domainNameConfigurations.size()", is(2))
-                .body("domainNameConfigurations[0].ipAddressType", is("dualstack"))
-                .body("domainNameConfigurations[0].ownershipVerificationCertificateArn", is("arn:ownership"))
-                .body("domainNameConfigurations[1].certificateArn", is("arn:secondary"))
-                .body("domainNameConfigurations[1].apiGatewayDomainName", is("secondary.example.com"));
-        try {
-            given().get(path).then().statusCode(200)
-                    .body("routingMode", is("ROUTING_RULE_ONLY"))
-                    .body("mutualTlsAuthentication.truststoreVersion", is("1"))
-                    .body("domainNameConfigurations[1].securityPolicy", is("TLS_1_0"));
-            given().get("/v2/domainnames").then().statusCode(200)
-                    .body("items.find { it.domainName == '" + domain + "' }.domainNameConfigurations.size()", is(2));
-            given().get("/domainnames/" + domain).then().statusCode(200)
-                    .body("certificateArn", is("arn:primary"));
-
-            given().contentType(ContentType.JSON).body("""
-                    {"routingMode":"ROUTING_RULE_THEN_API_MAPPING",
-                     "apiMappingSelectionExpression":"$request.header.updated",
-                     "mutualTlsAuthentication":{"truststoreUri":"s3://trust/updated.pem","truststoreVersion":"2"},
-                     "domainNameConfigurations":[{"certificateArn":"arn:primary-updated","endpointType":"REGIONAL"},
-                                                 {"certificateArn":"arn:secondary-updated","endpointType":"EDGE"}]}
-                    """).patch(path).then().statusCode(200)
-                    .body("routingMode", is("ROUTING_RULE_THEN_API_MAPPING"))
-                    .body("apiMappingSelectionExpression", is("$request.header.updated"))
-                    .body("mutualTlsAuthentication.truststoreVersion", is("2"))
-                    .body("domainNameConfigurations[1].certificateArn", is("arn:secondary-updated"));
-
-            given().contentType(ContentType.JSON).body("""
-                    {"routingMode":"API_MAPPING_ONLY",
-                     "mutualTlsAuthentication":{"truststoreUri":"s3://trust/wrong.pem"},
-                     "domainNameConfigurations":[{"certificateArn":"arn:wrong"},{"endpointType":"INVALID"}]}
-                    """).patch(path).then().statusCode(400);
-            given().get(path).then().statusCode(200)
-                    .body("routingMode", is("ROUTING_RULE_THEN_API_MAPPING"))
-                    .body("apiMappingSelectionExpression", is("$request.header.updated"))
-                    .body("mutualTlsAuthentication.truststoreUri", is("s3://trust/updated.pem"))
-                    .body("domainNameConfigurations[0].certificateArn", is("arn:primary-updated"))
-                    .body("domainNameConfigurations[1].certificateArn", is("arn:secondary-updated"));
-
-            given().contentType(ContentType.JSON).body("""
-                    {"patchOperations":[{"op":"replace","path":"/certificateArn","value":"arn:v1-updated"}]}
-                    """).patch("/domainnames/" + domain).then().statusCode(200);
-            given().get(path).then().statusCode(200)
-                    .body("domainNameConfigurations[0].certificateArn", is("arn:v1-updated"))
-                    .body("domainNameConfigurations[1].certificateArn", is("arn:secondary-updated"))
-                    .body("routingMode", is("ROUTING_RULE_THEN_API_MAPPING"))
-                    .body("mutualTlsAuthentication.truststoreVersion", is("2"));
-
-            given().contentType(ContentType.JSON)
-                    .body("{\"mutualTlsAuthentication\":null,\"domainNameConfigurations\":[]}")
-                    .patch(path).then().statusCode(200)
-                    .body("mutualTlsAuthentication", nullValue())
-                    .body("domainNameConfigurations.size()", is(0));
-            given().get(path).then().statusCode(200)
-                    .body("mutualTlsAuthentication", nullValue())
-                    .body("domainNameConfigurations.size()", is(0));
-        } finally {
-            given().delete(path).then().statusCode(204);
-        }
+            .body(containsString("API_MAPPING_ONLY"));
     }
 
     @Test
@@ -337,7 +260,7 @@ class ApiGatewayV2DomainNameIntegrationTest {
     @Order(7)
     void rootSpellingsCollapseToOneRecordOnWrite() {
         // The read path has always normalised the root to "(none)"; the write path now does too, so
-        // "/" cannot end up stored beside it as a second record that means the same thing, and a
+        // "/" cannot end up stored beside it as a second record that means the same thing — and a
         // mapping created as "" can be read back as "", which it could not before.
         String otherDomain = "root-spelling.example.com";
         given()
@@ -430,24 +353,18 @@ class ApiGatewayV2DomainNameIntegrationTest {
 
     @Test
     @Order(6)
-    void malformedDomainSettingsAreRefused() {
+    void inputsFlociCannotHonourAreRefused() {
+        // Accepting these would answer with a domain that behaves differently from the request.
         String[] bodies = {
             """
             {"domainName":"mtls.example.com","domainNameConfigurations":[{"endpointType":"REGIONAL"}],
-             "mutualTlsAuthentication":"not-an-object"}""",
+             "mutualTlsAuthentication":{"truststoreUri":"s3://bucket/truststore.pem"}}""",
             """
             {"domainName":"dualstack.example.com",
-             "domainNameConfigurations":[{"endpointType":"REGIONAL","ipAddressType":"ipv7"}]}""",
+             "domainNameConfigurations":[{"endpointType":"REGIONAL","ipAddressType":"dualstack"}]}""",
             """
             {"domainName":"ownership.example.com","domainNameConfigurations":[
-                {"endpointType":"REGIONAL","ownershipVerificationCertificateArn":42}]}""",
-            """
-            {"domainName":"bad-config.example.com","domainNameConfigurations":[{"endpointType":"REGIONAL"},7]}""",
-            """
-            {"domainName":"bad-expression.example.com","domainNameConfigurations":[{}],
-             "apiMappingSelectionExpression":{"invalid":true}}""",
-            """
-            {"domainName":"private.example.com","domainNameConfigurations":[{"endpointType":"PRIVATE"}]}"""
+                {"endpointType":"REGIONAL","ownershipVerificationCertificateArn":"arn:aws:acm:us-east-1:0:certificate/o"}]}"""
         };
         for (String body : bodies) {
             given()
@@ -515,6 +432,243 @@ class ApiGatewayV2DomainNameIntegrationTest {
             .get("/v2/domainnames/" + DOMAIN)
         .then()
             .statusCode(404);
+    }
+
+    @Test
+    @Order(11)
+    void aRestApiCanBeMappedUnderAKeyWithSeveralLevels() {
+        // AWS takes a REST API here too: the v2 API is how a REST API gets a multi-level mapping.
+        String restApiId = given()
+                .contentType(ContentType.JSON)
+                .body("{\"name\":\"v2-mapped-rest-api\"}")
+            .when()
+                .post("/restapis")
+            .then()
+                .statusCode(201)
+                .extract().path("id");
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"stageName\":\"prod\"}")
+        .when()
+            .post("/restapis/" + restApiId + "/deployments")
+        .then()
+            .statusCode(201);
+        given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {"domainName":"rest-multi-level.example.com","domainNameConfigurations":[
+                        {"certificateArn":"arn:aws:acm:us-east-1:000000000000:certificate/abc","endpointType":"REGIONAL"}]}
+                    """)
+        .when()
+            .post("/v2/domainnames")
+        .then()
+            .statusCode(201);
+
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"apiId\":\"%s\",\"stage\":\"prod\",\"apiMappingKey\":\"orders/v1/items\"}".formatted(restApiId))
+        .when()
+            .post("/v2/domainnames/rest-multi-level.example.com/apimappings")
+        .then()
+            .statusCode(201)
+            .body("apiId", is(restApiId))
+            .body("apiMappingKey", is("orders/v1/items"));
+    }
+
+    @Test
+    @Order(12)
+    void anEdgeDomainCannotBeManagedThroughTheV2Api() {
+        String message = "Only REGIONAL domain names can be managed through the API Gateway V2 API. For EDGE "
+                + "domain names, please use the API Gateway V1 API. Also note that only REST APIs can be attached "
+                + "to EDGE domain names.";
+        given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {"domainName":"edge-only.example.com",
+                     "certificateArn":"arn:aws:acm:us-east-1:000000000000:certificate/abc",
+                     "endpointConfiguration":{"types":["EDGE"]}}
+                    """)
+        .when()
+            .post("/domainnames")
+        .then()
+            .statusCode(201);
+
+        given()
+        .when()
+            .get("/v2/domainnames/edge-only.example.com/apimappings")
+        .then()
+            .statusCode(400)
+            .body("message", is(message));
+        given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {"domainName":"edge-v2.example.com","domainNameConfigurations":[{"endpointType":"EDGE"}]}
+                    """)
+        .when()
+            .post("/v2/domainnames")
+        .then()
+            .statusCode(400)
+            // Measured against API Gateway (eu-west-1, 2026-10-04): a v2 create names the endpoint type.
+            .body("message", is("EDGE endpoint type is not supported for APIGatewayV2 domainName"));
+    }
+
+    @Test
+    @Order(13)
+    void anHttpApiIsMappedOnlyOntoADomainOnTls12() {
+        given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {"domainName":"tls10.example.com",
+                     "regionalCertificateArn":"arn:aws:acm:us-east-1:000000000000:certificate/abc",
+                     "endpointConfiguration":{"types":["REGIONAL"]},"securityPolicy":"TLS_1_0"}
+                    """)
+        .when()
+            .post("/domainnames")
+        .then()
+            .statusCode(201);
+
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"apiId\":\"%s\",\"stage\":\"$default\"}".formatted(apiId))
+        .when()
+            .post("/v2/domainnames/tls10.example.com/apimappings")
+        .then()
+            .statusCode(400)
+            .body(containsString("TLS 1.2"));
+    }
+
+    /** Measured against API Gateway (eu-west-1, 2026-10-04): what an update leaves out keeps its value. */
+    @Test
+    @Order(14)
+    void updateApiMappingChangesOnlyWhatItNames() {
+        String domain = "patch-mapping.example.com";
+        createRegionalDomain(domain);
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"stageName\":\"s2\"}")
+        .when()
+            .post("/v2/apis/" + apiId + "/stages")
+        .then()
+            .statusCode(201);
+        String id = given()
+                .contentType(ContentType.JSON)
+                .body("{\"apiId\":\"%s\",\"stage\":\"$default\",\"apiMappingKey\":\"patched\"}".formatted(apiId))
+            .when()
+                .post("/v2/domainnames/" + domain + "/apimappings")
+            .then()
+                .statusCode(201)
+                .extract().path("apiMappingId");
+
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"apiId\":\"%s\",\"stage\":\"s2\"}".formatted(apiId))
+        .when()
+            .patch("/v2/domainnames/" + domain + "/apimappings/" + id)
+        .then()
+            .statusCode(200)
+            .body("apiMappingId", is(id))
+            .body("apiMappingKey", is("patched"))
+            .body("stage", is("s2"));
+
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"apiId\":\"%s\",\"apiMappingKey\":\"patched-again\"}".formatted(apiId))
+        .when()
+            .patch("/v2/domainnames/" + domain + "/apimappings/" + id)
+        .then()
+            .statusCode(200)
+            .body("apiMappingId", is(id))
+            .body("apiMappingKey", is("patched-again"))
+            .body("stage", is("s2"));
+
+        given()
+            .contentType(ContentType.JSON)
+            .body("{\"apiId\":\"%s\"}".formatted(apiId))
+        .when()
+            .patch("/v2/domainnames/" + domain + "/apimappings/zzzzzz")
+        .then()
+            .statusCode(404);
+    }
+
+    /** Measured against API Gateway (eu-west-1, 2026-10-04): an HTTP API domain stays regional. */
+    @Test
+    @Order(14)
+    void updateDomainNameKeepsTheDomainRegional() {
+        String domain = "patch-domain.example.com";
+        createRegionalDomain(domain);
+        given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {"domainNameConfigurations":[
+                        {"certificateArn":"arn:aws:acm:us-east-1:000000000000:certificate/def","endpointType":"PRIVATE"}]}
+                    """)
+        .when()
+            .patch("/v2/domainnames/" + domain)
+        .then()
+            .statusCode(200)
+            .body("domainNameConfigurations[0].endpointType", is("REGIONAL"))
+            .body("domainNameConfigurations[0].certificateArn", containsString("certificate/def"));
+
+        given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {"domainNameConfigurations":[
+                        {"certificateArn":"arn:aws:acm:us-east-1:000000000000:certificate/def","endpointType":"EDGE"}]}
+                    """)
+        .when()
+            .patch("/v2/domainnames/" + domain)
+        .then()
+            .statusCode(400)
+            .body("message", is("EDGE endpoint type is not supported for APIGatewayV2 domainName"));
+    }
+
+    /** A domain is one resource: a regional one's certificate is the v1 API's regional certificate. */
+    @Test
+    @Order(15)
+    void aRegionalDomainsCertificateIsTheSameThroughBothApis() {
+        String v2Created = "cert-v2.example.com";
+        createRegionalDomain(v2Created);
+        given()
+        .when()
+            .get("/domainnames/" + v2Created)
+        .then()
+            .statusCode(200)
+            .body("regionalCertificateArn", containsString("certificate/abc"))
+            .body("certificateArn", nullValue());
+
+        String v1Created = "cert-v1.example.com";
+        given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {"domainName":"%s",
+                     "regionalCertificateArn":"arn:aws:acm:us-east-1:000000000000:certificate/regional",
+                     "regionalCertificateName":"regional-name",
+                     "endpointConfiguration":{"types":["REGIONAL"]}}
+                    """.formatted(v1Created))
+        .when()
+            .post("/domainnames")
+        .then()
+            .statusCode(201);
+        given()
+        .when()
+            .get("/v2/domainnames/" + v1Created)
+        .then()
+            .statusCode(200)
+            .body("domainNameConfigurations[0].certificateArn", containsString("certificate/regional"))
+            .body("domainNameConfigurations[0].certificateName", is("regional-name"));
+    }
+
+    private static void createRegionalDomain(String domain) {
+        given()
+            .contentType(ContentType.JSON)
+            .body("""
+                    {"domainName":"%s","domainNameConfigurations":[
+                        {"certificateArn":"arn:aws:acm:us-east-1:000000000000:certificate/abc","endpointType":"REGIONAL"}]}
+                    """.formatted(domain))
+        .when()
+            .post("/v2/domainnames")
+        .then()
+            .statusCode(201);
     }
 
     private static org.hamcrest.Matcher<Iterable<? super String>> hasItemEqualTo(String value) {

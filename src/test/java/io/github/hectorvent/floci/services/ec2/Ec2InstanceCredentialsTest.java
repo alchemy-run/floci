@@ -11,8 +11,8 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
-import java.util.concurrent.Executors;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.stream.IntStream;
 
@@ -23,14 +23,6 @@ class Ec2InstanceCredentialsTest {
     private static final String ACCOUNT = "123456789012";
     private static final String PROFILE = "arn:aws:iam::123456789012:instance-profile/path/profile";
     private static final Instant NOW = Instant.parse("2026-09-16T10:00:00Z");
-
-    @Test
-    void iamCredentialRoleNameComesFromInstanceProfileRole() {
-        Fixture fixture = fixture();
-
-        assertEquals("worker", fixture.credentials.role(fixture.instance).orElseThrow().getRoleName());
-        verify(fixture.iam).findInstanceProfile(ACCOUNT, "profile");
-    }
 
     @Test
     void credentialsAreRegisteredStableAndRotateWithOverlap() {

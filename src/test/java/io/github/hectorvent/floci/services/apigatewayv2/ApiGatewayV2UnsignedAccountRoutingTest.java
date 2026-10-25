@@ -19,19 +19,21 @@ class ApiGatewayV2UnsignedAccountRoutingTest {
         String apiA = createApiGraph(ACCOUNT_A, "account-a-function");
         String apiB = createApiGraph(ACCOUNT_B, "account-b-function");
 
+        // Each route is found in its API's account and reaches its integration, whose function does
+        // not exist: API Gateway's 500, where an API it could not find would be a 404.
         given()
                 .header("Authorization", authorization(ACCOUNT_B, "execute-api"))
                 .when().get("/execute-api/" + apiA + "/$default/health")
                 .then()
-                .statusCode(404)
-                .body(containsString("Function not found: account-a-function"));
+                .statusCode(500)
+                .body(containsString("Internal Server Error"));
 
         given()
                 .header("Host", apiB + ".execute-api.localhost.floci.io")
                 .when().get("/health")
                 .then()
-                .statusCode(404)
-                .body(containsString("Function not found: account-b-function"));
+                .statusCode(500)
+                .body(containsString("Internal Server Error"));
     }
 
     @Test
@@ -42,7 +44,7 @@ class ApiGatewayV2UnsignedAccountRoutingTest {
     }
 
     private String createApiGraph(String accountId, String functionName) {
-        String authorization = authorization(accountId, "apigatewayv2");
+        String authorization = authorization(accountId, "apigateway");
         String apiId = given()
                 .contentType(ContentType.JSON)
                 .header("Authorization", authorization)
@@ -102,7 +104,7 @@ class ApiGatewayV2UnsignedAccountRoutingTest {
     private void createApiWithId(String accountId, String apiId, int expectedStatus) {
         given()
                 .contentType(ContentType.JSON)
-                .header("Authorization", authorization(accountId, "apigatewayv2"))
+                .header("Authorization", authorization(accountId, "apigateway"))
                 .body("""
                         {
                           "name":"account-owned-api",

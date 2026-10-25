@@ -10,6 +10,7 @@ import software.amazon.awssdk.services.detective.model.ConflictException;
 import software.amazon.awssdk.services.detective.model.DatasourcePackage;
 import software.amazon.awssdk.services.detective.model.DatasourcePackageIngestDetail;
 import software.amazon.awssdk.services.detective.model.DatasourcePackageIngestState;
+import software.amazon.awssdk.services.detective.model.GetMembersResponse;
 import software.amazon.awssdk.services.detective.model.Graph;
 import software.amazon.awssdk.services.detective.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.detective.model.ValidationException;
@@ -96,14 +97,14 @@ class DetectiveGraphLifecycleTest {
              DetectiveClient otherRegion = client(OTHER, Region.US_WEST_2)) {
             String arn = owner.createGraph(request -> {}).graphArn();
             try {
-                var absent = owner.getMembers(request -> request.graphArn(arn).accountIds(OTHER));
+                GetMembersResponse absent = owner.getMembers(request -> request.graphArn(arn).accountIds(OTHER));
                 assertThat(absent.memberDetails()).isEmpty();
                 assertThat(absent.unprocessedAccounts()).singleElement()
                         .satisfies(account -> assertThat(account.accountId()).isEqualTo(OTHER));
                 owner.createMembers(request -> request.graphArn(arn).accounts(
                         software.amazon.awssdk.services.detective.model.Account.builder()
                                 .accountId(OTHER).emailAddress("member@example.com").build()));
-                var found = owner.getMembers(request -> request.graphArn(arn).accountIds(OTHER, "732000000003"));
+                GetMembersResponse found = owner.getMembers(request -> request.graphArn(arn).accountIds(OTHER, "732000000003"));
                 assertThat(found.memberDetails()).singleElement().satisfies(member -> {
                     assertThat(member.accountId()).isEqualTo(OTHER);
                     assertThat(member.statusAsString()).isEqualTo("INVITED");

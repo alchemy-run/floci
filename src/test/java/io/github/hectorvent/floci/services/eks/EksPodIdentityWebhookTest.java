@@ -6,6 +6,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.eks.model.Addon;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
 import io.github.hectorvent.floci.services.eks.model.PodIdentityAssociationSummary;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
@@ -48,10 +49,10 @@ class EksPodIdentityWebhookTest {
         cluster.setName(CLUSTER_NAME);
         when(eks.findAuthenticationCluster(ACCOUNT_ID, CLUSTER_NAME)).thenReturn(Optional.of(cluster));
         when(addons.describe(any(), eq(EksPodIdentityWebhook.POD_IDENTITY_ADDON)))
-                .thenReturn(Mockito.mock(Addon.class));
+                .thenReturn(InlineMocks.inlineMock(Addon.class));
         when(associations.list(any(), anyString(), anyString(), any(), any()))
                 .thenReturn(new EksPodIdentityAssociationService.Page(
-                        List.of(Mockito.mock(PodIdentityAssociationSummary.class)), null));
+                        List.of(InlineMocks.inlineMock(PodIdentityAssociationSummary.class)), null));
     }
 
     private Map<String, Object> admissionReview(Map<String, Object> pod) {

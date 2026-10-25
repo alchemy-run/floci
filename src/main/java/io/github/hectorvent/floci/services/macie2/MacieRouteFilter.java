@@ -10,6 +10,8 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
 
+import java.net.URI;
+
 /** Disambiguates Macie classification-job reads from IoT job reads. */
 @Provider
 @PreMatching
@@ -19,7 +21,7 @@ public class MacieRouteFilter implements ContainerRequestFilter {
 
     @Override
     public void filter(ContainerRequestContext context) {
-        var uri = context.getUriInfo().getRequestUri();
+        URI uri = context.getUriInfo().getRequestUri();
         String decoded = uri.getPath();
         if (decoded.equals(PREFIX) || decoded.startsWith(PREFIX + "/")) {
             context.abortWith(Response.status(404).type(MediaType.APPLICATION_JSON)

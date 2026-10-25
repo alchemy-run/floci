@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
+import java.util.TreeSet;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -88,8 +89,11 @@ class OpenSearchDataPlaneAuthTest {
 
     @Test
     void domainAccessPolicyGrantsTheCallerWithoutAnIdentityGrant() throws Exception {
+        // The policy names the session itself: a same-account root principal only delegates to IAM,
+        // which this caller has no grant in.
         String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
-                + "\"Principal\":{\"AWS\":\"arn:aws:iam::000000000000:root\"},\"Action\":\"es:*\","
+                + "\"Principal\":{\"AWS\":\"arn:aws:sts::000000000000:assumed-role/fn/session\"},"
+                + "\"Action\":\"es:*\","
                 + "\"Resource\":\"" + DOMAIN_ARN + "/*\"}]}";
         when(iam.resolveCallerContext(ROLE_KEY)).thenReturn(CallerContext.of(List.of()));
         byte[] body = "{\"doc\":{\"plays\":2}}".getBytes(StandardCharsets.UTF_8);
@@ -172,6 +176,6 @@ class OpenSearchDataPlaneAuthTest {
 
     /** The test queries are already RFC 3986 encoded, so canonical form is just key order. */
     private static String sortedQuery(String query) {
-        return String.join("&", new java.util.TreeSet<>(List.of(query.split("&"))));
+        return String.join("&", new TreeSet<>(List.of(query.split("&"))));
     }
 }

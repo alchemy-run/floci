@@ -1,5 +1,8 @@
 package io.github.hectorvent.floci.services.rds.container;
 
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.CopyArchiveToContainerCmd;
+import com.github.dockerjava.api.model.Bind;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.ServiceConfigAccess;
@@ -10,9 +13,15 @@ import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
+import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
+import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
+import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -22,23 +31,18 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.command.CopyArchiveToContainerCmd;
-import com.github.dockerjava.api.model.Bind;
-import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
-
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
-import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -247,17 +251,17 @@ class RdsContainerManagerTest {
         manager.start("db1", "vol1", DatabaseEngine.MYSQL, "mysql:8.0", "admin", "password", "db");
 
         verify(copyCmd).withRemotePath("/docker-entrypoint-initdb.d");
-        var tarCaptor = org.mockito.ArgumentCaptor.forClass(java.io.InputStream.class);
+        ArgumentCaptor<InputStream> tarCaptor = org.mockito.ArgumentCaptor.forClass(java.io.InputStream.class);
         verify(copyCmd).withTarInputStream(tarCaptor.capture());
-        try (var tar = new org.apache.commons.compress.archivers.tar.TarArchiveInputStream(tarCaptor.getValue())) {
-            var entry = tar.getNextEntry();
+        try (TarArchiveInputStream tar = new org.apache.commons.compress.archivers.tar.TarArchiveInputStream(tarCaptor.getValue())) {
+            TarArchiveEntry entry = tar.getNextEntry();
             assertEquals("floci-master-grants.sql", entry.getName());
             assertEquals(RdsContainerManager.mysqlMasterGrantSql("admin"),
                     new String(tar.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8));
         }
         // The script lands on the created container before it starts, so the entrypoint's
         // one-time init phase is the thing that runs it.
-        var order = org.mockito.Mockito.inOrder(dockerClient, lifecycleManager);
+        InOrder order = org.mockito.Mockito.inOrder(dockerClient, lifecycleManager);
         order.verify(dockerClient).copyArchiveToContainerCmd("container-id");
         order.verify(lifecycleManager).startCreated(org.mockito.ArgumentMatchers.eq("container-id"), any());
     }
@@ -313,7 +317,7 @@ class RdsContainerManagerTest {
         manager.start("db1", "vol1", DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
 
         assertFalse(Files.exists(dbPath));
-        var spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
+        ArgumentCaptor<ContainerSpec> spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
         verify(lifecycleManager).create(spec.capture());
         Bind bind = spec.getValue().binds().getFirst();
         assertEquals(dbPath.toString(), bind.getPath());
@@ -346,10 +350,10 @@ class RdsContainerManagerTest {
         manager.start(runtimeId, "db1", null,
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
 
-        var spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
+        ArgumentCaptor<ContainerSpec> spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
         verify(lifecycleManager).create(spec.capture());
         assertEquals(dbPath.toString(), spec.getValue().binds().getFirst().getPath());
-        assertEquals("floci-rds-db1", spec.getValue().name());
+        assertEquals("floci-aws-rds-db1", spec.getValue().name());
         verify(logStreamer).attachForAccount(
                 "222222222222", "container-id", "/aws/rds/instance/db1/error",
                 "log-stream", "us-west-2", "rds:" + runtimeId);
@@ -375,7 +379,7 @@ class RdsContainerManagerTest {
         manager.start("arn:aws:rds:us-west-2:222222222222:db:db1", "db1", null,
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
 
-        var spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
+        ArgumentCaptor<ContainerSpec> spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
         verify(lifecycleManager).create(spec.capture());
         assertEquals(
                 Map.of("io.floci", "aws",
@@ -405,7 +409,7 @@ class RdsContainerManagerTest {
 
         manager.start("db1", "vol1", DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
 
-        var spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
+        ArgumentCaptor<ContainerSpec> spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
         verify(lifecycleManager).create(spec.capture());
         assertEquals(
                 Map.of("io.floci", "aws",
@@ -438,10 +442,10 @@ class RdsContainerManagerTest {
                 mock(ServiceConfigAccess.class));
 
         manager.start("arn:aws:rds:us-east-1:111111111111:db:db1", "db1",
-                "db-RESOURCE-A", "floci-rds-volume-a", DatabaseEngine.MYSQL,
+                "db-RESOURCE-A", "floci-aws-rds-volume-a", DatabaseEngine.MYSQL,
                 "mysql:8.0", "root", "password", "db");
         manager.start("arn:aws:rds:us-east-1:222222222222:db:db1", "db1",
-                "db-RESOURCE-B", "floci-rds-volume-b", DatabaseEngine.MYSQL,
+                "db-RESOURCE-B", "floci-aws-rds-volume-b", DatabaseEngine.MYSQL,
                 "mysql:8.0", "root", "password", "db");
 
         manager.stopAll();
@@ -474,8 +478,8 @@ class RdsContainerManagerTest {
                 mock(ServiceConfigAccess.class));
         String runtimeA = "arn:aws:rds:us-east-1:111111111111:db:db1";
         String runtimeB = "arn:aws:rds:us-east-1:222222222222:db:db1";
-        String volumeA = "floci-rds-111111111111-us-east-1-db_db1-shared-volume";
-        String volumeB = "floci-rds-222222222222-us-east-1-db_db1-shared-volume";
+        String volumeA = "floci-aws-rds-111111111111-us-east-1-db_db1-shared-volume";
+        String volumeB = "floci-aws-rds-222222222222-us-east-1-db_db1-shared-volume";
 
         RdsContainerHandle handleA = manager.start(
                 runtimeA, "db1", "db-RESOURCE-A", volumeA, DatabaseEngine.MYSQL,
@@ -515,7 +519,7 @@ class RdsContainerManagerTest {
         assertThrows(IllegalStateException.class, () -> manager.start(
                 "arn:aws:rds:us-east-1:111111111111:cluster:same", "same", null,
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db"));
-        verify(lifecycleManager, times(1)).removeIfExistsStrict("floci-rds-same");
+        verify(lifecycleManager, times(1)).removeIfExistsStrict("floci-aws-rds-same");
         verify(lifecycleManager, times(1)).create(any());
     }
 
@@ -605,7 +609,7 @@ class RdsContainerManagerTest {
                 mock(ServiceConfigAccess.class));
         String oldRuntime = "arn:aws:rds:us-east-1:111111111111:db:db1";
         String newRuntime = "arn:aws:rds:us-east-1:111111111111:db:db1-renamed";
-        String volume = "floci-rds-volume-a";
+        String volume = "floci-aws-rds-volume-a";
 
         manager.start(oldRuntime, "db1", "db1", volume, DatabaseEngine.MYSQL,
                 "mysql:8.0", "root", "password", "db");
@@ -615,7 +619,7 @@ class RdsContainerManagerTest {
         RdsContainerHandle moved = manager.getActiveHandle(newRuntime);
         assertEquals("container-a", moved.getContainerId());
         // The old identity is free for a new instance; the moved storage is still owned.
-        manager.start(oldRuntime, "db1", "db1-new", "floci-rds-volume-b", DatabaseEngine.MYSQL,
+        manager.start(oldRuntime, "db1", "db1-new", "floci-aws-rds-volume-b", DatabaseEngine.MYSQL,
                 "mysql:8.0", "root", "password", "db");
         assertThrows(IllegalStateException.class, () -> manager.removeVolume(newRuntime, "db1", volume));
         manager.stop(moved);
@@ -638,7 +642,7 @@ class RdsContainerManagerTest {
         String runtimeId = "arn:aws:rds:us-east-1:000000000000:db:db1";
 
         for (int attempt = 0; attempt < 3; attempt++) {
-            assertNull(manager.tryStart(runtimeId, "db1", "db1", "floci-rds-db1",
+            assertNull(manager.tryStart(runtimeId, "db1", "db1", "floci-aws-rds-db1",
                     DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db"),
                     "attempt " + attempt + " should report unavailable");
         }
@@ -660,7 +664,7 @@ class RdsContainerManagerTest {
 
         IllegalStateException failure = assertThrows(IllegalStateException.class,
                 () -> manager.tryStart("arn:aws:rds:us-east-1:000000000000:db:db1", "db1", "db1",
-                        "floci-rds-db1", DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db"));
+                        "floci-aws-rds-db1", DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db"));
 
         assertEquals("no such image: mysql:8.0", failure.getMessage());
         assertTrue(manager.isDockerReachable());
@@ -678,7 +682,7 @@ class RdsContainerManagerTest {
         RdsContainerManager manager = daemonlessCapableManager(lifecycleManager);
         String runtimeId = "arn:aws:rds:us-east-1:000000000000:db:db1";
 
-        assertNull(manager.tryStart(runtimeId, "db1", "db1", "floci-rds-db1",
+        assertNull(manager.tryStart(runtimeId, "db1", "db1", "floci-aws-rds-db1",
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db"));
 
         // A Docker daemon appears.
@@ -688,7 +692,7 @@ class RdsContainerManagerTest {
         DockerClient dockerClient = mock(DockerClient.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
         when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
 
-        RdsContainerHandle handle = manager.tryStart(runtimeId, "db1", "db1", "floci-rds-db1",
+        RdsContainerHandle handle = manager.tryStart(runtimeId, "db1", "db1", "floci-aws-rds-db1",
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
 
         assertEquals("late-container", handle.getContainerId());
@@ -711,12 +715,12 @@ class RdsContainerManagerTest {
         RdsContainerManager manager = daemonlessCapableManager(lifecycleManager);
         String runtimeId = "arn:aws:rds:us-east-1:000000000000:db:db1";
 
-        assertNull(manager.tryStart(runtimeId, "db1", "db1", "floci-rds-db1",
+        assertNull(manager.tryStart(runtimeId, "db1", "db1", "floci-aws-rds-db1",
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db"));
         assertEquals("created-container", manager.getActiveHandle(runtimeId).getContainerId());
 
         // Still no daemon: the retry keeps the identity rather than dropping it.
-        assertNull(manager.tryStart(runtimeId, "db1", "db1", "floci-rds-db1",
+        assertNull(manager.tryStart(runtimeId, "db1", "db1", "floci-aws-rds-db1",
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db"));
         assertEquals("created-container", manager.getActiveHandle(runtimeId).getContainerId());
 
@@ -727,7 +731,7 @@ class RdsContainerManagerTest {
         DockerClient dockerClient = mock(DockerClient.class, org.mockito.Mockito.RETURNS_DEEP_STUBS);
         when(lifecycleManager.getDockerClient()).thenReturn(dockerClient);
 
-        RdsContainerHandle handle = manager.tryStart(runtimeId, "db1", "db1", "floci-rds-db1",
+        RdsContainerHandle handle = manager.tryStart(runtimeId, "db1", "db1", "floci-aws-rds-db1",
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
 
         assertEquals("late-container", handle.getContainerId());
@@ -755,12 +759,12 @@ class RdsContainerManagerTest {
         RdsContainerManager manager = daemonlessCapableManager(lifecycleManager);
         String runtimeId = "arn:aws:rds:us-east-1:000000000000:db:db1";
 
-        RdsContainerHandle first = manager.start(runtimeId, "db1", "db1", "floci-rds-db1",
+        RdsContainerHandle first = manager.start(runtimeId, "db1", "db1", "floci-aws-rds-db1",
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
         assertThrows(IllegalStateException.class, () -> manager.stop(first));
         assertEquals(first, manager.getActiveHandle(runtimeId));
 
-        RdsContainerHandle retried = manager.tryStart(runtimeId, "db1", "db1", "floci-rds-db1",
+        RdsContainerHandle retried = manager.tryStart(runtimeId, "db1", "db1", "floci-aws-rds-db1",
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
 
         assertEquals("second-container", retried.getContainerId());
@@ -814,7 +818,7 @@ class RdsContainerManagerTest {
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
 
         assertEquals("container-b", retried.getContainerId());
-        verify(lifecycleManager, times(2)).removeIfExistsStrict("floci-rds-legacy");
+        verify(lifecycleManager, times(2)).removeIfExistsStrict("floci-aws-rds-legacy");
     }
 
     @Test
@@ -987,11 +991,11 @@ class RdsContainerManagerTest {
         String runtimeId = "arn:aws:rds:us-east-1:111111111111:db:db1";
 
         CompletableFuture<RdsContainerHandle> first = CompletableFuture.supplyAsync(() ->
-                manager.start(runtimeId, "db1", "storage-a", "floci-rds-volume-a",
+                manager.start(runtimeId, "db1", "storage-a", "floci-aws-rds-volume-a",
                         DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db"));
         assertTrue(createEntered.await(5, TimeUnit.SECONDS));
         assertThrows(IllegalStateException.class, () -> manager.start(
-                runtimeId, "db1", "storage-b", "floci-rds-volume-b",
+                runtimeId, "db1", "storage-b", "floci-aws-rds-volume-b",
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db"));
         allowCreate.countDown();
 
@@ -1027,9 +1031,9 @@ class RdsContainerManagerTest {
                 mock(ServiceConfigAccess.class));
         String runtimeA = "arn:aws:rds:us-east-1:111111111111:db:a";
         String runtimeB = "arn:aws:rds:us-east-1:111111111111:db:b";
-        manager.start(runtimeA, "a", "storage-a", "floci-rds-volume-a",
+        manager.start(runtimeA, "a", "storage-a", "floci-aws-rds-volume-a",
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
-        manager.start(runtimeB, "b", "storage-b", "floci-rds-volume-b",
+        manager.start(runtimeB, "b", "storage-b", "floci-aws-rds-volume-b",
                 DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
 
         assertDoesNotThrow(manager::stopAll);
@@ -1100,7 +1104,7 @@ class RdsContainerManagerTest {
 
         assertThrows(IllegalArgumentException.class, () -> manager.start(
                 "arn:aws:rds:us-east-1:111111111111:db:db1", "db1", "../escape",
-                "floci-rds-safe", DatabaseEngine.MYSQL, "mysql:8.0",
+                "floci-aws-rds-safe", DatabaseEngine.MYSQL, "mysql:8.0",
                 "root", "password", "db"));
         verify(lifecycleManager, never()).removeIfExistsStrict(any());
     }
@@ -1126,10 +1130,10 @@ class RdsContainerManagerTest {
 
         manager.start("db1", "volume-a", DatabaseEngine.MYSQL, "mysql:8.0", "root", "password", "db");
 
-        var spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
-        verify(lifecycleManager).removeIfExistsStrict("floci-rds-volume-a");
+        ArgumentCaptor<ContainerSpec> spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
+        verify(lifecycleManager).removeIfExistsStrict("floci-aws-rds-volume-a");
         verify(lifecycleManager).create(spec.capture());
-        assertEquals("floci-rds-volume-a", spec.getValue().name());
+        assertEquals("floci-aws-rds-volume-a", spec.getValue().name());
     }
 
     @Test
@@ -1155,10 +1159,10 @@ class RdsContainerManagerTest {
                 null, "db1", null, DatabaseEngine.MYSQL,
                 "mysql:8.0", "root", "password", "db");
 
-        var spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
-        verify(lifecycleManager).removeIfExistsStrict("floci-rds-db1");
+        ArgumentCaptor<ContainerSpec> spec = org.mockito.ArgumentCaptor.forClass(ContainerSpec.class);
+        verify(lifecycleManager).removeIfExistsStrict("floci-aws-rds-db1");
         verify(lifecycleManager).create(spec.capture());
-        assertEquals("floci-rds-db1", spec.getValue().name());
+        assertEquals("floci-aws-rds-db1", spec.getValue().name());
         assertEquals("db1", handle.getRuntimeId());
         manager.stop(handle);
         verify(lifecycleManager).stopAndRemoveStrict(

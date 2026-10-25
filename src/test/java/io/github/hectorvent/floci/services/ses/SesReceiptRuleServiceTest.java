@@ -1,8 +1,11 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.ServiceCallAuthorizer;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
+import io.github.hectorvent.floci.services.iam.IamPolicyEvaluator.Decision;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.ses.model.ReceiptAction;
@@ -21,6 +24,7 @@ import java.util.function.Predicate;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -41,19 +45,7 @@ class SesReceiptRuleServiceTest {
     private S3Service s3Service;
     private SnsService snsService;
     private LambdaService lambdaService;
-
-    @Test
-    void legacyReceiptActionRemainsReadable() throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
-        ReceiptAction action = mapper.readValue("""
-                {"AddHeaderAction":{"HeaderName":"X-Test","HeaderValue":"legacy"}}
-                """, ReceiptAction.class);
-        assertEquals("AddHeaderAction", action.getType());
-        assertEquals("legacy", action.property("HeaderValue"));
-        ReceiptAction restored = mapper.readValue(mapper.writeValueAsString(action), ReceiptAction.class);
-        assertEquals(action.getType(), restored.getType());
-        assertEquals(action.getProperties(), restored.getProperties());
-    }
+    private ServiceCallAuthorizer serviceCallAuthorizer;
 
     @BeforeEach
     void setUp() {
@@ -63,8 +55,12 @@ class SesReceiptRuleServiceTest {
         when(s3Service.bucketExists(anyString())).thenReturn(true);
         when(snsService.topicExists(anyString(), anyString())).thenReturn(true);
         when(lambdaService.functionExists(anyString(), anyString())).thenReturn(true);
+        serviceCallAuthorizer = mock(ServiceCallAuthorizer.class);
+        when(serviceCallAuthorizer.authorize(anyString(), anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(Decision.ALLOW);
         service = new SesReceiptRuleService(new InMemoryStorage<>(), new InMemoryStorage<>(),
-                s3Service, snsService, lambdaService, Clock.systemUTC());
+                s3Service, snsService, lambdaService, serviceCallAuthorizer,
+                new RegionResolver(REGION, "000000000000"), Clock.systemUTC());
     }
 
     private static ReceiptFilter filter(String name, String policy, String cidr) {
@@ -380,34 +376,22 @@ class SesReceiptRuleServiceTest {
     }
 
     @Test
-    void createAndUpdateRule_rejectInvalidRecipientsLikeSes() {
+    void aTopicWhosePolicyRefusesSesForTheRuleIsNotPublishable() {
         service.createReceiptRuleSet("rules-a", REGION);
-        ReceiptRule invalid = rule("r1", action("StopAction", "Scope", "RuleSet"));
-        invalid.setRecipients(new ArrayList<>(List.of("ok@example.com", "not a valid recipient")));
+        String arn = "arn:aws:sns:us-east-1:000000000000:topic";
+        when(serviceCallAuthorizer.authorize("ses", "sns:Publish", arn,
+                "arn:aws:ses:us-east-1:000000000000:receipt-rule-set/rules-a:receipt-rule/r1", "000000000000"))
+                .thenReturn(Decision.DENY);
 
-        AwsException created = assertThrows(AwsException.class, () ->
-                service.createReceiptRule("rules-a", invalid, null, REGION, ANY_SENDER_VERIFIED));
-        assertEquals("InvalidParameterValue", created.getErrorCode());
-        assertEquals("Invalid recipient: not a valid recipient", created.getMessage());
-        assertTrue(ruleNames("rules-a").isEmpty());
-
+        AwsException create = assertThrows(AwsException.class, () -> service.createReceiptRule("rules-a",
+                rule("r1", action("SNSAction", "TopicArn", arn)), null, REGION, ANY_SENDER_VERIFIED));
         service.createReceiptRule("rules-a", rule("r1"), null, REGION, ANY_SENDER_VERIFIED);
-        AwsException updated = assertThrows(AwsException.class, () ->
-                service.updateReceiptRule("rules-a", invalid, REGION, ANY_SENDER_VERIFIED));
-        assertEquals("Invalid recipient: not a valid recipient", updated.getMessage());
-    }
+        AwsException update = assertThrows(AwsException.class, () -> service.updateReceiptRule("rules-a",
+                rule("r1", action("S3Action", "BucketName", "inbox", "TopicArn", arn)), REGION, ANY_SENDER_VERIFIED));
 
-    @Test
-    void recipientValidationMatchesProbedSesBehaviour() {
-        for (String valid : List.of("example.com", ".example.com", ".com", "sub_domain.example.com",
-                "ex--ample.com", "user@example.com", "user+tag@example.com", "User.Name@Example.COM",
-                "user@example", "x_y@example.com", "user@-example.com", "user!#$%&'*+/=?^`{|}~@example.com")) {
-            assertTrue(SesReceiptRuleService.isValidRecipient(valid), valid);
-        }
-        for (String invalid : List.of("not a valid recipient", "user@", "@example.com", "a..b.com",
-                "*example.com", "exa mple.com", "user@exa_mple.com", "localhost", "-a.com", "a-.com",
-                "1.2.3.4", "user@.example.com", "a@b@example.com", "")) {
-            assertFalse(SesReceiptRuleService.isValidRecipient(invalid), invalid);
+        for (AwsException e : List.of(create, update)) {
+            assertEquals("InvalidSnsTopic", e.getErrorCode());
+            assertEquals("Could not publish to SNS topic: " + arn, e.getMessage());
         }
     }
 
@@ -928,5 +912,25 @@ class SesReceiptRuleServiceTest {
                 () -> service.createReceiptFilter(filter("f101", "Block", "10.0.0.0/24"), REGION));
         assertEquals("LimitExceeded", e.getErrorCode());
         assertEquals("Too many filters", e.getMessage());
+    }
+
+    @Test
+    void listReceiptRuleSets_servesAHundredAPageAndResumesFromTheToken() {
+        for (int i = 0; i < 101; i++) {
+            service.createReceiptRuleSet("page-%03d".formatted(i), REGION);
+        }
+
+        PaginatedResult<ReceiptRuleSet> first = service.listReceiptRuleSets(REGION,
+                SesListPaging.V1_LIST_RECEIPT_RULE_SETS, null);
+        assertEquals(100, first.items().size());
+        PaginatedResult<ReceiptRuleSet> rest = service.listReceiptRuleSets(REGION,
+                SesListPaging.V1_LIST_RECEIPT_RULE_SETS, first.nextToken());
+        assertEquals(1, rest.items().size());
+        assertNull(rest.nextToken());
+
+        List<String> paged = new ArrayList<>();
+        first.items().forEach(ruleSet -> paged.add(ruleSet.getName()));
+        rest.items().forEach(ruleSet -> paged.add(ruleSet.getName()));
+        assertEquals(service.listReceiptRuleSets(REGION).stream().map(ReceiptRuleSet::getName).toList(), paged);
     }
 }

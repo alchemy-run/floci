@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -20,11 +19,13 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
 import java.util.List;
 
 import static io.github.hectorvent.floci.services.ses.SesV2Json.parseTagsArray;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception;
 
 /**
@@ -58,14 +59,11 @@ public class SesTagController {
     public Response tagResource(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            if (body == null || body.isBlank()) {
+            if (body == null || body.isEmpty()) {
                 throw new AwsException("BadRequestException", "Request body is required.", 400);
             }
-            JsonNode request = objectMapper.readTree(body);
+            JsonNode request = readOptionBody(objectMapper, body);
             String arn = request.path("ResourceArn").asText(null);
-            if (arn == null || arn.isBlank()) {
-                throw new AwsException("BadRequestException", "ResourceArn is required.", 400);
-            }
             List<Tag> tags = parseTagsArray(request.path("Tags"));
             if (tags == null) {
                 throw new AwsException("BadRequestException", "Tags must be an array.", 400);
@@ -75,17 +73,15 @@ public class SesTagController {
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
     @DELETE
     @Path("/tags")
-    public Response untagResource(@Context HttpHeaders headers,
-                                   @QueryParam("ResourceArn") String arn,
+    public Response untagResource(@Context HttpHeaders headers, @Context UriInfo uriInfo,
                                    @QueryParam("TagKeys") List<String> tagKeys) {
         String region = regionResolver.resolveRegion(headers);
+        String arn = resourceArn(uriInfo);
         try {
             sesService.untagResource(arn, region, tagKeys);
             LOG.infov("SES V2 UntagResource: {0}", arn);
@@ -97,9 +93,9 @@ public class SesTagController {
 
     @GET
     @Path("/tags")
-    public Response listTagsForResource(@Context HttpHeaders headers,
-                                         @QueryParam("ResourceArn") String arn) {
+    public Response listTagsForResource(@Context HttpHeaders headers, @Context UriInfo uriInfo) {
         String region = regionResolver.resolveRegion(headers);
+        String arn = resourceArn(uriInfo);
         try {
             List<Tag> tags = sesService.listResourceTags(arn, region);
             ObjectNode result = objectMapper.createObjectNode();
@@ -114,5 +110,11 @@ public class SesTagController {
         } catch (AwsException e) {
             throw remapV1Exception(e);
         }
+    }
+
+    // A @QueryParam binds an empty value as null; read it raw so "ResourceArn=" stays a malformed ARN
+    // rather than an omitted one.
+    private static String resourceArn(UriInfo uriInfo) {
+        return uriInfo.getQueryParameters().getFirst("ResourceArn");
     }
 }

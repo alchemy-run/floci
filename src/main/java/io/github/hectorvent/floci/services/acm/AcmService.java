@@ -5,6 +5,9 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.config.FlociCertificateAuthority;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Digests;
+import io.github.hectorvent.floci.core.common.DomainNames;
+import io.github.hectorvent.floci.core.common.Pem;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
@@ -25,6 +28,7 @@ import io.github.hectorvent.floci.services.acm.model.ValidationMethod;
 import io.github.hectorvent.floci.services.route53.Route53Service;
 import io.github.hectorvent.floci.services.route53.model.HostedZone;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -41,6 +45,7 @@ import java.util.EnumSet;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
@@ -53,6 +58,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 /**
@@ -75,12 +81,14 @@ public class AcmService implements ResourceProvider {
     /** Key algorithms real ACM accepts for RequestCertificate; the wider enum stays valid for ImportCertificate. */
     private static final Set<KeyAlgorithm> REQUESTABLE_KEY_ALGORITHMS =
         EnumSet.of(KeyAlgorithm.RSA_2048, KeyAlgorithm.EC_prime256v1, KeyAlgorithm.EC_secp384r1);
+    @Inject
+    Instance<AcmCertificateReferenceProvider> referenceProviders;
+
     private final StorageBackend<String, Certificate> store;
     private final CertificateGenerator certificateGenerator;
     private final FlociCertificateAuthority certificateAuthority;
     private final RegionResolver regionResolver;
     private final int validationWaitSeconds;
-    private final Route53Service route53Service;
     private final AtomicInteger accountDaysBeforeExpiry = new AtomicInteger(45);
     private final AtomicBoolean securityWarningLogged = new AtomicBoolean(false);
 
@@ -95,17 +103,20 @@ public class AcmService implements ResourceProvider {
      * @see <a href="https://github.com/getmoto/moto/blob/main/moto/acm/models.py">moto ACM</a>
      */
     private final ConcurrentHashMap<String, IdempotencyTokenEntry> idempotencyTokenIndex = new ConcurrentHashMap<>();
+    private final boolean dnsValidationRequiresRecord;
 
     @Inject
     public AcmService(StorageFactory factory, CertificateGenerator certificateGenerator,
                       FlociCertificateAuthority certificateAuthority, EmulatorConfig config,
-                      RegionResolver regionResolver, Route53Service route53Service) {
+                      RegionResolver regionResolver) {
         this(factory.create("acm", "acm-certificates.json",
                 new TypeReference<Map<String, Certificate>>() {}),
             certificateGenerator,
             certificateAuthority,
             regionResolver,
-            config.services().acm().validationWaitSeconds(), route53Service);
+            config.services().acm().validationWaitSeconds(),
+            null,
+            config.services().acm().dnsValidationRequiresRecord());
     }
 
     AcmService(StorageBackend<String, Certificate> store, CertificateGenerator certificateGenerator,
@@ -117,12 +128,20 @@ public class AcmService implements ResourceProvider {
     AcmService(StorageBackend<String, Certificate> store, CertificateGenerator certificateGenerator,
                FlociCertificateAuthority certificateAuthority, RegionResolver regionResolver,
                int validationWaitSeconds, Route53Service route53Service) {
+        this(store, certificateGenerator, certificateAuthority, regionResolver, validationWaitSeconds,
+                route53Service, true);
+    }
+
+    AcmService(StorageBackend<String, Certificate> store, CertificateGenerator certificateGenerator,
+               FlociCertificateAuthority certificateAuthority, RegionResolver regionResolver,
+               int validationWaitSeconds, Route53Service route53Service, boolean dnsValidationRequiresRecord) {
+        this.route53Service = route53Service;
         this.store = store;
         this.certificateGenerator = certificateGenerator;
         this.certificateAuthority = certificateAuthority;
         this.regionResolver = regionResolver;
         this.validationWaitSeconds = validationWaitSeconds;
-        this.route53Service = route53Service;
+        this.dnsValidationRequiresRecord = dnsValidationRequiresRecord;
     }
 
     /**
@@ -256,7 +275,7 @@ public class AcmService implements ResourceProvider {
 
     // ============ DescribeCertificate ============
 
-    public Certificate describeCertificate(String certificateArn, String region) {
+    public synchronized Certificate describeCertificate(String certificateArn, String region) {
         Certificate cert = getCertificateByArn(certificateArn, region);
 
         // Check for expiration
@@ -363,12 +382,13 @@ public class AcmService implements ResourceProvider {
 
     // ============ DeleteCertificate ============
 
-    public void deleteCertificate(String certificateArn, String region) {
+    public synchronized void deleteCertificate(String certificateArn, String region) {
         Certificate cert = getCertificateByArn(certificateArn, region);
 
-        if (cert.getInUseBy() != null && !cert.getInUseBy().isEmpty()) {
+        List<String> consumers = certificateInUseBy(certificateArn, region);
+        if (!consumers.isEmpty()) {
             throw new AwsException("ResourceInUseException",
-                "Certificate " + certificateArn + " is in use by: " + String.join(", ", cert.getInUseBy()), 409);
+                "Certificate " + certificateArn + " is in use by: " + String.join(", ", consumers), 400);
         }
 
         String storageKey = regionKey(region, cert.extractCertificateId());
@@ -382,7 +402,7 @@ public class AcmService implements ResourceProvider {
      * Records {@code consumerArn} as a user of the certificate, so DeleteCertificate refuses with
      * ResourceInUseException until it is released. Registering the same consumer twice is a no-op.
      */
-    public void addInUseBy(String certificateArn, String consumerArn, String region) {
+    public synchronized void addInUseBy(String certificateArn, String consumerArn, String region) {
         Certificate cert = getCertificateByArn(certificateArn, region);
         if (!cert.getInUseBy().contains(consumerArn)) {
             cert.getInUseBy().add(consumerArn);
@@ -391,7 +411,7 @@ public class AcmService implements ResourceProvider {
     }
 
     /** Releases {@code consumerArn}. A certificate that no longer exists has nothing to release. */
-    public void removeInUseBy(String certificateArn, String consumerArn, String region) {
+    public synchronized void removeInUseBy(String certificateArn, String consumerArn, String region) {
         Certificate cert;
         try {
             cert = getCertificateByArn(certificateArn, region);
@@ -407,6 +427,45 @@ public class AcmService implements ResourceProvider {
         }
     }
 
+    /** The same bounded guard protects certificate deletion, reimport and reference publication. */
+    public synchronized <T> T supplyWithCertificatesHeld(Supplier<T> action) {
+        return action.get();
+    }
+
+    /** Detached union of persisted consumers and live references; computed uses are never stored. */
+    public synchronized List<String> certificateInUseBy(String certificateArn, String region) {
+        return certificateInUseBy(getCertificateByArn(certificateArn, region));
+    }
+
+    /** A captured list row remains serializable if it is deleted before response encoding. */
+    public synchronized List<String> certificateInUseBy(Certificate certificate) {
+        return certificateInUseBy(List.of(certificate)).get(certificate.getArn());
+    }
+
+    /** One detached live-reference snapshot for a captured response page, including deleted rows. */
+    public synchronized Map<String, List<String>> certificateInUseBy(List<Certificate> certificates) {
+        Map<String, Set<String>> consumersByArn = new LinkedHashMap<>();
+        for (Certificate certificate : certificates) {
+            Set<String> consumers = consumersByArn.computeIfAbsent(certificate.getArn(), key -> new LinkedHashSet<>());
+            if (certificate.getInUseBy() != null) {
+                consumers.addAll(certificate.getInUseBy());
+            }
+        }
+        if (!consumersByArn.isEmpty() && referenceProviders != null) {
+            for (AcmCertificateReferenceProvider provider : referenceProviders) {
+                for (AcmCertificateReferenceProvider.CertificateReference reference : provider.acmCertificateReferences()) {
+                    Set<String> consumers = consumersByArn.get(reference.certificateArn());
+                    if (consumers != null) {
+                        consumers.add(reference.resourceArn());
+                    }
+                }
+            }
+        }
+        Map<String, List<String>> snapshot = new LinkedHashMap<>();
+        consumersByArn.forEach((arn, consumers) -> snapshot.put(arn, List.copyOf(consumers)));
+        return Map.copyOf(snapshot);
+    }
+
     // ============ ImportCertificate ============
 
     public Certificate importCertificate(String certificatePem, String privateKeyPem, String chainPem,
@@ -415,7 +474,7 @@ public class AcmService implements ResourceProvider {
         // Parse and validate certificate
         X509Certificate x509Cert;
         try {
-            x509Cert = certificateGenerator.parseCertificate(certificatePem);
+            x509Cert = Pem.parseCertificate(certificatePem);
             certificateGenerator.validateCertificate(x509Cert);
         } catch (Exception e) {
             throw new AwsException("ValidationException", "Invalid certificate: " + e.getMessage(), 400);
@@ -423,7 +482,9 @@ public class AcmService implements ResourceProvider {
 
         // Parse and validate private key
         try {
-            certificateGenerator.parsePrivateKey(privateKeyPem);
+            if (!Pem.isPair(Pem.parsePrivateKey(privateKeyPem), x509Cert.getPublicKey())) {
+                throw new IllegalArgumentException("The private key does not match the certificate");
+            }
         } catch (Exception e) {
             throw new AwsException("ValidationException", "Invalid private key: " + e.getMessage(), 400);
         }
@@ -432,46 +493,54 @@ public class AcmService implements ResourceProvider {
             validateTags(tags);
         }
 
-        String certId;
-        String arn;
+        Certificate cert;
+        synchronized (this) {
+            Certificate existing = existingArn != null && !existingArn.isEmpty()
+                    ? getCertificateByArn(existingArn, region) : null;
+            String certId = existing == null ? UUID.randomUUID().toString() : existing.extractCertificateId();
+            String arn = existing == null ? buildCertificateArn(region, certId) : existingArn;
 
-        if (existingArn != null && !existingArn.isEmpty()) {
-            // Re-import
-            Certificate existing = getCertificateByArn(existingArn, region);
-            certId = existing.extractCertificateId();
-            arn = existingArn;
-        } else {
-            certId = UUID.randomUUID().toString();
-            arn = buildCertificateArn(region, certId);
+            Instant now = Instant.now();
+            KeyAlgorithm keyAlg = certificateGenerator.detectKeyAlgorithm(x509Cert.getPublicKey());
+
+            cert = new Certificate();
+            cert.setArn(arn);
+            cert.setDomainName(extractCommonName(x509Cert));
+            cert.setStatus(CertificateStatus.ISSUED);
+            cert.setType(CertificateType.IMPORTED);
+            cert.setCreatedAt(existingArn == null ? now : null);
+            cert.setImportedAt(now);
+            cert.setIssuedAt(now);
+            cert.setNotBefore(x509Cert.getNotBefore().toInstant());
+            cert.setNotAfter(x509Cert.getNotAfter().toInstant());
+            cert.setSerial(CertificateGenerator.colonHex(x509Cert.getSerialNumber()));
+            cert.setSubject(x509Cert.getSubjectX500Principal().getName());
+            cert.setIssuer(x509Cert.getIssuerX500Principal().getName());
+            cert.setKeyAlgorithm(keyAlg);
+            cert.setSignatureAlgorithm(x509Cert.getSigAlgName().toUpperCase(Locale.ROOT));
+            cert.setCertificateBody(certificatePem);
+            cert.setPrivateKey(privateKeyPem);
+            cert.setCertificateChain(chainPem);
+            cert.setTags(tags != null ? new HashMap<>(tags) : new HashMap<>());
+
+            String storageKey = regionKey(region, certId);
+            if (existing != null && existing.getInUseBy() != null) {
+                cert.setInUseBy(new ArrayList<>(existing.getInUseBy()));
+            }
+            store.put(storageKey, cert);
         }
-
-        Instant now = Instant.now();
-        KeyAlgorithm keyAlg = certificateGenerator.detectKeyAlgorithm(x509Cert.getPublicKey());
-
-        Certificate cert = new Certificate();
-        cert.setArn(arn);
-        cert.setDomainName(extractCommonName(x509Cert));
-        cert.setStatus(CertificateStatus.ISSUED);
-        cert.setType(CertificateType.IMPORTED);
-        cert.setCreatedAt(existingArn == null ? now : null);
-        cert.setImportedAt(now);
-        cert.setIssuedAt(now);
-        cert.setNotBefore(x509Cert.getNotBefore().toInstant());
-        cert.setNotAfter(x509Cert.getNotAfter().toInstant());
-        cert.setSerial(CertificateGenerator.colonHex(x509Cert.getSerialNumber()));
-        cert.setSubject(x509Cert.getSubjectX500Principal().getName());
-        cert.setIssuer(x509Cert.getIssuerX500Principal().getName());
-        cert.setKeyAlgorithm(keyAlg);
-        cert.setSignatureAlgorithm(x509Cert.getSigAlgName().toUpperCase(Locale.ROOT));
-        cert.setCertificateBody(certificatePem);
-        cert.setPrivateKey(privateKeyPem);
-        cert.setCertificateChain(chainPem);
-        cert.setTags(tags != null ? new HashMap<>(tags) : new HashMap<>());
-
-        String storageKey = regionKey(region, certId);
-        store.put(storageKey, cert);
-
-        LOG.infov("Imported certificate: {0}", arn);
+        // A consumer may acquire IAM before ACM; never invoke it while holding this guard.
+        if (existingArn != null && !existingArn.isEmpty() && referenceProviders != null) {
+            for (AcmCertificateReferenceProvider provider : referenceProviders) {
+                try {
+                    provider.certificateReimported(cert.getArn(), region);
+                } catch (RuntimeException failure) {
+                    LOG.warnv("ACM consumer refresh failed for {0} ({1}: {2}); an identical update can retry",
+                            cert.getArn(), failure.getClass().getSimpleName(), failure.getMessage());
+                }
+            }
+        }
+        LOG.infov("Imported certificate: {0}", cert.getArn());
         return cert;
     }
 
@@ -510,124 +579,9 @@ public class AcmService implements ResourceProvider {
         return exportCert;
     }
 
-    // ============ UpdateCertificateOptions ============
-
-    /**
-     * Syncs mutable certificate options. Export is fixed at request time —
-     * AWS rejects changing it ("Export option for certificates cannot be updated").
-     */
-    public Certificate updateCertificateOptions(String certificateArn, CertificateOptions options, String region) {
-        Certificate cert = getCertificateByArn(certificateArn, region);
-        CertificateOptions current = cert.getCertOptions() != null
-            ? cert.getCertOptions()
-            : CertificateOptions.defaultOptions();
-
-        if (options != null && options.export() != null
-            && !options.export().equals(current.export())) {
-            throw new AwsException("InvalidStateException",
-                "Export option for certificates cannot be updated", 400);
-        }
-
-        String ctPref = options != null && options.certificateTransparencyLoggingPreference() != null
-            ? options.certificateTransparencyLoggingPreference()
-            : current.certificateTransparencyLoggingPreference();
-        cert.setCertOptions(new CertificateOptions(ctPref, current.export()));
-        store.put(regionKey(region, cert.extractCertificateId()), cert);
-        return cert;
-    }
-
-    // ============ SearchCertificates ============
-
-    /**
-     * Lists certificates matching an optional predicate, with the same
-     * cursor pagination as {@link #listCertificates}.
-     */
-    public ListResult searchCertificates(Predicate<Certificate> filter,
-                                         String region, int maxItems, String nextToken) {
-        Predicate<Certificate> predicate = filter != null ? filter : c -> true;
-        int limit = maxItems > 0 ? Math.min(maxItems, 1000) : 100;
-        String lastArn = decodeToken(nextToken);
-
-        List<Certificate> allCerts = store.scan(k -> k.startsWith(region + "::")).stream()
-            .map(c -> settleValidation(c, region))
-            .filter(predicate)
-            .sorted(Comparator.comparing(Certificate::getArn))
-            .collect(Collectors.toList());
-
-        int startIndex = 0;
-        if (lastArn != null) {
-            for (int i = 0; i < allCerts.size(); i++) {
-                if (allCerts.get(i).getArn().compareTo(lastArn) > 0) {
-                    startIndex = i;
-                    break;
-                }
-                if (i == allCerts.size() - 1) {
-                    startIndex = allCerts.size();
-                }
-            }
-        }
-
-        List<Certificate> page = allCerts.stream()
-            .skip(startIndex)
-            .limit(limit)
-            .collect(Collectors.toList());
-
-        String newNextToken = null;
-        if (startIndex + limit < allCerts.size() && !page.isEmpty()) {
-            newNextToken = encodeToken(page.get(page.size() - 1).getArn());
-        }
-
-        return new ListResult(page, newNextToken);
-    }
-
-    // ============ RenewCertificate ============
-
-
-    // ============ ResendValidationEmail ============
-
-    public void resendValidationEmail(String certificateArn, String domain,
-                                      String validationDomain, String region) {
-        Certificate cert = getCertificateByArn(certificateArn, region);
-        if (cert.getValidationMethod() != ValidationMethod.EMAIL) {
-            throw new AwsException("InvalidStateException",
-                "Email validation cannot be resent for a certificate that uses "
-                    + (cert.getValidationMethod() != null ? cert.getValidationMethod().name() : "DNS")
-                    + " validation.",
-                400);
-        }
-        boolean knownDomain = domain != null && (
-            domain.equalsIgnoreCase(cert.getDomainName())
-                || (cert.getSubjectAlternativeNames() != null
-                    && cert.getSubjectAlternativeNames().stream()
-                        .anyMatch(san -> san.equalsIgnoreCase(domain)))
-        );
-        if (!knownDomain) {
-            throw new AwsException("InvalidDomainValidationOptionsException",
-                "Domain is not associated with the certificate.", 400);
-        }
-        if (validationDomain == null || validationDomain.isBlank()
-                || !isValidationDomainOf(domain, validationDomain)) {
-            throw new AwsException("InvalidDomainValidationOptionsException",
-                "ValidationDomain must not be empty.", 400);
-        }
-        // Emulator: no email is sent. Success is enough for the control plane.
-    }
-
-    // ============ RevokeCertificate ============
-
-    public Certificate revokeCertificate(String certificateArn, String revocationReason, String region) {
-        RevocationReason reason;
-        try {
-            reason = RevocationReason.valueOf(revocationReason);
-        } catch (IllegalArgumentException | NullPointerException e) {
-            throw new AwsException("ValidationException", "Invalid RevocationReason: " + revocationReason, 400);
-        }
-        return revokeCertificate(certificateArn, reason, region);
-    }
-
     // ============ Tagging Operations ============
 
-    public void addTagsToCertificate(String certificateArn, Map<String, String> tags, String region) {
+    public synchronized void addTagsToCertificate(String certificateArn, Map<String, String> tags, String region) {
         Certificate cert = getCertificateByArn(certificateArn, region);
         validateTags(tags);
 
@@ -648,7 +602,7 @@ public class AcmService implements ResourceProvider {
         return cert.getTags() != null ? new HashMap<>(cert.getTags()) : new HashMap<>();
     }
 
-    public void removeTagsFromCertificate(String certificateArn, List<Map<String, String>> tagSpecs, String region) {
+    public synchronized void removeTagsFromCertificate(String certificateArn, List<Map<String, String>> tagSpecs, String region) {
         Certificate cert = getCertificateByArn(certificateArn, region);
         Map<String, String> currentTags = cert.getTags() != null ? new HashMap<>(cert.getTags()) : new HashMap<>();
 
@@ -709,12 +663,16 @@ public class AcmService implements ResourceProvider {
         return Set.of(new SupportedResourceType("acm:certificate", "acm", true));
     }
 
-    public Certificate revokeCertificate(String certificateArn, RevocationReason reason, String region) {
+    public synchronized Certificate revokeCertificate(String certificateArn, RevocationReason reason, String region) {
         Certificate cert = getCertificateByArn(certificateArn, region);
         if (cert.getType() == CertificateType.IMPORTED
                 && (cert.getCertOptions() == null || !"ENABLED".equals(cert.getCertOptions().export()))) {
             throw new AwsException("ValidationException",
                 "Certificate " + certificateArn + " cannot be revoked because it is not export-enabled.", 400);
+        }
+        if (!certificateInUseBy(cert).isEmpty()) {
+            throw new AwsException("ResourceInUseException",
+                    "Certificate " + certificateArn + " is in use by another service.", 400);
         }
         if (!cert.isExported()) {
             throw new AwsException("ConflictException", "Only exported certificates can be revoked.", 409);
@@ -728,7 +686,7 @@ public class AcmService implements ResourceProvider {
         return cert;
     }
 
-    public Certificate renewCertificate(String certificateArn, String region) {
+    public synchronized Certificate renewCertificate(String certificateArn, String region) {
         Certificate cert = getCertificateByArn(certificateArn, region);
         if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
             throw new AwsException("RequestInProgressException", "Certificate is pending validation", 400);
@@ -745,22 +703,33 @@ public class AcmService implements ResourceProvider {
         return cert;
     }
 
+    /**
+     * Syncs mutable certificate options. Export is fixed at request time —
+     * AWS rejects changing it ("Export option for certificates cannot be updated").
+     */
+    public synchronized Certificate updateCertificateOptions(String certificateArn, CertificateOptions options, String region) {
+        Certificate cert = getCertificateByArn(certificateArn, region);
+        CertificateOptions current = cert.getCertOptions() != null
+            ? cert.getCertOptions()
+            : CertificateOptions.defaultOptions();
+
+        if (options != null && options.export() != null
+            && !options.export().equals(current.export())) {
+            throw new AwsException("InvalidStateException",
+                "Export option for certificates cannot be updated", 400);
+        }
+
+        String ctPref = options != null && options.certificateTransparencyLoggingPreference() != null
+            ? options.certificateTransparencyLoggingPreference()
+            : current.certificateTransparencyLoggingPreference();
+        cert.setCertOptions(new CertificateOptions(ctPref, current.export()));
+        store.put(regionKey(region, cert.extractCertificateId()), cert);
+        return cert;
+    }
 
     // ============ Helper Methods ============
 
-    private static CertificateOptions resolveRequestOptions(CertificateOptions options) {
-        if (options == null) {
-            return CertificateOptions.defaultOptions();
-        }
-        return new CertificateOptions(
-            options.certificateTransparencyLoggingPreference() != null
-                ? options.certificateTransparencyLoggingPreference()
-                : "ENABLED",
-            options.export() != null ? options.export() : "DISABLED"
-        );
-    }
-
-    private Certificate getCertificateByArn(String arn, String region) {
+    private synchronized Certificate getCertificateByArn(String arn, String region) {
         String certId = extractCertificateIdFromArn(arn);
         String storageKey = regionKey(region, certId);
 
@@ -770,12 +739,25 @@ public class AcmService implements ResourceProvider {
         return settleValidation(cert, region);
     }
 
-    /** Settles domain validation on reads and persists issuance for subsequent consumers. */
-    private Certificate settleValidation(Certificate cert, String region) {
+    /**
+     * Brings a stored certificate in line on read. A PENDING_VALIDATION certificate whose configured
+     * validation wait has passed is issued, since nothing else moves it along; and a certificate
+     * that has been issued (status ISSUED, or IssuedAt set on one revoked or expired since) reports
+     * SUCCESS for every domain, which also repairs records stored by earlier releases as ISSUED
+     * with pending entries. A certificate revoked before it was ever issued keeps its pending
+     * entries. Changes are stored, which is what a client polling ACM observes.
+     */
+    private synchronized Certificate settleValidation(Certificate cert, String region) {
+        // A list scan may have captured a row before reimport or deletion acquired this guard.
+        Certificate current = store.get(regionKey(region, cert.extractCertificateId())).orElse(null);
+        if (current == null) {
+            return cert;
+        }
+        cert = current;
         boolean changed = false;
         if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
             boolean validated;
-            if (cert.getValidationMethod() == ValidationMethod.DNS) {
+            if (cert.getValidationMethod() == ValidationMethod.DNS && dnsValidationRequiresRecord) {
                 List<HostedZone> zones = route53Service != null
                     ? route53Service.listHostedZones(null, 0) : List.of();
                 List<DomainValidation> validations = cert.getDomainValidationOptions().stream()
@@ -790,7 +772,7 @@ public class AcmService implements ResourceProvider {
                 validated = !validations.isEmpty()
                     && validations.stream().allMatch(validation -> "SUCCESS".equals(validation.validationStatus()));
             } else {
-                validated = cert.getValidationMethod() == ValidationMethod.EMAIL && validationWaitSeconds >= 0
+                validated = validationWaitSeconds >= 0
                     && cert.getCreatedAt() != null
                     && !Instant.now().isBefore(cert.getCreatedAt().plusSeconds(validationWaitSeconds));
             }
@@ -814,41 +796,6 @@ public class AcmService implements ResourceProvider {
             store.put(regionKey(region, cert.extractCertificateId()), cert);
         }
         return cert;
-    }
-
-    private boolean hasValidationRecord(ResourceRecord record, List<HostedZone> zones) {
-        if (record == null || !"CNAME".equals(record.type())) {
-            return false;
-        }
-        String name = normalizeDnsName(record.name());
-        String value = normalizeDnsName(record.value());
-        for (HostedZone zone : zones) {
-            String zoneName = normalizeDnsName(zone.getName());
-            if (zone.isPrivateZone() || !(name.equals(zoneName) || name.endsWith("." + zoneName))) {
-                continue;
-            }
-            try {
-                if (route53Service.listResourceRecordSets(zone.getId(), null, null, 0).stream()
-                        .filter(recordSet -> "CNAME".equals(recordSet.getType())
-                            && normalizeDnsName(recordSet.getName()).equals(name)
-                            && recordSet.getRecords() != null)
-                        .flatMap(recordSet -> recordSet.getRecords().stream())
-                        .anyMatch(answer -> normalizeDnsName(answer.getValue()).equals(value))) {
-                    return true;
-                }
-            } catch (AwsException exception) {
-                if (!"NoSuchHostedZone".equals(exception.getErrorCode())) {
-                    throw exception;
-                }
-                LOG.debugv("Hosted zone {0} was deleted during certificate validation", zone.getId());
-            }
-        }
-        return false;
-    }
-
-    private static String normalizeDnsName(String name) {
-        String normalized = name.toLowerCase(Locale.ROOT);
-        return normalized.endsWith(".") ? normalized : normalized + ".";
     }
 
     /**
@@ -991,7 +938,7 @@ public class AcmService implements ResourceProvider {
     static boolean isValidationDomainOf(String domain, String validationDomain) {
         String lowerDomain = domain.toLowerCase(Locale.ROOT);
         String lowerValidationDomain = validationDomain.toLowerCase(Locale.ROOT);
-        return lowerDomain.equals(lowerValidationDomain) || lowerDomain.endsWith("." + lowerValidationDomain);
+        return DomainNames.isWithin(lowerDomain, lowerValidationDomain);
     }
 
     /**
@@ -1043,13 +990,7 @@ public class AcmService implements ResourceProvider {
 
     private String generateValidationToken(String domain) {
         String tokenInput = regionResolver.getAccountId() + ":" + baseDomain(domain);
-        try {
-            return HexFormat.of().formatHex(
-                MessageDigest.getInstance("SHA-256").digest(tokenInput.getBytes(StandardCharsets.UTF_8))
-            );
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is unavailable", e);
-        }
+        return Digests.sha256Hex(tokenInput);
     }
 
     private static String baseDomain(String domain) {
@@ -1079,5 +1020,126 @@ public class AcmService implements ResourceProvider {
             .findFirst()
             .map(s -> s.substring(3))
             .orElse(dn);
+    }
+
+    public void resendValidationEmail(String certificateArn, String domain,
+                                      String validationDomain, String region) {
+        Certificate cert = getCertificateByArn(certificateArn, region);
+        if (cert.getValidationMethod() != ValidationMethod.EMAIL) {
+            throw new AwsException("InvalidStateException",
+                "Email validation cannot be resent for a certificate that uses "
+                    + (cert.getValidationMethod() != null ? cert.getValidationMethod().name() : "DNS")
+                    + " validation.",
+                400);
+        }
+        boolean knownDomain = domain != null && (
+            domain.equalsIgnoreCase(cert.getDomainName())
+                || (cert.getSubjectAlternativeNames() != null
+                    && cert.getSubjectAlternativeNames().stream()
+                        .anyMatch(san -> san.equalsIgnoreCase(domain)))
+        );
+        if (!knownDomain) {
+            throw new AwsException("InvalidDomainValidationOptionsException",
+                "Domain is not associated with the certificate.", 400);
+        }
+        if (validationDomain == null || validationDomain.isBlank()
+                || !isValidationDomainOf(domain, validationDomain)) {
+            throw new AwsException("InvalidDomainValidationOptionsException",
+                "ValidationDomain must not be empty.", 400);
+        }
+        // Emulator: no email is sent. Success is enough for the control plane.
+    }
+
+    private static CertificateOptions resolveRequestOptions(CertificateOptions options) {
+        if (options == null) {
+            return CertificateOptions.defaultOptions();
+        }
+        return new CertificateOptions(
+            options.certificateTransparencyLoggingPreference() != null
+                ? options.certificateTransparencyLoggingPreference()
+                : "ENABLED",
+            options.export() != null ? options.export() : "DISABLED"
+        );
+    }
+
+    /**
+     * Lists certificates matching an optional predicate, with the same
+     * cursor pagination as {@link #listCertificates}.
+     */
+    public ListResult searchCertificates(Predicate<Certificate> filter,
+                                         String region, int maxItems, String nextToken) {
+        Predicate<Certificate> predicate = filter != null ? filter : c -> true;
+        int limit = maxItems > 0 ? Math.min(maxItems, 1000) : 100;
+        String lastArn = decodeToken(nextToken);
+
+        List<Certificate> allCerts = store.scan(k -> k.startsWith(region + "::")).stream()
+            .map(c -> settleValidation(c, region))
+            .filter(predicate)
+            .sorted(Comparator.comparing(Certificate::getArn))
+            .collect(Collectors.toList());
+
+        int startIndex = 0;
+        if (lastArn != null) {
+            for (int i = 0; i < allCerts.size(); i++) {
+                if (allCerts.get(i).getArn().compareTo(lastArn) > 0) {
+                    startIndex = i;
+                    break;
+                }
+                if (i == allCerts.size() - 1) {
+                    startIndex = allCerts.size();
+                }
+            }
+        }
+
+        List<Certificate> page = allCerts.stream()
+            .skip(startIndex)
+            .limit(limit)
+            .collect(Collectors.toList());
+
+        String newNextToken = null;
+        if (startIndex + limit < allCerts.size() && !page.isEmpty()) {
+            newNextToken = encodeToken(page.get(page.size() - 1).getArn());
+        }
+
+        return new ListResult(page, newNextToken);
+    }
+
+
+    @Inject
+    Route53Service route53Service;
+
+    private static String normalizeDnsName(String name) {
+        String normalized = name.toLowerCase(Locale.ROOT);
+        return normalized.endsWith(".") ? normalized : normalized + ".";
+    }
+
+    private boolean hasValidationRecord(ResourceRecord record, List<HostedZone> zones) {
+        if (record == null || !"CNAME".equals(record.type())) {
+            return false;
+        }
+        String name = normalizeDnsName(record.name());
+        String value = normalizeDnsName(record.value());
+        for (HostedZone zone : zones) {
+            String zoneName = normalizeDnsName(zone.getName());
+            if (zone.isPrivateZone() || !(name.equals(zoneName) || name.endsWith("." + zoneName))) {
+                continue;
+            }
+            try {
+                if (route53Service.listResourceRecordSets(zone.getId(), null, null, 0).stream()
+                        .filter(recordSet -> "CNAME".equals(recordSet.getType())
+                            && normalizeDnsName(recordSet.getName()).equals(name)
+                            && recordSet.getRecords() != null)
+                        .flatMap(recordSet -> recordSet.getRecords().stream())
+                        .anyMatch(answer -> normalizeDnsName(answer.getValue()).equals(value))) {
+                    return true;
+                }
+            } catch (AwsException exception) {
+                if (!"NoSuchHostedZone".equals(exception.getErrorCode())) {
+                    throw exception;
+                }
+                LOG.debugv("Hosted zone {0} was deleted during certificate validation", zone.getId());
+            }
+        }
+        return false;
     }
 }

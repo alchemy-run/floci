@@ -5,6 +5,7 @@ import com.github.dockerjava.api.model.Statistics;
 import io.github.hectorvent.floci.services.ecs.model.ContainerDefinition;
 import io.github.hectorvent.floci.services.ecs.model.EcsTask;
 import io.github.hectorvent.floci.services.ecs.model.TaskDefinition;
+import io.github.hectorvent.floci.testing.TestImages;
 import io.quarkus.test.junit.QuarkusTest;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Assumptions;
@@ -29,7 +30,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @QuarkusTest
 class EcsContainerManagerStatsDockerIntegrationTest {
 
-    private static final String BUSYBOX_IMAGE = "public.ecr.aws/docker/library/busybox:latest";
+    private static final String BUSYBOX_IMAGE = TestImages.BUSYBOX;
 
     @Inject
     EcsContainerManager containerManager;
@@ -118,7 +119,9 @@ class EcsContainerManagerStatsDockerIntegrationTest {
         ContainerDefinition definition = new ContainerDefinition();
         definition.setName(name);
         definition.setImage(BUSYBOX_IMAGE);
-        definition.setCommand(List.of("sleep", "60"));
+        // PID 1 gets no default SIGTERM handler, so a bare "sleep 60" sits out the whole
+        // stopTimeout grace period on teardown, once per container in the task.
+        definition.setCommand(List.of("sh", "-c", "trap 'exit 0' TERM; sleep 60 & wait"));
         return definition;
     }
 

@@ -3,19 +3,25 @@ package io.github.hectorvent.floci.services.elb;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegionFacts;
+import io.github.hectorvent.floci.core.common.CertificateReferenceResolver;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.acm.AcmService;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.elb.model.ClassicHealthCheck;
 import io.github.hectorvent.floci.services.elb.model.ClassicListener;
 import io.github.hectorvent.floci.services.elb.model.ClassicLoadBalancer;
+import io.github.hectorvent.floci.services.iam.IamService;
+import io.github.hectorvent.floci.services.iam.ServerCertificateReferenceProvider;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
 import java.security.SecureRandom;
 import java.time.Instant;
@@ -44,11 +50,9 @@ import java.util.stream.Collectors;
  * inventing a result.
  */
 @ApplicationScoped
-public class ElbClassicService {
+public class ElbClassicService implements ServerCertificateReferenceProvider {
 
-    /** The hosted zone ID AWS reports for Classic load balancers; fixed per region on AWS too. */
-    private static final String CANONICAL_HOSTED_ZONE_ID = "Z35SXDOTRQ7X7K";
-
+    private static final Logger LOG = Logger.getLogger(ElbClassicService.class);
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final Ec2Service ec2Service;
@@ -56,15 +60,28 @@ public class ElbClassicService {
     private final StorageFactory storageFactory;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
+    private final IamService iamService;
+    private final CertificateReferenceResolver certificates;
 
     // region → load balancer name → record
     private Map<String, Map<String, ClassicLoadBalancer>> loadBalancers = new ConcurrentHashMap<>();
+
+    /** Serializes listener writes against each other; see {@link #createLoadBalancerListeners}. */
+    private final Object listenerLock = new Object();
 
     public ElbClassicService(Ec2Service ec2Service,
                              ElbClassicHealthChecker healthChecker,
                              StorageFactory storageFactory,
                              EmulatorConfig config) {
-        this(ec2Service, healthChecker, storageFactory, config, null);
+        this(ec2Service, healthChecker, storageFactory, config, null, null, null);
+    }
+
+    public ElbClassicService(Ec2Service ec2Service,
+                             ElbClassicHealthChecker healthChecker,
+                             StorageFactory storageFactory,
+                             EmulatorConfig config,
+                             RegionResolver regionResolver) {
+        this(ec2Service, healthChecker, storageFactory, config, regionResolver, null, null);
     }
 
     @Inject
@@ -72,12 +89,16 @@ public class ElbClassicService {
                              ElbClassicHealthChecker healthChecker,
                              StorageFactory storageFactory,
                              EmulatorConfig config,
-                             RegionResolver regionResolver) {
+                             RegionResolver regionResolver,
+                             IamService iamService,
+                             AcmService acmService) {
         this.ec2Service = ec2Service;
         this.healthChecker = healthChecker;
         this.storageFactory = storageFactory;
         this.config = config;
         this.regionResolver = regionResolver;
+        this.iamService = iamService;
+        this.certificates = new CertificateReferenceResolver(iamService, acmService);
     }
 
     @PostConstruct
@@ -101,6 +122,18 @@ public class ElbClassicService {
      * nothing reachable from {@link #initializeStorage()} may touch an injected collaborator.
      */
     public void restorePersistedRuntime() {
+        // A balancer stored before the zone was looked up per region still carries the one fixed
+        // zone every balancer used to report; take the region's zone again and store it back.
+        for (String region : List.copyOf(loadBalancers.keySet())) {
+            Map<String, ClassicLoadBalancer> regionLbs = loadBalancers.get(region);
+            if (regionLbs == null) {
+                continue;
+            }
+            for (ClassicLoadBalancer lb : regionLbs.values()) {
+                lb.setCanonicalHostedZoneNameId(AwsRegionFacts.classicElbHostedZoneId(region).orElse(null));
+            }
+            loadBalancers.put(region, regionLbs);
+        }
         for (Map<String, ClassicLoadBalancer> regionLbs : loadBalancers.values()) {
             for (ClassicLoadBalancer lb : regionLbs.values()) {
                 healthChecker.startMonitoring(lb);
@@ -128,13 +161,12 @@ public class ElbClassicService {
         for (ClassicListener listener : listeners) {
             validateListener(listener);
         }
+        requireCertificates(region, listeners);
 
         Map<String, ClassicLoadBalancer> regionLbs =
                 loadBalancers.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
         if (regionLbs.containsKey(name)) {
-            throw new AwsException("DuplicateLoadBalancerName",
-                    "Load balancer named " + name + " already exists and is not compatible with the "
-                            + "requested configuration.", 400);
+            throw duplicateLoadBalancerName(name);
         }
 
         String id = randomHex();
@@ -143,9 +175,12 @@ public class ElbClassicService {
         ClassicLoadBalancer lb = new ClassicLoadBalancer();
         lb.setLoadBalancerName(name);
         lb.setRegion(region);
+        if (regionResolver != null && regionResolver.getAccountId() != null) {
+            lb.setAccountId(regionResolver.getAccountId());
+        }
         lb.setDnsName(dnsName);
         lb.setCanonicalHostedZoneName(dnsName);
-        lb.setCanonicalHostedZoneNameId(CANONICAL_HOSTED_ZONE_ID);
+        lb.setCanonicalHostedZoneNameId(AwsRegionFacts.classicElbHostedZoneId(region).orElse(null));
         lb.setScheme(scheme != null && !scheme.isBlank() ? scheme : "internet-facing");
         lb.setCreatedTime(Instant.now());
         lb.setListeners(new ArrayList<>(listeners));
@@ -168,8 +203,18 @@ public class ElbClassicService {
             lb.setAvailabilityZones(new ArrayList<>(availabilityZones));
         }
 
-        regionLbs.put(name, lb);
-        loadBalancers.put(region, regionLbs);
+        whileCertificatesHeld(listeners, () -> {
+            // The certificate check again, and this is the one that counts. The one above it
+            // fails fast and keeps AWS's error precedence, but a check made before the lock says
+            // nothing about the moment of the write. The unique name is a separate problem that
+            // putIfAbsent settles on its own, lock or no lock: checked and then written as two
+            // steps, two creates of one name both pass and only the second survives.
+            requireCertificates(region, listeners);
+            if (regionLbs.putIfAbsent(name, lb) != null) {
+                throw duplicateLoadBalancerName(name);
+            }
+            loadBalancers.put(region, regionLbs);
+        });
         healthChecker.startMonitoring(lb);
         return lb;
     }
@@ -258,31 +303,47 @@ public class ElbClassicService {
         for (ClassicListener listener : listeners) {
             validateListener(listener);
         }
-        for (ClassicListener listener : listeners) {
-            ClassicListener existing = lb.getListeners().stream()
-                    .filter(l -> l.getLoadBalancerPort().equals(listener.getLoadBalancerPort()))
-                    .findFirst()
-                    .orElse(null);
-            if (existing != null) {
-                // AWS accepts a repeat of an identical listener and rejects a conflicting one.
-                if (!sameListener(existing, listener)) {
-                    throw new AwsException("DuplicateListener",
-                            "A listener already exists for " + name + " with LoadBalancerPort "
-                                    + listener.getLoadBalancerPort()
-                                    + ", but with a different InstancePort, Protocol, or "
-                                    + "SSLCertificateId", 400);
+        requireCertificates(region, listeners);
+        whileCertificatesHeld(listeners, () -> {
+            requireCertificates(region, listeners);
+            // The port of an existing listener decides whether this one is added, so the walk and
+            // the add are one step. Two threads adding the same port would otherwise both find it
+            // absent and both add it, and a removal landing in between would drop a listener this
+            // call has already decided to keep.
+            synchronized (listenerLock) {
+                for (ClassicListener listener : listeners) {
+                    ClassicListener existing = lb.getListeners().stream()
+                            .filter(l -> l.getLoadBalancerPort().equals(listener.getLoadBalancerPort()))
+                            .findFirst()
+                            .orElse(null);
+                    if (existing != null) {
+                        // AWS accepts a repeat of an identical listener and rejects a conflicting one.
+                        if (!sameListener(existing, listener)) {
+                            throw new AwsException("DuplicateListener",
+                                    "A listener already exists for " + name + " with LoadBalancerPort "
+                                            + listener.getLoadBalancerPort()
+                                            + ", but with a different InstancePort, Protocol, or "
+                                            + "SSLCertificateId", 400);
+                        }
+                        continue;
+                    }
+                    lb.getListeners().add(listener);
                 }
-                continue;
+                persist(region);
             }
-            lb.getListeners().add(listener);
-        }
-        persist(region);
+        });
     }
 
     public void deleteLoadBalancerListeners(String region, String name, List<Integer> loadBalancerPorts) {
         ClassicLoadBalancer lb = requireLoadBalancer(region, name);
-        lb.getListeners().removeIf(l -> loadBalancerPorts.contains(l.getLoadBalancerPort()));
-        persist(region);
+        // Under the same monitor as the add, so a removal cannot land between that method's look
+        // at the port and its decision. No certificate lock: removing a listener can only drop a
+        // reference to a certificate, never record one, and a delete that reads the list while
+        // this runs reads a snapshot of it.
+        synchronized (listenerLock) {
+            lb.getListeners().removeIf(l -> loadBalancerPorts.contains(l.getLoadBalancerPort()));
+            persist(region);
+        }
     }
 
     // ── Health ────────────────────────────────────────────────────────────────
@@ -540,6 +601,71 @@ public class ElbClassicService {
         }
     }
 
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Takes no monitor of this service, which is what keeps the ordering with IAM one way: the
+     * delete calls this while holding its certificate lock. Safe without one because both maps
+     * walked here are concurrent and the listener list iterates a snapshot.
+     */
+    @Override
+    public List<Reference> serverCertificateReferences() {
+        List<Reference> references = new ArrayList<>();
+        for (Map<String, ClassicLoadBalancer> regionLbs : loadBalancers.values()) {
+            for (ClassicLoadBalancer lb : regionLbs.values()) {
+                for (ClassicListener listener : lb.getListeners()) {
+                    String certificate = listener.getSslCertificateId();
+                    if (certificate != null && !certificate.isBlank()) {
+                        references.add(new Reference(certificate,
+                                "load balancer " + lb.getLoadBalancerName()));
+                    }
+                }
+            }
+        }
+        return references;
+    }
+
+    private static AwsException duplicateLoadBalancerName(String name) {
+        return new AwsException("DuplicateLoadBalancerName",
+                "Load balancer named " + name + " already exists and is not compatible with the "
+                        + "requested configuration.", 400);
+    }
+
+    /**
+     * Runs a listener write under {@link CertificateReferenceResolver#runWhileHeld}, so an IAM
+     * server certificate it records cannot be deleted between the check and the write. The
+     * callers re-check inside the guard: the fail-fast check above it keeps the error precedence
+     * AWS has, and only the one under the guard is atomic with the commit.
+     *
+     * <p>This class's own invariants do not ride on that lock. The unique load balancer name is
+     * carried by {@code putIfAbsent} and the listener list by {@link #listenerLock}, both of
+     * which hold whether or not IAM is present, which is what the unit tests build.
+     */
+    private void whileCertificatesHeld(List<ClassicListener> listeners, Runnable action) {
+        certificates.runWhileHeld(certificateIdsOf(listeners), action);
+    }
+
+    private void requireCertificates(String region, List<ClassicListener> listeners) {
+        for (ClassicListener listener : listeners) {
+            String certificateId = listener.getSslCertificateId();
+            if (certificateId != null && !certificateId.isBlank()
+                    && !certificates.exists(region, certificateId)) {
+                throw new AwsException("CertificateNotFound",
+                        "Server Certificate not found for the key: " + certificateId, 400);
+            }
+        }
+    }
+
+    private static List<String> certificateIdsOf(List<ClassicListener> listeners) {
+        List<String> certificateIds = new ArrayList<>();
+        for (ClassicListener listener : listeners) {
+            if (listener.getSslCertificateId() != null) {
+                certificateIds.add(listener.getSslCertificateId());
+            }
+        }
+        return certificateIds;
+    }
+
     private static void validateListener(ClassicListener listener) {
         if (listener.getProtocol() == null || listener.getLoadBalancerPort() == null
                 || listener.getInstancePort() == null) {
@@ -584,4 +710,5 @@ public class ElbClassicService {
                 && java.util.Objects.equals(a.getInstanceProtocol(), b.getInstanceProtocol())
                 && java.util.Objects.equals(a.getSslCertificateId(), b.getSslCertificateId());
     }
+
 }

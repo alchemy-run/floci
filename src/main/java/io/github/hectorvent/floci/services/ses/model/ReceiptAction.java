@@ -73,19 +73,6 @@ public class ReceiptAction {
         this.properties = properties;
     }
 
-    @JsonAnySetter
-    public void readLegacyAction(String actionType, JsonNode fields) {
-        if (ACTION_FIELDS.containsKey(actionType) && fields != null && fields.isObject()) {
-            type = actionType;
-            properties = new LinkedHashMap<>();
-            fields.properties().forEach(entry -> {
-                if (!entry.getValue().isNull()) {
-                    properties.put(entry.getKey(), entry.getValue().asText());
-                }
-            });
-        }
-    }
-
     public String property(String name) {
         return getProperties().get(name);
     }
@@ -99,5 +86,18 @@ public class ReceiptAction {
 
     public boolean is(String actionType) {
         return actionType.equals(type);
+    }
+
+    @JsonAnySetter
+    public void readLegacyAction(String actionType, JsonNode fields) {
+        if (ACTION_FIELDS.containsKey(actionType) && fields != null && fields.isObject()) {
+            type = actionType;
+            properties = new LinkedHashMap<>();
+            fields.properties().forEach(entry -> {
+                if (!entry.getValue().isNull()) {
+                    properties.put(entry.getKey(), entry.getValue().asText());
+                }
+            });
+        }
     }
 }

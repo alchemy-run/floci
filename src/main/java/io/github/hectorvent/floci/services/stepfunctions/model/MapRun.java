@@ -4,7 +4,7 @@ import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 /**
- * A distributed Map run, keyed by its Map run ARN. It is kept while running and after success or
+ * A distributed Map run that has finished, keyed by its Map run ARN. It is kept on success and on
  * failure, so the {@code mapRunArn} of a {@code MapRunStarted} event resolves through
  * {@code DescribeMapRun}. A Map cancels the remaining items on the first failure, so a failed run
  * reports those as aborted.

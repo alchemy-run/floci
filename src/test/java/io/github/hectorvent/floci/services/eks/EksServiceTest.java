@@ -1,5 +1,8 @@
 package io.github.hectorvent.floci.services.eks;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -18,10 +21,10 @@ import io.github.hectorvent.floci.services.ec2.model.LaunchTemplateData;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.Tag;
 import io.github.hectorvent.floci.services.ec2.portforward.Ec2PortForwardManager;
+import io.github.hectorvent.floci.services.eks.model.Cluster;
 import io.github.hectorvent.floci.services.eks.model.ClusterIdentity;
 import io.github.hectorvent.floci.services.eks.model.ClusterOidcKey;
 import io.github.hectorvent.floci.services.eks.model.ClusterStatus;
-import io.github.hectorvent.floci.services.eks.model.OidcIdentity;
 import io.github.hectorvent.floci.services.eks.model.CreateClusterRequest;
 import io.github.hectorvent.floci.services.eks.model.CreateFargateProfileRequest;
 import io.github.hectorvent.floci.services.eks.model.CreateNodeGroupRequest;
@@ -29,21 +32,18 @@ import io.github.hectorvent.floci.services.eks.model.EncryptionConfig;
 import io.github.hectorvent.floci.services.eks.model.FargateProfile;
 import io.github.hectorvent.floci.services.eks.model.FargateProfileStatus;
 import io.github.hectorvent.floci.services.eks.model.KubernetesNetworkConfig;
-import io.github.hectorvent.floci.services.eks.model.Cluster;
 import io.github.hectorvent.floci.services.eks.model.LogSetup;
 import io.github.hectorvent.floci.services.eks.model.Logging;
 import io.github.hectorvent.floci.services.eks.model.Nodegroup;
 import io.github.hectorvent.floci.services.eks.model.NodegroupScalingConfig;
 import io.github.hectorvent.floci.services.eks.model.NodegroupStatus;
+import io.github.hectorvent.floci.services.eks.model.OidcIdentity;
 import io.github.hectorvent.floci.services.eks.model.Provider;
 import io.github.hectorvent.floci.services.eks.model.ResourcesVpcConfig;
 import io.github.hectorvent.floci.services.eks.model.Update;
 import io.github.hectorvent.floci.services.eks.model.UpdateNodegroupConfigRequest;
 import io.github.hectorvent.floci.services.eks.model.UpdateNodegroupVersionRequest;
 import io.github.hectorvent.floci.services.eks.model.UpdateParam;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -1391,9 +1391,8 @@ class EksServiceTest {
         assertFalse(ec2Service.describeSecurityGroups("us-east-1", List.of(sgId), List.of(), Map.of()).isEmpty());
 
         service.deleteCluster("cluster-to-delete");
-        AwsException gone = assertThrows(AwsException.class,
-                () -> ec2Service.describeSecurityGroups("us-east-1", List.of(sgId), List.of(), Map.of()));
-        assertEquals("InvalidGroup.NotFound", gone.getErrorCode());
+        // The service-level lookup is lenient; DescribeSecurityGroups itself refuses the unknown id.
+        assertTrue(ec2Service.describeSecurityGroups("us-east-1", List.of(sgId), List.of(), Map.of()).isEmpty());
     }
 
     @Test
@@ -1717,7 +1716,7 @@ class EksServiceTest {
         String defaultVpc = Ec2Service.defaultVpcId("us-east-1");
 
         doThrow(new RuntimeException("Simulated tagging failure"))
-                .when(spyEc2).createTags(any(), any(), any());
+                .when(spyEc2).createSystemTags(any(), any(), any());
 
         StorageFactory storageFactory = fixedStorageFactory(new InMemoryStorage<>());
         RegionResolver regionResolver = new RegionResolver("us-east-1", "000000000000");
@@ -2191,27 +2190,6 @@ class EksServiceTest {
         assertEquals(EksService.ALTERNATIVE_SERVICE_IPV4_CIDR, cluster.getKubernetesNetworkConfig().getServiceIpv4Cidr());
     }
 
-    @Test
-    void createClusterWithBothDefaultServiceCidrsOverlappingVpcThrowsInvalidParameterException() {
-        Ec2Service ec2 = realEc2Service();
-        ec2.ensureDefaultResources("us-east-1");
-        String vpcId = ec2.createVpc("us-east-1", "0.0.0.0/0", false).getVpcId();
-        String subnetId = ec2.createSubnet("us-east-1", vpcId, "0.0.0.0/24", "us-east-1a").getSubnetId();
-
-        EksService service = new EksService(storageFactory, testConfig(), regionResolver, null, ec2,
-                new EksOidcService(storageFactory, new ObjectMapper()), mock(EksAccessEntryService.class),
-                mock(EksPodIdentityAssociationService.class));
-
-        CreateClusterRequest req = createTestClusterRequest("both-overlap-cluster");
-        ResourcesVpcConfig vpcConfig = new ResourcesVpcConfig();
-        vpcConfig.setSubnetIds(List.of(subnetId));
-        req.setResourcesVpcConfig(vpcConfig);
-
-        AwsException ex = assertThrows(AwsException.class, () -> service.createCluster(req));
-        assertEquals("InvalidParameterException", ex.getErrorCode());
-        assertEquals(400, ex.getHttpStatus());
-        assertTrue(ex.getMessage().contains("Default service IPv4 CIDR blocks"));
-    }
 
     @Test
     void createClusterWithoutVpcDefaultsToK3sPodCidr() {

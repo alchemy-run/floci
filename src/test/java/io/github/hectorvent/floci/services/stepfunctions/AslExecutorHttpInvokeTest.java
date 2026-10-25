@@ -3,33 +3,27 @@ package io.github.hectorvent.floci.services.stepfunctions;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbService;
-import io.github.hectorvent.floci.services.ecs.EcsJsonHandler;
-import io.github.hectorvent.floci.services.ecs.EcsService;
-import io.github.hectorvent.floci.services.lambda.LambdaExecutorService;
-import io.github.hectorvent.floci.services.lambda.LambdaFunctionStore;
-import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
-import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
 import io.github.hectorvent.floci.services.stepfunctions.model.HistoryEvent;
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachine;
 import io.quarkus.logging.Log;
 import io.quarkus.test.junit.QuarkusTest;
-
 import io.smallrye.mutiny.Uni;
 import io.vertx.core.json.JsonObject;
 import io.vertx.mutiny.core.MultiMap;
 import io.vertx.mutiny.core.Vertx;
 import io.vertx.mutiny.core.buffer.Buffer;
 import io.vertx.mutiny.core.http.HttpServer;
+import io.vertx.mutiny.core.http.HttpServerRequest;
 import io.vertx.mutiny.ext.web.Router;
 import io.vertx.mutiny.ext.web.RoutingContext;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -43,7 +37,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
 
 @QuarkusTest
 class AslExecutorHttpInvokeTest {
@@ -89,7 +82,7 @@ class AslExecutorHttpInvokeTest {
     void setUp() {
         server = vertx.createHttpServer();
 
-        var router = Router.router(vertx);
+        Router router = Router.router(vertx);
         router.get("/json")
             .handler(ctx -> {
                 ctx.request().body()
@@ -156,34 +149,20 @@ class AslExecutorHttpInvokeTest {
             .endAndForget(Buffer.newInstance(JsonObject.of("ok", "false").toBuffer()))
         );
         server.requestHandler(router)
-            .listenAndAwait(0);
+            .listenAndAwait(0, "127.0.0.1");
         baseUrl = "http://127.0.0.1:" + server.actualPort();
 
-        executor = new AslExecutor(
-            mock(LambdaExecutorService.class),
-            mock(LambdaFunctionStore.class),
-            mock(DynamoDbService.class),
-            mock(DynamoDbJsonHandler.class),
-            mock(SqsJsonHandler.class), mock(SnsJsonHandler.class),
-            mock(io.github.hectorvent.floci.services.cloudformation.CloudFormationQueryHandler.class),
-            mock(io.github.hectorvent.floci.services.ec2.Ec2Service.class),
-            mock(io.github.hectorvent.floci.services.s3.S3Service.class),
-            mock(EcsService.class),
-            mock(EcsJsonHandler.class),
-            mock(io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler.class),
-            mock(io.github.hectorvent.floci.services.scheduler.SchedulerService.class),
-            mock(io.github.hectorvent.floci.services.scheduler.SchedulerController.class),
-            objectMapper,
-            new JsonataEvaluator(objectMapper),
-            mock(Instance.class),
-            emulatorConfig,
-            vertx,
-            null);
+        executor = AslExecutorFixture.builder()
+                .objectMapper(objectMapper)
+                .config(emulatorConfig)
+                .vertx(vertx)
+                .customResourceLiveness(null)
+                .build();
     }
 
     private void recordRequest(final RoutingContext ctx, String body) {
-        var request = ctx.request();
-        var requestRecord = new RecordedRequest(
+        HttpServerRequest request = ctx.request();
+        RecordedRequest requestRecord = new RecordedRequest(
             request.method().name(),
             request.uri(),
             request.query(),
@@ -243,6 +222,7 @@ class AslExecutorHttpInvokeTest {
 
         assertFalse(request.query().contains("ignored"));
         assertEquals(List.of("one", "two"), request.headerValues("X-Custom"));
+        assertEquals(List.of("Amazon|StepFunctions|HttpInvoke|" + REGION), request.headerValues("User-Agent"));
     }
 
     @Test
@@ -259,6 +239,9 @@ class AslExecutorHttpInvokeTest {
                         "Method.$": "$.method",
                         "Authentication": {
                           "ConnectionArn": "%s"
+                        },
+                        "Headers": {
+                          "User-Agent": "custom-client/1.0"
                         },
                         "RequestBody": {
                           "customerId.$": "$.customerId",
@@ -283,6 +266,7 @@ class AslExecutorHttpInvokeTest {
 
         RecordedRequest request = onlyRequest();
         assertEquals("POST", request.method());
+        assertEquals(List.of("Amazon|StepFunctions|HttpInvoke|" + REGION), request.headerValues("User-Agent"));
         assertEquals("application/json", request.firstHeader("Content-Type"));
         JsonNode body = objectMapper.readTree(request.body());
         assertEquals("cust-123", body.path("customerId").asText());
@@ -447,7 +431,7 @@ class AslExecutorHttpInvokeTest {
     }
 
     @Test
-    void formTransformationIsUnsupported() {
+    void unknownBodyTransformationFailsBeforeSending() {
         Execution execution = run("""
                 {
                   "StartAt": "CallHttp",
@@ -463,7 +447,7 @@ class AslExecutorHttpInvokeTest {
                           "ConnectionArn": "%s"
                         },
                         "Transform": {
-                          "RequestBodyEncoding": "URL_ENCODED",
+                          "RequestBodyEncoding": "INVALID",
                           "RequestEncodingOptions": {
                             "ArrayFormat": "COMMAS"
                           }
@@ -483,7 +467,64 @@ class AslExecutorHttpInvokeTest {
 
         assertEquals("FAILED", execution.getStatus());
         assertEquals("States.TaskFailed", execution.getError());
-        assertThat(execution.getCause(), startsWith("URL-encoded request bodies are not supported yet"));
+        assertThat(execution.getCause(), startsWith("Unsupported body transformer: INVALID"));
+        assertEquals(0, receivedRequests.size());
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "INDICES | colors%5B0%5D=red%20blue&colors%5B1%5D=a%26b&colors%5B2%5D=caf%C3%A9",
+            "REPEAT | colors=red%20blue&colors=a%26b&colors=caf%C3%A9",
+            "COMMAS | colors=red%20blue,a%26b,caf%C3%A9",
+            "BRACKETS | colors%5B%5D=red%20blue&colors%5B%5D=a%26b&colors%5B%5D=caf%C3%A9"
+    })
+    void formTransformationSendsTheDocumentedArrayFormats(String format, String expected) {
+        Execution execution = runForm("{\"colors\":[\"red blue\",\"a&b\",\"café\"]}",
+                "{\"ArrayFormat\":\"" + format + "\"}");
+
+        assertEquals("SUCCEEDED", execution.getStatus(), execution.getCause());
+        RecordedRequest request = onlyRequest();
+        assertEquals("POST", request.method());
+        assertEquals("application/x-www-form-urlencoded", request.firstHeader("Content-Type"));
+        assertEquals(expected, request.body());
+    }
+
+    @Test
+    void formTransformationDefaultsToIndicesAndEncodesNestedObjectsAndScalars() {
+        Execution execution = runForm("""
+                {"customer":"cust-123","metadata":{"order_details":"monthly report"},
+                 "symbols":"a&b=c+%","enabled":true,"count":3,"empty":"","nothing":null,
+                 "items":["one","two"]}
+                """, "{}");
+
+        assertEquals("SUCCEEDED", execution.getStatus(), execution.getCause());
+        assertEquals("customer=cust-123&metadata%5Border_details%5D=monthly%20report"
+                + "&symbols=a%26b%3Dc%2B%25&enabled=true&count=3&empty=&nothing="
+                + "&items%5B0%5D=one&items%5B1%5D=two", onlyRequest().body());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{\"ArrayFormat\":\"INVALID\"}", "{\"ArrayFormat\":null}",
+            "{\"ArrayFormat\":{}}", "[]"})
+    void malformedFormOptionsFailBeforeSending(String options) {
+        Execution execution = runForm("{\"value\":1}", options);
+
+        assertEquals("FAILED", execution.getStatus());
+        assertEquals("States.TaskFailed", execution.getError());
+        assertEquals(0, receivedRequests.size());
+    }
+
+    private Execution runForm(String body, String options) {
+        return run("""
+                {"StartAt":"CallHttp","States":{"CallHttp":{"Type":"Task",
+                 "Resource":"arn:aws:states:::http:invoke","Parameters":{
+                   "ApiEndpoint":"%s/text","Method":"POST",
+                   "Authentication":{"ConnectionArn":"%s"},
+                   "Headers":{"Content-Type":"application/x-www-form-urlencoded"},
+                   "RequestBody.$":"$.body",
+                   "Transform":{"RequestBodyEncoding":"URL_ENCODED","RequestEncodingOptions":%s}
+                 },"End":true}}}
+                """.formatted(baseUrl, CONNECTION_ARN, options), "{\"body\":" + body + "}");
     }
 
     private Execution run(String definition, String input) {

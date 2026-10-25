@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.apigatewayv2;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.sun.net.httpserver.HttpServer;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.AfterAll;
@@ -20,7 +21,6 @@ import java.security.KeyPairGenerator;
 import java.security.Signature;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
-import java.util.Base64;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static io.restassured.RestAssured.given;
@@ -217,7 +217,7 @@ class HttpProxyJwtClaimsMappingIntegrationTest {
         Signature signature = Signature.getInstance("SHA256withRSA");
         signature.initSign(signingKey);
         signature.update(signingInput.getBytes(StandardCharsets.UTF_8));
-        String encodedSignature = Base64.getUrlEncoder().withoutPadding().encodeToString(signature.sign());
+        String encodedSignature = Base64Url.encode(signature.sign());
 
         return signingInput + "." + encodedSignature;
     }
@@ -229,8 +229,7 @@ class HttpProxyJwtClaimsMappingIntegrationTest {
     }
 
     private static String base64Url(String json) {
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(json.getBytes(StandardCharsets.UTF_8));
+        return Base64Url.encode(json);
     }
 
     private static String base64UrlUnsigned(BigInteger value) {
@@ -238,6 +237,6 @@ class HttpProxyJwtClaimsMappingIntegrationTest {
         if (bytes.length > 1 && bytes[0] == 0) {
             bytes = java.util.Arrays.copyOfRange(bytes, 1, bytes.length);
         }
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        return Base64Url.encode(bytes);
     }
 }

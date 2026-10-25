@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -60,7 +61,7 @@ class MacieClassificationJobTest {
         }
     }
 
-    private MacieService newService(java.util.concurrent.Executor jobExecutor) {
+    private MacieService newService(Executor jobExecutor) {
         return new MacieService(AccountAwareStorageBackend.inMemory(ACCOUNT),
                 AccountAwareStorageBackend.inMemory(ACCOUNT), s3, jobExecutor);
     }

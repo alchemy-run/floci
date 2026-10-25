@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.ServicePrincipals;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
 import io.github.hectorvent.floci.core.resource.SupportedResourceType;
@@ -17,6 +18,7 @@ import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.kms.KmsService;
 import io.github.hectorvent.floci.services.kms.model.KmsKey;
+import io.github.hectorvent.floci.services.lambda.LambdaArnUtils;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
@@ -37,12 +39,16 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 
@@ -64,11 +70,46 @@ public class SecretsManagerService implements ResourceProvider {
     private final LambdaService lambdaService;
     private final ObjectMapper objectMapper;
     private final KmsService kmsService;
-    private final ExecutorService rotationExecutor = Executors.newCachedThreadPool();
-    private final ConcurrentHashMap<String, Object> rotationLocks = new ConcurrentHashMap<>();
+
+    // Fixed threads with an unbounded queue: a burst of rotations is queued, not rejected,
+    // because RotateSecret documents no overload error.
+    static final int ROTATION_EXECUTOR_POOL_SIZE = Math.max(4, Runtime.getRuntime().availableProcessors());
+    private final ExecutorService rotationExecutor =
+            Executors.newFixedThreadPool(ROTATION_EXECUTOR_POOL_SIZE, new RotationThreadFactory());
+
+    // Fixed stripes instead of one lock per ARN, which was never removed. Secrets that share a
+    // stripe only contend; no lock is held while a rotation Lambda runs.
+    private static final int ROTATION_LOCK_STRIPE_COUNT = 32;
+    private final Object[] rotationLockStripes = newLockStripes(ROTATION_LOCK_STRIPE_COUNT);
+    // Entries exist only while a service owner changes backend credentials outside the stripe.
+    private final Set<String> managedReleases = ConcurrentHashMap.newKeySet();
+
+    private static Object[] newLockStripes(int count) {
+        Object[] stripes = new Object[count];
+        for (int i = 0; i < count; i++) {
+            stripes[i] = new Object();
+        }
+        return stripes;
+    }
 
     private Object lockFor(String secretArn) {
-        return rotationLocks.computeIfAbsent(secretArn, k -> new Object());
+        int index = Math.floorMod(secretArn.hashCode(), rotationLockStripes.length);
+        return rotationLockStripes[index];
+    }
+
+    /** Names rotation threads for diagnostics. */
+    private static final class RotationThreadFactory implements ThreadFactory {
+        private final AtomicInteger nextId = new AtomicInteger(1);
+
+        @Override
+        public Thread newThread(Runnable runnable) {
+            // Set explicitly: a new thread otherwise inherits these from whichever thread grows the
+            // pool, and a daemon rotation thread could be cut off mid-rotation at JVM exit.
+            Thread thread = new Thread(runnable, "secretsmanager-rotation-" + nextId.getAndIncrement());
+            thread.setDaemon(false);
+            thread.setPriority(Thread.NORM_PRIORITY);
+            return thread;
+        }
     }
 
     @Inject
@@ -82,7 +123,7 @@ public class SecretsManagerService implements ResourceProvider {
     }
 
     SecretsManagerService(StorageBackend<String, Secret> store, int defaultRecoveryWindowDays) {
-        this(store, defaultRecoveryWindowDays, new RegionResolver("us-east-1", "000000000000"), null,
+        this(store, defaultRecoveryWindowDays, new RegionResolver("us-east-1", "000000000000"), null, // partition-literal: test-shaped constructor default
                 new ObjectMapper(), null);
     }
 
@@ -379,18 +420,36 @@ public class SecretsManagerService implements ResourceProvider {
     }
 
     /**
-     * The secret {@code secretId} (name, partial ARN or full ARN) names in the request's account,
-     * or empty when there is none. Used by IAM to evaluate policies against the secret's real ARN.
+     * The full ARN of the secret {@code secretId} names in the given account, or empty when there is
+     * none, resolved in the order the operations resolve it: a name in {@code region}, or an ARN,
+     * matched exactly before it is read as a partial ARN without the random suffix. An ARN that
+     * matches neither way in this account is empty, and the caller authorizes the ARN as given, which
+     * is the secret the operations then look for in the account the ARN names. IAM enforcement reads
+     * it before the request runs: AWS authorizes a request against the secret's ARN, random suffix
+     * included, however the request names the secret.
      */
-    public java.util.Optional<Secret> findSecret(String secretId, String region) {
-        if (secretId == null || secretId.isBlank()) {
-            return java.util.Optional.empty();
+    public Optional<String> findArn(String accountId, String secretId, String region) {
+        if (!secretId.startsWith("arn:")) {
+            return findArnByName(accountId, secretId, region);
         }
-        try {
-            return java.util.Optional.of(resolveSecret(secretId, region));
-        } catch (AwsException e) {
-            return java.util.Optional.empty();
+        AwsArnUtils.Arn arn = parseOrNull(secretId);
+        String nameFromArn = secretNameOrNull(arn);
+        if (nameFromArn == null) {
+            return Optional.empty();
         }
+        if (findByArnInAccount(accountId, secretId, arn) != null) {
+            return Optional.of(secretId);
+        }
+        return findArnByName(accountId, nameFromArn, arn.region());
+    }
+
+    /** The full ARN of the secret with this name in the given account and region, or empty when there is none. */
+    Optional<String> findArnByName(String accountId, String name, String region) {
+        String key = regionKey(region, name);
+        Optional<Secret> secret = store instanceof AccountAwareStorageBackend<Secret> aware
+                ? aware.getForAccount(accountId, key).or(() -> aware.getLegacyForAccount(accountId, key))
+                : store.get(key);
+        return secret.map(Secret::getArn);
     }
 
     /**
@@ -434,9 +493,14 @@ public class SecretsManagerService implements ResourceProvider {
 
     /** Finds a secret by full ARN within the account and region that ARN names. */
     private Secret findByArnInAccount(String secretArn, AwsArnUtils.Arn arn) {
+        return findByArnInAccount(arn.accountId(), secretArn, arn);
+    }
+
+    /** Finds a secret by full ARN within the given account and the region that ARN names. */
+    private Secret findByArnInAccount(String accountId, String secretArn, AwsArnUtils.Arn arn) {
         Predicate<String> inRegion = key -> key.startsWith(arn.region() + "::");
         List<Secret> candidates = store instanceof AccountAwareStorageBackend<Secret> aware
-                ? aware.scanForAccount(arn.accountId(), inRegion)
+                ? aware.scanForAccount(accountId, inRegion)
                 : store.scan(inRegion);
         return candidates.stream()
                 .filter(s -> secretArn.equals(s.getArn()))
@@ -638,6 +702,55 @@ public class SecretsManagerService implements ResourceProvider {
 
     public record Filter(String key, List<String> values) {}
 
+    /**
+     * Reserves release under the secret monitor, then changes backend credentials without holding
+     * a shared stripe. Replication and deletion refuse a reserved secret until the action finishes.
+     * Returns false without running the action when replicas prevent deletion.
+     */
+    public boolean deleteManagedSecretAfter(String secretArn, String region, Runnable changeCredentials) {
+        boolean secretExists = true;
+        synchronized (lockFor(secretArn)) {
+            throwIfManagedRelease(secretArn);
+            Secret secret = null;
+            try {
+                secret = resolveSecret(secretArn, region);
+            } catch (AwsException e) {
+                if (!"ResourceNotFoundException".equals(e.getErrorCode())) {
+                    throw e;
+                }
+                // An already removed secret does not prevent its owner from releasing management.
+                secretExists = false;
+            }
+            if (secret != null) {
+                throwIfReplica(secret);
+                if (secret.getReplicationStatus() != null && !secret.getReplicationStatus().isEmpty()) {
+                    return false;
+                }
+            }
+            managedReleases.add(secretArn);
+        }
+        boolean credentialsChanged = false;
+        try {
+            changeCredentials.run();
+            credentialsChanged = true;
+            return true;
+        } finally {
+            synchronized (lockFor(secretArn)) {
+                managedReleases.remove(secretArn);
+                if (credentialsChanged && secretExists) {
+                    deleteSecret(secretArn, null, true, region);
+                }
+            }
+        }
+    }
+
+    private void throwIfManagedRelease(String secretArn) {
+        if (managedReleases.contains(secretArn)) {
+            throw new AwsException("InvalidRequestException",
+                    "The secret's managed credentials are being released. Try again after the release completes.", 400);
+        }
+    }
+
     public Secret deleteSecret(String secretId, Integer recoveryWindowInDays, boolean forceDelete, String region) {
         // Parameters are checked before the secret is resolved, the way AWS orders it: an invalid
         // window is reported as such even when the secret does not exist.
@@ -653,38 +766,42 @@ public class SecretsManagerService implements ResourceProvider {
                     "The RecoveryWindowInDays value must be between 7 and 30 days, inclusive.", 400);
         }
 
-        Secret secret = resolveSecret(secretId, region);
-        throwIfReplica(secret);
-        // AWS: "You can't delete a primary secret that is replicated to other Regions. You must
-        // first delete the replicas." Deleting it here would strand every replica with no primary
-        // to sync from and no way to remove them.
-        if (secret.getReplicationStatus() != null && !secret.getReplicationStatus().isEmpty()) {
-            throw new AwsException("InvalidRequestException",
-                    "You can't delete a secret that is replicated to other Regions. "
-                            + "Remove the replicas with RemoveRegionsFromReplication first.", 400);
-        }
-        String storageKey = regionKey(region, secret.getName());
+        Secret resolved = resolveSecret(secretId, region);
+        synchronized (lockFor(resolved.getArn())) {
+            Secret secret = resolveSecret(resolved.getArn(), region);
+            throwIfManagedRelease(secret.getArn());
+            throwIfReplica(secret);
+            // AWS: "You can't delete a primary secret that is replicated to other Regions. You must
+            // first delete the replicas." Deleting it here would strand every replica with no primary
+            // to sync from and no way to remove them.
+            if (secret.getReplicationStatus() != null && !secret.getReplicationStatus().isEmpty()) {
+                throw new AwsException("InvalidRequestException",
+                        "You can't delete a secret that is replicated to other Regions. "
+                                + "Remove the replicas with RemoveRegionsFromReplication first.", 400);
+            }
+            String storageKey = regionKey(region, secret.getName());
 
-        if (forceDelete) {
-            store.delete(storageKey);
-            LOG.infov("Force-deleted secret: {0}", secret.getName());
-            secret.setDeletedDate(Instant.now());
+            if (forceDelete) {
+                store.delete(storageKey);
+                LOG.infov("Force-deleted secret: {0}", secret.getName());
+                secret.setDeletedDate(Instant.now());
+                return secret;
+            }
+
+            // Guard placed AFTER the force-delete branch on purpose: force-deleting a secret that is
+            // already inside its recovery window is a legitimate "skip the window, remove it now"
+            // escape hatch, so only the scheduling path is refused. Re-scheduling an already-scheduled
+            // secret silently moved its DeletionDate, which would quietly extend a window a caller
+            // believed was already counting down.
+            throwIfPendingDeletion(secret);
+
+            int windowDays = (recoveryWindowInDays != null) ? recoveryWindowInDays : defaultRecoveryWindowDays;
+            Instant deletedDate = Instant.now().plusSeconds((long) windowDays * 86400);
+            secret.setDeletedDate(deletedDate);
+            store.put(storageKey, secret);
+            LOG.infov("Scheduled deletion of secret: {0} at {1}", secret.getName(), deletedDate);
             return secret;
         }
-
-        // Guard placed AFTER the force-delete branch on purpose: force-deleting a secret that is
-        // already inside its recovery window is a legitimate "skip the window, remove it now"
-        // escape hatch, so only the scheduling path is refused. Re-scheduling an already-scheduled
-        // secret silently moved its DeletionDate, which would quietly extend a window a caller
-        // believed was already counting down.
-        throwIfPendingDeletion(secret);
-
-        int windowDays = (recoveryWindowInDays != null) ? recoveryWindowInDays : defaultRecoveryWindowDays;
-        Instant deletedDate = Instant.now().plusSeconds((long) windowDays * 86400);
-        secret.setDeletedDate(deletedDate);
-        store.put(storageKey, secret);
-        LOG.infov("Scheduled deletion of secret: {0} at {1}", secret.getName(), deletedDate);
-        return secret;
     }
 
     // ─── Multi-region replication ──────────────────────────────────────────────
@@ -845,11 +962,12 @@ public class SecretsManagerService implements ResourceProvider {
                     "AddReplicaRegions must contain at least one Region.", 400);
         }
 
-        Secret primary = resolveSecret(secretId, region);
-        throwIfPendingDeletion(primary);
-        throwIfReplica(primary);
-
-        synchronized (lockFor(primary.getArn())) {
+        Secret resolved = resolveSecret(secretId, region);
+        synchronized (lockFor(resolved.getArn())) {
+            Secret primary = resolveSecret(resolved.getArn(), region);
+            throwIfManagedRelease(primary.getArn());
+            throwIfPendingDeletion(primary);
+            throwIfReplica(primary);
             List<Secret.ReplicaStatus> statuses = primary.getReplicationStatus() != null
                     ? new ArrayList<>(primary.getReplicationStatus()) : new ArrayList<>();
 
@@ -944,10 +1062,11 @@ public class SecretsManagerService implements ResourceProvider {
                     "RemoveReplicaRegions must contain at least one Region.", 400);
         }
 
-        Secret primary = resolveSecret(secretId, region);
-        throwIfReplica(primary);
-
-        synchronized (lockFor(primary.getArn())) {
+        Secret resolved = resolveSecret(secretId, region);
+        synchronized (lockFor(resolved.getArn())) {
+            Secret primary = resolveSecret(resolved.getArn(), region);
+            throwIfManagedRelease(primary.getArn());
+            throwIfReplica(primary);
             List<Secret.ReplicaStatus> statuses = primary.getReplicationStatus() != null
                     ? new ArrayList<>(primary.getReplicationStatus()) : new ArrayList<>();
 
@@ -990,6 +1109,18 @@ public class SecretsManagerService implements ResourceProvider {
         // halves of the promotion run inside one critical section for the same reason: a sync
         // landing between them would write the replica back over the copy just promoted.
         synchronized (lockFor(primary != null ? primary.getArn() : replica.getArn())) {
+            // A removal or promotion may have completed while this call waited. Never write the
+            // pre-lock objects back over a deletion or over a newly independent secret.
+            replica = resolveSecret(replica.getArn(), region);
+            if (!replica.isReplica() || !primaryRegionName.equals(replica.getPrimaryRegion())) {
+                throw new AwsException("InvalidRequestException",
+                        "The secret is no longer a replica of the original primary.", 400);
+            }
+            if (primary != null) {
+                primary = resolveSecret(primary.getArn(), primaryRegionName);
+                throwIfManagedRelease(primary.getArn());
+            }
+            throwIfManagedRelease(replica.getArn());
             replica.setPrimaryRegion(null);
             replica.setLastChangedDate(Instant.now());
             putSecret(region, replica);
@@ -1071,8 +1202,23 @@ public class SecretsManagerService implements ResourceProvider {
         return secret;
     }
 
+    /**
+     * Rotation started by Floci itself, such as the scheduled sweep, with no caller to authorize.
+     */
     public Secret rotateSecret(String secretId, String clientRequestToken, String rotationLambdaArn, Secret.RotationRules rotationRules,
                                boolean rotateImmediately, String region) {
+        return rotateSecret(secretId, clientRequestToken, rotationLambdaArn, rotationRules, rotateImmediately, region,
+                functionArn -> { });
+    }
+
+    /**
+     * @param authorizeInvoke called with the full ARN of the rotation function this call will
+     *                        invoke, before the function is looked up or the secret changed, so the
+     *                        caller can be refused {@code lambda:InvokeFunction} on exactly that
+     *                        function
+     */
+    public Secret rotateSecret(String secretId, String clientRequestToken, String rotationLambdaArn, Secret.RotationRules rotationRules,
+                               boolean rotateImmediately, String region, Consumer<String> authorizeInvoke) {
         Secret secret = resolveSecret(secretId, region);
         throwIfPendingDeletion(secret);
         throwIfReplica(secret);
@@ -1101,14 +1247,30 @@ public class SecretsManagerService implements ResourceProvider {
                     "You tried to enable rotation on a secret that doesn't already have a Lambda function ARN configured and you didn't include such an ARN as a parameter in this call.", 400);
         }
 
-        // Validate Lambda exists synchronously
+        // One full ARN for the permission check, the lookup and the invoke, so all three reach the same
+        // function: a name or partial ARN would otherwise be invoked in whatever account the rotation
+        // thread resolves, which is not necessarily the one that was checked.
+        String functionArn = serviceManaged ? null : rotationFunctionArn(finalLambdaArn, secret, region);
+        if (!serviceManaged) {
+            authorizeInvoke.accept(functionArn);
+        }
+
+        // A function that cannot be found is reported the way AWS reports it, AccessDeniedException with
+        // HTTP 400; any other reference Lambda refuses is an invalid RotationLambdaARN. Either way the
+        // secret is left as it was. The function is looked up where the rotation will invoke it: in the
+        // ARN's account, and as the version or alias the ARN names.
         if (!serviceManaged && lambdaService != null) {
             try {
-                lambdaService.getFunction(region, finalLambdaArn);
+                lambdaService.getFunctionByArn(functionArn);
             } catch (AwsException e) {
                 if (e.getHttpStatus() == 404) {
-                    throw new AwsException("ResourceNotFoundException",
-                            "Secrets Manager cannot find the specified Lambda function.", 404);
+                    throw new AwsException("AccessDeniedException",
+                            "Secrets Manager cannot invoke the specified Lambda function. Ensure that the function "
+                                    + "policy grants access to the principal " + ServicePrincipals.of("secretsmanager")
+                                    + ".", 400);
+                }
+                if (e.getHttpStatus() == 400) {
+                    throw invalidRotationFunction(e.getMessage());
                 }
                 throw e;
             }
@@ -1155,7 +1317,7 @@ public class SecretsManagerService implements ResourceProvider {
         
         rotationExecutor.submit(() -> {
             try {
-                executeRotationLifecycle(arn, finalToken, finalLambdaArn, rotateImmediately, isExistingVersion, region);
+                executeRotationLifecycle(arn, finalToken, functionArn, rotateImmediately, isExistingVersion, region);
             } catch (Exception e) {
                 LOG.errorv(e, "Rotation lifecycle failed for secret {0}", arn);
             }
@@ -1165,6 +1327,39 @@ public class SecretsManagerService implements ResourceProvider {
         return secret;
     }
 
+    /**
+     * The full ARN of the rotation function {@code reference} names, in the secret's partition and
+     * account unless the reference names its own. A reference Lambda cannot read is refused with
+     * Secrets Manager's {@code InvalidParameterException}: Lambda's codes for it,
+     * {@code InvalidParameterValueException} and {@code ValidationException}, are not among the
+     * errors {@code RotateSecret} declares, so an SDK client could not type them.
+     */
+    private static String rotationFunctionArn(String reference, Secret secret, String region) {
+        AwsArnUtils.Arn secretArn = AwsArnUtils.parse(secret.getArn());
+        String functionArn;
+        try {
+            functionArn = LambdaArnUtils.functionArn(reference, secretArn.partition(), region, secretArn.accountId());
+        } catch (AwsException e) {
+            throw invalidRotationFunction(e.getMessage());
+        }
+        // Lambda refuses a function ARN from another Region; refusing it here keeps it with the other
+        // bad references, ahead of the caller check.
+        String functionRegion = AwsArnUtils.parse(functionArn).region();
+        if (!region.equals(functionRegion)) {
+            throw invalidRotationFunction(
+                    "Region '" + functionRegion + "' in ARN does not match request region '" + region + "'");
+        }
+        return functionArn;
+    }
+
+    /**
+     * RotateSecret's own error for a function reference Lambda refuses, keeping Lambda's reason: the
+     * operation declares {@code InvalidParameterException} and none of Lambda's codes.
+     */
+    private static AwsException invalidRotationFunction(String reason) {
+        return new AwsException("InvalidParameterException",
+                "RotationLambdaARN is not a valid Lambda function reference: " + reason, 400);
+    }
 
     /**
      * The outcome of {@link #cancelRotateSecret}: the secret with rotation turned off, plus the id
@@ -1248,10 +1443,12 @@ public class SecretsManagerService implements ResourceProvider {
             }
             invokeRotationLambda(secretArn, clientRequestToken, lambdaArn, "testSecret", region);
             invokeRotationLambda(secretArn, clientRequestToken, lambdaArn, "finishSecret", region);
-            
-            Secret refreshed = resolveSecret(secretArn, region);
-            refreshed.setLastRotatedDate(Instant.now());
-            persist(refreshed, region);
+
+            synchronized (lockFor(secretArn)) {
+                Secret refreshed = resolveSecret(secretArn, region);
+                refreshed.setLastRotatedDate(Instant.now());
+                persist(refreshed, region);
+            }
         } catch (Exception e) {
             LOG.errorv(e, "Error during rotation steps for secret {0}", secretArn);
             throw e;
@@ -1336,25 +1533,6 @@ public class SecretsManagerService implements ResourceProvider {
         persist(secret, region);
         LOG.infov("Deleted resource policy on secret: {0}", secret.getName());
         return secret;
-    }
-
-    public Secret putResourcePolicy(String secretId, String resourcePolicy, Boolean blockPublicPolicy, String region) {
-        if (resourcePolicy == null || resourcePolicy.isBlank() || resourcePolicy.length() > 20_480) {
-            throw new AwsException("InvalidParameterException", "ResourcePolicy must contain 1 to 20480 characters.", 400);
-        }
-        JsonNode parsedPolicy;
-        try {
-            parsedPolicy = objectMapper.readTree(resourcePolicy);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("MalformedPolicyDocumentException", "The resource policy is not valid JSON.", 400);
-        }
-        if (parsedPolicy == null || !parsedPolicy.isObject()) {
-            throw new AwsException("MalformedPolicyDocumentException", "The resource policy is not a JSON object.", 400);
-        }
-        if (Boolean.TRUE.equals(blockPublicPolicy) && !ResourcePolicyValidator.validate(parsedPolicy).isEmpty()) {
-            throw new AwsException("PublicPolicyException", "The resource policy did not prevent broad access.", 400);
-        }
-        return putResourcePolicy(secretId, resourcePolicy, region);
     }
 
     public Map<String, List<String>> listSecretVersionIds(String secretId, String region) {
@@ -1628,16 +1806,11 @@ public class SecretsManagerService implements ResourceProvider {
             //    ARN format: arn:<partition>:secretsmanager:<region>:<account>:secret:<name>
             //    Parsed rather than matched against a literal prefix, because the ARN carries the
             //    region's own partition and a pinned "arn:aws:" refused a GovCloud or China
-            //    secret its own ARN. The name comes off the parsed resource without a second
-            //    split: a secret name may itself contain colons.
+            //    secret its own ARN.
             AwsArnUtils.Arn parsedArn = parseOrNull(secretId);
-            String secretResourcePrefix = "secret:";
-            if (parsedArn != null
-                    && "secretsmanager".equals(parsedArn.service())
-                    && parsedArn.resource().startsWith(secretResourcePrefix)) {
-                String arnRegion = parsedArn.region();
-                String nameFromArn = parsedArn.resource().substring(secretResourcePrefix.length());
-                Secret byName = store.get(regionKey(arnRegion, nameFromArn)).orElse(null);
+            String nameFromArn = secretNameOrNull(parsedArn);
+            if (nameFromArn != null) {
+                Secret byName = store.get(regionKey(parsedArn.region(), nameFromArn)).orElse(null);
                 if (byName != null) {
                     return byName;
                 }
@@ -1689,6 +1862,19 @@ public class SecretsManagerService implements ResourceProvider {
         }
     }
 
+    /**
+     * The secret name a Secrets Manager secret ARN carries, taken off the parsed resource without a
+     * second split because a name may itself contain colons, or {@code null} for any other ARN.
+     */
+    private static String secretNameOrNull(AwsArnUtils.Arn arn) {
+        String secretResourcePrefix = "secret:";
+        if (arn == null || !"secretsmanager".equals(arn.service())
+                || !arn.resource().startsWith(secretResourcePrefix)) {
+            return null;
+        }
+        return arn.resource().substring(secretResourcePrefix.length());
+    }
+
     private static String regionKey(String region, String name) {
         return region + "::" + name;
     }
@@ -1731,5 +1917,40 @@ public class SecretsManagerService implements ResourceProvider {
     @Override
     public Set<SupportedResourceType> getSupportedResourceTypes() {
         return Set.of(new SupportedResourceType("secretsmanager:secret", "secretsmanager", true));
+    }
+
+
+    /**
+     * The secret {@code secretId} (name, partial ARN or full ARN) names in the request's account,
+     * or empty when there is none. Used by IAM to evaluate policies against the secret's real ARN.
+     */
+    public Optional<Secret> findSecret(String secretId, String region) {
+        if (secretId == null || secretId.isBlank()) {
+            return java.util.Optional.empty();
+        }
+        try {
+            return java.util.Optional.of(resolveSecret(secretId, region));
+        } catch (AwsException e) {
+            return java.util.Optional.empty();
+        }
+    }
+
+    public Secret putResourcePolicy(String secretId, String resourcePolicy, Boolean blockPublicPolicy, String region) {
+        if (resourcePolicy == null || resourcePolicy.isBlank() || resourcePolicy.length() > 20_480) {
+            throw new AwsException("InvalidParameterException", "ResourcePolicy must contain 1 to 20480 characters.", 400);
+        }
+        JsonNode parsedPolicy;
+        try {
+            parsedPolicy = objectMapper.readTree(resourcePolicy);
+        } catch (JsonProcessingException e) {
+            throw new AwsException("MalformedPolicyDocumentException", "The resource policy is not valid JSON.", 400);
+        }
+        if (parsedPolicy == null || !parsedPolicy.isObject()) {
+            throw new AwsException("MalformedPolicyDocumentException", "The resource policy is not a JSON object.", 400);
+        }
+        if (Boolean.TRUE.equals(blockPublicPolicy) && !ResourcePolicyValidator.validate(parsedPolicy).isEmpty()) {
+            throw new AwsException("PublicPolicyException", "The resource policy did not prevent broad access.", 400);
+        }
+        return putResourcePolicy(secretId, resourcePolicy, region);
     }
 }

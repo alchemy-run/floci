@@ -82,7 +82,7 @@ public final class S3CopySimulator {
     // dependency through the whole proxy chain for this one check.
     private static final IamPolicyEvaluator ROLE_POLICY_EVALUATOR = new IamPolicyEvaluator(new ObjectMapper());
     private static final AssumeRolePolicyEvaluator ROLE_TRUST_POLICY_EVALUATOR =
-            new AssumeRolePolicyEvaluator(new ObjectMapper());
+            new AssumeRolePolicyEvaluator(new ObjectMapper(), ROLE_POLICY_EVALUATOR);
 
     private S3CopySimulator() {
     }

@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.ses.model.AccountSuppressionAttributes;
 import io.github.hectorvent.floci.services.ses.model.AccountVdmAttributes;
 import jakarta.inject.Inject;
@@ -31,6 +32,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import static io.github.hectorvent.floci.services.ses.SesV2Json.coerceBoolean;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.coerceBooleanOrFalse;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.requireJsonObject;
@@ -139,21 +141,19 @@ public class SesAccountController {
     public Response putAccountVdmAttributes(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = (body == null || body.isBlank())
-                    ? objectMapper.createObjectNode()
-                    : objectMapper.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
+            SesV2RequestShapes.check("PutAccountVdmAttributes", request);
             JsonNode vdm = request.path("VdmAttributes");
-            if (!vdm.isObject()) {
+            if (vdm.isMissingNode() || vdm.isNull()) {
                 throw new AwsException("BadRequestException", "VdmAttributes is required.", 400);
             }
             boolean vdmEnabled = parseFeatureStatus(vdm, "VdmEnabled",
                     "vdmAttributes.vdmEnabled", true);
             boolean engagement = parseFeatureStatus(
-                    requireObjectOrAbsent(vdm, "DashboardAttributes"), "EngagementMetrics",
+                    vdm.path("DashboardAttributes"), "EngagementMetrics",
                     "vdmAttributes.dashboardAttributes.engagementMetrics", false);
             boolean osd = parseFeatureStatus(
-                    requireObjectOrAbsent(vdm, "GuardianAttributes"), "OptimizedSharedDelivery",
+                    vdm.path("GuardianAttributes"), "OptimizedSharedDelivery",
                     "vdmAttributes.guardianAttributes.optimizedSharedDelivery", false);
             accountService.putAccountVdmAttributes(region,
                     new AccountVdmAttributes(vdmEnabled, engagement, osd));
@@ -162,8 +162,6 @@ public class SesAccountController {
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -172,10 +170,7 @@ public class SesAccountController {
     public Response putAccountDetails(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = (body == null || body.isBlank())
-                    ? objectMapper.createObjectNode()
-                    : objectMapper.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
 
             // Parse every member first (rejecting wrong JSON types as a serialization error, the way
             // AWS does before validation), then validate the parsed values together so all constraint
@@ -202,10 +197,8 @@ public class SesAccountController {
                 }
             }
             JsonNode productionAccess = request.path("ProductionAccessEnabled");
-            if (!productionAccess.isMissingNode() && !productionAccess.isNull() && !productionAccess.isBoolean()) {
-                throw new AwsException("SerializationException", null, 400);
-            }
-            boolean productionAccessEnabled = productionAccess.asBoolean(false);
+            boolean productionAccessEnabled = !productionAccess.isMissingNode() && !productionAccess.isNull()
+                    && coerceBoolean(productionAccess);
 
             // The service owns validation and the synthetic review/case so they can't be bypassed; the
             // controller only parses the REST JSON and rejects wrong JSON types.
@@ -215,10 +208,6 @@ public class SesAccountController {
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            // AWS reports a malformed JSON body as a SerializationException, the same error type used
-            // for wrong-typed members above.
-            throw new AwsException("SerializationException", null, 400);
         }
     }
 
@@ -231,8 +220,8 @@ public class SesAccountController {
             JsonNode enabledNode = request.path("AutoWarmupEnabled");
             // AutoWarmupEnabled has a default of false: the SDK omits it when false, so a missing
             // member is treated as false rather than rejected. A present value goes through the
-            // shared SES v2 boolean coercion (string→true, null/number/container→SerializationException).
-            boolean enabled = enabledNode.isMissingNode() ? false : coerceBoolean(enabledNode);
+            // shared SES v2 boolean coercion.
+            boolean enabled = coerceBooleanOrFalse(enabledNode);
             accountService.setDedicatedIpAutoWarmup(region, enabled);
             LOG.infov("SES V2 PutAccountDedicatedIpWarmupAttributes: {0}", enabled);
             return Response.ok(objectMapper.createObjectNode()).build();
@@ -246,31 +235,21 @@ public class SesAccountController {
     public Response putAccountSuppressionAttributes(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = (body == null || body.isBlank())
-                    ? objectMapper.createObjectNode()
-                    : objectMapper.readTree(body);
-            requireJsonObject(request);
-            JsonNode reasonsNode = request.path("SuppressedReasons");
+            JsonNode request = readOptionBody(objectMapper, body);
+            SesV2RequestShapes.check("PutAccountSuppressionAttributes", request);
             List<String> reasons = new ArrayList<>();
-            if (!reasonsNode.isMissingNode() && !reasonsNode.isNull()) {
-                if (!reasonsNode.isArray()) {
-                    throw new AwsException("BadRequestException", "SuppressedReasons must be an array.", 400);
+            for (JsonNode r : request.path("SuppressedReasons")) {
+                if (r.isNull()) {
+                    throw new AwsException("BadRequestException",
+                            "SuppressedReasons entries must be strings.", 400);
                 }
-                for (JsonNode r : reasonsNode) {
-                    if (r.isNull() || !r.isTextual()) {
-                        throw new AwsException("BadRequestException",
-                                "SuppressedReasons entries must be strings.", 400);
-                    }
-                    reasons.add(r.asText());
-                }
+                reasons.add(r.textValue());
             }
             suppressionService.putAccountSuppressionAttributes(region, reasons);
             LOG.infov("SES V2 PutAccountSuppressionAttributes: {0}", reasons);
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -279,13 +258,9 @@ public class SesAccountController {
     public Response putAccountSendingAttributes(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = objectMapper.readTree(body);
-            JsonNode sendingEnabledNode = request.get("SendingEnabled");
-            if (sendingEnabledNode == null || !sendingEnabledNode.isBoolean()) {
-                throw new AwsException("BadRequestException",
-                        "SendingEnabled must be present and must be a boolean", 400);
-            }
-            accountService.setAccountSendingEnabled(region, sendingEnabledNode.booleanValue());
+            JsonNode request = readOptionBody(objectMapper, body);
+            accountService.setAccountSendingEnabled(region,
+                    coerceBooleanOrFalse(request.path("SendingEnabled")));
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
@@ -305,9 +280,9 @@ public class SesAccountController {
         JsonNode node = parent.path(field);
         if (node.isMissingNode() || node.isNull()) {
             if (required) {
-                throw new AwsException("BadRequestException",
-                        "1 validation error detected: Value null at '" + path
-                                + "' failed to satisfy constraint: Member must not be null", 400);
+                throw SmithyValidationErrors.badRequest(
+                        "Value null at '" + path
+                                + "' failed to satisfy constraint: Member must not be null");
             }
             return false;
         }
@@ -320,11 +295,11 @@ public class SesAccountController {
                 return false;
             }
         }
-        throw new AwsException("BadRequestException",
-                "1 validation error detected: Value at '" + path
-                        + "' failed to satisfy constraint: Member must satisfy enum value set: [ENABLED, DISABLED]",
-                400);
+        throw SmithyValidationErrors.badRequest(
+                "Value at '" + path
+                        + "' failed to satisfy constraint: Member must satisfy enum value set: [ENABLED, DISABLED]");
     }
+
     @GET
     @Path("/deliverability-dashboard/blacklist-report")
     public Response getBlacklistReports(@QueryParam("BlacklistItemNames") List<String> blacklistItemNames) {
@@ -340,62 +315,7 @@ public class SesAccountController {
         return Response.ok(result).build();
     }
 
-    @GET
-    @Path("/insights/{messageId}")
-    public Response getMessageInsights(@Context HttpHeaders headers,
-                                       @PathParam("messageId") String messageId) {
-        String region = regionResolver.resolveRegion(headers);
-        if (!accountService.findAccountVdmAttributes(region).map(AccountVdmAttributes::vdmEnabled).orElse(false)) {
-            throw new AwsException("NotFoundException",
-                    "To use this feature you must enable Virtual Deliverability Manager.", 404);
-        }
-        if (!SesMessageIds.isWellFormed(messageId)) {
-            throw new AwsException("BadRequestException",
-                    "MessageId is not a valid SES message id.", 400);
-        }
-        throw new AwsException("NotFoundException",
-                "Message " + messageId + " was not found.", 404);
-    }
 
-    @POST
-    @Path("/metrics/batch")
-    public Response batchGetMetricData(@Context HttpHeaders headers, String body) {
-        String region = regionResolver.resolveRegion(headers);
-        try {
-            if (!accountService.findAccountVdmAttributes(region).map(AccountVdmAttributes::vdmEnabled).orElse(false)) {
-                throw new AwsException("BadRequestException",
-                        "To use this feature you must enable Virtual Deliverability Manager.", 400);
-            }
-            JsonNode request = objectMapper.readTree(body == null ? "{}" : body);
-            requireJsonObject(request);
-            JsonNode queries = request.path("Queries");
-            if (!queries.isArray() || queries.isEmpty()) {
-                throw new AwsException("BadRequestException", "Queries is required.", 400);
-            }
-            ArrayNode results = objectMapper.createArrayNode();
-            for (JsonNode query : queries) {
-                Instant start = parseMetricTimestamp(query.path("StartDate"));
-                Instant end = parseMetricTimestamp(query.path("EndDate"));
-                if (start != null && end != null && (!isMidnightUtc(start) || !isMidnightUtc(end))) {
-                    throw new AwsException("BadRequestException",
-                            "To get daily aggregated data you must not specify partial-day timestamps. "
-                                    + "Please make your interval go from midnight to midnight UTC.", 400);
-                }
-                ObjectNode item = objectMapper.createObjectNode();
-                item.put("Id", query.path("Id").asText(""));
-                item.putArray("Timestamps");
-                item.putArray("Values");
-                results.add(item);
-            }
-            ObjectNode result = objectMapper.createObjectNode();
-            result.set("Results", results);
-            return Response.ok(result).build();
-        } catch (AwsException e) {
-            throw remapV1Exception(e);
-        } catch (Exception e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
-        }
-    }
 
     private static Instant parseMetricTimestamp(JsonNode node) {
         if (node == null || node.isMissingNode() || node.isNull()) {

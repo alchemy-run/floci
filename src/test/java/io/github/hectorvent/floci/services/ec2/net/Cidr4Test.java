@@ -39,6 +39,21 @@ class Cidr4Test {
     }
 
     @Test
+    void rfc1918RangeIsTheRangeThatWhollyContainsTheBlock() {
+        assertEquals(Optional.of(Cidr4.parse("10.0.0.0/8").orElseThrow()),
+                Cidr4.parse("10.2.0.0/16").orElseThrow().rfc1918Range());
+        assertEquals(Optional.of(Cidr4.parse("172.16.0.0/12").orElseThrow()),
+                Cidr4.parse("172.31.104.0/21").orElseThrow().rfc1918Range());
+        assertEquals(Optional.of(Cidr4.parse("192.168.0.0/16").orElseThrow()),
+                Cidr4.parse("192.168.0.0/16").orElseThrow().rfc1918Range());
+
+        assertEquals(Optional.empty(), Cidr4.parse("0.0.0.0/0").orElseThrow().rfc1918Range(),
+                "overlapping a range is not being in it");
+        assertEquals(Optional.empty(), Cidr4.parse("8.0.0.0/6").orElseThrow().rfc1918Range());
+        assertEquals(Optional.empty(), Cidr4.parse("52.0.0.0/16").orElseThrow().rfc1918Range());
+    }
+
+    @Test
     void containmentAndOverlapAreExactAtTheBoundaries() {
         Cidr4 vpc = Cidr4.parse("10.0.0.0/16").orElseThrow();
         assertTrue(vpc.contains(Cidr4.parse("10.0.255.0/24").orElseThrow()));

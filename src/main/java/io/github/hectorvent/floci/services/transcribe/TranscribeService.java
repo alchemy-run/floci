@@ -3,12 +3,13 @@ package io.github.hectorvent.floci.services.transcribe;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.Resettable;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.transcribe.model.TranscriptionJob;
 import io.github.hectorvent.floci.services.transcribe.model.TranscriptionJobSummary;
 import io.github.hectorvent.floci.services.transcribe.model.VocabularyInfo;
-import io.github.hectorvent.floci.core.common.Resettable;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -43,7 +44,7 @@ public class TranscribeService implements Resettable {
     }
 
     TranscribeService(StorageFactory storageFactory) {
-        this(storageFactory, new RegionResolver("us-east-1", "000000000000"));
+        this(storageFactory, new RegionResolver("us-east-1", "000000000000")); // partition-literal: test-shaped constructor default
     }
 
     @PostConstruct
@@ -255,10 +256,9 @@ public class TranscribeService implements Resettable {
 
     private void requireNonBlank(String value, String fieldName) {
         if (value == null || value.isBlank()) {
-            throw new AwsException("BadRequestException",
-                    "1 validation error detected: Value null at '" + fieldName
-                            + "' failed to satisfy constraint: Member must not be null",
-                    400);
+            throw SmithyValidationErrors.badRequest(
+                    "Value null at '" + fieldName
+                            + "' failed to satisfy constraint: Member must not be null");
         }
     }
 

@@ -3,16 +3,19 @@ package io.github.hectorvent.floci.services.ssoportal;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.ServicePrincipals;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
 import io.github.hectorvent.floci.services.ssoadmin.SsoAdminService;
+import io.github.hectorvent.floci.services.ssoadmin.model.Assignment;
+import io.github.hectorvent.floci.services.ssoadmin.model.PermissionSet;
 import io.github.hectorvent.floci.services.ssooidc.SsoOidcException;
 import io.github.hectorvent.floci.services.ssooidc.SsoOidcService;
 import io.github.hectorvent.floci.services.ssooidc.model.TokenSession;
 import io.github.hectorvent.floci.services.ssoportal.model.PortalAccountInfo;
-import io.github.hectorvent.floci.services.ssoportal.model.PortalRoleInfo;
 import io.github.hectorvent.floci.services.ssoportal.model.PortalRoleCredentials;
+import io.github.hectorvent.floci.services.ssoportal.model.PortalRoleInfo;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -33,16 +36,19 @@ public class SsoPortalService {
     private final SsoAdminService ssoAdminService;
     private final OrganizationsService organizationsService;
     private final IamService iamService;
+    private final RegionResolver regionResolver;
 
     @Inject
     public SsoPortalService(SsoOidcService oidcService,
                             SsoAdminService ssoAdminService,
                             OrganizationsService organizationsService,
-                            IamService iamService) {
+                            IamService iamService,
+                            RegionResolver regionResolver) {
         this.oidcService = oidcService;
         this.ssoAdminService = ssoAdminService;
         this.organizationsService = organizationsService;
         this.iamService = iamService;
+        this.regionResolver = regionResolver;
     }
 
     public PaginatedResult<PortalAccountInfo> listAccounts(
@@ -74,7 +80,7 @@ public class SsoPortalService {
         ssoAdminService.portalAssignmentsForUser(session.principalId()).stream()
                 .filter(assignment -> accountId.equals(assignment.accountId()))
                 .forEach(assignment -> {
-                    var permissionSet = ssoAdminService.permissionSetForPortal(assignment.permissionSetArn());
+                    PermissionSet permissionSet = ssoAdminService.permissionSetForPortal(assignment.permissionSetArn());
                     roles.putIfAbsent(assignment.permissionSetArn(),
                             new PortalRoleInfo(accountId, permissionSet.name()));
                 });
@@ -92,20 +98,20 @@ public class SsoPortalService {
         if (roleName == null || roleName.isBlank()) {
             throw new AwsException("InvalidRequestException", "roleName is required.", 400);
         }
-        var assignment = ssoAdminService.portalAssignmentsForUser(session.principalId()).stream()
+        Assignment assignment = ssoAdminService.portalAssignmentsForUser(session.principalId()).stream()
                 .filter(candidate -> accountId.equals(candidate.accountId()))
                 .filter(candidate -> roleName.equals(
                         ssoAdminService.permissionSetForPortal(candidate.permissionSetArn()).name()))
                 .findFirst()
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "The requested account role is not assigned to this user.", 404));
-        var permissionSet = ssoAdminService.permissionSetForPortal(assignment.permissionSetArn());
+        PermissionSet permissionSet = ssoAdminService.permissionSetForPortal(assignment.permissionSetArn());
         Instant expiration = Instant.now().plus(Duration.parse(permissionSet.sessionDuration()));
         String accessKeyId = "ASIA" + random(UPPER_ALPHANUMERIC, 16);
         String secretAccessKey = random(SECRET_CHARACTERS, 40);
         String sessionToken = random(SECRET_CHARACTERS, 200);
-        String roleArn = AwsArnUtils.Arn.of("iam", "", accountId,
-                "role/aws-reserved/sso.amazonaws.com/AWSReservedSSO_" + roleName + "_floci").toString();
+        String roleArn = regionResolver.buildGlobalArn("iam", accountId,
+                "role/aws-reserved/" + ServicePrincipals.of("sso") + "/AWSReservedSSO_" + roleName + "_floci");
         iamService.registerSessionForAccount(accountId, accessKeyId, secretAccessKey, sessionToken,
                 roleArn, expiration, null);
         return new PortalRoleCredentials(accessKeyId, expiration.toEpochMilli(), secretAccessKey, sessionToken);

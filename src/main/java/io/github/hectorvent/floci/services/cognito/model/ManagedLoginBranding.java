@@ -13,7 +13,6 @@ import java.util.Map;
 public class ManagedLoginBranding {
     private String managedLoginBrandingId;
     private String userPoolId;
-    private String clientId;
     private boolean useCognitoProvidedValues;
     /** Null when the caller supplied none; AWS omits Settings from the response in that case. */
     private Map<String, Object> settings;
@@ -50,12 +49,15 @@ public class ManagedLoginBranding {
         this.assets = assets == null ? new ArrayList<>() : new ArrayList<>(assets);
     }
 
-    public String getClientId() { return clientId; }
-    public void setClientId(String clientId) { this.clientId = clientId; }
-
     public long getCreationDate() { return creationDate; }
     public void setCreationDate(long creationDate) { this.creationDate = creationDate; }
 
     public long getLastModifiedDate() { return lastModifiedDate; }
     public void setLastModifiedDate(long lastModifiedDate) { this.lastModifiedDate = lastModifiedDate; }
+
+    private String clientId;
+
+    public String getClientId() { return clientId; }
+
+    public void setClientId(String clientId) { this.clientId = clientId; }
 }

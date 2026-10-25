@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.dns.ContainerEndpoints;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
+import io.github.hectorvent.floci.services.acm.CertificateGenerator;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
@@ -25,6 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 
 import java.nio.file.Path;
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -153,7 +155,7 @@ class ElastiCacheServerlessServiceTest {
         assertTrue(address.length() > 64, address);
         ArgumentCaptor<TlsMaterial> tls = ArgumentCaptor.forClass(TlsMaterial.class);
         verify(containers).tryStart(anyString(), eq("valkey"), anyString(), anyString(), anyString(), tls.capture());
-        java.security.cert.X509Certificate leaf = new io.github.hectorvent.floci.services.acm.CertificateGenerator()
+        X509Certificate leaf = new CertificateGenerator()
                 .parseCertificate(tls.getValue().certificateChainPem());
         assertTrue(leaf.getSubjectAlternativeNames().stream().anyMatch(san -> address.equals(san.get(1))),
                 "the leaf names the cache hostname");

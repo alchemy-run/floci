@@ -1,7 +1,7 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
 import io.github.hectorvent.floci.core.common.XmlParser;
-import io.github.hectorvent.floci.services.redshift.RedshiftEndpoints;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.specification.RequestSpecification;
@@ -29,7 +29,6 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * End-to-end integration test provisioning AWS::Redshift::Cluster,
@@ -69,7 +68,7 @@ class RedshiftClusterCfnIntegrationTest {
         for (String stack : stacksToCleanup) {
             try {
                 cloudFormation(stack, "DeleteStack", null);
-                awaitStackDeleted(stack);
+                CfnStackWaits.awaitStackDeleted(stack);
             } catch (Exception e) {
                 LOG.warnv("Failed to clean up stack {0}: {1}", stack, e.getMessage());
             }
@@ -131,7 +130,7 @@ class RedshiftClusterCfnIntegrationTest {
         }
 
         cloudFormation(stackName, "DeleteStack", null);
-        awaitStackDeleted(stackName);
+        CfnStackWaits.awaitStackDeleted(stackName);
         stacksToCleanup.remove(stackName);
 
         assertClusterNotFound(clusterId);
@@ -147,18 +146,6 @@ class RedshiftClusterCfnIntegrationTest {
         String template = """
             {
               "Resources": {
-                "Vpc": {
-                  "Type": "AWS::EC2::VPC",
-                  "Properties": {"CidrBlock": "10.87.0.0/16"}
-                },
-                "SubnetA": {
-                  "Type": "AWS::EC2::Subnet",
-                  "Properties": {"VpcId": {"Ref": "Vpc"}, "CidrBlock": "10.87.1.0/24", "AvailabilityZone": "us-east-1a"}
-                },
-                "SubnetB": {
-                  "Type": "AWS::EC2::Subnet",
-                  "Properties": {"VpcId": {"Ref": "Vpc"}, "CidrBlock": "10.87.2.0/24", "AvailabilityZone": "us-east-1b"}
-                },
                 "ParamGroup": {
                   "Type": "AWS::Redshift::ClusterParameterGroup",
                   "Properties": {
@@ -172,7 +159,7 @@ class RedshiftClusterCfnIntegrationTest {
                   "Properties": {
                     "ClusterSubnetGroupName": "%s",
                     "Description": "Test subnet group for CFN integration",
-                    "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}]
+                    "SubnetIds": ["subnet-12345678", "subnet-87654321"]
                   }
                 },
                 "SecurityGroup": {
@@ -203,7 +190,7 @@ class RedshiftClusterCfnIntegrationTest {
         assertSubnetGroupExists(sgName);
 
         cloudFormation(stackName, "DeleteStack", null);
-        awaitStackDeleted(stackName);
+        CfnStackWaits.awaitStackDeleted(stackName);
         stacksToCleanup.remove(stackName);
 
         assertParameterGroupNotFound(pgName);
@@ -216,9 +203,9 @@ class RedshiftClusterCfnIntegrationTest {
                     .atMost(Duration.ofSeconds(30))
                     .pollInterval(Duration.ofMillis(500))
                     .ignoreExceptions()
-                    .until(() -> DriverManager.getConnection(RedshiftEndpoints.jdbcUrl(host, port, "dev"), username, password), Objects::nonNull);
+                    .until(() -> DriverManager.getConnection("jdbc:postgresql://" + host + ":" + port + "/dev", username, password), Objects::nonNull);
         } catch (ConditionTimeoutException e) {
-            return DriverManager.getConnection(RedshiftEndpoints.jdbcUrl(host, port, "dev"), username, password);
+            return DriverManager.getConnection("jdbc:postgresql://" + host + ":" + port + "/dev", username, password);
         }
     }
 
@@ -235,6 +222,8 @@ class RedshiftClusterCfnIntegrationTest {
     }
 
     private static String describeStacks(String stack, String expectedStatus) {
+        CfnStackWaits.StackState state = CfnStackWaits.awaitTerminal(stack, CFN_AUTH);
+        assertEquals(expectedStatus, state.status(), state.reason());
         return given()
             .contentType("application/x-www-form-urlencoded")
             .header("Authorization", CFN_AUTH)
@@ -243,25 +232,6 @@ class RedshiftClusterCfnIntegrationTest {
         .when().post("/").then().statusCode(200)
             .body(containsString("<StackStatus>" + expectedStatus + "</StackStatus>"))
             .extract().asString();
-    }
-
-    private static void awaitStackDeleted(String stack) throws InterruptedException {
-        for (int i = 0; i < 100; i++) {
-            String body = given()
-                .contentType("application/x-www-form-urlencoded")
-                .header("Authorization", CFN_AUTH)
-                .formParam("Action", "DescribeStacks")
-                .formParam("StackName", stack)
-            .when().post("/").then().extract().asString();
-            if (body.contains("does not exist")) {
-                return;
-            }
-            if (body.contains("<StackStatus>DELETE_FAILED</StackStatus>")) {
-                fail("Stack delete failed: " + body);
-            }
-            Thread.sleep(50);
-        }
-        fail("Stack " + stack + " was not deleted within the timeout");
     }
 
     private static void assertClusterNotFound(String clusterId) {
@@ -316,7 +286,7 @@ class RedshiftClusterCfnIntegrationTest {
             .formParam("Action", "DescribeClusterSubnetGroups")
             .formParam("ClusterSubnetGroupName", sgName)
         .when().post("/").then()
-            .statusCode(404)
+            .statusCode(400)
             .body(containsString("<Code>ClusterSubnetGroupNotFoundFault</Code>"));
     }
 

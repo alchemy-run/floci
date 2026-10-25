@@ -15,6 +15,7 @@ import io.github.hectorvent.floci.services.lambda.microvm.MicrovmImageService;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmImageStore;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmRuntimeService;
 import io.github.hectorvent.floci.services.lambda.microvm.MicrovmStore;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -77,9 +78,9 @@ class LambdaMicrovmsServicePersistenceTest {
         when(containers.createAndStart(any())).thenAnswer(call ->
                 new ContainerLifecycleManager.ContainerInfo("container-" + UUID.randomUUID(), Map.of()));
         ContainerBuilder builder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder spec = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        ContainerBuilder.Builder spec = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(builder.newContainer(anyString())).thenReturn(spec);
-        when(spec.build()).thenReturn(mock(ContainerSpec.class));
+        when(spec.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.services().lambda().dockerNetwork()).thenReturn(Optional.empty());
         LaunchedContainerAwsEnv env = mock(LaunchedContainerAwsEnv.class);

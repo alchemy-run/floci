@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -15,6 +16,7 @@ import io.github.hectorvent.floci.services.cloudtrail.CloudTrailEventService;
 import io.github.hectorvent.floci.services.detective.model.DetectiveMember;
 import io.github.hectorvent.floci.services.detective.model.DetectiveState;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
+import io.github.hectorvent.floci.services.organizations.model.Organization;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -162,8 +164,8 @@ public class DetectiveService implements Resettable {
             states.put(region, state);
         }
         ObjectNode response = objectMapper.createObjectNode();
-        var datasources = response.putArray("MemberDatasources");
-        var unprocessed = response.putArray("UnprocessedAccounts");
+        ArrayNode datasources = response.putArray("MemberDatasources");
+        ArrayNode unprocessed = response.putArray("UnprocessedAccounts");
         for (String accountId : new java.util.LinkedHashSet<>(accountIds)) {
             if (owner.equals(accountId)) {
                 datasources.add(membershipDatasources(accountId, graphArn, state));
@@ -189,8 +191,8 @@ public class DetectiveService implements Resettable {
         }
         String caller = regionResolver.getAccountId();
         ObjectNode response = objectMapper.createObjectNode();
-        var datasources = response.putArray("MembershipDatasources");
-        var unprocessed = response.putArray("UnprocessedGraphs");
+        ArrayNode datasources = response.putArray("MembershipDatasources");
+        ArrayNode unprocessed = response.putArray("UnprocessedGraphs");
         for (String graphArn : new java.util.LinkedHashSet<>(graphArns)) {
             String[] parts = graphArn.split(":");
             String graphRegion = parts[3];
@@ -334,7 +336,7 @@ public class DetectiveService implements Resettable {
 
     public synchronized void enableAdmin(String region, String callerAccountId, String accountId) {
         requireAccountId(accountId);
-        var organization = organizationsService.describeOrganization(callerAccountId);
+        Organization organization = organizationsService.describeOrganization(callerAccountId);
         if (!callerAccountId.equals(organization.getMasterAccountId())) {
             throw new AwsException("AccessDeniedException",
                     "Only the organization management account can designate the Detective administrator account.", 403);

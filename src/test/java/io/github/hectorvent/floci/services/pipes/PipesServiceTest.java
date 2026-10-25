@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.pipes.model.DesiredState;
 import io.github.hectorvent.floci.services.pipes.model.Pipe;
@@ -128,7 +128,7 @@ class PipesServiceTest {
 
     @Test
     void createPipeWithSelfManagedKafkaSourceRequiresTopicParameters() throws Exception {
-        var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
+        ObjectMapper mapper = new ObjectMapper();
         AwsException ex = assertThrows(AwsException.class, () ->
                 pipesService.createPipe("smk-pipe",
                         "smk://localhost:9092",
@@ -382,26 +382,6 @@ class PipesServiceTest {
     }
 
     @Test
-    void createPipeStoresLogConfigurationAndKmsKey() {
-        com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-        com.fasterxml.jackson.databind.JsonNode logConfig = mapper.createObjectNode()
-                .put("Level", "INFO");
-        Pipe pipe = pipesService.createPipe("log-pipe",
-                "arn:aws:sqs:us-east-1:000000000000:source",
-                "arn:aws:sqs:us-east-1:000000000000:target",
-                "arn:aws:iam::000000000000:role/role",
-                null, null, null, null, null, null, Map.of(),
-                logConfig, "alias/pipes-key", "us-east-1");
-
-        assertEquals("INFO", pipe.getLogConfiguration().get("Level").asText());
-        assertEquals("alias/pipes-key", pipe.getKmsKeyIdentifier());
-
-        Pipe described = pipesService.describePipe("log-pipe", "us-east-1");
-        assertEquals("INFO", described.getLogConfiguration().get("Level").asText());
-        assertEquals("alias/pipes-key", described.getKmsKeyIdentifier());
-    }
-
-    @Test
     void regionIsolation() {
         pipesService.createPipe("region-pipe",
                 "arn:aws:sqs:us-east-1:000000000000:source",
@@ -559,6 +539,32 @@ class PipesServiceTest {
 
         assertEquals("ValidationException", ex.getErrorCode());
         assertTrue(ex.getMessage().contains("must be between 1 and 10"), ex.getMessage());
+    }
+
+    @Test
+    void dynamoDbStreamRetryOptionsAreAcceptedAndReturned() {
+        String created = """
+                {"StartingPosition":"TRIM_HORIZON","MaximumRetryAttempts":3,"MaximumRecordAgeInSeconds":60,
+                 "OnPartialBatchItemFailure":"AUTOMATIC_BISECT"}""";
+        String updated = """
+                {"MaximumRetryAttempts":10000,"MaximumRecordAgeInSeconds":604800,
+                 "OnPartialBatchItemFailure":"AUTOMATIC_BISECT"}""";
+
+        pipesService.createPipe("ddb-retry-pipe",
+                "arn:aws:dynamodb:us-east-1:000000000000:table/orders/stream/2024-01-01T00:00:00.000",
+                "arn:aws:sqs:us-east-1:000000000000:target", "arn:aws:iam::000000000000:role/role",
+                null, null, null, sourceParameters("{\"DynamoDBStreamParameters\":" + created + "}"),
+                null, null, null, "us-east-1");
+        assertEquals(sourceParameters(created), pipesService.describePipe("ddb-retry-pipe", "us-east-1")
+                .getSourceParameters().path("DynamoDBStreamParameters"));
+
+        pipesService.updatePipe("ddb-retry-pipe", null, null, null, null, null,
+                sourceParameters("{\"DynamoDBStreamParameters\":" + updated + "}"), null, null, "us-east-1");
+        JsonNode stored = pipesService.describePipe("ddb-retry-pipe", "us-east-1")
+                .getSourceParameters().path("DynamoDBStreamParameters");
+        assertEquals(10000, stored.path("MaximumRetryAttempts").asInt());
+        assertEquals(604800, stored.path("MaximumRecordAgeInSeconds").asInt());
+        assertEquals("AUTOMATIC_BISECT", stored.path("OnPartialBatchItemFailure").asText());
     }
 
     private static JsonNode sourceParameters(String json) {

@@ -44,6 +44,7 @@ class Ec2VpcEndpointCfnProvisionerTest {
         CloudFormationTemplateEngine engine = mock(CloudFormationTemplateEngine.class);
         when(engine.resolve(any())).thenAnswer(inv -> fakeResolve(inv.getArgument(0)));
         when(engine.resolveNode(any())).thenAnswer(inv -> fakeResolveNode(inv.getArgument(0)));
+        when(engine.resolveNodeOmittingNoValue(any())).thenAnswer(inv -> fakeResolveNode(inv.getArgument(0)));
         // Same contract as the real resolveJsonAttribute: resolve the tree, then unwrap a
         // textual result rather than re-serialising it (#2317's double-encoding trap).
         when(engine.resolveJsonAttribute(any())).thenAnswer(inv -> {
@@ -113,7 +114,7 @@ class Ec2VpcEndpointCfnProvisionerTest {
     @Test
     void gatewayEndpointSetsPhysicalIdAndResolvesRefs() {
         when(ec2.createVpcEndpoint(eq("us-east-1"), eq("resolved-Vpc"), eq("com.amazonaws.us-east-1.s3"),
-                eq("Gateway"), eq(List.of("resolved-Rt")), eq(List.of()), eq(List.of()), isNull(), isNull(), anyList()))
+                eq("Gateway"), eq(List.of("resolved-Rt")), eq(List.of()), eq(List.of()), isNull(), isNull(), anyList(), anyList(), any()))
                 .thenReturn(endpoint("vpce-123"));
         StackResource r = resource();
         ObjectNode props = mapper.createObjectNode()
@@ -132,7 +133,7 @@ class Ec2VpcEndpointCfnProvisionerTest {
     @Test
     void dnsEntriesPairTheZoneWithTheNameAndJoinOnCommas() {
         when(ec2.createVpcEndpoint(anyString(), anyString(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), any(), any(), anyList()))
+                anyList(), anyList(), anyList(), any(), any(), anyList(), anyList(), any()))
                 .thenReturn(endpoint("vpce-entries"));
         when(ec2.endpointDnsEntries(any())).thenReturn(List.of(
                 new VpcEndpointDnsEntry("vpce-entries-ab12cd34.s3.us-east-1.vpce.amazonaws.com", "ZREGIONAL"),
@@ -151,7 +152,7 @@ class Ec2VpcEndpointCfnProvisionerTest {
     @Test
     void privateDnsEnabledResolvesThroughEngine() {
         when(ec2.createVpcEndpoint(anyString(), anyString(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), eq(Boolean.TRUE), any(), anyList()))
+                anyList(), anyList(), anyList(), eq(Boolean.TRUE), any(), anyList(), anyList(), any()))
                 .thenReturn(endpoint("vpce-dns"));
         StackResource r = resource();
         ObjectNode props = mapper.createObjectNode()
@@ -165,7 +166,7 @@ class Ec2VpcEndpointCfnProvisionerTest {
 
         assertEquals("vpce-dns", r.getPhysicalId());
         verify(ec2).createVpcEndpoint(eq("us-east-1"), eq("vpc-1"), eq("com.amazonaws.us-east-1.ecr.api"),
-                eq("Interface"), anyList(), anyList(), anyList(), eq(Boolean.TRUE), any(), anyList());
+                eq("Interface"), anyList(), anyList(), anyList(), eq(Boolean.TRUE), any(), anyList(), anyList(), any());
     }
 
     @Test
@@ -174,7 +175,7 @@ class Ec2VpcEndpointCfnProvisionerTest {
         // Passing null here would drop a CloudFormation-declared policy exactly as the
         // EC2 API path used to.
         when(ec2.createVpcEndpoint(anyString(), anyString(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), any(), any(), anyList()))
+                anyList(), anyList(), anyList(), any(), any(), anyList(), anyList(), any()))
                 .thenReturn(endpoint("vpce-policy"));
         StackResource r = resource();
         ObjectNode props = mapper.createObjectNode()
@@ -193,7 +194,7 @@ class Ec2VpcEndpointCfnProvisionerTest {
 
         verify(ec2).createVpcEndpoint(eq("us-east-1"), eq("vpc-1"), eq("com.amazonaws.us-east-1.s3"),
                 anyString(), anyList(), anyList(), anyList(), any(),
-                eq(policy.toString()), anyList());
+                eq(policy.toString()), anyList(), anyList(), any());
     }
 
     @Test
@@ -201,7 +202,7 @@ class Ec2VpcEndpointCfnProvisionerTest {
         // A PolicyDocument carrying Fn::Sub/Ref must reach Ec2Service resolved, or
         // DescribeVpcEndpoints hands the caller back literal template text.
         when(ec2.createVpcEndpoint(anyString(), anyString(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), any(), any(), anyList()))
+                anyList(), anyList(), anyList(), any(), any(), anyList(), anyList(), any()))
                 .thenReturn(endpoint("vpce-sub"));
         StackResource r = resource();
         ObjectNode props = mapper.createObjectNode()
@@ -221,7 +222,7 @@ class Ec2VpcEndpointCfnProvisionerTest {
 
         ArgumentCaptor<String> stored = ArgumentCaptor.forClass(String.class);
         verify(ec2).createVpcEndpoint(anyString(), anyString(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), any(), stored.capture(), anyList());
+                anyList(), anyList(), anyList(), any(), stored.capture(), anyList(), anyList(), any());
         String document = stored.getValue();
         assertTrue(document.contains("arn:aws:s3:::us-east-1-artifacts/*"), document);
         assertTrue(document.contains("resolved-AppRole"), document);
@@ -232,7 +233,7 @@ class Ec2VpcEndpointCfnProvisionerTest {
     @Test
     void anAbsentPolicyDocumentStaysNull() {
         when(ec2.createVpcEndpoint(anyString(), anyString(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), any(), isNull(), anyList()))
+                anyList(), anyList(), anyList(), any(), isNull(), anyList(), anyList(), any()))
                 .thenReturn(endpoint("vpce-nopolicy"));
         StackResource r = resource();
         ObjectNode props = mapper.createObjectNode()
@@ -242,13 +243,13 @@ class Ec2VpcEndpointCfnProvisionerTest {
         provisioner.provision(r, props, ctx());
 
         verify(ec2).createVpcEndpoint(anyString(), anyString(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), any(), isNull(), anyList());
+                anyList(), anyList(), anyList(), any(), isNull(), anyList(), anyList(), any());
     }
 
     @Test
     void updateReplacesAndDeletesPreviousEndpoint() {
         when(ec2.createVpcEndpoint(anyString(), anyString(), anyString(), anyString(),
-                anyList(), anyList(), anyList(), any(), any(), anyList()))
+                anyList(), anyList(), anyList(), any(), any(), anyList(), anyList(), any()))
                 .thenReturn(endpoint("vpce-new"));
         StackResource r = resource();
         r.setPhysicalId("vpce-old");

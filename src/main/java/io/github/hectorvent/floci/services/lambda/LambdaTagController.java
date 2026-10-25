@@ -33,15 +33,14 @@ import java.util.Map;
 public class LambdaTagController {
 
     private final LambdaService lambdaService;
-    private final MicrovmImageService microvmImageService;
     private final LambdaMicrovmsService microvmsService;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public LambdaTagController(LambdaService lambdaService, MicrovmImageService microvmImageService,
-                               LambdaMicrovmsService microvmsService, ObjectMapper objectMapper) {
+    public LambdaTagController(LambdaService lambdaService,
+                               io.github.hectorvent.floci.services.lambdamicrovms.LambdaMicrovmsService microvmsService,
+                               ObjectMapper objectMapper) {
         this.lambdaService = lambdaService;
-        this.microvmImageService = microvmImageService;
         this.microvmsService = microvmsService;
         this.objectMapper = objectMapper;
     }
@@ -80,8 +79,7 @@ public class LambdaTagController {
         try {
             @SuppressWarnings("unchecked")
             Map<String, Object> request = objectMapper.readValue(body, Map.class);
-            @SuppressWarnings("unchecked")
-            Map<String, String> tags = (Map<String, String>) request.get("Tags");
+            Map<String, String> tags = LambdaService.requestTags(request);
             if (tags == null) {
                 throw new AwsException("InvalidParameterValueException", "Tags is required", 400);
             }
@@ -113,6 +111,9 @@ public class LambdaTagController {
         }
         return Response.noContent().build();
     }
+
+    @Inject
+    MicrovmImageService microvmImageService;
 
     /** {@code arn:aws:lambda:us-east-1:...} → {@code us-east-1}. */
     private static String regionFromArn(String arn) {

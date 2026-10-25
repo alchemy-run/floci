@@ -1,11 +1,11 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.ses.model.EmailTemplate;
 import io.github.hectorvent.floci.services.ses.model.Tag;
@@ -18,6 +18,7 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
@@ -27,8 +28,9 @@ import org.jboss.logging.Logger;
 import java.util.List;
 
 import static io.github.hectorvent.floci.services.ses.SesV2Json.parseTagsArray;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.putTimestamp;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception;
-import static io.github.hectorvent.floci.services.ses.SesV2Json.requireJsonObject;
 
 /**
  * SES V2 email-template endpoints ({@code /v2/email/templates}). Talks to
@@ -62,7 +64,7 @@ public class SesTemplateController {
     public Response createEmailTemplate(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = objectMapper.readTree(body);
+            JsonNode request = readOptionBody(objectMapper, body);
             String templateName = request.path("TemplateName").asText(null);
             if (templateName == null || templateName.isBlank()) {
                 throw new AwsException("BadRequestException", "TemplateName is required.", 400);
@@ -77,26 +79,26 @@ public class SesTemplateController {
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
     @GET
     @Path("/templates")
-    public Response listEmailTemplates(@Context HttpHeaders headers) {
+    public Response listEmailTemplates(@Context HttpHeaders headers,
+                                       @QueryParam("PageSize") String pageSize,
+                                       @QueryParam("NextToken") String nextToken) {
         String region = regionResolver.resolveRegion(headers);
-        List<EmailTemplate> templates = templateService.listTemplates(region);
+        PaginatedResult<EmailTemplate> page = templateService.listTemplates(region,
+                SesListPaging.V2_LIST_EMAIL_TEMPLATES, SesListPaging.parseQueryPageSize(pageSize), nextToken);
         ObjectNode result = objectMapper.createObjectNode();
         ArrayNode items = result.putArray("TemplatesMetadata");
-        for (EmailTemplate t : templates) {
+        for (EmailTemplate t : page.items()) {
             ObjectNode item = objectMapper.createObjectNode();
             item.put("TemplateName", t.getTemplateName());
-            if (t.getCreatedTimestamp() != null) {
-                item.put("CreatedTimestamp", t.getCreatedTimestamp().getEpochSecond());
-            }
+            putTimestamp(item, "CreatedTimestamp", t.getCreatedTimestamp());
             items.add(item);
         }
+        result.put("NextToken", page.nextToken());
         return Response.ok(result).build();
     }
 
@@ -120,15 +122,13 @@ public class SesTemplateController {
                                          String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = objectMapper.readTree(body);
+            JsonNode request = readOptionBody(objectMapper, body);
             EmailTemplate template = parseTemplateContent(templateName, request.path("TemplateContent"));
             templateService.updateTemplate(template, region);
             LOG.infov("SES V2 UpdateEmailTemplate: {0}", templateName);
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -153,11 +153,10 @@ public class SesTemplateController {
                                              String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            if (body == null || body.isBlank()) {
+            if (body == null || body.isEmpty()) {
                 throw new AwsException("BadRequestException", "Request body is required.", 400);
             }
-            JsonNode request = objectMapper.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
             JsonNode templateDataNode = request.path("TemplateData");
             if (!templateDataNode.isMissingNode() && !templateDataNode.isNull()
                     && !templateDataNode.isTextual()) {
@@ -172,8 +171,6 @@ public class SesTemplateController {
             return Response.ok(result).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 

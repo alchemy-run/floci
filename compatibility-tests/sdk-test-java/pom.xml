@@ -16,8 +16,8 @@
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <aws.sdk.version>2.52.0</aws.sdk.version>
-        <awsjavasdk.version>2.52.0</awsjavasdk.version>
+        <aws.sdk.version>2.55.11</aws.sdk.version>
+        <awsjavasdk.version>2.55.11</awsjavasdk.version>
         <jackson.version>2.18.8</jackson.version>
         <kafka.clients.version>3.9.2</kafka.clients.version>
         <netty.version>4.1.135.Final</netty.version>
@@ -74,6 +74,10 @@
     <dependencies>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
+            <artifactId>servicequotas</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
             <artifactId>acm</artifactId>
         </dependency>
         <dependency>
@@ -110,6 +114,10 @@
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
+            <artifactId>redshiftserverless</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
             <artifactId>sns</artifactId>
         </dependency>
         <dependency>
@@ -123,6 +131,10 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>lambda</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>lambdaweb</artifactId>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
@@ -162,6 +174,10 @@
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
+            <artifactId>transfer</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
             <artifactId>kafka</artifactId>
         </dependency>
         <dependency>
@@ -179,6 +195,10 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>glue</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>resourcegroups</artifactId>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
@@ -218,6 +238,10 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>rds</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>dsql</artifactId>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
@@ -341,6 +365,11 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>emr</artifactId>
+        </dependency>
+        <!-- EMR Serverless client -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>emrserverless</artifactId>
         </dependency>
         <!-- WAF v2 client -->
         <dependency>
@@ -473,6 +502,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>elasticloadbalancingv2</artifactId>
         </dependency>
+        <!-- Route 53 Resolver client -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>route53resolver</artifactId>
+        </dependency>
         <!-- Global Accelerator client -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
@@ -595,6 +629,11 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>appintegrations</artifactId>
         </dependency>
+        <!-- Amazon Data Lifecycle Manager client -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>dlm</artifactId>
+        </dependency>
         <!-- DataSync client -->
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
@@ -646,6 +685,20 @@
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcpkix-jdk18on</artifactId>
             <version>1.84</version>
+            <scope>test</scope>
+        </dependency>
+        <!-- MQTT 3.1.1 and MQTT 5 clients for the IoT custom-authorizer WebSocket tests,
+             the versions the emulator module itself tests with -->
+        <dependency>
+            <groupId>org.eclipse.paho</groupId>
+            <artifactId>org.eclipse.paho.client.mqttv3</artifactId>
+            <version>1.2.5</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.eclipse.paho</groupId>
+            <artifactId>org.eclipse.paho.mqttv5.client</artifactId>
+            <version>1.2.5</version>
             <scope>test</scope>
         </dependency>
         <!-- Decodes the Snappy variants Firehose delivers to S3 (issue #2328).

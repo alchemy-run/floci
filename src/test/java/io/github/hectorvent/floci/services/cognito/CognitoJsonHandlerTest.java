@@ -9,15 +9,11 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.ReservedTags;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.acm.AcmService;
-import io.github.hectorvent.floci.services.cognito.model.ManagedLoginBranding;
-import io.github.hectorvent.floci.services.cognito.model.UserPool;
-import io.github.hectorvent.floci.services.cognito.model.UserPoolClient;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.Spliterators;
 import java.util.stream.Collectors;
@@ -29,13 +25,12 @@ import static org.mockito.Mockito.mock;
 class CognitoJsonHandlerTest {
 
     private CognitoJsonHandler handler;
-    private CognitoService service;
     private ObjectMapper mapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
         RegionResolver regionResolver = new RegionResolver("us-east-1", "000000000000");
-        service = new CognitoService(
+        CognitoService service = new CognitoService(
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
@@ -47,110 +42,7 @@ class CognitoJsonHandlerTest {
                 null,
                 mock(AcmService.class)
         );
-        handler = new CognitoJsonHandler(service,
-                new CognitoManagedLoginBrandingService(new InMemoryStorage<>(), service), mapper);
-    }
-
-    @Test
-    void legacyBrandingMigratesToTheClientWithoutLosingTheStyle() {
-        UserPool pool = service.createUserPool(Map.of("PoolName", "legacy-branding"), "us-east-1");
-        UserPoolClient client = service.createUserPoolClient(pool.getId(), "client", false, false, List.of(), List.of());
-        ManagedLoginBranding legacy = new ManagedLoginBranding();
-        legacy.setUserPoolId(pool.getId());
-        legacy.setClientId(client.getClientId());
-        legacy.setManagedLoginBrandingId("12345678-1234-4234-8234-123456789012");
-        legacy.setUseCognitoProvidedValues(true);
-        InMemoryStorage<String, ManagedLoginBranding> legacyStore = new InMemoryStorage<>();
-        String key = pool.getId() + "::" + legacy.getManagedLoginBrandingId();
-        legacyStore.put(key, legacy);
-        CognitoManagedLoginBrandingService branding = new CognitoManagedLoginBrandingService(legacyStore, service);
-
-        assertEquals(legacy.getManagedLoginBrandingId(),
-                branding.describeByClient(pool.getId(), client.getClientId()).getManagedLoginBrandingId());
-        assertTrue(legacyStore.get(key).isEmpty());
-        assertTrue(service.describeManagedLoginBranding(pool.getId(), legacy.getManagedLoginBrandingId())
-                .isUseCognitoProvidedValues());
-        assertTrue(branding.mergedSettings(legacy).containsKey("components"));
-        service.deleteUserPoolClient(pool.getId(), client.getClientId());
-        assertThrows(AwsException.class,
-                () -> branding.describe(pool.getId(), legacy.getManagedLoginBrandingId()));
-    }
-
-    @Test
-    void managedLoginBranding_lifecycle() {
-        ObjectNode poolReq = mapper.createObjectNode();
-        poolReq.put("PoolName", "branding-pool");
-        JsonNode poolBody = (JsonNode) handler.handle("CreateUserPool", poolReq, "us-east-1").getEntity();
-        String poolId = poolBody.get("UserPool").get("Id").asText();
-
-        ObjectNode clientReq = mapper.createObjectNode();
-        clientReq.put("UserPoolId", poolId);
-        clientReq.put("ClientName", "branding-client");
-        JsonNode clientBody = (JsonNode) handler.handle("CreateUserPoolClient", clientReq, "us-east-1").getEntity();
-        String clientId = clientBody.get("UserPoolClient").get("ClientId").asText();
-
-        // No branding yet: by-client describe is a typed not-found.
-        ObjectNode byClientReq = mapper.createObjectNode();
-        byClientReq.put("UserPoolId", poolId);
-        byClientReq.put("ClientId", clientId);
-        AwsException missing = assertThrows(AwsException.class,
-                () -> handler.handle("DescribeManagedLoginBrandingByClient", byClientReq, "us-east-1"));
-        assertEquals("ResourceNotFoundException", missing.getErrorCode());
-
-        // Create with Cognito's provided values (no Settings/Assets).
-        ObjectNode createReq = mapper.createObjectNode();
-        createReq.put("UserPoolId", poolId);
-        createReq.put("ClientId", clientId);
-        createReq.put("UseCognitoProvidedValues", true);
-        JsonNode created = ((JsonNode) handler.handle("CreateManagedLoginBranding", createReq, "us-east-1").getEntity())
-                .get("ManagedLoginBranding");
-        String brandingId = created.get("ManagedLoginBrandingId").asText();
-        assertFalse(brandingId.isBlank());
-        assertTrue(created.get("UseCognitoProvidedValues").asBoolean());
-        assertFalse(created.has("Settings"), "provided-values style carries no Settings document");
-
-        // A second style for the same client is rejected with the typed conflict.
-        AwsException duplicate = assertThrows(AwsException.class,
-                () -> handler.handle("CreateManagedLoginBranding", createReq, "us-east-1"));
-        assertEquals("ManagedLoginBrandingExistsException", duplicate.getErrorCode());
-
-        // By-client describe resolves the same style.
-        JsonNode byClient = ((JsonNode) handler.handle("DescribeManagedLoginBrandingByClient", byClientReq, "us-east-1").getEntity())
-                .get("ManagedLoginBranding");
-        assertEquals(brandingId, byClient.get("ManagedLoginBrandingId").asText());
-
-        // Merged resources surface the provided default document.
-        ObjectNode mergedReq = mapper.createObjectNode();
-        mergedReq.put("UserPoolId", poolId);
-        mergedReq.put("ManagedLoginBrandingId", brandingId);
-        mergedReq.put("ReturnMergedResources", true);
-        JsonNode merged = ((JsonNode) handler.handle("DescribeManagedLoginBranding", mergedReq, "us-east-1").getEntity())
-                .get("ManagedLoginBranding");
-        assertTrue(merged.get("Settings").isObject());
-        assertTrue(merged.get("Settings").has("components"));
-
-        // Update to a custom document flips UseCognitoProvidedValues off.
-        ObjectNode updateReq = mapper.createObjectNode();
-        updateReq.put("UserPoolId", poolId);
-        updateReq.put("ManagedLoginBrandingId", brandingId);
-        updateReq.put("UseCognitoProvidedValues", false);
-        updateReq.set("Settings", merged.get("Settings"));
-        JsonNode updated = ((JsonNode) handler.handle("UpdateManagedLoginBranding", updateReq, "us-east-1").getEntity())
-                .get("ManagedLoginBranding");
-        assertFalse(updated.get("UseCognitoProvidedValues").asBoolean());
-        assertTrue(updated.get("Settings").has("components"));
-
-        ObjectNode describeReq = mapper.createObjectNode();
-        describeReq.put("UserPoolId", poolId);
-        describeReq.put("ManagedLoginBrandingId", brandingId);
-        JsonNode described = ((JsonNode) handler.handle("DescribeManagedLoginBranding", describeReq, "us-east-1").getEntity())
-                .get("ManagedLoginBranding");
-        assertFalse(described.get("UseCognitoProvidedValues").asBoolean());
-
-        handler.handle("DeleteManagedLoginBranding", describeReq, "us-east-1");
-        AwsException gone = assertThrows(AwsException.class,
-                () -> handler.handle("DescribeManagedLoginBranding", describeReq, "us-east-1"));
-        assertEquals("ResourceNotFoundException", gone.getErrorCode());
+        handler = new CognitoJsonHandler(service, mapper);
     }
 
     @Test
@@ -594,67 +486,6 @@ class CognitoJsonHandlerTest {
                 .put("ProviderAttributeName", "Cognito_Subject")
                 .put("ProviderAttributeValue", sourceUserId);
         return request;
-    }
-
-    @Test
-    void describeMissingUserPoolDomainReturnsEmptyDescription() {
-        ObjectNode request = mapper.createObjectNode();
-        request.put("Domain", "does-not-exist");
-        Response response = handler.handle("DescribeUserPoolDomain", request, "us-east-1");
-        assertEquals(200, response.getStatus());
-        JsonNode body = (JsonNode) response.getEntity();
-        assertTrue(body.get("DomainDescription").isObject());
-        assertFalse(body.get("DomainDescription").has("UserPoolId"));
-    }
-
-    @Test
-    void identityProviderAndRiskConfigurationThroughHandler() {
-        ObjectNode poolReq = mapper.createObjectNode();
-        poolReq.put("PoolName", "handler-idp-pool");
-        JsonNode poolBody = (JsonNode) handler.handle("CreateUserPool", poolReq, "us-east-1").getEntity();
-        String poolId = poolBody.get("UserPool").get("Id").asText();
-
-        ObjectNode createIdp = mapper.createObjectNode();
-        createIdp.put("UserPoolId", poolId);
-        createIdp.put("ProviderName", "corporate-oidc");
-        createIdp.put("ProviderType", "OIDC");
-        createIdp.putObject("ProviderDetails").put("oidc_issuer", "https://accounts.google.com");
-        createIdp.putObject("AttributeMapping").put("email", "email");
-        JsonNode created = (JsonNode) handler.handle("CreateIdentityProvider", createIdp, "us-east-1").getEntity();
-        assertEquals("OIDC", created.get("IdentityProvider").get("ProviderType").asText());
-
-        ObjectNode describeIdp = mapper.createObjectNode();
-        describeIdp.put("UserPoolId", poolId);
-        describeIdp.put("ProviderName", "corporate-oidc");
-        JsonNode described = (JsonNode) handler.handle("DescribeIdentityProvider", describeIdp, "us-east-1").getEntity();
-        assertEquals("https://accounts.google.com",
-                described.get("IdentityProvider").get("ProviderDetails").get("oidc_issuer").asText());
-
-        ObjectNode createDomain = mapper.createObjectNode();
-        createDomain.put("UserPoolId", poolId);
-        createDomain.put("Domain", "handler-auth");
-        JsonNode domainCreated = (JsonNode) handler.handle("CreateUserPoolDomain", createDomain, "us-east-1").getEntity();
-        assertFalse(domainCreated.has("CloudFrontDomain"));
-
-        ObjectNode describeDomain = mapper.createObjectNode();
-        describeDomain.put("Domain", "handler-auth");
-        JsonNode domainDescribed = (JsonNode) handler.handle("DescribeUserPoolDomain", describeDomain, "us-east-1").getEntity();
-        assertEquals("ACTIVE", domainDescribed.get("DomainDescription").get("Status").asText());
-        assertEquals(poolId, domainDescribed.get("DomainDescription").get("UserPoolId").asText());
-
-        ObjectNode setRisk = mapper.createObjectNode();
-        setRisk.put("UserPoolId", poolId);
-        setRisk.putObject("CompromisedCredentialsRiskConfiguration")
-                .putObject("Actions").put("EventAction", "BLOCK");
-        JsonNode riskSet = (JsonNode) handler.handle("SetRiskConfiguration", setRisk, "us-east-1").getEntity();
-        assertEquals("BLOCK", riskSet.get("RiskConfiguration")
-                .get("CompromisedCredentialsRiskConfiguration").get("Actions").get("EventAction").asText());
-
-        ObjectNode describeRisk = mapper.createObjectNode();
-        describeRisk.put("UserPoolId", poolId);
-        JsonNode riskDescribed = (JsonNode) handler.handle("DescribeRiskConfiguration", describeRisk, "us-east-1").getEntity();
-        assertEquals("BLOCK", riskDescribed.get("RiskConfiguration")
-                .get("CompromisedCredentialsRiskConfiguration").get("Actions").get("EventAction").asText());
     }
 
     private Set<String> schemaNames(JsonNode pool) {

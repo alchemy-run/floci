@@ -17,8 +17,8 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The managed-policy catalog carries the full published AWS list rather than a curated
@@ -42,6 +42,38 @@ class IamManagedPolicyCatalogTest {
                 new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
                 new RegionResolver("us-east-1", "000000000000"));
+    }
+
+    @Test
+    void aManagedPolicyResolvesUnderThePartitionItsArnNames() {
+        IamPolicy china = iamService.getPolicy("arn:aws-cn:iam::aws:policy/AdministratorAccess");
+        assertEquals("arn:aws-cn:iam::aws:policy/AdministratorAccess", china.getArn());
+        assertEquals("AdministratorAccess", china.getPolicyName());
+        IamPolicy govcloud = iamService.getPolicy("arn:aws-us-gov:iam::aws:policy/AWSLambdaExecute");
+        assertTrue(govcloud.getVersions().get(govcloud.getDefaultVersionId()).getDocument()
+                .contains("arn:aws-us-gov:logs:"));
+
+        AwsException unknown = assertThrows(AwsException.class,
+                () -> iamService.getPolicy("arn:aws-xyz:iam::aws:policy/AdministratorAccess"));
+        assertEquals("NoSuchEntity", unknown.getErrorCode());
+        AwsException denied = assertThrows(AwsException.class,
+                () -> iamService.deletePolicy("arn:aws-cn:iam::aws:policy/AdministratorAccess"));
+        assertEquals("AccessDenied", denied.getErrorCode());
+    }
+
+    @Test
+    void aChinaDeploymentListsTheChinaCatalog() {
+        IamService china = new IamService(
+                new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(),
+                new RegionResolver("cn-north-1", "000000000000"));
+        List<IamPolicy> listed = china.listPolicies("AWS", "/");
+        assertEquals(AwsManagedPolicies.POLICIES.size(), listed.size());
+        assertTrue(listed.stream().allMatch(p -> p.getArn().startsWith("arn:aws-cn:iam::aws:policy/")),
+                "every listed ARN carries the deployment's partition");
+        assertTrue(iamService.listPolicies("AWS", "/").stream()
+                .allMatch(p -> p.getArn().startsWith("arn:aws:iam::aws:policy/")));
     }
 
     @Test
@@ -139,6 +171,25 @@ class IamManagedPolicyCatalogTest {
         PolicyVersion fetched = iamService.getPolicyVersion(arn, "v3");
         assertEquals(listed.getDocument(), fetched.getDocument());
         assertTrue(fetched.isDefaultVersion());
+    }
+
+    @Test
+    void managedPolicySnapshotsDoNotShareMutableCatalogState() {
+        String arn = "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess";
+        IamPolicy fetched = iamService.getPolicy(arn);
+        String originalDocument = fetched.getDefaultDocument();
+
+        fetched.getTags().put("tampered", "true");
+        fetched.getVersions().get("v3").setDocument("{}");
+        fetched.getVersions().put("v99", new PolicyVersion("v99", "{}", false));
+
+        IamPolicy listed = iamService.listPolicies("AWS", null).stream()
+                .filter(policy -> arn.equals(policy.getArn()))
+                .findFirst()
+                .orElseThrow();
+        assertFalse(listed.getTags().containsKey("tampered"));
+        assertEquals(1, listed.getVersions().size());
+        assertEquals(originalDocument, listed.getVersions().get("v3").getDocument());
     }
 
     /**

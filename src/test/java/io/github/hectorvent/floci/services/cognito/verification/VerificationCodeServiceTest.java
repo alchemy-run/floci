@@ -10,6 +10,14 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -40,6 +48,25 @@ class VerificationCodeServiceTest {
             VerificationCode.Purpose.SIGNUP_CONFIRMATION, Duration.ofHours(24));
         assertEquals(6, code.length(), "code length");
         assertTrue(code.matches("\\d{6}"), "code is digits");
+    }
+
+    /**
+     * Measured on AWS (eu-west-1, 2026-10-16), the codes Cognito handed a custom email sender:
+     * an email sign-in code had eight digits, sign-up, resent, forgotten-password and attribute
+     * verification codes six.
+     */
+    @Test
+    void issue_emailSignInCode_hasEightDigits() {
+        for (int i = 0; i < 50; i++) {
+            String signIn = service.issue("pool", "alice-" + i,
+                VerificationCode.Purpose.EMAIL_OTP, Duration.ofMinutes(5));
+            assertTrue(signIn.matches("\\d{8}"), signIn);
+        }
+        for (VerificationCode.Purpose purpose : List.of(VerificationCode.Purpose.PASSWORD_RESET,
+                VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION, VerificationCode.Purpose.EMAIL_MFA)) {
+            String code = service.issue("pool", "bob-" + purpose, purpose, Duration.ofHours(1));
+            assertTrue(code.matches("\\d{6}"), purpose + " " + code);
+        }
     }
 
     @Test
@@ -212,6 +239,102 @@ class VerificationCodeServiceTest {
         assertDoesNotThrow(() -> service.consume("pool:child", "alice",
             VerificationCode.Purpose.SIGNUP_CONFIRMATION, childCode),
             "deleting pool must not invalidate a code issued by pool:child");
+    }
+
+    /** A code redeems once: of consumes of it at the same moment, one succeeds and the others find it gone. */
+    @Test
+    void consume_sameCodeConcurrently_redeemsOnce() throws Exception {
+        VerificationCodeService slow = new VerificationCodeService(SlowVerificationCodeStore.factory(), clock);
+        String code = slow.issue("pool", "alice", VerificationCode.Purpose.EMAIL_OTP, Duration.ofMinutes(5));
+
+        List<VerificationCodeException.Kind> outcomes = consumeAtOnce(slow, Collections.nCopies(8, code));
+
+        assertEquals(1, Collections.frequency(outcomes, null), outcomes.toString());
+        assertEquals(7, Collections.frequency(outcomes, VerificationCodeException.Kind.NOT_FOUND),
+            outcomes.toString());
+    }
+
+    /** Wrong codes at the same moment each use up an attempt, so five of them invalidate the code as five in turn do. */
+    @Test
+    void consume_wrongCodesConcurrently_countEveryAttempt() throws Exception {
+        VerificationCodeService slow = new VerificationCodeService(SlowVerificationCodeStore.factory(), clock);
+        String code = slow.issue("pool", "alice", VerificationCode.Purpose.EMAIL_OTP, Duration.ofMinutes(5));
+
+        consumeAtOnce(slow, Collections.nCopies(5, "000000".equals(code) ? "000001" : "000000"));
+
+        VerificationCodeException ex = assertThrows(VerificationCodeException.class,
+            () -> slow.consume("pool", "alice", VerificationCode.Purpose.EMAIL_OTP, code));
+        assertEquals(VerificationCodeException.Kind.NOT_FOUND, ex.getKind());
+    }
+
+    /** A code sent while the one before it is redeemed stays usable: redeeming the old code cannot delete it. */
+    @Test
+    void issue_whilePreviousCodeIsConsumed_leavesTheNewCodeUsable() throws Exception {
+        VerificationCodeService slow = new VerificationCodeService(SlowVerificationCodeStore.factory(), clock);
+        String previous = slow.issue("pool", "alice", VerificationCode.Purpose.EMAIL_OTP, Duration.ofMinutes(5));
+        clock.advance(Duration.ofSeconds(31));
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            CountDownLatch ready = new CountDownLatch(2);
+            CountDownLatch start = new CountDownLatch(1);
+            Future<VerificationCodeException.Kind> redeemed = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                try {
+                    slow.consume("pool", "alice", VerificationCode.Purpose.EMAIL_OTP, previous);
+                    return null;
+                } catch (VerificationCodeException e) {
+                    return e.getKind();
+                }
+            });
+            Future<String> resent = executor.submit(() -> {
+                ready.countDown();
+                start.await();
+                return slow.issue("pool", "alice", VerificationCode.Purpose.EMAIL_OTP, Duration.ofMinutes(5));
+            });
+            assertTrue(ready.await(10, TimeUnit.SECONDS));
+            start.countDown();
+            VerificationCodeException.Kind previousOutcome = redeemed.get(10, TimeUnit.SECONDS);
+            String code = resent.get(10, TimeUnit.SECONDS);
+
+            assertTrue(previousOutcome == null || previousOutcome == VerificationCodeException.Kind.MISMATCH,
+                "the old code is redeemed, or is wrong once the new one replaced it: " + previousOutcome);
+            assertDoesNotThrow(() -> slow.consume("pool", "alice", VerificationCode.Purpose.EMAIL_OTP, code));
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    /** Consumes each of {@code codes} as alice's EMAIL_OTP at the same moment; null where one succeeded. */
+    private static List<VerificationCodeException.Kind> consumeAtOnce(VerificationCodeService service,
+                                                                      List<String> codes) throws Exception {
+        ExecutorService executor = Executors.newFixedThreadPool(codes.size());
+        try {
+            CountDownLatch ready = new CountDownLatch(codes.size());
+            CountDownLatch start = new CountDownLatch(1);
+            List<Future<VerificationCodeException.Kind>> futures = new ArrayList<>();
+            for (String code : codes) {
+                futures.add(executor.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    try {
+                        service.consume("pool", "alice", VerificationCode.Purpose.EMAIL_OTP, code);
+                        return null;
+                    } catch (VerificationCodeException e) {
+                        return e.getKind();
+                    }
+                }));
+            }
+            assertTrue(ready.await(10, TimeUnit.SECONDS));
+            start.countDown();
+            List<VerificationCodeException.Kind> outcomes = new ArrayList<>();
+            for (Future<VerificationCodeException.Kind> future : futures) {
+                outcomes.add(future.get(10, TimeUnit.SECONDS));
+            }
+            return outcomes;
+        } finally {
+            executor.shutdownNow();
+        }
     }
 
     static final class MutableClock extends Clock {

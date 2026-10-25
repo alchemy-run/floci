@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.s3;
 
+import io.github.hectorvent.floci.services.apigateway.ApiGatewayCustomDomainFilter;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.core.MultivaluedHashMap;
@@ -12,7 +13,6 @@ import org.junit.jupiter.params.provider.NullSource;
 import org.mockito.ArgumentCaptor;
 
 import java.net.URI;
-
 import java.util.Optional;
 import java.util.Set;
 
@@ -67,6 +67,12 @@ class S3VirtualHostFilterTest {
             "my-bucket.s3.amazonaws.com:443,            localhost, my-bucket",
             "my-bucket.s3.us-east-1.amazonaws.com,      localhost, my-bucket",
             "my-bucket.s3.eu-west-1.amazonaws.com:443,  localhost, my-bucket",
+            // The same in every other partition: the longest published suffix wins, so .cn survives
+            "my-bucket.s3.cn-north-1.amazonaws.com.cn,  localhost, my-bucket",
+            "my-bucket.s3.amazonaws.com.cn,             localhost, my-bucket",
+            "my-bucket.s3.us-gov-west-1.amazonaws.com,  localhost, my-bucket",
+            "my-bucket.s3.us-iso-east-1.c2s.ic.gov,     localhost, my-bucket",
+            "my-bucket.s3.eusc-de-east-1.amazonaws.eu,  localhost, my-bucket",
             // LocalStack-compatible domains (*.localhost.localstack.cloud resolves to 127.0.0.1 via public DNS)
             "my-bucket.s3.localhost.localstack.cloud,           localhost, my-bucket",
             "my-bucket.s3.localhost.localstack.cloud:4566,      localhost, my-bucket",
@@ -426,6 +432,24 @@ class S3VirtualHostFilterTest {
         ArgumentCaptor<URI> rewritten = ArgumentCaptor.forClass(URI.class);
         verify(ctx).setRequestUri(rewritten.capture());
         assertEquals("/www.example.com/index.html", rewritten.getValue().getRawPath());
+    }
+
+    @Test
+    void filterLeavesApiGatewayCustomDomainRoutedRequestAlone() {
+        // ApiGatewayCustomDomainFilter already rewrote this dotted .localhost custom domain to
+        // /execute-api/...; the host must not also be read as the dotted bucket "api.mycorp".
+        URI requestUri = URI.create("http://api.mycorp.localhost:4566/execute-api/abc123/prod/items");
+        UriInfo uriInfo = mock(UriInfo.class);
+        when(uriInfo.getRequestUri()).thenReturn(requestUri);
+        when(uriInfo.getQueryParameters()).thenReturn(new MultivaluedHashMap<>());
+        ContainerRequestContext ctx = mock(ContainerRequestContext.class);
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+        when(ctx.getHeaderString("Host")).thenReturn("api.mycorp.localhost:4566");
+        when(ctx.getProperty(ApiGatewayCustomDomainFilter.ROUTED_PROPERTY)).thenReturn(Boolean.TRUE);
+
+        new S3VirtualHostFilter().filter(ctx);
+
+        verify(ctx, never()).setRequestUri(any(URI.class));
     }
 
     @Test

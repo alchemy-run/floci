@@ -11,10 +11,10 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.BackupWindows;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.Resettable;
+import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.CurrentContainerNetworkResolver;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
-import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
 import io.github.hectorvent.floci.core.resource.SupportedResourceType;
@@ -7388,7 +7388,7 @@ public class RdsService implements Resettable, ResourceProvider {
 
         String requestedTag = engineVersion.trim();
         // Aurora MySQL versions read 8.0.mysql_aurora.3.08.0. The MySQL image tag is the part in front.
-        var auroraSuffix = requestedTag.indexOf(".mysql_aurora.");
+        int auroraSuffix = requestedTag.indexOf(".mysql_aurora.");
         if (auroraSuffix > 0) {
             requestedTag = requestedTag.substring(0, auroraSuffix);
         }

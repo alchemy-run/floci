@@ -1,7 +1,7 @@
 package io.github.hectorvent.floci.core.common;
 
-import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Cookie;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.MultivaluedMap;
@@ -11,6 +11,7 @@ import java.util.Date;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -25,6 +26,32 @@ class RegionResolverTest {
                 "SignedHeaders=host, Signature=abc123");
 
         assertEquals("us-west-2", resolver.resolveRegion(headers));
+    }
+
+    @Test
+    void sigV4aRegionSetOfOneRegionSelectsIt() {
+        assertEquals("eu-west-1", resolver.resolveRegionFromRegionSet("eu-west-1"));
+        assertEquals("eu-west-1", resolver.resolveRegionFromRegionSet(" eu-west-1 "));
+    }
+
+    @Test
+    void sigV4aWildcardListOrMissingRegionSetServesTheDefaultRegion() {
+        assertEquals("us-east-1", resolver.resolveRegionFromRegionSet("*"));
+        assertEquals("us-east-1", resolver.resolveRegionFromRegionSet("eu-*"));
+        assertEquals("us-east-1", resolver.resolveRegionFromRegionSet("eu-west-1,us-west-2"));
+        assertEquals("us-east-1", resolver.resolveRegionFromRegionSet(""));
+        assertEquals("us-east-1", resolver.resolveRegionFromRegionSet(null));
+        assertEquals("us-east-1", resolver.resolveRegionFromRegionSet(","));
+        assertEquals("us-east-1", resolver.resolveRegionFromRegionSet(",,"));
+        assertEquals("us-east-1", resolver.resolveRegionFromRegionSet(" , , "));
+    }
+
+    @Test
+    void sigV4aAuthorizationResolvesFromRegionSet() {
+        HttpHeaders headers = stubHeaders(
+                "AWS4-ECDSA-P256-SHA256 Credential=AKID/20260215/sqs/aws4_request, SignedHeaders=host, Signature=abc",
+                "eu-west-1");
+        assertEquals("eu-west-1", resolver.resolveRegion(headers));
     }
 
     @Test
@@ -77,6 +104,19 @@ class RegionResolverTest {
     void fallsBackToDefaultWhenMalformedAuthHeader() {
         HttpHeaders headers = stubHeaders("Bearer some-token");
         assertEquals("us-east-1", resolver.resolveRegion(headers));
+    }
+
+    /** Published, pseudo, and pattern-admitted labels are regions; garbage, null and blank are not. */
+    @Test
+    void isKnownRegionFollowsThePartitionCatalogAndItsRegionPatterns() {
+        assertTrue(RegionResolver.isKnownRegion("us-east-1"));
+        assertTrue(RegionResolver.isKnownRegion("cn-north-1"));
+        assertTrue(RegionResolver.isKnownRegion("aws-cn-global"));
+        assertTrue(RegionResolver.isKnownRegion("eu-south-9"), "unpublished but matches the commercial pattern");
+        assertFalse(RegionResolver.isKnownRegion("polygondwanaland-west-1"));
+        assertFalse(RegionResolver.isKnownRegion("s3"));
+        assertFalse(RegionResolver.isKnownRegion(null));
+        assertFalse(RegionResolver.isKnownRegion(" "));
     }
 
     @Test
@@ -172,16 +212,128 @@ class RegionResolverTest {
         assertNull(resolver.resolveRegionFromHost(""));
     }
 
+    @Test
+    void theDeploymentPartitionFollowsTheDefaultRegion() {
+        assertEquals("aws", resolver.getDefaultPartition());
+        assertEquals("aws-cn", new RegionResolver("cn-north-1", "000000000000").getDefaultPartition());
+        assertEquals("aws-us-gov", new RegionResolver("us-gov-west-1", "000000000000").getDefaultPartition());
+        assertEquals("aws-iso-b", new RegionResolver("us-isob-east-1", "000000000000", "aws-iso-b").getDefaultPartition());
+    }
+
+    @Test
+    void anExplicitPartitionIdOverridesTheRegionDerivedOne() {
+        assertEquals("aws-cn", RegionResolver.effectivePartition("cn-north-1", Optional.empty()));
+        assertEquals("aws-us-gov", RegionResolver.effectivePartition("us-east-1", Optional.of(" AWS-US-GOV ")));
+        assertEquals("aws", RegionResolver.effectivePartition("us-east-1", Optional.of("  ")));
+    }
+
+    /**
+     * The request's partition comes from its signing region. A blank region (no credential) is
+     * the deployment's partition, never a literal {@code aws}; a pseudo-region resolves to its
+     * partition; and a region the catalog cannot place stays local rather than commercial.
+     */
+    @Test
+    void partitionForRegionScopesARequest() {
+        RegionResolver china = new RegionResolver("cn-north-1", "000000000000");
+        assertEquals("aws-cn", china.partitionForRegion(null));
+        assertEquals("aws-cn", china.partitionForRegion(""));
+        assertEquals("aws-cn", china.partitionForRegion("xx-nowhere-9"));
+        assertEquals("aws", china.partitionForRegion("us-east-1"));
+        assertEquals("aws-us-gov", china.partitionForRegion("us-gov-west-1"));
+        assertEquals("aws-eusc", china.partitionForRegion("eusc-de-east-1"));
+        assertEquals("aws-cn", resolver.partitionForRegion("aws-cn-global"));
+        assertEquals("aws-iso", resolver.partitionForRegion("aws-iso-global"));
+        assertEquals("aws", resolver.partitionForRegion("aws-global"));
+    }
+
+    /**
+     * AWS never signs with a pseudo-region, so one named in a credential scope is served as its
+     * partition's implicit global region instead of becoming a regional namespace of its own.
+     */
+    @Test
+    void aPseudoSigningRegionIsServedAsItsPartitionsGlobalRegion() {
+        assertEquals("cn-northwest-1", resolver.resolveRegionFromAuth(
+                "AWS4-HMAC-SHA256 Credential=AKID/20260617/aws-cn-global/sqs/aws4_request, SignedHeaders=host, Signature=abc"));
+        assertEquals("us-east-1", resolver.resolveRegionFromAuthOrNull(
+                "AWS4-HMAC-SHA256 Credential=AKID/20260617/aws-global/sqs/aws4_request, SignedHeaders=host, Signature=abc"));
+        assertEquals("us-gov-west-1",
+                resolver.resolveRegionFromPresignedCredential("AKID/20260617/aws-us-gov-global/s3/aws4_request"));
+        assertEquals("cn-north-1", resolver.resolveRegionFromAuth(
+                "AWS4-HMAC-SHA256 Credential=AKID/20260617/cn-north-1/sqs/aws4_request, SignedHeaders=host, Signature=abc"));
+        assertEquals("xx-nowhere-9", resolver.resolveRegionFromAuth(
+                "AWS4-HMAC-SHA256 Credential=AKID/20260617/xx-nowhere-9/sqs/aws4_request, SignedHeaders=host, Signature=abc"),
+                "an unknown label stays raw so the unknown-region guard can name it");
+    }
+
+    /**
+     * A region no partition publishes is scoped to the deployment's partition when served
+     * ({@code floci.partitions.allow-unknown-regions}), and its ARNs must agree with that scope.
+     */
+    @Test
+    void buildArnMintsAnUnknownRegionInTheDeploymentPartition() {
+        RegionResolver china = new RegionResolver("cn-north-1", "000000000000");
+        assertEquals("arn:aws-cn:sqs:xx-nowhere-9:000000000000:q", china.buildArn("sqs", "xx-nowhere-9", "q"));
+        assertEquals("arn:aws:sqs:us-east-1:000000000000:q", china.buildArn("sqs", "us-east-1", "q"));
+        assertEquals("arn:aws:sqs:xx-nowhere-9:000000000000:q", resolver.buildArn("sqs", "xx-nowhere-9", "q"));
+    }
+
+    @Test
+    void buildArnPreservesAnExplicitOwnerAcrossRegionalAndGlobalScopes() {
+        RegionResolver china = new RegionResolver("cn-north-1", "000000000000");
+        assertEquals("arn:aws-cn:rds:xx-nowhere-9:222222222222:db:db1",
+                china.buildArn("rds", "xx-nowhere-9", "222222222222", "db:db1"));
+        assertEquals("arn:aws:rds:us-east-1:222222222222:db:db1",
+                china.buildArn("rds", "us-east-1", "222222222222", "db:db1"));
+        assertEquals("arn:aws-cn:iam::222222222222:role/r",
+                china.buildArn("iam", "", "222222222222", "role/r"));
+        assertEquals("arn:aws-cn:iam::222222222222:role/r",
+                china.buildArn("iam", null, "222222222222", "role/r"));
+        assertEquals("arn:aws-cn:s3:::bucket", china.buildArn("s3", "", "", "bucket"));
+    }
+
+    @Test
+    void getPartitionOutsideARequestIsTheDeploymentPartition() {
+        assertEquals("aws", resolver.getPartition());
+        assertEquals("aws-cn", new RegionResolver("cn-north-1", "000000000000").getPartition());
+    }
+
+    @Test
+    void buildArnRoutesABlankRegionToTheDeploymentPartition() {
+        RegionResolver govCloud = new RegionResolver("us-gov-west-1", "000000000000");
+        assertEquals("arn:aws-us-gov:iam::000000000000:role/r", govCloud.buildArn("iam", "", "role/r"));
+        assertEquals("arn:aws-us-gov:iam::000000000000:role/r", govCloud.buildArn("iam", null, "role/r"));
+        assertEquals("arn:aws-us-gov:s3:::bucket", govCloud.buildGlobalArn("s3", "", "bucket"));
+        assertEquals("arn:aws-us-gov:sqs:us-gov-west-1:000000000000:q", govCloud.buildArn("sqs", "us-gov-west-1", "q"));
+        assertEquals("arn:aws:iam::000000000000:role/r", resolver.buildArn("iam", "", "role/r"));
+    }
+
+    @Test
+    void resolveRegionFromHostAcceptsEveryPartitionsShapeButOnlyPublishedIds() {
+        assertEquals("eusc-de-east-1", resolver.resolveRegionFromHost("abc123.execute-api.eusc-de-east-1.localhost:4566"));
+        assertEquals("us-isob-east-1", resolver.resolveRegionFromHost("abc123.execute-api.us-isob-east-1.localhost"));
+        assertEquals("cn-north-1", resolver.resolveRegionFromHost("abc123.execute-api.cn-north-1.amazonaws.com.cn"));
+        assertNull(resolver.resolveRegionFromHost("abc123.execute-api.xx-nowhere-9.localhost:4566"));
+        assertNull(resolver.resolveRegionFromHost("abc123.execute-api.my-cd-1.localhost:4566"));
+    }
+
     private static HttpHeaders stubHeaders(String authorizationValue) {
+        return stubHeaders(authorizationValue, null);
+    }
+
+    private static HttpHeaders stubHeaders(String authorizationValue, String regionSetValue) {
         return new HttpHeaders() {
             @Override public List<String> getRequestHeader(String name) {
                 if ("Authorization".equalsIgnoreCase(name) && authorizationValue != null) {
                     return List.of(authorizationValue);
                 }
+                if ("X-Amz-Region-Set".equalsIgnoreCase(name) && regionSetValue != null) {
+                    return List.of(regionSetValue);
+                }
                 return List.of();
             }
             @Override public String getHeaderString(String name) {
                 if ("Authorization".equalsIgnoreCase(name)) return authorizationValue;
+                if ("X-Amz-Region-Set".equalsIgnoreCase(name)) return regionSetValue;
                 return null;
             }
             @Override public MultivaluedMap<String, String> getRequestHeaders() { return new MultivaluedHashMap<>(); }

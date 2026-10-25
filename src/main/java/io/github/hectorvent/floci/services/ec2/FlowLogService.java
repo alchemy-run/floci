@@ -1,6 +1,8 @@
 package io.github.hectorvent.floci.services.ec2;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import io.github.hectorvent.floci.core.common.AvailabilityZoneIds;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -34,6 +36,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.zip.GZIPOutputStream;
 
 /**
@@ -58,12 +62,48 @@ public class FlowLogService {
 
     private static final Logger LOG = Logger.getLogger(FlowLogService.class);
 
-    /** AWS VPC Flow Logs default (version 5) field order. */
-    static final String DEFAULT_HEADER =
-            "account-id action az-id bytes dstaddr dstport end flow-direction instance-id "
-            + "interface-id log-status packets pkt-dst-aws-service pkt-dstaddr pkt-src-aws-service "
-            + "pkt-srcaddr protocol region srcaddr srcport start sublocation-id sublocation-type "
-            + "subnet-id tcp-flags traffic-path type version vpc-id";
+    /**
+     * The format a flow log is created with when CreateFlowLogs omits LogFormat, which
+     * DescribeFlowLogs reports for it thereafter. Version 2 fields in the order AWS documents.
+     */
+    public static final String DEFAULT_LOG_FORMAT =
+            "${version} ${account-id} ${interface-id} ${srcaddr} ${dstaddr} ${srcport} "
+            + "${dstport} ${protocol} ${packets} ${bytes} ${start} ${end} ${action} ${log-status}";
+
+    /**
+     * Every field a flow log record can carry, against the format version that introduced it.
+     *
+     * <p>The version a record reports is the highest of the versions its selected fields belong
+     * to, which is how AWS numbers a format. A record of version 2 fields alone reports 2, and one
+     * naming any version 5 field reports 5.
+     */
+    private static final Map<String, Integer> FIELD_VERSIONS = Map.ofEntries(
+            Map.entry("version", 2), Map.entry("account-id", 2), Map.entry("interface-id", 2),
+            Map.entry("srcaddr", 2), Map.entry("dstaddr", 2), Map.entry("srcport", 2),
+            Map.entry("dstport", 2), Map.entry("protocol", 2), Map.entry("packets", 2),
+            Map.entry("bytes", 2), Map.entry("start", 2), Map.entry("end", 2),
+            Map.entry("action", 2), Map.entry("log-status", 2),
+            Map.entry("vpc-id", 3), Map.entry("subnet-id", 3), Map.entry("instance-id", 3),
+            Map.entry("tcp-flags", 3), Map.entry("type", 3), Map.entry("pkt-srcaddr", 3),
+            Map.entry("pkt-dstaddr", 3),
+            Map.entry("region", 4), Map.entry("az-id", 4), Map.entry("sublocation-type", 4),
+            Map.entry("sublocation-id", 4),
+            Map.entry("pkt-src-aws-service", 5), Map.entry("pkt-dst-aws-service", 5),
+            Map.entry("flow-direction", 5), Map.entry("traffic-path", 5));
+
+    /**
+     * One ${field-name} token of a LogFormat.
+     *
+     * <p>Deliberately not restricted to the fields below. A token this emulator does not recognise
+     * still names a column the caller asked for, and matching it keeps that column in place.
+     */
+    private static final Pattern FIELD_TOKEN = Pattern.compile("\\$\\{([^}\\s]+)\\}");
+
+    /**
+     * The fields a flow log created without a LogFormat delivers, read from the same constant the
+     * describe reports rather than repeated, so the two cannot drift apart.
+     */
+    static final List<String> DEFAULT_FIELDS = tokensOf(DEFAULT_LOG_FORMAT);
 
     private static final DateTimeFormatter PATH_FMT =
             DateTimeFormatter.ofPattern("yyyy/MM/dd/HH").withZone(ZoneOffset.UTC);
@@ -115,126 +155,15 @@ public class FlowLogService {
 
     public FlowLog createFlowLog(String region, String resourceId, String resourceType,
                                  String trafficType, String logDestinationType,
-                                 String logDestination, String logFormat, int maxAggregationInterval) {
-        return createFlowLog(region, resourceId, resourceType, trafficType, logDestinationType,
-                logDestination, logFormat, maxAggregationInterval, null, null, List.of());
-    }
-
-    public FlowLog createFlowLog(String region, String resourceId, String resourceType,
-                                 String trafficType, String logDestinationType,
                                  String logDestination, String deliverLogsPermissionArn,
                                  String logFormat, int maxAggregationInterval) {
         return createFlowLog(region, resourceId, resourceType, trafficType, logDestinationType,
                 logDestination, logFormat, maxAggregationInterval, null, deliverLogsPermissionArn, List.of());
     }
 
-    public FlowLog createFlowLog(String region, String resourceId, String resourceType,
-                                 String trafficType, String logDestinationType,
-                                 String logDestination, String logFormat, int maxAggregationInterval,
-                                 String logGroupName, String deliverLogsPermissionArn, List<Tag> tags) {
-        FlowLog fl = new FlowLog();
-        fl.setFlowLogId("fl-" + randomHex(17));
-        fl.setResourceId(resourceId);
-        fl.setResourceType(resourceType != null ? resourceType : "VPC");
-        fl.setTrafficType(trafficType != null ? trafficType : "ALL");
-        boolean cloudWatch = logGroupName != null && !logGroupName.isBlank();
-        String destinationType = logDestinationType != null && !logDestinationType.isBlank()
-                ? logDestinationType
-                : (cloudWatch ? "cloud-watch-logs" : "s3");
-        fl.setLogDestinationType(destinationType);
-        fl.setLogDestination(logDestination);
-        fl.setLogGroupName(logGroupName);
-        fl.setDeliverLogsPermissionArn(deliverLogsPermissionArn);
-        fl.setBucketName(bucketFromArn(logDestination));
-        fl.setLogFormat(logFormat);
-        fl.setMaxAggregationInterval(maxAggregationInterval);
-        fl.setRegion(region);
-        fl.setAccountId(ec2Service.callerAccountId());
-        if (tags != null && !tags.isEmpty()) {
-            fl.setTags(new ArrayList<>(tags));
-        }
-        flowLogs.put(fl.getFlowLogId(), fl);
-        LOG.infov("Created flow log {0} for {1} {2} -> {3}",
-                fl.getFlowLogId(), fl.getResourceType(), resourceId, fl.getBucketName());
-
-        // Deliver an initial batch right away so flows are visible without
-        // waiting for the first scheduled tick.
-        if ("s3".equals(fl.getLogDestinationType()) && fl.getBucketName() != null) {
-            try {
-                generateAndDeliver(fl);
-            } catch (Exception e) {
-                LOG.warnv("Initial flow-log delivery failed for {0}: {1}", fl.getFlowLogId(), e.getMessage());
-            }
-        }
-        return fl;
-    }
-
     public List<FlowLog> describeFlowLogs(String region, List<String> flowLogIds) {
         return describeFlowLogs(region, flowLogIds, Map.of(), 0, null).logs();
     }
-
-    public FlowLogListResult describeFlowLogs(String region, List<String> flowLogIds,
-                                              Map<String, List<String>> filters, int maxResults, String nextToken) {
-        List<FlowLog> result = new ArrayList<>();
-        for (FlowLog fl : flowLogs.scan(k -> true)) {
-            if (region != null && fl.getRegion() != null && !region.equals(fl.getRegion())) {
-                continue;
-            }
-            if (flowLogIds != null && !flowLogIds.isEmpty() && !flowLogIds.contains(fl.getFlowLogId())) {
-                continue;
-            }
-            if (!matchesFlowLogFilters(fl, filters)) {
-                continue;
-            }
-            result.add(fl);
-        }
-        result.sort(Comparator.comparing(FlowLog::getFlowLogId, Comparator.nullsLast(String::compareTo)));
-        int start = parseOffsetToken(nextToken);
-        if (start > result.size()) {
-            start = result.size();
-        }
-        int end = maxResults > 0 ? Math.min(result.size(), start + maxResults) : result.size();
-        String token = end < result.size() ? String.valueOf(end) : null;
-        return new FlowLogListResult(result.subList(start, end), token);
-    }
-
-    private static boolean matchesFlowLogFilters(FlowLog fl, Map<String, List<String>> filters) {
-        if (filters == null || filters.isEmpty()) {
-            return true;
-        }
-        for (Map.Entry<String, List<String>> filter : filters.entrySet()) {
-            List<String> values = filter.getValue();
-            if (values == null || values.isEmpty()) {
-                continue;
-            }
-            String observed = switch (filter.getKey()) {
-                case "flow-log-id" -> fl.getFlowLogId();
-                case "resource-id" -> fl.getResourceId();
-                case "resource-type" -> fl.getResourceType();
-                case "traffic-type" -> fl.getTrafficType();
-                case "log-destination-type" -> fl.getLogDestinationType();
-                case "log-group-name" -> fl.getLogGroupName();
-                default -> null;
-            };
-            if (observed != null && values.stream().noneMatch(observed::equals)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private static int parseOffsetToken(String nextToken) {
-        if (nextToken == null || nextToken.isBlank()) {
-            return 0;
-        }
-        try {
-            return Math.max(0, Integer.parseInt(nextToken));
-        } catch (NumberFormatException e) {
-            return 0;
-        }
-    }
-
-    public record FlowLogListResult(List<FlowLog> logs, String nextToken) {}
 
     public List<String> deleteFlowLogs(String region, List<String> flowLogIds) {
         List<String> deleted = new ArrayList<>();
@@ -287,9 +216,9 @@ public class FlowLogService {
         long endEpoch = now.getEpochSecond();
         long startEpoch = endEpoch - fl.getMaxAggregationInterval();
 
+        List<String> fields = fieldsOf(fl);
         StringBuilder sb = new StringBuilder();
-        sb.append(fl.getLogFormat() != null && !fl.getLogFormat().isBlank()
-                ? customHeader(fl.getLogFormat()) : DEFAULT_HEADER).append('\n');
+        sb.append(String.join(" ", fields)).append('\n');
 
         // Collect the private IPs of all sibling ENIs in this flow log's resource
         // so instances in the same VPC actually talk to EACH OTHER (not just to
@@ -343,10 +272,10 @@ public class FlowLogService {
                 int srcPortEph = 32768 + ThreadLocalRandom.current().nextInt(28000);
                 String svc = endpointService.get(peer); // non-null only for endpoint peers
                 // egress: eni -> peer
-                sb.append(record(fl, eni, eni.privateIp, peer, srcPortEph, dstPort,
+                sb.append(record(fl, fields, eni, eni.privateIp, peer, srcPortEph, dstPort,
                         "egress", startEpoch, endEpoch, svc)).append('\n');
                 // ingress: peer -> eni (response)
-                sb.append(record(fl, eni, peer, eni.privateIp, dstPort, srcPortEph,
+                sb.append(record(fl, fields, eni, peer, eni.privateIp, dstPort, srcPortEph,
                         "ingress", startEpoch, endEpoch, svc)).append('\n');
                 recordCount += 2;
             }
@@ -374,8 +303,52 @@ public class FlowLogService {
      *            pkt-src-aws-service (ingress) so the record looks like real
      *            AWS-service traffic.
      */
-    private String record(FlowLog fl, Eni eni, String src, String dst, int srcPort, int dstPort,
-                          String direction, long start, long end, String svc) {
+    /**
+     * The fields this flow log delivers, taken from its LogFormat.
+     *
+     * <p>A token naming a field this emulator has no value for is kept rather than dropped, so the
+     * record still has one column per token the caller asked for, carrying "-" as AWS does for a
+     * field that does not apply.
+     */
+    static List<String> fieldsOf(FlowLog fl) {
+        String format = fl.getLogFormat();
+        if (format == null || format.isBlank()) {
+            return DEFAULT_FIELDS;
+        }
+        List<String> fields = tokensOf(format);
+        return fields.isEmpty() ? DEFAULT_FIELDS : fields;
+    }
+
+    /** The field names a LogFormat string names, in the order it names them. */
+    private static List<String> tokensOf(String format) {
+        List<String> fields = new ArrayList<>();
+        Matcher matcher = FIELD_TOKEN.matcher(format);
+        while (matcher.find()) {
+            fields.add(matcher.group(1));
+        }
+        return List.copyOf(fields);
+    }
+
+    /**
+     * The version AWS numbers a format by, which is the highest any of its fields belongs to.
+     *
+     * <p>{@link #FIELD_VERSIONS} is complete through version 5, so a field missing from it belongs
+     * to a later version, and one this emulator has no value for either. Such a field counts as
+     * the highest version the table does define rather than the lowest, which would report 2 for a
+     * record that plainly is not a version 2 one.
+     */
+    private static String formatVersion(List<String> fields) {
+        int highestKnown = FIELD_VERSIONS.values().stream().mapToInt(Integer::intValue).max().orElse(2);
+        int version = 2;
+        for (String field : fields) {
+            version = Math.max(version, FIELD_VERSIONS.getOrDefault(field, highestKnown));
+        }
+        return String.valueOf(version);
+    }
+
+    private String record(FlowLog fl, List<String> fields, Eni eni, String src, String dst,
+                          int srcPort, int dstPort, String direction, long start, long end,
+                          String svc) {
         int bytes = 200 + ThreadLocalRandom.current().nextInt(40000);
         int packets = 1 + ThreadLocalRandom.current().nextInt(60);
         int protocol = 6; // TCP
@@ -387,37 +360,45 @@ public class FlowLogService {
         // egress (eni->endpoint) => dst is the service; ingress (endpoint->eni) => src.
         String pktDstSvc = (svc != null && egress) ? svc : "-";
         String pktSrcSvc = (svc != null && !egress) ? svc : "-";
-        // Field order MUST match DEFAULT_HEADER exactly.
-        return String.join(" ",
-                fl.getAccountId(),                 // account-id
-                action,                            // action
-                azId,                              // az-id
-                String.valueOf(bytes),             // bytes
-                dst,                               // dstaddr
-                String.valueOf(dstPort),           // dstport
-                String.valueOf(end),               // end
-                direction,                         // flow-direction
-                nz(eni.instanceId),                // instance-id
-                eni.eniId,                         // interface-id
-                "OK",                              // log-status
-                String.valueOf(packets),           // packets
-                pktDstSvc,                         // pkt-dst-aws-service
-                dst,                               // pkt-dstaddr
-                pktSrcSvc,                         // pkt-src-aws-service
-                src,                               // pkt-srcaddr
-                String.valueOf(protocol),          // protocol
-                fl.getRegion(),                    // region
-                src,                               // srcaddr
-                String.valueOf(srcPort),           // srcport
-                String.valueOf(start),             // start
-                "-",                               // sublocation-id
-                "-",                               // sublocation-type
-                nz(eni.subnetId),                  // subnet-id
-                String.valueOf(tcpFlags),          // tcp-flags
-                "egress".equals(direction) ? "1" : "-", // traffic-path
-                "IPv4",                            // type
-                "5",                               // version
-                nz(eni.vpcId));                    // vpc-id
+        Map<String, String> values = Map.ofEntries(
+                Map.entry("version", formatVersion(fields)),
+                Map.entry("account-id", nz(fl.getAccountId())),
+                Map.entry("interface-id", nz(eni.eniId)),
+                Map.entry("srcaddr", nz(src)),
+                Map.entry("dstaddr", nz(dst)),
+                Map.entry("srcport", String.valueOf(srcPort)),
+                Map.entry("dstport", String.valueOf(dstPort)),
+                Map.entry("protocol", String.valueOf(protocol)),
+                Map.entry("packets", String.valueOf(packets)),
+                Map.entry("bytes", String.valueOf(bytes)),
+                Map.entry("start", String.valueOf(start)),
+                Map.entry("end", String.valueOf(end)),
+                Map.entry("action", action),
+                Map.entry("log-status", "OK"),
+                Map.entry("vpc-id", nz(eni.vpcId)),
+                Map.entry("subnet-id", nz(eni.subnetId)),
+                Map.entry("instance-id", nz(eni.instanceId)),
+                Map.entry("tcp-flags", String.valueOf(tcpFlags)),
+                Map.entry("type", "IPv4"),
+                Map.entry("pkt-srcaddr", nz(src)),
+                Map.entry("pkt-dstaddr", nz(dst)),
+                Map.entry("region", nz(fl.getRegion())),
+                Map.entry("az-id", nz(azId)),
+                Map.entry("sublocation-type", "-"),
+                Map.entry("sublocation-id", "-"),
+                Map.entry("pkt-src-aws-service", pktSrcSvc),
+                Map.entry("pkt-dst-aws-service", pktDstSvc),
+                Map.entry("flow-direction", direction),
+                Map.entry("traffic-path", egress ? "1" : "-"));
+
+        StringBuilder row = new StringBuilder();
+        for (String field : fields) {
+            if (row.length() > 0) {
+                row.append(' ');
+            }
+            row.append(values.getOrDefault(field, "-"));
+        }
+        return row.toString();
     }
 
     // ─── Inventory correlation ─────────────────────────────────────────────────
@@ -554,12 +535,13 @@ public class FlowLogService {
         }
     }
 
-    private static String bucketFromArn(String arn) {
+    static String bucketFromArn(String arn) {
         if (arn == null) {
             return null;
         }
-        // arn:aws:s3:::bucket-name[/optional/prefix]  OR a bare bucket name.
-        String name = arn.startsWith("arn:") ? arn.substring(arn.lastIndexOf(':') + 1) : arn;
+        // arn:aws:s3:::bucket-name[/optional/prefix] OR a bare bucket name. The prefix may itself
+        // contain ':', so the resource is everything after the ARN's fifth ':', not its last.
+        String name = AwsArnUtils.resourceIfArnFor(arn, "s3").orElse(arn);
         int slash = name.indexOf('/');
         return slash >= 0 ? name.substring(0, slash) : name;
     }
@@ -581,32 +563,13 @@ public class FlowLogService {
         return ports[ThreadLocalRandom.current().nextInt(ports.length)];
     }
 
-    /** Map a region + az letter to a plausible AWS az-id (e.g. us-east-1a -> use1-az1). */
+    /**
+     * The zone id of the ENI's zone, derived exactly as subnets and DescribeAvailabilityZones
+     * derive it ({@link AvailabilityZoneIds}), so a record's {@code az-id} matches the
+     * {@code AvailabilityZoneId} of the subnet it came from, in every region and partition.
+     */
     private static String azId(String region, String az) {
-        String code = switch (region == null ? "" : region) {
-            case "us-east-1" -> "use1";
-            case "us-east-2" -> "use2";
-            case "us-west-1" -> "usw1";
-            case "us-west-2" -> "usw2";
-            case "eu-west-1" -> "euw1";
-            case "eu-central-1" -> "euc1";
-            case "ap-southeast-1" -> "apse1";
-            case "ap-southeast-2" -> "apse2";
-            default -> region == null ? "use1" : region.replaceAll("[^a-z0-9]", "");
-        };
-        int n = 1;
-        if (az != null && !az.isEmpty()) {
-            char last = az.charAt(az.length() - 1);
-            if (last >= 'a' && last <= 'f') {
-                n = (last - 'a') + 1;
-            }
-        }
-        return code + "-az" + n;
-    }
-
-    private static String customHeader(String logFormat) {
-        // AWS custom format uses ${field-name} tokens; convert to a space-delimited header.
-        return logFormat.replace("${", "").replace("}", "").trim();
+        return region == null ? null : AvailabilityZoneIds.forZoneName(region, az);
     }
 
     private static String nz(String s) {
@@ -632,4 +595,177 @@ public class FlowLogService {
         String vpcId;
         String az;
     }
+
+    /** AWS VPC Flow Logs default (version 5) field order. */
+    static final String DEFAULT_HEADER =
+            "account-id action az-id bytes dstaddr dstport end flow-direction instance-id "
+            + "interface-id log-status packets pkt-dst-aws-service pkt-dstaddr pkt-src-aws-service "
+            + "pkt-srcaddr protocol region srcaddr srcport start sublocation-id sublocation-type "
+            + "subnet-id tcp-flags traffic-path type version vpc-id";
+
+    public FlowLog createFlowLog(String region, String resourceId, String resourceType,
+                                 String trafficType, String logDestinationType,
+                                 String logDestination, String logFormat, int maxAggregationInterval) {
+        return createFlowLog(region, resourceId, resourceType, trafficType, logDestinationType,
+                logDestination, logFormat, maxAggregationInterval, null, null, List.of());
+    }
+
+    public FlowLog createFlowLog(String region, String resourceId, String resourceType,
+                                 String trafficType, String logDestinationType,
+                                 String logDestination, String logFormat, int maxAggregationInterval,
+                                 String logGroupName, String deliverLogsPermissionArn, List<Tag> tags) {
+        FlowLog fl = new FlowLog();
+        fl.setFlowLogId("fl-" + randomHex(17));
+        fl.setResourceId(resourceId);
+        fl.setResourceType(resourceType != null ? resourceType : "VPC");
+        fl.setTrafficType(trafficType != null ? trafficType : "ALL");
+        boolean cloudWatch = logGroupName != null && !logGroupName.isBlank();
+        String destinationType = logDestinationType != null && !logDestinationType.isBlank()
+                ? logDestinationType
+                : (cloudWatch ? "cloud-watch-logs" : "s3");
+        fl.setLogDestinationType(destinationType);
+        fl.setLogDestination(logDestination);
+        fl.setLogGroupName(logGroupName);
+        fl.setDeliverLogsPermissionArn(deliverLogsPermissionArn);
+        fl.setBucketName(bucketFromArn(logDestination));
+        fl.setLogFormat(logFormat);
+        fl.setMaxAggregationInterval(maxAggregationInterval);
+        fl.setRegion(region);
+        fl.setAccountId(ec2Service.callerAccountId());
+        if (tags != null && !tags.isEmpty()) {
+            fl.setTags(new ArrayList<>(tags));
+        }
+        flowLogs.put(fl.getFlowLogId(), fl);
+        LOG.infov("Created flow log {0} for {1} {2} -> {3}",
+                fl.getFlowLogId(), fl.getResourceType(), resourceId, fl.getBucketName());
+
+        // Deliver an initial batch right away so flows are visible without
+        // waiting for the first scheduled tick.
+        if ("s3".equals(fl.getLogDestinationType()) && fl.getBucketName() != null) {
+            try {
+                generateAndDeliver(fl);
+            } catch (Exception e) {
+                LOG.warnv("Initial flow-log delivery failed for {0}: {1}", fl.getFlowLogId(), e.getMessage());
+            }
+        }
+        return fl;
+    }
+
+    public FlowLogListResult describeFlowLogs(String region, List<String> flowLogIds,
+                                              Map<String, List<String>> filters, int maxResults, String nextToken) {
+        List<FlowLog> result = new ArrayList<>();
+        for (FlowLog fl : flowLogs.scan(k -> true)) {
+            if (region != null && fl.getRegion() != null && !region.equals(fl.getRegion())) {
+                continue;
+            }
+            if (flowLogIds != null && !flowLogIds.isEmpty() && !flowLogIds.contains(fl.getFlowLogId())) {
+                continue;
+            }
+            if (!matchesFlowLogFilters(fl, filters)) {
+                continue;
+            }
+            result.add(fl);
+        }
+        result.sort(Comparator.comparing(FlowLog::getFlowLogId, Comparator.nullsLast(String::compareTo)));
+        int start = parseOffsetToken(nextToken);
+        if (start > result.size()) {
+            start = result.size();
+        }
+        int end = maxResults > 0 ? Math.min(result.size(), start + maxResults) : result.size();
+        String token = end < result.size() ? String.valueOf(end) : null;
+        return new FlowLogListResult(result.subList(start, end), token);
+    }
+
+    private static boolean matchesFlowLogFilters(FlowLog fl, Map<String, List<String>> filters) {
+        if (filters == null || filters.isEmpty()) {
+            return true;
+        }
+        for (Map.Entry<String, List<String>> filter : filters.entrySet()) {
+            List<String> values = filter.getValue();
+            if (values == null || values.isEmpty()) {
+                continue;
+            }
+            String observed = switch (filter.getKey()) {
+                case "flow-log-id" -> fl.getFlowLogId();
+                case "resource-id" -> fl.getResourceId();
+                case "resource-type" -> fl.getResourceType();
+                case "traffic-type" -> fl.getTrafficType();
+                case "log-destination-type" -> fl.getLogDestinationType();
+                case "log-group-name" -> fl.getLogGroupName();
+                default -> null;
+            };
+            if (observed != null && values.stream().noneMatch(observed::equals)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static int parseOffsetToken(String nextToken) {
+        if (nextToken == null || nextToken.isBlank()) {
+            return 0;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(nextToken));
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
+    public record FlowLogListResult(List<FlowLog> logs, String nextToken) {}
+
+    /**
+     * Build one space-delimited default-format flow record line.
+     *
+     * @param svc AWS service short-name (e.g. "S3") when the peer is an interface
+     *            VPC endpoint, else null. Sets pkt-dst-aws-service (egress) or
+     *            pkt-src-aws-service (ingress) so the record looks like real
+     *            AWS-service traffic.
+     */
+    private String record(FlowLog fl, Eni eni, String src, String dst, int srcPort, int dstPort,
+                          String direction, long start, long end, String svc) {
+        int bytes = 200 + ThreadLocalRandom.current().nextInt(40000);
+        int packets = 1 + ThreadLocalRandom.current().nextInt(60);
+        int protocol = 6; // TCP
+        String action = "ACCEPT";
+        String azId = azId(fl.getRegion(), eni.az);
+        int tcpFlags = "egress".equals(direction) ? 2 : 18; // SYN / SYN-ACK-ish
+        boolean egress = "egress".equals(direction);
+        // For endpoint traffic, the AWS service tags the side that is the endpoint:
+        // egress (eni->endpoint) => dst is the service; ingress (endpoint->eni) => src.
+        String pktDstSvc = (svc != null && egress) ? svc : "-";
+        String pktSrcSvc = (svc != null && !egress) ? svc : "-";
+        // Field order MUST match DEFAULT_HEADER exactly.
+        return String.join(" ",
+                fl.getAccountId(),                 // account-id
+                action,                            // action
+                azId,                              // az-id
+                String.valueOf(bytes),             // bytes
+                dst,                               // dstaddr
+                String.valueOf(dstPort),           // dstport
+                String.valueOf(end),               // end
+                direction,                         // flow-direction
+                nz(eni.instanceId),                // instance-id
+                eni.eniId,                         // interface-id
+                "OK",                              // log-status
+                String.valueOf(packets),           // packets
+                pktDstSvc,                         // pkt-dst-aws-service
+                dst,                               // pkt-dstaddr
+                pktSrcSvc,                         // pkt-src-aws-service
+                src,                               // pkt-srcaddr
+                String.valueOf(protocol),          // protocol
+                fl.getRegion(),                    // region
+                src,                               // srcaddr
+                String.valueOf(srcPort),           // srcport
+                String.valueOf(start),             // start
+                "-",                               // sublocation-id
+                "-",                               // sublocation-type
+                nz(eni.subnetId),                  // subnet-id
+                String.valueOf(tcpFlags),          // tcp-flags
+                "egress".equals(direction) ? "1" : "-", // traffic-path
+                "IPv4",                            // type
+                "5",                               // version
+                nz(eni.vpcId));                    // vpc-id
+    }
+
 }

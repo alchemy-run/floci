@@ -9,6 +9,7 @@ import java.util.List;
 import java.util.regex.Pattern;
 import java.util.zip.CRC32;
 import java.util.zip.CRC32C;
+import java.util.zip.Checksum;
 
 @RegisterForReflection
 public class S3Checksum {
@@ -18,6 +19,10 @@ public class S3Checksum {
     private static final long CRC64_NVME_POLY = 0x9a6c9329ac4bc9b5L;
     // Slicing-by-8: row n holds the CRC of each byte value followed by n zero bytes.
     private static final long[][] CRC64_TABLES = buildCrc64Tables();
+
+    private static final CrcCombiner CRC32_COMBINER = new CrcCombiner(0xEDB88320L, Integer.SIZE);
+    private static final CrcCombiner CRC32C_COMBINER = new CrcCombiner(0x82F63B78L, Integer.SIZE);
+    private static final CrcCombiner CRC64_NVME_COMBINER = new CrcCombiner(CRC64_NVME_POLY, Long.SIZE);
 
     private String checksumCRC32;
     private String checksumCRC32C;
@@ -93,6 +98,31 @@ public class S3Checksum {
         return checksum;
     }
 
+    /**
+     * Full-object checksum of a multipart object, combined from each part's CRC and size so the
+     * object's bytes are never read. S3 linearizes it the same way, which is why it offers full-object
+     * checksums on multipart uploads only for the CRC algorithms.
+     */
+    public static S3Checksum fullObject(ChecksumAlgorithm algorithm, List<Part> parts) {
+        ChecksumAlgorithm effective = algorithm != null ? algorithm : ChecksumAlgorithm.CRC64NVME;
+        CrcCombiner combiner = switch (effective) {
+            case CRC32 -> CRC32_COMBINER;
+            case CRC32C -> CRC32C_COMBINER;
+            case CRC64NVME -> CRC64_NVME_COMBINER;
+            case SHA1, SHA256 -> throw new IllegalArgumentException(
+                    effective.wireValue() + " has no full-object multipart checksum");
+        };
+        // The CRC of no bytes is zero for all three algorithms, so zero seeds the fold.
+        long crc = 0;
+        for (Part part : parts) {
+            crc = combiner.combine(crc, combiner.decode(part.getChecksum().valueFor(effective)), part.getSize());
+        }
+        S3Checksum checksum = new S3Checksum();
+        checksum.setValueFor(effective, combiner.encode(crc));
+        checksum.setChecksumType(ChecksumType.FULL_OBJECT);
+        return checksum;
+    }
+
     public static S3Checksum composite(ChecksumAlgorithm algorithm, List<String> partChecksums) {
         S3Checksum checksum = new S3Checksum();
         checksum.setValueFor(algorithm, algorithm.composite(partChecksums));
@@ -146,9 +176,15 @@ public class S3Checksum {
     }
 
     public static String crc64NvmeBase64(byte[] data) {
-        long crc = 0xFFFFFFFFFFFFFFFFL;
-        int offset = 0;
-        int blocksEnd = data.length - data.length % Long.BYTES;
+        return base64(~crc64NvmeUpdate(~0L, data, 0, data.length), Long.BYTES);
+    }
+
+    /** Runs {@code length} bytes through the CRC64NVME register; the final value is its complement. */
+    private static long crc64NvmeUpdate(long register, byte[] data, int start, int length) {
+        long crc = register;
+        int offset = start;
+        int end = start + length;
+        int blocksEnd = end - length % Long.BYTES;
         while (offset < blocksEnd) {
             crc ^= (data[offset] & 0xFFL)
                     | (data[offset + 1] & 0xFFL) << 8
@@ -168,17 +204,88 @@ public class S3Checksum {
                     ^ CRC64_TABLES[0][(int)(crc >>> 56)];
             offset += Long.BYTES;
         }
-        while (offset < data.length) {
+        while (offset < end) {
             int idx = (int)((crc ^ data[offset]) & 0xFF);
             crc = CRC64_TABLES[0][idx] ^ (crc >>> 8);
             offset++;
         }
-        crc ^= 0xFFFFFFFFFFFFFFFFL;
-        byte[] bytes = new byte[]{
-            (byte)(crc >> 56), (byte)(crc >> 48), (byte)(crc >> 40), (byte)(crc >> 32),
-            (byte)(crc >> 24), (byte)(crc >> 16), (byte)(crc >> 8),  (byte) crc
-        };
+        return crc;
+    }
+
+    private static String base64(long value, int byteCount) {
+        byte[] bytes = new byte[byteCount];
+        for (int i = byteCount - 1; i >= 0; i--) {
+            bytes[i] = (byte) (value >>> ((byteCount - 1 - i) * Byte.SIZE));
+        }
         return Base64.getEncoder().encodeToString(bytes);
+    }
+
+    /** A {@link Calculator} for {@code algorithm}, CRC64NVME when no algorithm was declared, as {@link #of}. */
+    public static Calculator calculator(ChecksumAlgorithm algorithm) {
+        return new Calculator(algorithm != null ? algorithm : ChecksumAlgorithm.CRC64NVME);
+    }
+
+    /**
+     * Computes a checksum over data fed in pieces, for a body too large to hold in one array. The
+     * value is the one {@link ChecksumAlgorithm#compute} gives for the same bytes in one piece.
+     */
+    public static final class Calculator {
+
+        private final ChecksumAlgorithm algorithm;
+        private final Checksum crc;
+        private final MessageDigest digest;
+        private long crc64Register = ~0L;
+
+        private Calculator(ChecksumAlgorithm algorithm) {
+            this.algorithm = algorithm;
+            this.crc = switch (algorithm) {
+                case CRC32 -> new CRC32();
+                case CRC32C -> new CRC32C();
+                case CRC64NVME, SHA1, SHA256 -> null;
+            };
+            this.digest = switch (algorithm) {
+                case SHA1 -> newDigest("SHA-1");
+                case SHA256 -> newDigest("SHA-256");
+                case CRC32, CRC32C, CRC64NVME -> null;
+            };
+        }
+
+        public ChecksumAlgorithm algorithm() {
+            return algorithm;
+        }
+
+        public void update(byte[] data, int offset, int length) {
+            switch (algorithm) {
+                case CRC32, CRC32C -> crc.update(data, offset, length);
+                case CRC64NVME -> crc64Register = crc64NvmeUpdate(crc64Register, data, offset, length);
+                case SHA1, SHA256 -> digest.update(data, offset, length);
+            }
+        }
+
+        /** The Base64 checksum of everything fed so far. */
+        public String value() {
+            return switch (algorithm) {
+                case CRC32, CRC32C -> base64(crc.getValue(), Integer.BYTES);
+                case CRC64NVME -> base64(~crc64Register, Long.BYTES);
+                case SHA1, SHA256 -> Base64.getEncoder().encodeToString(digest.digest());
+            };
+        }
+
+        /** The value as a full-object checksum, the kind a single-part object carries. */
+        public S3Checksum fullObject() {
+            S3Checksum checksum = new S3Checksum();
+            checksum.setValueFor(algorithm, value());
+            checksum.setChecksumType(ChecksumType.FULL_OBJECT);
+            return checksum;
+        }
+
+        private static MessageDigest newDigest(String name) {
+            try {
+                return MessageDigest.getInstance(name);
+            } catch (NoSuchAlgorithmException e) {
+                throw new IllegalStateException("Missing digest algorithm: " + name, e);
+            }
+        }
     }
 
     public static String sha256Base64(byte[] data) {
@@ -219,5 +326,70 @@ public class S3Checksum {
             }
         }
         return tables;
+    }
+
+    /**
+     * Joins the CRCs of two adjacent byte ranges, as zlib's {@code crc32_combine} does, for a reflected
+     * CRC whose initial value and final XOR are both all ones (CRC32, CRC32C and CRC64NVME all are).
+     * With those parameters crc(A + B) = crc(A) * x^(8 * len(B)) mod P xor crc(B), so the second range's
+     * length is all that is needed besides the two CRCs. In the reflected form the top bit is x^0.
+     */
+    private static final class CrcCombiner {
+
+        private final long polynomial;
+        private final int width;
+        private final long one;
+        // Entry k is x^(2^k) mod P. Lengths are counted in bytes, so x^(8n) starts at k = 3.
+        private final long[] xToPowerOfTwo = new long[Long.SIZE + 3];
+
+        CrcCombiner(long polynomial, int width) {
+            this.polynomial = polynomial;
+            this.width = width;
+            this.one = 1L << (width - 1);
+            long power = one >>> 1;
+            for (int k = 0; k < xToPowerOfTwo.length; k++) {
+                xToPowerOfTwo[k] = power;
+                power = multiply(power, power);
+            }
+        }
+
+        long combine(long first, long second, long secondLength) {
+            long shift = one;
+            int k = 3;
+            for (long remaining = secondLength; remaining != 0; remaining >>>= 1) {
+                if ((remaining & 1) != 0) {
+                    shift = multiply(xToPowerOfTwo[k], shift);
+                }
+                k++;
+            }
+            return multiply(shift, first) ^ second;
+        }
+
+        long decode(String base64) {
+            long crc = 0;
+            for (byte b : Base64.getDecoder().decode(base64)) {
+                crc = (crc << Byte.SIZE) | (b & 0xFF);
+            }
+            return crc;
+        }
+
+        String encode(long crc) {
+            byte[] bytes = new byte[width / Byte.SIZE];
+            for (int i = bytes.length - 1; i >= 0; i--) {
+                bytes[i] = (byte) (crc >>> ((bytes.length - 1 - i) * Byte.SIZE));
+            }
+            return Base64.getEncoder().encodeToString(bytes);
+        }
+
+        private long multiply(long a, long b) {
+            long product = 0;
+            for (long bit = one; bit != 0; bit >>>= 1) {
+                if ((a & bit) != 0) {
+                    product ^= b;
+                }
+                b = (b & 1) != 0 ? (b >>> 1) ^ polynomial : b >>> 1;
+            }
+            return product;
+        }
     }
 }

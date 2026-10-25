@@ -6,6 +6,7 @@ import software.amazon.awssdk.services.cloudwatch.model.*;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.*;
 
@@ -184,5 +185,68 @@ class CloudWatchTest {
                 .unit(StandardUnit.MILLISECONDS)
         );
         assertThat(noMatch.datapoints()).isEmpty();
+    }
+
+    @Test
+    @DisplayName("PutMetricData stores datums nested under EntityMetricData")
+    void testPutMetricDataWithEntityMetricData() {
+        String namespace = "JavaTestEntityMetricData";
+        Instant now = Instant.now();
+
+        cloudWatchClient.putMetricData(request -> request
+                .namespace(namespace)
+                .metricData(datum -> datum
+                        .metricName("TopLevel")
+                        .value(1.0)
+                        .timestamp(now))
+                .entityMetricData(entityMetricData -> entityMetricData
+                        .entity(entity -> entity
+                                .keyAttributes(Map.of(
+                                        "Type", "AWS::Resource",
+                                        "ResourceType", "AWS::EC2::Instance",
+                                        "Identifier", "i-0123456789abcdef0")))
+                        .metricData(MetricDatum.builder()
+                                .metricName("mem_used_percent")
+                                .value(6.5)
+                                .unit(StandardUnit.PERCENT)
+                                .storageResolution(60)
+                                .timestamp(now)
+                                .dimensions(Dimension.builder().name("host").value("h1").build())
+                                .build()))
+                .strictEntityValidation(false)
+        );
+
+        ListMetricsResponse listed = cloudWatchClient.listMetrics(request -> request.namespace(namespace));
+        assertThat(listed.metrics())
+                .extracting(Metric::metricName)
+                .containsExactlyInAnyOrder("TopLevel", "mem_used_percent");
+
+        GetMetricStatisticsResponse stats = cloudWatchClient.getMetricStatistics(request -> request
+                .namespace(namespace)
+                .metricName("mem_used_percent")
+                .dimensions(Dimension.builder().name("host").value("h1").build())
+                .startTime(now.minus(1, ChronoUnit.HOURS))
+                .endTime(now.plus(1, ChronoUnit.MINUTES))
+                .period(3600)
+                .statistics(Statistic.SUM)
+        );
+        assertThat(stats.datapoints()).hasSize(1);
+        assertThat(stats.datapoints().get(0).sum()).isEqualTo(6.5);
+    }
+
+    @Test
+    @DisplayName("PutMetricData without MetricName throws MissingRequiredParameterException")
+    void testPutMetricDataWithoutMetricNameIsRejected() {
+        String namespace = "JavaTestMissingMetricName";
+
+        assertThatThrownBy(() -> cloudWatchClient.putMetricData(request -> request
+                .namespace(namespace)
+                .entityMetricData(entityMetricData -> entityMetricData
+                        .metricData(MetricDatum.builder().value(1.0).build()))))
+                .isInstanceOf(MissingRequiredParameterException.class)
+                .satisfies(e -> assertThat(((MissingRequiredParameterException) e).awsErrorDetails().errorCode())
+                        .isEqualTo("MissingParameter"));
+
+        assertThat(cloudWatchClient.listMetrics(request -> request.namespace(namespace)).metrics()).isEmpty();
     }
 }

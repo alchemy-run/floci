@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.cloudfront.edge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -12,7 +13,9 @@ import io.github.hectorvent.floci.services.cloudfront.CloudFrontService;
 import io.github.hectorvent.floci.services.cloudfront.CloudFrontServingController;
 import io.github.hectorvent.floci.services.cloudfront.model.CacheBehavior;
 import io.github.hectorvent.floci.services.cloudfront.model.CloudFrontFunction;
+import io.github.hectorvent.floci.services.cloudfront.model.DefaultCacheBehavior;
 import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
+import io.github.hectorvent.floci.services.cloudfront.model.DistributionConfig;
 import io.github.hectorvent.floci.services.cloudfront.model.Origin;
 import io.github.hectorvent.floci.services.cloudfront.model.OriginAccessControl;
 import io.quarkus.vertx.http.HttpServer;
@@ -39,9 +42,12 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.StreamingOutput;
 import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URLDecoder;
@@ -191,6 +197,31 @@ public class CloudFrontEdgeController {
 
     private Response handle(String method, String distributionId, String rawPath,
                             UriInfo uriInfo, HttpHeaders headers, byte[] body) {
+        return buffered(pipeline(method, distributionId, rawPath, uriInfo, headers, body));
+    }
+
+    /**
+     * The edge port relays this response over HTTP and reads its body back, so a streamed origin
+     * body is written out here, with the response's status and headers, rather than handed on as
+     * a writer the relay cannot run.
+     */
+    private Response buffered(Response response) {
+        if (!(response.getEntity() instanceof StreamingOutput streaming)) {
+            return response;
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        try {
+            streaming.write(out);
+        } catch (IOException e) {
+            return edgeError(502, "The origin response could not be read: " + e.getMessage());
+        }
+        Response.ResponseBuilder builder = Response.status(response.getStatusInfo());
+        response.getStringHeaders().forEach((name, values) -> values.forEach(value -> builder.header(name, value)));
+        return builder.entity(out.toByteArray()).build();
+    }
+
+    private Response pipeline(String method, String distributionId, String rawPath,
+                              UriInfo uriInfo, HttpHeaders headers, byte[] body) {
         Distribution distribution;
         try {
             distribution = service.getDistribution(distributionId);
@@ -361,8 +392,8 @@ public class CloudFrontEdgeController {
             parent.putObject(key).put("value", value);
             return;
         }
-        var multiValue = existing.has("multiValue")
-                ? (com.fasterxml.jackson.databind.node.ArrayNode) existing.get("multiValue")
+        ArrayNode multiValue = existing.has("multiValue")
+                ? (ArrayNode) existing.get("multiValue")
                 : existing.putArray("multiValue");
         if (multiValue.isEmpty()) {
             multiValue.addObject().put("value", existing.path("value").asText(""));
@@ -396,7 +427,7 @@ public class CloudFrontEdgeController {
     }
 
     private CacheBehaviorView matchBehavior(Distribution distribution, String uri) {
-        var config = distribution.getConfig();
+        DistributionConfig config = distribution.getConfig();
         if (config != null && config.getCacheBehaviors() != null) {
             for (CacheBehavior behavior : config.getCacheBehaviors()) {
                 if (matchesPattern(behavior.getPathPattern(), uri)) {
@@ -404,7 +435,7 @@ public class CloudFrontEdgeController {
                 }
             }
         }
-        var defaultBehavior = config != null ? config.getDefaultCacheBehavior() : null;
+        DefaultCacheBehavior defaultBehavior = config != null ? config.getDefaultCacheBehavior() : null;
         return defaultBehavior == null
                 ? new CacheBehaviorView(null, List.of())
                 : new CacheBehaviorView(defaultBehavior.getTargetOriginId(),
@@ -483,7 +514,7 @@ public class CloudFrontEdgeController {
             outboundHeaders.put("cookie", cookie);
         }
         if (CloudFrontRequestRouter.isS3Origin(origin) && List.of("GET", "HEAD", "OPTIONS").contains(method)) {
-            return servingController.serveEdgeS3Origin(distribution, resolved, uri, method, outboundHeaders);
+            return buffered(servingController.serveEdgeS3Origin(distribution, resolved, uri, method, outboundHeaders));
         }
         if (origin.getCustomHeaders() != null) {
             for (Map<String, String> header : origin.getCustomHeaders()) {

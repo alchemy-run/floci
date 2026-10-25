@@ -12,50 +12,153 @@ Floci manages real Valkey/Redis Docker containers and proxies TCP connections to
 | Action | Description |
 | --- | --- |
 | `ValidateIamAuthToken` | Validate an IAM auth token (data-plane auth) |
-| `CreateReplicationGroup` | Start a new Redis/Valkey cluster; `AtRestEncryptionEnabled`, `KmsKeyId` (resolved to the key ARN), `SnapshotRetentionLimit`, `SnapshotWindow` and `Tags` are kept and returned, with the group `ARN` |
+| `CreateReplicationGroup` | Start a new Redis/Valkey cluster; `AtRestEncryptionEnabled`, `KmsKeyId` (resolved to the key ARN), `SnapshotRetentionLimit`, `SnapshotWindow`, `Tags` and `UserGroupIds` are kept and returned, with the group `ARN`. `UserGroupIds` needs `TransitEncryptionEnabled` or an `AuthToken` |
 | `DescribeReplicationGroups` | List clusters and their connection info |
-| `ModifyReplicationGroup` | Modify `SnapshotRetentionLimit` and `SnapshotWindow`, and the associated user groups |
+| `ModifyReplicationGroup` | Modify `SnapshotRetentionLimit` and `SnapshotWindow`, and the associated user groups (`UserGroupIdsToAdd`, `UserGroupIdsToRemove`, `RemoveUserGroups`). A cache with user groups no longer takes its AUTH token, `AuthTokenUpdateStrategy=DELETE` removes the token when adding a user group, and removing the last user group leaves the cache without access control. Changing the AUTH token (`ROTATE`, `SET`) is not supported |
 | `DeleteReplicationGroup` | Stop and remove a cluster |
-| `CreateUser` | Create an ElastiCache IAM user |
+| `CreateUser` | Create a user with password, no-password-required or IAM authentication, set through `AuthenticationMode` or the top-level `Passwords` and `NoPasswordRequired` |
 | `DescribeUsers` | List ElastiCache users |
-| `ModifyUser` | Update user access strings |
+| `ModifyUser` | Change a user's passwords and authentication mode, replace its access string with `AccessString` or add to it with `AppendAccessString` |
 | `DeleteUser` | Remove an ElastiCache user |
-| `CreateCacheCluster` | - |
-| `DescribeCacheClusters` | - |
-| `DescribeCacheEngineVersions` | - |
-| `ModifyCacheCluster` | Update node count and node type metadata |
-| `DeleteCacheCluster` | - |
-| `CreateCacheSubnetGroup` | Create persisted subnet metadata |
-| `DescribeCacheSubnetGroups` | List persisted subnet metadata |
-| `ModifyCacheSubnetGroup` | Update subnet metadata |
-| `DeleteCacheSubnetGroup` | Delete subnet metadata |
-| `IncreaseReplicaCount` | Update replication group replica metadata |
-| `DecreaseReplicaCount` | Update replication group replica metadata |
-| `ModifyReplicationGroupShardConfiguration` | Update shard metadata |
-| `TestFailover` | - |
-| `DescribeSnapshots` | List final snapshots created on delete |
-| `DeleteSnapshot` | Delete a snapshot |
-| `ListTagsForResource` | List tags for provisioned cache resources |
-| `AddTagsToResource` | Add resource tags |
-| `RemoveTagsFromResource` | Remove resource tags |
+| `CreateUserGroup` | Create a user group; a `redis` group must contain a user named `default`, a `valkey` group need not |
+| `DescribeUserGroups` | List user groups with their users and the replication groups and serverless caches using them |
+| `ModifyUserGroup` | Add or remove users, or change the engine; membership changes apply to authentication at once |
+| `DeleteUserGroup` | Remove a user group that no replication group or serverless cache uses |
+| `CreateCacheCluster` | Start a Memcached cluster, or a single-node Redis/Valkey one (`NumCacheNodes` must be 1) |
+| `CreateServerlessCache` | Create a local Valkey, Redis or Memcached runtime with serverless metadata |
+| `DescribeServerlessCaches` | List serverless caches, settings and endpoints |
+| `ModifyServerlessCache` | Update metadata and user-group association while retaining cache data |
+| `DeleteServerlessCache` | Delete serverless metadata and its backing runtime |
+| `DescribeCacheClusters` | List cache clusters: Memcached, single-node Redis/Valkey, and replication group members |
+| `DeleteCacheCluster` | Stop and remove a cache cluster |
+| `CreateCacheSubnetGroup` | Create a cache subnet group |
+| `DescribeCacheSubnetGroups` | List cache subnet groups |
+| `ModifyCacheSubnetGroup` | Replace a group's description or subnets |
+| `DeleteCacheSubnetGroup` | Delete a cache subnet group |
+| `CreateCacheParameterGroup` | Create a cache parameter group |
 | `DescribeCacheParameterGroups` | List parameter groups, including the AWS defaults |
 | `DescribeEvents` | Empty list (events are not recorded) |
 | `CreateCacheParameterGroup` | Create a cache parameter group |
 | `ModifyCacheParameterGroup` | Set parameters on a group |
 | `DescribeCacheParameters` | List the parameters set on a group |
 | `DeleteCacheParameterGroup` | Delete a cache parameter group |
-| `CreateServerlessCache` | Create a Valkey, Redis OSS or Memcached serverless cache backed by a real engine container; answers `creating` and turns `available` once the engine is ready. `SubnetIds` and `SecurityGroupIds` must exist in EC2 (defaults: the default VPC's subnets and its `default` group), `KmsKeyId` must name a usable key, and `UserGroupId` raises `UserGroupNotFound` (user groups are not emulated) |
-| `DescribeServerlessCaches` | List serverless caches with `NextToken` paging; `Endpoint` and `ReaderEndpoint` are `<name>-<6 chars>.serverless.<region code>.cache.amazonaws.com` on 6379/6380 (Memcached: 11211/11212), TLS only |
-| `ModifyServerlessCache` | Update description, usage limits, security groups, snapshot settings and the redis-to-valkey engine upgrade; answers `modifying` |
-| `DeleteServerlessCache` | Answers `deleting`, optionally takes `FinalSnapshotName`, then removes the cache and its container |
-| `CreateServerlessCacheSnapshot` | Capture the cache's keyspace; answers `creating`, then `available` |
-| `DescribeServerlessCacheSnapshots` | List snapshots, filtered by cache, name or `SnapshotType` |
-| `DeleteServerlessCacheSnapshot` | Delete an `available` snapshot; a `creating` one raises `InvalidServerlessCacheSnapshotStateFault` |
-| `CopyServerlessCacheSnapshot` | Copy a snapshot, keys included |
-| `ExportServerlessCacheSnapshot` | Validates the snapshot, then refuses: snapshots are not kept as RDB files that could be written to S3 |
+| `AddTagsToResource` | - |
+| `RemoveTagsFromResource` | - |
+| `ListTagsForResource` | Read stored tags for supported ElastiCache resource ARNs |
 <!-- floci:actions:end -->
 
+### Serverless caches and user groups
+
+`CreateServerlessCache`, `DescribeServerlessCaches`, `ModifyServerlessCache` and
+`DeleteServerlessCache` use the native AWS Query protocol. Valkey and Redis caches reuse the
+existing single-node Valkey container and shared proxy port range. Memcached caches reuse the
+existing Memcached container runtime. Their internal backing clusters are hidden from ordinary
+cluster management APIs. `Endpoint` and `ReaderEndpoint` identify the same local runtime.
+
+User groups support create, describe, modify and delete. Redis groups require a `default` user;
+Valkey groups can be empty and accept authenticated Redis or Valkey users. Caches read the current
+group membership and user credentials on each authentication. An attached empty group still
+requires authentication and grants no access. Removing `UserGroupId` through `RemoveUserGroup`
+allows anonymous connections. Attached groups cannot be deleted until their cache association
+is removed. IAM authentication validates tokens against the public serverless cache name.
+
+Descriptions, security groups, usage limits, snapshot schedules and user-group associations can
+be modified without recreating the runtime or dropping cached values. Supplied subnets, security
+groups and KMS keys must exist in the caller's account and region; network resources must belong
+to one VPC. Names, settings, tags, owner account and runtime identity use the existing ElastiCache
+storage mode. Restart recovery reserves proxy ports and restores authentication and endpoints;
+the cache keyspace itself comes back empty, as for the other local cache runtimes.
+
+Tags on a serverless cache are set at creation and are not editable afterwards, because
+`AddTagsToResource` and `RemoveTagsFromResource` are not implemented for ElastiCache.
+
+Local serverless caches have fixed capacity and plaintext TCP endpoints. Usage limits, subnet and
+security-group placement, KMS encryption and snapshot schedules are metadata; they do not enable
+autoscaling, VPC networking, encryption or snapshot storage. Snapshot restore and final snapshots
+are rejected explicitly. Engine/version transitions are rejected; supported major versions are
+Valkey 8, Redis 7 and Memcached 1.6. With Docker unavailable, metadata operations still work and
+connections require a reachable Docker daemon and a runtime restart. Snapshot APIs and serverless
+pagination are not implemented.
+
+### Single-node Redis/Valkey clusters
+
+`CreateCacheCluster` serves three engines. `Engine=memcached` starts a Memcached container and
+reports its node-discovery `ConfigurationEndpoint`. `Engine=redis` or `Engine=valkey` starts a
+single-node cluster with no replication group: the same Valkey container and auth proxy a
+cluster-mode-disabled replication group gets, on a port from the same proxy range, which defaults
+to 6379. AWS allows only one node in that shape, so `NumCacheNodes` greater than 1 is refused with
+`InvalidParameterValue`, as it is on a live account.
+
+This is the call `aws_elasticache_cluster` with `engine = "redis"` emits, which is why it is not
+interchangeable with `CreateReplicationGroup`: a single-node cluster created this way never appears
+in `DescribeReplicationGroups`. Following AWS, it carries no `ConfigurationEndpoint` either, and
+reports its node's address under `CacheNodes` when the request sets `ShowCacheNodeInfo`. These
+clusters are re-provisioned after a Floci restart, the same as replication groups and Memcached
+clusters.
+
+An id is taken across all three at once: a standalone cache cluster, a Memcached cluster and a
+replication group cannot share one. Two of them would have `DescribeCacheClusters` report the same
+id twice, and for a cache cluster against a replication group it is worse, since Floci names both
+their containers `valkey-<id>` and keys both their proxies by it. Whichever create arrives second
+is refused, whether it is `CreateCacheCluster` or `CreateReplicationGroup`, rather than allowed to
+remove the first's container.
+
+`CacheSubnetGroupName` must name a subnet group that exists, as on AWS, on the `Engine=redis` and
+`Engine=valkey` paths. `Engine=memcached` drops the parameter: it is neither checked nor echoed
+back. (`CreateReplicationGroup` does not check it either, so a replication group can still be
+created against a name nothing resolves.)
+
+Each record re-reserves its proxy port as it is restored, before Floci serves anything, so a
+create is never handed a port a surviving cluster or replication group still advertises.
+
+#### Port, when two caches ask for the same one
+
+On AWS, `Port` belongs to a cache's own endpoint. 6379 is the Redis default, so nearly every
+ElastiCache cluster uses it and they coexist: each cache gets a DNS name of its own, and the
+port never has to tell them apart. Floci puts every cache's proxy on one host, where a TCP port
+is exclusive and the port is the only thing that does tell them apart.
+
+This section is about `Engine=redis` and `Engine=valkey`, the engines Floci fronts with an auth
+proxy. `Engine=memcached` never reaches any of it: `CreateCacheCluster` routes that engine to a
+path the `Port` is not passed to, so a pinned port is silently ignored and the cluster reports
+the Docker-published port it is actually on. The safety property below holds there for a
+different reason, not because the rules do.
+
+So a `Port` you pass is honored when it is free and inside
+`FLOCI_SERVICES_ELASTICACHE_PROXY_BASE_PORT`/`_MAX_PORT`, and otherwise the cache is served on
+another port from that range, which is the port its endpoint then reports. A create is never
+refused for a port that is merely taken: refusing the second cache on 6379 breaks any module
+standing up two Redis clusters, and any suite running one per test in parallel.
+
+**The port a cache reports is always the port it is actually on.** If you pinned one Floci could
+not give you, the endpoint reports the substitute rather than the port you asked for, and the
+create logs a warning saying which and why. That is a visible difference: terraform treats the
+port as replacement-forcing, so a pinned port that was unavailable shows up as a diff on the
+next plan. It is deliberately preferred to the alternative, where a cache reports the port you
+pinned while listening somewhere else, because that endpoint names a *different* cache's
+listener and a client following it reads the wrong cache's data with no error.
+
+The only port rejection left is a range check: `Port` must be between 1150 and 65535. That bound
+is the one `RdsService.reserveProxyPort` applies to the same argument, not a measurement of
+ElastiCache's own limit, which nothing here establishes. It is strictly more permissive than the
+proxy-range check it replaced, so the direction it could be wrong in is accepting a port AWS
+would refuse, never refusing one AWS accepts.
+
+`SnapshotRetentionLimit`, `SnapshotWindow`, `PreferredMaintenanceWindow`,
+`PreferredAvailabilityZone`, `SecurityGroupIds`, `NetworkType`, `IpDiscovery` and
+`AtRestEncryptionEnabled` (output-only on real AWS's CreateCacheCluster; accepted here leniently and echoed) are kept and echoed by `DescribeCacheClusters`, with the same defaults
+and the same validation the replication group applies, since every one is an optional
+`aws_elasticache_cluster` argument that would otherwise read back unset and leave a permanent
+plan diff. `NotificationConfiguration` and `LogDeliveryConfigurations` are **not** modelled: a
+request may send them, and the describe will not report them back.
+
 ### Cluster Mode
+
+`SecurityGroupIds` supplied to `CreateReplicationGroup` are stored with the group and returned
+on every member by `DescribeCacheClusters` as `SecurityGroups` memberships with `Status=active`.
+This includes shards and replicas in cluster mode. Groups without stored IDs return no memberships.
+The IDs are control-plane
+metadata, not network rules applied to the backing cache containers.
 
 `CreateReplicationGroup` provisions a real sharded Valkey cluster when the request asks for one:
 `NumNodeGroups` greater than 1, a `default.*.cluster.on` parameter group, a custom parameter group
@@ -80,8 +183,8 @@ case : the shipped `docker-compose.yml` uses `localhost.floci.io`, which public 
 Floci's embedded DNS resolve it to the Floci container from inside Docker. Cluster-mode groups
 then announce that name and report it as their `ConfigurationEndpoint`.
 
-With `persistent`, `hybrid` or `wal` storage, every replication group and Memcached cluster is
-re-provisioned from its persisted record on startup: containers are restarted, cluster-mode groups
+With `persistent`, `hybrid` or `wal` storage, every replication group, standalone cache cluster
+and Memcached cluster is re-provisioned from its persisted record on startup: containers are restarted, cluster-mode groups
 are re-formed, and proxy ports are re-reserved. Caches restart empty, as on any Floci restart:
 only the topology is persisted, never the keyspace.
 
@@ -90,16 +193,18 @@ restarts and cluster formation run in the background so a slow Docker daemon can
 readiness, and each record flips to `available` once its data plane is back. A replication group
 whose data plane cannot be brought back is reported with status `create-failed` instead of
 `available`, and its member clusters answer `DescribeCacheClusters` with `restore-failed`
-(`CacheClusterStatus` has no `create-failed` value). A Memcached cluster that cannot be brought
-back reports `restore-failed` directly.
+(`CacheClusterStatus` has no `create-failed` value). A standalone cache cluster or Memcached
+cluster that cannot be brought back reports `restore-failed` directly.
 
 Reporting a failed record as failed matters more than it looks. A record that is left unreconciled
 keeps its `available` status with nothing behind the endpoint, so the control plane answers healthy
 while every connection fails, and the proxy port it still advertises is free for the next create to
 take: the old endpoint then reaches an unrelated cache rather than failing cleanly.
 
-Restored groups and Memcached clusters keep their hostname and `Port`; only the host proxy is
-re-bound to the new container.
+A Memcached cluster's endpoint follows its new container. Outside Docker, Floci publishes the
+backend on a host port Docker picks per run, so a restored cluster's `ConfigurationEndpoint` port
+can differ from the one it had before the restart. Replication groups and standalone cache
+clusters keep their port: it is a proxy port Floci owns and re-reserves.
 
 A delete that arrives while a record is still `creating` wins. The restore takes the same
 per-record monitor `DeleteReplicationGroup` and `DeleteCacheCluster` take, and skips its write-back
@@ -269,3 +374,11 @@ aws elasticache create-user \
   --no-no-password-required \
   --endpoint-url $AWS_ENDPOINT_URL
 ```
+
+### Transit encryption mode metadata
+
+An explicit `TransitEncryptionMode` (`preferred` or `required`) on a replication group is
+persisted and returned by create, modify and describe responses, including the member entries
+in `DescribeCacheClusters`. An unrelated modification preserves it. This is control-plane
+metadata; it does not establish data-plane TLS or plaintext rejection. Legacy records and
+requests that omit the mode do not acquire an invented value.

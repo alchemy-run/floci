@@ -7,6 +7,7 @@ import io.github.hectorvent.floci.services.eventbridge.model.RuleState;
 import io.github.hectorvent.floci.services.eventbridge.model.Target;
 import io.github.hectorvent.floci.services.sqs.SqsService;
 import io.github.hectorvent.floci.services.sqs.model.Message;
+import io.github.hectorvent.floci.services.sqs.model.Queue;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
@@ -80,7 +81,7 @@ class AppConfigExtensionActionTest {
                 .extract().path("Id");
 
         String queueName = "appconfig-ext-" + suffix;
-        var queue = sqsService.createQueue(queueName, Map.of(), REGION);
+        Queue queue = sqsService.createQueue(queueName, Map.of(), REGION);
         String queueArn = sqsService.getQueueAttributes(queue.getQueueUrl(), List.of("QueueArn"), REGION).get("QueueArn");
         eventBridgeService.putRule(
                 "appconfig-ext-" + suffix,

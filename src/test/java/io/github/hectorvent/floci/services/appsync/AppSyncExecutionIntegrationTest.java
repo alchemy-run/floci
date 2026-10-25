@@ -3,7 +3,9 @@ package io.github.hectorvent.floci.services.appsync;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncErrorFormatter;
 import io.github.hectorvent.floci.services.appsync.graphql.SchemaRegistry;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
+import io.github.hectorvent.floci.testing.SidecarContainersProfile;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,7 +22,9 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+/** Runs against the real GraphQL sidecar image, started by {@link GraphqlSidecarManager}. */
 @QuarkusTest
+@TestProfile(SidecarContainersProfile.class)
 class AppSyncExecutionIntegrationTest {
 
     private static final String AUTH = "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/appsync/aws4_request";
@@ -33,6 +37,7 @@ class AppSyncExecutionIntegrationTest {
 
     @BeforeAll
     static void configureRestAssured() {
+        SidecarContainersProfile.requireDockerAndImage("floci.services.appsync.graphql-image");
         RestAssuredJsonUtils.configureAwsContentTypes();
     }
 
@@ -42,43 +47,6 @@ class AppSyncExecutionIntegrationTest {
         apiKey = createApiKey(apiId);
         startSchema(apiId, "type Query { hello: String }");
         awaitSchemaSuccess(apiId);
-    }
-
-    @Test
-    void resolverAddedAfterSchemaCreationExecutesThroughAuthenticatedHostRoute() {
-        given()
-            .header("Authorization", AUTH)
-            .contentType("application/json")
-            .body(Map.of("name", "none", "type", "NONE"))
-        .when()
-            .post("/v1/apis/" + apiId + "/datasources")
-        .then()
-            .statusCode(200);
-
-        given()
-            .header("Authorization", AUTH)
-            .contentType("application/json")
-            .body(Map.of("fieldName", "hello", "dataSourceName", "none",
-                    "requestMappingTemplate", "{\"version\":\"2018-05-29\",\"payload\":\"merged\"}",
-                    "responseMappingTemplate", "$util.toJson($ctx.result)"))
-        .when()
-            .post("/v1/apis/" + apiId + "/types/Query/resolvers")
-        .then()
-            .statusCode(200);
-
-        for (String path : List.of("/v1/apis/" + apiId + "/graphql", "/graphql")) {
-            given()
-                .header("Host", apiId + ".appsync-api.us-east-1.amazonaws.com")
-                .header("x-api-key", apiKey)
-                .contentType("application/json")
-                .body(Map.of("query", "{ hello }"))
-            .when()
-                .post(path)
-            .then()
-                .statusCode(200)
-                .body("data.hello", equalTo("merged"))
-                .body("errors", nullValue());
-        }
     }
 
     @Test
@@ -352,7 +320,8 @@ class AppSyncExecutionIntegrationTest {
 
     @Test
     void awsDateTimeVariableCoercionRejectsInvalidValueAndAcceptsValid() {
-        // Validate variable coercion through the executable schema, not just SDL registration.
+        // Proves the real AWSDateTime Coercing actually runs through the sidecar's schema
+        // build, not just that StartSchemaCreation accepts the type name (issue #2917).
         String scalarApi = createApi("scalar-" + UUID.randomUUID().toString().substring(0, 8));
         String scalarKey = createApiKey(scalarApi);
         startSchema(scalarApi, "type Query { echo(t: AWSDateTime): AWSDateTime }");
@@ -392,7 +361,8 @@ class AppSyncExecutionIntegrationTest {
 
     @Test
     void fragmentCycleAgainstProtectedFieldNeverLeaksRealData() {
-        // Invalid fragment cycles must be rejected before resolver execution.
+        // Proves the sidecar's fail-closed /v1/plan behavior: a query the planner can't
+        // analyze must never fall back to "nothing to authorize, run it anyway."
         String protectedApi = createApi("protected-" + UUID.randomUUID().toString().substring(0, 8));
         String protectedKey = createApiKey(protectedApi);
         startSchema(protectedApi, "type Query { hello: String secret: String @aws_iam }");

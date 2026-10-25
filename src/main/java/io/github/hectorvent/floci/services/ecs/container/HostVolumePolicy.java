@@ -16,7 +16,8 @@ import java.util.List;
 import java.util.function.Function;
 
 /**
- * Guards task-definition {@code volumes[].host.sourcePath} against the unsafe bind mounts a
+ * Guards task-definition {@code volumes[].host.sourcePath}, and the host path of each of a
+ * container's {@code linuxParameters.devices}, against the unsafe host access a
  * caller-controlled task definition could otherwise request: relative/traversal paths, the bare
  * filesystem root, anything that reaches the Docker daemon socket, and (unless
  * {@code floci.services.ecs.allow-unsafe-host-volumes} is set) paths outside the configured
@@ -34,6 +35,12 @@ import java.util.function.Function;
  */
 @ApplicationScoped
 public class HostVolumePolicy {
+
+    /** The field {@link #validate(String)} names. */
+    public static final String VOLUME_SOURCE_PATH = "volumes[].host.sourcePath";
+
+    /** The field a container's devices are checked as. */
+    public static final String DEVICE_HOST_PATH = "containerDefinitions[].linuxParameters.devices[].hostPath";
 
     private static final List<String> LITERAL_DOCKER_SOCKET_PATHS = List.of(
             "/var/run/docker.sock",
@@ -60,33 +67,38 @@ public class HostVolumePolicy {
     }
 
     public void validate(String sourcePath) {
+        validate(sourcePath, VOLUME_SOURCE_PATH);
+    }
+
+    /** As {@link #validate(String)}, for the host path {@code field} names in its refusals. */
+    public void validate(String sourcePath, String field) {
         Path rawPath;
         try {
             rawPath = Path.of(sourcePath);
         } catch (InvalidPathException e) {
             throw new AwsException("InvalidParameterException",
-                    "volumes[].host.sourcePath is not a valid filesystem path: " + sourcePath, 400);
+                    field + " is not a valid filesystem path: " + sourcePath, 400);
         }
         if (!rawPath.isAbsolute()) {
             throw new AwsException("InvalidParameterException",
-                    "volumes[].host.sourcePath must be an absolute path: " + sourcePath, 400);
+                    field + " must be an absolute path: " + sourcePath, 400);
         }
         for (Path segment : rawPath) {
             if ("..".equals(segment.toString())) {
                 throw new AwsException("InvalidParameterException",
-                        "volumes[].host.sourcePath must not contain '..' segments: " + sourcePath, 400);
+                        field + " must not contain '..' segments: " + sourcePath, 400);
             }
         }
         Path normalized = rawPath.normalize();
         if (normalized.getNameCount() == 0) {
             throw new AwsException("InvalidParameterException",
-                    "volumes[].host.sourcePath must not be the filesystem root: " + sourcePath, 400);
+                    field + " must not be the filesystem root: " + sourcePath, 400);
         }
 
         Path canonical = canonicalizeForContainment(normalized);
         if (exposesDockerSocket(normalized, canonical)) {
             throw new AwsException("InvalidParameterException",
-                    "volumes[].host.sourcePath must not target or contain the Docker socket: "
+                    field + " must not target or contain the Docker socket: "
                             + sourcePath, 400);
         }
 
@@ -97,7 +109,7 @@ public class HostVolumePolicy {
         List<String> roots = ecsConfig.hostVolumeRoots().orElse(List.of());
         if (roots.isEmpty()) {
             throw new AwsException("InvalidParameterException",
-                    "volumes[].host.sourcePath is rejected by default: " + sourcePath
+                    field + " is rejected by default: " + sourcePath
                             + ". Configure floci.services.ecs.host-volume-roots"
                             + " (FLOCI_SERVICES_ECS_HOST_VOLUME_ROOTS) with approved parent"
                             + " directories, or set floci.services.ecs.allow-unsafe-host-volumes"
@@ -111,7 +123,7 @@ public class HostVolumePolicy {
             }
         }
         throw new AwsException("InvalidParameterException",
-                "volumes[].host.sourcePath is not within an approved host-volume root: " + sourcePath, 400);
+                field + " is not within an approved host-volume root: " + sourcePath, 400);
     }
 
     /**

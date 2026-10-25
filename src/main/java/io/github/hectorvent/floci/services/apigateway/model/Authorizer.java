@@ -12,9 +12,6 @@ public class Authorizer {
     private String name;
     private String type; // TOKEN, REQUEST, COGNITO_USER_POOLS
     private String authorizerUri;
-    private String authType;
-    private String authorizerCredentials;
-    private String identityValidationExpression;
     private String identitySource;
     private String authorizerResultTtlInSeconds;
     private List<String> providerARNs; // COGNITO_USER_POOLS
@@ -33,15 +30,6 @@ public class Authorizer {
     public String getAuthorizerUri() { return authorizerUri; }
     public void setAuthorizerUri(String authorizerUri) { this.authorizerUri = authorizerUri; }
 
-    public String getAuthType() { return authType; }
-    public void setAuthType(String authType) { this.authType = authType; }
-
-    public String getAuthorizerCredentials() { return authorizerCredentials; }
-    public void setAuthorizerCredentials(String authorizerCredentials) { this.authorizerCredentials = authorizerCredentials; }
-
-    public String getIdentityValidationExpression() { return identityValidationExpression; }
-    public void setIdentityValidationExpression(String expression) { this.identityValidationExpression = expression; }
-
     public String getIdentitySource() { return identitySource; }
     public void setIdentitySource(String identitySource) { this.identitySource = identitySource; }
 
@@ -50,4 +38,22 @@ public class Authorizer {
 
     public List<String> getProviderARNs() { return providerARNs; }
     public void setProviderARNs(List<String> providerARNs) { this.providerARNs = providerARNs; }
+
+    private String authType;
+
+    private String authorizerCredentials;
+
+    private String identityValidationExpression;
+
+    public String getAuthType() { return authType; }
+
+    public void setAuthType(String authType) { this.authType = authType; }
+
+    public String getAuthorizerCredentials() { return authorizerCredentials; }
+
+    public void setAuthorizerCredentials(String authorizerCredentials) { this.authorizerCredentials = authorizerCredentials; }
+
+    public String getIdentityValidationExpression() { return identityValidationExpression; }
+
+    public void setIdentityValidationExpression(String expression) { this.identityValidationExpression = expression; }
 }

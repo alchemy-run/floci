@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.model.VpcEndpoint;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -53,15 +54,21 @@ public class Ec2VpcEndpointCfnProvisioner implements CfnResourceProvisioner {
         Boolean privateDnsEnabled = privateDns != null && !privateDns.isBlank()
                 ? Boolean.parseBoolean(privateDns)
                 : null;
+        JsonNode addressTypeNode = ctx.engine().resolveNodeOmittingNoValue(props.get("IpAddressType"));
+        String ipAddressType = addressTypeNode == null || addressTypeNode.isNull() || addressTypeNode.isMissingNode()
+                ? null : addressTypeNode.asText();
+        if ("not-specified".equals(ipAddressType)) {
+            ipAddressType = null;
+        }
         String previousEndpointId = r.getPhysicalId();
-        var endpoint = ec2Service.createVpcEndpoint(ctx.region(), vpcId, serviceName,
+        VpcEndpoint endpoint = ec2Service.createVpcEndpoint(ctx.region(), vpcId, serviceName,
                 endpointType != null ? endpointType : "Gateway",
                 resolveIdList(props, "RouteTableIds", ctx),
                 resolveIdList(props, "SubnetIds", ctx),
                 resolveIdList(props, "SecurityGroupIds", ctx),
                 privateDnsEnabled,
                 policyDocument(props, ctx),
-                List.of());
+                List.of(), List.of(), ipAddressType);
         r.setPhysicalId(endpoint.getVpcEndpointId());
         r.getAttributes().put("Id", endpoint.getVpcEndpointId());
         // An unset attribute resolves to the literal "LogicalId.CreationTimestamp" rather than

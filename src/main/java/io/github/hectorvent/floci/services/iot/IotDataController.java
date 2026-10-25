@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.iot;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -20,6 +21,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 
+import java.time.Instant;
 import java.util.Base64;
 import java.util.UUID;
 
@@ -76,7 +78,7 @@ public class IotDataController {
     public Response listNamedShadowsForThing(@Context HttpHeaders headers,
                                              @PathParam("thingName") String thingName) {
         ObjectNode response = objectMapper.createObjectNode();
-        var results = response.putArray("results");
+        ArrayNode results = response.putArray("results");
         iotService.listNamedShadowsForThing(thingName, regionResolver.resolveRegion(headers)).forEach(results::add);
         return Response.ok(response).build();
     }
@@ -112,7 +114,7 @@ public class IotDataController {
                                       @QueryParam("nextToken") String nextToken) {
         IotService.Page<String> page = iotService.listSubscriptions(clientId, maxResults, nextToken);
         ObjectNode response = objectMapper.createObjectNode();
-        var subscriptions = response.putArray("subscriptions");
+        ArrayNode subscriptions = response.putArray("subscriptions");
         for (String topicFilter : page.items()) {
             ObjectNode subscription = subscriptions.addObject();
             subscription.put("topicFilter", topicFilter);
@@ -172,7 +174,7 @@ public class IotDataController {
                                          @QueryParam("nextToken") String nextToken) {
         IotService.Page<IotRetainedMessage> page = iotService.listRetainedMessages(maxResults, nextToken);
         ObjectNode response = objectMapper.createObjectNode();
-        var topics = response.putArray("retainedTopics");
+        ArrayNode topics = response.putArray("retainedTopics");
         for (IotRetainedMessage retained : page.items()) {
             ObjectNode item = topics.addObject();
             item.put("topic", retained.getTopic());
@@ -186,7 +188,7 @@ public class IotDataController {
         return Response.ok(response).build();
     }
 
-    private void putEpochMillis(ObjectNode node, String field, java.time.Instant instant) {
+    private void putEpochMillis(ObjectNode node, String field, Instant instant) {
         if (instant != null) {
             node.put(field, instant.toEpochMilli());
         }

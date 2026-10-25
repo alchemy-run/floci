@@ -13,6 +13,7 @@ import io.github.hectorvent.floci.services.batch.model.BatchNodeExecution;
 import io.github.hectorvent.floci.services.batch.model.BatchResourceRequirement;
 import io.github.hectorvent.floci.services.batch.model.BatchRunResult;
 import io.github.hectorvent.floci.services.batch.model.BatchRuntimePlatform;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -34,9 +35,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
-import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.RETURNS_SELF;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -90,9 +91,9 @@ class BatchDockerRunnerTest {
         when(dockerClient.inspectContainerCmd("container-id").exec().getState().getExitCodeLong()).thenReturn(0L);
 
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
         BatchDockerRunner runner = new BatchDockerRunner(containerBuilder, lifecycleManager,
                 mock(ContainerLogStreamer.class), config, detector);
@@ -145,9 +146,9 @@ class BatchDockerRunnerTest {
         }).when(lifecycleManager).stopAndRemove(eq("container-id"), isNull());
 
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
         BatchDockerRunner runner = new BatchDockerRunner(containerBuilder, lifecycleManager,
                 mock(ContainerLogStreamer.class), config, mock(ContainerDetector.class));
         BatchJob job = job();
@@ -181,9 +182,9 @@ class BatchDockerRunnerTest {
         when(dockerClient.inspectContainerCmd("container-id").exec().getState().getRunning()).thenReturn(false);
         when(dockerClient.inspectContainerCmd("container-id").exec().getState().getExitCodeLong()).thenReturn(0L);
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
         BatchDockerRunner runner = new BatchDockerRunner(containerBuilder, lifecycleManager,
                 mock(ContainerLogStreamer.class), config, mock(ContainerDetector.class));
 
@@ -228,9 +229,9 @@ class BatchDockerRunnerTest {
             }).when(lifecycleManager).stopAndRemove(eq(containerId), isNull());
         }
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
         BatchDockerRunner runner = new BatchDockerRunner(containerBuilder, lifecycleManager,
                 mock(ContainerLogStreamer.class), config, mock(ContainerDetector.class));
         BatchJob job = job();
@@ -272,9 +273,9 @@ class BatchDockerRunnerTest {
         when(dockerClient.inspectContainerCmd("container-id").exec().getState().getRunning()).thenReturn(false);
         when(dockerClient.inspectContainerCmd("container-id").exec().getState().getExitCodeLong()).thenReturn(0L);
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
         ContainerLogStreamer logStreamer = mock(ContainerLogStreamer.class);
         String ecrImage = "123456789012.dkr.ecr.us-east-1.amazonaws.com/jobs:abc";
         String localImage = "123456789012.dkr.ecr.us-east-1.localhost:4566/jobs:abc";
@@ -384,9 +385,9 @@ class BatchDockerRunnerTest {
         when(batch.dockerNetwork()).thenReturn(Optional.empty());
         when(config.port()).thenReturn(4566);
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
         return new BatchDockerRunner(containerBuilder, lifecycleManager,
                 mock(ContainerLogStreamer.class), config, mock(ContainerDetector.class));
     }

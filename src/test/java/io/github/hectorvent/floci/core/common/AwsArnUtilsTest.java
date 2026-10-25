@@ -1,8 +1,11 @@
 package io.github.hectorvent.floci.core.common;
 
+import io.github.hectorvent.floci.testing.PartitionMatrix;
+import io.github.hectorvent.floci.testing.PartitionMatrix.PartitionCase;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -140,13 +143,73 @@ class AwsArnUtilsTest {
     }
 
     /**
-     * Global services pass no region, and they keep the commercial partition. Thirty call sites
-     * do this; anything else would rewrite every IAM, S3 and CloudFront ARN the emulator mints.
+     * A regionless {@code Arn.of} keeps the commercial partition outside the test build: nothing in
+     * the region argument can say otherwise, and an untested path must keep its response. Call
+     * sites that know the request's partition use {@link AwsArnUtils.Arn#global}.
      */
     @Test
-    void aRegionlessArnStaysInTheCommercialPartition() {
-        assertEquals("arn:aws:iam::000000000000:role/r",
-                AwsArnUtils.Arn.of("iam", "", "000000000000", "role/r").toString());
+    void aRegionlessArnStaysInTheCommercialPartitionOutsideTheTestBuild() {
+        String previous = System.clearProperty(BlankRegionGuard.FAIL_PROPERTY);
+        try {
+            assertEquals("arn:aws:iam::000000000000:role/r",
+                    AwsArnUtils.Arn.of("iam", "", "000000000000", "role/r").toString());
+        } finally {
+            if (previous != null) {
+                System.setProperty(BlankRegionGuard.FAIL_PROPERTY, previous);
+            }
+        }
+    }
+
+    /** The test build sets the guard's property, so a blank-region mint fails the test that reached it. */
+    @Test
+    void theTestBuildFailsABlankRegionMint() {
+        assertEquals("true", System.getProperty(BlankRegionGuard.FAIL_PROPERTY));
+
+        IllegalStateException blank = assertThrows(IllegalStateException.class,
+                () -> AwsArnUtils.Arn.of("sqs", "", "000000000000", "q"));
+        assertThrows(IllegalStateException.class, () -> AwsArnUtils.Arn.of("sqs", null, "000000000000", "q"));
+        assertThrows(IllegalStateException.class, () -> AwsArnUtils.Arn.of("sqs", "  ", "000000000000", "q"));
+        assertTrue(blank.getMessage().contains(AwsArnUtilsTest.class.getName()), blank.getMessage());
+    }
+
+    /** A regionless ARN minted the intended way is not a blank-region mint. */
+    @Test
+    void globalArnsDoNotTripTheGuard() {
+        assertEquals("arn:aws-cn:iam::000000000000:role/r",
+                AwsArnUtils.Arn.global("aws-cn", "iam", "000000000000", "role/r").toString());
+        RegionResolver resolver = new RegionResolver("us-gov-west-1", "000000000000");
+        assertEquals("arn:aws-us-gov:iam::000000000000:role/r", resolver.buildGlobalArn("iam", "role/r"));
+        assertEquals("arn:aws-us-gov:iam::000000000000:role/r", resolver.buildArn("iam", "", "role/r"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("io.github.hectorvent.floci.testing.PartitionMatrix#cases")
+    void aGlobalArnCarriesTheGivenPartitionAndNoRegion(PartitionCase partitionCase) {
+        AwsArnUtils.Arn arn = AwsArnUtils.Arn.global(partitionCase.partition(), "iam", "000000000000", "role/r");
+        assertEquals("arn:" + partitionCase.partition() + ":iam::000000000000:role/r", arn.toString());
+        PartitionMatrix.assertGlobalArnIn(partitionCase, arn.toString());
+    }
+
+    @ParameterizedTest
+    @MethodSource("io.github.hectorvent.floci.testing.PartitionMatrix#cases")
+    void resourceIfArnForYieldsTheResourceTailInEveryPartition(PartitionCase partitionCase) {
+        String prefix = "arn:" + partitionCase.partition() + ":s3:::";
+        assertEquals("bucket/key", AwsArnUtils.resourceIfArnFor(prefix + "bucket/key", "s3").orElseThrow());
+        assertEquals("", AwsArnUtils.resourceIfArnFor(prefix, "s3").orElseThrow());
+        assertTrue(AwsArnUtils.resourceIfArnFor(prefix + "bucket", "sqs").isEmpty());
+    }
+
+    @Test
+    void resourceIfArnForIsEmptyForNonArns() {
+        assertTrue(AwsArnUtils.resourceIfArnFor(null, "s3").isEmpty());
+        assertTrue(AwsArnUtils.resourceIfArnFor("bucket", "s3").isEmpty());
+        assertTrue(AwsArnUtils.resourceIfArnFor("arn:aws:s3", "s3").isEmpty());
+    }
+
+    @Test
+    void aPseudoRegionResolvesToItsPartitionWhenMinting() {
+        assertEquals("arn:aws-cn:sqs:aws-cn-global:000000000000:q",
+                AwsArnUtils.Arn.of("sqs", "aws-cn-global", "000000000000", "q").toString());
     }
 
     /** A region AWS has not launched yet must not fail closed. */

@@ -1,8 +1,9 @@
 package io.github.hectorvent.floci.services.lambda.model;
 
+import io.vertx.ext.web.RoutingContext;
+
 import java.util.ArrayDeque;
 import java.util.List;
-import io.vertx.ext.web.RoutingContext;
 
 /**
  * Tracks one extension's Extensions API registration state within a single container's
@@ -56,6 +57,10 @@ public class RegisteredExtension {
      */
     public boolean hasWaitingContext() {
         return waitingContext != null;
+    }
+
+    public boolean hasReceivedFirstNext() {
+        return firstNextReceived;
     }
 
     /**

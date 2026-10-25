@@ -1,14 +1,15 @@
 package io.github.hectorvent.floci.services.cloudwatch.metrics;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.core.storage.WriteProfile;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
-import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 @ApplicationScoped
@@ -30,24 +32,39 @@ public class CloudWatchMetricsService {
 
     private final StorageBackend<String, MetricDatum> metricStore;
     private final StorageBackend<String, MetricAlarm> alarmStore;
-    private final Map<String, Instant> manualStateHeldUntil = new ConcurrentHashMap<>();
     private final RegionResolver regionResolver;
+    private final AlarmSnsNotifier alarmSnsNotifier;
+
+    public CloudWatchMetricsService(StorageFactory storageFactory, RegionResolver regionResolver) {
+        this(storageFactory, regionResolver, null);
+    }
 
     @Inject
-    public CloudWatchMetricsService(StorageFactory storageFactory, RegionResolver regionResolver) {
+    public CloudWatchMetricsService(StorageFactory storageFactory, RegionResolver regionResolver,
+                                    AlarmSnsNotifier alarmSnsNotifier) {
+        // Services publish into this store every minute, SQS for every active queue, so under
+        // persistent mode it is journaled rather than rewritten in full on every datum.
         this.metricStore = storageFactory.create("cloudwatchmetrics", "cwmetrics.json",
-                new TypeReference<Map<String, MetricDatum>>() {});
+                new TypeReference<Map<String, MetricDatum>>() {}, WriteProfile.APPEND_HEAVY);
         this.alarmStore = storageFactory.create("cloudwatchmetrics", "cwalarms.json",
                 new TypeReference<Map<String, MetricAlarm>>() {});
         this.regionResolver = regionResolver;
+        this.alarmSnsNotifier = alarmSnsNotifier;
     }
 
     CloudWatchMetricsService(StorageBackend<String, MetricDatum> metricStore,
                              StorageBackend<String, MetricAlarm> alarmStore,
                              RegionResolver regionResolver) {
+        this(metricStore, alarmStore, regionResolver, null);
+    }
+
+    CloudWatchMetricsService(StorageBackend<String, MetricDatum> metricStore,
+                             StorageBackend<String, MetricAlarm> alarmStore,
+                             RegionResolver regionResolver, AlarmSnsNotifier alarmSnsNotifier) {
         this.metricStore = metricStore;
         this.alarmStore = alarmStore;
         this.regionResolver = regionResolver;
+        this.alarmSnsNotifier = alarmSnsNotifier;
     }
 
     public void putMetricData(String namespace, List<MetricDatum> datums, String region) {
@@ -115,6 +132,22 @@ public class CloudWatchMetricsService {
             aware.putForAccount(accountId, key, datum);
         } else {
             metricStore.put(key, datum);
+        }
+    }
+
+    /**
+     * Drops the {@code namespace} datapoints stamped before {@code cutoff}, in every account. A service
+     * that writes its own metrics each minute, such as SQS, calls it so that history stays bounded.
+     */
+    public void deleteMetricDataBefore(String namespace, Instant cutoff) {
+        long cutoffSeconds = cutoff.getEpochSecond();
+        Predicate<MetricDatum> expired = d -> namespace.equals(d.getNamespace()) && d.getTimestamp() < cutoffSeconds;
+        if (metricStore instanceof AccountAwareStorageBackend<MetricDatum> aware) {
+            aware.deleteAllAccountsMatching(expired);
+            return;
+        }
+        for (String key : List.copyOf(metricStore.keys())) {
+            metricStore.get(key).filter(expired).ifPresent(ignored -> metricStore.delete(key));
         }
     }
 
@@ -333,6 +366,7 @@ public class CloudWatchMetricsService {
         MetricAlarm alarm = alarmStore.get(key)
                 .orElseThrow(() -> new AwsException("ResourceNotFound", "Alarm not found: " + alarmName, 404));
 
+        String oldState = alarm.getStateValue();
         alarm.setStateValue(stateValue);
         alarm.setStateReason(stateReason);
         alarm.setStateReasonData(stateReasonData);
@@ -340,7 +374,69 @@ public class CloudWatchMetricsService {
 
         alarmStore.put(key, alarm);
         LOG.infov("SetAlarmState: {0} -> {1}", alarmName, stateValue);
+        if (alarmSnsNotifier != null) {
+            alarmSnsNotifier.notifyTransition(alarm, oldState);
+        }
     }
+
+    /**
+     * Resolves the alarm an ARN names, or reports that nothing does.
+     *
+     * <p>CloudWatch's three tag operations each declare {@code ResourceNotFoundException},
+     * which is a different shape from the {@code ResourceNotFound} that {@code SetAlarmState}
+     * and {@code GetDashboard} declare; the SDK maps the two codes to two exception classes,
+     * so the tag path uses the longer one rather than the code used elsewhere in this service.
+     *
+     * <p>The message names the ARN rather than asserting it was an alarm, because both tag
+     * handlers route every ARN that is not a dashboard and not a metric stream here. That
+     * includes kinds AWS considers taggable and Floci does not serve, a Contributor Insights
+     * {@code insight-rule/} ARN being the one AWS documents; reporting that no resource
+     * matches the ARN is true of those, where "alarm not found" would not be.
+     */
+    private MetricAlarm requireAlarm(String resourceArn, String region) {
+        return alarmStore.scan(k -> k.startsWith(region + "::"))
+                .stream()
+                .filter(a -> a.getAlarmArn() != null && a.getAlarmArn().equals(resourceArn))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "No CloudWatch resource matches the ARN " + resourceArn + ".", 404));
+    }
+
+    public Map<String, String> listTagsForResource(String resourceArn, String region) {
+        return requireAlarm(resourceArn, region).getTags();
+    }
+
+    public void tagResource(String resourceArn, Map<String, String> tags, String region) {
+        MetricAlarm alarm = requireAlarm(resourceArn, region);
+        alarm.getTags().putAll(tags);
+        alarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
+    }
+
+    public void untagResource(String resourceArn, List<String> tagKeys, String region) {
+        MetricAlarm alarm = requireAlarm(resourceArn, region);
+        tagKeys.forEach(alarm.getTags()::remove);
+        alarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
+    }
+
+    // ──────────────────────────── Helpers ────────────────────────────
+
+    static String buildDimKey(List<Dimension> dimensions) {
+        if (dimensions == null || dimensions.isEmpty()) {
+            return "";
+        }
+        return dimensions.stream()
+                .sorted(Comparator.comparing(Dimension::name))
+                .map(d -> d.name() + "=" + d.value())
+                .collect(Collectors.joining(","));
+    }
+
+    private boolean matchesDimensions(List<Dimension> actual, List<Dimension> required) {
+        String requiredKey = buildDimKey(required);
+        String actualKey = buildDimKey(actual);
+        return actualKey.contains(requiredKey);
+    }
+
+    private final Map<String, Instant> manualStateHeldUntil = new ConcurrentHashMap<>();
 
     /**
      * Records a SetAlarmState API call. AWS keeps the requested state until the alarm's next
@@ -372,54 +468,5 @@ public class CloudWatchMetricsService {
                 .orElseThrow(() -> CloudWatchMetadataService.notFound(alarmName));
         alarm.setActionsEnabled(enabled);
         alarmStore.put(key, alarm);
-    }
-
-    public Map<String, String> listTagsForResource(String resourceArn, String region) {
-        return alarmStore.scan(k -> k.startsWith(region + "::"))
-                .stream()
-                .filter(a -> resourceArn.equals(a.getAlarmArn()))
-                .findFirst()
-                .map(MetricAlarm::getTags)
-                .orElse(Map.of());
-    }
-
-    public void tagResource(String resourceArn, Map<String, String> tags, String region) {
-        alarmStore.scan(k -> k.startsWith(region + "::"))
-                .stream()
-                .filter(a -> resourceArn.equals(a.getAlarmArn()))
-                .findFirst()
-                .ifPresent(alarm -> {
-                    alarm.getTags().putAll(tags);
-                    alarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
-                });
-    }
-
-    public void untagResource(String resourceArn, List<String> tagKeys, String region) {
-        alarmStore.scan(k -> k.startsWith(region + "::"))
-                .stream()
-                .filter(a -> resourceArn.equals(a.getAlarmArn()))
-                .findFirst()
-                .ifPresent(alarm -> {
-                    tagKeys.forEach(alarm.getTags()::remove);
-                    alarmStore.put(region + "::" + alarm.getAlarmName(), alarm);
-                });
-    }
-
-    // ──────────────────────────── Helpers ────────────────────────────
-
-    static String buildDimKey(List<Dimension> dimensions) {
-        if (dimensions == null || dimensions.isEmpty()) {
-            return "";
-        }
-        return dimensions.stream()
-                .sorted(Comparator.comparing(Dimension::name))
-                .map(d -> d.name() + "=" + d.value())
-                .collect(Collectors.joining(","));
-    }
-
-    private boolean matchesDimensions(List<Dimension> actual, List<Dimension> required) {
-        String requiredKey = buildDimKey(required);
-        String actualKey = buildDimKey(actual);
-        return actualKey.contains(requiredKey);
     }
 }

@@ -1,6 +1,9 @@
 package io.github.hectorvent.floci.services.dynamodb;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.JsonResponseBytes;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
@@ -18,6 +21,23 @@ public final class DynamoDbResponses {
     private static final Logger LOG = Logger.getLogger(DynamoDbResponses.class);
 
     private DynamoDbResponses() {}
+
+    public static Response withLegacyErrorNamespace(Response response, ObjectMapper objectMapper) {
+        if (response.getStatus() < 400 || response.getEntity() == null) {
+            return response;
+        }
+        JsonNode body = objectMapper.valueToTree(response.getEntity());
+        if (!(body instanceof ObjectNode error) || !error.path("__type").isTextual()) {
+            return response;
+        }
+        String type = error.path("__type").asText();
+        if (type.startsWith("com.amazon.coral.")) {
+            return response;
+        }
+        ObjectNode legacyError = error.deepCopy();
+        legacyError.put("__type", "com.amazonaws.dynamodb.v20111205#" + type.substring(type.lastIndexOf('#') + 1));
+        return Response.fromResponse(response).entity(legacyError).build();
+    }
 
     /**
      * Pre-serialize the response entity and attach an {@code X-Amz-Crc32} header whose value
@@ -40,18 +60,9 @@ public final class DynamoDbResponses {
         if (response == null) {
             return null;
         }
-        Object entity = response.getEntity();
-        byte[] bodyBytes;
-        try {
-            if (entity == null) {
-                bodyBytes = new byte[0];
-            } else if (entity instanceof byte[] b) {
-                bodyBytes = b;
-            } else {
-                bodyBytes = objectMapper.writeValueAsBytes(entity);
-            }
-        } catch (Exception e) {
-            LOG.warn("Failed to serialize DynamoDB response for CRC32 computation", e);
+        byte[] bodyBytes = JsonResponseBytes.serializeOrNull(response.getEntity(), objectMapper,
+                LOG, "Failed to serialize DynamoDB response for CRC32 computation");
+        if (bodyBytes == null) {
             return response;
         }
 

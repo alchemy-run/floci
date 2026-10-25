@@ -1,14 +1,15 @@
 package io.github.hectorvent.floci.services.s3;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
 import static io.restassured.RestAssured.given;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * Integration tests for virtual-hosted-style S3 requests.
@@ -302,7 +303,7 @@ class S3VirtualHostIntegrationTest {
     @Order(20)
     void createMultipartUploadViaVirtualHost() {
         String key = "virtual-multipart.zip";
-        var response = given()
+        Response response = given()
             .header("Host", HOST)
             .header("Authorization",
                     "AWS4-HMAC-SHA256 Credential=test/20260912/us-east-1/s3/aws4_request, Signature=fake")
@@ -471,5 +472,34 @@ class S3VirtualHostIntegrationTest {
             .get("/" + truncated)
         .then()
             .statusCode(404);
+    }
+
+    @Test
+    @Order(91)
+    void keyWithPercentSignIsStoredLiterally() {
+        String percentBucket = "vhost-percent-key";
+        String percentHost = percentBucket + ".localhost";
+        given().header("Host", percentHost).when().put("/").then().statusCode(200);
+
+        for (String wirePath : new String[] {"/a%25/b", "/archive/" + percentBucket + "/a%25b"}) {
+            given()
+                .urlEncodingEnabled(false)
+                .header("Host", percentHost)
+                .contentType("text/plain")
+                .body("x")
+            .when()
+                .put(wirePath)
+            .then()
+                .statusCode(200);
+        }
+
+        given()
+            .header("Host", percentHost)
+            .queryParam("list-type", "2")
+        .when()
+            .get("/")
+        .then()
+            .statusCode(200)
+            .body("ListBucketResult.Contents.Key", containsInAnyOrder("a%/b", "archive/" + percentBucket + "/a%b"));
     }
 }

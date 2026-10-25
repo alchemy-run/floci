@@ -1,7 +1,7 @@
 package io.github.hectorvent.floci.services.opensearch;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
@@ -11,13 +11,16 @@ import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.PortAllocator;
 import io.github.hectorvent.floci.services.opensearch.model.Domain;
+import io.github.hectorvent.floci.services.opensearch.model.VolumeOwnership;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.io.File;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.file.Path;
+import java.util.Optional;
 
 /**
  * Manages the Docker lifecycle of OpenSearch containers for real-mode domains.
@@ -28,6 +31,7 @@ public class OpenSearchDomainManager {
 
     private static final Logger LOG = Logger.getLogger(OpenSearchDomainManager.class);
     private static final int OPENSEARCH_PORT = 9200;
+    private static final String CONTAINER_DATA_PATH = "/usr/share/opensearch/data";
 
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
@@ -35,21 +39,18 @@ public class OpenSearchDomainManager {
     private final PortAllocator portAllocator;
     private final EmulatorConfig config;
     private volatile boolean dockerUnavailableLogged;
-    private final RegionResolver regionResolver;
 
     @Inject
     public OpenSearchDomainManager(ContainerBuilder containerBuilder,
                                    ContainerLifecycleManager lifecycleManager,
                                    ContainerDetector containerDetector,
                                    PortAllocator portAllocator,
-                                   EmulatorConfig config,
-                                   RegionResolver regionResolver) {
+                                   EmulatorConfig config) {
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.containerDetector = containerDetector;
         this.portAllocator = portAllocator;
         this.config = config;
-        this.regionResolver = regionResolver;
     }
 
     /**
@@ -98,12 +99,18 @@ public class OpenSearchDomainManager {
 
     public void startDomain(Domain domain) {
         String image = resolveImage(domain.getEngineVersion());
-        String containerName = containerName(domain);
+        AwsArnUtils.Arn arn = AwsArnUtils.parse(domain.getArn());
+        String containerName = ContainerStorageHelper.resourceName(config, "opensearch", null,
+                arn.accountId() + "-" + arn.region() + "-" + domain.getDomainName());
 
         LOG.infov("Starting OpenSearch container for domain: {0} (version={1}, image={2})",
                 domain.getDomainName(), domain.getEngineVersion(), image);
 
-        lifecycleManager.removeIfExists(containerName);
+        // Older container names omit account and Region, so only the persisted ID proves ownership.
+        if (domain.getContainerId() != null && !domain.getContainerId().isBlank()) {
+            lifecycleManager.removeIfExists(domain.getContainerId());
+        }
+        ContainerStorageHelper.removeStaleContainer(config, lifecycleManager, containerName);
 
         // A restart of an existing domain has just removed the old container, so its
         // reservation is stale; hand the port back before allocating a fresh one.
@@ -117,9 +124,12 @@ public class OpenSearchDomainManager {
                 .withEnv("discovery.type", "single-node")
                 .withDockerNetwork(config.services().dockerNetwork())
                 .withLogRotation()
+                // The OpenSearch image's entrypoint is a bash script that runs the server as its
+                // child rather than exec'ing it. As PID 1 that script ignores SIGTERM, so every
+                // DeleteDomain, and every shutdown for each domain, waited out the whole stop timeout.
+                .withInit()
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(
-                        "opensearch", domain.getDomainName(), regionResolver.getAccountId(),
-                        regionResolver.getDefaultRegion()));
+                        "opensearch", domain.getDomainName(), arn.accountId(), arn.region()));
 
         // Container-name DNS only resolves on a user-defined Docker network, and
         // nothing guarantees the spawned OpenSearch container and floci itself land
@@ -140,28 +150,32 @@ public class OpenSearchDomainManager {
                 config.services().opensearch().proxyMaxPort());
         specBuilder.withPortBinding(OPENSEARCH_PORT, hostPort);
 
-        applyEngineEnv(specBuilder, domain.getEngineVersion());
-
-        if (ContainerStorageHelper.isNamedVolumeMode(config)) {
-            ContainerStorageHelper.applyStorage(specBuilder, lifecycleManager, config,
-                    "opensearch", domain.getVolumeId(), domain.getDomainName(),
-                    "/usr/share/opensearch/data");
-        } else {
-            // Legacy host-path mode: host-persistent-path is an absolute path
-            Path dataPath = ContainerStorageHelper.hostResourcePath(config, "opensearch", domain.getDomainName());
-            if (!containerDetector.isRunningInContainer()) {
-                ContainerStorageHelper.ensureHostDir(dataPath.toString());
-            }
-            String dataPathStr = dataPath.toAbsolutePath().normalize().toString();
-            String persistentPathStr = Path.of(config.storage().persistentPath()).toAbsolutePath().normalize().toString();
-            String hostDataPath = dataPathStr.replace(persistentPathStr, config.storage().hostPersistentPath());
-            specBuilder.withBind(hostDataPath, "/usr/share/opensearch/data");
-        }
-
-        ContainerSpec spec = specBuilder.build();
-
         ContainerInfo info;
         try {
+            applyEngineEnv(specBuilder, domain.getEngineVersion());
+
+            Optional<String> configuredDataVolume = config.services().opensearch().dataVolume()
+                    .filter(dataVolume -> !dataVolume.isBlank());
+            if (configuredDataVolume.isPresent()) {
+                applyConfiguredDataVolume(specBuilder, domain, configuredDataVolume.get(), image);
+            } else if (ContainerStorageHelper.isNamedVolumeMode(config)) {
+                domain.setVolumeOwnership(VolumeOwnership.FLOCI_MANAGED);
+                ContainerStorageHelper.applyNamedVolume(specBuilder, lifecycleManager,
+                        resolveVolumeName(domain), CONTAINER_DATA_PATH);
+            } else {
+                // Legacy host-path mode: host-persistent-path is an absolute path
+                Path dataPath = ContainerStorageHelper.hostResourcePath(config, "opensearch", domain.getDomainName());
+                if (!containerDetector.isRunningInContainer()) {
+                    ContainerStorageHelper.ensureHostDir(dataPath.toString());
+                }
+                String dataPathStr = dataPath.toAbsolutePath().normalize().toString();
+                String persistentPathStr = Path.of(config.storage().persistentPath()).toAbsolutePath().normalize().toString();
+                String hostDataPath = dataPathStr.replace(persistentPathStr, config.storage().hostPersistentPath());
+                specBuilder.withBind(hostDataPath, CONTAINER_DATA_PATH);
+            }
+
+            ContainerSpec spec = specBuilder.build();
+
             info = lifecycleManager.createAndStart(spec);
         } catch (RuntimeException e) {
             portAllocator.release(hostPort);
@@ -207,15 +221,9 @@ public class OpenSearchDomainManager {
         if (domain.getContainerId() == null) {
             return;
         }
-        if (config.services().opensearch().keepRunningOnShutdown()) {
-            LOG.infov("Leaving OpenSearch container for domain {0} running", domain.getDomainName());
-            return;
-        }
         lifecycleManager.stopAndRemove(domain.getContainerId(), null);
         // The container no longer holds the binding, so the reservation must go with
         // it. Repeated create/delete would otherwise exhaust the configured range.
-        // The keep-running early return above deliberately keeps the reservation:
-        // the surviving container still owns the binding.
         if (domain.getHostPort() != null) {
             portAllocator.release(domain.getHostPort());
             domain.setHostPort(null);
@@ -223,9 +231,45 @@ public class OpenSearchDomainManager {
         LOG.infov("Stopped OpenSearch container for domain {0}", domain.getDomainName());
     }
 
+    /**
+     * Removes the domain's Docker volume on delete, honouring the configured prune policy.
+     * The decision rides on the {@link VolumeOwnership} marker persisted when the storage
+     * was selected, not on names recomputed from the configuration held at delete time: a
+     * recomputed name stops matching the persisted one as soon as the resource namespace
+     * changes, and a name composed from {@code floci.services.opensearch.data-volume} can
+     * be spelled exactly like one Floci derives. Records predating the marker also predate
+     * configured data volumes, so their volumes are always Floci-managed.
+     */
     public void removeDomainStorage(Domain domain) {
-        ContainerStorageHelper.removeStorage(config, lifecycleManager,
-                "opensearch", domain.getVolumeId(), domain.getDomainName());
+        VolumeOwnership ownership = domain.getVolumeOwnership();
+        if (ownership == VolumeOwnership.OPERATOR_BIND) {
+            LOG.infov("Retained the bind-mounted data directory of domain {0}. It was named by "
+                    + "floci.services.opensearch.data-volume, which Floci never removes.",
+                    domain.getDomainName());
+            return;
+        }
+        String volumeName = resolveVolumeName(domain);
+        if (ownership == VolumeOwnership.OPERATOR_NAMED) {
+            LOG.infov("Retained Docker volume {0}. It was named by "
+                    + "floci.services.opensearch.data-volume, which Floci never removes. "
+                    + "Remove manually: docker volume rm {0}", volumeName);
+            return;
+        }
+        ContainerStorageHelper.removeNamedVolume(config, lifecycleManager, volumeName);
+    }
+
+    /**
+     * The domain's Docker volume name, backfilled once for records written before the field
+     * existed: those predate the {@code floci-aws-} migration, so their data is in the
+     * legacy-named volume and must keep resolving there. Never use the live helper here, which
+     * would strand that data under a freshly created volume.
+     */
+    private String resolveVolumeName(Domain domain) {
+        if (domain.getDockerVolumeName() == null || domain.getDockerVolumeName().isBlank()) {
+            domain.setDockerVolumeName(ContainerStorageHelper.legacyResourceName(
+                    config, "opensearch", domain.getVolumeId(), domain.getDomainName()));
+        }
+        return domain.getDockerVolumeName();
     }
 
     private String resolveImage(String engineVersion) {
@@ -233,8 +277,55 @@ public class OpenSearchDomainManager {
                 config.services().opensearch().defaultImage(), engineVersion);
     }
 
-    private String containerName(Domain domain) {
-        return ContainerStorageHelper.resourceName(config, "opensearch", null, domain.getDomainName());
+    /**
+     * Mounts the operator-configured {@code floci.services.opensearch.data-volume}. An
+     * absolute path is bind-mounted as {@code <path>/<account-id>/<region>/<domain-name>}, nested under a
+     * {@code <namespace>} subdirectory when a resource namespace is configured; any
+     * other value is a Docker volume name and the domain gets its own
+     * {@code <name>-<namespace>-<account-id>-<region>-<domain-name>} volume of it, without the namespace
+     * segment when none is configured. Per-domain, per-deployment naming is deliberate:
+     * two OpenSearch nodes sharing one data directory corrupt each other's cluster
+     * state, and two namespaced deployments on one Docker daemon must not converge on
+     * one volume through the same configured base. The domain record is stamped with
+     * the volume name and the operator ownership marker so
+     * {@link #removeDomainStorage} can tell operator-named storage, which it never
+     * deletes, from the kind Floci derives. The bind branch clears any managed name
+     * stamped at creation: a stale one would read as a volume the domain never mounted.
+     * A volume created when absent carries no Floci label, so no sweep of
+     * Floci-labelled volumes, a floci-scoped prune or a testcontainers run's
+     * labelled-children reap, collects operator storage.
+     */
+    private void applyConfiguredDataVolume(ContainerBuilder.Builder specBuilder, Domain domain,
+                                           String dataVolume, String image) {
+        AwsArnUtils.Arn arn = AwsArnUtils.parse(domain.getArn());
+        if (dataVolume.startsWith("/") || Path.of(dataVolume).isAbsolute()) {
+            domain.setVolumeOwnership(VolumeOwnership.OPERATOR_BIND);
+            domain.setDockerVolumeName(null);
+            String namespace = ContainerStorageHelper.resourceNamespace(config);
+            String hostPath;
+            if (dataVolume.startsWith("/") && File.separatorChar != '/') {
+                // A Linux daemon path must not be resolved against the Windows client's drive.
+                String base = dataVolume.endsWith("/") ? dataVolume : dataVolume + "/";
+                String prefix = namespace.isBlank() ? base : base + namespace + "/";
+                hostPath = prefix + arn.accountId() + "/" + arn.region() + "/" + domain.getDomainName();
+            } else {
+                Path domainDataPath = namespace.isBlank()
+                        ? Path.of(dataVolume, arn.accountId(), arn.region(), domain.getDomainName())
+                        : Path.of(dataVolume, namespace, arn.accountId(), arn.region(), domain.getDomainName());
+                if (!containerDetector.isRunningInContainer()) {
+                    ContainerStorageHelper.ensureHostDir(domainDataPath.toString());
+                }
+                hostPath = domainDataPath.toAbsolutePath().normalize().toString();
+            }
+            lifecycleManager.ensureBindDirectory(hostPath, image, CONTAINER_DATA_PATH);
+            specBuilder.withBind(hostPath, CONTAINER_DATA_PATH);
+            return;
+        }
+        String volumeName = ContainerStorageHelper.prefixedDockerName(
+                config, dataVolume, arn.accountId() + "-" + arn.region() + "-" + domain.getDomainName());
+        domain.setDockerVolumeName(volumeName);
+        domain.setVolumeOwnership(VolumeOwnership.OPERATOR_NAMED);
+        ContainerStorageHelper.applyOperatorNamedVolume(specBuilder, lifecycleManager, volumeName, CONTAINER_DATA_PATH);
     }
 
     /**

@@ -58,12 +58,16 @@ public class MixedInstancesPolicy {
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class LaunchTemplateOverride {
         private String instanceType;
+        private String weightedCapacity;
         private InstanceRequirements instanceRequirements;
 
         public LaunchTemplateOverride() {}
 
         public String getInstanceType() { return instanceType; }
         public void setInstanceType(String v) { this.instanceType = v; }
+
+        public String getWeightedCapacity() { return weightedCapacity; }
+        public void setWeightedCapacity(String v) { this.weightedCapacity = v; }
 
         public InstanceRequirements getInstanceRequirements() { return instanceRequirements; }
         public void setInstanceRequirements(InstanceRequirements v) { this.instanceRequirements = v; }

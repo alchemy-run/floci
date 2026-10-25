@@ -50,6 +50,38 @@ class ProvisionContextTest {
         }
     }
 
+    private ProvisionContext contextWithPriorProperties(String priorProperties) {
+        return new ProvisionContext(engine, "us-east-1", "000000000000", "my-stack", "prior-id",
+                event -> { }, priorProperties == null ? null : props(priorProperties));
+    }
+
+    @Test
+    void previouslyDeclaredReadsThePreviousTemplatesProperties() {
+        ProvisionContext ctx = contextWithPriorProperties("""
+                {"Declared": {"Fn::GetAtt": ["Other", "Arn"]}, "ExplicitNull": null}
+                """);
+
+        assertTrue(ctx.previouslyDeclared("Declared"), "declared, whatever it resolved to");
+        assertFalse(ctx.previouslyDeclared("ExplicitNull"), "null is how a template omits a property");
+        assertFalse(ctx.previouslyDeclared("Absent"));
+    }
+
+    /** A resource the previous deployment never provisioned, such as one its Condition kept out, declared nothing. */
+    @Test
+    void aResourceWithoutAPriorPhysicalIdDeclaredNothing() {
+        ProvisionContext ctx = new ProvisionContext(engine, "us-east-1", "000000000000", "my-stack", null,
+                event -> { }, props("{\"Declared\": \"value\"}"));
+
+        assertFalse(ctx.previouslyDeclared("Declared"));
+    }
+
+    @Test
+    void nothingIsPreviouslyDeclaredWithoutAPreviousTemplate() {
+        assertFalse(contextWithPriorProperties(null).previouslyDeclared("Declared"));
+        assertFalse(context("prior-id").previouslyDeclared("Declared"),
+                "the constructors without prior properties have none");
+    }
+
     @Test
     void isUpdateReflectsWhetherAPriorPhysicalIdExists() {
         assertFalse(context(null).isUpdate(), "a first-time create has no prior physical id");
@@ -129,6 +161,21 @@ class ProvisionContextTest {
     }
 
     @Test
+    void resolveTagsReadsTheMapShapeSomeTypesDeclare() {
+        // AWS::Batch::* declare Tags as {key: value} rather than [{Key, Value}]; the map form
+        // resolves each value and keeps template order too.
+        Map<String, String> tags = context(null).resolveTags(
+                props("""
+                        {"Tags": {"zeta": "z", "alpha": "a", "empty": ""}}
+                        """),
+                "Tags");
+
+        assertEquals(List.of("zeta", "alpha", "empty"), List.copyOf(tags.keySet()));
+        assertEquals("z", tags.get("zeta"));
+        assertEquals("", tags.get("empty"));
+    }
+
+    @Test
     void resolveTagsSkipsBlankKeysAndNeverReturnsNull() {
         Map<String, String> blankKeys = context(null).resolveTags(
                 props("""
@@ -188,6 +235,27 @@ class ProvisionContextTest {
                 "the same name means the same entity, so the provisioner must update it");
         assertFalse(update.reusesPriorEntity("explicitly-named"),
                 "a replacing update derives a different name and must still create");
+    }
+
+    @Test
+    void isGeneratedPhysicalNameRecognisesOnlyWhatGeneratePhysicalNameProducesForTheLogicalId() {
+        ProvisionContext ctx = context(null);
+        String generated = ctx.generatePhysicalName("AdminGroup", 128, false);
+        assertTrue(ctx.isGeneratedPhysicalName(generated, "AdminGroup", 128, false), generated);
+
+        ProvisionContext longStack = new ProvisionContext(engine, "us-east-1", "000000000000",
+                "a-stack-name-long-enough-to-force-truncation", null);
+        String longLogicalId = "AVeryLongLogicalIdThatPushesTheGeneratedNamePastItsLimit";
+        String truncated = longStack.generatePhysicalName(longLogicalId, 64, false);
+        assertEquals(64, truncated.length(), truncated);
+        assertTrue(longStack.isGeneratedPhysicalName(truncated, longLogicalId, 64, false), truncated);
+
+        assertFalse(ctx.isGeneratedPhysicalName("admin", "AdminGroup", 128, false), "an explicit name");
+        assertFalse(ctx.isGeneratedPhysicalName(ctx.generatePhysicalName("OtherGroup", 128, false),
+                "AdminGroup", 128, false), "another logical id's name");
+        assertFalse(ctx.isGeneratedPhysicalName("my-stack-AdminGroup-0123456789zz", "AdminGroup", 128, false),
+                "a suffix that is not hex");
+        assertFalse(ctx.isGeneratedPhysicalName(null, "AdminGroup", 128, false));
     }
 
 

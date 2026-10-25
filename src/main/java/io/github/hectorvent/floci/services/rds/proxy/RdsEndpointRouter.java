@@ -4,6 +4,7 @@ import io.github.hectorvent.floci.services.rds.model.DatabaseEngine;
 import org.jboss.logging.Logger;
 
 import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
 import java.io.DataInputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -464,7 +465,7 @@ final class RdsEndpointRouter {
         return buffer;
     }
 
-    private static void closeQuietly(java.io.Closeable closeable) {
+    private static void closeQuietly(Closeable closeable) {
         if (closeable == null) {
             return;
         }

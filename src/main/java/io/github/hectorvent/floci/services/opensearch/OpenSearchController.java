@@ -1,5 +1,9 @@
 package io.github.hectorvent.floci.services.opensearch;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.opensearch.model.AdvancedSecurityOptions;
@@ -11,10 +15,6 @@ import io.github.hectorvent.floci.services.opensearch.model.EbsOptions;
 import io.github.hectorvent.floci.services.opensearch.model.EncryptionAtRestOptions;
 import io.github.hectorvent.floci.services.opensearch.model.NodeToNodeEncryptionOptions;
 import io.github.hectorvent.floci.services.opensearch.model.VpcOptions;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -421,86 +421,6 @@ public class OpenSearchController {
     }
 
     @GET
-    @Path("/opensearch/domain/{domainName}/nodes")
-    public Response describeDomainNodes(@PathParam("domainName") String domainName) {
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode list = response.putArray("DomainNodesStatusList");
-        for (OpenSearchService.DomainNode node : service.describeDomainNodes(domainName)) {
-            ObjectNode entry = list.addObject();
-            entry.put("NodeId", node.nodeId());
-            entry.put("NodeType", node.nodeType());
-            entry.put("AvailabilityZone", node.availabilityZone());
-            entry.put("InstanceType", node.instanceType());
-            entry.put("NodeStatus", node.nodeStatus());
-            entry.put("StorageType", node.storageType());
-            if (node.storageVolumeType() != null) {
-                entry.put("StorageVolumeType", node.storageVolumeType());
-            }
-            if (node.storageSize() != null) {
-                entry.put("StorageSize", node.storageSize());
-            }
-        }
-        return Response.ok(response).build();
-    }
-
-    @GET
-    @Path("/opensearch/domain/{domainName}/scheduledActions")
-    public Response listScheduledActions(@PathParam("domainName") String domainName) {
-        service.describeDomain(domainName);
-        // Floci never schedules service software updates or blue/green actions.
-        ObjectNode response = objectMapper.createObjectNode();
-        response.putArray("ScheduledActions");
-        return Response.ok(response).build();
-    }
-
-    @POST
-    @Path("/opensearch/domain/{domainName}/domainMaintenance")
-    public Response startDomainMaintenance(@PathParam("domainName") String domainName, String body) {
-        JsonNode req = readBody(body);
-        DomainMaintenance maintenance = service.startDomainMaintenance(domainName,
-                req.path("Action").asText(null), req.path("NodeId").asText(null));
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("MaintenanceId", maintenance.getMaintenanceId());
-        return Response.ok(response).build();
-    }
-
-    @GET
-    @Path("/opensearch/domain/{domainName}/domainMaintenance")
-    public Response getDomainMaintenanceStatus(@PathParam("domainName") String domainName,
-                                               @QueryParam("maintenanceId") String maintenanceId) {
-        DomainMaintenance maintenance = service.getDomainMaintenanceStatus(domainName, maintenanceId);
-        ObjectNode response = objectMapper.createObjectNode();
-        writeMaintenance(response, maintenance);
-        return Response.ok(response).build();
-    }
-
-    @GET
-    @Path("/opensearch/domain/{domainName}/domainMaintenances")
-    public Response listDomainMaintenances(@PathParam("domainName") String domainName,
-                                           @QueryParam("action") String action,
-                                           @QueryParam("status") String status,
-                                           @QueryParam("maxResults") Integer maxResults,
-                                           @QueryParam("nextToken") String nextToken) {
-        List<DomainMaintenance> all = service.listDomainMaintenances(domainName, action, status);
-        int start = parseNextToken(nextToken, all.size());
-        int pageSize = maxResults != null && maxResults > 0 ? maxResults : 100;
-        int end = Math.min(all.size(), start + pageSize);
-
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode list = response.putArray("DomainMaintenances");
-        for (DomainMaintenance maintenance : all.subList(start, end)) {
-            ObjectNode entry = list.addObject();
-            entry.put("MaintenanceId", maintenance.getMaintenanceId());
-            entry.put("DomainName", domainName);
-            writeMaintenance(entry, maintenance);
-        }
-        if (end < all.size()) {
-            response.put("NextToken", String.valueOf(end));
-        }
-        return Response.ok(response).build();
-    }
-
-    @GET
     @Path("/opensearch/upgradeDomain/{domainName}/history")
     public Response getUpgradeHistory(@PathParam("domainName") String domainName) {
         service.describeDomain(domainName);
@@ -583,57 +503,6 @@ public class OpenSearchController {
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private JsonNode readBody(String body) {
-        if (body == null || body.isBlank()) {
-            return objectMapper.createObjectNode();
-        }
-        try {
-            return objectMapper.readTree(body);
-        } catch (IOException e) {
-            throw new AwsException("ValidationException", e.getMessage(), 400);
-        }
-    }
-
-    private Domain requireDomainFromBody(String body) {
-        String domainName = readBody(body).path("DomainName").asText(null);
-        if (domainName == null || domainName.isBlank()) {
-            throw new AwsException("ValidationException", "DomainName is required.", 400);
-        }
-        return service.describeDomain(domainName);
-    }
-
-    private void writeMaintenance(ObjectNode node, DomainMaintenance maintenance) {
-        node.put("Action", maintenance.getAction());
-        if (maintenance.getNodeId() != null) {
-            node.put("NodeId", maintenance.getNodeId());
-        }
-        node.put("Status", maintenance.getStatus());
-        if (maintenance.getStatusMessage() != null) {
-            node.put("StatusMessage", maintenance.getStatusMessage());
-        }
-        if (maintenance.getCreatedAt() != null) {
-            node.put("CreatedAt", maintenance.getCreatedAt().getEpochSecond());
-        }
-        if (maintenance.getUpdatedAt() != null) {
-            node.put("UpdatedAt", maintenance.getUpdatedAt().getEpochSecond());
-        }
-    }
-
-    private int parseNextToken(String nextToken, int size) {
-        if (nextToken == null || nextToken.isBlank()) {
-            return 0;
-        }
-        try {
-            int offset = Integer.parseInt(nextToken);
-            if (offset >= 0 && offset <= size) {
-                return offset;
-            }
-        } catch (NumberFormatException ignored) {
-            // fall through to the validation error
-        }
-        throw new AwsException("ValidationException", "Invalid NextToken: " + nextToken, 400);
-    }
 
     private ObjectNode toDomainStatusNode(Domain domain) {
         ObjectNode node = objectMapper.createObjectNode();
@@ -814,19 +683,14 @@ public class OpenSearchController {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return null;
         }
+        // Omitted fields stay null so the service only applies what the request supplied.
         ClusterConfig cc = new ClusterConfig();
-        if (node.has("InstanceType")) {
-            cc.setInstanceType(node.get("InstanceType").asText());
-        }
-        if (node.has("InstanceCount")) {
-            cc.setInstanceCount(node.get("InstanceCount").asInt());
-        }
-        if (node.has("DedicatedMasterEnabled")) {
-            cc.setDedicatedMasterEnabled(node.get("DedicatedMasterEnabled").asBoolean());
-        }
-        if (node.has("ZoneAwarenessEnabled")) {
-            cc.setZoneAwarenessEnabled(node.get("ZoneAwarenessEnabled").asBoolean());
-        }
+        cc.setInstanceType(node.has("InstanceType") ? node.get("InstanceType").asText() : null);
+        cc.setInstanceCount(node.has("InstanceCount") ? node.get("InstanceCount").asInt() : null);
+        cc.setDedicatedMasterEnabled(node.has("DedicatedMasterEnabled")
+                ? node.get("DedicatedMasterEnabled").asBoolean() : null);
+        cc.setZoneAwarenessEnabled(node.has("ZoneAwarenessEnabled")
+                ? node.get("ZoneAwarenessEnabled").asBoolean() : null);
         return cc;
     }
 
@@ -834,16 +698,11 @@ public class OpenSearchController {
         if (node == null || node.isMissingNode() || node.isNull()) {
             return null;
         }
+        // Omitted fields stay null so the service only applies what the request supplied.
         EbsOptions ebs = new EbsOptions();
-        if (node.has("EBSEnabled")) {
-            ebs.setEbsEnabled(node.get("EBSEnabled").asBoolean());
-        }
-        if (node.has("VolumeType")) {
-            ebs.setVolumeType(node.get("VolumeType").asText());
-        }
-        if (node.has("VolumeSize")) {
-            ebs.setVolumeSize(node.get("VolumeSize").asInt());
-        }
+        ebs.setEbsEnabled(node.has("EBSEnabled") ? node.get("EBSEnabled").asBoolean() : null);
+        ebs.setVolumeType(node.has("VolumeType") ? node.get("VolumeType").asText() : null);
+        ebs.setVolumeSize(node.has("VolumeSize") ? node.get("VolumeSize").asInt() : null);
         return ebs;
     }
 
@@ -964,5 +823,137 @@ public class OpenSearchController {
             }
         });
         return tags;
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/nodes")
+    public Response describeDomainNodes(@PathParam("domainName") String domainName) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode list = response.putArray("DomainNodesStatusList");
+        for (OpenSearchService.DomainNode node : service.describeDomainNodes(domainName)) {
+            ObjectNode entry = list.addObject();
+            entry.put("NodeId", node.nodeId());
+            entry.put("NodeType", node.nodeType());
+            entry.put("AvailabilityZone", node.availabilityZone());
+            entry.put("InstanceType", node.instanceType());
+            entry.put("NodeStatus", node.nodeStatus());
+            entry.put("StorageType", node.storageType());
+            if (node.storageVolumeType() != null) {
+                entry.put("StorageVolumeType", node.storageVolumeType());
+            }
+            if (node.storageSize() != null) {
+                entry.put("StorageSize", node.storageSize());
+            }
+        }
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/scheduledActions")
+    public Response listScheduledActions(@PathParam("domainName") String domainName) {
+        service.describeDomain(domainName);
+        // Floci never schedules service software updates or blue/green actions.
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putArray("ScheduledActions");
+        return Response.ok(response).build();
+    }
+
+    @POST
+    @Path("/opensearch/domain/{domainName}/domainMaintenance")
+    public Response startDomainMaintenance(@PathParam("domainName") String domainName, String body) {
+        JsonNode req = readBody(body);
+        DomainMaintenance maintenance = service.startDomainMaintenance(domainName,
+                req.path("Action").asText(null), req.path("NodeId").asText(null));
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("MaintenanceId", maintenance.getMaintenanceId());
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/domainMaintenance")
+    public Response getDomainMaintenanceStatus(@PathParam("domainName") String domainName,
+                                               @QueryParam("maintenanceId") String maintenanceId) {
+        DomainMaintenance maintenance = service.getDomainMaintenanceStatus(domainName, maintenanceId);
+        ObjectNode response = objectMapper.createObjectNode();
+        writeMaintenance(response, maintenance);
+        return Response.ok(response).build();
+    }
+
+    @GET
+    @Path("/opensearch/domain/{domainName}/domainMaintenances")
+    public Response listDomainMaintenances(@PathParam("domainName") String domainName,
+                                           @QueryParam("action") String action,
+                                           @QueryParam("status") String status,
+                                           @QueryParam("maxResults") Integer maxResults,
+                                           @QueryParam("nextToken") String nextToken) {
+        List<DomainMaintenance> all = service.listDomainMaintenances(domainName, action, status);
+        int start = parseNextToken(nextToken, all.size());
+        int pageSize = maxResults != null && maxResults > 0 ? maxResults : 100;
+        int end = Math.min(all.size(), start + pageSize);
+
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode list = response.putArray("DomainMaintenances");
+        for (DomainMaintenance maintenance : all.subList(start, end)) {
+            ObjectNode entry = list.addObject();
+            entry.put("MaintenanceId", maintenance.getMaintenanceId());
+            entry.put("DomainName", domainName);
+            writeMaintenance(entry, maintenance);
+        }
+        if (end < all.size()) {
+            response.put("NextToken", String.valueOf(end));
+        }
+        return Response.ok(response).build();
+    }
+
+    private JsonNode readBody(String body) {
+        if (body == null || body.isBlank()) {
+            return objectMapper.createObjectNode();
+        }
+        try {
+            return objectMapper.readTree(body);
+        } catch (IOException e) {
+            throw new AwsException("ValidationException", e.getMessage(), 400);
+        }
+    }
+
+
+    private void writeMaintenance(ObjectNode node, DomainMaintenance maintenance) {
+        node.put("Action", maintenance.getAction());
+        if (maintenance.getNodeId() != null) {
+            node.put("NodeId", maintenance.getNodeId());
+        }
+        node.put("Status", maintenance.getStatus());
+        if (maintenance.getStatusMessage() != null) {
+            node.put("StatusMessage", maintenance.getStatusMessage());
+        }
+        if (maintenance.getCreatedAt() != null) {
+            node.put("CreatedAt", maintenance.getCreatedAt().getEpochSecond());
+        }
+        if (maintenance.getUpdatedAt() != null) {
+            node.put("UpdatedAt", maintenance.getUpdatedAt().getEpochSecond());
+        }
+    }
+
+    private int parseNextToken(String nextToken, int size) {
+        if (nextToken == null || nextToken.isBlank()) {
+            return 0;
+        }
+        try {
+            int offset = Integer.parseInt(nextToken);
+            if (offset >= 0 && offset <= size) {
+                return offset;
+            }
+        } catch (NumberFormatException ignored) {
+            // fall through to the validation error
+        }
+        throw new AwsException("ValidationException", "Invalid NextToken: " + nextToken, 400);
+    }
+
+    private Domain requireDomainFromBody(String body) {
+        String domainName = readBody(body).path("DomainName").asText(null);
+        if (domainName == null || domainName.isBlank()) {
+            throw new AwsException("ValidationException", "DomainName is required.", 400);
+        }
+        return service.describeDomain(domainName);
     }
 }

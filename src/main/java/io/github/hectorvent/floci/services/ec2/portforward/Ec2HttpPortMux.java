@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.ec2.portforward;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.model.Container;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.Frame;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -21,6 +22,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
@@ -212,7 +214,7 @@ public class Ec2HttpPortMux {
 
     private boolean applyConfig(int appPort) {
         String name = muxContainerName(appPort);
-        var found = lifecycleManager.findByName(name);
+        Optional<Container> found = lifecycleManager.findByName(name);
         if (found.isEmpty()) {
             return ensureContainer(appPort) && applyConfig(appPort);
         }
@@ -252,7 +254,7 @@ public class Ec2HttpPortMux {
 
     private String resolveLiveIp(Backend backend) {
         if (backend.containerName() != null && !backend.containerName().isBlank()) {
-            var found = lifecycleManager.findByName(backend.containerName());
+            Optional<Container> found = lifecycleManager.findByName(backend.containerName());
             if (found.isPresent()) {
                 return inspectContainerIp(found.get().getId());
             }

@@ -1,8 +1,10 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
 import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -14,7 +16,6 @@ import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * A public/private networking stack the way CDK lays one out: internet gateway and attachment,
@@ -82,8 +83,30 @@ class CloudFormationEc2NetworkingIntegrationTest {
                 "the subnet's prior MapPublicIpOnLaunch must be back");
 
         cloudFormation(ROLLBACK_STACK, "DeleteStack", null);
-        awaitStackDeleted(ROLLBACK_STACK);
+        CfnStackWaits.awaitStackDeleted(ROLLBACK_STACK);
         ec2("DeleteVpc", Map.of("VpcId", vpcId));
+    }
+
+    /**
+     * CreateNatGateway with an Elastic IP another gateway holds succeeds on AWS and leaves the
+     * gateway failed; CloudFormation must still fail the resource rather than report it created.
+     */
+    @Test
+    void aNatGatewayGivenAnAlreadyHeldElasticIpFailsTheStack() {
+        String vpcId = between(ec2("CreateVpc", Map.of("CidrBlock", "10.42.0.0/16")), "<vpcId>", "</vpcId>");
+        String nat = "{\"Type\": \"AWS::EC2::NatGateway\", %s\"Properties\": {\"SubnetId\": {\"Ref\": \"Subnet\"},"
+                + " \"AllocationId\": {\"Fn::GetAtt\": [\"Eip\", \"AllocationId\"]}}}";
+        cloudFormation("ec2-nat-shared-eip-it", "CreateStack", """
+        {"Resources": {
+          "Subnet": {"Type": "AWS::EC2::Subnet", "Properties": {"VpcId": "%s", "CidrBlock": "10.42.0.0/24"}},
+          "Eip": {"Type": "AWS::EC2::EIP", "Properties": {"Domain": "vpc"}},
+          "NatA": %s,
+          "NatB": %s
+        }}
+        """.formatted(vpcId, nat.formatted(""), nat.formatted("\"DependsOn\": \"NatA\", ")));
+
+        describeStacks("ec2-nat-shared-eip-it", "ROLLBACK_COMPLETE");
+        assertFalse(ec2("DescribeNatGateways").contains(vpcId), "no gateway, failed or not, is left behind");
     }
 
     private static String subnetXml(String subnetId) {
@@ -175,8 +198,9 @@ class CloudFormationEc2NetworkingIntegrationTest {
         assertTrue(ec2("DescribeInternetGateways").contains(out.get("IgwId")));
 
         // The same template again: every id survives (the switch re-created all seven).
-        cloudFormation("UpdateStack", template(vpcId, "10.40.0.0/24"));
+        cloudFormation("UpdateStack", CfnUpdates.forceUpdate(template(vpcId, "10.40.0.0/24")));
         Map<String, String> again = XmlParser.extractPairs(describeStacks("UPDATE_COMPLETE"), "Outputs", "OutputKey", "OutputValue");
+        again.remove(CfnUpdates.FORCED_OUTPUT);
         assertEquals(out, again, "an unchanged update must keep every networking resource");
 
         // Tags are mutable: a dropped key goes, a changed value is written, the subnet stays.
@@ -187,14 +211,27 @@ class CloudFormationEc2NetworkingIntegrationTest {
         assertFalse(retagged.contains("<key>tier</key>"), "the dropped tag must be removed");
 
         // CidrBlock is createOnly: the public subnet is replaced, and with it the NAT gateway and the
-        // association that name it; the gateway, EIP and route tables stay.
-        cloudFormation("UpdateStack", template(vpcId, "10.40.2.0/24"));
+        // association that name it; the gateway and route tables stay. The replacement gateway gets a
+        // new EIP: CloudFormation creates it before deleting the old one, and on AWS a gateway given
+        // an Elastic IP the displaced gateway still holds is created failed. The old EIP stays in
+        // the template for a second reason: Floci's update cleanup deletes removed resources before
+        // the old copies of replaced ones (AWS deletes in reverse dependency order), so dropping the
+        // EIP while replacing its gateway would try to release it while the old gateway still holds
+        // it. Keeping NatEip sidesteps that; the cleanup order is a separate issue. The old EIP is
+        // free once the displaced gateway is gone. oldEip is NatEip: out is NatEipB's outputs below.
+        cloudFormation("UpdateStack", template(vpcId, "10.40.2.0/24").replace("NatEip", "NatEipB")
+                .replace("\"NatEipB\": {\"Type\"",
+                        "\"NatEip\": {\"Type\": \"AWS::EC2::EIP\", \"Properties\": {\"Domain\": \"vpc\"}},\n"
+                        + "            \"NatEipB\": {\"Type\""));
         Map<String, String> replaced = XmlParser.extractPairs(describeStacks("UPDATE_COMPLETE"), "Outputs", "OutputKey", "OutputValue");
         assertFalse(out.get("SubnetId").equals(replaced.get("SubnetId")), "a changed CIDR must replace the subnet");
         assertFalse(out.get("NatId").equals(replaced.get("NatId")), "the NAT gateway follows its subnet");
         assertFalse(out.get("AssocId").equals(replaced.get("AssocId")), "the association follows its subnet");
         assertEquals(out.get("IgwId"), replaced.get("IgwId"));
-        assertEquals(out.get("EipAllocationId"), replaced.get("EipAllocationId"));
+        assertFalse(out.get("EipAllocationId").equals(replaced.get("EipAllocationId")), "the gateway takes the new EIP");
+        assertFalse(ec2("DescribeAddresses", Map.of("AllocationId.1", out.get("EipAllocationId"))).contains("<associationId>"),
+                "the displaced gateway's EIP must be free");
+        String oldEip = out.get("EipAllocationId");
         assertEquals(out.get("PublicRtId"), replaced.get("PublicRtId"));
         assertEquals(out.get("PrivateRtId"), replaced.get("PrivateRtId"));
         assertFalse(ec2("DescribeSubnets").contains(out.get("SubnetId")), "the displaced subnet must be gone");
@@ -203,10 +240,10 @@ class CloudFormationEc2NetworkingIntegrationTest {
         out = replaced;
 
         cloudFormation("DeleteStack", null);
-        awaitStackDeleted();
+        CfnStackWaits.awaitStackDeleted(STACK);
 
         for (String id : List.of(out.get("SubnetId"), out.get("PublicRtId"), out.get("PrivateRtId"),
-                out.get("AssocId"), out.get("NatId"), out.get("EipAllocationId"), out.get("IgwId"))) {
+                out.get("AssocId"), out.get("NatId"), out.get("EipAllocationId"), oldEip, out.get("IgwId"))) {
             String everything = ec2("DescribeSubnets") + ec2("DescribeRouteTables") + ec2("DescribeNatGateways")
                     + ec2("DescribeAddresses") + ec2("DescribeInternetGateways");
             assertFalse(everything.contains(id), "stack delete must remove " + id);
@@ -226,7 +263,7 @@ class CloudFormationEc2NetworkingIntegrationTest {
     }
 
     private static void cloudFormation(String stack, String action, String templateBody) {
-        var request = given()
+        RequestSpecification request = given()
             .contentType("application/x-www-form-urlencoded")
             .header("Authorization", CFN_AUTH)
             .formParam("Action", action)
@@ -252,35 +289,12 @@ class CloudFormationEc2NetworkingIntegrationTest {
             .extract().asString();
     }
 
-    private static void awaitStackDeleted() throws InterruptedException {
-        awaitStackDeleted(STACK);
-    }
-
-    private static void awaitStackDeleted(String stack) throws InterruptedException {
-        for (int i = 0; i < 200; i++) {
-            String body = given()
-                .contentType("application/x-www-form-urlencoded")
-                .header("Authorization", CFN_AUTH)
-                .formParam("Action", "DescribeStacks")
-                .formParam("StackName", stack)
-            .when().post("/").then().extract().asString();
-            if (body.contains("does not exist")) {
-                return;
-            }
-            if (body.contains("<StackStatus>DELETE_FAILED</StackStatus>")) {
-                fail("stack delete failed: " + body);
-            }
-            Thread.sleep(50);
-        }
-        fail("stack " + stack + " was not deleted within the timeout");
-    }
-
     private static String ec2(String action) {
         return ec2(action, Map.of());
     }
 
     private static String ec2(String action, Map<String, String> params) {
-        var request = given()
+        RequestSpecification request = given()
             .contentType("application/x-www-form-urlencoded")
             .header("Authorization", EC2_AUTH)
             .formParam("Action", action)

@@ -1,18 +1,19 @@
 package io.github.hectorvent.floci.services.iam;
 
-import io.quarkus.test.junit.QuarkusTest;
 import io.github.hectorvent.floci.core.common.IamConditionContextResolver;
+import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.Tag;
 import io.github.hectorvent.floci.services.ec2.model.Vpc;
 import io.github.hectorvent.floci.services.iam.IamPolicyEvaluator.Decision;
 import io.github.hectorvent.floci.services.s3.S3Service;
+import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.UriInfo;
 import org.junit.jupiter.api.Test;
 
-import jakarta.inject.Inject;
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -46,6 +47,9 @@ class IamEnforcementIntegrationTest {
 
     @Inject
     S3Service s3Service;
+
+    @Inject
+    RequestContext requestContext;
 
     // =========================================================================
     // IamPolicyEvaluator — basic allow / deny / implicit-deny
@@ -219,7 +223,8 @@ class IamEnforcementIntegrationTest {
         {"Version":"2012-10-17","Statement":[
           {"Effect":"Allow","Action":["dynamodb:GetItem","dynamodb:Query"],
            "Resource":"arn:aws:dynamodb:us-east-1:000000000000:table/FgacTable",
-           "Condition":{"ForAllValues:StringLike":{"dynamodb:LeadingKeys":["USER_alice*"]}}}
+           "Condition":{"ForAllValues:StringLike":{"dynamodb:LeadingKeys":["USER_alice*"]},
+             "Null":{"dynamodb:LeadingKeys":"false"}}}
         ]}""";
 
     @Test
@@ -234,7 +239,7 @@ class IamEnforcementIntegrationTest {
                 "arn:aws:dynamodb:us-east-1:000000000000:table/FgacTable",
                 Map.of("dynamodb:LeadingKeys", List.of("USER_bob"))));
 
-        // The leading key could not be resolved from the request: fail closed.
+        // Null:false requires a leading key even though ForAllValues alone would match.
         assertEquals(Decision.DENY, evaluator.simulateCustomPolicy(
                 List.of(LEADING_KEYS_SCOPED_POLICY), "dynamodb:GetItem",
                 "arn:aws:dynamodb:us-east-1:000000000000:table/FgacTable",
@@ -287,6 +292,28 @@ class IamEnforcementIntegrationTest {
                 List.of(TEAM_SCOPED_EC2_POLICY), "ec2:DeleteTags", "*",
                 conditionContextResolver.resolve("ec2", "ec2:DeleteTags",
                         ec2Request("Action=DeleteTags&ResourceId.1=" + other.getVpcId() + "&Tag.1.Key=Team"))));
+    }
+
+    @Test
+    void resourceTagConditionReadsTheTagsOfTheRequestRegion() {
+        Vpc west = ec2Service.createVpc("eu-west-1", "10.46.0.0/16", false);
+        ec2Service.createTags("eu-west-1", List.of(west.getVpcId()), List.of(new Tag("Team", "payments")));
+        String deleteTeamTag = "Action=DeleteTags&ResourceId.1=" + west.getVpcId() + "&Tag.1.Key=Team";
+        String previousRegion = requestContext.getRegion();
+        try {
+            requestContext.setRegion("eu-west-1");
+            assertEquals(Decision.ALLOW, evaluator.simulateCustomPolicy(
+                    List.of(TEAM_SCOPED_EC2_POLICY), "ec2:DeleteTags", "*",
+                    conditionContextResolver.resolve("ec2", "ec2:DeleteTags", ec2Request(deleteTeamTag))));
+
+            requestContext.setRegion("us-east-1");
+            assertEquals(Decision.DENY, evaluator.simulateCustomPolicy(
+                    List.of(TEAM_SCOPED_EC2_POLICY), "ec2:DeleteTags", "*",
+                    conditionContextResolver.resolve("ec2", "ec2:DeleteTags", ec2Request(deleteTeamTag))));
+        } finally {
+            requestContext.setRegion(previousRegion);
+            ec2Service.deleteVpc("eu-west-1", west.getVpcId());
+        }
     }
 
     @Test

@@ -12,12 +12,12 @@ public class Route {
     private String destinationIpv6CidrBlock;
     private String destinationPrefixListId;
     private String gatewayId;
+    private String instanceId;
+    private String instanceOwnerId;
     private String natGatewayId;
+    private String networkInterfaceId;
     private String egressOnlyInternetGatewayId;
     private String vpcPeeringConnectionId;
-    private String networkInterfaceId;
-    private String instanceId;
-    private String vpcEndpointId;
     private String state = "active";
     private String origin;
 
@@ -64,8 +64,17 @@ public class Route {
     public String getGatewayId() { return gatewayId; }
     public void setGatewayId(String gatewayId) { this.gatewayId = gatewayId; }
 
+    public String getInstanceId() { return instanceId; }
+    public void setInstanceId(String instanceId) { this.instanceId = instanceId; }
+
+    public String getInstanceOwnerId() { return instanceOwnerId; }
+    public void setInstanceOwnerId(String instanceOwnerId) { this.instanceOwnerId = instanceOwnerId; }
+
     public String getNatGatewayId() { return natGatewayId; }
     public void setNatGatewayId(String natGatewayId) { this.natGatewayId = natGatewayId; }
+
+    public String getNetworkInterfaceId() { return networkInterfaceId; }
+    public void setNetworkInterfaceId(String networkInterfaceId) { this.networkInterfaceId = networkInterfaceId; }
 
     public String getEgressOnlyInternetGatewayId() { return egressOnlyInternetGatewayId; }
     public void setEgressOnlyInternetGatewayId(String egressOnlyInternetGatewayId) { this.egressOnlyInternetGatewayId = egressOnlyInternetGatewayId; }
@@ -73,18 +82,15 @@ public class Route {
     public String getVpcPeeringConnectionId() { return vpcPeeringConnectionId; }
     public void setVpcPeeringConnectionId(String vpcPeeringConnectionId) { this.vpcPeeringConnectionId = vpcPeeringConnectionId; }
 
-    public String getNetworkInterfaceId() { return networkInterfaceId; }
-    public void setNetworkInterfaceId(String networkInterfaceId) { this.networkInterfaceId = networkInterfaceId; }
-
-    public String getInstanceId() { return instanceId; }
-    public void setInstanceId(String instanceId) { this.instanceId = instanceId; }
-
-    public String getVpcEndpointId() { return vpcEndpointId; }
-    public void setVpcEndpointId(String vpcEndpointId) { this.vpcEndpointId = vpcEndpointId; }
-
     public String getState() { return state; }
     public void setState(String state) { this.state = state; }
 
     public String getOrigin() { return origin; }
     public void setOrigin(String origin) { this.origin = origin; }
+
+    private String vpcEndpointId;
+
+    public String getVpcEndpointId() { return vpcEndpointId; }
+
+    public void setVpcEndpointId(String vpcEndpointId) { this.vpcEndpointId = vpcEndpointId; }
 }

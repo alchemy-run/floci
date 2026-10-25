@@ -6,12 +6,14 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.acm.model.Certificate;
 import io.github.hectorvent.floci.services.acm.model.CertificateOptions;
 import io.github.hectorvent.floci.services.acm.model.CertificateStatus;
 import io.github.hectorvent.floci.services.acm.model.DomainValidation;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import io.github.hectorvent.floci.services.acm.model.ListResult;
+import io.github.hectorvent.floci.services.acm.model.ResourceRecord;
 import io.github.hectorvent.floci.services.acm.model.RevocationReason;
 import io.github.hectorvent.floci.services.acm.model.ValidationMethod;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -92,7 +94,13 @@ public class AcmJsonHandler {
                     "Value null at 'domainName' failed to satisfy constraint: Member must not be null"))
                 .build();
         }
-        List<String> sans = parseStringList(request.path("SubjectAlternativeNames"));
+        JsonNode sanNode = request.path("SubjectAlternativeNames");
+        if (sanNode.isArray() && sanNode.isEmpty()) {
+            throw SmithyValidationErrors.validationException(
+                "Value '[]' at 'subjectAlternativeNames' failed to satisfy "
+                    + "constraint: Member must have length greater than or equal to 1");
+        }
+        List<String> sans = parseStringList(sanNode);
         ValidationMethod validationMethod = parseValidationMethod(request.path("ValidationMethod").asText(null));
         String idempotencyToken = request.path("IdempotencyToken").asText(null);
         KeyAlgorithm keyAlgorithm = KeyAlgorithm.fromAwsName(request.path("KeyAlgorithm").asText(null));
@@ -138,10 +146,11 @@ public class AcmJsonHandler {
 
         ListResult result = service.listCertificates(statuses, keyTypes, region, maxItems, nextToken);
 
+        Map<String, List<String>> consumers = service.certificateInUseBy(result.certificates());
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode summaryList = objectMapper.createArrayNode();
         for (Certificate cert : result.certificates()) {
-            summaryList.add(buildCertificateSummary(cert));
+            summaryList.add(buildCertificateSummary(cert, consumers.get(cert.getArn())));
         }
         response.set("CertificateSummaryList", summaryList);
         if (result.nextToken() != null) {
@@ -247,27 +256,6 @@ public class AcmJsonHandler {
 
         service.putAccountConfiguration(daysBeforeExpiry, idempotencyToken);
         return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleSearchCertificates(JsonNode request, String region) {
-        int maxItems = request.path("MaxResults").asInt(100);
-        String nextToken = request.path("NextToken").asText(null);
-        JsonNode filterStatement = request.get("FilterStatement");
-
-        ListResult result = service.searchCertificates(
-            cert -> matchesFilterStatement(cert, filterStatement),
-            region, maxItems, nextToken);
-
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode results = objectMapper.createArrayNode();
-        for (Certificate cert : result.certificates()) {
-            results.add(buildSearchResult(cert));
-        }
-        response.set("Results", results);
-        if (result.nextToken() != null) {
-            response.put("NextToken", result.nextToken());
-        }
-        return Response.ok(response).build();
     }
 
     private Response handleRevokeCertificate(JsonNode request, String region) {
@@ -401,9 +389,7 @@ public class AcmJsonHandler {
         }
 
         ArrayNode inUseBy = objectMapper.createArrayNode();
-        if (cert.getInUseBy() != null) {
-            cert.getInUseBy().forEach(inUseBy::add);
-        }
+        service.certificateInUseBy(cert).forEach(inUseBy::add);
         node.set("InUseBy", inUseBy);
 
         if (cert.getDomainValidationOptions() != null && !cert.getDomainValidationOptions().isEmpty()) {
@@ -468,6 +454,171 @@ public class AcmJsonHandler {
 
         return node;
     }
+
+    private ObjectNode buildCertificateSummary(Certificate cert, List<String> consumers) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("CertificateArn", cert.getArn());
+        node.put("DomainName", cert.getDomainName());
+
+        ArrayNode sans = objectMapper.createArrayNode();
+        if (cert.getSubjectAlternativeNames() != null) {
+            cert.getSubjectAlternativeNames().forEach(sans::add);
+        }
+        node.set("SubjectAlternativeNameSummaries", sans);
+        node.put("HasAdditionalSubjectAlternativeNames", false);
+
+        node.put("Status", cert.getStatus().name());
+        node.put("Type", cert.getType().name());
+
+        if (cert.getKeyAlgorithm() != null) {
+            node.put("KeyAlgorithm", cert.getKeyAlgorithm().getAwsName());
+        }
+
+        ArrayNode keyUsages = objectMapper.createArrayNode();
+        keyUsages.add("DIGITAL_SIGNATURE");
+        keyUsages.add("KEY_ENCIPHERMENT");
+        node.set("KeyUsages", keyUsages);
+
+        ArrayNode extKeyUsages = objectMapper.createArrayNode();
+        extKeyUsages.add("TLS_WEB_SERVER_AUTHENTICATION");
+        extKeyUsages.add("TLS_WEB_CLIENT_AUTHENTICATION");
+        node.set("ExtendedKeyUsages", extKeyUsages);
+
+        if (cert.getCreatedAt() != null) {
+            node.put("CreatedAt", cert.getCreatedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getIssuedAt() != null) {
+            node.put("IssuedAt", cert.getIssuedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getImportedAt() != null) {
+            node.put("ImportedAt", cert.getImportedAt().toEpochMilli() / 1000.0);
+        }
+        if (cert.getNotBefore() != null) {
+            node.put("NotBefore", cert.getNotBefore().toEpochMilli() / 1000.0);
+        }
+        if (cert.getNotAfter() != null) {
+            node.put("NotAfter", cert.getNotAfter().toEpochMilli() / 1000.0);
+        }
+
+        node.put("RenewalEligibility", "INELIGIBLE");
+        node.put("InUse", !consumers.isEmpty());
+
+        return node;
+    }
+
+    private List<String> parseStringList(JsonNode node) {
+        if (!node.isArray()) return null;
+        List<String> list = new ArrayList<>();
+        node.forEach(n -> list.add(n.asText()));
+        return list;
+    }
+
+    private Map<String, String> parseTags(JsonNode tagsNode) {
+        if (!tagsNode.isArray()) return null;
+        Map<String, String> tags = new HashMap<>();
+        for (JsonNode tagNode : tagsNode) {
+            String key = tagNode.path("Key").asText();
+            String value = tagNode.path("Value").asText(null);
+            tags.put(key, value);
+        }
+        return tags;
+    }
+
+    /**
+     * Reads the requested {@code DomainValidationOptions} into a {@code ValidationDomain} per
+     * {@code DomainName}. Both members are required, so an entry missing either is rejected rather
+     * than dropped back to the default of validating the domain against itself.
+     */
+    private Map<String, String> parseDomainValidationOptions(JsonNode optionsNode) {
+        if (!optionsNode.isArray()) {
+            return Map.of();
+        }
+        Map<String, String> validationDomains = new LinkedHashMap<>();
+        for (JsonNode option : optionsNode) {
+            String domainName = option.path("DomainName").asText(null);
+            String validationDomain = option.path("ValidationDomain").asText(null);
+            if (domainName == null || domainName.isBlank() || validationDomain == null || validationDomain.isBlank()) {
+                throw new AwsException(
+                    "InvalidDomainValidationOptionsException",
+                    "One or more values in the DomainValidationOption structure is incorrect.",
+                    400);
+            }
+            validationDomains.put(domainName, validationDomain);
+        }
+        return validationDomains;
+    }
+
+    private ValidationMethod parseValidationMethod(String method) {
+        if (method == null) return ValidationMethod.DNS;
+        try {
+            return ValidationMethod.valueOf(method.toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new AwsException(
+                "ValidationException",
+                "Invalid validation method: " + method + ". Must be DNS or EMAIL.",
+                400);
+        }
+    }
+
+    private CertificateOptions parseOptions(JsonNode optionsNode) {
+        if (optionsNode == null || optionsNode.isMissingNode() || optionsNode.isNull()) {
+            return null;
+        }
+        String ctPref = optionsNode.hasNonNull("CertificateTransparencyLoggingPreference")
+            ? optionsNode.get("CertificateTransparencyLoggingPreference").asText()
+            : null;
+        String export = optionsNode.hasNonNull("Export")
+            ? optionsNode.get("Export").asText()
+            : null;
+        if (ctPref == null && export == null) {
+            return null;
+        }
+        return new CertificateOptions(ctPref, export);
+    }
+
+    private List<CertificateStatus> parseCertificateStatuses(JsonNode node) {
+        if (!node.isArray()) return null;
+        List<CertificateStatus> list = new ArrayList<>();
+        for (JsonNode n : node) {
+            try {
+                list.add(CertificateStatus.valueOf(n.asText()));
+            } catch (IllegalArgumentException e) {
+                LOG.debugv("Ignoring unknown certificate status: {0}", n.asText());
+            }
+        }
+        return list.isEmpty() ? null : list;
+    }
+
+    /**
+     * Decodes a base64-encoded blob field from the AWS JSON 1.1 wire protocol.
+     * AWS SDKs send binary fields (Certificate, PrivateKey, Passphrase, etc.)
+     * as base64-encoded strings. If the value is already in PEM format (e.g. from
+     * direct HTTP calls), it is returned as-is.
+     */
+    private String decodeBlob(String value) {
+        if (value == null || value.startsWith("-----")) {
+            return value;
+        }
+        try {
+            return new String(Base64.getDecoder().decode(value));
+        } catch (IllegalArgumentException e) {
+            // Not valid base64 — return as-is
+            return value;
+        }
+    }
+
+    private List<KeyAlgorithm> parseKeyTypes(JsonNode node) {
+        if (!node.isArray()) return null;
+        List<KeyAlgorithm> list = new ArrayList<>();
+        for (JsonNode n : node) {
+            KeyAlgorithm alg = KeyAlgorithm.fromAwsName(n.asText());
+            if (alg != null) {
+                list.add(alg);
+            }
+        }
+        return list.isEmpty() ? null : list;
+    }
+
 
     private ObjectNode buildSearchResult(Certificate cert) {
         ObjectNode node = objectMapper.createObjectNode();
@@ -568,76 +719,6 @@ public class AcmJsonHandler {
         return node;
     }
 
-    private List<String> parseStringList(JsonNode node) {
-        if (!node.isArray()) return null;
-        List<String> list = new ArrayList<>();
-        node.forEach(n -> list.add(n.asText()));
-        return list;
-    }
-
-    private Map<String, String> parseTags(JsonNode tagsNode) {
-        if (!tagsNode.isArray()) return null;
-        Map<String, String> tags = new HashMap<>();
-        for (JsonNode tagNode : tagsNode) {
-            String key = tagNode.path("Key").asText();
-            String value = tagNode.path("Value").asText(null);
-            tags.put(key, value);
-        }
-        return tags;
-    }
-
-    /**
-     * Reads the requested {@code DomainValidationOptions} into a {@code ValidationDomain} per
-     * {@code DomainName}. Both members are required, so an entry missing either is rejected rather
-     * than dropped back to the default of validating the domain against itself.
-     */
-    private Map<String, String> parseDomainValidationOptions(JsonNode optionsNode) {
-        if (!optionsNode.isArray()) {
-            return Map.of();
-        }
-        Map<String, String> validationDomains = new LinkedHashMap<>();
-        for (JsonNode option : optionsNode) {
-            String domainName = option.path("DomainName").asText(null);
-            String validationDomain = option.path("ValidationDomain").asText(null);
-            if (domainName == null || domainName.isBlank() || validationDomain == null || validationDomain.isBlank()) {
-                throw new AwsException(
-                    "InvalidDomainValidationOptionsException",
-                    "One or more values in the DomainValidationOption structure is incorrect.",
-                    400);
-            }
-            validationDomains.put(domainName, validationDomain);
-        }
-        return validationDomains;
-    }
-
-    private ValidationMethod parseValidationMethod(String method) {
-        if (method == null) return ValidationMethod.DNS;
-        try {
-            return ValidationMethod.valueOf(method.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new AwsException(
-                "ValidationException",
-                "Invalid validation method: " + method + ". Must be DNS or EMAIL.",
-                400);
-        }
-    }
-
-    private CertificateOptions parseOptions(JsonNode optionsNode) {
-        if (optionsNode == null || optionsNode.isMissingNode() || optionsNode.isNull()) {
-            return null;
-        }
-        String ctPref = optionsNode.hasNonNull("CertificateTransparencyLoggingPreference")
-            ? optionsNode.get("CertificateTransparencyLoggingPreference").asText()
-            : null;
-        String export = optionsNode.hasNonNull("Export")
-            ? optionsNode.get("Export").asText()
-            : null;
-        if (ctPref == null && export == null) {
-            return null;
-        }
-        return new CertificateOptions(ctPref, export);
-    }
-
     private boolean matchesFilterStatement(Certificate cert, JsonNode statement) {
         if (statement == null || statement.isMissingNode() || statement.isNull() || statement.isEmpty()) {
             return true;
@@ -728,46 +809,24 @@ public class AcmJsonHandler {
         return true;
     }
 
-    private List<CertificateStatus> parseCertificateStatuses(JsonNode node) {
-        if (!node.isArray()) return null;
-        List<CertificateStatus> list = new ArrayList<>();
-        for (JsonNode n : node) {
-            try {
-                list.add(CertificateStatus.valueOf(n.asText()));
-            } catch (IllegalArgumentException e) {
-                LOG.debugv("Ignoring unknown certificate status: {0}", n.asText());
-            }
-        }
-        return list.isEmpty() ? null : list;
-    }
+    private Response handleSearchCertificates(JsonNode request, String region) {
+        int maxItems = request.path("MaxResults").asInt(100);
+        String nextToken = request.path("NextToken").asText(null);
+        JsonNode filterStatement = request.get("FilterStatement");
 
-    /**
-     * Decodes a base64-encoded blob field from the AWS JSON 1.1 wire protocol.
-     * AWS SDKs send binary fields (Certificate, PrivateKey, Passphrase, etc.)
-     * as base64-encoded strings. If the value is already in PEM format (e.g. from
-     * direct HTTP calls), it is returned as-is.
-     */
-    private String decodeBlob(String value) {
-        if (value == null || value.startsWith("-----")) {
-            return value;
-        }
-        try {
-            return new String(Base64.getDecoder().decode(value));
-        } catch (IllegalArgumentException e) {
-            // Not valid base64 — return as-is
-            return value;
-        }
-    }
+        ListResult result = service.searchCertificates(
+            cert -> matchesFilterStatement(cert, filterStatement),
+            region, maxItems, nextToken);
 
-    private List<KeyAlgorithm> parseKeyTypes(JsonNode node) {
-        if (!node.isArray()) return null;
-        List<KeyAlgorithm> list = new ArrayList<>();
-        for (JsonNode n : node) {
-            KeyAlgorithm alg = KeyAlgorithm.fromAwsName(n.asText());
-            if (alg != null) {
-                list.add(alg);
-            }
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode results = objectMapper.createArrayNode();
+        for (Certificate cert : result.certificates()) {
+            results.add(buildSearchResult(cert));
         }
-        return list.isEmpty() ? null : list;
+        response.set("Results", results);
+        if (result.nextToken() != null) {
+            response.put("NextToken", result.nextToken());
+        }
+        return Response.ok(response).build();
     }
 }

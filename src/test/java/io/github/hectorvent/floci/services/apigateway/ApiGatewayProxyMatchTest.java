@@ -1,12 +1,12 @@
 package io.github.hectorvent.floci.services.apigateway;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.apigateway.model.ApiGatewayResource;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2Service;
 import io.github.hectorvent.floci.services.apigatewayv2.websocket.WebSocketConnectionManager;
 import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
-import io.github.hectorvent.floci.core.common.RegionResolver;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -33,10 +33,10 @@ class ApiGatewayProxyMatchTest {
 
     @BeforeEach
     void setUp() {
-        ctrl = new ApiGatewayExecuteController(apiGatewayService, apiGatewayV2Service, lambdaService,
+        ctrl = new ApiGatewayExecuteController(apiGatewayService, null, apiGatewayV2Service, lambdaService,
                 new RegionResolver("us-east-1", "000000000000"),
                 new ObjectMapper(), vtlEngine, serviceRouter, webSocketConnectionManager, elbV2Service, null,
-                new ApiGatewayExecuteRouteContext(), null, null, null);
+                new ApiGatewayExecuteRouteContext(), null, null, null, null, null);
     }
 
     private ApiGatewayResource resource(String id, String parentId, String pathPart, String path) {

@@ -12,13 +12,13 @@ public class ClusterConfig {
     private String instanceType = "m5.large.search";
 
     @JsonProperty("InstanceCount")
-    private int instanceCount = 1;
+    private Integer instanceCount = 1;
 
     @JsonProperty("DedicatedMasterEnabled")
-    private boolean dedicatedMasterEnabled = false;
+    private Boolean dedicatedMasterEnabled = false;
 
     @JsonProperty("ZoneAwarenessEnabled")
-    private boolean zoneAwarenessEnabled = false;
+    private Boolean zoneAwarenessEnabled = false;
 
     public ClusterConfig() {}
 
@@ -30,27 +30,27 @@ public class ClusterConfig {
         this.instanceType = instanceType;
     }
 
-    public int getInstanceCount() {
+    public Integer getInstanceCount() {
         return instanceCount;
     }
 
-    public void setInstanceCount(int instanceCount) {
+    public void setInstanceCount(Integer instanceCount) {
         this.instanceCount = instanceCount;
     }
 
-    public boolean isDedicatedMasterEnabled() {
+    public Boolean isDedicatedMasterEnabled() {
         return dedicatedMasterEnabled;
     }
 
-    public void setDedicatedMasterEnabled(boolean dedicatedMasterEnabled) {
+    public void setDedicatedMasterEnabled(Boolean dedicatedMasterEnabled) {
         this.dedicatedMasterEnabled = dedicatedMasterEnabled;
     }
 
-    public boolean isZoneAwarenessEnabled() {
+    public Boolean isZoneAwarenessEnabled() {
         return zoneAwarenessEnabled;
     }
 
-    public void setZoneAwarenessEnabled(boolean zoneAwarenessEnabled) {
+    public void setZoneAwarenessEnabled(Boolean zoneAwarenessEnabled) {
         this.zoneAwarenessEnabled = zoneAwarenessEnabled;
     }
 }

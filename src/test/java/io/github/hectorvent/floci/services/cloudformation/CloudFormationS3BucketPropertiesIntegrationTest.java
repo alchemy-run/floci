@@ -70,6 +70,168 @@ class CloudFormationS3BucketPropertiesIntegrationTest {
     }
 
     @Test
+    void ownershipControlsFollowTheTemplateWithoutErasingUnmanagedChanges() throws InterruptedException {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String bucket = "cfn-ownership-" + suffix;
+        String stackName = "cfn-ownership-stack-" + suffix;
+        String stackId = stack("CreateStack", stackName, ownershipTemplate(bucket, "BucketOwnerEnforced", "create"));
+        await(stackId, "CREATE_COMPLETE");
+        bucketGet(bucket, "ownershipControls").body(containsString("<ObjectOwnership>BucketOwnerEnforced</ObjectOwnership>"));
+        given().header("x-amz-acl", "public-read")
+            .when().put("/" + bucket + "?acl")
+            .then().statusCode(400).body(containsString("AccessControlListNotSupported"));
+        bucketGet(bucket, "acl");
+
+        stack("UpdateStack", stackName, ownershipTemplate(bucket, "ObjectWriter", "update"));
+        await(stackId, "UPDATE_COMPLETE");
+        bucketGet(bucket, "ownershipControls").body(containsString("<ObjectOwnership>ObjectWriter</ObjectOwnership>"));
+
+        stack("UpdateStack", stackName, ownershipTemplate(bucket, null, "removed"));
+        await(stackId, "UPDATE_COMPLETE");
+        given().when().get("/" + bucket + "?ownershipControls").then().statusCode(404);
+
+        given().contentType("application/xml")
+            .body("<OwnershipControls><Rule><ObjectOwnership>BucketOwnerPreferred</ObjectOwnership></Rule></OwnershipControls>")
+        .when().put("/" + bucket + "?ownershipControls").then().statusCode(200);
+        stack("UpdateStack", stackName, ownershipTemplate(bucket, null, "unmanaged"));
+        await(stackId, "UPDATE_COMPLETE");
+        bucketGet(bucket, "ownershipControls").body(containsString("<ObjectOwnership>BucketOwnerPreferred</ObjectOwnership>"));
+    }
+
+    @Test
+    void failedUpdateRestoresChangedOwnershipControls() throws InterruptedException {
+        assertFailedUpdateRestoresOwnershipControls("ObjectWriter");
+    }
+
+    @Test
+    void failedUpdateRestoresRemovedOwnershipControls() throws InterruptedException {
+        assertFailedUpdateRestoresOwnershipControls(null);
+    }
+
+    private static void assertFailedUpdateRestoresOwnershipControls(String attemptedOwnership)
+            throws InterruptedException {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String bucket = "cfn-ownership-rollback-" + suffix;
+        String stackName = "cfn-ownership-rollback-stack-" + suffix;
+        String stackId = stack("CreateStack", stackName,
+                ownershipTemplate(bucket, "BucketOwnerEnforced", "initial"));
+        await(stackId, "CREATE_COMPLETE");
+        given().body("""
+                <CORSConfiguration><CORSRule><AllowedOrigin>https://initial.example</AllowedOrigin>
+                  <AllowedMethod>GET</AllowedMethod></CORSRule></CORSConfiguration>
+                """)
+            .when().put("/" + bucket + "?cors").then().statusCode(200);
+
+        String controls = attemptedOwnership == null ? "" : """
+                , "OwnershipControls": { "Rules": [{ "ObjectOwnership": "%s" }] }
+                """.formatted(attemptedOwnership);
+        String update = """
+                { "Resources": {
+                    "Bucket": { "Type": "AWS::S3::Bucket",
+                        "Properties": { "BucketName": "%s", "Tags": [
+                            { "Key": "marker", "Value": "attempted" } ],
+                            "VersioningConfiguration": { "Status": "Enabled" },
+                            "PublicAccessBlockConfiguration": { "BlockPublicAcls": false }
+                            %s } },
+                    "Broken": { "Type": "AWS::S3::Bucket", "DependsOn": "Bucket",
+                        "Properties": { "BucketName": "cfn-broken-%s",
+                            "VersioningConfiguration": { "Status": "Bogus" } } }
+                } }
+                """.formatted(bucket, controls, suffix);
+        stack("UpdateStack", stackName, update);
+        await(stackId, "UPDATE_ROLLBACK_COMPLETE");
+        bucketGet(bucket, "ownershipControls")
+                .body(containsString("<ObjectOwnership>BucketOwnerEnforced</ObjectOwnership>"));
+        bucketGet(bucket, "tagging").body(containsString("<Value>initial</Value>"));
+        bucketGet(bucket, "versioning").body(not(containsString("<Status>Enabled</Status>")));
+        bucketGet(bucket, "publicAccessBlock").body(containsString("<BlockPublicAcls>true</BlockPublicAcls>"));
+        bucketGet(bucket, "cors").body(containsString("https://initial.example"));
+    }
+    private static String ownershipTemplate(String bucket, String ownership, String marker) {
+        String controls = ownership == null ? "" : ", \"OwnershipControls\": { \"Rules\": "
+                + "[{ \"ObjectOwnership\": \"" + ownership + "\" }] }";
+        return "{ \"Resources\": { \"Bucket\": { \"Type\": \"AWS::S3::Bucket\", \"Properties\": { "
+                + "\"BucketName\": \"" + bucket + "\", \"Tags\": [{ \"Key\": \"marker\", \"Value\": \""
+                + marker + "\" }]" + controls + " } } } }";
+    }
+
+    /** A key the registry schema does not define fails the create, and the stack leaves no bucket. */
+    @Test
+    void anOwnershipRuleWithAKeyTheSchemaDoesNotDefineFailsTheCreate() throws InterruptedException {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String bucket = "cfn-ownership-extra-" + suffix;
+        String stackId = stack("CreateStack", "cfn-ownership-extra-stack-" + suffix, """
+                { "Resources": { "Bucket": { "Type": "AWS::S3::Bucket", "Properties": {
+                    "BucketName": "%s",
+                    "OwnershipControls": { "Rules": [
+                        { "ObjectOwnership": "BucketOwnerEnforced", "Owner": "me" } ] } } } } }
+                """.formatted(bucket));
+        await(stackId, "ROLLBACK_COMPLETE");
+
+        String events = stackEvents(stackId);
+        assertTrue(events.contains(
+                "Model validation failed (#/OwnershipControls/Rules/0: extraneous key [Owner] is not permitted)"),
+                "the create failed on the rule: " + events);
+        given().when().head("/" + bucket).then().statusCode(404);
+    }
+
+    /**
+     * The template is resolved before the schema is checked, so two rules that resolve to the same
+     * mode are a repeated rule. The update rolls back and the bucket keeps its tag and mode.
+     */
+    @Test
+    void ownershipRulesThatResolveToTheSameModeFailTheUpdate() throws InterruptedException {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String bucket = "cfn-ownership-repeated-" + suffix;
+        String stackName = "cfn-ownership-repeated-stack-" + suffix;
+        String stackId = stack("CreateStack", stackName, ownershipTemplate(bucket, "BucketOwnerEnforced", "before"));
+        await(stackId, "CREATE_COMPLETE");
+
+        stack("UpdateStack", stackName, """
+                { "Parameters": { "Mode": { "Type": "String", "Default": "ObjectWriter" } },
+                  "Resources": { "Bucket": { "Type": "AWS::S3::Bucket", "Properties": {
+                    "BucketName": "%s", "Tags": [{ "Key": "marker", "Value": "after" }],
+                    "OwnershipControls": { "Rules": [
+                        { "ObjectOwnership": { "Ref": "Mode" } }, { "ObjectOwnership": "ObjectWriter" } ] } } } } }
+                """.formatted(bucket));
+        await(stackId, "UPDATE_ROLLBACK_COMPLETE");
+
+        String events = stackEvents(stackId);
+        assertTrue(events.contains("Model validation failed (#/OwnershipControls/Rules: array items are not unique)"),
+                "the update failed on the repeated rule: " + events);
+        bucketGet(bucket, "ownershipControls")
+                .body(containsString("<ObjectOwnership>BucketOwnerEnforced</ObjectOwnership>"));
+        bucketGet(bucket, "tagging").body(containsString("<Value>before</Value>"));
+    }
+
+    /**
+     * A stack update cannot suspend versioning on a bucket that has since had Object Lock enabled: S3
+     * refuses it, the update rolls back, and the bucket stays versioned.
+     */
+    @Test
+    void anUpdateSuspendingVersioningOnALockedBucketRollsBack() throws InterruptedException {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String bucket = "cfn-locked-versioning-" + suffix;
+        String stackName = "cfn-locked-versioning-stack-" + suffix;
+        String bucketTemplate = """
+                { "Resources": { "Bucket": { "Type": "AWS::S3::Bucket", "Properties": {
+                    "BucketName": "%s", "VersioningConfiguration": { "Status": "%s" } } } } }
+                """;
+        String stackId = stack("CreateStack", stackName, bucketTemplate.formatted(bucket, "Enabled"));
+        await(stackId, "CREATE_COMPLETE");
+        given().body("<ObjectLockConfiguration><ObjectLockEnabled>Enabled</ObjectLockEnabled></ObjectLockConfiguration>")
+            .when().put("/" + bucket + "?object-lock").then().statusCode(200);
+
+        stack("UpdateStack", stackName, bucketTemplate.formatted(bucket, "Suspended"));
+        await(stackId, "UPDATE_ROLLBACK_COMPLETE");
+
+        String events = stackEvents(stackId);
+        assertTrue(events.contains("An Object Lock configuration is present on this bucket"),
+                "the update failed on the suspend: " + events);
+        bucketGet(bucket, "versioning").body(containsString("<Status>Enabled</Status>"));
+    }
+
+    @Test
     void theBucketCarriesWhatItsTemplateDeclares() throws InterruptedException {
         String suffix = Long.toString(System.nanoTime(), 36);
         String bucket = "cfn-props-bucket-" + suffix;
@@ -133,7 +295,9 @@ class CloudFormationS3BucketPropertiesIntegrationTest {
 
         given().when().get("/" + bucket + "?versioning").then().statusCode(200).body(not(containsString("<Status>")));
         given().when().get("/" + bucket + "?lifecycle").then().statusCode(404);
-        given().when().get("/" + bucket + "?publicAccessBlock").then().statusCode(404);
+        // A bucket nobody configured reports the AWS default rather than a 404.
+        given().when().get("/" + bucket + "?publicAccessBlock").then().statusCode(200)
+                .body(containsString("<BlockPublicAcls>true</BlockPublicAcls>"));
     }
 
     @Test
@@ -190,6 +354,14 @@ class CloudFormationS3BucketPropertiesIntegrationTest {
 
     private static io.restassured.response.ValidatableResponse bucketGet(String bucket, String subresource) {
         return given().when().get("/" + bucket + "?" + subresource).then().statusCode(200);
+    }
+
+    private static String stackEvents(String stackId) {
+        return given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DescribeStackEvents")
+            .formParam("StackName", stackId)
+        .when().post("/").then().statusCode(200).extract().asString();
     }
 
     private static String stack(String action, String stackName, String template) {

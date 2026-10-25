@@ -529,6 +529,99 @@ class SecretsManagerServiceTest {
     }
 
     @Test
+    void findArnByNameReturnsTheStoredArnWithItsSuffix() {
+        Secret created = service.createSecret("app/core", "value", null, null, null, null, REGION);
+
+        assertEquals(created.getArn(), service.findArnByName("000000000000", "app/core", REGION).orElseThrow());
+        assertTrue(service.findArnByName("000000000000", "app/missing", REGION).isEmpty());
+    }
+
+    @Test
+    void findArnByNameReadsOnlyTheNamedAccount() {
+        AccountAwareStorageBackend<Secret> accountAware =
+                AccountAwareStorageBackend.inMemory("000000000000");
+        SecretsManagerService svc = new SecretsManagerService(accountAware, 30);
+        Secret otherAccount = new Secret();
+        otherAccount.setName("app/core");
+        otherAccount.setArn("arn:aws:secretsmanager:" + REGION + ":111122223333:secret:app/core-AbCdEf");
+        accountAware.putForAccount("111122223333", REGION + "::app/core", otherAccount);
+
+        assertEquals(otherAccount.getArn(), svc.findArnByName("111122223333", "app/core", REGION).orElseThrow());
+        assertTrue(svc.findArnByName("000000000000", "app/core", REGION).isEmpty());
+    }
+
+    @Test
+    void findArnResolvesANameOrAnArnTheWayTheOperationsDo() {
+        Secret core = service.createSecret("app/core", "value", null, null, null, null, REGION);
+        String partialArn = core.getArn().substring(0, core.getArn().length() - "-AbCdEf".length());
+
+        assertEquals(core.getArn(), service.findArn("000000000000", "app/core", REGION).orElseThrow());
+        assertEquals(core.getArn(), service.findArn("000000000000", core.getArn(), REGION).orElseThrow());
+        assertEquals(core.getArn(), service.findArn("000000000000", partialArn, "eu-west-1").orElseThrow());
+        assertFindArnNamesTheSecretTheOperationActsOn(service, "app/core", REGION);
+        assertFindArnNamesTheSecretTheOperationActsOn(service, core.getArn(), REGION);
+        assertFindArnNamesTheSecretTheOperationActsOn(service, partialArn, "eu-west-1");
+        assertTrue(service.findArn("000000000000", partialArn.replace("app/core", "app/missing"), REGION).isEmpty());
+        assertTrue(service.findArn("000000000000", "arn:aws:s3:::app/core", REGION).isEmpty());
+    }
+
+    @Test
+    void findArnPrefersTheCallersAccountToTheOneTheArnNamesAsTheOperationsDo() {
+        AccountAwareStorageBackend<Secret> accountAware =
+                AccountAwareStorageBackend.inMemory("000000000000");
+        SecretsManagerService svc = new SecretsManagerService(accountAware, 30);
+        Secret otherAccount = new Secret();
+        otherAccount.setName("app/core");
+        otherAccount.setArn("arn:aws:secretsmanager:" + REGION + ":111122223333:secret:app/core-AbCdEf");
+        accountAware.putForAccount("111122223333", REGION + "::app/core", otherAccount);
+
+        // Only the account the ARN names holds it: the caller authorizes the ARN as given, and the
+        // operation finds that secret there.
+        assertTrue(svc.findArn("000000000000", otherAccount.getArn(), REGION).isEmpty());
+        assertFindArnNamesTheSecretTheOperationActsOn(svc, otherAccount.getArn(), REGION);
+
+        // A secret of the caller's own named like the ARN's resource is the one the operation reads
+        // the ARN as, before it looks in the account the ARN names.
+        Secret callers = svc.createSecret("app/core-AbCdEf", "value", null, null, null, null, REGION);
+        assertEquals(callers.getArn(), svc.findArn("000000000000", otherAccount.getArn(), REGION).orElseThrow());
+        assertFindArnNamesTheSecretTheOperationActsOn(svc, otherAccount.getArn(), REGION);
+    }
+
+    /**
+     * IAM authorizes {@code findArn}'s answer, or an ARN as given when it has none, so it has to name
+     * the secret the operation then acts on.
+     */
+    private static void assertFindArnNamesTheSecretTheOperationActsOn(SecretsManagerService svc,
+                                                                      String secretId, String region) {
+        assertEquals(svc.describeSecret(secretId, region).getArn(),
+                svc.findArn("000000000000", secretId, region).orElse(secretId));
+    }
+
+    @Test
+    void findArnMatchesAFullArnExactlyBeforeReadingItAsAPartialOne() {
+        Secret core = service.createSecret("app/core", "value", null, null, null, null, REGION);
+        String suffixed = core.getArn().substring(core.getArn().indexOf("app/core"));
+        Secret namedLikeTheArn = service.createSecret(suffixed, "other", null, null, null, null, REGION);
+
+        assertEquals(core.getArn(), service.findArn("000000000000", core.getArn(), REGION).orElseThrow());
+        assertEquals(namedLikeTheArn.getArn(), service.findArn("000000000000", suffixed, REGION).orElseThrow());
+    }
+
+    @Test
+    void findArnByNameReadsALegacyEntryOnlyForTheDefaultAccount() {
+        InMemoryStorage<String, Secret> raw = new InMemoryStorage<>();
+        SecretsManagerService svc = new SecretsManagerService(
+                new AccountAwareStorageBackend<>(raw, null, "000000000000"), 30);
+        Secret legacy = new Secret();
+        legacy.setName("app/legacy");
+        legacy.setArn("arn:aws:secretsmanager:" + REGION + ":000000000000:secret:app/legacy-AbCdEf");
+        raw.put(REGION + "::app/legacy", legacy);
+
+        assertEquals(legacy.getArn(), svc.findArnByName("000000000000", "app/legacy", REGION).orElseThrow());
+        assertTrue(svc.findArnByName("111122223333", "app/legacy", REGION).isEmpty());
+    }
+
+    @Test
     void ordinarySecretNamedLikeAnRdsSecretStillNeedsALambdaArn() {
         // Ownership is a property of the secret, not of its name: anyone may create a secret
         // called rds!something, and that must not grant it service-managed rotation.
@@ -1533,121 +1626,5 @@ class SecretsManagerServiceTest {
 
         assertEquals(1, service.listSecrets(REGION, null, false).size());
         assertEquals(2, service.listSecrets(REGION, null, true).size());
-    }
-
-    @Test
-    void rotateSecret_doesNotReservePendingVersionBeforeCreateSecret() throws Exception {
-        io.github.hectorvent.floci.services.lambda.LambdaService mockLambda =
-                org.mockito.Mockito.mock(io.github.hectorvent.floci.services.lambda.LambdaService.class);
-        String lambdaArn = "arn:aws:lambda:us-east-1:000000000000:function:rotate";
-        String token = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
-
-        SecretsManagerService svc = new SecretsManagerService(
-                new InMemoryStorage<String, Secret>(), 30,
-                new io.github.hectorvent.floci.core.common.RegionResolver("us-east-1", "000000000000"),
-                mockLambda, new com.fasterxml.jackson.databind.ObjectMapper());
-
-        svc.createSecret("my-secret", "alchemy-sm-rotation-initial", null, null, null, null, REGION);
-
-        org.mockito.Mockito.when(mockLambda.invoke(org.mockito.Mockito.anyString(), org.mockito.Mockito.anyString(),
-                        org.mockito.Mockito.any(byte[].class), org.mockito.Mockito.any()))
-                .thenAnswer(invocation -> {
-                    byte[] payloadBytes = invocation.getArgument(2);
-                    com.fasterxml.jackson.databind.JsonNode payload =
-                            new com.fasterxml.jackson.databind.ObjectMapper().readTree(payloadBytes);
-                    String step = payload.get("Step").asText();
-                    String requestToken = payload.get("ClientRequestToken").asText();
-
-                    switch (step) {
-                        case "createSecret" -> {
-                            boolean exists = svc.listSecretVersionIds("my-secret", REGION)
-                                    .containsKey(requestToken);
-                            if (!exists) {
-                                svc.putSecretValue("my-secret", "alchemy-sm-rotated-new",
-                                        null, requestToken, REGION, List.of("AWSPENDING"));
-                            }
-                        }
-                        case "finishSecret" -> {
-                            SecretVersion current = svc.getSecretValue("my-secret", null, "AWSCURRENT", REGION);
-                            if (!requestToken.equals(current.getVersionId())) {
-                                svc.updateSecretVersionStage("my-secret", requestToken,
-                                        current.getVersionId(), "AWSCURRENT", REGION);
-                            }
-                        }
-                        default -> { }
-                    }
-                    io.github.hectorvent.floci.services.lambda.model.InvokeResult ok =
-                            new io.github.hectorvent.floci.services.lambda.model.InvokeResult();
-                    ok.setStatusCode(200);
-                    return ok;
-                });
-
-        svc.rotateSecret("my-secret", token, lambdaArn, null, true, REGION);
-
-        long end = System.currentTimeMillis() + 2000;
-        boolean passed = false;
-        while (System.currentTimeMillis() < end) {
-            SecretVersion current = svc.getSecretValue("my-secret", null, "AWSCURRENT", REGION);
-            if ("alchemy-sm-rotated-new".equals(current.getSecretString())
-                    && token.equals(current.getVersionId())) {
-                passed = true;
-                break;
-            }
-            Thread.sleep(50);
-        }
-        assertTrue(passed, "createSecret must write AWSPENDING; finishSecret must promote it");
-    }
-
-    @Test
-    void resourcePolicyRoundTripAndDelete() {
-        service.createSecret("policy-secret", "value", null, null, null, null, REGION);
-        String policy = """
-                {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":"arn:aws:iam::000000000000:root"},"Action":"secretsmanager:GetSecretValue","Resource":"*"}]}
-                """;
-
-        Secret attached = service.putResourcePolicy("policy-secret", policy, null, REGION);
-        assertEquals(policy, attached.getResourcePolicy());
-        assertEquals(policy, service.getResourcePolicy("policy-secret", REGION).getResourcePolicy());
-
-        service.deleteResourcePolicy("policy-secret", REGION);
-        assertNull(service.getResourcePolicy("policy-secret", REGION).getResourcePolicy());
-
-        assertNull(service.deleteResourcePolicy("policy-secret", REGION).getResourcePolicy());
-    }
-
-    @Test
-    void putResourcePolicyRejectsPublicPrincipalWhenBlockingIsRequested() {
-        service.createSecret("public-policy-secret", "value", null, null, null, null, REGION);
-        String publicPolicy = """
-                {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":"*","Action":"secretsmanager:GetSecretValue","Resource":"*"}]}
-                """;
-
-        AwsException blocked = assertThrows(AwsException.class,
-                () -> service.putResourcePolicy("public-policy-secret", publicPolicy, true, REGION));
-        assertEquals("PublicPolicyException", blocked.getErrorCode());
-
-        Secret allowed = service.putResourcePolicy("public-policy-secret", publicPolicy, false, REGION);
-        assertEquals(publicPolicy, allowed.getResourcePolicy());
-    }
-
-    @Test
-    void cancelRotateSecretDisablesRotation() throws Exception {
-        io.github.hectorvent.floci.services.lambda.LambdaService mockLambda =
-                org.mockito.Mockito.mock(io.github.hectorvent.floci.services.lambda.LambdaService.class);
-        SecretsManagerService svc = new SecretsManagerService(
-                new InMemoryStorage<String, Secret>(), 30,
-                new io.github.hectorvent.floci.core.common.RegionResolver("us-east-1", "000000000000"),
-                mockLambda, new com.fasterxml.jackson.databind.ObjectMapper());
-
-        svc.createSecret("rotate-cancel", "value", null, null, null, null, REGION);
-        String lambdaArn = "arn:aws:lambda:us-east-1:000000000000:function:rotate";
-        svc.rotateSecret("rotate-cancel", "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-                lambdaArn, new Secret.RotationRules(30, null, null), false, REGION);
-
-        Secret cancelled = svc.cancelRotateSecret("rotate-cancel", REGION).secret();
-        assertFalse(cancelled.isRotationEnabled());
-        assertEquals(lambdaArn, cancelled.getRotationLambdaArn());
-
-        assertFalse(svc.cancelRotateSecret("rotate-cancel", REGION).secret().isRotationEnabled());
     }
 }

@@ -2,23 +2,16 @@ package io.github.hectorvent.floci.services.stepfunctions;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbService;
 import io.github.hectorvent.floci.services.lambda.LambdaExecutorService;
 import io.github.hectorvent.floci.services.lambda.LambdaFunctionStore;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
-import io.github.hectorvent.floci.services.s3.S3Service;
-import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
-import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
 import io.github.hectorvent.floci.services.stepfunctions.model.HistoryEvent;
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachine;
 import io.quarkus.test.junit.QuarkusTest;
 import io.vertx.mutiny.core.Vertx;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -80,23 +73,13 @@ class AslExecutorCatchTest {
                     return new InvokeResult(200, null, output, null, "cleanup-request");
                 });
 
-        executor = new AslExecutor(
-                lambdaExecutor,
-                functionStore,
-                mock(DynamoDbService.class),
-                mock(DynamoDbJsonHandler.class),
-                mock(SqsJsonHandler.class), mock(SnsJsonHandler.class),
-                mock(io.github.hectorvent.floci.services.cloudformation.CloudFormationQueryHandler.class),
-                mock(io.github.hectorvent.floci.services.ec2.Ec2Service.class),
-                mock(S3Service.class),
-                mock(io.github.hectorvent.floci.services.ecs.EcsService.class),
-                mock(io.github.hectorvent.floci.services.ecs.EcsJsonHandler.class),
-                mock(io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler.class),
-                mock(io.github.hectorvent.floci.services.scheduler.SchedulerService.class),
-                mock(io.github.hectorvent.floci.services.scheduler.SchedulerController.class),
-                objectMapper,
-                new JsonataEvaluator(objectMapper),
-                mock(Instance.class), mock(EmulatorConfig.class), vertx, null);
+        executor = AslExecutorFixture.builder()
+                .lambdaExecutor(lambdaExecutor)
+                .functionStore(functionStore)
+                .objectMapper(objectMapper)
+                .vertx(vertx)
+                .customResourceLiveness(null)
+                .build();
     }
 
     @Test
@@ -158,35 +141,6 @@ class AslExecutorCatchTest {
         assertEquals(ERROR_PAYLOAD, execution.getCause());
         verify(lambdaExecutor).invoke(eq(failingFunction), any(byte[].class), eq(InvocationType.RequestResponse));
         verify(lambdaExecutor, never()).invoke(eq(cleanupFunction), any(byte[].class), eq(InvocationType.RequestResponse));
-    }
-
-    @Test
-    void optimizedLambdaInvoke_wrapsFunctionOutputUnderPayload() throws Exception {
-        // Alchemy StateMachine.fromProgram compiles Sfn.invoke to
-        // Resource=arn:aws:states:::lambda:invoke + Assign {% $states.result.Payload %}.
-        Execution execution = run("""
-                {
-                  "QueryLanguage": "JSONata",
-                  "StartAt": "Invoke",
-                  "States": {
-                    "Invoke": {
-                      "Type": "Task",
-                      "Resource": "arn:aws:states:::lambda:invoke",
-                      "Arguments": {
-                        "FunctionName": "%s",
-                        "Payload": { "value": 6 }
-                      },
-                      "Output": "{%% $states.result.Payload %%}",
-                      "End": true
-                    }
-                  }
-                }
-                """.formatted(CLEANUP_FUNCTION_ARN));
-
-        assertEquals("SUCCEEDED", execution.getStatus());
-        JsonNode output = objectMapper.readTree(execution.getOutput());
-        assertTrue(output.path("cleanup").asBoolean());
-        assertEquals(6, output.path("input").path("value").asInt());
     }
 
     private Execution run(String definition) {

@@ -89,7 +89,9 @@ public class TagDispatcher {
         } catch (AwsException e) {
             throw e;
         } catch (Exception e) {
-            String code = handler.strictTagValidation() ? "ValidationException" : "BadRequestException";
+            String code = handler.strictTagValidation()
+                    ? handler.tagValidationErrorCode()
+                    : "BadRequestException";
             throw new AwsException(code, e.getMessage(), 400);
         }
     }
@@ -127,22 +129,22 @@ public class TagDispatcher {
         Map<String, String> tags = new HashMap<>();
         String key = handler.tagsBodyKey();
         if (handler.strictTagValidation() && !node.isObject()) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Request payload must be a JSON object", 400);
+            throw SmithyValidationErrors.validationException(
+                    "Request payload must be a JSON object");
         }
         JsonNode tagNode = node.get(key);
         if (tagNode == null || tagNode.isNull()) {
             if (handler.strictTagValidation()) {
-                throw new AwsException("ValidationException",
-                        "1 validation error detected: Value null at '" + key + "' failed to satisfy constraint: Member must not be null", 400);
+                throw SmithyValidationErrors.validationException(
+                        "Value null at '" + key + "' failed to satisfy constraint: Member must not be null");
             }
             return tags;
         }
         if (handler.tagsBodyIsList()) {
             if (!tagNode.isArray()) {
                 if (handler.strictTagValidation()) {
-                    throw new AwsException("ValidationException",
-                            "1 validation error detected: Value at '" + key + "' failed to satisfy constraint: Member must be a list", 400);
+                    throw SmithyValidationErrors.validationException(
+                            "Value at '" + key + "' failed to satisfy constraint: Member must be a list");
                 }
                 return tags;
             }
@@ -151,30 +153,30 @@ public class TagDispatcher {
                 JsonNode v = entry.get(handler.tagEntryValueName());
                 if (k == null || k.isNull() || v == null || v.isNull()) {
                     if (handler.strictTagValidation()) {
-                        throw new AwsException("ValidationException",
-                                "1 validation error detected: Tag entries at '" + key + "' must have non-null Key and Value", 400);
+                        throw SmithyValidationErrors.validationException(
+                                "Tag entries at '" + key + "' must have non-null Key and Value");
                     }
                     continue;
                 }
                 if (handler.strictTagValidation() && (!k.isTextual() || !v.isTextual())) {
-                    throw new AwsException("ValidationException",
-                            "1 validation error detected: Tag entries at '" + key
-                                    + "' must contain string Key and Value members", 400);
+                    throw SmithyValidationErrors.validationException(
+                            "Tag entries at '" + key
+                                    + "' must contain string Key and Value members");
                 }
                 tags.put(k.asText(), v.asText());
             }
         } else {
             if (!tagNode.isObject()) {
                 if (handler.strictTagValidation()) {
-                    throw new AwsException("ValidationException",
-                            "1 validation error detected: Value at '" + key + "' failed to satisfy constraint: Member must be a map", 400);
+                    throw SmithyValidationErrors.validationException(
+                            "Value at '" + key + "' failed to satisfy constraint: Member must be a map");
                 }
                 return tags;
             }
             tagNode.fields().forEachRemaining(e -> {
                 if (handler.strictTagValidation() && !e.getValue().isTextual()) {
-                    throw new AwsException("ValidationException",
-                            "1 validation error detected: Tag values at '" + key + "' must be strings", 400);
+                    throw SmithyValidationErrors.validationException(
+                            "Tag values at '" + key + "' must be strings");
                 }
                 tags.put(e.getKey(), e.getValue().asText());
             });
@@ -187,8 +189,8 @@ public class TagDispatcher {
         List<String> values = uriInfo.getQueryParameters().get(paramName);
         if (handler.strictTagValidation() && !handler.allowEmptyTagKeys()
                 && (values == null || values.isEmpty())) {
-            throw new AwsException("ValidationException",
-                    "1 validation error detected: Value null at '" + paramName + "' failed to satisfy constraint: Member must not be null", 400);
+            throw SmithyValidationErrors.validationException(
+                    "Value null at '" + paramName + "' failed to satisfy constraint: Member must not be null");
         }
         return (values == null) ? List.of() : List.copyOf(values);
     }

@@ -12,37 +12,16 @@ public class PendingInvocation {
     private final String functionArn;
     private final CompletableFuture<InvokeResult> resultFuture;
     private final CompletableFuture<Void> dispatchedFuture = new CompletableFuture<>();
+    private volatile String clientContext;
 
     public PendingInvocation(String requestId, byte[] payload, long deadlineMs,
                               String functionArn, CompletableFuture<InvokeResult> resultFuture) {
         this.requestId = requestId;
         this.payload = payload;
+        this.deadlineMs = deadlineMs;
         this.timeoutMs = Math.max(0, deadlineMs - System.currentTimeMillis());
         this.functionArn = functionArn;
         this.resultFuture = resultFuture;
-        this.deadlineMs = deadlineMs;
-    }
-
-    /**
-     * Queue-safe invocation: the AWS timeout clock starts when the runtime
-     * dequeues the event ({@link #prepareForDispatch()}), not when it is enqueued.
-     * Bursting Function URL callers therefore do not spend the 3s default
-     * timeout sitting behind a single warm container.
-     */
-    public static PendingInvocation withExecutionTimeout(
-            String requestId, byte[] payload, int timeoutSeconds,
-            String functionArn, CompletableFuture<InvokeResult> resultFuture) {
-        return new PendingInvocation(requestId, payload, timeoutSeconds, functionArn, resultFuture);
-    }
-
-    private PendingInvocation(String requestId, byte[] payload, int timeoutSeconds,
-                              String functionArn, CompletableFuture<InvokeResult> resultFuture) {
-        this.requestId = requestId;
-        this.payload = payload;
-        this.timeoutMs = TimeUnit.SECONDS.toMillis(timeoutSeconds > 0 ? timeoutSeconds : 3);
-        this.functionArn = functionArn;
-        this.resultFuture = resultFuture;
-        this.deadlineMs = 0L;
     }
 
     public void prepareForDispatch() {
@@ -58,6 +37,20 @@ public class PendingInvocation {
     public byte[] getPayload() { return payload; }
     public long getDeadlineMs() { return deadlineMs; }
     public String getFunctionArn() { return functionArn; }
+    public String getClientContext() { return clientContext; }
+    public void setClientContext(String clientContext) { this.clientContext = clientContext; }
     public CompletableFuture<InvokeResult> getResultFuture() { return resultFuture; }
     public CompletableFuture<Void> getDispatchedFuture() { return dispatchedFuture; }
+
+    /**
+     * Queue-safe invocation: the AWS timeout clock starts when the runtime
+     * dequeues the event ({@link #prepareForDispatch()}), not when it is enqueued.
+     * Bursting Function URL callers therefore do not spend the 3s default
+     * timeout sitting behind a single warm container.
+     */
+    public static PendingInvocation withExecutionTimeout(
+            String requestId, byte[] payload, int timeoutSeconds,
+            String functionArn, CompletableFuture<InvokeResult> resultFuture) {
+        return new PendingInvocation(requestId, payload, timeoutSeconds, functionArn, resultFuture);
+    }
 }

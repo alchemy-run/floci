@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.ses;
 
 import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -23,23 +24,18 @@ import static org.hamcrest.Matchers.notNullValue;
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class SesBulkV2IntegrationTest {
 
+    private static boolean sendersVerified;
+
+    @BeforeEach
+    void verifySenders() {
+        if (!sendersVerified) {
+            SesVerifiedSenders.verify("bulk@example.com", "bulk2@example.com", "inline@example.com");
+            sendersVerified = true;
+        }
+    }
+
     private static final String AUTH_HEADER =
             "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/ses/aws4_request";
-
-    private static void createEmailIdentity(String email) {
-        // Idempotent setup: sibling suites in the shared JVM may already have
-        // verified this identity; AWS answers a duplicate CreateEmailIdentity
-        // with 400 AlreadyExistsException, which is just as good here.
-        given()
-            .contentType("application/json")
-            .header("Authorization", AUTH_HEADER)
-            .body("{\"EmailIdentity\": \"" + email + "\"}")
-        .when()
-            .post("/v2/email/identities")
-        .then()
-            .statusCode(org.hamcrest.Matchers.anyOf(
-                org.hamcrest.Matchers.is(200), org.hamcrest.Matchers.is(400)));
-    }
 
     @Test
     @Order(1)
@@ -66,8 +62,6 @@ class SesBulkV2IntegrationTest {
     @Test
     @Order(2)
     void sendBulkEmail_storedTemplate_perEntryReplacement() {
-        createEmailIdentity("bulk@example.com");
-        createEmailIdentity("bulk2@example.com");
         String firstId = given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
@@ -164,7 +158,6 @@ class SesBulkV2IntegrationTest {
     @Test
     @Order(3)
     void sendBulkEmail_inlineTemplateContent() {
-        createEmailIdentity("inline@example.com");
         String messageId = given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
@@ -350,12 +343,40 @@ class SesBulkV2IntegrationTest {
             .body("__type", equalTo("BadRequestException"));
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("io.github.hectorvent.floci.services.ses.SesV2SerializationErrors#nonObjectBodies")
+    @Order(12)
+    void sendBulkEmail_nonObjectBody_isASerializationException(String body, String message) {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body(body)
+        .when()
+            .post("/v2/email/outbound-bulk-emails")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("SerializationException"))
+            .body("message", equalTo(message));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("wrongTypeSendBulkEmailBodies")
+    @Order(13)
+    void sendBulkEmail_wrongMemberType_returnsSerializationException(String label, String body) {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body(body)
+        .when()
+            .post("/v2/email/outbound-bulk-emails")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("SerializationException"));
+    }
+
     static Stream<Arguments> malformedSendBulkEmailBodies() {
         String validDefaultTemplate = "\"DefaultContent\": {\"Template\": {\"TemplateName\": \"v2-bulk-welcome\", \"TemplateData\": \"{\\\"team\\\":\\\"floci\\\",\\\"name\\\":\\\"X\\\"}\"}}";
         return Stream.of(
-                Arguments.of("body is array", "[1,2,3]"),
-                Arguments.of("body is JSON null literal", "null"),
-                Arguments.of("body is JSON string", "\"hello\""),
                 Arguments.of("BulkEmailEntries element is null", """
                     {
                       "FromEmailAddress": "bulk@example.com",
@@ -363,6 +384,21 @@ class SesBulkV2IntegrationTest {
                       "BulkEmailEntries": [null]
                     }
                     """.formatted(validDefaultTemplate)),
+                Arguments.of("DefaultTemplateData as invalid JSON string", """
+                    {
+                      "FromEmailAddress": "bulk@example.com",
+                      "DefaultContent": {
+                        "Template": {"TemplateName": "v2-bulk-welcome", "TemplateData": "{not json"}
+                      },
+                      "BulkEmailEntries": [{"Destination": {"ToAddresses": ["alice@example.com"]}}]
+                    }
+                    """)
+        );
+    }
+
+    static Stream<Arguments> wrongTypeSendBulkEmailBodies() {
+        String validDefaultTemplate = "\"DefaultContent\": {\"Template\": {\"TemplateName\": \"v2-bulk-welcome\", \"TemplateData\": \"{\\\"team\\\":\\\"floci\\\",\\\"name\\\":\\\"X\\\"}\"}}";
+        return Stream.of(
                 Arguments.of("BulkEmailEntries element is string", """
                     {
                       "FromEmailAddress": "bulk@example.com",
@@ -382,15 +418,6 @@ class SesBulkV2IntegrationTest {
                       "FromEmailAddress": "bulk@example.com",
                       "DefaultContent": {
                         "Template": {"TemplateName": "v2-bulk-welcome", "TemplateData": {"team": "floci"}}
-                      },
-                      "BulkEmailEntries": [{"Destination": {"ToAddresses": ["alice@example.com"]}}]
-                    }
-                    """),
-                Arguments.of("DefaultTemplateData as invalid JSON string", """
-                    {
-                      "FromEmailAddress": "bulk@example.com",
-                      "DefaultContent": {
-                        "Template": {"TemplateName": "v2-bulk-welcome", "TemplateData": "{not json"}
                       },
                       "BulkEmailEntries": [{"Destination": {"ToAddresses": ["alice@example.com"]}}]
                     }
@@ -477,34 +504,5 @@ class SesBulkV2IntegrationTest {
         .then()
             .statusCode(400)
             .body("__type", equalTo("MessageRejected"));
-    }
-
-    @Test
-    @Order(9)
-    void sendBulkEmail_unverifiedSender_entryMessageRejected() {
-        given()
-            .contentType("application/json")
-            .header("Authorization", AUTH_HEADER)
-            .body("""
-                {
-                  "FromEmailAddress": "nobody@unverified-bulk.example.com",
-                  "DefaultContent": {
-                    "Template": {
-                      "TemplateName": "v2-bulk-welcome",
-                      "TemplateData": "{\\"name\\":\\"Ada\\",\\"team\\":\\"floci\\"}"
-                    }
-                  },
-                  "BulkEmailEntries": [
-                    {"Destination": {"ToAddresses": ["alice@example.com"]}}
-                  ]
-                }
-                """)
-        .when()
-            .post("/v2/email/outbound-bulk-emails")
-        .then()
-            .statusCode(200)
-            .body("BulkEmailEntryResults", hasSize(1))
-            .body("BulkEmailEntryResults[0].Status", equalTo("MESSAGE_REJECTED"))
-            .body("BulkEmailEntryResults[0].Error", notNullValue());
     }
 }

@@ -1,12 +1,22 @@
 package io.github.hectorvent.floci.services.emrserverless.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
+import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 
+/** GetApplication's application. Timestamps go out as epoch seconds, the restJson1 default. */
 @RegisterForReflection
 public class Application {
+
+    // Applications persisted before their timestamps were epoch seconds hold epoch milliseconds, and
+    // those read back as seconds. 1e11 seconds is the year 5138, while 1e11 milliseconds is 1973, before
+    // any application, so a value at or past it was written as milliseconds.
+    private static final long LEGACY_MILLIS_FLOOR = 100_000_000_000L;
+
     private String applicationId;
     private String arn;
     private String name;
@@ -15,8 +25,10 @@ public class Application {
     private String state;
     private String stateDetails;
     private String clientToken;
-    private Long createdAt;
-    private Long updatedAt;
+    @JsonFormat(shape = JsonFormat.Shape.NUMBER)
+    private Instant createdAt;
+    @JsonFormat(shape = JsonFormat.Shape.NUMBER)
+    private Instant updatedAt;
     private Map<String, String> tags;
     private String architecture;
     private Map<String, InitialCapacityConfig> initialCapacity;
@@ -50,10 +62,10 @@ public class Application {
     public void setStateDetails(String stateDetails) { this.stateDetails = stateDetails; }
     public String getClientToken() { return clientToken; }
     public void setClientToken(String clientToken) { this.clientToken = clientToken; }
-    public Long getCreatedAt() { return createdAt; }
-    public void setCreatedAt(Long createdAt) { this.createdAt = createdAt; }
-    public Long getUpdatedAt() { return updatedAt; }
-    public void setUpdatedAt(Long updatedAt) { this.updatedAt = updatedAt; }
+    public Instant getCreatedAt() { return createdAt; }
+    public void setCreatedAt(Instant createdAt) { this.createdAt = fromLegacyMillis(createdAt); }
+    public Instant getUpdatedAt() { return updatedAt; }
+    public void setUpdatedAt(Instant updatedAt) { this.updatedAt = fromLegacyMillis(updatedAt); }
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
     public String getArchitecture() { return architecture; }
@@ -86,4 +98,9 @@ public class Application {
     public void setIdentityCenterConfiguration(IdentityCenterConfiguration identityCenterConfiguration) { this.identityCenterConfiguration = identityCenterConfiguration; }
     public JobLevelCostAllocationConfiguration getJobLevelCostAllocationConfiguration() { return jobLevelCostAllocationConfiguration; }
     public void setJobLevelCostAllocationConfiguration(JobLevelCostAllocationConfiguration jobLevelCostAllocationConfiguration) { this.jobLevelCostAllocationConfiguration = jobLevelCostAllocationConfiguration; }
+
+    private static Instant fromLegacyMillis(Instant value) {
+        return value != null && value.getEpochSecond() >= LEGACY_MILLIS_FLOOR
+                ? Instant.ofEpochMilli(value.getEpochSecond()) : value;
+    }
 }

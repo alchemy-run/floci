@@ -76,12 +76,20 @@ class ContainerLifecycleManagerCpuLimitTest {
     }
 
     @Test
+    void initReachesHostConfig() {
+        HostConfig hostConfig = createHostConfig(EIGHT_CPU_HOST, ContainerBuilder.Builder::withInit);
+
+        assertTrue(hostConfig.getInit());
+    }
+
+    @Test
     void containerThatAskedForNoCpuLimitGetsNone() {
         HostConfig hostConfig = createHostConfig(EIGHT_CPU_HOST, UnaryOperator.identity());
 
         assertNull(hostConfig.getNanoCPUs());
         assertNull(hostConfig.getCpuShares());
         assertNull(hostConfig.getReadonlyRootfs());
+        assertNull(hostConfig.getInit());
     }
 
     /**
@@ -131,7 +139,7 @@ class ContainerLifecycleManagerCpuLimitTest {
         ImageCacheService imageCacheService = mock(ImageCacheService.class);
         when(imageCacheService.ensureImageExists(any())).thenAnswer(invocation -> invocation.getArgument(0));
         ContainerLifecycleManager manager = new ContainerLifecycleManager(
-                dockerClient, imageCacheService, mock(ContainerDetector.class), mock(PortAllocator.class), config);
+                dockerClient, imageCacheService, mock(ContainerDetector.class), config);
 
         manager.create(spec);
 

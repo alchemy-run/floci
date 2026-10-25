@@ -41,6 +41,19 @@ class UnknownServiceScopeGuardDisabledIntegrationTest {
     }
 
     @Test
+    void unsupportedScopeWithAnUnrecognisedSmithyProtocolFallsThroughWhenRejectionDisabled() {
+        given()
+            .header("Authorization", "AWS4-HMAC-SHA256 Credential=test/20260707/us-east-1/account"
+                    + "/aws4_request, SignedHeaders=host;x-amz-date, Signature=deadbeef")
+            .header("smithy-protocol", "unrecognised")
+        .when()
+            .get("/guard-disabled-no-such-bucket")
+        .then()
+            .statusCode(404)
+            .body(containsString("<Code>NoSuchBucket</Code>"));
+    }
+
+    @Test
     void knownRestJsonScopeFallsThroughWhenRejectionDisabled() {
         given()
             .header("Authorization", "AWS4-HMAC-SHA256 Credential=test/20260707/us-east-1/bedrock"

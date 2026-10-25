@@ -6,7 +6,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.ses.model.Identity;
 import io.github.hectorvent.floci.services.ses.model.Tag;
 import jakarta.inject.Inject;
@@ -18,6 +20,7 @@ import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
+import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
@@ -27,10 +30,17 @@ import org.jboss.logging.Logger;
 import java.util.List;
 import java.util.Map;
 
+import static io.github.hectorvent.floci.services.ses.SesV2Json.coerceBooleanOrFalse;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.filterValues;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.intMemberOrAbsent;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.parseTagsArray;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.putTimestamp;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.remapV1Exception;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.requireJsonObject;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.requireObjectOrAbsent;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.stringMapMemberOrAbsent;
+import static io.github.hectorvent.floci.services.ses.SesV2Json.stringMemberOrAbsent;
 
 /**
  * SES V2 email-identity endpoints ({@code /v2/email/identities}), including the sending
@@ -38,7 +48,9 @@ import static io.github.hectorvent.floci.services.ses.SesV2Json.requireObjectOrA
  * Reads and the single-domain attribute writes call
  * {@link SesIdentityService} directly; create, delete, the policy operations and the default
  * configuration set go through the {@link SesService} facade, which checks the configuration set
- * exists, guards the delete against tenant associations and cascades the identity's policies.
+ * exists, guards the delete against tenant and certificate associations and cascades the
+ * identity's policies. The S/MIME certificate associations ({@code /v2/email/identity/certificates})
+ * call {@link SesIdentityCertificateService}.
  */
 @Path("/v2/email")
 @Produces(MediaType.APPLICATION_JSON)
@@ -47,16 +59,23 @@ public class SesIdentityController {
 
     private static final Logger LOG = Logger.getLogger(SesIdentityController.class);
 
+    /** In the order SES prints them when it refuses a key. */
+    private static final List<String> IDENTITY_FILTER_KEYS =
+            List.of("IDENTITY_NAME_CONTAINS", "VERIFICATION_STATUS", "IDENTITY_TYPE");
+
     private final SesIdentityService identityService;
     private final SesService sesService;
+    private final SesIdentityCertificateService certificateService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
 
     @Inject
     public SesIdentityController(SesIdentityService identityService, SesService sesService,
+                                 SesIdentityCertificateService certificateService,
                                  RegionResolver regionResolver, ObjectMapper objectMapper) {
         this.identityService = identityService;
         this.sesService = sesService;
+        this.certificateService = certificateService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
     }
@@ -66,7 +85,7 @@ public class SesIdentityController {
     public Response createEmailIdentity(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = objectMapper.readTree(body);
+            JsonNode request = readOptionBody(objectMapper, body);
             JsonNode emailIdentityNode = request.path("EmailIdentity");
             if (!emailIdentityNode.isMissingNode() && !emailIdentityNode.isNull()
                     && !emailIdentityNode.isTextual()) {
@@ -120,15 +139,40 @@ public class SesIdentityController {
         }
     }
 
+    /**
+     * The binding SDKs sent before the Filter member moved this operation to POST (AWS SDK for Java
+     * 2.55.8, botocore 1.43.105). It is gone from the model, but SES still answers it (probed
+     * 2026-10-03), so it stays for older SDKs and takes no filter.
+     */
     @GET
     @Path("/identities")
-    public Response listEmailIdentities(@Context HttpHeaders headers) {
+    public Response listEmailIdentities(@Context HttpHeaders headers,
+                                        @QueryParam("PageSize") String pageSize,
+                                        @QueryParam("NextToken") String nextToken) {
         String region = regionResolver.resolveRegion(headers);
-        List<Identity> identities = identityService.listIdentities(null, region);
+        return emailIdentitiesPage(region, Map.of(), SesListPaging.parseQueryPageSize(pageSize), nextToken);
+    }
+
+    /** The binding SDKs use since the Filter member was added. */
+    @POST
+    @Path("/list-identities")
+    public Response listEmailIdentitiesWithFilter(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode request = readOptionBody(objectMapper, body);
+        Map<String, String> filter = stringMapMemberOrAbsent(request, "Filter");
+        Integer pageSize = intMemberOrAbsent(request, "PageSize");
+        String nextToken = stringMemberOrAbsent(request, "NextToken");
+        Map<String, String> present = filterValues(filter, IDENTITY_FILTER_KEYS);
+        return emailIdentitiesPage(region, present, pageSize, nextToken);
+    }
+
+    private Response emailIdentitiesPage(String region, Map<String, String> filter, Integer pageSize,
+                                         String nextToken) {
+        PaginatedResult<Identity> page = identityService.listV2Identities(region, filter, pageSize, nextToken);
 
         ObjectNode result = objectMapper.createObjectNode();
         ArrayNode items = result.putArray("EmailIdentities");
-        for (Identity id : identities) {
+        for (Identity id : page.items()) {
             // Only a not-yet-verified domain can still transition (via its DKIM records),
             // so refresh just those; refreshing every identity would scan Route53 per call.
             Identity current = id;
@@ -146,6 +190,7 @@ public class SesIdentityController {
             item.put("VerificationStatus", toV2Status(current.getVerificationStatus()));
             items.add(item);
         }
+        result.put("NextToken", page.nextToken());
         return Response.ok(result).build();
     }
 
@@ -189,8 +234,6 @@ public class SesIdentityController {
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -206,8 +249,6 @@ public class SesIdentityController {
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -233,18 +274,17 @@ public class SesIdentityController {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private String readPolicyBody(String body) throws JsonProcessingException {
-        if (body == null || body.isBlank()) {
+    private String readPolicyBody(String body) {
+        if (body == null || body.isEmpty()) {
             throw new AwsException("BadRequestException", "Request body is required.", 400);
         }
-        JsonNode request = objectMapper.readTree(body);
-        requireJsonObject(request);
+        JsonNode request = readOptionBody(objectMapper, body);
         JsonNode policyNode = request.path("Policy");
         if (policyNode.isMissingNode() || policyNode.isNull()) {
             // Verified against AWS: a missing/null required member is a Smithy validation error.
-            throw new AwsException("BadRequestException",
-                    "1 validation error detected: Value at 'policy' failed to satisfy constraint: "
-                            + "Member must not be null", 400);
+            throw SmithyValidationErrors.badRequest(
+                    "Value at 'policy' failed to satisfy constraint: "
+                            + "Member must not be null");
         }
         if (!policyNode.isTextual()) {
             // Policy is a String; AWS rejects a non-string with an empty-bodied 400. Don't coerce
@@ -261,13 +301,8 @@ public class SesIdentityController {
                                                     String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = objectMapper.readTree(body);
-            JsonNode signingEnabledNode = request.get("SigningEnabled");
-            if (signingEnabledNode == null || !signingEnabledNode.isBoolean()) {
-                throw new AwsException("BadRequestException",
-                        "SigningEnabled must be present and must be a boolean", 400);
-            }
-            boolean signingEnabled = signingEnabledNode.booleanValue();
+            JsonNode request = readOptionBody(objectMapper, body);
+            boolean signingEnabled = coerceBooleanOrFalse(request.path("SigningEnabled"));
             identityService.setDkimAttributes(emailIdentity, signingEnabled, region);
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
@@ -284,9 +319,7 @@ public class SesIdentityController {
                                                           String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = (body == null || body.isBlank())
-                    ? objectMapper.createObjectNode() : objectMapper.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
             String origin = request.path("SigningAttributesOrigin").asText(null);
             if (!"AWS_SES".equals(origin) && !"EXTERNAL".equals(origin)) {
                 throw new AwsException("BadRequestException",
@@ -328,11 +361,10 @@ public class SesIdentityController {
                                                         String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            if (body == null || body.isBlank()) {
+            if (body == null || body.isEmpty()) {
                 throw new AwsException("BadRequestException", "Request body is required.", 400);
             }
-            JsonNode request = objectMapper.readTree(body);
-            requireJsonObject(request);
+            JsonNode request = readOptionBody(objectMapper, body);
             JsonNode mailFromDomainNode = request.path("MailFromDomain");
             if (mailFromDomainNode.isMissingNode()) {
                 throw new AwsException("BadRequestException",
@@ -359,8 +391,6 @@ public class SesIdentityController {
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
         }
     }
 
@@ -371,13 +401,8 @@ public class SesIdentityController {
                                                         String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
-            JsonNode request = objectMapper.readTree(body);
-            JsonNode emailForwardingEnabledNode = request.get("EmailForwardingEnabled");
-            if (emailForwardingEnabledNode == null || !emailForwardingEnabledNode.isBoolean()) {
-                throw new AwsException("BadRequestException",
-                        "EmailForwardingEnabled must be present and must be a boolean", 400);
-            }
-            boolean emailForwardingEnabled = emailForwardingEnabledNode.booleanValue();
+            JsonNode request = readOptionBody(objectMapper, body);
+            boolean emailForwardingEnabled = coerceBooleanOrFalse(request.path("EmailForwardingEnabled"));
             identityService.setFeedbackForwardingEnabled(emailIdentity, emailForwardingEnabled,
                     region);
             return Response.ok(objectMapper.createObjectNode()).build();
@@ -395,33 +420,76 @@ public class SesIdentityController {
                                                                String body) {
         String region = regionResolver.resolveRegion(headers);
         try {
+            // An omitted or explicit-null ConfigurationSetName clears the association, as does an
+            // empty body.
             String configurationSetName = null;
-            if (body != null && !body.isEmpty()) {
-                // Only a truly empty body is "no body". A non-empty body must be a JSON object; a
-                // whitespace-only or otherwise unparseable body is a serialization error (verified
-                // against real AWS: whitespace-only returns SerializationException and does not
-                // clear). Within a valid object, an omitted or explicit-null ConfigurationSetName
-                // clears the association (as does an empty body / {}).
-                JsonNode request = objectMapper.readTree(body);
-                if (request == null || !request.isObject()) {
-                    throw new AwsException("SerializationException", null, 400);
+            JsonNode node = readOptionBody(objectMapper, body).path("ConfigurationSetName");
+            if (!node.isMissingNode() && !node.isNull()) {
+                if (!node.isTextual()) {
+                    throw new AwsException("BadRequestException",
+                            "ConfigurationSetName must be a JSON string.", 400);
                 }
-                JsonNode node = request.path("ConfigurationSetName");
-                if (!node.isMissingNode() && !node.isNull()) {
-                    if (!node.isTextual()) {
-                        throw new AwsException("BadRequestException",
-                                "ConfigurationSetName must be a JSON string.", 400);
-                    }
-                    configurationSetName = node.asText();
-                }
+                configurationSetName = node.asText();
             }
             sesService.setEmailIdentityConfigurationSet(emailIdentity, configurationSetName, region);
             return Response.ok(objectMapper.createObjectNode()).build();
         } catch (AwsException e) {
             throw remapV1Exception(e);
-        } catch (JsonProcessingException e) {
-            throw new AwsException("SerializationException", null, 400);
         }
+    }
+
+    @POST
+    @Path("/identity/certificates")
+    public Response associateEmailIdentityCertificate(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode request = readOptionBody(objectMapper, body);
+        try {
+            certificateService.associate(stringMemberOrAbsent(request, "EmailIdentity"),
+                    stringMemberOrAbsent(request, "FromAddress"), stringMemberOrAbsent(request, "CertificateArn"),
+                    region);
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        }
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
+    @Path("/identity/certificates/delete")
+    public Response disassociateEmailIdentityCertificate(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode request = readOptionBody(objectMapper, body);
+        try {
+            certificateService.disassociate(stringMemberOrAbsent(request, "EmailIdentity"),
+                    stringMemberOrAbsent(request, "FromAddress"), region);
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        }
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    @POST
+    @Path("/identity/certificates/list")
+    public Response listEmailIdentityCertificates(@Context HttpHeaders headers, String body) {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode request = readOptionBody(objectMapper, body);
+        PaginatedResult<SesIdentityCertificateService.Entry> page;
+        try {
+            page = certificateService.list(stringMemberOrAbsent(request, "EmailIdentity"),
+                    intMemberOrAbsent(request, "PageSize"), stringMemberOrAbsent(request, "NextToken"), region);
+        } catch (AwsException e) {
+            throw remapV1Exception(e);
+        }
+        ObjectNode result = objectMapper.createObjectNode();
+        ArrayNode certificates = result.putArray("Certificates");
+        for (SesIdentityCertificateService.Entry entry : page.items()) {
+            ObjectNode item = certificates.addObject();
+            item.put("FromAddress", entry.fromAddress());
+            item.put("Status", entry.status());
+            item.put("CertificateArn", entry.certificateArn());
+            putTimestamp(item, "CertificateExpiryTime", entry.expiryTime());
+        }
+        result.put("NextToken", page.nextToken());
+        return Response.ok(result).build();
     }
 
     private ObjectNode buildFullIdentityResponse(Identity identity, String region) {
@@ -475,9 +543,9 @@ public class SesIdentityController {
         if ("USE_DEFAULT_VALUE".equals(v2)) {
             return "UseDefaultValue";
         }
-        throw new AwsException("BadRequestException",
-                "1 validation error detected: Value at 'behaviorOnMxFailure' failed to satisfy "
-                        + "constraint: Member must satisfy enum value set: [REJECT_MESSAGE, USE_DEFAULT_VALUE]", 400);
+        throw SmithyValidationErrors.badRequest(
+                "Value at 'behaviorOnMxFailure' failed to satisfy "
+                        + "constraint: Member must satisfy enum value set: [REJECT_MESSAGE, USE_DEFAULT_VALUE]");
     }
 
     private ObjectNode buildDkimAttributes(Identity identity, String region) {
@@ -493,15 +561,14 @@ public class SesIdentityController {
                 tokens.add(token);
             }
         }
+        if ("Domain".equals(src.getIdentityType()) && "AWS_SES".equals(src.getDkimSigningAttributesOrigin())
+                && !tokens.isEmpty()) {
+            dkim.put("SigningHostedZone", SesIdentityService.DKIM_SIGNING_HOSTED_ZONE);
+        }
         dkim.put("SigningAttributesOrigin", src.getDkimSigningAttributesOrigin());
         dkim.put("NextSigningKeyLength", src.getDkimNextSigningKeyLength());
         dkim.put("CurrentSigningKeyLength", src.getDkimCurrentSigningKeyLength());
-        if (src.getDkimLastKeyGenerationTimestamp() != null) {
-            // SES v2 (restJson1) serializes this timestamp as epoch seconds (a number); emitting an
-            // ISO string breaks the SDK's unixTimestamp unmarshaller.
-            dkim.put("LastKeyGenerationTimestamp",
-                    src.getDkimLastKeyGenerationTimestamp().toEpochMilli() / 1000.0);
-        }
+        putTimestamp(dkim, "LastKeyGenerationTimestamp", src.getDkimLastKeyGenerationTimestamp());
         return dkim;
     }
 
@@ -522,6 +589,8 @@ public class SesIdentityController {
             default -> v1Status;
         };
     }
+
+
     @GET
     @Path("/deliverability-dashboard/statistics-report/{domain}")
     public Response getDomainStatisticsReport(@Context HttpHeaders headers,

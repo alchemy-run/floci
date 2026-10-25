@@ -111,7 +111,7 @@ class ApiGatewayMockAuthorizerIntegrationTest {
 
         given().get("/execute-api/" + apiId + "/test/claims")
                 .then().statusCode(201).body("hasAuthorizer", equalTo(false));
-        verify(lambdaService, never()).invoke(eq("us-east-1"), eq(FUNCTION), any(byte[].class),
+        verify(lambdaService, never()).invokeTarget(eq("us-east-1"), eq("arn:aws:lambda:us-east-1:000000000000:function:" + FUNCTION), any(byte[].class),
                 eq(InvocationType.RequestResponse));
     }
 
@@ -131,7 +131,7 @@ class ApiGatewayMockAuthorizerIntegrationTest {
                         "Action", "execute-api:Invoke", "Effect", effect, "Resource", "*"))),
                 "context", Map.of("principalId", "custom-principal", "role", "admin",
                         "numberKey", 1, "booleanKey", true)));
-        when(lambdaService.invoke(eq("us-east-1"), eq(FUNCTION), any(byte[].class),
+        when(lambdaService.invokeTarget(eq("us-east-1"), eq("arn:aws:lambda:us-east-1:000000000000:function:" + FUNCTION), any(byte[].class),
                 eq(InvocationType.RequestResponse)))
                 .thenReturn(new InvokeResult(200, null, payload, null, "authorizer-request"));
     }

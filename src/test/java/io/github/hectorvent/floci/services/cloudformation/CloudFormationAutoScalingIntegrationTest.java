@@ -52,6 +52,11 @@ class CloudFormationAutoScalingIntegrationTest {
                         "CapacityRebalance": true,
                         "MaxInstanceLifetime": 86400,
                         "DefaultInstanceWarmup": 300,
+                        "ServiceLinkedRoleARN": "arn:aws:iam::000000000000:role/aws-service-role/autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling_cfn",
+                        "InstanceMaintenancePolicy": {"MinHealthyPercentage": 90, "MaxHealthyPercentage": 120},
+                        "AvailabilityZoneDistribution": {"CapacityDistributionStrategy": "balanced-only"},
+                        "CapacityReservationSpecification": {"CapacityReservationPreference": "none"},
+                        "MetricsCollection": [{"Granularity": "1Minute", "Metrics": ["GroupMinSize", "GroupMaxSize"]}],
                         "Tags": [
                           {"Key": "cluster", "Value": "demo", "PropagateAtLaunch": true},
                           {"Key": "control-plane", "Value": "only", "PropagateAtLaunch": false}
@@ -119,7 +124,17 @@ class CloudFormationAutoScalingIntegrationTest {
             .body(containsString("<DesiredCapacityType>units</DesiredCapacityType>"))
             .body(containsString("<CapacityRebalance>true</CapacityRebalance>"))
             .body(containsString("<MaxInstanceLifetime>86400</MaxInstanceLifetime>"))
-            .body(containsString("<DefaultInstanceWarmup>300</DefaultInstanceWarmup>"));
+            .body(containsString("<DefaultInstanceWarmup>300</DefaultInstanceWarmup>"))
+            .body(containsString("<ServiceLinkedRoleARN>arn:aws:iam::000000000000:role/aws-service-role/"
+                    + "autoscaling.amazonaws.com/AWSServiceRoleForAutoScaling_cfn</ServiceLinkedRoleARN>"))
+            .body(containsString("<InstanceMaintenancePolicy><MinHealthyPercentage>90</MinHealthyPercentage>"
+                    + "<MaxHealthyPercentage>120</MaxHealthyPercentage></InstanceMaintenancePolicy>"))
+            .body(containsString("<AvailabilityZoneDistribution><CapacityDistributionStrategy>balanced-only"
+                    + "</CapacityDistributionStrategy></AvailabilityZoneDistribution>"))
+            .body(containsString("<CapacityReservationSpecification><CapacityReservationPreference>none"
+                    + "</CapacityReservationPreference></CapacityReservationSpecification>"))
+            .body(containsString("<member><Metric>GroupMinSize</Metric><Granularity>1Minute</Granularity></member>"))
+            .body(containsString("<member><Metric>GroupMaxSize</Metric><Granularity>1Minute</Granularity></member>"));
     }
 
     @Test

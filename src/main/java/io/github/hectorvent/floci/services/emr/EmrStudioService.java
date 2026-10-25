@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -187,7 +188,7 @@ public class EmrStudioService {
         String engineId = requireText(studio, "EngineSecurityGroupId");
         try {
             ec2.describeVpcs(region, List.of(vpcId), Map.of());
-            for (Subnet subnet : ec2.describeSubnets(region, ids, Map.of())) {
+            for (Subnet subnet : ec2.requireSubnets(region, ids)) {
                 if (!vpcId.equals(subnet.getVpcId())) {
                     throw invalid("All subnets must belong to the Studio VPC.");
                 }
@@ -240,7 +241,7 @@ public class EmrStudioService {
                 : iam.getPolicy(role.getPermissionsBoundaryArn()).getDefaultDocument();
         CallerContext caller = new CallerContext(documents, null, boundary, null, role.getArn());
         List<String> bucketPolicies = bucketInfo.policy() == null ? List.of() : List.of(bucketInfo.policy());
-        String bucketArn = AwsArnUtils.Arn.of("s3", "", "", bucket).toString();
+        String bucketArn = AwsArnUtils.Arn.global(AwsRegions.partitionFor(regionResolver.getRegion()), "s3", "", bucket).toString();
         String path = uri.getPath() == null ? "" : uri.getPath();
         String objectArn = bucketArn + (path.endsWith("/") ? path : path + "/") + "*";
         IamPolicyEvaluator.ResourceAccountRelationship relationship =
@@ -289,9 +290,9 @@ public class EmrStudioService {
                     ((ObjectNode) entry).put("Resource", role.getArn());
                 }
             }
-            if (policies.evaluateResourcePolicy(List.of(document.toString()), "elasticmapreduce.amazonaws.com",
+            if (policies.evaluateServicePrincipal(List.of(document.toString()), "elasticmapreduce.amazonaws.com",
                     "sts:AssumeRole", role.getArn(), Map.of("aws:SourceAccount", List.of(regionResolver.getAccountId())))
-                    != IamPolicyEvaluator.ResourcePolicyDecision.ALLOW) {
+                    != IamPolicyEvaluator.Decision.ALLOW) {
                 throw invalid("Amazon EMR does not have permissions to assume role.");
             }
         } catch (JsonProcessingException | IllegalArgumentException e) {

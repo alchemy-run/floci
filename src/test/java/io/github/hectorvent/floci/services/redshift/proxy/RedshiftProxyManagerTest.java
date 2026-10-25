@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.services.rds.proxy.RdsSigV4Validator;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import org.junit.jupiter.api.Test;
 
+import java.io.DataOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.net.InetSocketAddress;
@@ -108,7 +109,7 @@ class RedshiftProxyManagerTest {
             // A plaintext startup names neither cluster, so the shared listener refuses it.
             try (Socket client = new Socket("127.0.0.1", clusterPort)) {
                 client.setSoTimeout(5000);
-                java.io.DataOutputStream out = new java.io.DataOutputStream(client.getOutputStream());
+                DataOutputStream out = new DataOutputStream(client.getOutputStream());
                 byte[] params = "user\0admin\0\0".getBytes(java.nio.charset.StandardCharsets.UTF_8);
                 out.writeInt(8 + params.length);
                 out.writeInt(196608);

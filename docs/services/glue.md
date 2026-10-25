@@ -3,7 +3,7 @@
 **Protocol:** JSON 1.1
 **Endpoint:** `http://localhost:4566/`
 
-Floci emulates the AWS Glue Data Catalog, ETL jobs, crawlers, connections, and Glue Schema Registry.
+Floci emulates the AWS Glue Data Catalog (databases, tables, partitions, functions, connections) and Glue Schema Registry, allowing you to manage local data lake metadata and schema-version workflows.
 
 ## Supported Actions
 
@@ -173,6 +173,129 @@ retroactively.
 | GetSecurityConfigurations | Lists stored security configurations. `MaxResults` and `NextToken` are currently ignored, so the complete list is returned. |
 | DeleteSecurityConfiguration | Deletes a named security configuration. |
 
+#### Jobs
+
+| Action | Description |
+|--------|-------------|
+| CreateJob | Creates a new job definition. |
+| GetJob | Retrieves an existing job definition. |
+| GetJobs | Retrieves all current job definitions. |
+| ListJobs | Lists job names, optionally only those carrying every given tag. |
+| BatchGetJobs | Retrieves several job definitions by name and reports the names not found. |
+| UpdateJob | Updates an existing job definition. |
+| DeleteJob | Deletes a specified job definition and its runs. |
+| StartJobRun | Starts a run of a job, with per-run arguments and capacity overrides. |
+| GetJobRun | Retrieves one run of a job. |
+| GetJobRuns | Lists a job's runs, newest first. |
+| BatchStopJobRun | Stops running runs of a job and reports the rest in `Errors`. |
+
+Job runs do not execute the job's script. A run follows Glue's state machine and response shape: it
+takes the job's worker type, worker count, timeout and Glue version unless the request overrides them,
+and `MaxConcurrentRuns` (1 when unset) rejects a start with `ConcurrentRunsExceededException` unless
+`JobRunQueuingEnabled` is set. With the default `job-run-duration-seconds` of 0 a run is `SUCCEEDED` as
+soon as it starts. A positive value keeps each run `RUNNING` for that many seconds, so a test can observe
+`BatchStopJobRun` (the run ends `STOPPED`) and the concurrency limit; a run whose duration exceeds the job
+timeout ends `TIMEOUT` when the timeout is reached. Queued runs are admitted straight away rather than
+waiting in `WAITING`.
+
+`ConnectionInput` is validated against the API reference: `Name` (1 to 255 characters), `ConnectionType`
+(the documented enumeration) and `ConnectionProperties` (the documented key list, at most 100 entries, and
+empty for a `NETWORK` connection) are required; `MatchCriteria` holds at most 10 entries. Credentials given
+under `AuthenticationConfiguration` are accepted and never returned by a read. A connection that uses
+`AuthenticationConfiguration` or the `SparkProperties`, `AthenaProperties` or `PythonProperties` maps reports
+`ConnectionSchemaVersion` 2; the classic JDBC, Kafka and network shape reports 1.
+
+`HidePassword` removes `PASSWORD` and `ENCRYPTED_PASSWORD`, the two members the API reference defines as the
+connection's password. The Kafka credentials (`KAFKA_CLIENT_KEYSTORE_PASSWORD`, `KAFKA_CLIENT_KEY_PASSWORD`,
+`KAFKA_SASL_PLAIN_PASSWORD`, `KAFKA_SASL_SCRAM_PASSWORD` and their `ENCRYPTED_` forms) are returned as stored: the
+reference does not say whether the flag covers them, so Floci does not guess. The `ENCRYPTED_` forms are what the
+catalog's `ConnectionPasswordEncryption` setting produces (see Encryption settings below).
+
+`TestConnection` is asynchronous on AWS and returns nothing; Floci checks the request's shape and accepts it
+without opening a socket to the data store, since no job or crawler runs against a connection yet.
+
+#### Resource policy
+
+| Action | Description |
+|--------|-------------|
+| CreateCrawler | Creates a new crawler with specified targets, role, configuration, and optional schedule. |
+| GetCrawler | Retrieves metadata for a specified crawler. |
+| GetCrawlers | Retrieves metadata for all crawlers defined in the customer account. |
+| ListCrawlers | Lists crawler names, optionally only those carrying every given tag. |
+| BatchGetCrawlers | Retrieves several crawlers by name and reports the names not found. |
+| UpdateCrawler | Updates a crawler; refused with `CrawlerRunningException` while a crawl runs. |
+| DeleteCrawler | Removes a crawler and its crawl history; refused with `CrawlerRunningException` while a crawl runs. |
+| StartCrawler | Starts a crawl. |
+| StopCrawler | Stops the running crawl, which is then recorded as `CANCELLED`. |
+| GetCrawlerMetrics | Reports time left, last and median runtime for the named crawlers, or for all of them. |
+| UpdateCrawlerSchedule | Replaces a crawler's cron schedule. |
+| StartCrawlerSchedule | Sets a crawler's schedule to `SCHEDULED`. |
+| StopCrawlerSchedule | Sets a crawler's schedule to `NOT_SCHEDULED`. |
+
+Crawls do not read the data store or write tables. A crawl follows the crawler's state machine:
+`GetCrawler` reports `RUNNING` with `CrawlElapsedTime` while it runs, then `READY` with a `LastCrawl`
+of `SUCCEEDED` (or `CANCELLED` after `StopCrawler`). With the default `crawler-run-duration-seconds` of
+0 a crawl finishes as soon as it starts; a positive value keeps the crawler `RUNNING` that long.
+`GetCrawlerMetrics` reports zero tables created, updated and deleted. Schedules are stored and their
+state can be switched, but a schedule never starts a crawl on its own.
+
+#### Triggers
+
+| Action | Description |
+|--------|-------------|
+| CreateTrigger | Creates an `ON_DEMAND`, `SCHEDULED` or `CONDITIONAL` trigger whose actions start jobs or crawlers. |
+| GetTrigger | Retrieves a trigger. |
+| GetTriggers | Retrieves triggers; with `DependentJobName`, those that start the job, or all when none do. |
+| ListTriggers | Lists trigger names, with the same `DependentJobName` rule and an optional tag filter. |
+| BatchGetTriggers | Retrieves several triggers by name and reports the names not found. |
+| UpdateTrigger | Applies the members a `TriggerUpdate` sets and returns the trigger. |
+| DeleteTrigger | Deletes a trigger; deleting one that does not exist succeeds. |
+| StartTrigger | Runs an `ON_DEMAND` trigger's actions now, or activates a `SCHEDULED` or `CONDITIONAL` one. |
+| StopTrigger | Deactivates a `SCHEDULED` or `CONDITIONAL` trigger. |
+
+An activated `CONDITIONAL` trigger fires for each job run or crawl its predicate watches that finishes
+in the named state (`ANY` on each matching completion, `AND` on a matching completion once every
+condition's latest outcome matches). Runs finished before the trigger was activated do not count.
+Floci evaluates conditional triggers after each request that starts, stops or reads job runs or crawls,
+so with the default run durations of 0 a whole chain of triggers completes within the request that
+starts it; with a positive duration the trigger fires on the first such request after the watched run
+finishes. One request runs at most 25 firing rounds; a longer chain continues on the next such request.
+As an emulator safeguard (AWS has no such limit), triggers start at most 100 runs on behalf of the run
+that set off a chain, the one no trigger started, so a loop of triggers of any shape stops there.
+A run a trigger starts carries its `TriggerName`. `SCHEDULED` triggers are stored and can
+be activated, but no timer fires them. A trigger can belong to a workflow through `WorkflowName`, and an
+`EVENT` trigger must; `EVENT` triggers are stored, but no EventBridge event starts them.
+
+#### Workflows
+
+| Action | Description |
+|--------|-------------|
+| CreateWorkflow | Creates a workflow, with default run properties and an optional `MaxConcurrentRuns`. |
+| GetWorkflow | Retrieves a workflow with its `LastRun`, and with `IncludeGraph` its graph of trigger, job and crawler nodes. |
+| ListWorkflows | Lists workflow names. |
+| BatchGetWorkflows | Retrieves several workflows by name and reports the names not found. |
+| UpdateWorkflow | Applies the members the request sets. |
+| DeleteWorkflow | Deletes a workflow and its runs; its triggers are kept. Deleting one that does not exist succeeds. |
+| StartWorkflowRun | Starts a run: the workflow's starting triggers fire inside it. |
+| StopWorkflowRun | Stops a running workflow run and what is running in it. |
+| ResumeWorkflowRun | Starts chosen job and crawler nodes of a finished run again in a new run, and what follows them. |
+| GetWorkflowRun | Retrieves a run with its `Statistics`, and with `IncludeGraph` the job runs and crawls of each node. |
+| GetWorkflowRuns | Lists a workflow's runs, newest first. |
+| GetWorkflowRunProperties | Retrieves a run's properties. |
+| PutWorkflowRunProperties | Adds properties to a run, replacing any with the same name. |
+
+`StartWorkflowRun` fires the workflow's starting triggers (every trigger of the workflow that is not
+`CONDITIONAL`) inside a new run, with the default run properties overlaid by the request's. A
+workflow's activated `CONDITIONAL` triggers fire only on job runs and crawls of a running run of that
+workflow, evaluate `AND` within that run, and start their actions inside it; job runs in a workflow run
+get the `--WORKFLOW_NAME` and `--WORKFLOW_RUN_ID` arguments. A run is `COMPLETED` once nothing is
+running in it and nothing more fires. An action that cannot be launched (its job at its concurrency limit,
+its crawler already running) is reported in the run's `ErrorMessage`, and a run none of whose starting
+actions could launch ends `ERROR`. `ResumeWorkflowRun` starts each chosen job with the arguments it had in
+the original run; if a node cannot be launched (its job at its concurrency limit, its crawler running) the
+request fails before anything starts.
+Blueprints are not emulated.
+
 #### Classifiers
 
 | Action | Description |
@@ -235,6 +358,8 @@ Supported schema formats are `AVRO`, `JSON`, and `PROTOBUF`. Compatibility modes
 | Variable | Default | Description |
 |---|---|---|
 | `FLOCI_SERVICES_GLUE_ENABLED` | `true` | Enable or disable the service |
+| `FLOCI_SERVICES_GLUE_JOB_RUN_DURATION_SECONDS` | `0` | Seconds a job run stays `RUNNING` before it succeeds; `0` finishes it as soon as it starts |
+| `FLOCI_SERVICES_GLUE_CRAWLER_RUN_DURATION_SECONDS` | `0` | Seconds a crawl keeps the crawler `RUNNING` before it succeeds; `0` finishes it as soon as it starts |
 
 ## Integration with Athena
 

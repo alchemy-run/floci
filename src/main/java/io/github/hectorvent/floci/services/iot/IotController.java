@@ -179,6 +179,23 @@ public class IotController {
         }
     }
 
+    @POST
+    @Path("/certificate/register-no-ca")
+    public Response registerCertificateWithoutCa(@Context HttpHeaders headers, String body) {
+        try {
+            JsonNode request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            IotCertificate certificate = iotService.registerCertificateWithoutCa(
+                    request.path("certificatePem").asText(null), request.path("status").asText(null),
+                    regionResolver.resolveRegion(headers));
+            ObjectNode response = objectMapper.createObjectNode();
+            response.put("certificateArn", certificate.getCertificateArn());
+            response.put("certificateId", certificate.getCertificateId());
+            return Response.ok(response).build();
+        } catch (JsonProcessingException e) {
+            throw new AwsException("InvalidRequestException", e.getMessage(), 400);
+        }
+    }
+
     @GET
     @Path("/certificates/{certificateId}")
     public Response describeCertificate(@Context HttpHeaders headers,
@@ -199,6 +216,7 @@ public class IotController {
             item.put("certificateArn", certificate.getCertificateArn());
             item.put("certificateId", certificate.getCertificateId());
             item.put("status", certificate.getStatus());
+            item.put("certificateMode", certificateMode(certificate));
             putEpoch(item, "creationDate", certificate.getCreationDate());
         }
         return Response.ok(response).build();
@@ -449,6 +467,30 @@ public class IotController {
         return Response.ok(response).build();
     }
 
+    @GET
+    @Path("/things/{thingName}/principals-v2")
+    public Response listThingPrincipalsV2(@Context HttpHeaders headers,
+                                          @PathParam("thingName") String thingName,
+                                          @QueryParam("thingPrincipalType") String thingPrincipalType,
+                                          @QueryParam("maxResults") Integer maxResults,
+                                          @QueryParam("nextToken") String nextToken) {
+        return Response.ok(buildThingPrincipalPage(iotService.listThingPrincipalsV2(
+                thingName, thingPrincipalType, regionResolver.resolveRegion(headers), maxResults, nextToken),
+                "thingPrincipalObjects", "principal")).build();
+    }
+
+    @GET
+    @Path("/principals/things-v2")
+    public Response listPrincipalThingsV2(@Context HttpHeaders headers,
+                                          @HeaderParam("x-amzn-principal") String principal,
+                                          @QueryParam("thingPrincipalType") String thingPrincipalType,
+                                          @QueryParam("maxResults") Integer maxResults,
+                                          @QueryParam("nextToken") String nextToken) {
+        return Response.ok(buildThingPrincipalPage(iotService.listPrincipalThingsV2(
+                principal, thingPrincipalType, regionResolver.resolveRegion(headers), maxResults, nextToken),
+                "principalThingObjects", "thingName")).build();
+    }
+
     @POST
     @Path("/thing-types/{thingTypeName}")
     public Response createThingType(@Context HttpHeaders headers,
@@ -493,10 +535,8 @@ public class IotController {
     @Path("/thing-types/{thingTypeName}/deprecate")
     @Consumes(MediaType.WILDCARD)
     public Response deprecateThingType(@Context HttpHeaders headers,
-                                       @PathParam("thingTypeName") String thingTypeName,
-                                       String body) {
-        boolean undoDeprecate = parseProperties(body, "undoDeprecate").asBoolean(false);
-        iotService.deprecateThingType(thingTypeName, undoDeprecate, regionResolver.resolveRegion(headers));
+                                       @PathParam("thingTypeName") String thingTypeName) {
+        iotService.deprecateThingType(thingTypeName, regionResolver.resolveRegion(headers));
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -941,13 +981,32 @@ public class IotController {
         return response;
     }
 
+    private ObjectNode buildThingPrincipalPage(IotService.Page<String> page, String arrayName, String itemField) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode objects = response.putArray(arrayName);
+        for (String item : page.items()) {
+            objects.addObject()
+                    .put(itemField, item)
+                    .put("thingPrincipalType", IotService.NON_EXCLUSIVE_THING);
+        }
+        if (page.nextToken() != null) {
+            response.put("nextToken", page.nextToken());
+        }
+        return response;
+    }
+
+    /** Records stored before the mode was kept are {@code DEFAULT}, as every certificate then was. */
+    private static String certificateMode(IotCertificate certificate) {
+        return certificate.getCertificateMode() != null ? certificate.getCertificateMode() : "DEFAULT";
+    }
+
     private ObjectNode buildCertificateDescription(IotCertificate certificate) {
         ObjectNode description = objectMapper.createObjectNode();
         description.put("certificateArn", certificate.getCertificateArn());
         description.put("certificateId", certificate.getCertificateId());
         description.put("certificatePem", certificate.getCertificatePem());
         description.put("status", certificate.getStatus());
-        description.put("certificateMode", "DEFAULT");
+        description.put("certificateMode", certificateMode(certificate));
         putEpoch(description, "creationDate", certificate.getCreationDate());
         if (certificate.getNotBefore() != null && certificate.getNotAfter() != null) {
             ObjectNode validity = description.putObject("validity");
@@ -1176,4 +1235,5 @@ public class IotController {
 
     private record GroupMembershipRequest(String thingGroupName, String thingName) {
     }
+
 }

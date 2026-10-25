@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.ec2.model;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -14,8 +15,9 @@ public class KeyPair {
     private String keyPairId;
     private String keyFingerprint;
     private String keyMaterial;
-    private String keyType = "rsa";
     private String publicKey;
+    private String keyType;
+    private Instant createTime;
     private String region;
     private List<Tag> tags = new ArrayList<>();
 
@@ -33,11 +35,16 @@ public class KeyPair {
     public String getKeyMaterial() { return keyMaterial; }
     public void setKeyMaterial(String keyMaterial) { this.keyMaterial = keyMaterial; }
 
+    public String getPublicKey() { return publicKey; }
+    public void setPublicKey(String publicKey) { this.publicKey = publicKey; }
+
+    /** {@code rsa} or {@code ed25519}; null for a key pair stored before the type was recorded. */
     public String getKeyType() { return keyType; }
     public void setKeyType(String keyType) { this.keyType = keyType; }
 
-    public String getPublicKey() { return publicKey; }
-    public void setPublicKey(String publicKey) { this.publicKey = publicKey; }
+    /** When the key pair was created or imported; null for one stored before this was recorded. */
+    public Instant getCreateTime() { return createTime; }
+    public void setCreateTime(Instant createTime) { this.createTime = createTime; }
 
     public String getRegion() { return region; }
     public void setRegion(String region) { this.region = region; }

@@ -17,6 +17,7 @@ import io.github.hectorvent.floci.services.inspector2.model.CisTargets;
 import io.github.hectorvent.floci.services.inspector2.model.InspectorFilter;
 import io.github.hectorvent.floci.services.inspector2.model.InspectorState;
 import io.github.hectorvent.floci.services.organizations.OrganizationsService;
+import io.github.hectorvent.floci.services.organizations.model.OrganizationAccount;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -744,7 +745,7 @@ public class Inspector2Service implements Resettable {
         String managementAccountId = managementAccountFor(callerAccountId).orElse(null);
         if (managementAccountId != null && callerAccountId.equals(
                 stateForAccount(managementAccountId, region).getAdminAccountId())) {
-            for (var account : organizationsService.listAccounts(managementAccountId)) {
+            for (OrganizationAccount account : organizationsService.listAccounts(managementAccountId)) {
                 if (callerAccountId.equals(account.getId())) {
                     continue;
                 }

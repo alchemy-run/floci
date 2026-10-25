@@ -160,11 +160,13 @@ public class BedrockService {
         String blockedOutputsMessaging = requiredBlockedMessaging(request, "blockedOutputsMessaging");
 
         Guardrail guardrail = getGuardrail(identifier, DRAFT_VERSION, region);
+        // getGuardrail returns the stored draft, so the key must resolve before any setter runs.
+        String kmsKeyArn = resolveKmsKeyArn(textOrNull(request, "kmsKeyId"), region);
         guardrail.setName(name);
         guardrail.setDescription(description);
         guardrail.setBlockedInputMessaging(blockedInputMessaging);
         guardrail.setBlockedOutputsMessaging(blockedOutputsMessaging);
-        guardrail.setKmsKeyArn(resolveKmsKeyArn(textOrNull(request, "kmsKeyId"), region));
+        guardrail.setKmsKeyArn(kmsKeyArn);
         guardrail.setUpdatedAt(Instant.now());
         applyPolicies(guardrail, request, region);
 
@@ -383,6 +385,7 @@ public class BedrockService {
         }
         String guardrailId = resolveGuardrailId(resourceArn);
         return guardrails.get(storageKey(region, guardrailId, DRAFT_VERSION))
+                .filter(guardrail -> !resourceArn.startsWith("arn:") || resourceArn.equals(guardrail.getGuardrailArn()))
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Resource " + resourceArn + " does not exist.", 404));
     }

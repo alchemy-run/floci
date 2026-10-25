@@ -8,6 +8,7 @@ import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.UriInfo;
 import org.junit.jupiter.api.Test;
 
+import java.net.URI;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -61,20 +62,12 @@ class CredentialScopeAliasTest {
     }
 
     @Test
-    void sesAliasesNormaliseToSes() {
-        // SES v1 signs as "email", SES v2 as "sesv2"; IAM actions live under ses:.
-        assertEquals("ses", catalog.canonicalCredentialScope("email"));
-        assertEquals("ses", catalog.canonicalCredentialScope("sesv2"));
-        assertEquals("ses", catalog.canonicalCredentialScope("ses"));
-    }
-
-    @Test
     void scopeWhoseExternalKeyIsNotItsIamNamespaceIsLeftAlone() {
-        // These are the traps: the catalog routes Bedrock Runtime under "bedrock-runtime"
-        // and CloudWatch Logs under "logs". Deriving the canonical scope from the external
-        // key would rewrite valid scopes onto prefixes AWS never issues, so every action
-        // would resolve to null and enforcement would be skipped. SES aliases are explicit
-        // (see sesAliasesNormaliseToSes); they must not be derived for every mismatch.
+        // These are the traps: the catalog routes SES under "email" and Bedrock Runtime under
+        // "bedrock-runtime", but their IAM namespaces are "ses:" and "bedrock:". Deriving the
+        // canonical scope from the external key would rewrite valid scopes onto prefixes AWS
+        // never issues, so every action would resolve to null and enforcement would be skipped.
+        assertEquals("ses", catalog.canonicalCredentialScope("ses"));
         assertEquals("bedrock", catalog.canonicalCredentialScope("bedrock"));
         assertEquals("logs", catalog.canonicalCredentialScope("logs"));
     }
@@ -89,12 +82,9 @@ class CredentialScopeAliasTest {
                 .filter(scope -> !scope.equals(catalog.canonicalCredentialScope(scope)))
                 .collect(Collectors.toMap(scope -> scope, catalog::canonicalCredentialScope));
 
-        assertEquals(Map.of(
-                "s3express", "s3",
-                "iot-jobs-data", "iot",
-                "email", "ses",
-                "sesv2", "ses",
-                "awsssoportal", "sso"), rewritten);
+        // The fork adds email for SES v2, signed as "email" by the SDK.
+        assertEquals(Map.of("s3express", "s3", "iot-jobs-data", "iot", "awsssoportal", "sso", "monitoring", "cloudwatch",
+                "email", "ses"), rewritten);
     }
 
     @Test
@@ -115,6 +105,8 @@ class CredentialScopeAliasTest {
     private static ContainerRequestContext getObjectRequest() {
         UriInfo uriInfo = mock(UriInfo.class);
         when(uriInfo.getPath()).thenReturn("/my-bucket/my-key");
+        when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:4566/my-bucket/my-key"));
+        when(uriInfo.getBaseUri()).thenReturn(URI.create("http://localhost:4566/"));
         when(uriInfo.getQueryParameters()).thenReturn(new MultivaluedHashMap<>());
 
         ContainerRequestContext ctx = mock(ContainerRequestContext.class);

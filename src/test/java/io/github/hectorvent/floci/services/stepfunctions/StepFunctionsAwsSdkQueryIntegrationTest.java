@@ -2,12 +2,16 @@ package io.github.hectorvent.floci.services.stepfunctions;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.testing.PartitionMatrix;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -39,6 +43,32 @@ class StepFunctionsAwsSdkQueryIntegrationTest {
         assertTrue(result.path("Regions").isArray(), "Regions should be an array");
         assertFalse(result.path("Regions").isEmpty(), "Regions should be non-empty");
         assertFalse(result.path("Regions").get(0).path("RegionName").asText().isBlank());
+    }
+
+    @Test
+    void ec2DescribeRegions_listsTheRegionsOfTheExecutionsPartition() throws Exception {
+        String auth = PartitionMatrix.sigV4Auth("cn-north-1", "states");
+        String definition = """
+                {"StartAt":"Action","States":{"Action":{"Type":"Task",
+                 "Resource":"arn:aws-cn:states:::aws-sdk:ec2:describeRegions","Parameters":{},"End":true}}}
+                """;
+        String smArn = createStateMachine(auth, "ec2-regions-cn-" + System.currentTimeMillis(), definition,
+                "arn:aws-cn:iam::000000000000:role/test-role");
+        try {
+            JsonNode regions = mapper.readTree(waitForExecution(auth, startExecution(auth, smArn))).path("Regions");
+            List<String> names = regions.findValuesAsText("RegionName");
+            assertEquals(List.of("cn-north-1", "cn-northwest-1"), names.stream().sorted().toList());
+            assertEquals("ec2.cn-north-1.amazonaws.com.cn",
+                    regions.get(names.indexOf("cn-north-1")).path("Endpoint").asText());
+        } finally {
+            signed(auth)
+                    .header("X-Amz-Target", "AWSStepFunctions.DeleteStateMachine")
+                    .contentType(SFN_CONTENT_TYPE)
+                    .body("""
+                            {"stateMachineArn": "%s"}
+                            """.formatted(smArn))
+                    .when().post("/");
+        }
     }
 
     @Test
@@ -74,25 +104,30 @@ class StepFunctionsAwsSdkQueryIntegrationTest {
         String definition = """
                 {"StartAt":"Action","States":{"Action":{"Type":"Task","Resource":"%s","Parameters":%s,"End":true}}}
                 """.formatted(resource, parameters.strip());
-        String smArn = createStateMachine(nameSuffix + "-" + System.currentTimeMillis(), definition);
-        String execArn = startExecution(smArn);
-        return waitForExecution(execArn);
+        String smArn = createStateMachine(null, nameSuffix + "-" + System.currentTimeMillis(), definition, ROLE_ARN);
+        String execArn = startExecution(null, smArn);
+        return waitForExecution(null, execArn);
     }
 
-    private String createStateMachine(String name, String definition) {
-        Response resp = given()
+    /** A request signed with {@code auth}, or unsigned (the default region) when it is null. */
+    private static RequestSpecification signed(String auth) {
+        return auth == null ? given() : given().header("Authorization", auth);
+    }
+
+    private String createStateMachine(String auth, String name, String definition, String roleArn) {
+        Response resp = signed(auth)
                 .header("X-Amz-Target", "AWSStepFunctions.CreateStateMachine")
                 .contentType(SFN_CONTENT_TYPE)
                 .body("""
                         {"name": "%s", "definition": %s, "roleArn": "%s"}
-                        """.formatted(name, quote(definition), ROLE_ARN))
+                        """.formatted(name, quote(definition), roleArn))
                 .when().post("/");
         resp.then().statusCode(200);
         return resp.jsonPath().getString("stateMachineArn");
     }
 
-    private String startExecution(String smArn) {
-        Response resp = given()
+    private String startExecution(String auth, String smArn) {
+        Response resp = signed(auth)
                 .header("X-Amz-Target", "AWSStepFunctions.StartExecution")
                 .contentType(SFN_CONTENT_TYPE)
                 .body("""
@@ -103,9 +138,9 @@ class StepFunctionsAwsSdkQueryIntegrationTest {
         return resp.jsonPath().getString("executionArn");
     }
 
-    private String waitForExecution(String execArn) throws InterruptedException {
+    private String waitForExecution(String auth, String execArn) throws InterruptedException {
         for (int i = 0; i < 50; i++) {
-            Response resp = given()
+            Response resp = signed(auth)
                     .header("X-Amz-Target", "AWSStepFunctions.DescribeExecution")
                     .contentType(SFN_CONTENT_TYPE)
                     .body("""

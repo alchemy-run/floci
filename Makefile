@@ -5,10 +5,140 @@
 #
 # Service-matrix docs: docs/services/index.md's Service Matrix table is checked
 # against ResolvedServiceCatalog.java so a registered service can't ship undocumented.
+#
+# Partition literals: hardcoded arn:aws: prefixes, amazonaws.com hosts and hosted-zone
+# ids in src/main are inventoried against tools/partition/baseline.tsv so the
+# commercial-partition assumption can only shrink. See tools/partition/.
+#
+# AWS partition data: src/main/resources/aws/partitions.json is generated from botocore's
+# published partition metadata (plus two CDK region rules) by tools/aws/regen_partitions.py.
+# src/main/resources/aws/dynamodb-request-shapes.json is generated from botocore's DynamoDB
+# model by tools/aws/regen_dynamodb_shapes.py.
+# src/main/resources/aws/redshift-serverless-request-shapes.json is generated from botocore's Redshift
+# Serverless model by tools/aws/regen_redshift_serverless_shapes.py.
+# API Gateway integration types come from the public service model via tools/aws/regen_apigateway_types.py.
+# src/main/resources/aws/sesv2-request-shapes.json is generated from botocore's SES v2 model
+# by tools/aws/regen_sesv2_shapes.py.
+# src/main/resources/aws/ecs-request-shapes.json is generated from botocore's ECS model
+# by tools/aws/regen_ecs_shapes.py.
+# src/main/resources/aws/ecr-request-shapes.json, the ECR request constraints, is generated
+# from botocore's ECR model by tools/aws/regen_ecr_shapes.py.
+# src/main/resources/aws/emr-serverless-shapes.json, the shapes the Step Functions emr-serverless
+# integrations recase against, is generated from botocore's EMR Serverless model by
+# tools/aws/regen_emr_serverless_shapes.py.
+# src/test/resources/aws/rest-routes.json, the REST routes IamRestRouteCoverageTest checks, is
+# generated from botocore's models by tools/aws/regen_rest_routes.py.
 
 PYTHON ?= python3
 
-.PHONY: docs-sync docs-check docs-test
+# Native builds. The binary is built inside the Quarkus builder container (works on macOS,
+# yields a Linux binary for the host arch) with the flags CI's compatibility workflow uses:
+# -Ob is the quick profile, and -H:-AOTSingleCallsiteInline is required on Mandrel 25.0.4+,
+# where Quarkus 3.39 turns single-callsite inlining on and the generated REST invokers for
+# AwsQueryController.dispatch and AwsJson11Controller.handle then outgrow the aarch64 branch
+# range (BranchTargetOutOfBoundsException). The flag exists only on Mandrel, so it lives here
+# and in the workflows rather than in application.yml.
+ARCH := $(shell uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+NATIVE_BUILDER ?= quay.io/quarkus/ubi9-quarkus-mandrel-builder-image:jdk-25
+NATIVE_ARGS ?= -Ob,-H:-AOTSingleCallsiteInline
+NATIVE_IMAGE ?= floci:local-native
+COMPOSE_NATIVE := docker compose -f docker-compose.yml -f docker/compose.native.yml
+SUITES ?= sdk-test-java
+
+# Host builds (make native-host): the installed GraalVM or Mandrel, found the way Quarkus finds
+# it, GRAALVM_HOME first, then JAVA_HOME, then the PATH. The inlining flag above is unknown to
+# GraalVM, so it is added only when that native-image is Mandrel.
+comma := ,
+NATIVE_IMAGE_BIN = $(or $(wildcard $(GRAALVM_HOME)/bin/native-image),$(wildcard $(JAVA_HOME)/bin/native-image),$(shell command -v native-image 2>/dev/null))
+NATIVE_HOST_ARGS ?= -Ob
+NATIVE_HOST_FLAGS = $(NATIVE_HOST_ARGS)$(if $(findstring andrel,$(shell "$(NATIVE_IMAGE_BIN)" --version 2>/dev/null)),$(comma)-H:-AOTSingleCallsiteInline)
+NATIVE_BIN = $(firstword $(wildcard target/*-runner))
+PREFIX ?= $(HOME)/.local
+
+.DEFAULT_GOAL := help
+.PHONY: help dev build test native native-host run-native native-install native-image native-up native-down native-logs clean-sidecars clean-volumes compat docker-tests \
+        docs-sync docs-check docs-test partition-check partition-baseline partition-audit partition-test \
+        slr-check slr-table slr-audit slr-test \
+        aws-data-sync aws-data-check aws-data-test \
+        iam-namespaces-sync iam-namespaces-check iam-namespaces-verify iam-namespaces-test \
+        iam-action-resources-sync iam-action-resources-check iam-action-resources-verify \
+        iam-action-resources-test iam-authorized-actions-sync iam-authorized-actions-check \
+        cfn-property-types-sync cfn-property-types-check cfn-property-types-verify cfn-property-types-test \
+        iam-authorized-actions-verify iam-authorized-actions-test iam-data-verify
+
+help: ## List the targets below
+	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-14s %s\n", $$1, $$2}'
+
+dev: ## Run Floci in Quarkus dev mode (hot reload on port 4566)
+	./mvnw quarkus:dev
+
+build: ## Build the JVM package without running tests
+	./mvnw clean package -DskipTests
+
+test: ## Run the test suite; T=Class or T=Class#method narrows it (make test T=SsmIntegrationTest)
+	./mvnw test $(if $(T),-Dtest='$(T)' -Dsurefire.failIfNoSpecifiedTests=false,)
+
+native: ## Build the native binary with CI's flags and stage it in native/$(ARCH)/ (about 4 min)
+	./mvnw clean package -Dnative -DskipTests -B \
+		-Dquarkus.native.container-build=true \
+		-Dquarkus.native.builder-image=$(NATIVE_BUILDER) \
+		-Dquarkus.native.additional-build-args-append="$(NATIVE_ARGS)"
+	mkdir -p native/$(ARCH)
+	cp target/*-runner native/$(ARCH)/application
+# The builder image has no zlib-static, so a container-built binary links zlib dynamically and
+# ubi9-micro ships no libz.so.1; stage it next to the binary, where the runtime image's
+# LD_LIBRARY_PATH finds it. CI builds with a host Mandrel that links zlib statically.
+	docker run --rm --entrypoint cat $(NATIVE_BUILDER) /usr/lib64/libz.so.1 > native/$(ARCH)/libz.so.1
+
+native-host: ## Build a native binary for this machine with the installed GraalVM or Mandrel, no Docker: target/floci-<version>-runner
+	@test -n "$(NATIVE_IMAGE_BIN)" || { echo "native-image not found: install GraalVM or Mandrel (for example 'sdk install java 25.0.3-graal') or set GRAALVM_HOME"; exit 1; }
+	@echo "native-image: $(NATIVE_IMAGE_BIN) (flags $(NATIVE_HOST_FLAGS))"
+	./mvnw clean package -Dnative -DskipTests -B \
+		-Dquarkus.native.additional-build-args-append="$(NATIVE_HOST_FLAGS)"
+	@echo "built $(NATIVE_BIN) for $$(uname -sm)"
+
+run-native: ## Run the host binary from native-host on port 4566, state under ./data
+	@test -n "$(NATIVE_BIN)" || { echo "no target/*-runner: run 'make native-host' first"; exit 1; }
+	@file "$(NATIVE_BIN)" | grep -q ELF && [ "$$(uname -s)" != Linux ] && { echo "$(NATIVE_BIN) is a Linux binary from 'make native'; run 'make native-host' for this machine"; exit 1; } || true
+	$(NATIVE_BIN)
+
+native-install: ## Copy the host binary to $(PREFIX)/bin/floci-aws (PREFIX defaults to ~/.local); `floci` is the CLI
+	@test -n "$(NATIVE_BIN)" || { echo "no target/*-runner: run 'make native-host' first"; exit 1; }
+	mkdir -p $(PREFIX)/bin
+	cp "$(NATIVE_BIN)" $(PREFIX)/bin/floci-aws
+	@echo "installed $(PREFIX)/bin/floci-aws"
+
+native-image: ## Package native/$(ARCH)/ as $(NATIVE_IMAGE) with docker/Dockerfile.native-package
+	@test -f native/$(ARCH)/application || { echo "native/$(ARCH)/application is missing: run 'make native' first"; exit 1; }
+	docker build -f docker/Dockerfile.native-package --build-arg VERSION=local -t $(NATIVE_IMAGE) .
+
+native-up: ## Start $(NATIVE_IMAGE) with docker compose (docker/compose.native.yml overlay) and wait for health
+	$(COMPOSE_NATIVE) up -d --no-build
+	@for i in $$(seq 1 60); do \
+		curl -fsS -o /dev/null http://localhost:4566/_floci/health 2>/dev/null && { echo "Floci is healthy on http://localhost:4566"; exit 0; }; \
+		sleep 2; \
+	done; echo "Floci did not become healthy in time"; $(COMPOSE_NATIVE) logs --tail=40 floci; exit 1
+
+native-down: ## Stop the compose stack started by native-up, then the sidecar containers Floci left behind
+	$(COMPOSE_NATIVE) down
+	$(MAKE) clean-sidecars
+
+clean-sidecars: ## Remove the containers Floci started (label floci=true) that outlived it: ECR registry, EC2 instances, RDS, sidecars
+	@ids=$$(docker ps -aq --filter label=floci=true --filter label=floci_emulator=floci-aws); \
+	if [ -n "$$ids" ]; then docker rm -f $$ids; else echo "no Floci-managed containers left"; fi
+
+clean-volumes: ## Remove the named volumes Floci created (label floci=true): ECR registry, RDS, OpenSearch and MSK data. Gives the next start a fresh state
+	@vols=$$(docker volume ls -q --filter label=floci=true --filter label=floci_emulator=floci-aws); \
+	if [ -n "$$vols" ]; then docker volume rm $$vols; else echo "no Floci-managed volumes left"; fi
+
+native-logs: ## Tail the running Floci container's log
+	$(COMPOSE_NATIVE) logs -f --tail=100 floci
+
+compat: ## Run compatibility suites against the running Floci: SUITES="sdk-test-java compat-cdk". The suites assume a fresh state: make clean-sidecars clean-volumes before native-up
+	FLOCI_START=0 COMPAT_SUITES="$(SUITES)" docker/run-docker-tests.sh
+
+docker-tests: ## Start the JVM image with compose and run every compatibility suite in Docker
+	docker/run-docker-tests.sh
 
 docs-sync: ## Regenerate the action tables in docs/services from handler source (in place)
 	$(PYTHON) tools/docs/regen_action_docs.py
@@ -41,3 +171,268 @@ docs-check: ## CI gate: regenerate and fail if anything is stale, unregistered, 
 
 docs-test: ## Run the docs tooling's unit tests
 	$(PYTHON) -m pytest tools/docs -q
+
+partition-check: ## CI gate: partition literals in src/main must match tools/partition/baseline.tsv
+	@$(PYTHON) tools/partition/partition_literals.py --check || { \
+		echo ""; \
+		echo "error: partition literals drifted from tools/partition/baseline.tsv (see above)."; \
+		echo "       Fix the new literal, or run 'make partition-baseline' after removing some."; \
+		exit 1; \
+	}
+
+partition-baseline: ## Regenerate tools/partition/baseline.tsv from the current tree (commit the result)
+	$(PYTHON) tools/partition/partition_literals.py --write-baseline
+
+partition-audit: ## Print the per-package table of remaining partition literals
+	@$(PYTHON) tools/partition/partition_literals.py --audit
+
+partition-test: ## Run the partition tooling's unit tests
+	$(PYTHON) -m pytest tools/partition -q
+
+slr-check: ## CI gate: the service-linked role table must match the vendored AWS data
+	@$(PYTHON) tools/slr/service_linked_roles.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/iam/service-linked-roles.tsv drifted (see above)."; \
+		echo "       Run 'make slr-table SNAPSHOT=<localstack iam snapshot>' and commit the result."; \
+		exit 1; \
+	}
+
+slr-table: ## Regenerate the service-linked role table from an AWS-validated snapshot
+	@test -n "$(SNAPSHOT)" || { \
+		echo "error: set SNAPSHOT to a LocalStack tests/aws/services/iam/test_iam.snapshot.json"; \
+		echo "       the suffix column can only come from a recorded create"; \
+		exit 1; \
+	}
+	$(PYTHON) tools/slr/service_linked_roles.py --refresh "$(SNAPSHOT)"
+
+slr-audit: ## Print the service-linked role table, marking names that are not derivable
+	@$(PYTHON) tools/slr/service_linked_roles.py --audit
+
+slr-test: ## Run the service-linked role tooling's unit tests
+	$(PYTHON) -m pytest tools/slr -q
+
+aws-data-sync: ## Regenerate src/main/resources/aws/*.json and the IAM managed-policy catalog from local/aws (commit the result)
+	$(PYTHON) tools/aws/regen_partitions.py
+	$(PYTHON) tools/aws/regen_region_facts.py
+	$(PYTHON) tools/aws/regen_dynamodb_shapes.py
+	$(PYTHON) tools/aws/regen_redshift_serverless_shapes.py
+	$(PYTHON) tools/aws/regen_resource_groups_shapes.py
+	$(PYTHON) tools/aws/regen_ecr_shapes.py
+	$(PYTHON) tools/aws/regen_apigateway_types.py
+	$(PYTHON) tools/aws/regen_sesv2_shapes.py
+	$(PYTHON) tools/aws/regen_ecs_shapes.py
+	$(PYTHON) tools/aws/regen_emr_serverless_shapes.py
+	$(PYTHON) tools/aws/regen_query_services.py
+	$(PYTHON) tools/aws/regen_rest_routes.py
+	$(PYTHON) tools/aws/regen_managed_policies.py
+
+aws-data-check: ## CI gate: the vendored AWS data must match a fresh generation
+	@$(PYTHON) tools/aws/regen_partitions.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/partitions.json is out of date."; \
+		echo "       Run 'make aws-data-sync' and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_region_facts.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/region-facts.json is out of date or malformed."; \
+		echo "       Run 'make aws-data-sync' with local/aws checked out and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_dynamodb_shapes.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/dynamodb-request-shapes.json is out of date."; \
+		echo "       Run 'make aws-data-sync' and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_redshift_serverless_shapes.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/redshift-serverless-request-shapes.json is out of date."; \
+		echo "       Run 'make aws-data-sync' and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_resource_groups_shapes.py --check || { \
+		echo "error: Resource Groups request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_ecr_shapes.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/ecr-request-shapes.json is out of date."; \
+		echo "       Run 'make aws-data-sync' and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_apigateway_types.py --check || { \
+		echo "error: API Gateway integration types are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_sesv2_shapes.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/sesv2-request-shapes.json is out of date."; \
+		echo "       Run 'make aws-data-sync' and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_ecs_shapes.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/ecs-request-shapes.json is out of date."; \
+		echo "       Run 'make aws-data-sync' and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_emr_serverless_shapes.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/emr-serverless-shapes.json is out of date."; \
+		echo "       Run 'make aws-data-sync' and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_query_services.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/query-services.json is out of date."; \
+		echo "       Run 'make aws-data-sync' and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_rest_routes.py --check || { \
+		echo ""; \
+		echo "error: src/test/resources/aws/rest-routes.json is out of date."; \
+		echo "       Run 'make aws-data-sync' and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_managed_policies.py --check || { \
+		echo ""; \
+		echo "error: the IAM managed-policy catalog (src/main/resources/iam/managed-polic*) is out of date or malformed."; \
+		echo "       Run 'make aws-data-sync' with local/aws checked out and commit the result."; \
+		exit 1; \
+	}
+
+aws-data-test: ## Run the AWS data generators' unit tests
+	$(PYTHON) -m pytest tools/aws -q
+
+iam-namespaces-sync: ## Regenerate src/main/resources/aws/iam-service-namespaces.json from AWS (commit the result)
+	$(PYTHON) tools/aws/regen_service_namespaces.py
+
+iam-namespaces-check: ## CI gate (offline): the vendored IAM namespace list must be well-formed
+	@$(PYTHON) tools/aws/regen_service_namespaces.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/iam-service-namespaces.json is malformed."; \
+		echo "       Run 'make iam-namespaces-sync' and commit the result."; \
+		exit 1; \
+	}
+
+iam-namespaces-verify: ## CI gate (online): every vendored IAM namespace must still exist upstream
+	@$(PYTHON) tools/aws/regen_service_namespaces.py --verify; status=$$?; \
+	if [ $$status -eq 2 ]; then \
+		echo ""; \
+		echo "error: could not reach AWS's service reference index, so nothing was verified."; \
+		exit 1; \
+	elif [ $$status -ne 0 ]; then \
+		echo ""; \
+		echo "error: the vendored IAM namespace list names a service AWS does not publish."; \
+		echo "       Run 'make iam-namespaces-sync' and commit the result."; \
+		exit 1; \
+	fi
+
+iam-namespaces-test: ## Run the IAM namespace generator's unit tests
+	$(PYTHON) -m pytest tools/aws/test_regen_service_namespaces.py -q
+
+iam-action-resources-sync: ## Regenerate src/main/resources/aws/iam-action-resources.json from AWS (commit the result)
+	$(PYTHON) tools/aws/regen_iam_action_resources.py
+
+iam-action-resources-check: ## CI gate (offline): the vendored IAM action resource map must be well-formed
+	@$(PYTHON) tools/aws/regen_iam_action_resources.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/iam-action-resources.json is malformed."; \
+		echo "       Run 'make iam-action-resources-sync' and commit the result."; \
+		exit 1; \
+	}
+
+iam-action-resources-verify: ## CI gate (online): every vendored IAM action resource must match AWS
+	@$(PYTHON) tools/aws/regen_iam_action_resources.py --verify; status=$$?; \
+	if [ $$status -eq 2 ]; then \
+		echo ""; \
+		echo "error: could not reach AWS's IAM service reference, so nothing was verified."; \
+		exit 1; \
+	elif [ $$status -ne 0 ]; then \
+		echo ""; \
+		echo "error: the vendored IAM action resource map claims a resource AWS does not use,"; \
+		echo "       so enforcement would authorize against the wrong thing."; \
+		echo "       Run 'make iam-action-resources-sync' and commit the result."; \
+		exit 1; \
+	fi
+
+iam-data-verify: ## CI gate (online): every vendored IAM file must still match AWS
+	@# Both halves run even when the first fails, so one file's drift cannot hide the other's
+	@# state. Sequential steps in CI stop at the first failure, which once left the action
+	@# resource gate unexercised while the namespace list was stale.
+	@namespaces=0; actions=0; authorized=0; \
+	$(MAKE) --no-print-directory iam-namespaces-verify || namespaces=$$?; \
+	$(MAKE) --no-print-directory iam-action-resources-verify || actions=$$?; \
+	$(MAKE) --no-print-directory iam-authorized-actions-verify || authorized=$$?; \
+	if [ $$namespaces -ne 0 ] || [ $$actions -ne 0 ] || [ $$authorized -ne 0 ]; then \
+		echo ""; \
+		echo "error: vendored IAM data does not match upstream:"; \
+		if [ $$namespaces -ne 0 ]; then \
+			echo "       the service namespace list, see its message above"; \
+		fi; \
+		if [ $$actions -ne 0 ]; then \
+			echo "       the action resource map, see its message above"; \
+		fi; \
+		if [ $$authorized -ne 0 ]; then \
+			echo "       the map of operations to their IAM actions, see its message above"; \
+		fi; \
+		exit 1; \
+	fi
+
+iam-action-resources-test: ## Run the IAM action resource generator's unit tests
+	$(PYTHON) -m pytest tools/aws/test_regen_iam_action_resources.py -q
+
+iam-authorized-actions-sync: ## Regenerate src/main/resources/aws/iam-authorized-actions.json from AWS (commit the result)
+	$(PYTHON) tools/aws/regen_iam_authorized_actions.py
+
+iam-authorized-actions-check: ## CI gate (offline): the vendored map of operations to their IAM actions must be well-formed
+	@$(PYTHON) tools/aws/regen_iam_authorized_actions.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/iam-authorized-actions.json is malformed."; \
+		echo "       Run 'make iam-authorized-actions-sync' and commit the result."; \
+		exit 1; \
+	}
+
+iam-authorized-actions-verify: ## CI gate (online): every vendored operation must still be authorized as AWS says
+	@$(PYTHON) tools/aws/regen_iam_authorized_actions.py --verify; status=$$?; \
+	if [ $$status -eq 2 ]; then \
+		echo ""; \
+		echo "error: could not reach AWS's service reference, so nothing was verified."; \
+		exit 1; \
+	elif [ $$status -ne 0 ]; then \
+		echo ""; \
+		echo "error: the vendored map authorizes an operation as an action AWS does not check for it."; \
+		echo "       Run 'make iam-authorized-actions-sync' and commit the result."; \
+		exit 1; \
+	fi
+
+iam-authorized-actions-test: ## Run the IAM authorized-action generator's unit tests
+	$(PYTHON) -m pytest tools/aws/test_regen_iam_authorized_actions.py -q
+
+cfn-property-types-sync: ## Regenerate src/main/resources/aws/cfn-property-types.json from AWS's resource schemas (commit the result)
+	$(PYTHON) tools/aws/regen_cfn_property_types.py
+
+cfn-property-types-check: ## CI gate (offline): the vendored CloudFormation property types must be well-formed
+	@$(PYTHON) tools/aws/regen_cfn_property_types.py --check || { \
+		echo ""; \
+		echo "error: src/main/resources/aws/cfn-property-types.json is malformed."; \
+		echo "       Run 'make cfn-property-types-sync' and commit the result."; \
+		exit 1; \
+	}
+
+cfn-property-types-verify: ## CI gate (online): the vendored CloudFormation property types must still match AWS's schemas
+	@$(PYTHON) tools/aws/regen_cfn_property_types.py --verify; status=$$?; \
+	if [ $$status -eq 2 ]; then \
+		echo ""; \
+		echo "error: could not read AWS's CloudFormation resource schemas, so nothing was verified."; \
+		exit 1; \
+	elif [ $$status -ne 0 ]; then \
+		echo ""; \
+		echo "error: AWS has changed a resource schema the vendored property types come from."; \
+		echo "       Run 'make cfn-property-types-sync' and commit the result."; \
+		exit 1; \
+	fi
+
+cfn-property-types-test: ## Run the CloudFormation property type generator's unit tests
+	$(PYTHON) -m pytest tools/aws/test_regen_cfn_property_types.py -q

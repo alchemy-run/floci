@@ -1,9 +1,11 @@
 package io.github.hectorvent.floci.config;
 
+import io.github.hectorvent.floci.services.acm.CertificateGenerator;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
+import org.bouncycastle.asn1.x509.Extension;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.junit.jupiter.api.Test;
 
@@ -26,6 +28,7 @@ import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -45,6 +48,8 @@ class TlsLocalCaIntegrationTest {
     void handshakeSucceedsTrustingOnlyTheServedCa() throws Exception {
         String caPem = given().when().get("/_floci/ca.pem").then().statusCode(200).extract().asString();
         X509Certificate ca = parse(caPem);
+        assertNotNull(ca.getExtensionValue(Extension.subjectKeyIdentifier.getId()));
+        assertNotNull(ca.getExtensionValue(Extension.authorityKeyIdentifier.getId()));
 
         HttpsURLConnection connection = open(trustOnly(ca));
         assertEquals(200, connection.getResponseCode());
@@ -52,6 +57,8 @@ class TlsLocalCaIntegrationTest {
         X509Certificate leaf = (X509Certificate) served[0];
         assertEquals(ca.getSubjectX500Principal(), leaf.getIssuerX500Principal());
         assertEquals(-1, leaf.getBasicConstraints());
+        assertNotNull(leaf.getExtensionValue(Extension.subjectKeyIdentifier.getId()));
+        assertNotNull(leaf.getExtensionValue(Extension.authorityKeyIdentifier.getId()));
         leaf.verify(ca.getPublicKey());
         connection.disconnect();
     }
@@ -103,7 +110,7 @@ class TlsLocalCaIntegrationTest {
         static {
             try {
                 FlociCertificateAuthority ca = FlociCertificateAuthority.loadOrCreate(TLS_DIR);
-                var leaf = ca.issueServerCertificate("localhost", List.of("localhost", "127.0.0.1"),
+                CertificateGenerator.GeneratedCertificate leaf = ca.issueServerCertificate("localhost", List.of("localhost", "127.0.0.1"),
                         KeyAlgorithm.RSA_2048, null);
                 Files.writeString(CERT_FILE, leaf.certificatePem());
                 Files.writeString(KEY_FILE, leaf.privateKeyPem());

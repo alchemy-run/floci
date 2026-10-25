@@ -4,10 +4,11 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.bedrockagentcorecontrol.model.Gateway;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -36,7 +37,7 @@ public class BedrockAgentCoreGatewayRuleService {
     }
 
     public ObjectNode create(String gatewayId, ObjectNode request, String region) {
-        var gateway = gatewayService.get(gatewayId, region);
+        Gateway gateway = gatewayService.get(gatewayId, region);
         String clientToken = request.hasNonNull("clientToken") ? request.get("clientToken").asText() : null;
         if (clientToken != null) {
             if (clientToken.length() < 33 || clientToken.length() > 256

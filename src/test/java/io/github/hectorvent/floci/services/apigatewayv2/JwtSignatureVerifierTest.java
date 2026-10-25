@@ -2,25 +2,42 @@ package io.github.hectorvent.floci.services.apigatewayv2;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpHandler;
 import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsServer;
+import io.github.hectorvent.floci.config.ContainerCaBundle;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.config.FlociCertificateAuthority;
+import io.github.hectorvent.floci.config.TlsConfigSource;
+import io.github.hectorvent.floci.core.common.Base64Url;
+import io.github.hectorvent.floci.core.common.Pem;
+import io.github.hectorvent.floci.services.acm.CertificateGenerator;
+import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import org.apache.hc.client5.http.DnsResolver;
 import org.apache.hc.client5.http.SystemDefaultDnsResolver;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
+import java.io.IOException;
 import java.math.BigInteger;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.security.GeneralSecurityException;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.Security;
 import java.security.Signature;
 import java.security.interfaces.RSAPrivateKey;
 import java.security.interfaces.RSAPublicKey;
-import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -29,6 +46,9 @@ import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * Verifies {@link JwtSignatureVerifier} against a real local OIDC discovery + JWKS server
@@ -55,34 +75,23 @@ class JwtSignatureVerifierTest {
         publicKey = (RSAPublicKey) pair.getPublic();
 
         server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
-
-        server.createContext("/.well-known/openid-configuration", exchange -> {
-            String issuerUrl = "http://127.0.0.1:" + server.getAddress().getPort();
-            String body = "{\"issuer\":\"" + issuerUrl + "\",\"jwks_uri\":\"" + issuerUrl + "/jwks\"}";
-            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, bytes.length);
-            exchange.getResponseBody().write(bytes);
-            exchange.close();
-        });
-
-        server.createContext("/jwks", exchange -> {
-            String n = base64UrlUnsigned(publicKey.getModulus());
-            String e = base64UrlUnsigned(publicKey.getPublicExponent());
-            String body = "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"test-key-1\",\"alg\":\"RS256\",\"use\":\"sig\","
-                    + "\"n\":\"" + n + "\",\"e\":\"" + e + "\"}]}";
-            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
-            exchange.getResponseHeaders().add("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, bytes.length);
-            exchange.getResponseBody().write(bytes);
-            exchange.close();
-        });
-
-        server.start();
         issuer = "http://127.0.0.1:" + server.getAddress().getPort();
+        server.createContext("/.well-known/openid-configuration", discovery(issuer));
+        server.createContext("/jwks", this::serveJwks);
+        server.start();
 
         verifier = new JwtSignatureVerifier(objectMapper, SystemDefaultDnsResolver.INSTANCE, true);
         strictVerifier = new JwtSignatureVerifier(objectMapper, SystemDefaultDnsResolver.INSTANCE, false);
+    }
+
+    @BeforeEach
+    @AfterEach
+    void forgetBootstrapTlsDir() {
+        // TlsConfigSource.resolvedTlsDir is static: a TLS-on bootstrap run by another test class
+        // in this JVM would otherwise steer the bundle lookup at that test's directory.
+        System.setProperty("floci.tls.enabled", "false");
+        new TlsConfigSource();
+        System.clearProperty("floci.tls.enabled");
     }
 
     @AfterEach
@@ -268,6 +277,45 @@ class JwtSignatureVerifierTest {
         };
     }
 
+    /**
+     * With TLS on, the verifier Floci injects trusts the CA bundle it writes for its containers, so
+     * an issuer served with a certificate of Floci's CA, as a Floci Cognito pool's is, verifies,
+     * where the JVM's roots alone refuse it. Goes through the configuration and the bundle writer,
+     * as production does.
+     */
+    @Test
+    void trustsAnIssuerCertificateFromTheCaBundleFlociWrites(@TempDir Path dir) throws Exception {
+        if (Security.getProvider(BouncyCastleProvider.PROVIDER_NAME) == null) {
+            Security.addProvider(new BouncyCastleProvider());
+        }
+        Path tlsDir = dir.resolve("tls");
+        FlociCertificateAuthority authority = FlociCertificateAuthority.loadOrCreate(tlsDir);
+        ContainerCaBundle.write(tlsDir, authority.certificatePath());
+        CertificateGenerator.GeneratedCertificate issued = authority.issueServerCertificate(
+                "localhost", List.of("localhost"), KeyAlgorithm.RSA_2048, null);
+        EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
+        when(config.tls().enabled()).thenReturn(true);
+        when(config.storage().persistentPath()).thenReturn(dir.toString());
+        when(config.security().allowPrivateJwtTargets()).thenReturn(true);
+
+        HttpsServer httpsServer = HttpsServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        httpsServer.setHttpsConfigurator(new HttpsConfigurator(authority.serverSslContext(
+                Pem.parseCertificate(issued.certificatePem()), Pem.parsePrivateKey(issued.privateKeyPem()))));
+        String httpsIssuer = "https://localhost:" + httpsServer.getAddress().getPort();
+        httpsServer.createContext("/.well-known/openid-configuration", discovery(httpsIssuer));
+        httpsServer.createContext("/jwks", this::serveJwks);
+        httpsServer.start();
+        try (JwtSignatureVerifier trustingVerifier = new JwtSignatureVerifier(objectMapper, config)) {
+            String token = signToken("test-key-1", privateKey);
+
+            assertThrows(JwtSignatureVerifier.JwtVerificationException.class,
+                    () -> verifier.verify(token, httpsIssuer));
+            assertDoesNotThrow(() -> trustingVerifier.verify(token, httpsIssuer));
+        } finally {
+            httpsServer.stop(0);
+        }
+    }
+
     @Test
     void doesNotFollowDiscoveryRedirects() throws Exception {
         AtomicInteger redirectedRequests = new AtomicInteger();
@@ -295,6 +343,26 @@ class JwtSignatureVerifierTest {
         }
     }
 
+    private static HttpHandler discovery(String issuerUrl) {
+        return exchange -> respond(exchange,
+                "{\"issuer\":\"" + issuerUrl + "\",\"jwks_uri\":\"" + issuerUrl + "/jwks\"}");
+    }
+
+    private void serveJwks(HttpExchange exchange) throws IOException {
+        String n = base64UrlUnsigned(publicKey.getModulus());
+        String e = base64UrlUnsigned(publicKey.getPublicExponent());
+        respond(exchange, "{\"keys\":[{\"kty\":\"RSA\",\"kid\":\"test-key-1\",\"alg\":\"RS256\",\"use\":\"sig\","
+                + "\"n\":\"" + n + "\",\"e\":\"" + e + "\"}]}");
+    }
+
+    private static void respond(HttpExchange exchange, String body) throws IOException {
+        byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().add("Content-Type", "application/json");
+        exchange.sendResponseHeaders(200, bytes.length);
+        exchange.getResponseBody().write(bytes);
+        exchange.close();
+    }
+
     private String signToken(String kid, RSAPrivateKey signingKey) throws GeneralSecurityException {
         ObjectNode header = objectMapper.createObjectNode();
         header.put("alg", "RS256");
@@ -310,13 +378,13 @@ class JwtSignatureVerifierTest {
         Signature signature = Signature.getInstance("SHA256withRSA");
         signature.initSign(signingKey);
         signature.update(signingInput.getBytes(StandardCharsets.UTF_8));
-        String encodedSignature = Base64.getUrlEncoder().withoutPadding().encodeToString(signature.sign());
+        String encodedSignature = Base64Url.encode(signature.sign());
 
         return signingInput + "." + encodedSignature;
     }
 
     private static String base64Url(String s) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(s.getBytes(StandardCharsets.UTF_8));
+        return Base64Url.encode(s);
     }
 
     private static String base64UrlUnsigned(BigInteger value) {
@@ -324,6 +392,6 @@ class JwtSignatureVerifierTest {
         if (bytes.length > 1 && bytes[0] == 0) {
             bytes = java.util.Arrays.copyOfRange(bytes, 1, bytes.length);
         }
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        return Base64Url.encode(bytes);
     }
 }

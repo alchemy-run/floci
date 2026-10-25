@@ -65,9 +65,9 @@ public class SsmResourceBackend {
         if (update && read(name, region) == null) {
             throw new AwsException("ResourceNotFoundException", "Parameter " + name + " was not found.", 404);
         }
-        ssm.putParameter(name, value, type, optional(desired, "Description"), update, region,
-                update ? null : tags, desired.path("Tier").asText("Standard"), null,
-                desired.path("AllowedPattern").asText(""), desired.path("DataType").asText("text"));
+        ssm.putParameter(name, value, type, optional(desired, "Description"), update,
+                update ? null : tags, null, desired.path("AllowedPattern").asText(""),
+                desired.path("Tier").asText("Standard"), null, region);
         if (update) {
             List<String> removed = ssm.listTagsForResource(name, region).keySet().stream()
                     .filter(key -> !tags.containsKey(key)).toList();

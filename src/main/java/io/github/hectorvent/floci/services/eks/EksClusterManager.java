@@ -1,5 +1,11 @@
 package io.github.hectorvent.floci.services.eks;
 
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.command.ExecCreateCmdResponse;
+import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.model.ContainerNetwork;
+import com.github.dockerjava.api.model.Frame;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.config.FlociCertificateAuthority;
 import io.github.hectorvent.floci.core.common.AwsRegions;
@@ -13,6 +19,11 @@ import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.DockerHostResolver;
 import io.github.hectorvent.floci.core.common.docker.PortAllocator;
+import io.github.hectorvent.floci.services.ec2.Ec2MetadataProxy;
+import io.github.hectorvent.floci.services.ec2.Ec2MetadataServer;
+import io.github.hectorvent.floci.services.ec2.model.Instance;
+import io.github.hectorvent.floci.services.ec2.model.InstanceState;
+import io.github.hectorvent.floci.services.ec2.model.Placement;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
 import io.github.hectorvent.floci.services.eks.model.CertificateAuthority;
 import io.github.hectorvent.floci.services.eks.model.Cluster;
@@ -20,17 +31,6 @@ import io.github.hectorvent.floci.services.eks.model.ClusterIdentity;
 import io.github.hectorvent.floci.services.eks.model.ClusterOidcKey;
 import io.github.hectorvent.floci.services.eks.model.LogSetup;
 import io.github.hectorvent.floci.services.eks.model.OidcIdentity;
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.async.ResultCallback;
-import com.github.dockerjava.api.command.ExecCreateCmdResponse;
-import com.github.dockerjava.api.command.InspectContainerResponse;
-import com.github.dockerjava.api.model.ContainerNetwork;
-import com.github.dockerjava.api.model.Frame;
-import io.github.hectorvent.floci.services.ec2.Ec2MetadataProxy;
-import io.github.hectorvent.floci.services.ec2.Ec2MetadataServer;
-import io.github.hectorvent.floci.services.ec2.model.Instance;
-import io.github.hectorvent.floci.services.ec2.model.InstanceState;
-import io.github.hectorvent.floci.services.ec2.model.Placement;
 import io.vertx.core.json.JsonObject;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -1429,7 +1429,7 @@ public class EksClusterManager {
                     clusterName, e.getMessage());
             return;
         }
-        List<String> regions = new ArrayList<>(AwsRegions.ALL);
+        List<String> regions = new ArrayList<>(AwsRegions.KNOWN_IDS.stream().sorted().toList());
         if (!regions.contains(config.defaultRegion())) {
             regions.add(config.defaultRegion());
         }
@@ -1659,23 +1659,16 @@ public class EksClusterManager {
             nodeInstance = synthesizeClusterNodeInstance(cluster, containerIps.primaryIp(), region, accountId);
             nodeInstance.setDockerContainerId(containerId);
 
+            metadataServer.reconcileClusterNodeAddresses(containerIps.allIps(), nodeInstance);
             ContainerExecResult install = execInContainerForResult(containerId,
-                    Ec2MetadataProxy.authenticatedInstallCommand(), 180);
+                    Ec2MetadataProxy.installCommand(), 180);
             if (install.exitCode() != 0) {
                 LOG.warnv("Could not install IMDS proxy dependencies for EKS cluster {0}: {1}",
                         cluster.getName(), install.summary());
                 return;
             }
-
-            capability = metadataServer.registerProxy(nodeInstance);
-            String proxyConfig = new JsonObject()
-                    .put("host", dockerHostResolver.resolve())
-                    .put("port", config.services().ec2().imdsPort())
-                    .put("capability", capability).encode();
-            copyMetadataFile(containerId, "floci-imds-proxy.py", Ec2MetadataProxy.authenticatedProxyScript(), 0700);
-            copyMetadataFile(containerId, "floci-imds-proxy.json.next", proxyConfig, 0600);
             ContainerExecResult start = execInContainerForResult(containerId,
-                    Ec2MetadataProxy.authenticatedStartCommand(nodeInstance.getInstanceId()), 30);
+                    Ec2MetadataProxy.startCommand(dockerHostResolver.resolve(), config.services().ec2().imdsPort()), 30);
             if (start.exitCode() != 0) {
                 LOG.warnv("Could not start link-local IMDS proxy for EKS cluster {0}: {1}",
                         cluster.getName(), start.summary());
@@ -1693,8 +1686,8 @@ public class EksClusterManager {
             LOG.warnv("Could not configure link-local IMDS endpoint for EKS cluster {0}: {1}",
                     cluster.getName(), e.getMessage());
         } finally {
-            if (!configured && capability != null) {
-                metadataServer.unregisterProxy(nodeInstance, capability);
+            if (!configured && nodeInstance != null) {
+                metadataServer.unregisterInstance(nodeInstance);
             }
         }
     }

@@ -257,7 +257,10 @@ class SnsMaximumMessageSizeTest {
         String arn = largeTopic("allowed-protocols");
         for (String protocol : List.of("sqs", "firehose", "lambda")) {
             assertNotNull(snsService.subscribe(arn, protocol, "arn:aws:" + protocol
-                    + ":us-east-1:000000000000:target", REGION, Map.of()));
+                    + ":us-east-1:000000000000:target", REGION,
+                    "firehose".equals(protocol)
+                            ? Map.of("SubscriptionRoleArn", "arn:aws:iam::000000000000:role/firehose-role")
+                            : Map.of()));
         }
     }
 

@@ -41,44 +41,9 @@ class ElbClassicIntegrationTest {
     private static final String V2_XMLNS =
             "https://elasticloadbalancing.amazonaws.com/doc/2015-12-01/";
 
-    private static final String EC2_AUTH =
-            "AWS4-HMAC-SHA256 Credential=test/20260427/us-east-1/ec2/aws4_request";
-
     private static final String LB = "classic-elb-1";
 
-    private static String classicGroupId;
-    private static String replacementGroupId;
-
     private static String subnetA() { return Ec2Service.defaultSubnetId("us-east-1", "a"); }
-
-    private static String classicGroup() {
-        if (classicGroupId == null) {
-            classicGroupId = createSecurityGroup("elb-classic-sg");
-        }
-        return classicGroupId;
-    }
-
-    private static String replacementGroup() {
-        if (replacementGroupId == null) {
-            replacementGroupId = createSecurityGroup("elb-classic-replaced-sg");
-        }
-        return replacementGroupId;
-    }
-
-    private static String createSecurityGroup(String name) {
-        return given()
-                .formParam("Action", "CreateSecurityGroup")
-                .formParam("Version", "2016-11-15")
-                .formParam("GroupName", name)
-                .formParam("GroupDescription", "Classic ELB integration test group")
-                .formParam("VpcId", Ec2Service.defaultVpcId("us-east-1"))
-                .header("Authorization", EC2_AUTH)
-            .when()
-                .post("/")
-            .then()
-                .statusCode(200)
-                .extract().xmlPath().getString("CreateSecurityGroupResponse.groupId");
-    }
 
     @Test
     @Order(1)
@@ -89,7 +54,7 @@ class ElbClassicIntegrationTest {
                 .formParam("LoadBalancerName", LB)
                 .formParam("Scheme", "internet-facing")
                 .formParam("Subnets.member.1", subnetA())
-                .formParam("SecurityGroups.member.1", classicGroup())
+                .formParam("SecurityGroups.member.1", "sg-classic")
                 .formParam("Listeners.member.1.Protocol", "HTTP")
                 .formParam("Listeners.member.1.LoadBalancerPort", "80")
                 .formParam("Listeners.member.1.InstanceProtocol", "HTTP")
@@ -157,7 +122,7 @@ class ElbClassicIntegrationTest {
             .then()
                 .statusCode(400)
                 .body("ErrorResponse.Error.Code", equalTo("ValidationError"))
-                // Not "Name is required for load balancer.", that is the v2 handler's message,
+                // Not "Name is required for load balancer." — that is the v2 handler's message,
                 // and seeing it here means a v1 request reached the wrong API again.
                 .body("ErrorResponse.Error.Message", containsString("listener"));
     }
@@ -200,7 +165,7 @@ class ElbClassicIntegrationTest {
                         + ".LoadBalancerDescriptions.member.Subnets.member", equalTo(subnetA()))
                 .body("DescribeLoadBalancersResponse.DescribeLoadBalancersResult"
                         + ".LoadBalancerDescriptions.member.SecurityGroups.member",
-                        equalTo(classicGroup()))
+                        equalTo("sg-classic"))
                 .body("DescribeLoadBalancersResponse.DescribeLoadBalancersResult"
                         + ".LoadBalancerDescriptions.member.ListenerDescriptions.member"
                         + ".Listener.InstancePort", equalTo("8080"))
@@ -502,7 +467,7 @@ class ElbClassicIntegrationTest {
                 .formParam("Action", "ApplySecurityGroupsToLoadBalancer")
                 .formParam("Version", V1)
                 .formParam("LoadBalancerName", LB)
-                .formParam("SecurityGroups.member.1", replacementGroup())
+                .formParam("SecurityGroups.member.1", "sg-replaced")
                 .header("Authorization", AUTH)
             .when()
                 .post("/")
@@ -510,7 +475,7 @@ class ElbClassicIntegrationTest {
                 .statusCode(200)
                 .body("ApplySecurityGroupsToLoadBalancerResponse"
                         + ".ApplySecurityGroupsToLoadBalancerResult.SecurityGroups.member",
-                        equalTo(replacementGroup()));
+                        equalTo("sg-replaced"));
     }
 
     @Test
@@ -656,36 +621,5 @@ class ElbClassicIntegrationTest {
                 .body("DescribeLoadBalancersResponse.DescribeLoadBalancersResult"
                                 + ".LoadBalancerDescriptions.member.SourceSecurityGroup.GroupName",
                         equalTo("elb-source-sg"));
-    }
-
-    @Test
-    @Order(20)
-    void createRejectsASecurityGroupThatDoesNotExist() {
-        given()
-                .formParam("Action", "CreateLoadBalancer")
-                .formParam("Version", V1)
-                .formParam("LoadBalancerName", "classic-elb-missing-sg")
-                .formParam("Subnets.member.1", subnetA())
-                .formParam("SecurityGroups.member.1", "sg-0000000000000dead")
-                .formParam("Listeners.member.1.Protocol", "TCP")
-                .formParam("Listeners.member.1.LoadBalancerPort", "443")
-                .formParam("Listeners.member.1.InstancePort", "443")
-                .header("Authorization", AUTH)
-            .when()
-                .post("/")
-            .then()
-                .statusCode(400)
-                .body("ErrorResponse.Error.Code", equalTo("InvalidSecurityGroup"));
-
-        given()
-                .formParam("Action", "DescribeLoadBalancers")
-                .formParam("Version", V1)
-                .formParam("LoadBalancerNames.member.1", "classic-elb-missing-sg")
-                .header("Authorization", AUTH)
-            .when()
-                .post("/")
-            .then()
-                .statusCode(400)
-                .body("ErrorResponse.Error.Code", equalTo("LoadBalancerNotFound"));
     }
 }

@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.lambda;
 
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.lambda.launcher.ContainerHandle;
 import io.github.hectorvent.floci.services.lambda.launcher.LambdaRuntimeLauncher;
 import io.github.hectorvent.floci.services.lambda.model.ContainerState;
@@ -8,21 +9,40 @@ import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
 import io.github.hectorvent.floci.services.lambda.runtime.RuntimeApiServer;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -36,17 +56,66 @@ class WarmPoolTest {
     @Mock LambdaRuntimeLauncher containerLauncher;
     @Mock EmulatorConfig config;
 
+    private final MutableClock clock = new MutableClock(Instant.parse("2026-09-29T12:00:00Z"));
+
     private WarmPool buildPool() {
+        return buildPool(Optional.empty(), 0);
+    }
+
+    private WarmPool buildPool(Optional<Integer> maxPerFunction, int maxTotal) {
+        return buildPool(maxPerFunction, maxTotal, null, 15);
+    }
+
+    private WarmPool buildPool(Optional<Integer> maxPerFunction, int maxTotal,
+                               ProvisionedConcurrencyPool provisioned, int drainSeconds) {
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
         EmulatorConfig.LambdaServiceConfig lambda = mock(EmulatorConfig.LambdaServiceConfig.class);
         when(config.services()).thenReturn(services);
         when(services.lambda()).thenReturn(lambda);
         when(lambda.ephemeral()).thenReturn(false);
         when(lambda.containerIdleTimeoutSeconds()).thenReturn(0);
-        // Tests that hold two BUSY handles (seed + compare) need headroom
-        // above the production default of 1.
-        lenient().when(lambda.maxConcurrentContainers()).thenReturn(8);
-        return new WarmPool(containerLauncher, config);
+        when(lambda.warmPoolMaxPerFunction()).thenReturn(maxPerFunction);
+        when(lambda.warmPoolMaxTotal()).thenReturn(maxTotal);
+        when(lambda.containerDrainTimeoutSeconds()).thenReturn(drainSeconds);
+        return new WarmPool(containerLauncher, config, clock, provisioned);
+    }
+
+    private static LambdaFunction function(String name) {
+        LambdaFunction fn = mock(LambdaFunction.class);
+        when(fn.getFunctionName()).thenReturn(name);
+        return fn;
+    }
+
+    /** LRU order is by the release timestamp, so consecutive releases must land on distinct ticks. */
+    private void nextMillisecond() {
+        clock.advance(Duration.ofMillis(1));
+    }
+
+    private static final class MutableClock extends Clock {
+        private Instant now;
+
+        private MutableClock(Instant now) {
+            this.now = now;
+        }
+
+        void advance(Duration duration) {
+            now = now.plus(duration);
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+
+        @Override
+        public Instant instant() {
+            return now;
+        }
     }
 
     @Test
@@ -72,6 +141,503 @@ class WarmPoolTest {
     }
 
     @Test
+    void failedRemovalRemainsOwnedAndRetriesWithoutRetiringCompletedHandlesTwice() {
+        WarmPool pool = buildPool();
+        pool.init();
+        ContainerHandle handle = new ContainerHandle("cid-retry", "retry-fn", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(handle);
+        pool.release(pool.acquire(function("retry-fn")));
+        doThrow(new IllegalStateException("Docker removal failed")).doNothing().when(containerLauncher).stop(handle);
+
+        pool.drainFunction("retry-fn");
+        verify(containerLauncher, times(1)).stop(handle);
+        pool.drainFunction("retry-fn");
+        verify(containerLauncher, times(2)).stop(handle);
+        pool.drainFunction("retry-fn");
+        pool.release(handle);
+        pool.shutdown();
+        verify(containerLauncher, times(2)).stop(handle);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void shutdownStopsBusyHandlesAndResetAcceptsNewInvocations(boolean ephemeral) {
+        WarmPool pool = buildPool();
+        when(config.services().lambda().ephemeral()).thenReturn(ephemeral);
+        ContainerHandle busy = new ContainerHandle("busy", "fn", null, ContainerState.WARM);
+        ContainerHandle current = new ContainerHandle("current", "fn", null, ContainerState.WARM);
+        LambdaFunction fn = function("fn");
+        when(containerLauncher.launch(any())).thenReturn(busy, current);
+        try {
+            pool.init();
+            assertSame(busy, pool.acquire(fn));
+
+            pool.stopManagedContainers();
+
+            verify(containerLauncher).stop(busy);
+            AwsException failure = assertThrows(AwsException.class, () -> pool.acquire(fn));
+            assertEquals("ResourceConflictException", failure.getErrorCode());
+            assertEquals(409, failure.getHttpStatus());
+            pool.release(busy);
+            verify(containerLauncher, times(1)).stop(busy);
+            pool.afterReset();
+            assertSame(current, pool.acquire(fn));
+        } finally {
+            pool.shutdown();
+        }
+        verify(containerLauncher, times(1)).stop(busy);
+        verify(containerLauncher, times(1)).stop(current);
+    }
+
+    @Test
+    void shutdownDeadlineCancelsConcurrentRemovalsAndResetRetainsThemForRetry() throws Exception {
+        WarmPool pool = buildPool(Optional.empty(), 0, null, 1);
+        ContainerHandle first = new ContainerHandle("first", "first", null, ContainerState.WARM);
+        ContainerHandle second = new ContainerHandle("second", "second", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(first, second);
+        CountDownLatch bothStarted = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch bothInterrupted = new CountDownLatch(2);
+        doAnswer(invocation -> {
+            bothStarted.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException interrupted) {
+                bothInterrupted.countDown();
+                throw interrupted;
+            }
+            return null;
+        }).when(containerLauncher).stop(any());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            pool.init();
+            pool.release(pool.acquire(function("first")));
+            pool.release(pool.acquire(function("second")));
+            Future<?> drain = executor.submit(pool::stopManagedContainers);
+            assertTrue(bothStarted.await(3, TimeUnit.SECONDS));
+            drain.get(3, TimeUnit.SECONDS);
+            assertTrue(bothInterrupted.await(3, TimeUnit.SECONDS));
+            pool.stopManagedContainers();
+            verify(containerLauncher, times(1)).stop(first);
+            verify(containerLauncher, times(1)).stop(second);
+
+            pool.afterReset();
+            doNothing().when(containerLauncher).stop(any());
+            // Cancellation can return before workers finish releasing their teardown ownership.
+            await().atMost(Duration.ofSeconds(3)).untilAsserted(() -> {
+                pool.evictIdleContainers();
+                verify(containerLauncher, times(2)).stop(first);
+                verify(containerLauncher, times(2)).stop(second);
+            });
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            pool.shutdown();
+        }
+        verify(containerLauncher, times(2)).stop(first);
+        verify(containerLauncher, times(2)).stop(second);
+    }
+
+    @Test
+    void releaseAfterShutdownDeadlineRetriesFailedRemoval() throws Exception {
+        WarmPool pool = buildPool(Optional.empty(), 0, null, 1);
+        LambdaFunction fn = function("late-release");
+        ContainerHandle busy = new ContainerHandle("busy", "late-release", null, ContainerState.WARM);
+        ContainerHandle slow = new ContainerHandle("slow", "late-release", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(busy, slow);
+        doThrow(new IllegalStateException("Removal failed")).doNothing().when(containerLauncher).stop(busy);
+        CountDownLatch slowStopStarted = new CountDownLatch(1);
+        CountDownLatch releaseSlowStop = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            slowStopStarted.countDown();
+            releaseSlowStop.await();
+            return null;
+        }).when(containerLauncher).stop(slow);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            pool.init();
+            assertSame(busy, pool.acquire(fn));
+            assertSame(slow, pool.acquire(fn));
+            Future<?> shutdown = executor.submit(pool::stopManagedContainers);
+            assertTrue(slowStopStarted.await(3, TimeUnit.SECONDS));
+            shutdown.get(3, TimeUnit.SECONDS);
+            verify(containerLauncher, times(1)).stop(busy);
+
+            pool.release(busy);
+
+            verify(containerLauncher, times(2)).stop(busy);
+            pool.release(busy);
+            verify(containerLauncher, times(2)).stop(busy);
+        } finally {
+            releaseSlowStop.countDown();
+            executor.shutdownNow();
+            doNothing().when(containerLauncher).stop(slow);
+            pool.afterReset();
+            pool.shutdown();
+        }
+    }
+
+    @Test
+    void failedCapEvictionRetriesEvenWhenIdleEvictionIsDisabled() {
+        WarmPool pool = buildPool(Optional.of(1), 1);
+        ContainerHandle first = new ContainerHandle("retry-first", "first", null, ContainerState.WARM);
+        ContainerHandle second = new ContainerHandle("retry-second", "second", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(first, second);
+        doThrow(new IllegalStateException("Docker removal failed")).doNothing().when(containerLauncher).stop(first);
+        try {
+            pool.init();
+            pool.release(pool.acquire(function("first")));
+            nextMillisecond();
+            pool.release(pool.acquire(function("second")));
+            verify(containerLauncher, times(1)).stop(first);
+
+            pool.evictIdleContainers();
+            verify(containerLauncher, times(2)).stop(first);
+            pool.evictIdleContainers();
+            verify(containerLauncher, times(2)).stop(first);
+            verify(containerLauncher, never()).stop(second);
+        } finally {
+            pool.shutdown();
+        }
+        verify(containerLauncher, times(2)).stop(first);
+        verify(containerLauncher, times(1)).stop(second);
+    }
+
+    @Test
+    void functionDrainUsesConfiguredBudgetAndMaintenanceRetriesCanceledRemoval() throws Exception {
+        WarmPool pool = buildPool(Optional.empty(), 0, null, 1);
+        ContainerHandle handle = new ContainerHandle("bounded-drain", "bounded", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(handle);
+        AtomicInteger attempts = new AtomicInteger();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        doAnswer(call -> {
+            if (attempts.incrementAndGet() == 1) {
+                entered.countDown();
+                release.await();
+            }
+            return null;
+        }).when(containerLauncher).stop(handle);
+        try (ExecutorService tasks = Executors.newSingleThreadExecutor()) {
+            pool.init();
+            pool.release(pool.acquire(function("bounded")));
+            Future<?> drain = tasks.submit(() -> pool.drainFunction("bounded"));
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS));
+                drain.get(3, TimeUnit.SECONDS);
+                assertEquals(1, attempts.get());
+            } finally {
+                release.countDown();
+            }
+            await().atMost(Duration.ofSeconds(3)).until(() -> {
+                pool.evictIdleContainers();
+                return attempts.get() == 2;
+            });
+        } finally {
+            release.countDown();
+            pool.shutdown();
+        }
+        verify(containerLauncher, times(2)).stop(handle);
+    }
+
+    @Test
+    void bothPoolsUseOneConfiguredDeadlineAndCanceledRemovalRemainsRetryable() throws Exception {
+        ProvisionedConcurrencyPool provisioned = mock(ProvisionedConcurrencyPool.class);
+        WarmPool pool = buildPool(Optional.empty(), 0, provisioned, 1);
+        pool.init();
+        ContainerHandle handle = new ContainerHandle("cid-canceled", "cancel-fn", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(handle);
+        LambdaFunction fn = function("cancel-fn");
+        pool.release(pool.acquire(fn));
+        CountDownLatch bothStarted = new CountDownLatch(2);
+        CountDownLatch bothInterrupted = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicLong provisionedDeadline = new AtomicLong();
+        doAnswer(invocation -> {
+            provisionedDeadline.set(invocation.getArgument(0));
+            bothStarted.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException interrupted) {
+                bothInterrupted.countDown();
+                Thread.currentThread().interrupt();
+            }
+            return null;
+        }).when(provisioned).stopManagedContainers(anyLong());
+        doAnswer(invocation -> {
+            bothStarted.countDown();
+            try {
+                release.await();
+            } catch (InterruptedException interrupted) {
+                bothInterrupted.countDown();
+                Thread.currentThread().interrupt();
+                throw new IllegalStateException(interrupted);
+            }
+            return null;
+        }).when(containerLauncher).stop(handle);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        long before = System.nanoTime();
+        Future<?> drain = executor.submit(pool::stopManagedContainers);
+        try {
+            assertTrue(bothStarted.await(3, TimeUnit.SECONDS),
+                    "Both pools must start draining before either pool finishes");
+            drain.get(5, TimeUnit.SECONDS);
+            assertTrue(bothInterrupted.await(3, TimeUnit.SECONDS));
+            assertTrue(provisionedDeadline.get() >= before + TimeUnit.SECONDS.toNanos(1));
+            assertTrue(provisionedDeadline.get() <= System.nanoTime());
+            assertThrows(RuntimeException.class, () -> pool.acquire(fn));
+            pool.shutdown();
+            verify(containerLauncher, times(1)).stop(handle);
+            verify(provisioned, times(1)).stopManagedContainers(anyLong());
+
+            pool.afterReset();
+            doNothing().when(containerLauncher).stop(handle);
+            pool.drainFunction("cancel-fn");
+            pool.drainFunction("cancel-fn");
+            verify(containerLauncher, times(2)).stop(handle);
+        } finally {
+            release.countDown();
+            executor.shutdownNow();
+            pool.shutdown();
+        }
+    }
+
+    @Test
+    void warmHandleRemovedDuringLivenessProbeIsNotOwnedAgain() throws Exception {
+        WarmPool pool = buildPool();
+        pool.init();
+        LambdaFunction fn = function("reuse-race-fn");
+        ContainerHandle handle = new ContainerHandle("cid-reuse-race", "reuse-race-fn", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(handle);
+        pool.release(pool.acquire(fn));
+        CountDownLatch probeStarted = new CountDownLatch(1);
+        CountDownLatch finishProbe = new CountDownLatch(1);
+        when(containerLauncher.isAlive(handle)).thenAnswer(invocation -> {
+            probeStarted.countDown();
+            assertTrue(finishProbe.await(5, TimeUnit.SECONDS));
+            return true;
+        });
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<ContainerHandle> acquire = executor.submit(() -> pool.acquire(fn));
+            assertTrue(probeStarted.await(3, TimeUnit.SECONDS));
+            pool.stopManagedContainers();
+            verify(containerLauncher, times(1)).stop(handle);
+            finishProbe.countDown();
+            assertThrows(ExecutionException.class, () -> acquire.get(3, TimeUnit.SECONDS));
+            pool.release(handle);
+            pool.shutdown();
+            verify(containerLauncher, times(1)).stop(handle);
+        } finally {
+            finishProbe.countDown();
+            executor.shutdownNow();
+            pool.shutdown();
+        }
+    }
+
+    @Test
+    void knownWarmHandleStopsWhileColdLaunchRemainsBlocked() throws Exception {
+        WarmPool pool = buildPool(Optional.empty(), 0, null, 1);
+        pool.init();
+        ContainerHandle warm = new ContainerHandle("cid-known", "known-fn", null, ContainerState.WARM);
+        ContainerHandle late = new ContainerHandle("cid-blocked", "blocked-fn", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(warm);
+        pool.release(pool.acquire(function("known-fn")));
+        CountDownLatch launchStarted = new CountDownLatch(1);
+        CountDownLatch finishLaunch = new CountDownLatch(1);
+        CountDownLatch warmStopped = new CountDownLatch(1);
+        when(containerLauncher.launch(any())).thenAnswer(invocation -> {
+            launchStarted.countDown();
+            assertTrue(finishLaunch.await(5, TimeUnit.SECONDS));
+            return late;
+        });
+        doAnswer(invocation -> {
+            warmStopped.countDown();
+            return null;
+        }).when(containerLauncher).stop(warm);
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<ContainerHandle> acquire = executor.submit(() -> pool.acquire(function("blocked-fn")));
+            assertTrue(launchStarted.await(3, TimeUnit.SECONDS));
+            Future<?> drain = executor.submit(pool::stopManagedContainers);
+            assertTrue(warmStopped.await(500, TimeUnit.MILLISECONDS),
+                    "Known containers must retire before waiting for a blocked launch");
+            drain.get(3, TimeUnit.SECONDS);
+            finishLaunch.countDown();
+            assertThrows(ExecutionException.class, () -> acquire.get(3, TimeUnit.SECONDS));
+            verify(containerLauncher, times(1)).stop(warm);
+            verify(containerLauncher, times(1)).stop(late);
+            pool.afterReset();
+            pool.drainFunction("blocked-fn");
+            verify(containerLauncher, times(1)).stop(late);
+        } finally {
+            finishLaunch.countDown();
+            executor.shutdownNow();
+            pool.shutdown();
+        }
+    }
+
+    @Test
+    void oldColdLaunchCannotAcquireAfterResetReopensPool() throws Exception {
+        WarmPool pool = buildPool(Optional.empty(), 0, null, 1);
+        pool.init();
+        LambdaFunction fn = function("reset-fn");
+        ContainerHandle old = new ContainerHandle("cid-old-launch", "reset-fn", null, ContainerState.WARM);
+        ContainerHandle current = new ContainerHandle("cid-new-launch", "reset-fn", null, ContainerState.WARM);
+        CountDownLatch launchStarted = new CountDownLatch(1);
+        CountDownLatch finishLaunch = new CountDownLatch(1);
+        when(containerLauncher.launch(any())).thenAnswer(invocation -> {
+            launchStarted.countDown();
+            assertTrue(finishLaunch.await(5, TimeUnit.SECONDS));
+            return old;
+        }).thenReturn(current);
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<ContainerHandle> acquire = executor.submit(() -> pool.acquire(fn));
+            assertTrue(launchStarted.await(3, TimeUnit.SECONDS));
+            pool.stopManagedContainers();
+            pool.afterReset();
+            assertSame(current, pool.acquire(fn));
+            pool.release(current);
+            finishLaunch.countDown();
+            assertThrows(ExecutionException.class, () -> acquire.get(3, TimeUnit.SECONDS));
+            verify(containerLauncher, times(1)).stop(old);
+            verify(containerLauncher, never()).stop(current);
+            when(containerLauncher.isAlive(current)).thenReturn(true);
+            assertSame(current, pool.acquire(fn));
+            pool.drainFunction("reset-fn");
+            verify(containerLauncher, times(1)).stop(old);
+            verify(containerLauncher, never()).stop(current);
+            pool.release(current);
+            verify(containerLauncher, times(1)).stop(current);
+        } finally {
+            finishLaunch.countDown();
+            executor.shutdownNow();
+            pool.shutdown();
+        }
+    }
+
+    @Test
+    void oldLivenessProbeCannotAcquireAfterResetReopensPool() throws Exception {
+        WarmPool pool = buildPool();
+        pool.init();
+        LambdaFunction fn = function("reset-probe-fn");
+        ContainerHandle old = new ContainerHandle("cid-old-probe", "reset-probe-fn", null, ContainerState.WARM);
+        ContainerHandle current = new ContainerHandle("cid-new-probe", "reset-probe-fn", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(old, current);
+        pool.release(pool.acquire(fn));
+        CountDownLatch probeStarted = new CountDownLatch(1);
+        CountDownLatch finishProbe = new CountDownLatch(1);
+        when(containerLauncher.isAlive(old)).thenAnswer(invocation -> {
+            probeStarted.countDown();
+            assertTrue(finishProbe.await(5, TimeUnit.SECONDS));
+            return true;
+        });
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        try {
+            Future<ContainerHandle> acquire = executor.submit(() -> pool.acquire(fn));
+            assertTrue(probeStarted.await(3, TimeUnit.SECONDS));
+            pool.stopManagedContainers();
+            pool.afterReset();
+            assertSame(current, pool.acquire(fn));
+            pool.release(current);
+            finishProbe.countDown();
+            assertThrows(ExecutionException.class, () -> acquire.get(3, TimeUnit.SECONDS));
+            verify(containerLauncher, times(1)).stop(old);
+            verify(containerLauncher, never()).stop(current);
+            when(containerLauncher.isAlive(current)).thenReturn(true);
+            assertSame(current, pool.acquire(fn));
+        } finally {
+            finishProbe.countDown();
+            executor.shutdownNow();
+            pool.shutdown();
+        }
+        verify(containerLauncher, times(1)).stop(old);
+        verify(containerLauncher, times(1)).stop(current);
+    }
+
+    @Test
+    void launchBeyondShutdownDeadlineIsRefusedAndStopped() throws Exception {
+        WarmPool pool = buildPool(Optional.empty(), 0, null, 1);
+        pool.init();
+        LambdaFunction fn = function("late-fn");
+        ContainerHandle handle = new ContainerHandle("cid-late", "late-fn", null, ContainerState.WARM);
+        CountDownLatch launched = new CountDownLatch(1);
+        CountDownLatch finishLaunch = new CountDownLatch(1);
+        when(containerLauncher.launch(any())).thenAnswer(invocation -> {
+            launched.countDown();
+            assertTrue(finishLaunch.await(5, TimeUnit.SECONDS));
+            return handle;
+        });
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            Future<ContainerHandle> acquire = executor.submit(() -> pool.acquire(fn));
+            assertTrue(launched.await(3, TimeUnit.SECONDS));
+            Future<?> drain = executor.submit(pool::stopManagedContainers);
+            drain.get(3, TimeUnit.SECONDS);
+            verify(containerLauncher, never()).stop(handle);
+            finishLaunch.countDown();
+            ExecutionException failure = assertThrows(ExecutionException.class,
+                    () -> acquire.get(3, TimeUnit.SECONDS));
+            assertTrue(failure.getCause().getMessage().contains("Lambda executor is stopping"));
+            verify(containerLauncher, times(1)).stop(handle);
+            pool.afterReset();
+            pool.drainFunction("late-fn");
+            pool.drainFunction("late-fn");
+            verify(containerLauncher, times(1)).stop(handle);
+        } finally {
+            finishLaunch.countDown();
+            executor.shutdownNow();
+            pool.shutdown();
+        }
+    }
+
+    @Test
+    void stopManagedContainersDoesNotLetOneFunctionOccupyEveryWorker() throws Exception {
+        WarmPool pool = buildPool(Optional.of(17), 0);
+        pool.init();
+        AtomicInteger ids = new AtomicInteger();
+        when(containerLauncher.launch(any())).thenAnswer(invocation -> {
+            LambdaFunction fn = invocation.getArgument(0);
+            return new ContainerHandle("cid-" + ids.incrementAndGet(),
+                    fn.getFunctionName(), null, ContainerState.WARM);
+        });
+        List<ContainerHandle> handles = new ArrayList<>();
+        for (String name : List.of("first", "second")) {
+            LambdaFunction fn = function(name);
+            for (int i = 0; i < 17; i++) {
+                handles.add(pool.acquire(fn));
+            }
+        }
+        handles.forEach(pool::release);
+
+        CountDownLatch allStopping = new CountDownLatch(handles.size());
+        CountDownLatch finishStops = new CountDownLatch(1);
+        doAnswer(invocation -> {
+            allStopping.countDown();
+            assertTrue(finishStops.await(10, TimeUnit.SECONDS));
+            return null;
+        }).when(containerLauncher).stop(any());
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        Future<?> drain = executor.submit(pool::stopManagedContainers);
+        try {
+            assertTrue(allStopping.await(5, TimeUnit.SECONDS),
+                    "Every container must begin stopping before blocked stops finish");
+        } finally {
+            finishStops.countDown();
+            try {
+                drain.get(10, TimeUnit.SECONDS);
+            } finally {
+                executor.shutdownNow();
+                pool.shutdown();
+            }
+        }
+        for (ContainerHandle handle : handles) {
+            verify(containerLauncher, times(1)).stop(handle);
+        }
+    }
+
+    @Test
     void stopManagedContainersOnEmptyPoolIsNoOp() {
         WarmPool pool = buildPool();
         pool.init();
@@ -79,6 +645,60 @@ class WarmPoolTest {
         pool.stopManagedContainers();
 
         pool.shutdown();
+    }
+
+    @Test
+    void interruptedDrainCancelsEveryStopAndPreservesTheCallerInterrupt() throws Exception {
+        WarmPool pool = buildPool();
+        pool.init();
+        LambdaFunction fn = function("interrupted-drain");
+        AtomicInteger ids = new AtomicInteger();
+        when(containerLauncher.launch(any())).thenAnswer(invocation ->
+                new ContainerHandle("cid-interrupt-" + ids.incrementAndGet(),
+                        fn.getFunctionName(), null, ContainerState.WARM));
+        List<ContainerHandle> handles = new ArrayList<>();
+        for (int i = 0; i < 3; i++) {
+            handles.add(pool.acquire(fn));
+        }
+        handles.forEach(pool::release);
+
+        CountDownLatch allStopping = new CountDownLatch(handles.size());
+        CountDownLatch finishStops = new CountDownLatch(1);
+        CountDownLatch interruptedStops = new CountDownLatch(handles.size());
+        doAnswer(invocation -> {
+            allStopping.countDown();
+            try {
+                finishStops.await();
+            } catch (InterruptedException interrupted) {
+                interruptedStops.countDown();
+                throw interrupted;
+            }
+            return null;
+        }).when(containerLauncher).stop(any());
+        AtomicReference<Thread> drainThread = new AtomicReference<>();
+        ExecutorService caller = Executors.newSingleThreadExecutor();
+        Future<Boolean> drain = caller.submit(() -> {
+            drainThread.set(Thread.currentThread());
+            pool.stopManagedContainers();
+            return Thread.currentThread().isInterrupted();
+        });
+        try {
+            assertTrue(allStopping.await(3, TimeUnit.SECONDS));
+            drainThread.get().interrupt();
+            assertTrue(drain.get(2, TimeUnit.SECONDS));
+            assertTrue(interruptedStops.await(3, TimeUnit.SECONDS));
+        } finally {
+            finishStops.countDown();
+            try {
+                drain.get(5, TimeUnit.SECONDS);
+            } finally {
+                caller.shutdownNow();
+                pool.shutdown();
+            }
+        }
+        for (ContainerHandle handle : handles) {
+            verify(containerLauncher, times(1)).stop(handle);
+        }
     }
 
     @Test
@@ -456,112 +1076,215 @@ class WarmPoolTest {
         }
     }
 
-
+    /**
+     * A drain detaches the deque from its pool and stops the contents itself. An eviction that
+     * snapshotted the same deque before the drain must not remove from the orphaned object and
+     * stop the container a second time. The LRU sort reads {@code getLastUsedMs()} between the
+     * snapshot and the removal, which is the only hook into that window without a sleep.
+     */
     @Test
-    void drainFunction_retiresContainerThatWasInFlightDuringDrain() {
-        WarmPool pool = buildPool();
+    void totalCap_doesNotStopContainerAlreadyClaimedByDrain() {
+        WarmPool pool = buildPool(Optional.empty(), 2);
         pool.init();
 
-        LambdaFunction fn = mock(LambdaFunction.class);
-        when(fn.getFunctionName()).thenReturn("swap-fn");
+        LambdaFunction fnA = function("fn-a");
+        LambdaFunction fnB = function("fn-b");
+        LambdaFunction fnC = function("fn-c");
+        CountDownLatch drainOnce = new CountDownLatch(1);
+        ContainerHandle a1 = new ContainerHandle("cid-a1", "fn-a", null, ContainerState.WARM) {
+            @Override
+            public long getLastUsedMs() {
+                if (drainOnce.getCount() > 0) {
+                    drainOnce.countDown();
+                    pool.drainFunction("fn-a");
+                }
+                return super.getLastUsedMs();
+            }
+        };
+        ContainerHandle b1 = new ContainerHandle("cid-b1", "fn-b", null, ContainerState.WARM);
+        ContainerHandle c1 = new ContainerHandle("cid-c1", "fn-c", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(a1, b1, c1);
 
-        ContainerHandle idle = new ContainerHandle("cid-idle", "swap-fn", null, ContainerState.WARM);
-        ContainerHandle busy = new ContainerHandle("cid-busy", "swap-fn", null, ContainerState.WARM);
-        ContainerHandle fresh = new ContainerHandle("cid-fresh", "swap-fn", null, ContainerState.WARM);
-        // Every acquire below cold-starts (the pool is empty each time), so no isAlive stub.
-        when(containerLauncher.launch(any())).thenReturn(idle, busy, fresh);
+        ContainerHandle leasedA1 = pool.acquire(fnA);
+        ContainerHandle leasedB1 = pool.acquire(fnB);
+        ContainerHandle leasedC1 = pool.acquire(fnC);
+        pool.release(leasedA1);
+        nextMillisecond();
+        pool.release(leasedB1);
+        nextMillisecond();
+        // Two idle entries are snapshotted, so the LRU sort compares them and the hook drains
+        // fn-a before the removal step. a1 is the LRU; it must be stopped by the drain only.
+        pool.release(leasedC1);
 
-        // Two containers exist: one back in the pool, one mid-invocation.
-        ContainerHandle a1 = pool.acquire(fn);
-        ContainerHandle a2 = pool.acquire(fn);
-        assertSame(idle, a1);
-        assertSame(busy, a2);
-        pool.release(a1);
+        assertEquals(0, drainOnce.getCount());
+        verify(containerLauncher, times(1)).stop(a1);
+        verify(containerLauncher, never()).stop(b1);
+        verify(containerLauncher, never()).stop(c1);
 
-        // UpdateFunctionCode: only the pooled container can be stopped right now.
-        pool.drainFunction("swap-fn");
-        verify(containerLauncher, times(1)).stop(idle);
-        verify(containerLauncher, never()).stop(busy);
+        pool.shutdown();
+    }
 
-        // The in-flight invocation completes: the container predates the drain and is retired.
-        pool.release(a2);
-        verify(containerLauncher, times(1)).stop(busy);
+    @Test
+    void totalCap_evictsLeastRecentlyUsedAcrossFunctions() {
+        WarmPool pool = buildPool(Optional.empty(), 2);
+        pool.init();
 
-        // The next invoke cold-starts on the new code instead of reusing the stale container.
-        ContainerHandle next = pool.acquire(fn);
-        assertSame(fresh, next);
+        LambdaFunction fnA = function("fn-a");
+        LambdaFunction fnB = function("fn-b");
+        ContainerHandle a1 = new ContainerHandle("cid-a1", "fn-a", null, ContainerState.WARM);
+        ContainerHandle b1 = new ContainerHandle("cid-b1", "fn-b", null, ContainerState.WARM);
+        ContainerHandle a2 = new ContainerHandle("cid-a2", "fn-a", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(a1, b1, a2);
+
+        // Lease all three at once so none is reused, then release oldest-first.
+        ContainerHandle leasedA1 = pool.acquire(fnA);
+        ContainerHandle leasedB1 = pool.acquire(fnB);
+        ContainerHandle leasedA2 = pool.acquire(fnA);
+        pool.release(leasedA1);
+        nextMillisecond();
+        pool.release(leasedB1);
+        nextMillisecond();
+        pool.release(leasedA2);
+
+        // Third idle container exceeds the cap of 2: a1 is the global LRU and goes, even though
+        // it belongs to the function that just released. b1 (older than a2) survives.
+        verify(containerLauncher).stop(a1);
+        verify(containerLauncher, never()).stop(b1);
+        verify(containerLauncher, never()).stop(a2);
+
+        when(containerLauncher.isAlive(any())).thenReturn(true);
+        assertSame(a2, pool.acquire(fnA));
+        assertSame(b1, pool.acquire(fnB));
         verify(containerLauncher, times(3)).launch(any());
 
         pool.shutdown();
     }
 
     @Test
-    void drainFunction_keepsContainerLaunchedAfterDrain() {
-        WarmPool pool = buildPool();
+    void totalCap_evictsOwnOldestContainerWhenSameFunction() {
+        WarmPool pool = buildPool(Optional.empty(), 1);
         pool.init();
 
-        LambdaFunction fn = mock(LambdaFunction.class);
-        when(fn.getFunctionName()).thenReturn("post-drain-fn");
+        LambdaFunction fn = function("fn-single");
+        ContainerHandle h1 = new ContainerHandle("cid-1", "fn-single", null, ContainerState.WARM);
+        ContainerHandle h2 = new ContainerHandle("cid-2", "fn-single", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(h1, h2);
 
-        ContainerHandle handle = new ContainerHandle("cid-new", "post-drain-fn", null, ContainerState.WARM);
-        when(containerLauncher.launch(any())).thenReturn(handle);
-        when(containerLauncher.isAlive(any())).thenReturn(true);
+        ContainerHandle leased1 = pool.acquire(fn);
+        ContainerHandle leased2 = pool.acquire(fn);
+        pool.release(leased1);
+        nextMillisecond();
+        pool.release(leased2);
 
-        // A drain with nothing pooled (e.g. the first UpdateFunctionCode) must not taint
-        // containers launched afterwards.
-        pool.drainFunction("post-drain-fn");
+        verify(containerLauncher).stop(h1);
+        verify(containerLauncher, never()).stop(h2);
 
-        ContainerHandle first = pool.acquire(fn);
-        pool.release(first);
-        verify(containerLauncher, never()).stop(handle);
-
-        assertSame(handle, pool.acquire(fn));
-        verify(containerLauncher, times(1)).launch(any());
+        when(containerLauncher.isAlive(h2)).thenReturn(true);
+        assertSame(h2, pool.acquire(fn));
 
         pool.shutdown();
     }
 
     @Test
-    void acquire_waitsForInFlightSlotWhenAtMaxConcurrent() throws Exception {
-        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
-        EmulatorConfig.LambdaServiceConfig lambda = mock(EmulatorConfig.LambdaServiceConfig.class);
-        when(config.services()).thenReturn(services);
-        when(services.lambda()).thenReturn(lambda);
-        when(lambda.ephemeral()).thenReturn(false);
-        when(lambda.containerIdleTimeoutSeconds()).thenReturn(0);
-        when(lambda.maxConcurrentContainers()).thenReturn(1);
-        WarmPool pool = new WarmPool(containerLauncher, config);
+    void perFunctionCap_rejectsExcessWithoutEvictingOtherFunctions() {
+        WarmPool pool = buildPool(Optional.of(1), 10);
         pool.init();
 
-        LambdaFunction fn = mock(LambdaFunction.class);
-        when(fn.getFunctionName()).thenReturn("serial-fn");
-        ContainerHandle firstHandle = new ContainerHandle("cid-1", "serial-fn", null, ContainerState.WARM);
-        ContainerHandle secondHandle = new ContainerHandle("cid-2", "serial-fn", null, ContainerState.WARM);
-        when(containerLauncher.launch(any())).thenReturn(firstHandle, secondHandle);
-        when(containerLauncher.isAlive(any())).thenReturn(true);
+        LambdaFunction fnA = function("fn-a");
+        LambdaFunction fnB = function("fn-b");
+        ContainerHandle b1 = new ContainerHandle("cid-b1", "fn-b", null, ContainerState.WARM);
+        ContainerHandle a1 = new ContainerHandle("cid-a1", "fn-a", null, ContainerState.WARM);
+        ContainerHandle a2 = new ContainerHandle("cid-a2", "fn-a", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(b1, a1, a2);
 
-        ContainerHandle held = pool.acquire(fn);
-        CountDownLatch entered = new CountDownLatch(1);
-        CountDownLatch done = new CountDownLatch(1);
-        AtomicReference<ContainerHandle> waited = new AtomicReference<>();
-        Thread waiter = new Thread(() -> {
-            entered.countDown();
-            waited.set(pool.acquire(fn));
-            done.countDown();
-        }, "warm-pool-waiter");
-        waiter.setDaemon(true);
-        waiter.start();
+        ContainerHandle leasedB1 = pool.acquire(fnB);
+        ContainerHandle leasedA1 = pool.acquire(fnA);
+        ContainerHandle leasedA2 = pool.acquire(fnA);
+        pool.release(leasedB1);
+        nextMillisecond();
+        pool.release(leasedA1);
+        nextMillisecond();
+        pool.release(leasedA2);
 
-        assertTrue(entered.await(2, TimeUnit.SECONDS));
-        // Still blocked on the in-flight lease — must not have launched a second env.
-        Thread.sleep(150);
-        verify(containerLauncher, times(1)).launch(any());
-
-        pool.release(held);
-        assertTrue(done.await(2, TimeUnit.SECONDS));
-        assertSame(firstHandle, waited.get());
-        verify(containerLauncher, times(1)).launch(any());
+        // fn-a already holds its one idle container, so a2 is the excess and is stopped. The
+        // global LRU (b1) is untouched: the total cap only evicts to admit a container that the
+        // per-function cap has accepted.
+        verify(containerLauncher).stop(a2);
+        verify(containerLauncher, never()).stop(a1);
+        verify(containerLauncher, never()).stop(b1);
 
         pool.shutdown();
+    }
+
+    @Test
+    void totalCapZero_keepsEveryIdleContainer() {
+        WarmPool pool = buildPool(Optional.empty(), 0);
+        pool.init();
+
+        ContainerHandle a1 = new ContainerHandle("cid-a1", "fn-a", null, ContainerState.WARM);
+        ContainerHandle b1 = new ContainerHandle("cid-b1", "fn-b", null, ContainerState.WARM);
+        ContainerHandle c1 = new ContainerHandle("cid-c1", "fn-c", null, ContainerState.WARM);
+        when(containerLauncher.launch(any())).thenReturn(a1, b1, c1);
+
+        pool.release(pool.acquire(function("fn-a")));
+        pool.release(pool.acquire(function("fn-b")));
+        pool.release(pool.acquire(function("fn-c")));
+
+        verify(containerLauncher, never()).stop(any());
+
+        pool.shutdown();
+    }
+
+    @Test
+    void drainTimeoutPreservesTheDefaultAndAcceptsOnlyBoundedOverrides() {
+        EmulatorConfig emulatorConfig = buildConfig(Optional.empty());
+        EmulatorConfig.LambdaServiceConfig lambda = emulatorConfig.services().lambda();
+        for (int seconds : new int[]{1, 15, 60, 300}) {
+            when(lambda.containerDrainTimeoutSeconds()).thenReturn(seconds);
+            assertEquals(seconds, WarmPool.resolveDrainTimeout(emulatorConfig));
+        }
+        for (int seconds : new int[]{0, -1, 301, Integer.MAX_VALUE}) {
+            when(lambda.containerDrainTimeoutSeconds()).thenReturn(seconds);
+            IllegalArgumentException failure = assertThrows(IllegalArgumentException.class,
+                    () -> WarmPool.resolveDrainTimeout(emulatorConfig));
+            assertTrue(failure.getMessage().contains("must be between 1 and 300"));
+            assertThrows(IllegalArgumentException.class,
+                    () -> new WarmPool(containerLauncher, emulatorConfig, clock));
+        }
+    }
+
+    @Test
+    void resolveMaxPerFunction_fallsBackToDerivedDefaultBelowOne() {
+        int derived = Math.max(4, Runtime.getRuntime().availableProcessors());
+
+        assertEquals(7, WarmPool.resolveMaxPerFunction(buildConfig(Optional.of(7))));
+        assertEquals(derived, WarmPool.resolveMaxPerFunction(buildConfig(Optional.of(0))));
+        assertEquals(derived, WarmPool.resolveMaxPerFunction(buildConfig(Optional.empty())));
+    }
+
+    /**
+     * {@code 0} is the documented opt-out, so a negative value must not quietly become it:
+     * the fallback is still unbounded, but it is logged rather than mistaken for a cap.
+     */
+    @Test
+    void resolveMaxTotal_treatsNegativeAsUnboundedWithWarning() {
+        assertEquals(24, WarmPool.resolveMaxTotal(buildConfig(Optional.empty(), 24)));
+        assertEquals(0, WarmPool.resolveMaxTotal(buildConfig(Optional.empty(), 0)));
+        assertEquals(0, WarmPool.resolveMaxTotal(buildConfig(Optional.empty(), -1)));
+    }
+
+    private static EmulatorConfig buildConfig(Optional<Integer> maxPerFunction) {
+        return buildConfig(maxPerFunction, 0);
+    }
+
+    private static EmulatorConfig buildConfig(Optional<Integer> maxPerFunction, int maxTotal) {
+        EmulatorConfig emulatorConfig = mock(EmulatorConfig.class);
+        EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
+        EmulatorConfig.LambdaServiceConfig lambda = mock(EmulatorConfig.LambdaServiceConfig.class);
+        when(emulatorConfig.services()).thenReturn(services);
+        when(services.lambda()).thenReturn(lambda);
+        lenient().when(lambda.warmPoolMaxPerFunction()).thenReturn(maxPerFunction);
+        lenient().when(lambda.warmPoolMaxTotal()).thenReturn(maxTotal);
+        return emulatorConfig;
     }
 }

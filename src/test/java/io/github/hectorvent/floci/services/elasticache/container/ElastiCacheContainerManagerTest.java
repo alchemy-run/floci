@@ -7,6 +7,7 @@ import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
+import io.github.hectorvent.floci.testing.InlineMocks;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.Test;
 
@@ -42,7 +43,7 @@ class ElastiCacheContainerManagerTest {
         // Rollback must still fall back to the deterministic name so nothing is orphaned.
         manager.stopByGroupId("my-group");
 
-        verify(lifecycleManager).removeIfExists("floci-valkey-my-group");
+        verify(lifecycleManager).removeIfExists("floci-aws-valkey-my-group");
     }
 
     @Test
@@ -67,9 +68,9 @@ class ElastiCacheContainerManagerTest {
                                     "127.0.0.1", serverSocket.getLocalPort()))));
 
             ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-            ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+            ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(mock(ContainerSpec.class));
+            when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
             EmulatorConfig config = mock(EmulatorConfig.class);
             EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
@@ -118,9 +119,9 @@ class ElastiCacheContainerManagerTest {
                                     "127.0.0.1", serverSocket.getLocalPort()))));
 
             ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-            ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+            ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(mock(ContainerSpec.class));
+            when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
             EmulatorConfig config = mock(EmulatorConfig.class);
             EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
@@ -158,9 +159,9 @@ class ElastiCacheContainerManagerTest {
                 .thenThrow(new IllegalStateException("log attach failed after daemon went away"));
 
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);

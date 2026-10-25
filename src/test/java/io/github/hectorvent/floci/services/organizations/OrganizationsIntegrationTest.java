@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.organizations;
 
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.path.json.JsonPath;
 import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.TestMethodOrder;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
+import static org.hamcrest.Matchers.empty;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
@@ -108,7 +110,9 @@ class OrganizationsIntegrationTest {
 
     @Test
     @Order(4)
-    void listRootsReturnsRootWithServiceControlPolicyEnabled() {
+    void listRootsReturnsRootWithNoPolicyTypesEnabled() {
+        // AvailablePolicyTypes above lists SCPs for an all-features organization, but that is not
+        // the same as the root having them enabled: a new root starts with none.
         rootId = organizations("ListRoots", "{}")
         .when()
             .post("/")
@@ -118,13 +122,31 @@ class OrganizationsIntegrationTest {
             .body("Roots[0].Id", matchesPattern("r-[a-z0-9]{4}"))
             .body("Roots[0].Name", equalTo("Root"))
             .body("Roots[0].Arn", startsWith("arn:aws:organizations::000000000000:root/" + organizationId))
-            .body("Roots[0].PolicyTypes.Type", hasItem("SERVICE_CONTROL_POLICY"))
-            .body("Roots[0].PolicyTypes.Status", hasItem("ENABLED"))
+            .body("Roots[0].PolicyTypes", empty())
             .extract().jsonPath().getString("Roots[0].Id");
     }
 
     @Test
     @Order(5)
+    void serviceControlPoliciesCanBeEnabledOnTheNewRoot() {
+        organizations("EnablePolicyType", "{\"RootId\":\"" + rootId + "\",\"PolicyType\":\"SERVICE_CONTROL_POLICY\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Root.PolicyTypes.Type", contains("SERVICE_CONTROL_POLICY"));
+
+        organizations("ListRoots", "{}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Roots[0].PolicyTypes.Type", contains("SERVICE_CONTROL_POLICY"))
+            .body("Roots[0].PolicyTypes.Status", contains("ENABLED"));
+    }
+
+    @Test
+    @Order(6)
     void fullAwsAccessIsAttachedToTheRoot() {
         organizations("ListPoliciesForTarget",
                 "{\"TargetId\":\"" + rootId + "\",\"Filter\":\"SERVICE_CONTROL_POLICY\"}")
@@ -254,7 +276,7 @@ class OrganizationsIntegrationTest {
     @Test
     @Order(20)
     void createAccount() {
-        var response = organizations("CreateAccount",
+        JsonPath response = organizations("CreateAccount",
                 "{\"Email\":\"dev@example.com\",\"AccountName\":\"Dev\"}")
         .when()
             .post("/")
@@ -540,24 +562,17 @@ class OrganizationsIntegrationTest {
 
     @Test
     @Order(40)
-    void tagPolicyCanBeCreatedButNotAttachedBeforeItsPolicyTypeIsEnabled() {
-        String pendingId = organizations("CreatePolicy",
-                "{\"Name\":\"PendingCostCenter\",\"Type\":\"TAG_POLICY\",\"Content\":" + quote(TAG_POLICY_CONTENT) + "}")
+    void tagPolicyCanBeCreatedBeforeItsPolicyTypeIsEnabled() {
+        // AWS creates a policy of a type the root has not enabled; only attaching it needs the type.
+        String policyId = organizations("CreatePolicy",
+                "{\"Name\":\"CostCenterDraft\",\"Type\":\"TAG_POLICY\",\"Content\":"
+                        + quote(TAG_POLICY_CONTENT) + "}")
         .when()
             .post("/")
         .then()
             .statusCode(200)
-            .body("Policy.PolicySummary.Type", equalTo("TAG_POLICY"))
-            .extract().jsonPath().getString("Policy.PolicySummary.Id");
-
-        organizations("AttachPolicy", "{\"PolicyId\":\"" + pendingId + "\",\"TargetId\":\"" + rootId + "\"}")
-        .when()
-            .post("/")
-        .then()
-            .statusCode(400)
-            .body("__type", equalTo("PolicyTypeNotEnabledException"));
-
-        organizations("DeletePolicy", "{\"PolicyId\":\"" + pendingId + "\"}")
+            .extract().path("Policy.PolicySummary.Id");
+        organizations("DeletePolicy", "{\"PolicyId\":\"" + policyId + "\"}")
         .when()
             .post("/")
         .then()

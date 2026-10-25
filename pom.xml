@@ -6,7 +6,7 @@
 
     <groupId>io.github.hectorvent</groupId>
     <artifactId>floci</artifactId>
-    <version>2.1.0</version>
+    <version>2.3.0</version>
     <packaging>jar</packaging>
 
     <name>Floci</name>
@@ -15,11 +15,12 @@
     <properties>
         <maven.compiler.release>25</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <quarkus.platform.version>3.39.2</quarkus.platform.version>
-        <jackson.version>2.22.2</jackson.version>
+        <quarkus.platform.version>3.40.1</quarkus.platform.version>
+        <jackson.version>2.22.3</jackson.version>
         <apicurio.version>2.6.13.Final</apicurio.version>
         <everit.json.schema.version>1.14.6</everit.json.schema.version>
-        <wire.version>6.4.7</wire.version>
+        <wire.version>7.0.1</wire.version>
+        <aws.sdk.version>2.55.14</aws.sdk.version>
     </properties>
 
     <dependencyManagement>
@@ -48,10 +49,14 @@
                 <artifactId>protobuf-java-util</artifactId>
                 <version>3.25.9</version>
             </dependency>
+            <!-- Held below 2.65.0: from that release on it is generated for protobuf-java 4 and its
+                 classes need com.google.protobuf.GeneratedFile, which protobuf-java 3.25 does not have,
+                 so the native build fails initializing apicurio's FileDescriptorUtils. Move it together
+                 with protobuf-java. -->
             <dependency>
                 <groupId>com.google.api.grpc</groupId>
                 <artifactId>proto-google-common-protos</artifactId>
-                <version>2.49.0</version>
+                <version>2.64.1</version>
             </dependency>
             <!-- Matched to httpclient5 5.5.1 (its own declared core). The Quarkus 3.38+ BOM manages
                  httpcore5 5.4, whose SocketConfig defaults turn on TCP keep-alive with a keep-idle of 5 s;
@@ -71,7 +76,7 @@
             <dependency>
                 <groupId>com.h2database</groupId>
                 <artifactId>h2-mvstore</artifactId>
-                <version>2.4.240</version>
+                <version>2.5.252</version>
             </dependency>
             <dependency>
                 <groupId>com.squareup.wire</groupId>
@@ -154,7 +159,7 @@
         <dependency>
             <groupId>com.jayway.jsonpath</groupId>
             <artifactId>json-path</artifactId>
-            <version>2.9.0</version>
+            <version>3.0.0</version>
         </dependency>
 
         <!-- Vert.x for per-container Lambda Runtime API servers -->
@@ -201,7 +206,7 @@
             <artifactId>httpclient5</artifactId>
             <!-- Held at 5.5.x: 5.6 adds commons-compress content decoding, and its XZ codec
                  needs org.tukaani:xz at native link time (GraalVM link-at-build-time). -->
-            <version>5.5.1</version>
+            <version>5.5.2</version>
         </dependency>
         <!-- Explicit overrides for Quarkus BOM which pins these at 3.7.0;
              docker-java-core:3.7.1 requires 3.7.1 for ImageHistoryCmd and ExportContainerCmd -->
@@ -231,12 +236,12 @@
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcprov-jdk18on</artifactId>
-            <version>1.85.2</version>
+            <version>1.86</version>
         </dependency>
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcpkix-jdk18on</artifactId>
-            <version>1.85</version>
+            <version>1.86</version>
         </dependency>
 
         <!-- JSONata expression engine (Step Functions) -->
@@ -251,13 +256,6 @@
             <groupId>org.apache.velocity</groupId>
             <artifactId>velocity-engine-core</artifactId>
             <version>2.4.1</version>
-        </dependency>
-
-        <!-- GraphQL schema parsing and resolver execution (AppSync) -->
-        <dependency>
-            <groupId>com.graphql-java</groupId>
-            <artifactId>graphql-java</artifactId>
-            <version>26.1</version>
         </dependency>
 
         <!-- JSON Schema validation (API Gateway request validation) -->
@@ -333,6 +331,72 @@
 
         <!-- Testing -->
         <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>iotdataplane</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>bedrock</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>cloudwatchlogs</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>organizations</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>redshift</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ssm</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>apigateway</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3vectors</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>elasticache</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>ec2</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>io.quarkus</groupId>
             <artifactId>quarkus-junit</artifactId>
             <scope>test</scope>
@@ -348,9 +412,33 @@
             <scope>test</scope>
         </dependency>
         <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>rds</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>redshiftdata</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
+            <version>${aws.sdk.version}</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
             <groupId>org.awaitility</groupId>
             <artifactId>awaitility</artifactId>
             <version>4.3.0</version>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>com.amazon.ion</groupId>
+            <artifactId>ion-java</artifactId>
+            <version>1.12.1</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -405,19 +493,29 @@
         <dependency>
             <groupId>com.h2database</groupId>
             <artifactId>h2</artifactId>
-            <version>2.4.240</version>
+            <version>2.5.252</version>
             <scope>test</scope>
         </dependency>
         <!-- openCypher/Bolt client for the Neptune neo4j db-type integration test -->
         <dependency>
             <groupId>org.neo4j.driver</groupId>
             <artifactId>neo4j-java-driver</artifactId>
-            <version>6.2.1</version>
+            <version>6.3.0</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
 
     <build>
+        <resources>
+            <resource>
+                <directory>src/main/resources</directory>
+            </resource>
+            <!-- Only the build version is filtered; everything else is copied as is. -->
+            <resource>
+                <directory>src/main/resources-filtered</directory>
+                <filtering>true</filtering>
+            </resource>
+        </resources>
         <plugins>
             <plugin>
                 <groupId>io.quarkus.platform</groupId>
@@ -449,10 +547,46 @@
                 <configuration>
                     <!-- The suite's end-of-run live set exceeds the 4g default heap of
                          16g CI runners; a full GC near the end reclaims almost nothing. -->
-                    <argLine>-Xmx6g</argLine>
+                    <argLine>@{argLine} -Xmx6g</argLine>
                     <systemPropertyVariables>
                         <java.util.logging.manager>org.jboss.logmanager.LogManager</java.util.logging.manager>
+                        <!-- An ARN minted with a blank region fails the test that reached it (BlankRegionGuard). -->
+                        <io.github.hectorvent.floci.arn.fail-on-blank-region>true</io.github.hectorvent.floci.arn.fail-on-blank-region>
                     </systemPropertyVariables>
+                    <!-- Abort a hung test with a thread dump instead of letting CI's job timeout kill
+                         the shard silently. Set here rather than in junit-platform.properties, which
+                         would shadow the one quarkus-junit ships (its profile-aware class orderer). -->
+                    <properties>
+                        <configurationParameters>
+                            junit.jupiter.execution.timeout.testable.method.default = 2m
+                            junit.jupiter.execution.timeout.lifecycle.method.default = 2m
+                            junit.jupiter.execution.timeout.threaddump.enabled = true
+                        </configurationParameters>
+                    </properties>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-checkstyle-plugin</artifactId>
+                <version>3.6.0</version>
+                <dependencies>
+                    <dependency>
+                        <groupId>com.puppycrawl.tools</groupId>
+                        <artifactId>checkstyle</artifactId>
+                        <version>14.3.0</version>
+                    </dependency>
+                </dependencies>
+                <configuration>
+                    <configLocation>tools/checkstyle/checkstyle.xml</configLocation>
+                    <propertyExpansion>config_loc=${project.basedir}/tools/checkstyle</propertyExpansion>
+                    <!-- compatibility-tests is checked from here because its Docker image builds on JDK 17. -->
+                    <sourceDirectories>
+                        <sourceDirectory>${project.basedir}/src/main/java</sourceDirectory>
+                        <sourceDirectory>${project.basedir}/src/test/java</sourceDirectory>
+                        <sourceDirectory>${project.basedir}/compatibility-tests/sdk-test-java/src/main/java</sourceDirectory>
+                        <sourceDirectory>${project.basedir}/compatibility-tests/sdk-test-java/src/test/java</sourceDirectory>
+                    </sourceDirectories>
+                    <consoleOutput>true</consoleOutput>
                 </configuration>
             </plugin>
             <plugin>
@@ -490,7 +624,7 @@
             <properties>
                 <skipITs>true</skipITs>
                 <quarkus.native.enabled>true</quarkus.native.enabled>
-                <maven.compiler.release>24</maven.compiler.release>
+                <maven.compiler.release>25</maven.compiler.release>
             </properties>
         </profile>
     </profiles>

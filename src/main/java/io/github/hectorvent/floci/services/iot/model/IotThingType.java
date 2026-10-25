@@ -19,7 +19,6 @@ public class IotThingType {
     private boolean deprecated;
     private Instant creationDate;
     private Instant deprecatedDate;
-    private Map<String, String> tags = new TreeMap<>();
 
     public String getThingTypeName() { return thingTypeName; }
     public void setThingTypeName(String thingTypeName) { this.thingTypeName = thingTypeName; }
@@ -45,6 +44,9 @@ public class IotThingType {
     public Instant getDeprecatedDate() { return deprecatedDate; }
     public void setDeprecatedDate(Instant deprecatedDate) { this.deprecatedDate = deprecatedDate; }
 
+    private Map<String, String> tags = new TreeMap<>();
+
     public Map<String, String> getTags() { return tags == null ? Map.of() : tags; }
+
     public void setTags(Map<String, String> tags) { this.tags = tags == null ? new TreeMap<>() : new TreeMap<>(tags); }
 }

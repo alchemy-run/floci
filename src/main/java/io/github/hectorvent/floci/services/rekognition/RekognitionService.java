@@ -8,10 +8,13 @@ import io.github.hectorvent.floci.core.common.AwsGeometry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
+
 import java.util.Optional;
 /**
- * Dummy response builder for Amazon Rekognition. Stateless — every action ignores
- * the actual image content and returns a fixed but AWS-shaped response by default.
+ * Dummy response builder for Amazon Rekognition. Stateless: every action returns a fixed but
+ * AWS-shaped response by default, whatever the image shows. The image itself has already been
+ * checked by {@link RekognitionImageValidator}, so an image Rekognition would refuse never
+ * reaches this class.
  * <p>
  * Content-listing operations (DetectLabels, DetectText) always return one canned
  * entry, matching the TextractService stub precedent. Face/moderation operations

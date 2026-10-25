@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.cognito;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -175,7 +176,7 @@ class CognitoAlchemyParityIntegrationTest {
         return RestAssuredJsonUtils.awsActionJson("AWSCognitoIdentityService", action, body);
     }
 
-    private static io.restassured.response.Response identityAction(String action, String body) {
+    private static Response identityAction(String action, String body) {
         return RestAssuredJsonUtils.awsAction("AWSCognitoIdentityService", action, body);
     }
 }

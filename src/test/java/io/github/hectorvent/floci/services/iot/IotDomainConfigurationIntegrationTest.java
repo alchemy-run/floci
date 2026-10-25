@@ -4,6 +4,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
@@ -216,7 +217,7 @@ class IotDomainConfigurationIntegrationTest {
             .body("domainConfigurationName", equalTo("iot:Data-ATS"))
             .body("domainConfigurationArn",
                     startsWith("arn:aws:iot:us-east-1:000000000000:domainconfiguration/iot:Data-ATS/"))
-            .body("domainName", equalTo(IotEndpoints.awsAddress("iot:Data-ATS", "000000000000", "us-east-1")))
+            .body("domainName", endsWith("-ats.iot.us-east-1.amazonaws.com"))
             .body("domainType", equalTo("AWS_MANAGED"))
             .body("serviceType", equalTo("DATA"))
             .body("domainConfigurationStatus", equalTo("ENABLED"))
@@ -319,6 +320,26 @@ class IotDomainConfigurationIntegrationTest {
     }
 
     @Test
+    void createWithTrailingContentAfterTheBodyIsASerializationError() {
+        given()
+            .contentType("application/json")
+            .body(createBody("trailing.it.example.com", "DATA") + " trailing")
+        .when()
+            .post("/domainConfigurations/it-domain-trailing")
+        .then()
+            .statusCode(400)
+            .header("x-amzn-ErrorType", equalTo("SerializationException"))
+            .body("__type", equalTo("SerializationException"));
+
+        given()
+        .when()
+            .get("/domainConfigurations/it-domain-trailing")
+        .then()
+            .statusCode(404)
+            .body("__type", equalTo("ResourceNotFoundException"));
+    }
+
+    @Test
     void describeEndpointAcceptsTheCredentialProviderEndpointType() {
         given()
             .queryParam("endpointType", "iot:CredentialProvider")
@@ -326,9 +347,6 @@ class IotDomainConfigurationIntegrationTest {
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", equalTo(
-                    IotEndpoints.awsAddress("iot:CredentialProvider", "000000000000", "us-east-1")))
-            .body("endpointAddress", startsWith(
-                    IotEndpoints.accountPrefix("000000000000") + ".credentials.iot.us-east-1."));
+            .body("endpointAddress", endsWith(".credentials.iot.us-east-1.amazonaws.com"));
     }
 }

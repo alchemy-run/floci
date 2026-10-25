@@ -6,11 +6,24 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AwsRegionsTest {
+
+    @ParameterizedTest
+    @CsvSource({
+            "us-east-1, ec2.internal",
+            "us-west-2, us-west-2.compute.internal",
+            "eu-central-1, eu-central-1.compute.internal"})
+    void ec2PrivateDnsNamesUseTheRegionalDomain(String region, String domain) {
+        assertEquals(domain, AwsRegions.ec2PrivateDnsDomain(region));
+        assertEquals("ip-10-24-34-0." + domain,
+                AwsRegions.ec2PrivateIpDnsName("10.24.34.0", region));
+    }
 
     /**
      * {@code ALL} is what the emulator advertises; {@code KNOWN_IDS} is what it recognises. The
@@ -19,7 +32,7 @@ class AwsRegionsTest {
      */
     @Test
     void everyAdvertisedRegionIsAKnownRegionId() {
-        for (String region : AwsRegions.ALL) {
+        for (String region : AwsRegions.advertised("aws")) {
             assertTrue(AwsRegions.KNOWN_IDS.contains(region),
                     region + " is advertised by DescribeRegions but is not a known region id");
         }
@@ -97,17 +110,28 @@ class AwsRegionsTest {
         assertEquals("aws-cn", AwsRegions.partitionFor("CN-NORTH-1"));
     }
 
-    /** Every GovCloud and China id the emulator recognises must land outside {@code aws}. */
+    /** Every known id resolves to a partition whose published regions contain it. */
     @Test
-    void knownNonCommercialIdsAreNotCommercial() {
+    void everyKnownIdResolvesToThePartitionThatPublishesIt() {
         for (String region : AwsRegions.KNOWN_IDS) {
-            if (region.startsWith("us-gov-")) {
-                assertEquals("aws-us-gov", AwsRegions.partitionFor(region), region);
-            } else if (region.startsWith("cn-")) {
-                assertEquals("aws-cn", AwsRegions.partitionFor(region), region);
-            } else {
-                assertEquals("aws", AwsRegions.partitionFor(region), region);
-            }
+            String partition = AwsRegions.partitionFor(region);
+            assertTrue(AwsRegions.advertised(partition).contains(region),
+                    region + " resolves to " + partition + ", which does not publish it");
         }
+    }
+
+    @Test
+    void advertisedListsArePerPartition() {
+        assertEquals(34, AwsRegions.advertised("aws").size());
+        assertEquals(List.of("cn-north-1", "cn-northwest-1"), AwsRegions.advertised("aws-cn"));
+        assertTrue(AwsRegions.KNOWN_IDS.contains("eusc-de-east-1"));
+        assertTrue(AwsRegions.KNOWN_IDS.contains("us-isof-south-1"));
+    }
+
+    @Test
+    void pseudoRegionsResolveToTheirPartition() {
+        assertEquals("aws-cn", AwsRegions.partitionFor("aws-cn-global"));
+        assertEquals("amazonaws.com.cn", AwsRegions.dnsSuffixFor("aws-cn-global"));
+        assertEquals("aws-us-gov", AwsRegions.partitionFor("aws-us-gov-global"));
     }
 }

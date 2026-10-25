@@ -4,6 +4,7 @@ import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -45,13 +46,13 @@ class SecretsManagerRoleSessionAccessIntegrationTest {
                 .then().statusCode(200).body("ARN", equalTo(arn));
 
         call(session, "DescribeSecret", "{\"SecretId\":\"" + arn + "\"}")
-                .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+                .then().statusCode(400).body("__type", equalTo("AccessDeniedException"));
         call(session, "DescribeSecret", "{\"SecretId\":\"" + name + "\"}")
-                .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+                .then().statusCode(400).body("__type", equalTo("AccessDeniedException"));
         call(session, "PutSecretValue", "{\"SecretId\":\"" + arn + "\",\"SecretString\":\"other\"}")
-                .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+                .then().statusCode(400).body("__type", equalTo("AccessDeniedException"));
         call(session, "ListSecrets", "{}")
-                .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+                .then().statusCode(400).body("__type", equalTo("AccessDeniedException"));
     }
 
     @Test
@@ -61,7 +62,7 @@ class SecretsManagerRoleSessionAccessIntegrationTest {
         String session = roleSession(bound, "secretsmanager:GetSecretValue");
 
         call(session, "GetSecretValue", "{\"SecretId\":\"" + other + "\"}")
-                .then().statusCode(403).body("__type", equalTo("AccessDeniedException"));
+                .then().statusCode(400).body("__type", equalTo("AccessDeniedException"));
     }
 
     @Test
@@ -70,7 +71,7 @@ class SecretsManagerRoleSessionAccessIntegrationTest {
         IamRole role = createRole(arn, "secretsmanager:GetSecretValue");
         String session = iamService.mintRoleSession(role.getArn()).accessKeyId();
 
-        call(session, "DescribeSecret", "{\"SecretId\":\"" + arn + "\"}").then().statusCode(403);
+        call(session, "DescribeSecret", "{\"SecretId\":\"" + arn + "\"}").then().statusCode(400);
 
         String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
                 + "\"Principal\":{\"AWS\":\"" + role.getArn() + "\"},"
@@ -104,7 +105,7 @@ class SecretsManagerRoleSessionAccessIntegrationTest {
         return role;
     }
 
-    private static io.restassured.response.Response call(String accessKeyId, String operation, String body) {
+    private static Response call(String accessKeyId, String operation, String body) {
         return given()
                 .header("Authorization", "AWS4-HMAC-SHA256 Credential=" + accessKeyId
                         + "/20260720/us-east-1/secretsmanager/aws4_request, SignedHeaders=host, Signature=abc")

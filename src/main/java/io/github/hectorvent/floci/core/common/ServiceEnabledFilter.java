@@ -1,7 +1,7 @@
 package io.github.hectorvent.floci.core.common;
 
-import com.fasterxml.jackson.dataformat.cbor.CBORFactory;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.cbor.CBORFactory;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.container.ContainerRequestFilter;
@@ -10,6 +10,8 @@ import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.ext.Provider;
+
+import java.util.Optional;
 
 @Provider
 public class ServiceEnabledFilter implements ContainerRequestFilter {
@@ -52,15 +54,13 @@ public class ServiceEnabledFilter implements ContainerRequestFilter {
             return null;
         }
 
-        var resourceMatch = catalog.byResourceClass(resourceClass());
+        Optional<ServiceDescriptor> resourceMatch = catalog.byResourceClass(resourceClass());
         if (resourceMatch.isPresent()) {
             ServiceDescriptor descriptor = resourceMatch.get();
             return new ResolvedRequest(descriptor.externalKey(), descriptor.defaultProtocol());
         }
 
-        return SigV4CredentialScope.serviceName(ctx.getHeaderString("Authorization"))
-                .or(() -> SigV4CredentialScope.serviceNameFromCredential(
-                        ctx.getUriInfo().getQueryParameters().getFirst("X-Amz-Credential")))
+        return SignedServiceRoute.signingService(ctx)
                 .flatMap(catalog::byCredentialScope)
                 .map(descriptor -> new ResolvedRequest(
                         descriptor.externalKey(), protocolFor(claim, descriptor)))

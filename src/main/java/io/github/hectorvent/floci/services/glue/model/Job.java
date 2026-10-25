@@ -10,7 +10,6 @@ import java.time.Instant;
 import java.util.Map;
 
 @RegisterForReflection
-@JsonIgnoreProperties(ignoreUnknown = true)
 public class Job {
     @JsonProperty("AllocatedCapacity")
     private Integer allocatedCapacity;

@@ -1,8 +1,10 @@
 package io.github.hectorvent.floci.services.cloudcontrol;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import org.junit.jupiter.api.Test;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -11,8 +13,8 @@ class ResourcePatchTest {
 
     @Test
     void appliesAllOperationsWithEscapedPointersAndArrayInsertion() throws Exception {
-        var source = mapper.readTree("{\"a/b\":{\"~key\":[1,3]},\"Value\":\"old\"}");
-        var patch = mapper.readTree("""
+        JsonNode source = mapper.readTree("{\"a/b\":{\"~key\":[1,3]},\"Value\":\"old\"}");
+        JsonNode patch = mapper.readTree("""
                 [{"op":"test","path":"/Value","value":"old"},
                  {"op":"add","path":"/a~1b/~0key/1","value":2},
                  {"op":"copy","from":"/a~1b/~0key","path":"/copy"},
@@ -26,7 +28,7 @@ class ResourcePatchTest {
 
     @Test
     void rejectsInvalidPatchesWithoutMutatingInput() throws Exception {
-        var source = mapper.readTree("{\"Value\":\"old\",\"list\":[1]}");
+        JsonNode source = mapper.readTree("{\"Value\":\"old\",\"list\":[1]}");
         for (String patch : new String[]{
                 "[{\"op\":\"replace\",\"path\":\"/absent\",\"value\":1}]",
                 "[{\"op\":\"remove\",\"path\":\"/absent\"}]",

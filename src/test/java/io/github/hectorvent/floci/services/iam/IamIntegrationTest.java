@@ -7,7 +7,11 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -24,6 +28,19 @@ class IamIntegrationTest {
     private static final String TRUST_POLICY =
             "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
             + "\"Principal\":{\"Service\":\"lambda.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+
+    private static void createRoleForAssume(String accessKeyId, String roleName) {
+        given()
+            .formParam("Action", "CreateRole")
+            .formParam("RoleName", roleName)
+            .formParam("AssumeRolePolicyDocument", TRUST_POLICY)
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=" + accessKeyId + "/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+    }
 
     private static final String POLICY_DOCUMENT =
             "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
@@ -77,9 +94,10 @@ class IamIntegrationTest {
     @Test
     @Order(3)
     void stsAssumeRole() {
+        createRoleForAssume("test", "StsAssumeTestRole");
         given()
             .formParam("Action", "AssumeRole")
-            .formParam("RoleArn", "arn:aws:iam::000000000000:role/TestRole")
+            .formParam("RoleArn", "arn:aws:iam::000000000000:role/StsAssumeTestRole")
             .formParam("RoleSessionName", "test-session")
             .formParam("DurationSeconds", "3600")
             .header("Authorization",
@@ -94,12 +112,13 @@ class IamIntegrationTest {
             .body("AssumeRoleResponse.AssumeRoleResult.Credentials.SessionToken", notNullValue())
             .body("AssumeRoleResponse.AssumeRoleResult.Credentials.Expiration", notNullValue())
             .body("AssumeRoleResponse.AssumeRoleResult.AssumedRoleUser.Arn",
-                    containsString("assumed-role/TestRole/test-session"));
+                    containsString("assumed-role/StsAssumeTestRole/test-session"));
     }
 
     @Test
     @Order(4)
     void stsAssumeRoleHonoursTwelveDigitAccessKey() {
+        createRoleForAssume("123456789012", "TestRole");
         given()
             .formParam("Action", "AssumeRole")
             .formParam("RoleArn", "arn:aws:iam::123456789012:role/TestRole")
@@ -118,6 +137,7 @@ class IamIntegrationTest {
     @Test
     @Order(6)
     void stsAssumeRoleUsesAccountFromRoleArnForCrossAccount() {
+        createRoleForAssume("222222222222", "CrossAccountRole");
         given()
             .formParam("Action", "AssumeRole")
             .formParam("RoleArn", "arn:aws:iam::222222222222:role/CrossAccountRole")
@@ -377,6 +397,240 @@ class IamIntegrationTest {
     }
 
     @Test
+    @Order(36)
+    void simulateCustomPolicyEvaluatesProvidedDocuments() {
+        given()
+            .formParam("Action", "SimulateCustomPolicy")
+            .formParam("PolicyInputList.member.1", POLICY_DOCUMENT)
+            .formParam("PolicyInputList.member.2", EXPLICIT_DENY_POLICY_DOCUMENT)
+            .formParam("ActionNames.member.1", "s3:GetObject")
+            .formParam("ActionNames.member.2", "ec2:RunInstances")
+            .formParam("ActionNames.member.3", "ssm:GetParameter")
+            .formParam("ResourceArns.member.1", "*")
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .contentType("application/xml")
+            .body("SimulateCustomPolicyResponse.SimulateCustomPolicyResult.EvaluationResults.member.find { it.EvalActionName == 's3:GetObject' }.EvalDecision",
+                    equalTo("allowed"))
+            .body("SimulateCustomPolicyResponse.SimulateCustomPolicyResult.EvaluationResults.member.find { it.EvalActionName == 'ec2:RunInstances' }.EvalDecision",
+                    equalTo("explicitDeny"))
+            .body("SimulateCustomPolicyResponse.SimulateCustomPolicyResult.EvaluationResults.member.find { it.EvalActionName == 'ssm:GetParameter' }.EvalDecision",
+                    equalTo("implicitDeny"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "ForAllValues:StringLike, allowed",
+            "ForAllValues:StringNotLike, allowed",
+            "ForAnyValue:StringLike, implicitDeny",
+            "ForAnyValue:StringNotLike, implicitDeny"
+    })
+    void simulateCustomPolicyUsesSetOperatorSemanticsForMissingKeys(String operator, String decision) {
+        String policy = """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow","Action":"dynamodb:GetItem","Resource":"*",
+                   "Condition":{"%s":{"dynamodb:LeadingKeys":["USER_alice*"]}}}
+                ]}""".formatted(operator);
+        given()
+            .formParam("Action", "SimulateCustomPolicy")
+            .formParam("PolicyInputList.member.1", policy)
+            .formParam("ActionNames.member.1", "dynamodb:GetItem")
+            .formParam("ResourceArns.member.1", "*")
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then().statusCode(200)
+            .body("SimulateCustomPolicyResponse.SimulateCustomPolicyResult.EvaluationResults.member.EvalDecision",
+                    equalTo(decision));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"ForAllValues:StringTypoIfExists", "ForAnyValue:StringTypoIfExists",
+            "StringTypoIfExists", "ForAllValues:Null", "ForAnyValue:Null", "NullIfExists",
+            "ForAllValues:NullIfExists", "ForAnyValue:NullIfExists"})
+    void simulateCustomPolicyRejectsUnsupportedMissingKeyShortcuts(String operator) {
+        String policy = """
+                {"Version":"2012-10-17","Statement":[
+                  {"Effect":"Allow","Action":"dynamodb:GetItem","Resource":"*",
+                   "Condition":{"%s":{"dynamodb:LeadingKeys":["true"]}}}
+                ]}""".formatted(operator);
+        given()
+            .formParam("Action", "SimulateCustomPolicy")
+            .formParam("PolicyInputList.member.1", policy)
+            .formParam("ActionNames.member.1", "dynamodb:GetItem")
+            .formParam("ResourceArns.member.1", "*")
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then().statusCode(200)
+            .body("SimulateCustomPolicyResponse.SimulateCustomPolicyResult.EvaluationResults.member.EvalDecision",
+                    equalTo("implicitDeny"));
+    }
+
+    @Test
+    @Order(37)
+    void simulateCustomPolicyAppliesPermissionsBoundary() {
+        given()
+            .formParam("Action", "SimulateCustomPolicy")
+            .formParam("PolicyInputList.member.1", POLICY_DOCUMENT)
+            .formParam("PermissionsBoundaryPolicyInputList.member.1", EXPLICIT_DENY_POLICY_DOCUMENT)
+            .formParam("ActionNames.member.1", "s3:GetObject")
+            .formParam("ResourceArns.member.1", "*")
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            // The identity policy allows s3:GetObject, but the boundary policy (denying only
+            // ec2:RunInstances) has no explicit allow for it, so the boundary intersection denies.
+            .body("SimulateCustomPolicyResponse.SimulateCustomPolicyResult.EvaluationResults.member.find { it.EvalActionName == 's3:GetObject' }.EvalDecision",
+                    equalTo("implicitDeny"));
+    }
+
+    @Test
+    @Order(38)
+    void simulateCustomPolicyWithoutPolicyInputListReturnsValidationError() {
+        given()
+            .formParam("Action", "SimulateCustomPolicy")
+            .formParam("ActionNames.member.1", "s3:GetObject")
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("ErrorResponse.Error.Code", equalTo("ValidationError"));
+    }
+
+    @Test
+    @Order(39)
+    void getContextKeysForCustomPolicyReturnsKeysFromEveryDocumentIncludingRepeats() {
+        String conditionPolicyA = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
+                + "\"Action\":\"s3:GetObject\",\"Resource\":\"*\","
+                + "\"Condition\":{\"StringEquals\":{\"aws:PrincipalArn\":\"arn:aws:iam::111111111111:user/a\"}}}]}";
+        String conditionPolicyB = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
+                + "\"Action\":\"s3:PutObject\",\"Resource\":\"*\","
+                + "\"Condition\":{\"StringEquals\":{\"aws:PrincipalArn\":\"arn:aws:iam::111111111111:user/a\","
+                + "\"s3:VersionId\":\"abc\"}}}]}";
+
+        given()
+            .formParam("Action", "GetContextKeysForCustomPolicy")
+            .formParam("PolicyInputList.member.1", conditionPolicyA)
+            .formParam("PolicyInputList.member.2", conditionPolicyB)
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .contentType("application/xml")
+            // Not sorted and not de-duplicated, matching AWS's own documented example response
+            // for this method's sibling, which repeats a key referenced by more than one policy.
+            .body("GetContextKeysForCustomPolicyResponse.GetContextKeysForCustomPolicyResult.ContextKeyNames.member",
+                    contains("aws:PrincipalArn", "aws:PrincipalArn", "s3:VersionId"));
+    }
+
+    // AWS's own primary documented example for GetContextKeysForCustomPolicy: a ${...} policy
+    // variable inside a Resource ARN is reported as a referenced context key, alongside the
+    // key from a Condition operator in the same statement.
+    @Test
+    @Order(43)
+    void getContextKeysForCustomPolicyIncludesPolicyVariablesFromResourcePatterns() {
+        String policyWithResourceVariable = "{\"Version\":\"2012-10-17\",\"Statement\":{\"Effect\":\"Allow\","
+                + "\"Action\":\"dynamodb:*\","
+                + "\"Resource\":\"arn:aws:dynamodb:us-east-2:123456789012:table/${aws:username}\","
+                + "\"Condition\":{\"DateGreaterThan\":{\"aws:CurrentTime\":\"2015-08-16T12:00:00Z\"}}}}";
+
+        given()
+            .formParam("Action", "GetContextKeysForCustomPolicy")
+            .formParam("PolicyInputList.member.1", policyWithResourceVariable)
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("GetContextKeysForCustomPolicyResponse.GetContextKeysForCustomPolicyResult.ContextKeyNames.member",
+                    contains("aws:CurrentTime", "aws:username"));
+    }
+
+    @Test
+    @Order(41)
+    void getContextKeysForPrincipalPolicyMergesAttachedAndExtraPolicies() {
+        String extraConditionPolicy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
+                + "\"Action\":\"dynamodb:GetItem\",\"Resource\":\"*\","
+                + "\"Condition\":{\"StringEquals\":{\"dynamodb:LeadingKeys\":\"USER_alice\"}}}]}";
+
+        given()
+            .formParam("Action", "CreateUser")
+            .formParam("UserName", "context-keys-user")
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .formParam("Action", "PutUserPolicy")
+            .formParam("UserName", "context-keys-user")
+            .formParam("PolicyName", "inline-with-condition")
+            .formParam("PolicyDocument", "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
+                    + "\"Action\":\"s3:GetObject\",\"Resource\":\"*\","
+                    + "\"Condition\":{\"StringEquals\":{\"aws:PrincipalArn\":\"arn:aws:iam::111111111111:user/a\"}}}]}")
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        // No extra PolicyInputList: only the attached policy's key comes back.
+        given()
+            .formParam("Action", "GetContextKeysForPrincipalPolicy")
+            .formParam("PolicySourceArn", "arn:aws:iam::000000000000:user/context-keys-user")
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            // A single-element XML list decodes as a bare string rather than a list.
+            .body("GetContextKeysForPrincipalPolicyResponse.GetContextKeysForPrincipalPolicyResult.ContextKeyNames.member",
+                    equalTo("aws:PrincipalArn"));
+
+        // With an extra PolicyInputList document, both keys come back, merged.
+        given()
+            .formParam("Action", "GetContextKeysForPrincipalPolicy")
+            .formParam("PolicySourceArn", "arn:aws:iam::000000000000:user/context-keys-user")
+            .formParam("PolicyInputList.member.1", extraConditionPolicy)
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("GetContextKeysForPrincipalPolicyResponse.GetContextKeysForPrincipalPolicyResult.ContextKeyNames.member",
+                    contains("aws:PrincipalArn", "dynamodb:LeadingKeys"));
+    }
+
+    @Test
+    @Order(42)
+    void getContextKeysForPrincipalPolicyOfUnknownUserReturnsNoSuchEntity() {
+        given()
+            .formParam("Action", "GetContextKeysForPrincipalPolicy")
+            .formParam("PolicySourceArn", "arn:aws:iam::000000000000:user/no-such-context-keys-user")
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(404)
+            .body("ErrorResponse.Error.Code", equalTo("NoSuchEntity"));
+    }
+
+    @Test
     @Order(35)
     void attachManagedPolicyToRole() {
         given()
@@ -409,18 +663,18 @@ class IamIntegrationTest {
 
     @Test
     @Order(50)
-    void listMfaDevicesReturnsEmptyList() {
+    void listMfaDevicesRejectsAnUnknownUser() {
         given()
             .formParam("Action", "ListMFADevices")
-            .formParam("UserName", "any-user")
+            .formParam("UserName", "no-such-mfa-user")
             .header("Authorization",
                     "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
         .when()
             .post("/")
         .then()
-            .statusCode(200)
+            .statusCode(404)
             .contentType("application/xml")
-            .body("ListMFADevicesResponse.ListMFADevicesResult.IsTruncated", equalTo("false"));
+            .body("ErrorResponse.Error.Code", equalTo("NoSuchEntity"));
     }
 
     @Test
@@ -437,7 +691,29 @@ class IamIntegrationTest {
             .statusCode(200)
             .contentType("application/xml")
             .body("GetAccessKeyLastUsedResponse.GetAccessKeyLastUsedResult"
-                    + ".AccessKeyLastUsed.ServiceName", equalTo("N/A"));
+                    + ".AccessKeyLastUsed.ServiceName", equalTo("N/A"))
+            .body(not(containsString("<UserName>")));
+    }
+
+    @Test
+    @Order(49)
+    void getAccessKeyLastUsedReturnsOwningUserName() {
+        // Terraform's aws_iam_access_key import resolves the owner from this field.
+        createUser("last-used-owner");
+        String keyId = createAccessKeyFor("last-used-owner");
+        given()
+            .formParam("Action", "GetAccessKeyLastUsed")
+            .formParam("AccessKeyId", keyId)
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("GetAccessKeyLastUsedResponse.GetAccessKeyLastUsedResult.UserName",
+                    equalTo("last-used-owner"))
+            .body("GetAccessKeyLastUsedResponse.GetAccessKeyLastUsedResult"
+                    + ".AccessKeyLastUsed.Region", equalTo("N/A"));
     }
 
     @Test
@@ -1184,5 +1460,284 @@ class IamIntegrationTest {
                             + ".member.find { it.EvalActionName == 'dynamodb:GetItem' }.EvalDecision",
                     equalTo("allowed"));
     }
-}
 
+    // =========================================================================
+    // PermissionsBoundary round-trip (CreateRole/CreateUser accept it; Get* return it; List* don't)
+    // =========================================================================
+
+    private static final String IAM_AUTH =
+            "AWS4-HMAC-SHA256 Credential=test/20261001/us-east-1/iam/aws4_request";
+
+    private static String createBoundaryPolicy(String name) {
+        return given()
+            .formParam("Action", "CreatePolicy")
+            .formParam("PolicyName", name)
+            .formParam("PolicyDocument", POLICY_DOCUMENT)
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(200)
+            .extract().path("CreatePolicyResponse.CreatePolicyResult.Policy.Arn");
+    }
+
+    @Test
+    @Order(80)
+    void createRoleWithPermissionsBoundaryIsReturnedByGetRole() {
+        String boundary = createBoundaryPolicy("pb-create-role-boundary");
+        given()
+            .formParam("Action", "CreateRole")
+            .formParam("RoleName", "pb-create-role")
+            .formParam("Path", "/pb-list/")
+            .formParam("AssumeRolePolicyDocument", TRUST_POLICY)
+            .formParam("PermissionsBoundary", boundary)
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(200)
+            .body("CreateRoleResponse.CreateRoleResult.Role.PermissionsBoundary.PermissionsBoundaryArn",
+                    equalTo(boundary));
+
+        given()
+            .formParam("Action", "GetRole")
+            .formParam("RoleName", "pb-create-role")
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(200)
+            .body("GetRoleResponse.GetRoleResult.Role.PermissionsBoundary.PermissionsBoundaryArn",
+                    equalTo(boundary))
+            .body("GetRoleResponse.GetRoleResult.Role.PermissionsBoundary.PermissionsBoundaryType",
+                    equalTo("Policy"));
+    }
+
+    @Test
+    @Order(81)
+    void putRolePermissionsBoundaryIsReturnedByGetRole() {
+        String boundary = createBoundaryPolicy("pb-put-role-boundary");
+        given()
+            .formParam("Action", "CreateRole")
+            .formParam("RoleName", "pb-put-role")
+            .formParam("AssumeRolePolicyDocument", TRUST_POLICY)
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then().statusCode(200);
+
+        given()
+            .formParam("Action", "PutRolePermissionsBoundary")
+            .formParam("RoleName", "pb-put-role")
+            .formParam("PermissionsBoundary", boundary)
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then().statusCode(200);
+
+        given()
+            .formParam("Action", "GetRole")
+            .formParam("RoleName", "pb-put-role")
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(200)
+            .body("GetRoleResponse.GetRoleResult.Role.PermissionsBoundary.PermissionsBoundaryArn",
+                    equalTo(boundary));
+    }
+
+    @Test
+    @Order(82)
+    void createUserWithPermissionsBoundaryIsReturnedByGetUser() {
+        String boundary = createBoundaryPolicy("pb-create-user-boundary");
+        given()
+            .formParam("Action", "CreateUser")
+            .formParam("UserName", "pb-create-user")
+            .formParam("Path", "/pb-list/")
+            .formParam("PermissionsBoundary", boundary)
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(200)
+            .body("CreateUserResponse.CreateUserResult.User.PermissionsBoundary.PermissionsBoundaryArn",
+                    equalTo(boundary));
+
+        given()
+            .formParam("Action", "GetUser")
+            .formParam("UserName", "pb-create-user")
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(200)
+            .body("GetUserResponse.GetUserResult.User.PermissionsBoundary.PermissionsBoundaryArn",
+                    equalTo(boundary));
+    }
+
+    @Test
+    @Order(83)
+    void putUserPermissionsBoundaryIsReturnedByGetUser() {
+        String boundary = createBoundaryPolicy("pb-put-user-boundary");
+        given()
+            .formParam("Action", "CreateUser")
+            .formParam("UserName", "pb-put-user")
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then().statusCode(200);
+
+        given()
+            .formParam("Action", "PutUserPermissionsBoundary")
+            .formParam("UserName", "pb-put-user")
+            .formParam("PermissionsBoundary", boundary)
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then().statusCode(200);
+
+        given()
+            .formParam("Action", "GetUser")
+            .formParam("UserName", "pb-put-user")
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(200)
+            .body("GetUserResponse.GetUserResult.User.PermissionsBoundary.PermissionsBoundaryArn",
+                    equalTo(boundary));
+    }
+
+    @Test
+    @Order(84)
+    void listRolesAndListUsersOmitPermissionsBoundary() {
+        // Orders 80 and 82 created a bounded role and user under /pb-list/. ListRoles and
+        // ListUsers document that they do not return PermissionsBoundary.
+        given()
+            .formParam("Action", "ListRoles")
+            .formParam("PathPrefix", "/pb-list/")
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(200)
+            .body("ListRolesResponse.ListRolesResult.Roles.member.RoleName", equalTo("pb-create-role"))
+            .body(not(containsString("PermissionsBoundary")));
+
+        given()
+            .formParam("Action", "ListUsers")
+            .formParam("PathPrefix", "/pb-list/")
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(200)
+            .body("ListUsersResponse.ListUsersResult.Users.member.UserName", equalTo("pb-create-user"))
+            .body(not(containsString("PermissionsBoundary")));
+    }
+
+    @Test
+    @Order(85)
+    void createRoleWithUnknownPermissionsBoundaryCreatesNothing() {
+        given()
+            .formParam("Action", "CreateRole")
+            .formParam("RoleName", "pb-bad-role")
+            .formParam("AssumeRolePolicyDocument", TRUST_POLICY)
+            .formParam("PermissionsBoundary", "arn:aws:iam::000000000000:policy/pb-does-not-exist")
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(404)
+            .body(containsString("NoSuchEntity"));
+
+        given()
+            .formParam("Action", "GetRole")
+            .formParam("RoleName", "pb-bad-role")
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(404);
+    }
+
+    @Test
+    @Order(86)
+    void createRoleRejectsANameOutsideTheRoleNamePattern() {
+        String pattern = "Member must satisfy regular expression pattern: [\\w+=,.@-]+";
+        Map<String, String> constraints = Map.of(
+                "aws:ec2-instance", pattern,
+                "bad/name", pattern,
+                "x".repeat(65), "Member must have length less than or equal to 64");
+        for (Map.Entry<String, String> entry : constraints.entrySet()) {
+            String name = entry.getKey();
+            given()
+                .formParam("Action", "CreateRole")
+                .formParam("RoleName", name)
+                .formParam("AssumeRolePolicyDocument", TRUST_POLICY)
+                .header("Authorization", IAM_AUTH)
+            .when().post("/").then()
+                .statusCode(400)
+                .body("ErrorResponse.Error.Code", equalTo("ValidationError"))
+                .body("ErrorResponse.Error.Message", equalTo("1 validation error detected: Value '" + name
+                        + "' at 'roleName' failed to satisfy constraint: " + entry.getValue()));
+
+            given()
+                .formParam("Action", "GetRole")
+                .formParam("RoleName", name)
+                .header("Authorization", IAM_AUTH)
+            .when().post("/").then()
+                .statusCode(400);
+
+            given()
+                .formParam("Action", "ListRoles")
+                .header("Authorization", IAM_AUTH)
+            .when().post("/").then()
+                .statusCode(200)
+                .body("ListRolesResponse.ListRolesResult.Roles.member.RoleName.flatten()",
+                        not(hasItem(name)));
+        }
+
+        given()
+            .formParam("Action", "CreateRole")
+            .formParam("AssumeRolePolicyDocument", TRUST_POLICY)
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(400)
+            .body("ErrorResponse.Error.Code", equalTo("ValidationError"))
+            .body("ErrorResponse.Error.Message", equalTo("1 validation error detected: Value null"
+                    + " at 'roleName' failed to satisfy constraint: Member must not be null"));
+
+        given()
+            .formParam("Action", "CreateRole")
+            .formParam("RoleName", "")
+            .formParam("AssumeRolePolicyDocument", TRUST_POLICY)
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(400)
+            .body("ErrorResponse.Error.Code", equalTo("ValidationError"))
+            .body("ErrorResponse.Error.Message", equalTo("1 validation error detected: Value ''"
+                    + " at 'roleName' failed to satisfy constraint: Member must have length greater than or equal to 1"));
+
+        given()
+            .formParam("Action", "CreateRole")
+            .formParam("RoleName", "Ok_+=,.@-" + "x".repeat(55))
+            .formParam("AssumeRolePolicyDocument", TRUST_POLICY)
+            .header("Authorization", IAM_AUTH)
+        .when().post("/").then()
+            .statusCode(200);
+    }
+
+    @Test
+    @Order(87)
+    void roleActionsRejectANameOutsideTheRoleNamePattern() {
+        String name = "aws:ec2-instance";
+        String message = "1 validation error detected: Value '" + name + "' at 'roleName' failed to satisfy"
+                + " constraint: Member must satisfy regular expression pattern: [\\w+=,.@-]+";
+        Map<String, Map<String, String>> actions = new LinkedHashMap<>();
+        actions.put("GetRole", Map.of());
+        actions.put("DeleteRole", Map.of());
+        actions.put("UpdateRole", Map.of());
+        actions.put("UpdateAssumeRolePolicy", Map.of("PolicyDocument", TRUST_POLICY));
+        actions.put("TagRole", Map.of("Tags.member.1.Key", "k", "Tags.member.1.Value", "v"));
+        actions.put("UntagRole", Map.of("TagKeys.member.1", "k"));
+        actions.put("ListRoleTags", Map.of());
+        actions.put("AttachRolePolicy", Map.of("PolicyArn", "arn:aws:iam::aws:policy/ReadOnlyAccess"));
+        actions.put("DetachRolePolicy", Map.of("PolicyArn", "arn:aws:iam::aws:policy/ReadOnlyAccess"));
+        actions.put("ListAttachedRolePolicies", Map.of());
+        actions.put("PutRolePolicy", Map.of("PolicyName", "p", "PolicyDocument", TRUST_POLICY));
+        actions.put("GetRolePolicy", Map.of("PolicyName", "p"));
+        actions.put("DeleteRolePolicy", Map.of("PolicyName", "p"));
+        actions.put("ListRolePolicies", Map.of());
+        actions.put("ListInstanceProfilesForRole", Map.of());
+        actions.put("PutRolePermissionsBoundary",
+                Map.of("PermissionsBoundary", "arn:aws:iam::aws:policy/ReadOnlyAccess"));
+        actions.put("DeleteRolePermissionsBoundary", Map.of());
+        actions.put("AddRoleToInstanceProfile", Map.of("InstanceProfileName", "ip"));
+        actions.put("RemoveRoleFromInstanceProfile", Map.of("InstanceProfileName", "ip"));
+        actions.put("DeleteServiceLinkedRole", Map.of());
+
+        for (Map.Entry<String, Map<String, String>> action : actions.entrySet()) {
+            given()
+                .formParam("Action", action.getKey())
+                .formParam("RoleName", name)
+                .formParams(action.getValue())
+                .header("Authorization", IAM_AUTH)
+            .when().post("/").then()
+                .statusCode(400)
+                .body("ErrorResponse.Error.Code", equalTo("ValidationError"))
+                .body("ErrorResponse.Error.Message", equalTo(message));
+        }
+    }
+}

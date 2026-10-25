@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ExtractableResponse;
+import io.restassured.response.Response;
 import io.restassured.response.ValidatableResponse;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -37,9 +40,9 @@ class CloudTrailManagementIntegrationTest {
         try {
             putParameter(ACCOUNT, REGION, parameter, "do-not-log-this-value");
             putParameter(ACCOUNT, REGION, parameter, "another-secret");
-            var query = Map.<String, Object>of("LookupAttributes",
+            Map<String, Object> query = Map.<String, Object>of("LookupAttributes",
                     List.of(Map.of("AttributeKey", "EventName", "AttributeValue", "PutParameter")), "MaxResults", 1);
-            var first = ct(ACCOUNT, REGION, "LookupEvents", query).statusCode(200)
+            ExtractableResponse<Response> first = ct(ACCOUNT, REGION, "LookupEvents", query).statusCode(200)
                     .body("Events", hasSize(1)).body("NextToken", notNullValue()).extract();
             String firstId = first.path("Events[0].EventId");
             JsonNode event = mapper.readTree((String) first.path("Events[0].CloudTrailEvent"));
@@ -50,7 +53,7 @@ class CloudTrailManagementIntegrationTest {
             assertFalse(event.toString().contains("secret"));
             assertFalse(event.toString().contains("do-not-log"));
             String token = first.path("NextToken");
-            var next = new java.util.HashMap<>(query);
+            HashMap<String, Object> next = new HashMap<>(query);
             next.put("NextToken", token);
             ct(ACCOUNT, REGION, "LookupEvents", next).statusCode(200)
                     .body("Events", hasSize(1)).body("Events[0].EventId", not(equalTo(firstId)));
@@ -58,7 +61,7 @@ class CloudTrailManagementIntegrationTest {
                     .body("__type", containsString("InvalidNextTokenException"));
             ct(ACCOUNT, "us-west-2", "LookupEvents", next).statusCode(400)
                     .body("__type", containsString("InvalidNextTokenException"));
-            var byId = Map.<String, Object>of("LookupAttributes",
+            Map<String, Object> byId = Map.<String, Object>of("LookupAttributes",
                     List.of(Map.of("AttributeKey", "EventId", "AttributeValue", firstId)));
             ct(OTHER, REGION, "LookupEvents", byId).statusCode(200).body("Events", empty());
             ct(ACCOUNT, "us-west-2", "LookupEvents", byId).statusCode(200).body("Events", empty());

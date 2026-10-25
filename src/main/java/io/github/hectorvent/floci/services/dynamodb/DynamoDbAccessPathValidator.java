@@ -18,8 +18,11 @@ import io.github.hectorvent.floci.services.dynamodb.ExpressionEvaluator.TokenTyp
 import io.github.hectorvent.floci.services.dynamodb.model.AttributeDefinition;
 import io.github.hectorvent.floci.services.dynamodb.model.TableDefinition;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -52,28 +55,29 @@ final class DynamoDbAccessPathValidator {
         return partitionKeyValuePlaceholder;
     }
 
-    static void validateSelection(TableDefinition table, DynamoDbAccessPath accessPath,
-                                  String select, String projectionExpression,
-                                  JsonNode attributesToGet, JsonNode expressionAttributeNames) {
-        if (projectionExpression != null && select != null && !"SPECIFIC_ATTRIBUTES".equals(select)) {
-            throw validationException("Cannot specify the ProjectionExpression when choosing to get "
-                    + ("COUNT".equals(select) ? "only the Count" : select));
+    static void validateSelection(String select, String indexName,
+                                  String projectionExpression, JsonNode attributesToGet) {
+        rejectWithSelect("ProjectionExpression", projectionExpression != null, select);
+        rejectWithSelect("AttributesToGet", attributesToGet != null, select);
+        if ("ALL_PROJECTED_ATTRIBUTES".equals(select) && indexName == null) {
+            throw validationException("1 validation error detected: "
+                    + "ALL_PROJECTED_ATTRIBUTES can be used only when Querying using an IndexName");
         }
-        if ("ALL_PROJECTED_ATTRIBUTES".equals(select) && !accessPath.isIndex()) {
-            throw validationException("ALL_PROJECTED_ATTRIBUTES can be used only when Querying using an IndexName");
-        }
-        if (attributesToGet != null && select != null && !"SPECIFIC_ATTRIBUTES".equals(select)) {
-            throw validationException("Cannot use both Select and AttributesToGet unless Select is SPECIFIC_ATTRIBUTES");
-        }
+    }
+
+    static void validateGsiProjection(TableDefinition table, DynamoDbAccessPath accessPath,
+                                      String select, String projectionExpression,
+                                      JsonNode attributesToGet, JsonNode expressionAttributeNames) {
         if (!accessPath.isGlobalSecondaryIndex() || "ALL".equals(accessPath.projectionType())) {
             return;
         }
         if ("ALL_ATTRIBUTES".equals(select)) {
-            throw validationException("Select type ALL_ATTRIBUTES is not supported for global secondary index "
+            throw validationException("One or more parameter values were invalid: "
+                    + "Select type ALL_ATTRIBUTES is not supported for global secondary index "
                     + accessPath.indexName() + " because its projection type is not ALL");
         }
 
-        Set<String> requestedAttributes = new HashSet<>();
+        Set<String> requestedAttributes = new LinkedHashSet<>();
         if (projectionExpression != null) {
             requestedAttributes.addAll(ProjectionEvaluator.topLevelAttributes(
                     projectionExpression, expressionAttributeNames));
@@ -85,9 +89,20 @@ final class DynamoDbAccessPathValidator {
         Set<String> projectedAttributes = accessPath.projectedAttributeNames(table);
         requestedAttributes.removeAll(projectedAttributes);
         if (!requestedAttributes.isEmpty()) {
-            throw validationException("One or more parameter values were invalid: Global secondary index "
-                    + accessPath.indexName() + " does not project "
-                    + String.join(", ", requestedAttributes.stream().sorted().toList()));
+            throw unprojectedGsiAttributes(accessPath.indexName(), requestedAttributes);
+        }
+    }
+
+    static AwsException unprojectedGsiAttributes(String indexName, Collection<String> attributes) {
+        return validationException("One or more parameter values were invalid: Global secondary index "
+                + indexName + " does not project [" + String.join(", ", attributes) + "]");
+    }
+
+    private static void rejectWithSelect(String parameter, boolean present, String select) {
+        if (present && select != null && !"SPECIFIC_ATTRIBUTES".equals(select)) {
+            throw validationException("1 validation error detected: "
+                    + "Cannot specify the " + parameter + " when choosing to get "
+                    + ("COUNT".equals(select) ? "only the Count" : select));
         }
     }
 
@@ -109,7 +124,7 @@ final class DynamoDbAccessPathValidator {
 
         boolean conditionOnNonKeyAttribute = false;
 
-        for (var rawCondition : conditions) {
+        for (Expr rawCondition : conditions) {
             Expr condition = normalizeOperandOrder(rawCondition);
             if (conditionOperand(condition) instanceof PathOperand(List<String> segments) && segments.size() > 1) {
                 throw new AwsException("ValidationException",
@@ -427,42 +442,104 @@ final class DynamoDbAccessPathValidator {
         return new AwsException("ValidationException", message, 400);
     }
     // DynamoDB requires an ExclusiveStartKey to exactly match the paged key schema's
-    // attribute names and scalar types. Query and Scan report different messages for faults.
+    // attribute names and scalar types.
     static void validateExclusiveStartKey(JsonNode exclusiveStartKey, TableDefinition table,
-                                          DynamoDbAccessPath accessPath, boolean isScan) {
+                                          DynamoDbAccessPath accessPath) {
         if (exclusiveStartKey == null || exclusiveStartKey.isNull()) return;
-        Set<String> expected = new HashSet<>();
-        expected.add(table.getPartitionKeyName());
-        String sortKey = table.getSortKeyName();
-        if (sortKey != null) {
-            expected.add(sortKey);
-        }
-        if (accessPath.isIndex()) {
-            expected.addAll(accessPath.keyAttributeNames());
+        Set<String> expected = startKeyAttributeNames(table, accessPath);
+        for (String attribute : expected) {
+            JsonNode value = exclusiveStartKey.get(attribute);
+            if (value == null) {
+                continue;
+            }
+            String expectedType = startKeyAttributeType(table, attribute);
+            if (isEmptyKeyValue(value, expectedType)) {
+                throw DynamoDbKeyValueErrors.emptyKeyValue(expectedType, attribute);
+            }
+            if (expectedType == null || hasInvalidScalarValue(value, expectedType)) {
+                throw invalidStartingKey();
+            }
         }
         Set<String> actual = new HashSet<>();
         exclusiveStartKey.fieldNames().forEachRemaining(actual::add);
-        if (!actual.equals(expected) || hasInvalidKeyValue(exclusiveStartKey, table, expected)) {
-            throw invalidStartingKey(isScan);
+        if (!actual.equals(expected)) {
+            throw invalidStartingKey();
         }
     }
 
-    private static boolean hasInvalidKeyValue(JsonNode exclusiveStartKey, TableDefinition table,
-                                              Set<String> expected) {
-        if (table.getAttributeDefinitions() == null) {
-            return true;
+    // A Scan of a table with secondary indexes checks the key values against each index,
+    // in index name order, and names the index in the error. A Scan of an index checks
+    // only that index. With several bad values AWS reports one in no fixed order.
+    static void validateScanExclusiveStartKey(JsonNode exclusiveStartKey, TableDefinition table,
+                                              DynamoDbAccessPath accessPath) {
+        if (exclusiveStartKey == null || exclusiveStartKey.isNull()) {
+            return;
         }
-        for (String attribute : expected) {
-            String expectedType = table.getAttributeDefinitions().stream()
-                    .filter(definition -> attribute.equals(definition.getAttributeName()))
-                    .map(AttributeDefinition::getAttributeType)
-                    .findFirst()
-                    .orElse(null);
-            if (expectedType == null || hasInvalidScalarValue(exclusiveStartKey.get(attribute), expectedType)) {
-                return true;
+        List<DynamoDbAccessPath> indexes = accessPath.isIndex()
+                ? List.of(accessPath)
+                : secondaryIndexNames(table).stream()
+                        .map(indexName -> DynamoDbAccessPath.resolve(table, indexName))
+                        .toList();
+        for (DynamoDbAccessPath index : indexes) {
+            Set<String> attributes = startKeyAttributeNames(table, index);
+            for (String attribute : attributes) {
+                JsonNode value = exclusiveStartKey.get(attribute);
+                String expectedType = startKeyAttributeType(table, attribute);
+                if (value != null && value.isObject() && !value.isEmpty()
+                        && expectedType != null && !value.has(expectedType)) {
+                    throw DynamoDbKeyValueErrors.indexKeyTypeMismatch(attribute, expectedType,
+                            value.fieldNames().next(), index.indexName());
+                }
+            }
+            for (String attribute : attributes) {
+                JsonNode value = exclusiveStartKey.get(attribute);
+                String expectedType = startKeyAttributeType(table, attribute);
+                if (value != null && isEmptyKeyValue(value, expectedType)) {
+                    throw DynamoDbKeyValueErrors.emptyIndexKeyValue(expectedType, index.indexName(), attribute);
+                }
             }
         }
-        return false;
+        validateExclusiveStartKey(exclusiveStartKey, table, accessPath);
+    }
+
+    private static Set<String> startKeyAttributeNames(TableDefinition table, DynamoDbAccessPath accessPath) {
+        Set<String> names = new LinkedHashSet<>();
+        if (accessPath.isIndex()) {
+            accessPath.keySchema().forEach(key -> names.add(key.getAttributeName()));
+        }
+        names.add(table.getPartitionKeyName());
+        if (table.getSortKeyName() != null) {
+            names.add(table.getSortKeyName());
+        }
+        return names;
+    }
+
+    private static List<String> secondaryIndexNames(TableDefinition table) {
+        List<String> names = new ArrayList<>();
+        if (table.getGlobalSecondaryIndexes() != null) {
+            table.getGlobalSecondaryIndexes().forEach(gsi -> names.add(gsi.getIndexName()));
+        }
+        if (table.getLocalSecondaryIndexes() != null) {
+            table.getLocalSecondaryIndexes().forEach(lsi -> names.add(lsi.getIndexName()));
+        }
+        return names.stream().sorted().toList();
+    }
+
+    private static String startKeyAttributeType(TableDefinition table, String attribute) {
+        if (table.getAttributeDefinitions() == null) {
+            return null;
+        }
+        return table.getAttributeDefinitions().stream()
+                .filter(definition -> attribute.equals(definition.getAttributeName()))
+                .map(AttributeDefinition::getAttributeType)
+                .findFirst()
+                .orElse(null);
+    }
+
+    private static boolean isEmptyKeyValue(JsonNode value, String expectedType) {
+        return ("S".equals(expectedType) || "B".equals(expectedType))
+                && value.isObject() && value.size() == 1
+                && value.path(expectedType).isTextual() && value.get(expectedType).textValue().isEmpty();
     }
 
     private static boolean hasInvalidScalarValue(JsonNode value, String expectedType) {
@@ -483,9 +560,7 @@ final class DynamoDbAccessPathValidator {
         return false;
     }
 
-    private static AwsException invalidStartingKey(boolean isScan) {
-        return new AwsException("ValidationException", isScan
-                ? "The provided starting key is invalid: The provided key element does not match the schema"
-                : "The provided starting key is invalid", 400);
+    private static AwsException invalidStartingKey() {
+        return new AwsException("ValidationException", "The provided starting key is invalid", 400);
     }
 }

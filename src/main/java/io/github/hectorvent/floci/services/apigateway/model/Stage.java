@@ -1,8 +1,7 @@
 package io.github.hectorvent.floci.services.apigateway.model;
 
-import io.quarkus.runtime.annotations.RegisterForReflection;
-
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -15,7 +14,6 @@ public class Stage {
     private String deploymentId;
     private String description;
     private Map<String, String> variables = new HashMap<>();
-    private Map<String, String> tags = new HashMap<>();
     private Map<String, MethodSetting> methodSettings = new HashMap<>();
     /** Stage-level cache switch; a method's own cachingEnabled only applies when this is on. */
     private boolean cacheClusterEnabled;
@@ -23,6 +21,7 @@ public class Stage {
     private String cacheClusterStatus = "NOT_AVAILABLE";
     private AccessLogSettings accessLogSettings;
     private boolean tracingEnabled;
+    private Map<String, String> tags = new HashMap<>();
 
     @RegisterForReflection
     public record AccessLogSettings(String destinationArn, String format) {}
@@ -41,6 +40,14 @@ public class Stage {
 
     public void setTracingEnabled(boolean tracingEnabled) {
         this.tracingEnabled = tracingEnabled;
+    }
+
+    public Map<String, String> getTags() {
+        return tags;
+    }
+
+    public void setTags(Map<String, String> tags) {
+        this.tags = tags != null ? tags : new HashMap<>();
     }
 
     public boolean isCacheClusterEnabled() {
@@ -100,14 +107,6 @@ public class Stage {
 
     public void setVariables(Map<String, String> variables) {
         this.variables = variables != null ? variables : new HashMap<>();
-    }
-
-    public Map<String, String> getTags() {
-        return tags;
-    }
-
-    public void setTags(Map<String, String> tags) {
-        this.tags = tags != null ? new HashMap<>(tags) : new HashMap<>();
     }
 
     public Map<String, MethodSetting> getMethodSettings() {

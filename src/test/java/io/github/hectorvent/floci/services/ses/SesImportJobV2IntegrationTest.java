@@ -187,11 +187,14 @@ class SesImportJobV2IntegrationTest {
                  "ImportDestination":{"SuppressionListDestination":{"SuppressionListImportAction":"PUT"}}} garbage
                 """.formatted(BUCKET);
 
-        for (String body : new String[] {badFormat, bothDestinations, noDataSource, trailingTokens}) {
+        for (String body : new String[] {badFormat, bothDestinations, noDataSource}) {
             given().contentType("application/json").header("Authorization", AUTH).body(body)
             .when().post("/v2/email/import-jobs").then().statusCode(400)
                     .body("__type", equalTo("BadRequestException"));
         }
+        given().contentType("application/json").header("Authorization", AUTH).body(trailingTokens)
+        .when().post("/v2/email/import-jobs").then().statusCode(400)
+                .body("__type", equalTo("SerializationException"));
         given().contentType("application/json").header("Authorization", AUTH)
         .when().post("/v2/email/import-jobs").then().statusCode(400)
                 .body("__type", equalTo("BadRequestException"));
@@ -220,7 +223,10 @@ class SesImportJobV2IntegrationTest {
         String s3AuthA = accountAuth("111111111111", "s3");
         String bucketA = BUCKET + "-a";
 
-        given().header("Authorization", s3AuthA).when().put("/" + bucketA).then().statusCode(200);
+        // A regional S3 endpoint requires a LocationConstraint naming its region, as on AWS.
+        given().header("Authorization", s3AuthA).contentType("application/xml")
+                .body("<CreateBucketConfiguration><LocationConstraint>eu-west-3</LocationConstraint></CreateBucketConfiguration>")
+        .when().put("/" + bucketA).then().statusCode(200);
         given().header("Authorization", s3AuthA).contentType("text/plain").body("account-a@example.com,BOUNCE\n")
         .when().put("/" + bucketA + "/suppress.csv").then().statusCode(200);
 

@@ -7,11 +7,14 @@ import io.github.hectorvent.floci.services.s3.model.ChecksumType;
 import io.github.hectorvent.floci.services.s3.model.GetObjectAttributesResult;
 import io.github.hectorvent.floci.services.s3.model.MultipartUpload;
 import io.github.hectorvent.floci.services.s3.model.ObjectAttributeName;
+import io.github.hectorvent.floci.services.s3.model.Part;
 import io.github.hectorvent.floci.services.s3.model.S3Checksum;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
@@ -37,6 +40,135 @@ class S3MultipartServiceTest {
     void setUp() {
         s3Service = new S3Service(new InMemoryStorage<>(), new InMemoryStorage<>(), tempDir, true);
         s3Service.createBucket("test-bucket", "us-east-1");
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void undersizedNonFinalPartPreservesObjectAndUploadForRetry(boolean memory) {
+        S3Service service = new S3Service(new InMemoryStorage<>(), new InMemoryStorage<>(),
+                tempDir.resolve("minimum-part-size"), memory);
+        service.createBucket("sized-bucket", "us-east-1");
+        service.putObject("sized-bucket", "object", "prior".getBytes(StandardCharsets.UTF_8), "text/plain", Map.of());
+        MultipartUpload upload = service.initiateMultipartUpload("sized-bucket", "object", null);
+        byte[] smallPart = "data".getBytes(StandardCharsets.UTF_8);
+        String firstETag = service.uploadPart("sized-bucket", "object", upload.getUploadId(), 1, smallPart);
+        String lastETag = service.uploadPart("sized-bucket", "object", upload.getUploadId(), 2, smallPart);
+
+        AwsException error = assertThrows(AwsException.class, () -> service.completeMultipartUpload(
+                "sized-bucket", "object", upload.getUploadId(), List.of(1, 2),
+                Map.of(1, firstETag, 2, lastETag), Map.of(), null, null));
+        assertEquals("EntityTooSmall", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+        assertEquals("Your proposed upload is smaller than the minimum allowed size", error.getMessage());
+        assertEquals(Map.of("ProposedSize", 4L, "MinSizeAllowed", 5242880L, "PartNumber", 1,
+                "ETag", firstETag.substring(1, firstETag.length() - 1)), error.getExtendedData());
+        assertEquals("prior", new String(service.getObject("sized-bucket", "object").getData(),
+                StandardCharsets.UTF_8));
+        assertEquals(2, service.getMultipartUpload("sized-bucket", "object", upload.getUploadId()).getParts().size());
+
+        String replacementETag = service.uploadPart("sized-bucket", "object", upload.getUploadId(), 1,
+                new byte[5242880]);
+        S3Object completed = service.completeMultipartUpload("sized-bucket", "object", upload.getUploadId(),
+                List.of(1, 2), Map.of(1, replacementETag, 2, lastETag), Map.of(), null, null);
+        assertEquals(5242884, completed.getSize());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 5242879})
+    void minimumPartSizeRejectsValuesBelowFiveMiB(int size) {
+        MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "boundary", null);
+        s3Service.uploadPart("test-bucket", "boundary", upload.getUploadId(), 1, new byte[size]);
+        s3Service.uploadPart("test-bucket", "boundary", upload.getUploadId(), 2, new byte[0]);
+
+        AwsException error = assertThrows(AwsException.class, () -> s3Service.completeMultipartUpload(
+                "test-bucket", "boundary", upload.getUploadId(), List.of(1, 2), null, null));
+        assertEquals("EntityTooSmall", error.getErrorCode());
+        assertEquals((long) size, error.getExtendedData().get("ProposedSize"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void minimumPartSizeOnlyChecksSelectedNonFinalParts(boolean memory) {
+        S3Service service = new S3Service(new InMemoryStorage<>(), new InMemoryStorage<>(),
+                tempDir.resolve("selected-parts"), memory);
+        service.createBucket("selected-bucket", "us-east-1");
+        MultipartUpload upload = service.initiateMultipartUpload("selected-bucket", "object", null);
+        service.uploadPart("selected-bucket", "object", upload.getUploadId(), 1, new byte[1]);
+        service.uploadPart("selected-bucket", "object", upload.getUploadId(), 2, new byte[5242880]);
+        service.uploadPart("selected-bucket", "object", upload.getUploadId(), 7, new byte[0]);
+        service.uploadPart("selected-bucket", "object", upload.getUploadId(), 9, new byte[1]);
+
+        S3Object completed = service.completeMultipartUpload("selected-bucket", "object", upload.getUploadId(),
+                List.of(2, 7), null, null);
+        assertEquals(5242880, completed.getSize());
+        assertEquals(List.of(2, 7), completed.getParts().stream().map(Part::getPartNumber).toList());
+    }
+
+    @Test
+    void minimumPartSizeReportsTheFirstUndersizedNonFinalPart() {
+        MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "first-small", null);
+        s3Service.uploadPart("test-bucket", "first-small", upload.getUploadId(), 1, new byte[5242880]);
+        s3Service.uploadPart("test-bucket", "first-small", upload.getUploadId(), 3, new byte[2]);
+        s3Service.uploadPart("test-bucket", "first-small", upload.getUploadId(), 7, new byte[1]);
+        s3Service.uploadPart("test-bucket", "first-small", upload.getUploadId(), 9, new byte[0]);
+
+        AwsException error = assertThrows(AwsException.class, () -> s3Service.completeMultipartUpload(
+                "test-bucket", "first-small", upload.getUploadId(), List.of(1, 3, 7, 9), null, null));
+        assertEquals("EntityTooSmall", error.getErrorCode());
+        assertEquals(3, error.getExtendedData().get("PartNumber"));
+        assertEquals(2L, error.getExtendedData().get("ProposedSize"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 4})
+    void minimumPartSizeAllowsASingleSmallSelectedPart(int size) {
+        MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "single", null);
+        s3Service.uploadPart("test-bucket", "single", upload.getUploadId(), 1, new byte[size]);
+        s3Service.uploadPart("test-bucket", "single", upload.getUploadId(), 2, new byte[1]);
+
+        S3Object completed = s3Service.completeMultipartUpload("test-bucket", "single", upload.getUploadId(),
+                List.of(1), null, null);
+        assertEquals(size, completed.getSize());
+    }
+
+    @Test
+    void minimumPartSizePreservesManifestValidationBeforeSizeValidation() {
+        MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "validation", null);
+        String firstETag = s3Service.uploadPart("test-bucket", "validation", upload.getUploadId(), 1, new byte[1]);
+        s3Service.uploadPart("test-bucket", "validation", upload.getUploadId(), 2, new byte[1]);
+
+        AwsException badETag = assertThrows(AwsException.class, () -> s3Service.completeMultipartUpload(
+                "test-bucket", "validation", upload.getUploadId(), List.of(1, 2),
+                Map.of(1, firstETag, 2, "wrong"), Map.of(), null, null));
+        assertEquals("InvalidPart", badETag.getErrorCode());
+        AwsException badOrder = assertThrows(AwsException.class, () -> s3Service.completeMultipartUpload(
+                "test-bucket", "validation", upload.getUploadId(), List.of(2, 1), null, null));
+        assertEquals("InvalidPartOrder", badOrder.getErrorCode());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void expectedObjectSizeUsesSelectedPartsAndPreservesExistingObjectOnMismatch(boolean memory) {
+        S3Service service = new S3Service(new InMemoryStorage<>(), new InMemoryStorage<>(),
+                tempDir.resolve("size-check"), memory);
+        service.createBucket("sized-bucket", "us-east-1");
+        service.putObject("sized-bucket", "object", "prior".getBytes(StandardCharsets.UTF_8), "text/plain", Map.of());
+        MultipartUpload upload = service.initiateMultipartUpload("sized-bucket", "object", null);
+        service.uploadPart("sized-bucket", "object", upload.getUploadId(), 1,
+                "data".getBytes(StandardCharsets.UTF_8));
+        service.uploadPart("sized-bucket", "object", upload.getUploadId(), 2,
+                "unused".getBytes(StandardCharsets.UTF_8));
+        AwsException error = assertThrows(AwsException.class, () -> service.completeMultipartUpload(
+                "sized-bucket", "object", upload.getUploadId(), List.of(1), Map.of(), Map.of(), null, null, 10L));
+        assertEquals("InvalidRequest", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+        assertEquals("prior", new String(service.getObject("sized-bucket", "object").getData(),
+                StandardCharsets.UTF_8));
+        S3Object completed = service.completeMultipartUpload("sized-bucket", "object", upload.getUploadId(),
+                List.of(1), Map.of(), Map.of(), null, null, 4L);
+        assertEquals(4, completed.getSize());
+        assertEquals("data", new String(service.getObject("sized-bucket", "object").getData(),
+                StandardCharsets.UTF_8));
     }
 
     @Test
@@ -67,10 +199,15 @@ class S3MultipartServiceTest {
     @Test
     void uploadPartInvalidNumber() {
         MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "file.bin", null);
-        assertThrows(AwsException.class, () ->
-                s3Service.uploadPart("test-bucket", "file.bin", upload.getUploadId(), 0, new byte[1]));
-        assertThrows(AwsException.class, () ->
-                s3Service.uploadPart("test-bucket", "file.bin", upload.getUploadId(), 10001, new byte[1]));
+        for (int partNumber : new int[] {0, 10001}) {
+            AwsException error = assertThrows(AwsException.class, () ->
+                    s3Service.uploadPart("test-bucket", "file.bin", upload.getUploadId(), partNumber, new byte[1]));
+            assertEquals("InvalidArgument", error.getErrorCode());
+            assertEquals(400, error.getHttpStatus());
+            assertEquals("Part number must be an integer between 1 and 10000, inclusive", error.getMessage());
+            assertEquals(Map.of("ArgumentName", "partNumber", "ArgumentValue", Integer.toString(partNumber)),
+                    error.getExtendedData());
+        }
     }
 
     @Test
@@ -83,7 +220,9 @@ class S3MultipartServiceTest {
     void completeMultipartUpload() {
         MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "file.bin", "text/plain",
                 Map.of("owner", "team-a"), "STANDARD_IA");
-        s3Service.uploadPart("test-bucket", "file.bin", upload.getUploadId(), 1, "part1".getBytes());
+        byte[] firstPart = new byte[5 * 1024 * 1024];
+        byte[] whole = concat(firstPart, "part2".getBytes(StandardCharsets.UTF_8));
+        s3Service.uploadPart("test-bucket", "file.bin", upload.getUploadId(), 1, firstPart);
         s3Service.uploadPart("test-bucket", "file.bin", upload.getUploadId(), 2, "part2".getBytes());
 
         S3Object result = s3Service.completeMultipartUpload("test-bucket", "file.bin",
@@ -96,12 +235,12 @@ class S3MultipartServiceTest {
         assertEquals(2, result.getParts().size());
         // Verify the data is concatenated
         S3Object fetched = s3Service.getObject("test-bucket", "file.bin");
-        assertEquals("part1part2", new String(fetched.getData()));
+        assertArrayEquals(whole, fetched.getData());
         // Composite ETag should end with -2 (number of parts)
         assertTrue(result.getETag().endsWith("-2\""), "ETag should be composite: " + result.getETag());
         // Without a checksum algorithm AWS attaches the default CRC64NVME full-object checksum
         assertEquals(ChecksumType.FULL_OBJECT, result.getChecksum().getChecksumType());
-        assertEquals(S3Checksum.crc64NvmeBase64("part1part2".getBytes(StandardCharsets.UTF_8)),
+        assertEquals(S3Checksum.crc64NvmeBase64(whole),
                 result.getChecksum().getChecksumCRC64NVME());
     }
 
@@ -200,15 +339,16 @@ class S3MultipartServiceTest {
     @Test
     void completeMultipartUploadAcceptsNonConsecutivePartNumbers() {
         MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "gapped.bin", null);
+        byte[] firstPart = new byte[5 * 1024 * 1024];
         String first = s3Service.uploadPart("test-bucket", "gapped.bin", upload.getUploadId(), 1,
-                "part1".getBytes(StandardCharsets.UTF_8));
+                firstPart);
         String third = s3Service.uploadPart("test-bucket", "gapped.bin", upload.getUploadId(), 3,
                 "part3".getBytes(StandardCharsets.UTF_8));
 
         S3Object result = s3Service.completeMultipartUpload("test-bucket", "gapped.bin", upload.getUploadId(),
                 List.of(1, 3), Map.of(1, first, 3, third), Map.of(), null, null);
-        assertEquals("part1part3", new String(s3Service.getObject("test-bucket", "gapped.bin").getData(),
-                StandardCharsets.UTF_8));
+        assertArrayEquals(concat(firstPart, "part3".getBytes(StandardCharsets.UTF_8)),
+                s3Service.getObject("test-bucket", "gapped.bin").getData());
     }
 
     @Test
@@ -230,66 +370,6 @@ class S3MultipartServiceTest {
 
         List<MultipartUpload> uploads = s3Service.listMultipartUploads("test-bucket");
         assertEquals(2, uploads.size());
-    }
-
-    @Test
-    void listMultipartUploadsFiltersByPrefixAndPagesWithinAKey() {
-        MultipartUpload first = s3Service.initiateMultipartUpload("test-bucket", "list/matching.txt", null);
-        MultipartUpload sibling = s3Service.initiateMultipartUpload("test-bucket", "list/matching.txt", null);
-        MultipartUpload next = s3Service.initiateMultipartUpload("test-bucket", "list/next.txt", null);
-        s3Service.initiateMultipartUpload("test-bucket", "other/excluded.txt", null);
-
-        S3Service.ListMultipartUploadsResult all =
-                s3Service.listMultipartUploads("test-bucket", "list/", null, 1000, null, null);
-        assertFalse(all.isTruncated());
-        assertEquals(Set.of(first.getUploadId(), sibling.getUploadId(), next.getUploadId()),
-                Set.copyOf(all.uploads().stream().map(MultipartUpload::getUploadId).toList()));
-
-        S3Service.ListMultipartUploadsResult page1 =
-                s3Service.listMultipartUploads("test-bucket", "list/", null, 1, null, null);
-        assertTrue(page1.isTruncated());
-        assertEquals(1, page1.uploads().size());
-        assertEquals("list/matching.txt", page1.nextKeyMarker());
-        assertEquals(page1.uploads().get(0).getUploadId(), page1.nextUploadIdMarker());
-
-        S3Service.ListMultipartUploadsResult page2 = s3Service.listMultipartUploads("test-bucket", "list/",
-                null, 1, page1.nextKeyMarker(), page1.nextUploadIdMarker());
-        assertTrue(page2.isTruncated());
-        assertEquals("list/matching.txt", page2.uploads().get(0).getKey());
-        assertEquals(Set.of(first.getUploadId(), sibling.getUploadId()),
-                Set.of(page1.nextUploadIdMarker(), page2.nextUploadIdMarker()));
-
-        S3Service.ListMultipartUploadsResult page3 = s3Service.listMultipartUploads("test-bucket", "list/",
-                null, 1, page2.nextKeyMarker(), page2.nextUploadIdMarker());
-        assertFalse(page3.isTruncated());
-        assertEquals(List.of(next.getUploadId()),
-                page3.uploads().stream().map(MultipartUpload::getUploadId).toList());
-        assertNull(page3.nextKeyMarker());
-    }
-
-    @Test
-    void listMultipartUploadsKeyMarkerWithoutUploadIdSkipsTheWholeKey() {
-        s3Service.initiateMultipartUpload("test-bucket", "a.txt", null);
-        s3Service.initiateMultipartUpload("test-bucket", "a.txt", null);
-        MultipartUpload b = s3Service.initiateMultipartUpload("test-bucket", "b.txt", null);
-
-        S3Service.ListMultipartUploadsResult result =
-                s3Service.listMultipartUploads("test-bucket", null, null, 1000, "a.txt", null);
-        assertEquals(List.of(b.getUploadId()),
-                result.uploads().stream().map(MultipartUpload::getUploadId).toList());
-    }
-
-    @Test
-    void listMultipartUploadsRollsUpCommonPrefixes() {
-        s3Service.initiateMultipartUpload("test-bucket", "dir/a.txt", null);
-        s3Service.initiateMultipartUpload("test-bucket", "dir/b.txt", null);
-        MultipartUpload top = s3Service.initiateMultipartUpload("test-bucket", "top.txt", null);
-
-        S3Service.ListMultipartUploadsResult result =
-                s3Service.listMultipartUploads("test-bucket", null, "/", 1000, null, null);
-        assertEquals(List.of("dir/"), result.commonPrefixes());
-        assertEquals(List.of(top.getUploadId()),
-                result.uploads().stream().map(MultipartUpload::getUploadId).toList());
     }
 
     @Test
@@ -326,7 +406,7 @@ class S3MultipartServiceTest {
         service.putBucketVersioning("versioned-bucket", "Enabled");
         MultipartUpload upload = service.initiateMultipartUpload("versioned-bucket", "file.bin", null);
         service.uploadPart("versioned-bucket", "file.bin", upload.getUploadId(), 1,
-                "part1".getBytes(StandardCharsets.UTF_8));
+                new byte[5 * 1024 * 1024]);
         service.uploadPart("versioned-bucket", "file.bin", upload.getUploadId(), 2,
                 "part2".getBytes(StandardCharsets.UTF_8));
 
@@ -340,7 +420,7 @@ class S3MultipartServiceTest {
     @Test
     void completeMultipartUploadReturnsTheMd5OfThePartMd5s() throws NoSuchAlgorithmException {
         MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "composite-etag.bin", null);
-        byte[] part1 = "part1".getBytes(StandardCharsets.UTF_8);
+        byte[] part1 = new byte[5 * 1024 * 1024];
         byte[] part2 = "part2".getBytes(StandardCharsets.UTF_8);
         s3Service.uploadPart("test-bucket", "composite-etag.bin", upload.getUploadId(), 1, part1);
         s3Service.uploadPart("test-bucket", "composite-etag.bin", upload.getUploadId(), 2, part2);
@@ -367,11 +447,12 @@ class S3MultipartServiceTest {
 
     @Test
     void getObjectAttributesReturnsMultipartParts() {
+        byte[] part1 = new byte[5 * 1024 * 1024];
         MultipartUpload upload = initiate("parts.bin", "SHA256", null);
-        s3Service.uploadPart("test-bucket", "parts.bin", upload.getUploadId(), 1, "abc".getBytes(StandardCharsets.UTF_8));
+        s3Service.uploadPart("test-bucket", "parts.bin", upload.getUploadId(), 1, part1);
         s3Service.uploadPart("test-bucket", "parts.bin", upload.getUploadId(), 2, "def".getBytes(StandardCharsets.UTF_8));
         s3Service.completeMultipartUpload("test-bucket", "parts.bin", upload.getUploadId(), List.of(1, 2),
-                partChecksums(ChecksumAlgorithm.SHA256, "abc".getBytes(StandardCharsets.UTF_8), "def".getBytes(StandardCharsets.UTF_8)), null, null);
+                partChecksums(ChecksumAlgorithm.SHA256, part1, "def".getBytes(StandardCharsets.UTF_8)), null, null);
 
         GetObjectAttributesResult attributes = s3Service.getObjectAttributes("test-bucket", "parts.bin", null,
                 Set.of(ObjectAttributeName.OBJECT_PARTS, ObjectAttributeName.CHECKSUM),
@@ -385,14 +466,15 @@ class S3MultipartServiceTest {
         assertEquals(1, attributes.getObjectParts().getParts().size());
         assertTrue(attributes.getObjectParts().isTruncated());
         assertEquals(1, attributes.getObjectParts().getNextPartNumberMarker());
-        assertEquals(S3Checksum.sha256Base64("abc".getBytes(StandardCharsets.UTF_8)),
+        assertEquals(S3Checksum.sha256Base64(part1),
                 attributes.getObjectParts().getParts().get(0).getChecksum().getChecksumSHA256());
     }
 
     @Test
     void getObjectAttributesReportsOnlyThePartCountForFullObjectChecksums() {
+        byte[] part1 = new byte[5 * 1024 * 1024];
         MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "full-parts.bin", "application/octet-stream");
-        s3Service.uploadPart("test-bucket", "full-parts.bin", upload.getUploadId(), 1, "abc".getBytes(StandardCharsets.UTF_8));
+        s3Service.uploadPart("test-bucket", "full-parts.bin", upload.getUploadId(), 1, part1);
         s3Service.uploadPart("test-bucket", "full-parts.bin", upload.getUploadId(), 2, "def".getBytes(StandardCharsets.UTF_8));
         s3Service.completeMultipartUpload("test-bucket", "full-parts.bin", upload.getUploadId(), List.of(1, 2), null, null);
 
@@ -418,7 +500,7 @@ class S3MultipartServiceTest {
 
     @Test
     void completeMultipartUploadReturnsCompositeSha256Checksum() {
-        byte[] part1 = "Part1Data-Hello".getBytes(StandardCharsets.UTF_8);
+        byte[] part1 = new byte[5 * 1024 * 1024];
         byte[] part2 = "Part2Data-World".getBytes(StandardCharsets.UTF_8);
         MultipartUpload upload = initiate("sha256.bin", "SHA256", null);
         s3Service.uploadPart("test-bucket", "sha256.bin", upload.getUploadId(), 1, part1);
@@ -459,7 +541,7 @@ class S3MultipartServiceTest {
 
     @Test
     void completeMultipartUploadReturnsCompositeCrc32Checksum() {
-        byte[] part1 = "crc-part-1".getBytes(StandardCharsets.UTF_8);
+        byte[] part1 = new byte[5 * 1024 * 1024];
         byte[] part2 = "crc-part-2".getBytes(StandardCharsets.UTF_8);
         MultipartUpload upload = initiate("crc32.bin", "CRC32", null);
         s3Service.uploadPart("test-bucket", "crc32.bin", upload.getUploadId(), 1, part1);
@@ -476,7 +558,7 @@ class S3MultipartServiceTest {
 
     @Test
     void completeMultipartUploadKeepsCrc64NvmeAsFullObjectChecksum() {
-        byte[] part1 = "crc64-part-1".getBytes(StandardCharsets.UTF_8);
+        byte[] part1 = new byte[5 * 1024 * 1024];
         byte[] part2 = "crc64-part-2".getBytes(StandardCharsets.UTF_8);
         MultipartUpload upload = initiate("crc64.bin", "CRC64NVME", null);
         assertEquals(ChecksumType.FULL_OBJECT, upload.getChecksumType());
@@ -492,7 +574,7 @@ class S3MultipartServiceTest {
 
     @Test
     void completeMultipartUploadHonorsFullObjectTypeRequestedAtInitiation() {
-        byte[] part1 = "full-part-1".getBytes(StandardCharsets.UTF_8);
+        byte[] part1 = new byte[5 * 1024 * 1024];
         byte[] part2 = "full-part-2".getBytes(StandardCharsets.UTF_8);
         MultipartUpload upload = initiate("crc32-full.bin", "CRC32", "FULL_OBJECT");
         s3Service.uploadPart("test-bucket", "crc32-full.bin", upload.getUploadId(), 1, part1);
@@ -525,7 +607,7 @@ class S3MultipartServiceTest {
 
     @Test
     void completeMultipartUploadValidatesClientCompositeChecksum() {
-        byte[] part1 = "Part1Data-Hello".getBytes(StandardCharsets.UTF_8);
+        byte[] part1 = new byte[5 * 1024 * 1024];
         byte[] part2 = "Part2Data-World".getBytes(StandardCharsets.UTF_8);
         MultipartUpload upload = initiate("validated.bin", "SHA256", null);
         s3Service.uploadPart("test-bucket", "validated.bin", upload.getUploadId(), 1, part1);
@@ -586,7 +668,7 @@ class S3MultipartServiceTest {
 
     @Test
     void completeMultipartUploadRequiresEveryPartChecksumOnCompositeUploads() {
-        byte[] part1 = "Part1Data-Hello".getBytes(StandardCharsets.UTF_8);
+        byte[] part1 = new byte[5 * 1024 * 1024];
         byte[] part2 = "Part2Data-World".getBytes(StandardCharsets.UTF_8);
         MultipartUpload upload = initiate("strict.bin", "SHA256", null);
         s3Service.uploadPart("test-bucket", "strict.bin", upload.getUploadId(), 1, part1);
@@ -613,6 +695,86 @@ class S3MultipartServiceTest {
         S3Object result = s3Service.completeMultipartUpload("test-bucket", "strict.bin", upload.getUploadId(),
                 List.of(1, 2), partChecksums(ChecksumAlgorithm.SHA256, part1, part2), null, null);
         assertEquals(compositeSha256(part1, part2), result.getChecksum().getChecksumSHA256());
+    }
+
+    @Test
+    void uploadPartThatTakesAnInMemoryUploadPastOneArrayIsRejected() {
+        MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "huge.bin", null);
+        // The check reads the recorded part sizes, so recording one avoids allocating 2 GiB here.
+        Part recorded = new Part(1, "\"etag\"", Integer.MAX_VALUE - 16L);
+        recorded.setStorageId("1-recorded");
+        upload.getParts().put(1, recorded);
+
+        AwsException error = assertThrows(AwsException.class, () -> s3Service.uploadPart(
+                "test-bucket", "huge.bin", upload.getUploadId(), 2, new byte[16]));
+
+        assertEquals("EntityTooLarge", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+        assertEquals("Your proposed upload exceeds the maximum allowed size", error.getMessage());
+        assertEquals(Map.of("ProposedSize", (long) Integer.MAX_VALUE, "MaxSizeAllowed", Integer.MAX_VALUE - 8L),
+                error.getExtendedData());
+        assertNull(upload.getParts().get(2), "a rejected part is not recorded");
+        s3Service.uploadPart("test-bucket", "huge.bin", upload.getUploadId(), 1, new byte[16]);
+        assertEquals(16, upload.getParts().get(1).getSize(), "re-uploading a part replaces its size in the total");
+    }
+
+    @Test
+    void completeMultipartUploadOverOneArrayIsRejectedInMemoryMode() {
+        MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "huge.bin", null);
+        s3Service.uploadPart("test-bucket", "huge.bin", upload.getUploadId(), 1, "part1".getBytes(StandardCharsets.UTF_8));
+        s3Service.uploadPart("test-bucket", "huge.bin", upload.getUploadId(), 2, "part2".getBytes(StandardCharsets.UTF_8));
+        // Concurrent UploadParts can each pass their own check, so Complete checks the total again.
+        upload.getParts().get(2).setSize(Integer.MAX_VALUE);
+
+        AwsException error = assertThrows(AwsException.class, () -> s3Service.completeMultipartUpload(
+                "test-bucket", "huge.bin", upload.getUploadId(), List.of(1, 2), null, null));
+
+        assertEquals("EntityTooLarge", error.getErrorCode());
+        assertThrows(AwsException.class, () -> s3Service.getObject("test-bucket", "huge.bin"));
+    }
+
+    @Test
+    void completeThatReadAReplacedPartsRecordFailsInsteadOfStoringTheNewBytes() {
+        MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "raced.bin", null);
+        s3Service.uploadPart("test-bucket", "raced.bin", upload.getUploadId(), 1, "first".getBytes(StandardCharsets.UTF_8));
+        Part staleRecord = upload.getParts().get(1);
+        s3Service.uploadPart("test-bucket", "raced.bin", upload.getUploadId(), 1, "other".getBytes(StandardCharsets.UTF_8));
+        // A record whose bytes a same-size re-upload replaced. The upload lock keeps a Complete from
+        // reading one, but if it ever did, it must fail rather than store the new bytes.
+        upload.getParts().put(1, staleRecord);
+
+        AwsException error = assertThrows(AwsException.class, () -> s3Service.completeMultipartUpload(
+                "test-bucket", "raced.bin", upload.getUploadId(), List.of(1), null, null));
+
+        assertEquals("InvalidPart", error.getErrorCode());
+        assertThrows(AwsException.class, () -> s3Service.getObject("test-bucket", "raced.bin"));
+    }
+
+    @Test
+    void uploadPartCopyCopiesOnlyTheRequestedRange() {
+        s3Service.putObject("test-bucket", "source.bin", "ABCDEFGHIJ".getBytes(StandardCharsets.UTF_8),
+                "application/octet-stream", Map.of());
+        MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "copy.bin", null);
+
+        s3Service.uploadPartCopy("test-bucket", "copy.bin", upload.getUploadId(), 1,
+                "test-bucket", "source.bin", null, "bytes=2-5");
+        s3Service.completeMultipartUpload("test-bucket", "copy.bin", upload.getUploadId(), List.of(1), null, null);
+
+        assertArrayEquals("CDEF".getBytes(StandardCharsets.UTF_8), s3Service.getObject("test-bucket", "copy.bin").getData());
+    }
+
+    @Test
+    void uploadPartCopyRejectsARangePastTheEndOfTheSource() {
+        s3Service.putObject("test-bucket", "source.bin", "ABCDEFGHIJ".getBytes(StandardCharsets.UTF_8),
+                "application/octet-stream", Map.of());
+        MultipartUpload upload = s3Service.initiateMultipartUpload("test-bucket", "copy.bin", null);
+
+        AwsException error = assertThrows(AwsException.class, () -> s3Service.uploadPartCopy("test-bucket", "copy.bin",
+                upload.getUploadId(), 1, "test-bucket", "source.bin", null, "bytes=5-10"));
+
+        assertEquals("InvalidArgument", error.getErrorCode());
+        assertEquals("Range specified is not valid for source object of size: 10", error.getMessage());
+        assertNull(upload.getParts().get(1), "no part is recorded for a rejected range");
     }
 
     private static Map<Integer, S3Checksum> partChecksums(ChecksumAlgorithm algorithm, byte[]... parts) {

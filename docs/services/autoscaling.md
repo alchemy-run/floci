@@ -11,13 +11,13 @@ Floci implements the EC2 Auto Scaling API : stored-state management for launch c
 - `arn:aws:autoscaling:<region>:<account>:scalingPolicy:<uuid>:autoScalingGroupName/<group>/policyName/<name>`
 - `arn:aws:autoscaling:<region>:<account>:scheduledUpdateGroupAction:<uuid>:autoScalingGroupName/<group>:scheduledActionName/<name>`
 
-## Supported Operations
+## Supported Operations (53 total)
 
 ### Launch Configurations
 
 | Operation | Notes |
 |---|---|
-| `CreateLaunchConfiguration` | Stores template: `ImageId`, `InstanceType`, `KeyName`, `SecurityGroups`, `UserData`, `IamInstanceProfile`, `InstanceMonitoring`, `BlockDeviceMappings` |
+| `CreateLaunchConfiguration` | Stores template: `ImageId`, `InstanceType`, `KeyName`, `SecurityGroups`, `UserData`, `IamInstanceProfile`, `InstanceMonitoring`, `BlockDeviceMappings`, `MetadataOptions` |
 | `DescribeLaunchConfigurations` | Filtered by name list; returns all if no filter |
 | `DeleteLaunchConfiguration` | Removes the named launch configuration |
 
@@ -29,12 +29,49 @@ Floci implements the EC2 Auto Scaling API : stored-state management for launch c
 | `DescribeAutoScalingGroups` | Filtered by name list; returns all if no filter; includes current instance list with lifecycle state and mixed instances policy shape when configured |
 | `UpdateAutoScalingGroup` | Updates capacity bounds, cooldown, launch source, AZs |
 | `DeleteAutoScalingGroup` | `ForceDelete=true` terminates all instances before deletion |
+| `DescribeTags` | Group tags; filters `auto-scaling-group`, `key`, `value`, `propagate-at-launch` (values ORed, filters ANDed); `MaxRecords`/`NextToken` paging |
+| `CreateOrUpdateTags` | Creates or updates group tags and their propagate-at-launch setting |
+| `DeleteTags` | Removes named group tags |
+| `EnableMetricsCollection` | Records the named group metrics, or all 20 when none are named, as `EnabledMetrics` on `DescribeAutoScalingGroups`. `Granularity` is required and must be `1Minute`; an unknown metric name raises `ValidationError`. No metrics are published to CloudWatch |
+| `DisableMetricsCollection` | Removes the named metrics from `EnabledMetrics`, or all of them when none are named |
+
+`CreateAutoScalingGroup` accepts both `subnet-a,subnet-b` and
+`subnet-a, subnet-b` in `VPCZoneIdentifier`. `DescribeAutoScalingGroups` returns the
+comma-only form. This matches a live AWS comparison in `us-east-1` on October 12,
+2026 at 17:30 UTC: two subnets, matching Availability Zones, one launch template
+and zero capacity. Both groups had identical configuration except for name, ARN
+and creation time. The SDK regression is
+`compatibility-tests/sdk-test-python/tests/test_autoscaling_subnet_whitespace.py`.
+
+Scale-out follows the [AWS placement rules](https://docs.aws.amazon.com/autoscaling/ec2/userguide/auto-scaling-benefits.html):
+choose the zone with the fewest active instances, then its subnet with the most
+free IPv4 addresses. Declared subnets and actual EC2 placement take precedence
+over stale group zone metadata. Exhausted IPv4 subnets are skipped when another
+subnet has capacity. If all are full, EC2 reports the selected subnet's allocation
+error. IPv6-only subnets do not require free IPv4 addresses. Retrying another zone
+after a launch error and rebalancing without a capacity increase are not implemented.
+
+AWS launch errors appear as failed scaling activities after preserving partial
+launches. Repeated identical failures reuse the recorded activity, following the
+scale-in behavior, and do not complete an instance refresh. Unexpected runtime
+failures in ordinary scale-out, and save and cleanup failures, still propagate.
+Refresh launch failures retain the original replacement attempt and appear as
+failed scaling activities while other replacements can continue. Refresh and
+ordinary launches share the same launch settings, including template block-device
+mappings; accepted refresh launches keep their recorded source identity.
+
+For groups configured only with Availability Zones, Floci preserves its unpinned
+EC2 launch behavior and counts each member under the requested zone. This permits
+real zones outside the local subnet catalog, such as `us-east-1d`; the underlying
+EC2 instance can use a default subnet in a different zone.
 
 ### Instance Management
 
 | Operation | Notes |
 |---|---|
 | `DescribeAutoScalingInstances` | Returns all ASG-tracked instances with lifecycle state and health status |
+| `SetInstanceHealth` | Updates an instance's health status immediately; accepts but does not enforce the grace-period flag |
+| `SetInstanceProtection` | Enables or disables scale-in protection for named instances in a group |
 | `SetDesiredCapacity` | Updates desired count; reconciler handles scale-out / scale-in within 10 s |
 | `AttachInstances` | Attaches existing EC2 instances to a group; sets lifecycle state to `InService` |
 | `DetachInstances` | Detaches instances from a group; optionally decrements desired capacity |
@@ -54,6 +91,29 @@ Floci implements the EC2 Auto Scaling API : stored-state management for launch c
 | `DescribeInstanceRefreshes` | Lists refreshes for a group, newest first |
 | `CancelInstanceRefresh` | Cancels an in-progress refresh; `ActiveInstanceRefreshNotFound` when none is active |
 | `RollbackInstanceRefresh` | Marks an active refresh `RollbackSuccessful`; same not-found when none is active |
+| `StartInstanceRefresh` | Starts replacement of group instances and returns a refresh ID |
+| `DescribeInstanceRefreshes` | Returns refresh status and progress, with `MaxRecords`/`NextToken` paging |
+
+### Instance Refresh Recovery
+
+New instance refreshes retain the selected instances and their replacement progress
+across persistent, hybrid, and WAL storage reloads. Suspending `InstanceRefresh`,
+`Launch`, or `Terminate` pauses refresh replacements; resuming those processes lets
+the refresh continue. A failed replacement launch remains part of the refresh, so
+ordinary desired-capacity reconciliation does not bypass the pause. Explicit
+`TerminateInstanceInAutoScalingGroup` requests still run, and independent capacity
+increases can proceed while only `InstanceRefresh` is suspended. Paused original
+instances keep their target-group registrations until replacement resumes.
+Explicitly detached instances leave refresh ownership and are not adopted again
+when the refresh resumes. Recovery of an accepted EC2 launch keeps the source
+identity recorded for that attempt even if the group configuration has changed.
+Older attempts without a recorded source use the available EC2 instance metadata
+without assigning the current launch template to the recovered instance.
+
+This does not implement rolling health-percentage limits, checkpoints, rollback,
+or cancellation. Refreshes saved by older versions without replacement ownership
+retain the previous reconciliation behavior. Storage reload coverage does not
+imply an atomic transaction spanning Auto Scaling and EC2 after a process crash.
 
 ### Load Balancer Attachment
 
@@ -126,6 +186,19 @@ Floci implements the EC2 Auto Scaling API : stored-state management for launch c
 | `DescribeMetricCollectionTypes` | Returns standard metric and granularity names |
 | `DescribeAutoScalingNotificationTypes` | Returns all notification type names |
 
+## Suspended Process Reasons
+
+`SuspendProcesses` records when each newly suspended process entered that state.
+`DescribeAutoScalingGroups` returns `SuspensionReason` in the form
+`User suspended at 2026-10-18T16:00:00Z`. Repeating a suspension preserves its
+original time. Resuming a process removes its recorded time; suspending it again
+starts a new interval.
+
+Saved groups without a recorded suspension time still report the process name
+and omit the optional reason. Floci does not invent a date for those existing
+suspensions. A repeated suspension leaves an unknown time unknown until the
+process is resumed and suspended again.
+
 ## Capacity Reconciler (Phase 2)
 
 Floci runs a background reconciler (10 s fixed rate) that keeps each group's InService instance count aligned with `DesiredCapacity`:
@@ -134,7 +207,37 @@ Floci runs a background reconciler (10 s fixed rate) that keeps each group's InS
 - **Scale-in**: selects InService instances not protected from scale-in, deregisters them from target groups, then calls `TerminateInstances`.
 - Activity records are written on each scale-out and scale-in event.
 
+`SuspendProcesses` pauses desired-capacity scale-out for `Launch` and scale-in for
+`Terminate`. The desired count remains stored, and `ResumeProcesses` allows the
+next reconciliation pass to continue toward it. Omitting process names suspends
+or resumes all processes. Suspending another process does not pause these capacity
+adjustments. Suspension and resumption wait for any desired-capacity adjustment already
+in progress for that group, so a completed suspension cannot be bypassed by an earlier
+reconciliation check.
+
+New owned refresh replacements also pause for `InstanceRefresh`, `Launch`, or
+`Terminate`, as described above. Explicitly requested termination and stale-instance
+cleanup continue independently.
+Other suspended process names are stored and returned but do not pause their
+associated activities.
+
 ## Launch Source Compatibility
+
+New launch configurations preserve their original base64 user data when launching instances, including
+binary and gzip payloads. Configurations derived from an instance retain its original encoding when
+available. Existing stored configurations retain their previous interpretation because older records
+mixed encoded input and decoded text; recreate a configuration to use byte-preserving launches.
+When deriving a configuration from an instance, omitted and blank user-data overrides continue to
+inherit the source instance's data. Creation checks the final selected data before saving: it must
+pass the shared EC2 decoder's base64 and 16 KiB raw-data checks. The decoder also rejects malformed
+gzip and expansion beyond 10 MiB; this is Floci's execution safety limit, not an AWS API limit.
+Invalid marked data in an older saved configuration is contained as a launch failure so reconciliation
+can still save the group and check refresh progress.
+
+Direct and mixed launch templates retain the selected version's original user-data
+encoding for instance attributes and metadata, including compressed and binary
+payloads. Execution still uses decoded text. Older templates that store only
+execution text retain that text through a UTF-8 fallback.
 
 Auto Scaling groups preserve either a launch configuration, a top-level launch template, or a `MixedInstancesPolicy`. These launch sources are mutually exclusive in create/update requests. When a mixed instances policy is supplied, Floci stores and returns:
 
@@ -142,6 +245,7 @@ Auto Scaling groups preserve either a launch configuration, a top-level launch t
 - `LaunchTemplate.LaunchTemplateSpecification.LaunchTemplateName`
 - `LaunchTemplate.LaunchTemplateSpecification.Version`
 - `LaunchTemplate.Overrides.member.N.InstanceType`
+- `LaunchTemplate.Overrides.member.N.WeightedCapacity`
 - `LaunchTemplate.Overrides.member.N.InstanceRequirements`
 - `InstancesDistribution.OnDemandBaseCapacity`
 - `InstancesDistribution.OnDemandPercentageAboveBaseCapacity`
@@ -153,6 +257,10 @@ specifies `InstanceRequirements` must specify both `VCpuCount` and `MemoryMiB`, 
 AWS model marks required on that shape, and raises `ValidationError` otherwise. Every member of the
 `InstanceRequirements` shape round-trips except `BaselinePerformanceFactors`, which is accepted and
 dropped.
+
+`WeightedCapacity` must be an integer from 1 to 999 written in at most 32 characters, and once
+one override sets it every override must, as the AWS model requires. Either rule raises
+`ValidationError` otherwise.
 
 A group uses attribute-based instance type selection when the mixed instances policy left in effect
 by the request carries at least one launch template override with `InstanceRequirements`. On create
@@ -172,6 +280,21 @@ never set a field omits it from the response rather than reporting a default.
 | `CapacityRebalance` | Stored and echoed as a boolean |
 | `MaxInstanceLifetime` | Seconds. Must be `0` or at least `86400`. `0` means no maximum and is echoed back as `0` |
 | `DefaultInstanceWarmup` | Seconds. Pass `-1` to remove a value already set, after which the field is omitted again |
+| `ServiceLinkedRoleARN` | Stored and echoed as given, 1 to 1600 characters. Floci does not check that the role exists, and a group that never set it omits it rather than reporting the default `AWSServiceRoleForAutoScaling` role |
+| `InstanceMaintenancePolicy` | `MinHealthyPercentage` 0 to 100 and `MaxHealthyPercentage` 100 to 200, both required, at most 100 apart. `-1` on both clears a policy already set. Any other combination raises `ValidationError` |
+| `AvailabilityZoneDistribution` | `CapacityDistributionStrategy` is one of `balanced-only`, `balanced-best-effort`, `reservations-then-balanced` |
+| `CapacityReservationSpecification` | `CapacityReservationPreference` is one of `capacity-reservations-only`, `capacity-reservations-first`, `none`, `default`. `CapacityReservationTarget` (`CapacityReservationIds`, `CapacityReservationResourceGroupArns`) round-trips, accepts at most one ID or resource group ARN, and is rejected alongside `none`. Each ID is 1 to 255 characters of `[A-Za-z0-9-_/]` and each resource group ARN is 1 to 1600 characters |
+
+Except for `CapacityReservationSpecification`, these fields are stored and reported only.
+
+The group capacity reservation preference applies to scale-out and replacement launches.
+`default` or an omitted preference retains the launch template specification. `none` launches
+without consuming reservations. `capacity-reservations-only` requires matching reserved capacity;
+`capacity-reservations-first` falls back to unreserved On-Demand capacity on a capacity shortage.
+An omitted group target inherits the template target; with neither target, matching open
+reservations are eligible. Updating the group affects subsequent launches, not existing instances.
+Missing or invalid targets do not trigger On-Demand fallback. Resource group targeting remains
+unsupported, as in EC2, and reports a failed scaling activity without allocating an instance.
 
 ## Scaling Policy Compatibility
 
@@ -215,3 +338,7 @@ aws autoscaling set-desired-capacity \
   --auto-scaling-group-name my-asg \
   --desired-capacity 3
 ```
+
+Launch configurations accept an IAM instance profile name or ARN. Unknown and foreign profiles fail creation with `ValidationError`. At launch, the reconciler resolves a stored name to its ARN in the owning account. `CreateAutoScalingGroup` and `UpdateAutoScalingGroup` refuse, with `ValidationError`, a launch template that names both an instance profile name and an ARN, directly or through the mixed instances policy.
+
+Launch-configuration metadata options (`HttpTokens`, `HttpEndpoint`, and `HttpPutResponseHopLimit`) round-trip through Query and CloudFormation and reach EC2 launches. CloudFormation resolves intrinsics inside the block, so `Fn::If` and `AWS::NoValue` can select or omit the block or any of its members. When the structure is omitted it stays absent from `DescribeLaunchConfigurations`; a supplied partial structure reports defaults for unspecified fields. Launch templates, mixed-instance templates and EC2 Fleet launches likewise forward their existing metadata options.

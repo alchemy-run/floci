@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.apigatewayv2;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.http.ContentType;
+import io.restassured.path.json.JsonPath;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -11,7 +12,6 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.WebSocket;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.notNullValue;
@@ -187,14 +187,8 @@ class WebSocketStageVariablesTest {
 
             ws.sendText("{\"action\":\"test\",\"data\":\"missing-var-test\"}", true).join();
 
-            // The substitution replaces ${stageVariables.missingVar} with empty string,
-            // resulting in an empty function name. The invoker returns IntegrationResult(500, null, ...)
-            // Since body is null, no response is sent back to the client.
-            // We verify this by expecting a timeout — proving the substitution happened
-            // (empty string was used) and the Lambda was NOT successfully invoked.
-            assertThrows(TimeoutException.class, () -> {
-                capture.getResponse(3, TimeUnit.SECONDS);
-            }, "Should not receive a successful response when stage variable is undefined (function name becomes empty)");
+            String response = capture.getResponse(3, TimeUnit.SECONDS);
+            assertEquals("Internal server error", JsonPath.from(response).getString("message"));
 
             ws.sendClose(WebSocket.NORMAL_CLOSURE, "done").join();
             Thread.sleep(500);

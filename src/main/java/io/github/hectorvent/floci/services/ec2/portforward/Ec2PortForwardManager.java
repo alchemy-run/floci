@@ -1,5 +1,8 @@
 package io.github.hectorvent.floci.services.ec2.portforward;
 
+import com.github.dockerjava.api.DockerClient;
+import com.github.dockerjava.api.command.InspectContainerResponse;
+import com.github.dockerjava.api.model.ContainerNetwork;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
@@ -9,9 +12,6 @@ import io.github.hectorvent.floci.core.common.docker.PortAllocator;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.IpPermission;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
-import com.github.dockerjava.api.DockerClient;
-import com.github.dockerjava.api.command.InspectContainerResponse;
-import com.github.dockerjava.api.model.ContainerNetwork;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -53,7 +53,6 @@ public class Ec2PortForwardManager {
     private final ContainerLifecycleManager lifecycleManager;
     private final PortAllocator portAllocator;
     private final EmulatorConfig config;
-    private final Ec2HttpPortMux httpPortMux;
 
     private final ExecutorService executor = Executors.newCachedThreadPool(r -> {
         Thread t = new Thread(r, "ec2-port-forward");
@@ -70,14 +69,12 @@ public class Ec2PortForwardManager {
                                  ContainerBuilder containerBuilder,
                                  ContainerLifecycleManager lifecycleManager,
                                  PortAllocator portAllocator,
-                                 EmulatorConfig config,
-                                 Ec2HttpPortMux httpPortMux) {
+                                 EmulatorConfig config) {
         this.dockerClient = dockerClient;
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.portAllocator = portAllocator;
         this.config = config;
-        this.httpPortMux = httpPortMux;
     }
 
     @PreDestroy
@@ -165,8 +162,13 @@ public class Ec2PortForwardManager {
                 continue;
             }
             portAllocator.markReserved(hostPort);
-            String name = forwardContainerName(instance.getInstanceId(), appPort);
-            if (lifecycleManager.findByName(name).isEmpty()) {
+            // A surviving sidecar is adopted by name, so check the pre-migration name too:
+            // otherwise a forward created before the rename is recreated while the old container
+            // still holds its host port, and the new one cannot bind.
+            String name = forwardContainerName(config, instance.getInstanceId(), appPort);
+            if (lifecycleManager.findByName(name).isEmpty()
+                    && lifecycleManager.findByName(legacyForwardContainerName(
+                            config, instance.getInstanceId(), appPort)).isEmpty()) {
                 LOG.infov("Recreating missing port-forward sidecar for EC2 instance {0} app port {1}",
                         instance.getInstanceId(), appPort);
                 if (!publishOn(instance, appPort, hostPort)) {
@@ -195,41 +197,6 @@ public class Ec2PortForwardManager {
         }
     }
 
-    private boolean publishViaMux(Instance instance, int appPort) {
-        if (httpPortMux == null) {
-            return false;
-        }
-        NetworkTarget target = resolveInstanceTarget(instance);
-        if (target == null) {
-            return false;
-        }
-        String containerName = ContainerStorageHelper.resourceName(config, "ec2", null, instance.getInstanceId());
-        if (!httpPortMux.register(appPort, publicHost(instance), target.ip(), containerName)) {
-            return false;
-        }
-        instance.getPublishedPorts().put(appPort, appPort);
-        persist(instance);
-        return true;
-    }
-
-    public static String publicHost(Instance instance) {
-        if (instance == null) {
-            return "localhost";
-        }
-        String dns = instance.getPublicDnsName();
-        if (dns != null && dns.endsWith(".localhost.floci.io")) {
-            return dns;
-        }
-        String ip = instance.getPublicIpAddress();
-        if (ip != null && ip.endsWith(".localhost.floci.io")) {
-            return ip;
-        }
-        if (instance.getInstanceId() != null && !instance.getInstanceId().isBlank()) {
-            return instance.getInstanceId() + ".localhost.floci.io";
-        }
-        return "localhost";
-    }
-
     private boolean publishOn(Instance instance, int appPort, int hostPort) {
         String instanceId = instance.getInstanceId();
         try {
@@ -240,8 +207,8 @@ public class Ec2PortForwardManager {
                 return false;
             }
 
-            String name = forwardContainerName(instanceId, appPort);
-            lifecycleManager.removeIfExists(name);
+            String name = forwardContainerName(config, instanceId, appPort);
+            ContainerStorageHelper.removeStaleContainer(config, lifecycleManager, name);
 
             ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(config.services().ec2().socatImage())
                     .withName(name)
@@ -276,8 +243,8 @@ public class Ec2PortForwardManager {
         if (muxed) {
             httpPortMux.unregister(appPort, publicHost(instance));
         } else {
-            String name = forwardContainerName(instance.getInstanceId(), appPort);
-            lifecycleManager.removeIfExists(name);
+            String name = forwardContainerName(config, instance.getInstanceId(), appPort);
+            ContainerStorageHelper.removeStaleContainer(config, lifecycleManager, name);
             if (hostPort != null) {
                 portAllocator.release(hostPort);
             }
@@ -299,8 +266,18 @@ public class Ec2PortForwardManager {
         }
     }
 
-    static String forwardContainerName(String instanceId, int appPort) {
-        return "floci-ec2-fwd-" + instanceId + "-" + appPort;
+    /** The unprefixed name token for a forward sidecar. */
+    static String forwardContainerToken(String instanceId, int appPort) {
+        return "ec2-fwd-" + instanceId + "-" + appPort;
+    }
+
+    static String forwardContainerName(EmulatorConfig config, String instanceId, int appPort) {
+        return ContainerStorageHelper.dockerName(config, forwardContainerToken(instanceId, appPort));
+    }
+
+    /** The name a pre-migration version gave the sidecar; only for finding or clearing survivors. */
+    static String legacyForwardContainerName(EmulatorConfig config, String instanceId, int appPort) {
+        return ContainerStorageHelper.legacyDockerName(config, forwardContainerToken(instanceId, appPort));
     }
 
     NetworkTarget resolveInstanceTarget(Instance instance) {
@@ -441,4 +418,48 @@ public class Ec2PortForwardManager {
     /** A resolved forward destination: the instance IP and the network to reach it on (null = default bridge). */
     record NetworkTarget(String network, String ip) {
     }
+
+
+
+    public static String publicHost(Instance instance) {
+        if (instance == null) {
+            return "localhost";
+        }
+        String dns = instance.getPublicDnsName();
+        if (dns != null && dns.endsWith(".localhost.floci.io")) {
+            return dns;
+        }
+        String ip = instance.getPublicIpAddress();
+        if (ip != null && ip.endsWith(".localhost.floci.io")) {
+            return ip;
+        }
+        if (instance.getInstanceId() != null && !instance.getInstanceId().isBlank()) {
+            return instance.getInstanceId() + ".localhost.floci.io";
+        }
+        return "localhost";
+    }
+
+    static String forwardContainerName(String instanceId, int appPort) {
+        return "floci-ec2-fwd-" + instanceId + "-" + appPort;
+    }
+
+    private boolean publishViaMux(Instance instance, int appPort) {
+        if (httpPortMux == null) {
+            return false;
+        }
+        NetworkTarget target = resolveInstanceTarget(instance);
+        if (target == null) {
+            return false;
+        }
+        String containerName = ContainerStorageHelper.resourceName(config, "ec2", null, instance.getInstanceId());
+        if (!httpPortMux.register(appPort, publicHost(instance), target.ip(), containerName)) {
+            return false;
+        }
+        instance.getPublishedPorts().put(appPort, appPort);
+        persist(instance);
+        return true;
+    }
+
+    @Inject
+    Ec2HttpPortMux httpPortMux;
 }

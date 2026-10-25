@@ -1,7 +1,10 @@
 package io.github.hectorvent.floci.core.common;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * Translates SQL statements containing named placeholders ({@code :name}) into
@@ -26,11 +29,15 @@ public final class SqlParameterParser {
      * @param backslashEscapes whether backslash escapes characters in string literals (e.g. MySQL)
      * @param escapeStrings whether PostgreSQL escape strings ({@code E'...'}/{@code e'...'})
      *                      honor backslash escapes (e.g. Redshift Data API)
+     * @param numericNames whether a parameter name may start with a digit, as in
+     *                     {@code :1} (RDS Data API)
+     * @param mysqlComments whether comments follow MySQL's hash, double-dash, and non-nesting rules
      */
-    public record Options(boolean allowBackticks, boolean backslashEscapes, boolean escapeStrings) {
-        public static final Options REDSHIFT = new Options(false, false, true);
-        public static final Options RDS_MYSQL = new Options(true, true, false);
-        public static final Options RDS_POSTGRESQL = new Options(true, false, false);
+    public record Options(boolean allowBackticks, boolean backslashEscapes, boolean escapeStrings,
+                          boolean numericNames, boolean mysqlComments) {
+        public static final Options REDSHIFT = new Options(false, false, true, false, false);
+        public static final Options RDS_MYSQL = new Options(true, true, false, true, true);
+        public static final Options RDS_POSTGRESQL = new Options(true, false, false, true, false);
     }
 
     /**
@@ -52,10 +59,17 @@ public final class SqlParameterParser {
         List<String> order = new ArrayList<>();
         int len = sql.length();
         int i = 0;
+        // One entry per open bracket or parenthesis; true marks an array subscript.
+        Deque<Boolean> nesting = new ArrayDeque<>();
+        // Whether the last significant token (comments and whitespace excluded) ends an
+        // operand: a name, number, literal, quoted identifier, ']' or ')'.
+        boolean afterOperand = false;
+        // Whether the last significant token is the '[' of an array subscript.
+        boolean subscriptStart = false;
         while (i < len) {
             char c = sql.charAt(i);
 
-            if (c == '-' && i + 1 < len && sql.charAt(i + 1) == '-') {
+            if (startsLineComment(sql, i, options)) {
                 int end = sql.indexOf('\n', i);
                 end = end < 0 ? len : end;
                 out.append(sql, i, end);
@@ -64,8 +78,7 @@ public final class SqlParameterParser {
             }
 
             if (c == '/' && i + 1 < len && sql.charAt(i + 1) == '*') {
-                int end = sql.indexOf("*/", i + 2);
-                end = end < 0 ? len : end + 2;
+                int end = skipBlockComment(sql, i, !options.mysqlComments());
                 out.append(sql, i, end);
                 i = end;
                 continue;
@@ -75,6 +88,8 @@ public final class SqlParameterParser {
                 int end = skipQuoted(sql, i, c, options);
                 out.append(sql, i, end);
                 i = end;
+                afterOperand = true;
+                subscriptStart = false;
                 continue;
             }
 
@@ -83,8 +98,49 @@ public final class SqlParameterParser {
                 if (consumed > i) {
                     out.append(sql, i, consumed);
                     i = consumed;
+                    afterOperand = true;
+                    subscriptStart = false;
                     continue;
                 }
+                out.append(c);
+                i++;
+                continue;
+            }
+
+            if (isNamePart(c)) {
+                int j = i + 1;
+                while (j < len && isNamePart(sql.charAt(j))) {
+                    j++;
+                }
+                afterOperand = !isNonOperandWord(sql.substring(i, j));
+                subscriptStart = false;
+                out.append(sql, i, j);
+                i = j;
+                continue;
+            }
+
+            if (c == '[') {
+                nesting.push(afterOperand);
+                subscriptStart = afterOperand;
+                afterOperand = false;
+                out.append(c);
+                i++;
+                continue;
+            }
+            if (c == '(') {
+                nesting.push(Boolean.FALSE);
+                afterOperand = false;
+                subscriptStart = false;
+                out.append(c);
+                i++;
+                continue;
+            }
+            if (c == ']' || c == ')') {
+                if (!nesting.isEmpty()) {
+                    nesting.pop();
+                }
+                afterOperand = true;
+                subscriptStart = false;
                 out.append(c);
                 i++;
                 continue;
@@ -94,20 +150,33 @@ public final class SqlParameterParser {
                 if (i + 1 < len && sql.charAt(i + 1) == ':') {
                     out.append("::");
                     i += 2;
+                    afterOperand = false;
+                    subscriptStart = false;
                     continue;
                 }
-                if (i + 1 < len && isNameStart(sql.charAt(i + 1))) {
-                    int j = i + 1;
-                    while (j < len && isNamePart(sql.charAt(j))) {
-                        j++;
+                if (i + 1 < len && isNameStart(sql.charAt(i + 1), options)) {
+                    boolean sliceBound = Character.isDigit(sql.charAt(i + 1))
+                            && Boolean.TRUE.equals(nesting.peek())
+                            && (afterOperand || subscriptStart);
+                    if (!sliceBound) {
+                        int j = i + 1;
+                        while (j < len && isNamePart(sql.charAt(j))) {
+                            j++;
+                        }
+                        order.add(sql.substring(i + 1, j));
+                        out.append('?');
+                        i = j;
+                        afterOperand = true;
+                        subscriptStart = false;
+                        continue;
                     }
-                    order.add(sql.substring(i + 1, j));
-                    out.append('?');
-                    i = j;
-                    continue;
                 }
             }
 
+            if (!Character.isWhitespace(c)) {
+                afterOperand = false;
+                subscriptStart = false;
+            }
             out.append(c);
             i++;
         }
@@ -127,15 +196,14 @@ public final class SqlParameterParser {
         while (i < len) {
             char c = sql.charAt(i);
 
-            if (c == '-' && i + 1 < len && sql.charAt(i + 1) == '-') {
+            if (startsLineComment(sql, i, options)) {
                 int end = sql.indexOf('\n', i);
                 i = end < 0 ? len : end;
                 continue;
             }
 
             if (c == '/' && i + 1 < len && sql.charAt(i + 1) == '*') {
-                int end = sql.indexOf("*/", i + 2);
-                i = end < 0 ? len : end + 2;
+                i = skipBlockComment(sql, i, !options.mysqlComments());
                 continue;
             }
 
@@ -161,6 +229,38 @@ public final class SqlParameterParser {
             i++;
         }
         return false;
+    }
+
+    private static boolean startsLineComment(String sql, int start, Options options) {
+        boolean mysql = options.mysqlComments();
+        if (mysql && sql.charAt(start) == '#') {
+            return true;
+        }
+        if (sql.charAt(start) != '-' || start + 1 >= sql.length() || sql.charAt(start + 1) != '-') {
+            return false;
+        }
+        return !mysql || (start + 2 < sql.length()
+                && (Character.isWhitespace(sql.charAt(start + 2)) || Character.isISOControl(sql.charAt(start + 2))));
+    }
+
+    private static int skipBlockComment(String sql, int start, boolean nested) {
+        int depth = 1;
+        int i = start + 2;
+        while (i + 1 < sql.length()) {
+            if (nested && sql.charAt(i) == '/' && sql.charAt(i + 1) == '*') {
+                depth++;
+                i += 2;
+            } else if (sql.charAt(i) == '*' && sql.charAt(i + 1) == '/') {
+                depth--;
+                i += 2;
+                if (depth == 0) {
+                    return i;
+                }
+            } else {
+                i++;
+            }
+        }
+        return sql.length();
     }
 
     private static int skipQuoted(String sql, int start, char quote, Options options) {
@@ -211,8 +311,23 @@ public final class SqlParameterParser {
         return quotePos - 1 == 0 || !isNamePart(sql.charAt(quotePos - 2));
     }
 
-    private static boolean isNameStart(char c) {
-        return Character.isLetter(c) || c == '_';
+    /**
+     * Whether {@code word} is a keyword that cannot end an operand and can sit right before a
+     * {@code [} or a {@code :digit}, so what follows is not a subscript or slice bound.
+     * Clause words such as {@code SET}, {@code BY}, {@code VALUES} or {@code FROM} are
+     * left out: they never precede those, and a column may carry such a name. {@code ARRAY}
+     * is here because {@code ARRAY[...]} is a constructor, not a subscript.
+     */
+    private static boolean isNonOperandWord(String word) {
+        return switch (word.toUpperCase(Locale.ROOT)) {
+            case "ARRAY", "AND", "OR", "NOT", "IN", "IS", "LIKE", "ILIKE", "BETWEEN",
+                 "WHEN", "THEN", "ELSE", "CASE", "ANY", "ALL", "SOME", "DISTINCT" -> true;
+            default -> false;
+        };
+    }
+
+    private static boolean isNameStart(char c, Options options) {
+        return Character.isLetter(c) || c == '_' || (options.numericNames() && c >= '0' && c <= '9');
     }
 
     private static boolean isNamePart(char c) {

@@ -8,51 +8,108 @@ import java.time.Instant;
 public class ApiDestination {
 
     private String name;
-    private String apiDestinationArn;
-    private String destinationId;
+    private String arn;
     private String description;
     private String connectionArn;
     private String invocationEndpoint;
     private String httpMethod;
-    private int invocationRateLimitPerSecond;
-    private String apiDestinationState;
+    private Integer invocationRateLimitPerSecond;
+    private ApiDestinationState apiDestinationState;
     private Instant creationTime;
     private Instant lastModifiedTime;
 
-    public ApiDestination() {}
+    public ApiDestination() {
+    }
 
-    public String getName() { return name; }
-    public void setName(String name) { this.name = name; }
+    public ApiDestination(String name, String arn, String connectionArn, String invocationEndpoint,
+                          String httpMethod, Integer invocationRateLimitPerSecond, String description) {
+        this.name = name;
+        this.arn = arn;
+        this.connectionArn = connectionArn;
+        this.invocationEndpoint = invocationEndpoint;
+        this.httpMethod = httpMethod;
+        this.invocationRateLimitPerSecond = invocationRateLimitPerSecond;
+        this.description = description;
+        this.apiDestinationState = ApiDestinationState.ACTIVE;
+    }
 
-    public String getApiDestinationArn() { return apiDestinationArn; }
-    public void setApiDestinationArn(String apiDestinationArn) { this.apiDestinationArn = apiDestinationArn; }
+    public String getName() {
+        return name;
+    }
 
-    public String getDestinationId() { return destinationId; }
-    public void setDestinationId(String destinationId) { this.destinationId = destinationId; }
+    public void setName(String name) {
+        this.name = name;
+    }
 
-    public String getDescription() { return description; }
-    public void setDescription(String description) { this.description = description; }
+    public String getArn() {
+        return arn;
+    }
 
-    public String getConnectionArn() { return connectionArn; }
-    public void setConnectionArn(String connectionArn) { this.connectionArn = connectionArn; }
+    public void setArn(String arn) {
+        this.arn = arn;
+    }
 
-    public String getInvocationEndpoint() { return invocationEndpoint; }
-    public void setInvocationEndpoint(String invocationEndpoint) { this.invocationEndpoint = invocationEndpoint; }
+    public String getDescription() {
+        return description;
+    }
 
-    public String getHttpMethod() { return httpMethod; }
-    public void setHttpMethod(String httpMethod) { this.httpMethod = httpMethod; }
+    public void setDescription(String description) {
+        this.description = description;
+    }
 
-    public int getInvocationRateLimitPerSecond() { return invocationRateLimitPerSecond; }
-    public void setInvocationRateLimitPerSecond(int invocationRateLimitPerSecond) {
+    public String getConnectionArn() {
+        return connectionArn;
+    }
+
+    public void setConnectionArn(String connectionArn) {
+        this.connectionArn = connectionArn;
+    }
+
+    public String getInvocationEndpoint() {
+        return invocationEndpoint;
+    }
+
+    public void setInvocationEndpoint(String invocationEndpoint) {
+        this.invocationEndpoint = invocationEndpoint;
+    }
+
+    public String getHttpMethod() {
+        return httpMethod;
+    }
+
+    public void setHttpMethod(String httpMethod) {
+        this.httpMethod = httpMethod;
+    }
+
+    public Integer getInvocationRateLimitPerSecond() {
+        return invocationRateLimitPerSecond;
+    }
+
+    public void setInvocationRateLimitPerSecond(Integer invocationRateLimitPerSecond) {
         this.invocationRateLimitPerSecond = invocationRateLimitPerSecond;
     }
 
-    public String getApiDestinationState() { return apiDestinationState; }
-    public void setApiDestinationState(String apiDestinationState) { this.apiDestinationState = apiDestinationState; }
+    public ApiDestinationState getApiDestinationState() {
+        return apiDestinationState;
+    }
 
-    public Instant getCreationTime() { return creationTime; }
-    public void setCreationTime(Instant creationTime) { this.creationTime = creationTime; }
+    public void setApiDestinationState(ApiDestinationState apiDestinationState) {
+        this.apiDestinationState = apiDestinationState;
+    }
 
-    public Instant getLastModifiedTime() { return lastModifiedTime; }
-    public void setLastModifiedTime(Instant lastModifiedTime) { this.lastModifiedTime = lastModifiedTime; }
+    public Instant getCreationTime() {
+        return creationTime;
+    }
+
+    public void setCreationTime(Instant creationTime) {
+        this.creationTime = creationTime;
+    }
+
+    public Instant getLastModifiedTime() {
+        return lastModifiedTime;
+    }
+
+    public void setLastModifiedTime(Instant lastModifiedTime) {
+        this.lastModifiedTime = lastModifiedTime;
+    }
 }

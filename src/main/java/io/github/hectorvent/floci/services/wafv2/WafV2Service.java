@@ -15,12 +15,12 @@ import io.github.hectorvent.floci.services.wafv2.model.WebAcl;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
-import java.net.Inet4Address;
-import java.net.InetAddress;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;

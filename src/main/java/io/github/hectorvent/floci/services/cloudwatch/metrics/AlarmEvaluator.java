@@ -22,7 +22,7 @@ import java.util.concurrent.TimeUnit;
  * Evaluates every CloudWatch alarm that carries metric-math configuration
  * (namespace/metricName/period/evaluationPeriods/comparisonOperator), transitions its
  * {@code StateValue} the way real CloudWatch would, and while it is in {@code ALARM}
- * dispatches {@code AlarmActions} through {@link AlarmActionHandler} on every tick, not
+ * dispatches {@code AlarmActions} through {@link AlarmActionHandler} on every tick — not
  * just the first transition into that state, so an action deferred by a handler (e.g. a
  * scaling policy still in cooldown) is retried on a later tick rather than dropped for as
  * long as the breach continues.
@@ -32,7 +32,7 @@ import java.util.concurrent.TimeUnit;
  * auto-create alarms for) is evaluated identically to one Floci synthesized itself.</p>
  *
  * <p>The value handed to {@link AlarmActionHandler#handle} is always the most recent
- * <em>breaching</em> datapoint, not simply the most recent one chronologically, the two can
+ * <em>breaching</em> datapoint, not simply the most recent one chronologically — the two can
  * differ once {@code TreatMissingData} lets missing periods themselves cause an {@code ALARM}
  * transition, and dispatching a non-breaching real reading in that case would push a handler's
  * math in the wrong direction. When {@code TreatMissingData=breaching} reaches {@code ALARM}
@@ -47,8 +47,6 @@ public class AlarmEvaluator {
 
     private final CloudWatchMetricsService metricsService;
     private final Instance<AlarmActionHandler> handlers;
-    @Inject
-    CloudWatchMetadataService metadataService;
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
             r -> new Thread(r, "alarm-evaluator"));
 
@@ -288,9 +286,10 @@ public class AlarmEvaluator {
 
     private static boolean isEvaluable(MetricAlarm alarm) {
         return alarm.getRegion() != null
+                && alarm.getMetrics().isEmpty()
                 && alarm.getNamespace() != null && !alarm.getNamespace().isBlank()
                 && alarm.getMetricName() != null && !alarm.getMetricName().isBlank()
-                && alarm.getPeriod() > 0
+                && alarm.getPeriod() != null && alarm.getPeriod() > 0
                 && alarm.getEvaluationPeriods() > 0
                 && alarm.getComparisonOperator() != null;
     }
@@ -304,4 +303,7 @@ public class AlarmEvaluator {
             default -> false;
         };
     }
+
+    @Inject
+    CloudWatchMetadataService metadataService;
 }

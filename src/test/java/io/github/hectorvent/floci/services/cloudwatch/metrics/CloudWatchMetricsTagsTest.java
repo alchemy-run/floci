@@ -2,11 +2,12 @@ package io.github.hectorvent.floci.services.cloudwatch.metrics;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.CloudWatchDashboardsService;
-import io.github.hectorvent.floci.services.cloudwatch.metricstreams.CloudWatchMetricStreamsService;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
+import io.github.hectorvent.floci.services.cloudwatch.metricstreams.CloudWatchMetricStreamsService;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
@@ -81,6 +82,34 @@ class CloudWatchMetricsTagsTest {
         assertEquals(1, tags.size());
         assertEquals("prod", tags.get("env"));
         assertNull(tags.get("team"));
+    }
+
+    /**
+     * An ARN naming no alarm is an error on all three operations, not a silent no-op. The ARN
+     * used here differs from a working one only in the alarm name, so the outcome cannot be
+     * explained by the ARN failing to parse.
+     */
+    @Test
+    void tagOperationsRejectAnArnThatNamesNoAlarm() {
+        MetricAlarm alarm = new MetricAlarm();
+        alarm.setAlarmName("test-alarm");
+        alarm.setAlarmArn("arn:aws:cloudwatch:us-east-1:000000000000:alarm:test-alarm");
+        service.putMetricAlarm(alarm, REGION);
+        String ghost = "arn:aws:cloudwatch:us-east-1:000000000000:alarm:nosuch";
+
+        for (Runnable call : List.<Runnable>of(
+                () -> service.tagResource(ghost, Map.of("env", "prod"), REGION),
+                () -> service.untagResource(ghost, List.of("env"), REGION),
+                () -> service.listTagsForResource(ghost, REGION))) {
+            AwsException e = assertThrows(AwsException.class, call::run);
+            assertEquals("ResourceNotFoundException", e.getErrorCode());
+            assertEquals(404, e.getHttpStatus());
+        }
+
+        // The failures wrote nothing: the real alarm still carries only what it was given.
+        assertEquals(Map.of(), service.listTagsForResource(alarm.getAlarmArn(), REGION));
+        service.tagResource(alarm.getAlarmArn(), Map.of("env", "dev"), REGION);
+        assertEquals(Map.of("env", "dev"), service.listTagsForResource(alarm.getAlarmArn(), REGION));
     }
 
     @Test

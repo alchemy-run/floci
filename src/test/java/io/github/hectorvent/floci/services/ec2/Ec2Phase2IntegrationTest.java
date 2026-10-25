@@ -85,6 +85,9 @@ class Ec2Phase2IntegrationTest {
     @Order(10)
     void runInstancesWithIamInstanceProfile() {
         String profileArn = "arn:aws:iam::000000000000:instance-profile/my-app-role";
+        given().header("Authorization", AUTH_HEADER.replace("/ec2/", "/iam/"))
+                .formParam("Action", "CreateInstanceProfile").formParam("InstanceProfileName", "my-app-role")
+                .post("/").then().statusCode(200);
 
         instanceWithProfile = given()
             .formParam("Action", "RunInstances")
@@ -167,8 +170,9 @@ class Ec2Phase2IntegrationTest {
     @Test
     @Order(20)
     void importKeyPairForSsh() {
-        // AWS wire format: PublicKeyMaterial must be base64-encoded
-        String publicKey = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAAQQDHnLTTbpnrFWkfVt test@test";
+        // AWS wire format: PublicKeyMaterial must be base64-encoded. The key has to be whole, as
+        // ImportKeyPair refuses a truncated blob.
+        String publicKey = Ec2KeyMaterial.generateRsa().openSshPublicKey() + " test@test";
         String encodedKey = Base64.getEncoder().encodeToString(publicKey.getBytes());
 
         given()

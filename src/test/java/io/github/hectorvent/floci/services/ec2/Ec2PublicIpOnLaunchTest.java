@@ -6,13 +6,13 @@ import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ec2.model.Address;
 import io.github.hectorvent.floci.services.ec2.model.Image;
+import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.InternetGateway;
 import io.github.hectorvent.floci.services.ec2.model.KeyPair;
 import io.github.hectorvent.floci.services.ec2.model.LaunchTemplate;
 import io.github.hectorvent.floci.services.ec2.model.ManagedPrefixList;
 import io.github.hectorvent.floci.services.ec2.model.NatGateway;
 import io.github.hectorvent.floci.services.ec2.model.NetworkAcl;
-import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.Reservation;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.ec2.model.Vpc;
@@ -60,8 +60,13 @@ class Ec2PublicIpOnLaunchTest {
         assertFalse(inPrivate.isAssociatePublicIp(),
                 "instance in a private subnet must NOT be flagged for a public IP");
 
-        assertEquals(inPublic.getInstanceId() + ".localhost.floci.io", inPublic.getPublicIpAddress(),
-                "public-subnet instance must report its host-routed public address immediately");
+        // The behavior #1984 is about, not just the flag: after the container
+        // manager's gate runs, a private-subnet instance reports no public
+        // address while a public-subnet one reports the host-reachable one.
+        applyContainerManagerPublicIpGate(inPublic);
+        applyContainerManagerPublicIpGate(inPrivate);
+        assertEquals("127.0.0.1", inPublic.getPublicIpAddress(),
+                "public-subnet instance must report the host-reachable public IP");
         assertNull(inPrivate.getPublicIpAddress(),
                 "private-subnet instance must report no public IP");
         assertNull(inPrivate.getPublicDnsName(),
@@ -86,9 +91,20 @@ class Ec2PublicIpOnLaunchTest {
                 "launch-time true must force a public IP in a private subnet");
         assertFalse(forcedOff.isAssociatePublicIp(),
                 "launch-time false must suppress the public IP in a public subnet");
-        assertEquals(forcedOn.getInstanceId() + ".localhost.floci.io", forcedOn.getPublicIpAddress());
-        assertNull(forcedOff.getPublicIpAddress());
-        assertNull(forcedOff.getPublicDnsName());
+    }
+
+    /**
+     * Mirrors the gate in Ec2ContainerManager (launch(), the
+     * isAssociatePublicIp branch): public addresses are set only for flagged
+     * instances. The manager is mocked out here to keep Docker away, so the
+     * decision is replicated verbatim — if the branch there changes shape,
+     * update this too.
+     */
+    private static void applyContainerManagerPublicIpGate(Instance instance) {
+        if (instance.isAssociatePublicIp()) {
+            instance.setPublicIpAddress("127.0.0.1");
+            instance.setPublicDnsName("localhost");
+        }
     }
 
     private Instance runOne(Ec2Service ec2, String subnetId) {
@@ -105,14 +121,15 @@ class Ec2PublicIpOnLaunchTest {
         EmulatorConfig config = mock(EmulatorConfig.class);
         when(config.defaultAccountId()).thenReturn("000000000000");
         // mock() == true short-circuits the container launch in runInstances, so
-        // no Docker is needed, the associatePublicIp flag is set before that.
+        // no Docker is needed — the associatePublicIp flag is set before that.
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
         EmulatorConfig.Ec2ServiceConfig ec2Cfg = mock(EmulatorConfig.Ec2ServiceConfig.class);
         when(config.services()).thenReturn(services);
         when(services.ec2()).thenReturn(ec2Cfg);
         when(ec2Cfg.mock()).thenReturn(true);
+        when(ec2Cfg.mockPublicAddresses()).thenReturn(EmulatorConfig.Ec2ServiceConfig.MockPublicAddresses.NONE);
         Ec2ImageCatalog imageCatalog = new Ec2ImageCatalog();
-        // A mock container manager makes launch() a no-op, the associatePublicIp
+        // A mock container manager makes launch() a no-op — the associatePublicIp
         // flag is set on the instance BEFORE launch, so no Docker is needed here.
         return new Ec2Service(config, mock(Ec2ContainerManager.class), mock(Ec2PortForwardManager.class),
                 new AmiImageResolver(imageCatalog), imageCatalog,

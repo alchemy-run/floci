@@ -29,6 +29,9 @@ Floci Batch implements the AWS Batch control plane for local integration tests. 
 | `TagResource` | `POST /v1/tagresource` | Tag a compute environment, queue, or job definition |
 | `UntagResource` | `POST /v1/untagresource` | Remove tags from a Batch resource |
 | `ListTagsForResource` | `POST /v1/listtagsforresource` | List tags on a Batch resource |
+| `ListTagsForResource` | `GET /v1/tags/{resourceArn}` | List the tags of a compute environment, job queue, job definition, or job |
+| `TagResource` | `POST /v1/tags/{resourceArn}` | Add or overwrite tags on a resource; tags the request omits are kept |
+| `UntagResource` | `DELETE /v1/tags/{resourceArn}?tagKeys=...` | Remove the named tag keys from a resource |
 
 ## Runner Modes
 

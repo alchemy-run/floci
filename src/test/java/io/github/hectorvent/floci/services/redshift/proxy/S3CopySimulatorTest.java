@@ -1420,7 +1420,7 @@ class S3CopySimulatorTest {
 
         String ndjson = "{\"id\": 1, \"name\": \"Alice\"}\n";
         ByteArrayOutputStream gzippedOut = new ByteArrayOutputStream();
-        try (java.util.zip.GZIPOutputStream gzip = new java.util.zip.GZIPOutputStream(gzippedOut)) {
+        try (GZIPOutputStream gzip = new GZIPOutputStream(gzippedOut)) {
             gzip.write(ndjson.getBytes(StandardCharsets.UTF_8));
         }
 

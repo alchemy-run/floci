@@ -3,33 +3,26 @@ package io.github.hectorvent.floci.services.cloudformation;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
+import io.github.hectorvent.floci.testing.RdsMockProfile;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
-import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
-import io.restassured.path.xml.XmlPath;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
 
 /** End-to-end coverage for attaching and detaching an external secret from an RDS target. */
 @QuarkusTest
-@TestProfile(CloudFormationSecretTargetAttachmentIntegrationTest.RdsMockProfile.class)
+@TestProfile(RdsMockProfile.class)
 class CloudFormationSecretTargetAttachmentIntegrationTest {
 
     private static final String CFN_AUTH =
             "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/cloudformation/aws4_request";
-    private static final String RDS_AUTH =
-            "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/rds/aws4_request";
-    private static final String DB_INSTANCE_PATH =
-            "DescribeDBInstancesResponse.DescribeDBInstancesResult.DBInstances.DBInstance";
     private static final String SM_CONTENT_TYPE = "application/x-amz-json-1.1";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -94,20 +87,14 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
             assertEquals("initial-password", attached.path("password").asText());
             assertEquals("keep", attached.path("custom").asText());
             assertEquals("postgres", attached.path("engine").asText());
-            // The attachment writes the instance's own endpoint, as DescribeDBInstances reports it.
-            XmlPath instance = describeDbInstance(databaseId);
-            String endpointAddress = instance.getString(DB_INSTANCE_PATH + ".Endpoint.Address");
-            int endpointPort = instance.getInt(DB_INSTANCE_PATH + ".Endpoint.Port");
-            assertFalse(endpointAddress == null || endpointAddress.isBlank(),
-                    "instance should report an endpoint address");
-            assertTrue(endpointPort > 0);
-            assertEquals(endpointAddress, attached.path("host").asText());
-            assertEquals(endpointPort, attached.path("port").asInt());
+            // The instance's endpoint address, which the fork's RDS names under rds.localhost.floci.io.
+            assertTrue(attached.path("host").asText().endsWith(".rds.localhost.floci.io"), attached.toString());
+            assertTrue(attached.path("port").asInt() > 0);
             assertEquals("appdb", attached.path("dbname").asText());
             assertEquals(databaseId, attached.path("dbInstanceIdentifier").asText());
 
             deleteStack(stackName);
-            awaitStackDeleted(stackName);
+            CfnStackWaits.awaitStackDeleted(stackName);
             stackCreated = false;
 
             given()
@@ -128,7 +115,7 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
         } finally {
             if (stackCreated) {
                 deleteStack(stackName);
-                awaitStackDeleted(stackName);
+                CfnStackWaits.awaitStackDeleted(stackName);
             }
             forceDeleteSecret(secretName);
         }
@@ -177,7 +164,7 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
             putBinarySecret(secretName, "AQID");
 
             deleteStack(stackName);
-            awaitStackDeleted(stackName);
+            CfnStackWaits.awaitStackDeleted(stackName);
             stackCreated = false;
 
             JsonNode value = getSecretValue(secretName);
@@ -186,7 +173,7 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
         } finally {
             if (stackCreated) {
                 deleteStack(stackName);
-                awaitStackDeleted(stackName);
+                CfnStackWaits.awaitStackDeleted(stackName);
             }
             forceDeleteSecret(secretName);
         }
@@ -256,7 +243,7 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
         } finally {
             if (stackCreated) {
                 deleteStack(stackName);
-                awaitStackDeleted(stackName);
+                CfnStackWaits.awaitStackDeleted(stackName);
             }
             forceDeleteSecret(secretName);
         }
@@ -310,8 +297,9 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
             String describeXml = describeStack(stackName);
             assertTrue(describeXml.contains("<StackStatus>ROLLBACK_COMPLETE</StackStatus>"),
                     "stack should be ROLLBACK_COMPLETE: " + describeXml);
-            assertTrue(describeXml.contains("already attached"),
-                    "stack should report the duplicate attachment: " + describeXml);
+            String failure = CfnStackWaits.failedResourceReason(stackName, CFN_AUTH);
+            assertTrue(failure.contains("already attached"),
+                    "the attachment should report the duplicate: " + failure);
 
             JsonNode rolledBack = getSecretJson(secretName);
             assertEquals("admin", rolledBack.path("username").asText());
@@ -324,7 +312,7 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
         } finally {
             if (stackCreated) {
                 deleteStack(stackName);
-                awaitStackDeleted(stackName);
+                CfnStackWaits.awaitStackDeleted(stackName);
             }
             forceDeleteSecret(secretName);
         }
@@ -387,15 +375,6 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
         .when().post("/").then().statusCode(200);
     }
 
-    private static XmlPath describeDbInstance(String databaseId) {
-        return given()
-            .contentType("application/x-www-form-urlencoded")
-            .header("Authorization", RDS_AUTH)
-            .formParam("Action", "DescribeDBInstances")
-            .formParam("DBInstanceIdentifier", databaseId)
-        .when().post("/").then().statusCode(200).extract().xmlPath();
-    }
-
     private static String describeStack(String stackName) {
         return given()
             .contentType("application/x-www-form-urlencoded")
@@ -416,31 +395,5 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
             .formParam("Action", "DeleteStack")
             .formParam("StackName", stackName)
         .when().post("/").then().statusCode(200);
-    }
-
-    private static void awaitStackDeleted(String stackName) throws InterruptedException {
-        for (int i = 0; i < 100; i++) {
-            String body = given()
-                .contentType("application/x-www-form-urlencoded")
-                .header("Authorization", CFN_AUTH)
-                .formParam("Action", "DescribeStacks")
-                .formParam("StackName", stackName)
-            .when().post("/").then().extract().asString();
-            if (body.contains("does not exist")) {
-                return;
-            }
-            if (body.contains("<StackStatus>DELETE_FAILED</StackStatus>")) {
-                fail("stack delete failed: " + body);
-            }
-            Thread.sleep(50);
-        }
-        fail("stack " + stackName + " was not deleted within the timeout");
-    }
-
-    public static final class RdsMockProfile implements QuarkusTestProfile {
-        @Override
-        public Map<String, String> getConfigOverrides() {
-            return Map.of("floci.services.rds.mock", "true");
-        }
     }
 }

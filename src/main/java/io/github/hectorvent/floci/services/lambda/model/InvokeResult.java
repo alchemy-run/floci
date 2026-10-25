@@ -11,7 +11,7 @@ public class InvokeResult {
     private String logResult;
     private String requestId;
     private String executedVersion;
-    private StreamingPayload stream;
+    private String durableExecutionArn;
 
     public InvokeResult() {
     }
@@ -76,6 +76,24 @@ public class InvokeResult {
         this.requestId = requestId;
     }
 
+    public String getExecutedVersion() {
+        return executedVersion;
+    }
+
+    public void setExecutedVersion(String executedVersion) {
+        this.executedVersion = executedVersion;
+    }
+
+    public String getDurableExecutionArn() {
+        return durableExecutionArn;
+    }
+
+    public void setDurableExecutionArn(String durableExecutionArn) {
+        this.durableExecutionArn = durableExecutionArn;
+    }
+
+    private StreamingPayload stream;
+
     /** Live chunk stream for a streaming response, or null for buffered results. */
     public StreamingPayload getStream() {
         return stream;
@@ -87,13 +105,5 @@ public class InvokeResult {
 
     public boolean isStreaming() {
         return stream != null;
-    }
-
-    public String getExecutedVersion() {
-        return executedVersion;
-    }
-
-    public void setExecutedVersion(String executedVersion) {
-        this.executedVersion = executedVersion;
     }
 }

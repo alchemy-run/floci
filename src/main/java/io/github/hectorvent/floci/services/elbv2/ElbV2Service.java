@@ -4,40 +4,51 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegionFacts;
+import io.github.hectorvent.floci.core.common.CertificateReferenceResolver;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.SsrfProtection;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
+import io.github.hectorvent.floci.core.resource.ExplorerResource;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.StorageBackedMap;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.acm.AcmCertificateReferenceProvider.CertificateReference;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
+import io.github.hectorvent.floci.services.ec2.VpcDependencyProvider;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.elbv2.model.*;
+import io.github.hectorvent.floci.services.iam.ServerCertificateReferenceProvider;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.jboss.logging.Logger;
 
-import java.nio.charset.StandardCharsets;
 import java.io.IOException;
 import java.net.InetAddress;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
-import java.util.stream.Collectors;
-import io.github.hectorvent.floci.core.resource.ExplorerResource;
-import io.github.hectorvent.floci.core.resource.ResourceProvider;
-import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.BooleanSupplier;
+import java.util.function.Function;
+import java.util.function.Supplier;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @ApplicationScoped
-public class ElbV2Service implements ResourceProvider {
+public class ElbV2Service implements ResourceProvider, ServerCertificateReferenceProvider, VpcDependencyProvider {
+
+    private static final Logger LOG = Logger.getLogger(ElbV2Service.class);
 
     @Inject
     ElbV2DataPlane dataPlane;
@@ -57,20 +68,19 @@ public class ElbV2Service implements ResourceProvider {
     @Inject
     EmulatorConfig config;
 
+    /**
+     * Left null by the unit tests, which wire this service without IAM or ACM. A referrer with no
+     * resolver keeps the behaviour it had before the check existed, rather than refusing every
+     * certificate because it cannot look one up.
+     */
     @Inject
-    S3Service s3Service;
-
-    private static final String CANONICAL_HOSTED_ZONE_ID = "Z35SXDOTRQ7X7K";
-    private static final Pattern PEM_CERT = Pattern.compile("-----BEGIN CERTIFICATE-----");
-    /** Classic (8 hex) or current (17 hex) subnet IDs. Anything else is SubnetNotFound. */
-    private static final Pattern AWS_SUBNET_ID = Pattern.compile("subnet-[0-9a-f]{8}(?:[0-9a-f]{9})?");
+    CertificateReferenceResolver certificateResolver;
 
     // region → ARN → resource
     private Map<String, Map<String, LoadBalancer>> loadBalancers = new ConcurrentHashMap<>();
     private Map<String, Map<String, TargetGroup>> targetGroups = new ConcurrentHashMap<>();
     private Map<String, Map<String, Listener>> listeners = new ConcurrentHashMap<>();
     private Map<String, Map<String, Rule>> rules = new ConcurrentHashMap<>();
-    private Map<String, Map<String, TrustStore>> trustStores = new ConcurrentHashMap<>();
 
     // indexes
     private final Map<String, List<String>> lbToListeners   = new ConcurrentHashMap<>(); // LB-ARN → listener ARNs
@@ -140,25 +150,6 @@ public class ElbV2Service implements ResourceProvider {
     }
 
     /**
-     * Storage reload (and {@code getOrDefault(..., Map.of())}) can hand back an
-     * immutable inner map. Mutating it throws {@code UnsupportedOperationException}
-     * with a null message — the Query dispatcher surfaces that as
-     * {@code InternalFailure: Unexpected error: null}.
-     */
-    private <V> Map<String, V> mutableRegion(Map<String, Map<String, V>> resources, String region) {
-        Map<String, V> existing = resources.get(region);
-        if (existing instanceof ConcurrentHashMap) {
-            return existing;
-        }
-        ConcurrentHashMap<String, V> copy = new ConcurrentHashMap<>();
-        if (existing != null) {
-            copy.putAll(existing);
-        }
-        resources.put(region, copy);
-        return copy;
-    }
-
-    /**
      * Rebuilds the in-memory indexes from the storage-backed maps. Pure and in-process on purpose:
      * nothing reachable from {@link #initializeStorage()} may call an injected collaborator, because
      * {@link ElbV2DataPlane} calls back into this service and CDI has not registered the instance in
@@ -173,7 +164,7 @@ public class ElbV2Service implements ResourceProvider {
 
         for (Map<String, Listener> regionListeners : listeners.values()) {
             for (Listener listener : regionListeners.values()) {
-                lbToListeners.computeIfAbsent(listener.getLoadBalancerArn(), k -> new ArrayList<>())
+                lbToListeners.computeIfAbsent(listener.getLoadBalancerArn(), k -> new CopyOnWriteArrayList<>())
                         .add(listener.getListenerArn());
             }
         }
@@ -198,6 +189,7 @@ public class ElbV2Service implements ResourceProvider {
      */
     public void restorePersistedRuntime()
     {
+        refreshCanonicalHostedZones();
         if (healthChecker != null) {
             for (Map<String, TargetGroup> regionTargetGroups : targetGroups.values()) {
                 for (TargetGroup targetGroup : regionTargetGroups.values()) {
@@ -212,7 +204,12 @@ public class ElbV2Service implements ResourceProvider {
             for (Map.Entry<String, Map<String, Listener>> regionEntry : listeners.entrySet()) {
                 String region = regionEntry.getKey();
                 for (Listener listener : regionEntry.getValue().values()) {
-                    startDataPlane(listener, region);
+                    try {
+                        restoreListener(region, listener.getListenerArn());
+                    } catch (RuntimeException failure) {
+                        LOG.warnv("ELBv2 saved listener {0} could not be restored ({1}: {2}); its configuration is retained",
+                                listener.getListenerArn(), failure.getClass().getSimpleName(), failure.getMessage());
+                    }
                 }
             }
         }
@@ -220,12 +217,38 @@ public class ElbV2Service implements ResourceProvider {
 
     // ── Load Balancers ────────────────────────────────────────────────────────
 
+    /**
+     * The subnets a CreateLoadBalancer or SetSubnets request names: {@code Subnets}, or else the subnet
+     * of each {@code SubnetMappings} entry. The two are alternatives, so a request that names subnets
+     * both ways is refused with the error AWS gives; an empty one does not count.
+     */
+    public static List<String> requestedSubnets(List<String> subnets, List<String> mappingSubnetIds) {
+        if (!subnets.isEmpty() && !mappingSubnetIds.isEmpty()) {
+            throw new AwsException("ValidationError",
+                    "You can specify either subnets or subnet mappings, not both", 400);
+        }
+        return mappingSubnetIds.isEmpty() ? subnets : mappingSubnetIds;
+    }
+
+    /**
+     * Resolving the subnets and publishing the balancer happen under EC2's subnet lock, so a
+     * DeleteSubnet cannot pass its dependency check in between and leave the balancer on a subnet
+     * that is gone.
+     */
     public LoadBalancer createLoadBalancer(String region, String name, String scheme,
                                            String type, String ipAddressType,
                                            List<String> subnets, List<String> securityGroups,
                                            Map<String, String> initialTags) {
+        return ec2Service.supplyWithSubnetReferencesHeld(region, () -> createLoadBalancerWithSubnetsHeld(
+                region, name, scheme, type, ipAddressType, subnets, securityGroups, initialTags));
+    }
+
+    private LoadBalancer createLoadBalancerWithSubnetsHeld(String region, String name, String scheme,
+                                                           String type, String ipAddressType,
+                                                           List<String> subnets, List<String> securityGroups,
+                                                           Map<String, String> initialTags) {
         validateName(name, "load balancer");
-        Map<String, LoadBalancer> regionLbs = mutableRegion(loadBalancers, region);
+        Map<String, LoadBalancer> regionLbs = loadBalancers.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
         boolean duplicate = regionLbs.values().stream()
                 .anyMatch(lb -> lb.getLoadBalancerName().equals(name));
         if (duplicate) {
@@ -240,12 +263,13 @@ public class ElbV2Service implements ResourceProvider {
         String id = randomHex16();
         String arn = AwsArnUtils.Arn.of("elasticloadbalancing", region, regionResolver.getAccountId(), "loadbalancer/" + typePrefix + "/" + name + "/" + id).toString();
         String dnsName = name + "-" + id + ".elb." + loadBalancerDnsSuffix();
+        requireSubnets(lbType, subnets);
         String vpcId = resolveSubnetVpcId(region, lbType, subnets);
 
         LoadBalancer lb = new LoadBalancer();
         lb.setLoadBalancerArn(arn);
         lb.setDnsName(dnsName);
-        lb.setCanonicalHostedZoneId(CANONICAL_HOSTED_ZONE_ID);
+        lb.setCanonicalHostedZoneId(canonicalHostedZoneId(lbType, region));
         lb.setCreatedTime(Instant.now());
         lb.setLoadBalancerName(name);
         lb.setScheme(lbScheme);
@@ -254,7 +278,7 @@ public class ElbV2Service implements ResourceProvider {
         lb.setType(lbType);
         lb.setIpAddressType(ipType);
         lb.setRegion(region);
-        if (subnets != null) lb.setAvailabilityZones(resolveAvailabilityZones(region, subnets));
+        lb.setAvailabilityZones(resolveAvailabilityZones(region, subnets));
         if (securityGroups != null) lb.setSecurityGroups(new ArrayList<>(securityGroups));
 
         regionLbs.put(arn, lb);
@@ -264,6 +288,48 @@ public class ElbV2Service implements ResourceProvider {
             tags.put(arn, new LinkedHashMap<>(initialTags));
         }
         return lb;
+    }
+
+    /**
+     * Every load balancer type takes {@code Subnets} or {@code SubnetMappings}, and an Application Load
+     * Balancer takes at least two, so a CreateLoadBalancer with fewer is refused before anything is
+     * created, with the message AWS gives an Application or a Network Load Balancer. A Gateway Load
+     * Balancer, which takes subnets the way a Network Load Balancer does, gets the Network one. AWS
+     * counts before it looks a subnet up, so one subnet that does not exist gets this error too, not
+     * SubnetNotFound. On create this runs after the duplicate-name check, because a CloudFormation stack
+     * update finds the balancer it keeps through DuplicateLoadBalancerName, whatever subnets its
+     * template names. SetSubnets takes the same subnets, so {@link #setSubnetsFromRequest} runs this on
+     * a SetSubnets that names none, and {@link #setSubnets} on a list that names some, once it has the
+     * balancer's type; whether the subnets span two Availability Zones is checked after they are looked
+     * up. No public report shows what AWS answers a SetSubnets with one subnet, so it gets the create
+     * message and order.
+     */
+    private static void requireSubnets(String lbType, List<String> subnets) {
+        int count = subnets == null ? 0 : subnets.size();
+        if ("application".equals(lbType) && count < 2) {
+            throw new AwsException("ValidationError",
+                    "At least two subnets in two different Availability Zones must be specified", 400);
+        }
+        if (count == 0) {
+            throw new AwsException("ValidationError", "At least one subnet must be specified", 400);
+        }
+    }
+
+    /**
+     * A subnet is in use while a load balancer is configured with it. Account-scoped through the
+     * request-scoped storage, and a target group does not count: it pins nothing in AWS either.
+     */
+    @Override
+    public boolean hasSubnetDependency(String region, String subnetId) {
+        return loadBalancers.getOrDefault(region, Map.of()).values().stream()
+                .anyMatch(lb -> lb.getAvailabilityZones().stream()
+                        .anyMatch(zone -> subnetId.equals(zone.getSubnetId())));
+    }
+
+    @Override
+    public boolean hasVpcDependency(String region, String vpcId) {
+        return loadBalancers.getOrDefault(region, Map.of()).values().stream()
+                .anyMatch(lb -> vpcId.equals(lb.getVpcId()));
     }
 
     private String loadBalancerDnsSuffix() {
@@ -303,25 +369,22 @@ public class ElbV2Service implements ResourceProvider {
             return; // AWS silently ignores non-existent LBs on delete
         }
         regionLbs = mutableRegion(loadBalancers, region);
-        LoadBalancer lb = regionLbs.remove(arn);
+        LoadBalancer lb = regionLbs.get(arn);
         if (lb == null) {
             return;
         }
-        // cascade: listeners → rules
-        List<String> listenerArns = lbToListeners.remove(arn);
-        if (listenerArns != null) {
-            Map<String, Listener> regionListeners = mutableRegion(listeners, region);
-            Map<String, Rule> regionRules = mutableRegion(rules, region);
-            for (String listenerArn : listenerArns) {
-                dataPlane.stopListener(listenerArn);
-                regionListeners.remove(listenerArn);
-                List<String> ruleArns = listenerToRules.remove(listenerArn);
-                if (ruleArns != null) {
-                    ruleArns.forEach(regionRules::remove);
-                }
+        List<String> listenerArns;
+        synchronized (lb) {
+            if (!regionLbs.remove(arn, lb)) {
+                return;
             }
-            listeners.put(region, regionListeners);
-            rules.put(region, regionRules);
+            listenerArns = listeners.getOrDefault(region, Map.of()).values().stream()
+                    .filter(listener -> arn.equals(listener.getLoadBalancerArn()))
+                    .map(Listener::getListenerArn).toList();
+            lbToListeners.remove(arn);
+        }
+        for (String listenerArn : listenerArns) {
+            deleteListener(region, listenerArn);
         }
         // remove from TG index
         tgToLbs.values().forEach(lbSet -> lbSet.remove(arn));
@@ -358,50 +421,51 @@ public class ElbV2Service implements ResourceProvider {
                 lb.getCapacityReservationLastModified());
     }
 
-    /**
-     * Stores or clears the requested minimum capacity. Floci does not provision LCUs, so a reset
-     * of a never-set reservation is a no-op success — the same as AWS when nothing is reserved.
-     */
-    public CapacityReservation modifyCapacityReservation(String region, String arn,
-                                                         Integer minimumCapacityUnits,
-                                                         Boolean reset) {
-        LoadBalancer lb = requireLoadBalancer(region, arn);
-        boolean doReset = Boolean.TRUE.equals(reset);
-        if (!doReset && minimumCapacityUnits == null) {
-            throw new AwsException("InvalidConfigurationRequest",
-                    "You must specify MinimumLoadBalancerCapacity or ResetCapacityReservation.", 400);
-        }
-        if (doReset) {
-            lb.setMinimumCapacityUnits(null);
-            lb.setDecreaseRequestsRemaining(null);
-            lb.setCapacityReservationLastModified(null);
-        } else {
-            lb.setMinimumCapacityUnits(minimumCapacityUnits);
-            lb.setDecreaseRequestsRemaining(2);
-            lb.setCapacityReservationLastModified(Instant.now());
-        }
-        persistRegion(loadBalancers, region);
-        return describeCapacityReservation(region, arn);
-    }
-
     public void setSecurityGroups(String region, String arn, List<String> sgIds) {
         LoadBalancer lb = requireLoadBalancer(region, arn);
         lb.setSecurityGroups(new ArrayList<>(sgIds));
         persistRegion(loadBalancers, region);
     }
 
-    public void setSubnets(String region, String arn, List<String> subnets) {
+    /**
+     * The SetSubnets action, for the Query handler. A request with neither {@code Subnets} nor
+     * {@code SubnetMappings} is refused and the balancer stays on its subnets, with the error
+     * CreateLoadBalancer gives a balancer of its type with neither; AWS gives a Network Load Balancer
+     * that error for SetSubnets too. The balancer is looked up first, as the message depends on its
+     * type. Only an empty list is refused here; a request that names subnets is checked by
+     * {@link #setSubnets}.
+     */
+    void setSubnetsFromRequest(String region, String arn, List<String> subnets) {
         LoadBalancer lb = requireLoadBalancer(region, arn);
-        String vpcId = resolveSubnetVpcId(region, lb.getType(), subnets);
-        if (vpcId != null && lb.getVpcId() != null && !lb.getVpcId().equals(vpcId)) {
-            throw new AwsException("InvalidConfigurationRequest",
-                    "All subnets must belong to the load balancer VPC.", 400);
+        if (subnets.isEmpty()) {
+            requireSubnets(lb.getType(), subnets);
         }
-        lb.setAvailabilityZones(resolveAvailabilityZones(region, subnets));
-        if (vpcId != null) {
-            lb.setVpcId(vpcId);
-        }
-        persistRegion(loadBalancers, region);
+        setSubnets(region, arn, subnets);
+    }
+
+    /**
+     * Under EC2's subnet lock for the same reason as {@link #createLoadBalancer}. Unlike the SetSubnets
+     * action, this takes an empty list: CloudFormation moves balancers through it, and its rollback
+     * moves a balancer an earlier Floci version saved without subnets back onto none.
+     */
+    public void setSubnets(String region, String arn, List<String> subnets) {
+        ec2Service.runWithSubnetReferencesHeld(region, () -> {
+            LoadBalancer lb = requireLoadBalancer(region, arn);
+            // Counted as on create, before any subnet is looked up; an empty list is taken, as above.
+            if (subnets != null && !subnets.isEmpty()) {
+                requireSubnets(lb.getType(), subnets);
+            }
+            String vpcId = resolveSubnetVpcId(region, lb.getType(), subnets);
+            if (vpcId != null && lb.getVpcId() != null && !lb.getVpcId().equals(vpcId)) {
+                throw new AwsException("InvalidConfigurationRequest",
+                        "All subnets must belong to the load balancer VPC.", 400);
+            }
+            lb.setAvailabilityZones(resolveAvailabilityZones(region, subnets));
+            if (vpcId != null) {
+                lb.setVpcId(vpcId);
+            }
+            persistRegion(loadBalancers, region);
+        });
     }
 
     public void setIpAddressType(String region, String arn, String ipAddressType) {
@@ -421,6 +485,7 @@ public class ElbV2Service implements ResourceProvider {
                                           String matcher, String ipAddressType,
                                           Map<String, String> initialTags) {
         validateName(name, "target group");
+        validateHealthCheckPort(healthCheckPort);
         Map<String, TargetGroup> regionTgs = mutableRegion(targetGroups, region);
         boolean duplicate = regionTgs.values().stream()
                 .anyMatch(tg -> tg.getTargetGroupName().equals(name));
@@ -514,6 +579,7 @@ public class ElbV2Service implements ResourceProvider {
                                    Integer healthCheckTimeout, Integer healthyThreshold,
                                    Integer unhealthyThreshold, String matcher) {
         TargetGroup tg = requireTargetGroup(region, arn);
+        validateHealthCheckPort(healthCheckPort);
         if (healthCheckProtocol != null) tg.setHealthCheckProtocol(healthCheckProtocol);
         if (healthCheckPort != null)     tg.setHealthCheckPort(healthCheckPort);
         if (healthCheckEnabled != null)  tg.setHealthCheckEnabled(healthCheckEnabled);
@@ -545,7 +611,7 @@ public class ElbV2Service implements ResourceProvider {
                                     Map<String, String> initialTags) {
         requireLoadBalancer(region, lbArn);
 
-        Map<String, Listener> regionListeners = mutableRegion(listeners, region);
+        Map<String, Listener> regionListeners = listeners.computeIfAbsent(region, k -> new ConcurrentHashMap<>());
 
         // check duplicate port on same LB
         boolean portExists = regionListeners.values().stream()
@@ -555,6 +621,10 @@ public class ElbV2Service implements ResourceProvider {
             throw new AwsException("DuplicateListener",
                     "A listener already exists on port " + port + " for this load balancer.", 400);
         }
+
+        // Fail fast, then again under the guard the listener is published inside: this one keeps
+        // the error precedence, and only the one holding the lock is atomic with the write.
+        requireListenerCertificates(region, protocol, certificates);
 
         LoadBalancer lb = requireLoadBalancer(region, lbArn);
         String lbType = lb.getType() != null ? lb.getType() : "application";
@@ -573,24 +643,38 @@ public class ElbV2Service implements ResourceProvider {
         listener.setDefaultActions(defaultActions != null ? new ArrayList<>(defaultActions) : new ArrayList<>());
         listener.setAlpnPolicy(alpnPolicy != null ? new ArrayList<>(alpnPolicy) : new ArrayList<>());
 
-        regionListeners.put(listenerArn, listener);
-        listeners.put(region, regionListeners);
-        lbToListeners.computeIfAbsent(lbArn, k -> new ArrayList<>()).add(listenerArn);
-
-        // auto-create the default rule
         Rule defaultRule = buildDefaultRule(region, listenerArn, lb, lbId, listenerId, defaultActions);
-        Map<String, Rule> regionRules = mutableRegion(rules, region);
-        regionRules.put(defaultRule.getRuleArn(), defaultRule);
-        rules.put(region, regionRules);
-        listenerToRules.computeIfAbsent(listenerArn, k -> new CopyOnWriteArrayList<>()).add(defaultRule.getRuleArn());
-        for (Action action : defaultRule.getActions()) {
-            linkTgToLb(action, lbArn);
+        while (true) {
+            requireListenerCertificates(region, protocol, certificates);
+            requireCompatibleListenerProtocol(listenerArn, port, listener.getProtocol());
+            boolean applied = publishListener(listener, region, port, () -> {
+                synchronized (lb) {
+                    requireCanonicalLoadBalancer(region, lb);
+                    requireAvailableListenerPort(regionListeners, lbArn, listenerArn, port);
+                    regionListeners.put(listenerArn, listener);
+                    listeners.put(region, regionListeners);
+                    lbToListeners.computeIfAbsent(lbArn, ignored -> new CopyOnWriteArrayList<>()).add(listenerArn);
+                    Map<String, Rule> regionRules = rules.computeIfAbsent(region, ignored -> new ConcurrentHashMap<>());
+                    regionRules.put(defaultRule.getRuleArn(), defaultRule);
+                    rules.put(region, regionRules);
+                    listenerToRules.computeIfAbsent(listenerArn, ignored -> new CopyOnWriteArrayList<>())
+                            .add(defaultRule.getRuleArn());
+                    for (Action action : defaultRule.getActions()) {
+                        linkTgToLb(action, lbArn);
+                    }
+                    if (!initialTags.isEmpty()) {
+                        tags.put(listenerArn, new LinkedHashMap<>(initialTags));
+                    }
+                    return true;
+                }
+            }, operation -> supplyCertificatesHeld(certificates, () -> {
+                requireListenerCertificates(region, protocol, certificates);
+                return operation.get();
+            }));
+            if (applied) {
+                break;
+            }
         }
-
-        if (!initialTags.isEmpty()) {
-            tags.put(listenerArn, new LinkedHashMap<>(initialTags));
-        }
-        startDataPlane(listener, region);
         return listener;
     }
 
@@ -622,79 +706,135 @@ public class ElbV2Service implements ResourceProvider {
     }
 
     public void deleteListener(String region, String listenerArn) {
-        Map<String, Listener> regionListeners = listeners.get(region);
-        if (regionListeners == null) {
-            return;
+        while (true) {
+            Map<String, Listener> regionListeners = listeners.get(region) == null ? null : mutableRegion(listeners, region);
+            Listener listener = regionListeners == null ? null : regionListeners.get(listenerArn);
+            if (listener == null) {
+                return;
+            }
+            ListenerState expected = listenerState(listener);
+            LoadBalancer lb = loadBalancers.getOrDefault(region, Map.of()).get(listener.getLoadBalancerArn());
+            BooleanSupplier removal = () -> {
+                if (!isCurrentListener(region, expected)) {
+                    return false;
+                }
+                regionListeners.remove(listenerArn, listener);
+                removeFromIndex(lbToListeners, listener.getLoadBalancerArn(), listenerArn);
+                Map<String, Rule> regionRules = mutableRegion(rules, region);
+                List<String> ruleArns = listenerToRules.remove(listenerArn);
+                if (ruleArns != null) {
+                    ruleArns.forEach(regionRules::remove);
+                }
+                listeners.put(region, regionListeners);
+                rules.put(region, regionRules);
+                tags.remove(listenerArn);
+                unlinkUnreferencedTargetGroups(region, listener.getLoadBalancerArn());
+                return true;
+            };
+            boolean removed = dataPlane.removeListener(listenerArn, expected.port(), () -> {
+                if (lb == null) {
+                    return removal.getAsBoolean();
+                }
+                synchronized (lb) {
+                    return removal.getAsBoolean();
+                }
+            });
+            if (removed) {
+                return;
+            }
         }
-        regionListeners = mutableRegion(listeners, region);
-        Listener listener = regionListeners.remove(listenerArn);
-        if (listener == null) {
-            return;
-        }
-        dataPlane.stopListener(listenerArn);
-        removeFromIndex(lbToListeners, listener.getLoadBalancerArn(), listenerArn);
-
-        Map<String, Rule> regionRules = mutableRegion(rules, region);
-        List<String> ruleArns = listenerToRules.remove(listenerArn);
-        if (ruleArns != null) {
-            ruleArns.forEach(regionRules::remove);
-        }
-        listeners.put(region, regionListeners);
-        rules.put(region, regionRules);
-        tags.remove(listenerArn);
-        unlinkUnreferencedTargetGroups(region, listener.getLoadBalancerArn());
     }
 
     public Listener modifyListener(String region, String listenerArn, String protocol, Integer port,
                                     String sslPolicy, List<String> certificates,
                                     List<Action> defaultActions, List<String> alpnPolicy) {
-        Listener listener = requireListener(region, listenerArn);
-        boolean restartDataPlane = false;
-        boolean recompileRules = false;
-
-        if (port != null && !Objects.equals(listener.getPort(), port)) {
-            // check duplicate port on same LB
-            Map<String, Listener> regionListeners = listeners.getOrDefault(region, Map.of());
-            boolean portExists = regionListeners.values().stream()
-                    .filter(l -> l.getLoadBalancerArn().equals(listener.getLoadBalancerArn()) && !l.getListenerArn().equals(listenerArn))
-                    .anyMatch(l -> Objects.equals(l.getPort(), port));
-            if (portExists) {
-                throw new AwsException("DuplicateListener",
-                        "A listener already exists on port " + port + " for this load balancer.", 400);
+        while (true) {
+            Listener initial = requireListener(region, listenerArn);
+            LoadBalancer initialLb = requireLoadBalancer(region, initial.getLoadBalancerArn());
+            ListenerState initialState = listenerState(initial, initialLb);
+            requireAvailableListenerPort(listeners.getOrDefault(region, Map.of()), initial.getLoadBalancerArn(),
+                    listenerArn, port != null ? port : initialState.port());
+            if (validateExistingListener(region, initialState, initialLb, () ->
+                    requireListenerCertificates(region, protocol != null ? protocol : initialState.protocol(),
+                            certificates != null ? certificates : initialState.certificates()))) {
+                break;
             }
-            listener.setPort(port);
-            restartDataPlane = true;
         }
-        if (protocol != null)      listener.setProtocol(protocol);
-        if (sslPolicy != null)     listener.setSslPolicy(sslPolicy);
-        if (certificates != null && !certificates.isEmpty()) {
-            // ModifyListener replaces only the default certificate. SNI extras
-            // added via AddListenerCertificates must survive (Alchemy's Listener
-            // reconcile always resends the default cert).
-            replaceDefaultCertificate(listener, certificates.getFirst());
+        while (true) {
+            Listener listener = requireListener(region, listenerArn);
+            LoadBalancer lb = requireLoadBalancer(region, listener.getLoadBalancerArn());
+            ListenerState expected = listenerState(listener, lb);
+            Listener prospective = prospectiveListener(expected, protocol, port, certificates);
+            requireAvailableListenerPort(listeners.getOrDefault(region, Map.of()), listener.getLoadBalancerArn(),
+                    listenerArn, prospective.getPort());
+            if (!validateExistingListener(region, expected, lb, () -> {
+                requireListenerCertificates(region, prospective.getProtocol(), prospective.getCertificates());
+                requireCompatibleListenerProtocol(listenerArn, prospective.getPort(), prospective.getProtocol());
+            })) {
+                continue;
+            }
+            BooleanSupplier publication = () -> {
+                synchronized (lb) {
+                    requireCanonicalLoadBalancer(region, lb);
+                    if (!isCurrentListener(region, expected)) {
+                        return false;
+                    }
+                    requireAvailableListenerPort(listeners.getOrDefault(region, Map.of()),
+                            listener.getLoadBalancerArn(), listenerArn, prospective.getPort());
+                    if (port != null) {
+                        listener.setPort(port);
+                    }
+                    if (protocol != null) {
+                        listener.setProtocol(protocol);
+                    }
+                    if (sslPolicy != null) {
+                        listener.setSslPolicy(sslPolicy);
+                    }
+                    if (certificates != null) {
+                        listener.setCertificates(new ArrayList<>(certificates));
+                    }
+                    if (alpnPolicy != null) {
+                        listener.setAlpnPolicy(new ArrayList<>(alpnPolicy));
+                    }
+                    if (defaultActions != null) {
+                        listener.setDefaultActions(new ArrayList<>(defaultActions));
+                        listenerToRules.getOrDefault(listenerArn, List.of()).stream()
+                                .map(arn -> rules.getOrDefault(region, Map.of()).get(arn))
+                                .filter(rule -> rule != null && rule.isDefault())
+                                .forEach(rule -> rule.setActions(new ArrayList<>(defaultActions)));
+                        for (Action action : defaultActions) {
+                            linkTgToLb(action, listener.getLoadBalancerArn());
+                        }
+                        unlinkUnreferencedTargetGroups(region, listener.getLoadBalancerArn());
+                    }
+                    persistRegion(listeners, region);
+                    persistRegion(rules, region);
+                    return true;
+                }
+            };
+            boolean restart = port != null || protocol != null || certificates != null;
+            boolean applied = restart
+                    ? publishExistingListener(prospective, region, expected, lb,
+                            () -> requireCertificates(region, prospective.getProtocol(),
+                                    certificates != null ? certificates : prospective.getCertificates()), publication)
+                    : supplyCertificatesHeld(prospective.getCertificates(), () -> {
+                        synchronized (lb) {
+                            if (!isCurrentListener(region, expected)) {
+                                return false;
+                            }
+                        }
+                        requireCertificates(region, prospective.getProtocol(), prospective.getCertificates());
+                        requirePublishedCertificates(region, prospective.getProtocol(), prospective.getCertificates());
+                        return dataPlane.updateListener(expected.port(), publication);
+                    });
+            if (applied) {
+                break;
+            }
         }
-        if (alpnPolicy != null)    listener.setAlpnPolicy(new ArrayList<>(alpnPolicy));
         if (defaultActions != null) {
-            listener.setDefaultActions(new ArrayList<>(defaultActions));
-            // update the default rule's actions
-            listenerToRules.getOrDefault(listenerArn, List.of()).stream()
-                    .map(ra -> rules.getOrDefault(region, Map.of()).get(ra))
-                .filter(r -> r != null && r.isDefault())
-                .forEach(r -> r.setActions(new ArrayList<>(defaultActions)));
-            for (Action action : defaultActions) {
-                linkTgToLb(action, listener.getLoadBalancerArn());
-            }
-            unlinkUnreferencedTargetGroups(region, listener.getLoadBalancerArn());
-            recompileRules = true;
+            dataPlane.recompileRules(listenerArn, () -> getListenerRules(region, listenerArn));
         }
-        persistRegion(listeners, region);
-        persistRegion(rules, region);
-        if (restartDataPlane) {
-            restartDataPlane(requireListener(region, listenerArn), region);
-        } else if (recompileRules) {
-            dataPlane.recompileRules(listenerArn, getListenerRules(region, listenerArn));
-        }
-        return listener;
+        return requireListener(region, listenerArn);
     }
 
     // ── Rules ─────────────────────────────────────────────────────────────────
@@ -747,7 +887,7 @@ public class ElbV2Service implements ResourceProvider {
         if (!initialTags.isEmpty()) {
             tags.put(ruleArn, new LinkedHashMap<>(initialTags));
         }
-        dataPlane.recompileRules(listenerArn, getListenerRules(region, listenerArn));
+        dataPlane.recompileRules(listenerArn, () -> getListenerRules(region, listenerArn));
         return rule;
     }
 
@@ -796,7 +936,7 @@ public class ElbV2Service implements ResourceProvider {
         if (listener != null) {
             unlinkUnreferencedTargetGroups(region, listener.getLoadBalancerArn());
         }
-        dataPlane.recompileRules(listenerArn, getListenerRules(region, listenerArn));
+        dataPlane.recompileRules(listenerArn, () -> getListenerRules(region, listenerArn));
     }
 
     public synchronized Rule modifyRule(String region, String ruleArn, List<RuleCondition> conditions, List<Action> actions) {
@@ -805,7 +945,7 @@ public class ElbV2Service implements ResourceProvider {
         if (conditions != null) rule.setConditions(new ArrayList<>(conditions));
         if (actions != null)    rule.setActions(new ArrayList<>(actions));
         persistRegion(rules, region);
-        dataPlane.recompileRules(listenerArn, getListenerRules(region, listenerArn));
+        dataPlane.recompileRules(listenerArn, () -> getListenerRules(region, listenerArn));
         return rule;
     }
 
@@ -827,18 +967,28 @@ public class ElbV2Service implements ResourceProvider {
             }
         }
 
-        // check for collisions with rules NOT in the update set
-        Set<String> updatingArns = arnToPriority.keySet();
-        Set<Integer> newPriorities = new HashSet<>(arnToPriority.values());
+        // priorities are unique per listener, so collisions are only checked among rules of the same listener
+        Map<String, Set<Integer>> newPrioritiesByListener = new HashMap<>();
+        for (Map.Entry<String, Integer> e : arnToPriority.entrySet()) {
+            String listenerArn = regionRules.get(e.getKey()).getListenerArn();
+            if (!newPrioritiesByListener.computeIfAbsent(listenerArn, k -> new HashSet<>()).add(e.getValue())) {
+                throw new AwsException("PriorityInUse",
+                        "Priority " + e.getValue() + " is already in use.", 400);
+            }
+        }
+        // iterate the concurrent region map, not the listener index lists, which CreateRule/DeleteRule mutate
         for (Rule existing : regionRules.values()) {
-            if (!updatingArns.contains(existing.getRuleArn()) && !existing.isDefault()) {
-                try {
-                    int existingPriority = Integer.parseInt(existing.getPriority());
-                    if (newPriorities.contains(existingPriority)) {
-                        throw new AwsException("PriorityInUse",
-                                "Priority " + existingPriority + " is already in use.", 400);
-                    }
-                } catch (NumberFormatException ignored) { /* default rule */ }
+            if (existing.isDefault() || arnToPriority.containsKey(existing.getRuleArn())) {
+                continue;
+            }
+            Set<Integer> newPriorities = newPrioritiesByListener.get(existing.getListenerArn());
+            if (newPriorities == null) {
+                continue;
+            }
+            int existingPriority = Integer.parseInt(existing.getPriority());
+            if (newPriorities.contains(existingPriority)) {
+                throw new AwsException("PriorityInUse",
+                        "Priority " + existingPriority + " is already in use.", 400);
             }
         }
 
@@ -849,7 +999,7 @@ public class ElbV2Service implements ResourceProvider {
         Set<String> affectedListeners = arnToPriority.keySet().stream()
                 .map(arn -> regionRules.get(arn).getListenerArn())
                 .collect(Collectors.toSet());
-        affectedListeners.forEach(la -> dataPlane.recompileRules(la, getListenerRules(region, la)));
+        affectedListeners.forEach(la -> dataPlane.recompileRules(la, () -> getListenerRules(region, la)));
     }
 
     // ── Targets ───────────────────────────────────────────────────────────────
@@ -958,29 +1108,72 @@ public class ElbV2Service implements ResourceProvider {
 
     // ── Listener Certificates ─────────────────────────────────────────────────
 
-    public void addListenerCertificates(String region, String listenerArn, List<String> certArns) {
-        Listener listener = requireListener(region, listenerArn);
-        List<String> certificates = listener.getCertificates();
-        for (String certArn : certArns) {
-            if (certArn != null && !certificates.contains(certArn)) {
-                certificates.add(certArn);
+    @Override
+    public List<Reference> serverCertificateReferences() {
+        List<Reference> references = new ArrayList<>();
+        for (Map<String, Listener> regionListeners : listeners.values()) {
+            for (Listener listener : regionListeners.values()) {
+                for (String certificate : listener.getCertificates()) {
+                    references.add(new Reference(certificate, "listener " + listener.getListenerArn()));
+                }
             }
         }
-        persistRegion(listeners, region);
+        return references;
+    }
+
+    public void addListenerCertificates(String region, String listenerArn, List<String> certArns) {
+        Listener initial = requireListener(region, listenerArn);
+        requireCertificates(region, initial.getProtocol(), certArns);
+        changeListenerCertificates(region, listenerArn, certArns, false);
     }
 
     public void removeListenerCertificates(String region, String listenerArn, List<String> certArns) {
-        Listener listener = requireListener(region, listenerArn);
-        List<String> certificates = listener.getCertificates();
-        String defaultCert = certificates.isEmpty() ? null : certificates.getFirst();
-        if (defaultCert != null && certArns != null && certArns.contains(defaultCert)) {
-            throw new AwsException("OperationNotPermitted",
-                    "The default certificate cannot be removed. Use ModifyListener to change it.", 400);
+        changeListenerCertificates(region, listenerArn, certArns, true);
+    }
+
+    private void changeListenerCertificates(String region, String listenerArn, List<String> requested, boolean remove) {
+        while (true) {
+            Listener listener = requireListener(region, listenerArn);
+            LoadBalancer lb = requireLoadBalancer(region, listener.getLoadBalancerArn());
+            ListenerState expected = listenerState(listener, lb);
+            List<String> certificates = new ArrayList<>(expected.certificates());
+            if (remove) {
+                if (servesCertificates(expected.protocol()) && !certificates.isEmpty()
+                        && requested.contains(certificates.getFirst())) {
+                    throw new AwsException("OperationNotPermitted",
+                            "The default listener certificate cannot be removed.", 400);
+                }
+                certificates.removeAll(requested);
+            } else {
+                if (!validateExistingListener(region, expected, lb,
+                        () -> requireCertificates(region, expected.protocol(), requested))) {
+                    continue;
+                }
+                for (String arn : requested) {
+                    if (!certificates.contains(arn)) {
+                        certificates.add(arn);
+                    }
+                }
+            }
+            Listener prospective = prospectiveListener(expected, null, null, certificates);
+            if (publishExistingListener(prospective, region, expected, lb, () -> {
+                if (!remove) {
+                    requireCertificates(region, expected.protocol(), requested);
+                }
+            }, () -> {
+                synchronized (lb) {
+                    requireCanonicalLoadBalancer(region, lb);
+                    if (!isCurrentListener(region, expected)) {
+                        return false;
+                    }
+                    listener.setCertificates(certificates);
+                    persistRegion(listeners, region);
+                    return true;
+                }
+            })) {
+                return;
+            }
         }
-        if (certArns != null) {
-            certificates.removeAll(certArns);
-        }
-        persistRegion(listeners, region);
     }
 
     public List<String> describeListenerCertificates(String region, String listenerArn) {
@@ -988,153 +1181,240 @@ public class ElbV2Service implements ResourceProvider {
         return new ArrayList<>(listener.getCertificates());
     }
 
-    /**
-     * Index 0 is the default certificate (CreateListener / ModifyListener).
-     * Subsequent entries are SNI extras (AddListenerCertificates).
-     */
-    private static void replaceDefaultCertificate(Listener listener, String defaultCertArn) {
-        List<String> current = listener.getCertificates();
-        List<String> extras = new ArrayList<>();
-        for (int i = 1; i < current.size(); i++) {
-            String extra = current.get(i);
-            if (extra != null && !extra.equals(defaultCertArn)) {
-                extras.add(extra);
-            }
-        }
-        List<String> updated = new ArrayList<>();
-        updated.add(defaultCertArn);
-        updated.addAll(extras);
-        listener.setCertificates(updated);
-    }
-
-    // ── Trust Stores ──────────────────────────────────────────────────────────
-
-    public TrustStore createTrustStore(String region, String name,
-                                       String caCertificatesBundleS3Bucket,
-                                       String caCertificatesBundleS3Key,
-                                       String caCertificatesBundleS3ObjectVersion,
-                                       Map<String, String> initialTags) {
-        validateName(name, "trust store");
-        if (caCertificatesBundleS3Bucket == null || caCertificatesBundleS3Bucket.isEmpty()
-                || caCertificatesBundleS3Key == null || caCertificatesBundleS3Key.isEmpty()) {
-            throw new AwsException("ValidationError",
-                    "CaCertificatesBundleS3Bucket and CaCertificatesBundleS3Key are required.", 400);
-        }
-        Map<String, TrustStore> regionStores = mutableRegion(trustStores, region);
-        boolean duplicate = regionStores.values().stream().anyMatch(ts -> ts.getName().equals(name));
-        if (duplicate) {
-            throw new AwsException("DuplicateTrustStoreName",
-                    "A trust store with name '" + name + "' already exists.", 400);
-        }
-
-        int certCount = loadCaBundleCertificateCount(
-                caCertificatesBundleS3Bucket, caCertificatesBundleS3Key, caCertificatesBundleS3ObjectVersion);
-
-        String id = randomHex16();
-        String arn = AwsArnUtils.Arn.of(
-                "elasticloadbalancing", region, regionResolver.getAccountId(),
-                "truststore/" + name + "/" + id).toString();
-
-        TrustStore trustStore = new TrustStore();
-        trustStore.setName(name);
-        trustStore.setTrustStoreArn(arn);
-        trustStore.setStatus("ACTIVE");
-        trustStore.setNumberOfCaCertificates(certCount);
-        trustStore.setTotalRevokedEntries(0);
-        trustStore.setCaCertificatesBundleS3Bucket(caCertificatesBundleS3Bucket);
-        trustStore.setCaCertificatesBundleS3Key(caCertificatesBundleS3Key);
-        trustStore.setCaCertificatesBundleS3ObjectVersion(caCertificatesBundleS3ObjectVersion);
-        trustStore.setRegion(region);
-
-        regionStores.put(arn, trustStore);
-        trustStores.put(region, regionStores);
-        if (initialTags != null && !initialTags.isEmpty()) {
-            tags.put(arn, new LinkedHashMap<>(initialTags));
-        }
-        return trustStore;
-    }
-
-    public List<TrustStore> describeTrustStores(String region, List<String> arns, List<String> names) {
-        Map<String, TrustStore> regionStores = trustStores.getOrDefault(region, Map.of());
-        List<TrustStore> result = new ArrayList<>(regionStores.values());
-
-        if (arns != null && !arns.isEmpty()) {
-            Set<String> arnSet = new HashSet<>(arns);
-            result = result.stream()
-                    .filter(ts -> arnSet.contains(ts.getTrustStoreArn()))
-                    .collect(Collectors.toList());
-            if (result.size() != arnSet.size()) {
-                throw new AwsException("TrustStoreNotFound",
-                        "One or more trust stores not found.", 400);
-            }
-        }
-        if (names != null && !names.isEmpty()) {
-            Set<String> nameSet = new HashSet<>(names);
-            result = result.stream()
-                    .filter(ts -> nameSet.contains(ts.getName()))
-                    .collect(Collectors.toList());
-            if (result.size() != nameSet.size()) {
-                throw new AwsException("TrustStoreNotFound",
-                        "One or more trust stores not found.", 400);
-            }
-        }
-        return result;
-    }
-
-    public TrustStore modifyTrustStore(String region, String arn,
-                                       String caCertificatesBundleS3Bucket,
-                                       String caCertificatesBundleS3Key,
-                                       String caCertificatesBundleS3ObjectVersion) {
-        TrustStore trustStore = requireTrustStore(region, arn);
-        if (caCertificatesBundleS3Bucket == null || caCertificatesBundleS3Bucket.isEmpty()
-                || caCertificatesBundleS3Key == null || caCertificatesBundleS3Key.isEmpty()) {
-            throw new AwsException("ValidationError",
-                    "CaCertificatesBundleS3Bucket and CaCertificatesBundleS3Key are required.", 400);
-        }
-        int certCount = loadCaBundleCertificateCount(
-                caCertificatesBundleS3Bucket, caCertificatesBundleS3Key, caCertificatesBundleS3ObjectVersion);
-        trustStore.setCaCertificatesBundleS3Bucket(caCertificatesBundleS3Bucket);
-        trustStore.setCaCertificatesBundleS3Key(caCertificatesBundleS3Key);
-        trustStore.setCaCertificatesBundleS3ObjectVersion(caCertificatesBundleS3ObjectVersion);
-        trustStore.setNumberOfCaCertificates(certCount);
-        persistRegion(trustStores, region);
-        return trustStore;
-    }
-
-    public void deleteTrustStore(String region, String arn) {
-        TrustStore trustStore = requireTrustStore(region, arn);
-        if (isTrustStoreInUse(trustStore.getTrustStoreArn())) {
-            throw new AwsException("TrustStoreInUse",
-                    "The specified trust store is currently in use.", 400);
-        }
-        Map<String, TrustStore> regionStores = mutableRegion(trustStores, region);
-        regionStores.remove(arn);
-        tags.remove(arn);
-        persistRegion(trustStores, region);
-    }
-
-    public String getTrustStoreCaCertificatesBundleLocation(String region, String arn) {
-        TrustStore trustStore = requireTrustStore(region, arn);
-        return "https://s3." + region + ".amazonaws.com/"
-                + trustStore.getCaCertificatesBundleS3Bucket() + "/"
-                + trustStore.getCaCertificatesBundleS3Key();
-    }
-
-    public String getTrustStoreRevocationContentLocation(String region, String arn, Long revocationId) {
-        TrustStore trustStore = requireTrustStore(region, arn);
-        if (revocationId == null) {
-            throw new AwsException("ValidationError", "RevocationId is required.", 400);
-        }
-        TrustStoreRevocation revocation = trustStore.getRevocations().stream()
-                .filter(r -> r.getRevocationId() == revocationId)
-                .findFirst()
-                .orElseThrow(() -> new AwsException("RevocationIdNotFound",
-                        "The specified revocation identifier was not found.", 400));
-        return "https://s3." + region + ".amazonaws.com/"
-                + revocation.getS3Bucket() + "/" + revocation.getS3Key();
-    }
-
     // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private record ListenerState(Listener listener, Integer port, String protocol, List<String> certificates) {}
+
+    private static ListenerState listenerState(Listener listener) {
+        return new ListenerState(listener, listener.getPort(), listener.getProtocol(),
+                new ArrayList<>(listener.getCertificates()));
+    }
+
+    private static ListenerState listenerState(Listener listener, LoadBalancer lb) {
+        synchronized (lb) {
+            return listenerState(listener);
+        }
+    }
+
+    private boolean isCurrentListener(String region, ListenerState expected) {
+        Listener current = listeners.getOrDefault(region, Map.of()).get(expected.listener().getListenerArn());
+        return current == expected.listener() && Objects.equals(current.getPort(), expected.port())
+                && Objects.equals(current.getProtocol(), expected.protocol())
+                && current.getCertificates().equals(expected.certificates());
+    }
+
+    private static Listener prospectiveListener(ListenerState expected, String protocol, Integer port,
+                                                List<String> certificates) {
+        Listener prospective = new Listener();
+        prospective.setListenerArn(expected.listener().getListenerArn());
+        prospective.setLoadBalancerArn(expected.listener().getLoadBalancerArn());
+        prospective.setPort(port != null ? port : expected.port());
+        prospective.setProtocol(protocol != null ? protocol : expected.protocol());
+        prospective.setCertificates(new ArrayList<>(certificates != null ? certificates : expected.certificates()));
+        return prospective;
+    }
+
+    private void requireCanonicalLoadBalancer(String region, LoadBalancer lb) {
+        if (loadBalancers.getOrDefault(region, Map.of()).get(lb.getLoadBalancerArn()) != lb) {
+            throw new AwsException("LoadBalancerNotFound", "One or more load balancers not found.", 400);
+        }
+    }
+
+    private static void requireAvailableListenerPort(Map<String, Listener> regionListeners, String lbArn,
+                                                     String listenerArn, Integer port) {
+        if (regionListeners.values().stream().anyMatch(listener -> lbArn.equals(listener.getLoadBalancerArn())
+                && !listenerArn.equals(listener.getListenerArn()) && Objects.equals(listener.getPort(), port))) {
+            throw new AwsException("DuplicateListener",
+                    "A listener already exists on port " + port + " for this load balancer.", 400);
+        }
+    }
+
+    private void requireCompatibleListenerProtocol(String listenerArn, Integer port, String protocol) {
+        if (port == null) {
+            return;
+        }
+        try {
+            dataPlane.requireCompatibleListenerProtocol(listenerArn, port, protocol);
+        } catch (ElbV2DataPlane.IncompatibleListenerProtocolException conflict) {
+            throw new ListenerProtocolConflict(conflict);
+        }
+    }
+
+    private boolean publishListener(Listener prospective, String region, Integer previousPort,
+                                    BooleanSupplier publication, Function<Supplier<Boolean>, Boolean> admission) {
+        try {
+            return dataPlane.publishListener(prospective, region, previousPort, publication,
+                    () -> getListenerRules(region, prospective.getListenerArn()), admission);
+        } catch (ElbV2DataPlane.IncompatibleListenerProtocolException conflict) {
+            throw new ListenerProtocolConflict(conflict);
+        }
+    }
+
+    private static final class ListenerProtocolConflict extends AwsException {
+        private ListenerProtocolConflict(ElbV2DataPlane.IncompatibleListenerProtocolException conflict) {
+            super("InvalidConfigurationRequest", conflict.getMessage(), 400);
+        }
+    }
+
+    private boolean staleListenerPreparation(String region, ListenerState expected, LoadBalancer lb,
+                                             AwsException failure) {
+        if (!(failure instanceof ListenerProtocolConflict) && !"CertificateNotFound".equals(failure.getErrorCode())) {
+            return false;
+        }
+        synchronized (lb) {
+            return !isCurrentListener(region, expected)
+                    || loadBalancers.getOrDefault(region, Map.of()).get(lb.getLoadBalancerArn()) != lb;
+        }
+    }
+
+    private boolean validateExistingListener(String region, ListenerState expected, LoadBalancer lb,
+                                             Runnable validation) {
+        try {
+            validation.run();
+            return true;
+        } catch (AwsException failure) {
+            if (staleListenerPreparation(region, expected, lb, failure)) {
+                return false;
+            }
+            throw failure;
+        }
+    }
+
+    private boolean publishExistingListener(Listener prospective, String region, ListenerState expected,
+                                            LoadBalancer lb, Runnable referenceValidation, BooleanSupplier publication) {
+        try {
+            return publishListener(prospective, region, expected.port(), publication,
+                    operation -> supplyCertificatesHeld(prospective.getCertificates(), () -> {
+                        synchronized (lb) {
+                            if (!isCurrentListener(region, expected)
+                                    || loadBalancers.getOrDefault(region, Map.of()).get(lb.getLoadBalancerArn()) != lb) {
+                                return false;
+                            }
+                        }
+                        referenceValidation.run();
+                        requirePublishedCertificates(region, prospective.getProtocol(), prospective.getCertificates());
+                        return operation.get();
+                    }));
+        } catch (AwsException failure) {
+            if (staleListenerPreparation(region, expected, lb, failure)) {
+                return false;
+            }
+            throw failure;
+        }
+    }
+
+    private void restoreListener(String region, String listenerArn) {
+        while (true) {
+            Listener listener = listeners.getOrDefault(region, Map.of()).get(listenerArn);
+            if (listener == null) {
+                return;
+            }
+            LoadBalancer lb = loadBalancers.getOrDefault(region, Map.of()).get(listener.getLoadBalancerArn());
+            if (lb == null) {
+                return;
+            }
+            ListenerState expected = listenerState(listener, lb);
+            if (publishExistingListener(prospectiveListener(expected, null, null, null), region, expected, lb,
+                    () -> { }, () -> {
+                synchronized (lb) {
+                    return loadBalancers.getOrDefault(region, Map.of()).get(lb.getLoadBalancerArn()) == lb
+                            && isCurrentListener(region, expected);
+                }
+            })) {
+                return;
+            }
+        }
+    }
+
+    private void requirePublishedCertificates(String region, String protocol, List<String> certificateArns) {
+        if (certificateResolver != null && certificateArns != null && servesCertificates(protocol)) {
+            for (String arn : certificateArns) {
+                if (arn != null && AwsArnUtils.isArn(arn) && "acm".equals(AwsArnUtils.parse(arn).service())
+                        && !certificateResolver.isUsableAcmCertificate(region, arn)) {
+                    throw new AwsException("CertificateNotFound", "The specified certificate is not available for use.", 400);
+                }
+            }
+        }
+        if ("HTTPS".equalsIgnoreCase(protocol) && (certificateArns == null || certificateArns.isEmpty())) {
+            throw new AwsException("InvalidConfigurationRequest",
+                    "An HTTPS listener requires a default certificate.", 400);
+        }
+    }
+
+    /**
+     * Refuses a certificate the account does not have. {@code CertificateNotFound} is modeled on
+     * {@code CreateListener}, {@code ModifyListener} and {@code AddListenerCertificates} alone,
+     * and the reference gives it one sentence, so that sentence is the message rather than one
+     * naming the ARN.
+     *
+     * <p>Only for the listener types the member belongs to. The reference marks {@code
+     * Certificates} "[HTTPS and TLS listeners]" and the user guide scopes the certificate list to
+     * an HTTPS listener, so a certificate on a listener of any other protocol is a configuration
+     * AWS does not describe, and what it answers there is not {@code CertificateNotFound} on any
+     * evidence here. Such a request keeps the behaviour it had rather than being refused with a
+     * code read off the wrong case.
+     *
+     * <p>A blank entry is refused like any other. {@code Certificates} is a list of the
+     * certificates the listener serves, and an empty value in it names one no better than a value
+     * that is no ARN at all, so letting it through would store a certificate the listener cannot
+     * serve.
+     */
+    private void requireCertificates(String region, String protocol,
+                                     List<String> certificateArns) {
+        if (certificateResolver == null || certificateArns == null || !servesCertificates(protocol)) {
+            return;
+        }
+        for (String certificateArn : certificateArns) {
+            if (certificateArn == null || certificateArn.isBlank()
+                    || !certificateResolver.exists(region, certificateArn)) {
+                throw new AwsException("CertificateNotFound",
+                        "The specified certificate does not exist.", 400);
+            }
+        }
+    }
+
+    private void requireListenerCertificates(String region, String protocol, List<String> certificateArns) {
+        requireCertificates(region, protocol, certificateArns);
+        if ("HTTPS".equalsIgnoreCase(protocol) && (certificateArns == null || certificateArns.isEmpty())) {
+            throw new AwsException("InvalidConfigurationRequest",
+                    "An HTTPS listener requires a default certificate.", 400);
+        }
+        requirePublishedCertificates(region, protocol, certificateArns);
+    }
+
+    /** The listener protocols a certificate belongs to, per the reference's own bracket. */
+    private static boolean servesCertificates(String protocol) {
+        return "HTTPS".equalsIgnoreCase(protocol) || "TLS".equalsIgnoreCase(protocol);
+    }
+
+    private <T> T supplyCertificatesHeld(List<String> certificateArns, Supplier<T> action) {
+        return certificateResolver == null ? action.get() : certificateResolver.supplyWhileHeld(certificateArns, action);
+    }
+
+    public List<CertificateReference> acmCertificateReferences() {
+        List<CertificateReference> references = new ArrayList<>();
+        for (Map<String, Listener> regionListeners : listeners.values()) {
+            for (Listener listener : regionListeners.values()) {
+                for (String certificateArn : listener.getCertificates()) {
+                    references.add(new CertificateReference(certificateArn, listener.getLoadBalancerArn()));
+                }
+            }
+        }
+        return references;
+    }
+
+    public void certificateReimported(String certificateArn, String region) {
+        for (Listener listener : listeners.getOrDefault(region, Map.of()).values()) {
+            if (listener.getCertificates().contains(certificateArn)) {
+                try {
+                    restoreListener(region, listener.getListenerArn());
+                } catch (RuntimeException failure) {
+                    LOG.warnv("ELBv2 certificate refresh for listener {0} failed ({1}: {2}); its configuration is retained",
+                            listener.getListenerArn(), failure.getClass().getSimpleName(), failure.getMessage());
+                }
+            }
+        }
+    }
 
     private LoadBalancer requireLoadBalancer(String region, String arn) {
         LoadBalancer lb = loadBalancers.getOrDefault(region, Map.of()).get(arn);
@@ -1170,11 +1450,6 @@ public class ElbV2Service implements ResourceProvider {
         Map<String, Subnet> subnetsById = resolveSubnetsById(region, subnetIds);
 
         if ("application".equals(lbType)) {
-            if (subnetIds.size() < 2) {
-                throw new AwsException("InvalidConfigurationRequest",
-                        "Application Load Balancers must be attached to subnets in at least two Availability Zones.", 400);
-            }
-
             long distinctAvailabilityZones = subnetIds.stream()
                     .map(subnetsById::get)
                     .map(Subnet::getAvailabilityZone)
@@ -1200,56 +1475,21 @@ public class ElbV2Service implements ResourceProvider {
     }
 
     private Map<String, Subnet> resolveSubnetsById(String region, List<String> subnetIds) {
+        Map<String, Subnet> described = describeSubnetsQuietly(region, subnetIds);
         Map<String, Subnet> subnetsById = new LinkedHashMap<>();
-        int index = 0;
         for (String subnetId : subnetIds) {
             if (subnetId == null || subnetId.isBlank()) {
                 throw new AwsException("SubnetNotFound",
                         "The subnet ID '" + subnetId + "' does not exist", 400);
             }
-            Subnet subnet = lookupEc2Subnet(region, subnetId);
+            Subnet subnet = described.containsKey(subnetId) ? described.get(subnetId) : lookupEc2Subnet(region, subnetId);
             if (subnet == null) {
-                // Accept well-formed IDs the EC2 store cannot see under this
-                // RequestContext (wrong account/region key, or a caller that
-                // described subnets out of band). Real ELBv2 still returns
-                // SubnetNotFound for a truly missing or malformed id; we only
-                // synthesize a valid-looking subnet-* so CreateLoadBalancer can
-                // proceed. AZ is positional so two IDs always span two zones
-                // (ALB requirement).
-                if (!AWS_SUBNET_ID.matcher(subnetId).matches()) {
-                    throw new AwsException("SubnetNotFound",
-                            "The subnet ID '" + subnetId + "' does not exist", 400);
-                }
-                subnet = synthesizeAcceptedSubnet(region, subnetId, index);
+                throw new AwsException("SubnetNotFound",
+                        "The subnet ID '" + subnetId + "' does not exist", 400);
             }
             subnetsById.put(subnetId, subnet);
-            index++;
         }
         return subnetsById;
-    }
-
-    private Subnet lookupEc2Subnet(String region, String subnetId) {
-        if (ec2Service == null) {
-            return null;
-        }
-        try {
-            return ec2Service.findSubnetById(region, subnetId).orElse(null);
-        } catch (AwsException e) {
-            if ("InvalidSubnetID.NotFound".equals(e.getErrorCode())) {
-                return null;
-            }
-            throw e;
-        }
-    }
-
-    private static Subnet synthesizeAcceptedSubnet(String region, String subnetId, int index) {
-        Subnet subnet = new Subnet();
-        subnet.setSubnetId(subnetId);
-        subnet.setVpcId("vpc-default");
-        subnet.setRegion(region);
-        subnet.setState("available");
-        subnet.setAvailabilityZone(region + (char) ('a' + Math.floorMod(index, 3)));
-        return subnet;
     }
     private TargetGroup requireTargetGroup(String region, String arn) {
         TargetGroup tg = targetGroups.getOrDefault(region, Map.of()).get(arn);
@@ -1275,68 +1515,6 @@ public class ElbV2Service implements ResourceProvider {
             throw new AwsException("RuleNotFound", "One or more rules not found.", 400);
         }
         return r;
-    }
-
-    private TrustStore requireTrustStore(String region, String arn) {
-        TrustStore trustStore = trustStores.getOrDefault(region, Map.of()).get(arn);
-        if (trustStore == null) {
-            throw new AwsException("TrustStoreNotFound",
-                    "One or more trust stores not found.", 400);
-        }
-        return trustStore;
-    }
-
-    private boolean isTrustStoreInUse(String trustStoreArn) {
-        for (Map<String, Listener> regionListeners : listeners.values()) {
-            for (Listener listener : regionListeners.values()) {
-                Map<String, String> attributes = listener.getAttributes();
-                if (attributes == null) {
-                    continue;
-                }
-                String mode = attributes.get("mutualAuthentication.trustStoreArn");
-                if (trustStoreArn.equals(mode)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    private int loadCaBundleCertificateCount(String bucket, String key, String versionId) {
-        if (s3Service == null) {
-            throw new AwsException("CaCertificatesBundleNotFound",
-                    "The specified CA certificates bundle could not be found.", 400);
-        }
-        S3Object object;
-        try {
-            object = versionId != null && !versionId.isEmpty()
-                    ? s3Service.getObject(bucket, key, versionId)
-                    : s3Service.getObject(bucket, key);
-        } catch (AwsException e) {
-            if ("NoSuchBucket".equals(e.getErrorCode())
-                    || "NoSuchKey".equals(e.getErrorCode())
-                    || "NoSuchVersion".equals(e.getErrorCode())) {
-                throw new AwsException("CaCertificatesBundleNotFound",
-                        "The specified CA certificates bundle could not be found.", 400);
-            }
-            throw e;
-        }
-        byte[] data = object.getData();
-        if (data == null || data.length == 0) {
-            throw new AwsException("InvalidCaCertificatesBundle",
-                    "The CA certificates bundle is empty.", 400);
-        }
-        String pem = new String(data, StandardCharsets.UTF_8);
-        Matcher matcher = PEM_CERT.matcher(pem);
-        int count = 0;
-        while (matcher.find()) {
-            count++;
-        }
-        if (count == 0) {
-            throw new AwsException("InvalidCaCertificatesBundle",
-                    "The CA certificates bundle does not contain a valid certificate.", 400);
-        }
-        return count;
     }
 
     public TargetGroup getTargetGroup(String region, String arn) {
@@ -1374,33 +1552,7 @@ public class ElbV2Service implements ResourceProvider {
             action.setTargetGroups(List.of(blueTuple, greenTuple));
         }
         defaultRule.setActions(List.of(action));
-        dataPlane.recompileRules(listenerArn, getListenerRules(region, listenerArn));
-    }
-
-    /**
-     * Data-plane bind is best-effort. A local HTTP proxy failure (null port,
-     * NLB/TCP/TLS, port conflict, NPE) must not fail CreateListener — that
-     * leaked as {@code InternalFailure: Unexpected error: null}.
-     */
-    private void startDataPlane(Listener listener, String region) {
-        if (dataPlane == null || listener == null) {
-            return;
-        }
-        try {
-            dataPlane.startListener(listener, region, getListenerRules(region, listener.getListenerArn()));
-        } catch (RuntimeException ignored) {
-            // already logged inside ElbV2DataPlane when the real impl is used
-        }
-    }
-
-    private void restartDataPlane(Listener listener, String region) {
-        if (dataPlane == null || listener == null) {
-            return;
-        }
-        try {
-            dataPlane.restartListener(listener, region, getListenerRules(region, listener.getListenerArn()));
-        } catch (RuntimeException ignored) {
-        }
+        dataPlane.recompileRules(listenerArn, () -> getListenerRules(region, listenerArn));
     }
 
     private List<Rule> getListenerRules(String region, String listenerArn) {
@@ -1413,6 +1565,17 @@ public class ElbV2Service implements ResourceProvider {
                     try { return Integer.parseInt(r.getPriority()); } catch (NumberFormatException e) { return Integer.MAX_VALUE; }
                 }))
                 .collect(Collectors.toList());
+    }
+
+    /** {@code HealthCheckPort} is either {@code traffic-port} or a port number from 1 to 65535. */
+    private static void validateHealthCheckPort(String healthCheckPort) {
+        if (healthCheckPort == null || "traffic-port".equals(healthCheckPort)) {
+            return;
+        }
+        if (ElbV2HealthChecker.parsePort(healthCheckPort) == null) {
+            throw new AwsException("ValidationError",
+                    "Health check port '" + healthCheckPort + "' must be 'traffic-port' or a port number from 1 to 65535.", 400);
+        }
     }
 
     private static void validateName(String name, String resource) {
@@ -1435,6 +1598,37 @@ public class ElbV2Service implements ResourceProvider {
 
     private static String randomHex16() {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+    }
+
+    /**
+     * A load balancer stored before the hosted zones were looked up per region and type still
+     * carries the one fixed zone every balancer used to report, so restored balancers take the
+     * zone of their region and type again, written back so the stored copy agrees.
+     */
+    private void refreshCanonicalHostedZones() {
+        for (String region : List.copyOf(loadBalancers.keySet())) {
+            Map<String, LoadBalancer> regionLoadBalancers = loadBalancers.get(region);
+            if (regionLoadBalancers == null) {
+                continue;
+            }
+            for (LoadBalancer lb : regionLoadBalancers.values()) {
+                String lbType = lb.getType() != null ? lb.getType() : "application";
+                lb.setCanonicalHostedZoneId(canonicalHostedZoneId(lbType, region));
+            }
+            loadBalancers.put(region, regionLoadBalancers);
+        }
+    }
+
+    /**
+     * Network load balancers have their own hosted zone per region, distinct from the one
+     * Application (and Classic) load balancers share; a gateway load balancer has none.
+     */
+    private static String canonicalHostedZoneId(String type, String region) {
+        return switch (type) {
+            case "network" -> AwsRegionFacts.nlbHostedZoneId(region).orElse(null);
+            case "gateway" -> null;
+            default -> AwsRegionFacts.albHostedZoneId(region).orElse(null);
+        };
     }
 
     private static String lbTypePrefix(String type) {
@@ -1599,5 +1793,313 @@ public class ElbV2Service implements ResourceProvider {
                 parsed.region(), parsed.accountId(),
                 createdAt != null ? createdAt : Instant.now(),
                 tags.getOrDefault(arn, Map.of())));
+    }
+
+    @Inject
+    S3Service s3Service;
+
+
+    private static final Pattern PEM_CERT = Pattern.compile("-----BEGIN CERTIFICATE-----");
+
+
+    private Map<String, Map<String, TrustStore>> trustStores = new ConcurrentHashMap<>();
+
+    /**
+     * Storage reload (and {@code getOrDefault(..., Map.of())}) can hand back an
+     * immutable inner map. Mutating it throws {@code UnsupportedOperationException}
+     * with a null message — the Query dispatcher surfaces that as
+     * {@code InternalFailure: Unexpected error: null}.
+     */
+    private <V> Map<String, V> mutableRegion(Map<String, Map<String, V>> resources, String region) {
+        Map<String, V> existing = resources.get(region);
+        if (existing instanceof ConcurrentHashMap) {
+            return existing;
+        }
+        ConcurrentHashMap<String, V> copy = new ConcurrentHashMap<>();
+        if (existing != null) {
+            copy.putAll(existing);
+        }
+        resources.put(region, copy);
+        return copy;
+    }
+
+    /**
+     * Stores or clears the requested minimum capacity. Floci does not provision LCUs, so a reset
+     * of a never-set reservation is a no-op success — the same as AWS when nothing is reserved.
+     */
+    public CapacityReservation modifyCapacityReservation(String region, String arn,
+                                                         Integer minimumCapacityUnits,
+                                                         Boolean reset) {
+        LoadBalancer lb = requireLoadBalancer(region, arn);
+        boolean doReset = Boolean.TRUE.equals(reset);
+        if (!doReset && minimumCapacityUnits == null) {
+            throw new AwsException("InvalidConfigurationRequest",
+                    "You must specify MinimumLoadBalancerCapacity or ResetCapacityReservation.", 400);
+        }
+        if (doReset) {
+            lb.setMinimumCapacityUnits(null);
+            lb.setDecreaseRequestsRemaining(null);
+            lb.setCapacityReservationLastModified(null);
+        } else {
+            lb.setMinimumCapacityUnits(minimumCapacityUnits);
+            lb.setDecreaseRequestsRemaining(2);
+            lb.setCapacityReservationLastModified(Instant.now());
+        }
+        persistRegion(loadBalancers, region);
+        return describeCapacityReservation(region, arn);
+    }
+
+
+    public TrustStore createTrustStore(String region, String name,
+                                       String caCertificatesBundleS3Bucket,
+                                       String caCertificatesBundleS3Key,
+                                       String caCertificatesBundleS3ObjectVersion,
+                                       Map<String, String> initialTags) {
+        validateName(name, "trust store");
+        if (caCertificatesBundleS3Bucket == null || caCertificatesBundleS3Bucket.isEmpty()
+                || caCertificatesBundleS3Key == null || caCertificatesBundleS3Key.isEmpty()) {
+            throw new AwsException("ValidationError",
+                    "CaCertificatesBundleS3Bucket and CaCertificatesBundleS3Key are required.", 400);
+        }
+        Map<String, TrustStore> regionStores = mutableRegion(trustStores, region);
+        boolean duplicate = regionStores.values().stream().anyMatch(ts -> ts.getName().equals(name));
+        if (duplicate) {
+            throw new AwsException("DuplicateTrustStoreName",
+                    "A trust store with name '" + name + "' already exists.", 400);
+        }
+
+        int certCount = loadCaBundleCertificateCount(
+                caCertificatesBundleS3Bucket, caCertificatesBundleS3Key, caCertificatesBundleS3ObjectVersion);
+
+        String id = randomHex16();
+        String arn = AwsArnUtils.Arn.of(
+                "elasticloadbalancing", region, regionResolver.getAccountId(),
+                "truststore/" + name + "/" + id).toString();
+
+        TrustStore trustStore = new TrustStore();
+        trustStore.setName(name);
+        trustStore.setTrustStoreArn(arn);
+        trustStore.setStatus("ACTIVE");
+        trustStore.setNumberOfCaCertificates(certCount);
+        trustStore.setTotalRevokedEntries(0);
+        trustStore.setCaCertificatesBundleS3Bucket(caCertificatesBundleS3Bucket);
+        trustStore.setCaCertificatesBundleS3Key(caCertificatesBundleS3Key);
+        trustStore.setCaCertificatesBundleS3ObjectVersion(caCertificatesBundleS3ObjectVersion);
+        trustStore.setRegion(region);
+
+        regionStores.put(arn, trustStore);
+        trustStores.put(region, regionStores);
+        if (initialTags != null && !initialTags.isEmpty()) {
+            tags.put(arn, new LinkedHashMap<>(initialTags));
+        }
+        return trustStore;
+    }
+
+    public List<TrustStore> describeTrustStores(String region, List<String> arns, List<String> names) {
+        Map<String, TrustStore> regionStores = trustStores.getOrDefault(region, Map.of());
+        List<TrustStore> result = new ArrayList<>(regionStores.values());
+
+        if (arns != null && !arns.isEmpty()) {
+            Set<String> arnSet = new HashSet<>(arns);
+            result = result.stream()
+                    .filter(ts -> arnSet.contains(ts.getTrustStoreArn()))
+                    .collect(Collectors.toList());
+            if (result.size() != arnSet.size()) {
+                throw new AwsException("TrustStoreNotFound",
+                        "One or more trust stores not found.", 400);
+            }
+        }
+        if (names != null && !names.isEmpty()) {
+            Set<String> nameSet = new HashSet<>(names);
+            result = result.stream()
+                    .filter(ts -> nameSet.contains(ts.getName()))
+                    .collect(Collectors.toList());
+            if (result.size() != nameSet.size()) {
+                throw new AwsException("TrustStoreNotFound",
+                        "One or more trust stores not found.", 400);
+            }
+        }
+        return result;
+    }
+
+    public TrustStore modifyTrustStore(String region, String arn,
+                                       String caCertificatesBundleS3Bucket,
+                                       String caCertificatesBundleS3Key,
+                                       String caCertificatesBundleS3ObjectVersion) {
+        TrustStore trustStore = requireTrustStore(region, arn);
+        if (caCertificatesBundleS3Bucket == null || caCertificatesBundleS3Bucket.isEmpty()
+                || caCertificatesBundleS3Key == null || caCertificatesBundleS3Key.isEmpty()) {
+            throw new AwsException("ValidationError",
+                    "CaCertificatesBundleS3Bucket and CaCertificatesBundleS3Key are required.", 400);
+        }
+        int certCount = loadCaBundleCertificateCount(
+                caCertificatesBundleS3Bucket, caCertificatesBundleS3Key, caCertificatesBundleS3ObjectVersion);
+        trustStore.setCaCertificatesBundleS3Bucket(caCertificatesBundleS3Bucket);
+        trustStore.setCaCertificatesBundleS3Key(caCertificatesBundleS3Key);
+        trustStore.setCaCertificatesBundleS3ObjectVersion(caCertificatesBundleS3ObjectVersion);
+        trustStore.setNumberOfCaCertificates(certCount);
+        persistRegion(trustStores, region);
+        return trustStore;
+    }
+
+    public void deleteTrustStore(String region, String arn) {
+        TrustStore trustStore = requireTrustStore(region, arn);
+        if (isTrustStoreInUse(trustStore.getTrustStoreArn())) {
+            throw new AwsException("TrustStoreInUse",
+                    "The specified trust store is currently in use.", 400);
+        }
+        Map<String, TrustStore> regionStores = mutableRegion(trustStores, region);
+        regionStores.remove(arn);
+        tags.remove(arn);
+        persistRegion(trustStores, region);
+    }
+
+    public String getTrustStoreCaCertificatesBundleLocation(String region, String arn) {
+        TrustStore trustStore = requireTrustStore(region, arn);
+        return "https://s3." + region + ".amazonaws.com/"
+                + trustStore.getCaCertificatesBundleS3Bucket() + "/"
+                + trustStore.getCaCertificatesBundleS3Key();
+    }
+
+    public String getTrustStoreRevocationContentLocation(String region, String arn, Long revocationId) {
+        TrustStore trustStore = requireTrustStore(region, arn);
+        if (revocationId == null) {
+            throw new AwsException("ValidationError", "RevocationId is required.", 400);
+        }
+        TrustStoreRevocation revocation = trustStore.getRevocations().stream()
+                .filter(r -> r.getRevocationId() == revocationId)
+                .findFirst()
+                .orElseThrow(() -> new AwsException("RevocationIdNotFound",
+                        "The specified revocation identifier was not found.", 400));
+        return "https://s3." + region + ".amazonaws.com/"
+                + revocation.getS3Bucket() + "/" + revocation.getS3Key();
+    }
+
+
+
+    private TrustStore requireTrustStore(String region, String arn) {
+        TrustStore trustStore = trustStores.getOrDefault(region, Map.of()).get(arn);
+        if (trustStore == null) {
+            throw new AwsException("TrustStoreNotFound",
+                    "One or more trust stores not found.", 400);
+        }
+        return trustStore;
+    }
+
+    private boolean isTrustStoreInUse(String trustStoreArn) {
+        for (Map<String, Listener> regionListeners : listeners.values()) {
+            for (Listener listener : regionListeners.values()) {
+                Map<String, String> attributes = listener.getAttributes();
+                if (attributes == null) {
+                    continue;
+                }
+                String mode = attributes.get("mutualAuthentication.trustStoreArn");
+                if (trustStoreArn.equals(mode)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private int loadCaBundleCertificateCount(String bucket, String key, String versionId) {
+        if (s3Service == null) {
+            throw new AwsException("CaCertificatesBundleNotFound",
+                    "The specified CA certificates bundle could not be found.", 400);
+        }
+        S3Object object;
+        try {
+            object = versionId != null && !versionId.isEmpty()
+                    ? s3Service.getObject(bucket, key, versionId)
+                    : s3Service.getObject(bucket, key);
+        } catch (AwsException e) {
+            if ("NoSuchBucket".equals(e.getErrorCode())
+                    || "NoSuchKey".equals(e.getErrorCode())
+                    || "NoSuchVersion".equals(e.getErrorCode())) {
+                throw new AwsException("CaCertificatesBundleNotFound",
+                        "The specified CA certificates bundle could not be found.", 400);
+            }
+            throw e;
+        }
+        byte[] data = object.getData();
+        if (data == null || data.length == 0) {
+            throw new AwsException("InvalidCaCertificatesBundle",
+                    "The CA certificates bundle is empty.", 400);
+        }
+        String pem = new String(data, StandardCharsets.UTF_8);
+        Matcher matcher = PEM_CERT.matcher(pem);
+        int count = 0;
+        while (matcher.find()) {
+            count++;
+        }
+        if (count == 0) {
+            throw new AwsException("InvalidCaCertificatesBundle",
+                    "The CA certificates bundle does not contain a valid certificate.", 400);
+        }
+        return count;
+    }
+
+
+    /** The subnets EC2 describes for these ids in one call; empty when it refuses one of them. */
+    private Map<String, Subnet> describeSubnetsQuietly(String region, List<String> subnetIds) {
+        if (ec2Service == null || subnetIds == null || subnetIds.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            List<Subnet> subnets = ec2Service.describeSubnets(region, subnetIds, Map.of());
+            if (subnets == null) {
+                return Map.of();
+            }
+            return subnets.stream()
+                    .collect(Collectors.toMap(Subnet::getSubnetId, subnet -> subnet, (left, right) -> left));
+        } catch (AwsException e) {
+            if ("InvalidSubnetID.NotFound".equals(e.getErrorCode())) {
+                return Map.of();
+            }
+            throw e;
+        }
+    }
+
+    private Subnet lookupEc2Subnet(String region, String subnetId) {
+        if (ec2Service == null) {
+            return null;
+        }
+        try {
+            return ec2Service.findSubnetById(region, subnetId).orElse(null);
+        } catch (AwsException e) {
+            if ("InvalidSubnetID.NotFound".equals(e.getErrorCode())) {
+                return null;
+            }
+            throw e;
+        }
+    }
+
+
+    private static final String CANONICAL_HOSTED_ZONE_ID = "Z35SXDOTRQ7X7K";
+
+    private void restartDataPlane(Listener listener, String region) {
+        if (dataPlane == null || listener == null) {
+            return;
+        }
+        try {
+            dataPlane.restartListener(listener, region, getListenerRules(region, listener.getListenerArn()));
+        } catch (RuntimeException ignored) {
+        }
+    }
+
+    /**
+     * Data-plane bind is best-effort. A local HTTP proxy failure (null port,
+     * NLB/TCP/TLS, port conflict, NPE) must not fail CreateListener — that
+     * leaked as {@code InternalFailure: Unexpected error: null}.
+     */
+    private void startDataPlane(Listener listener, String region) {
+        if (dataPlane == null || listener == null) {
+            return;
+        }
+        try {
+            dataPlane.startListener(listener, region, getListenerRules(region, listener.getListenerArn()));
+        } catch (RuntimeException ignored) {
+            // already logged inside ElbV2DataPlane when the real impl is used
+        }
     }
 }

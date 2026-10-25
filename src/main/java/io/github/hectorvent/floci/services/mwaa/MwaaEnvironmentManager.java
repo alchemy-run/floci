@@ -1,21 +1,24 @@
 package io.github.hectorvent.floci.services.mwaa;
 
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
-import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
-import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
-import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.ContainerInfo;
-import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
-import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
-import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
-import io.github.hectorvent.floci.services.mwaa.model.Environment;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.ContainerNetwork;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.StreamType;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.Base64Url;
+import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
+import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
+import io.github.hectorvent.floci.core.common.docker.ContainerExec;
+import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
+import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.ContainerInfo;
+import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
+import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
+import io.github.hectorvent.floci.core.common.docker.LaunchedContainerAwsEnv;
+import io.github.hectorvent.floci.core.common.docker.RetryingTarCopier;
+import io.github.hectorvent.floci.services.mwaa.model.Environment;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
@@ -25,6 +28,7 @@ import org.jboss.logging.Logger;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -35,6 +39,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
@@ -57,15 +62,24 @@ public class MwaaEnvironmentManager {
 
     private static final int POSTGRES_PORT = 5432;
     private static final int AIRFLOW_WEBSERVER_PORT = 8080;
-    /** Airflow web/API user created at bootstrap; InvokeRestApi authenticates as this user. */
-    public static final String AIRFLOW_ADMIN_USER = "admin";
-    private static final String API_AUTH_BACKENDS =
-            "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session";
     private static final String DAGS_MOUNT = "/opt/airflow/dags";
     private static final String LOGS_MOUNT = "/opt/airflow/logs";
     /** The OS user the stock apache/airflow image runs its process as (uid 50000) — distinct from
      *  the Airflow web-UI admin login username configured via {@code _AIRFLOW_WWW_USER_USERNAME}. */
     private static final String CONTAINER_OS_USER = "airflow";
+    private static final Set<String> MWAA_CLI_COMMANDS = Set.of("cheat-sheet", "version");
+    private static final Map<String, Set<String>> MWAA_CLI_SUBCOMMANDS = Map.of(
+            "connections", Set.of("add", "delete"),
+            "dags", Set.of("backfill", "delete", "list", "list-import-errors", "list-jobs",
+                    "list-runs", "next-execution", "pause", "report", "reserialize", "show",
+                    "state", "test", "trigger", "unpause"),
+            "db", Set.of("clean"),
+            "providers", Set.of("behaviours", "get", "hooks", "links", "list", "notifications",
+                    "secrets", "triggerer", "widgets"),
+            "roles", Set.of("add-perms", "create", "del-perms", "list"),
+            "tasks", Set.of("clear", "failed-deps", "list", "render", "run", "state",
+                    "states-for-dag-run", "test"),
+            "variables", Set.of("delete", "get", "list", "set"));
 
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
@@ -117,7 +131,7 @@ public class MwaaEnvironmentManager {
                 .withExposedPort(POSTGRES_PORT)
                 .withLogRotation()
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(
-                        "mwaa", name, environmentAccount(environment), environmentRegion(environment)))
+                        "mwaa", name, environmentAccount(environment), regionOf(environment)))
                 .build();
 
         String dbContainerId = lifecycleManager.create(dbSpec);
@@ -155,7 +169,7 @@ public class MwaaEnvironmentManager {
         // Points DAG code's own AWS SDK calls (boto3, botocore) at Floci itself, the same way
         // Lambda/ECS containers already do via LaunchedContainerAwsEnv — otherwise a real DAG's
         // boto3.client("s3") etc. would target real AWS instead of this emulator.
-        List<String> env = new ArrayList<>(awsEnv.sdkBaselineEnv(environmentRegion(environment), Optional.empty()));
+        List<String> env = new ArrayList<>(awsEnv.sdkBaselineEnv(regionOf(environment), Optional.empty()));
         env.addAll(List.of(
                 "AIRFLOW__CORE__EXECUTOR=LocalExecutor",
                 "AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=" + sqlAlchemyConn,
@@ -185,7 +199,7 @@ public class MwaaEnvironmentManager {
                 .withDockerNetwork(config.services().mwaa().dockerNetwork())
                 .withLogRotation()
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(
-                        "mwaa", name, environmentAccount(environment), environmentRegion(environment)));
+                        "mwaa", name, environmentAccount(environment), regionOf(environment)));
 
         if (!containerDetector.isRunningInContainer()) {
             specBuilder.withDynamicPort(AIRFLOW_WEBSERVER_PORT);
@@ -263,7 +277,7 @@ public class MwaaEnvironmentManager {
                 return false;
             }
             String body;
-            try (var in = conn.getInputStream()) {
+            try (InputStream in = conn.getInputStream()) {
                 body = new String(in.readAllBytes(), StandardCharsets.UTF_8);
             }
             return body.contains("\"metadatabase\"") && body.contains("\"scheduler\"")
@@ -327,10 +341,6 @@ public class MwaaEnvironmentManager {
 
     /** Stops and removes both containers and all three named volumes for the given environment. */
     public void stopEnvironment(Environment environment) {
-        if (config.services().mwaa().keepRunningOnShutdown()) {
-            LOG.infov("Leaving MWAA containers for environment {0} running", environment.getName());
-            return;
-        }
         String name = environment.getName();
         if (environment.getAirflowContainerId() != null) {
             lifecycleManager.stopAndRemove(environment.getAirflowContainerId(), null);
@@ -368,7 +378,7 @@ public class MwaaEnvironmentManager {
         }
         copyFileIntoContainer(containerId, "/tmp", "mwaa-requirements.txt", requirementsContent);
         try {
-            ExecResult result = execInContainer(containerId,
+            ContainerExec.Result result = execInContainer(containerId,
                     new String[]{"pip", "install", "--no-cache-dir", "-r", "/tmp/mwaa-requirements.txt"});
             if (result.exitCode() != 0) {
                 LOG.warnv("pip install -r requirements.txt exited {0} for environment {1}: {2}",
@@ -381,26 +391,123 @@ public class MwaaEnvironmentManager {
         }
     }
 
-    /** Runs {@code airflow <cliCommand>} inside the Airflow container via {@code sh -c}. */
-    public ExecResult runAirflowCli(String airflowContainerId, String cliCommand) throws Exception {
-        return execInContainer(airflowContainerId, new String[]{"sh", "-c", "airflow " + cliCommand});
+    /**
+     * Runs {@code airflow <cliCommand>} inside the Airflow container. The command is split into
+     * arguments with POSIX quoting rules and executed without a shell, so shell syntax such as
+     * {@code ;}, {@code |} or {@code $(...)} reaches Airflow as plain arguments.
+     */
+    public ContainerExec.Result runAirflowCli(String airflowContainerId, String cliCommand) throws Exception {
+        List<String> arguments = splitCliArguments(cliCommand);
+        if (!isSupportedCliCommand(arguments)) {
+            return new ContainerExec.Result(1, "", "Command is not supported by Amazon MWAA\n", false);
+        }
+        List<String> argv = new ArrayList<>();
+        argv.add("airflow");
+        argv.addAll(arguments);
+        return execInContainer(airflowContainerId, argv.toArray(new String[0]));
+    }
+
+    static boolean isSupportedCliCommand(List<String> arguments) {
+        if (arguments.isEmpty()) {
+            return false;
+        }
+        if (MWAA_CLI_COMMANDS.contains(arguments.getFirst())) {
+            return true;
+        }
+        Set<String> subcommands = MWAA_CLI_SUBCOMMANDS.get(arguments.getFirst());
+        return arguments.size() >= 2 && subcommands != null && subcommands.contains(arguments.get(1));
+    }
+
+    /**
+     * Splits a CLI command line into arguments using POSIX shell quoting without any expansion:
+     * spaces, tabs and newlines separate arguments, single quotes are literal, double quotes honour
+     * backslash escapes of {@code $}, backtick, {@code "}, backslash and newline, an unquoted
+     * backslash escapes the next character, and a backslash-newline pair is removed.
+     */
+    private static List<String> splitCliArguments(String command) {
+        List<String> args = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean inWord = false;
+        int i = 0;
+        while (i < command.length()) {
+            char c = command.charAt(i);
+            if (c == ' ' || c == '\t' || c == '\n') {
+                if (inWord) {
+                    args.add(current.toString());
+                    current.setLength(0);
+                    inWord = false;
+                }
+                i++;
+            } else if (c == '\'') {
+                int end = command.indexOf('\'', i + 1);
+                if (end < 0) {
+                    throw new IllegalArgumentException("Unterminated single quote in CLI command");
+                }
+                current.append(command, i + 1, end);
+                inWord = true;
+                i = end + 1;
+            } else if (c == '"') {
+                i++;
+                boolean closed = false;
+                while (i < command.length()) {
+                    char d = command.charAt(i);
+                    if (d == '"') {
+                        closed = true;
+                        i++;
+                        break;
+                    }
+                    if (d == '\\' && i + 1 < command.length() && "$`\"\\\n".indexOf(command.charAt(i + 1)) >= 0) {
+                        if (command.charAt(i + 1) != '\n') {
+                            current.append(command.charAt(i + 1));
+                        }
+                        i += 2;
+                    } else {
+                        current.append(d);
+                        i++;
+                    }
+                }
+                if (!closed) {
+                    throw new IllegalArgumentException("Unterminated double quote in CLI command");
+                }
+                inWord = true;
+            } else if (c == '\\') {
+                if (i + 1 >= command.length()) {
+                    throw new IllegalArgumentException("Trailing backslash in CLI command");
+                }
+                if (command.charAt(i + 1) != '\n') {
+                    current.append(command.charAt(i + 1));
+                    inWord = true;
+                }
+                i += 2;
+            } else {
+                current.append(c);
+                inWord = true;
+                i++;
+            }
+        }
+        if (inWord) {
+            args.add(current.toString());
+        }
+        return args;
     }
 
     /** Routed through {@link ContainerStorageHelper} so multiple Floci instances sharing one Docker
      *  daemon (via {@code FLOCI_DOCKER_RESOURCE_NAMESPACE}) don't collide, same as every other
      *  Docker-backed service (EKS, RDS, ...). {@code config} may be {@code null} — the helper treats
-     *  that as "no namespace configured" and returns the base name unchanged. */
+     *  that as "no namespace configured" and applies only the {@code floci-aws-} prefix. */
     static String dbContainerName(EmulatorConfig config, Environment environment) {
-        return ContainerStorageHelper.dockerName(config, "floci-mwaa-" + environmentIdentity(environment) + "-db");
+        return ContainerStorageHelper.dockerName(config, "mwaa-" + environmentIdentity(config, environment) + "-db");
     }
 
     static String airflowContainerName(EmulatorConfig config, Environment environment) {
         return ContainerStorageHelper.dockerName(config,
-                "floci-mwaa-" + environmentIdentity(environment) + "-airflow");
+                "mwaa-" + environmentIdentity(config, environment) + "-airflow");
     }
 
-    private static String environmentIdentity(Environment environment) {
-        return environmentAccount(environment) + "." + environmentRegion(environment) + "." + environment.getName();
+    private static String environmentIdentity(EmulatorConfig config, Environment environment) {
+        String defaultRegion = config != null ? config.defaultRegion() : null;
+        return environmentAccount(environment) + "." + environmentRegion(environment, defaultRegion) + "."
+                + environment.getName();
     }
 
     static String environmentAccount(Environment environment) {
@@ -409,8 +516,13 @@ public class MwaaEnvironmentManager {
                 : AwsArnUtils.accountOrDefault(environment.getArn(), "000000000000");
     }
 
-    static String environmentRegion(Environment environment) {
-        return AwsArnUtils.regionOrDefault(environment.getArn(), "us-east-1");
+    private String regionOf(Environment environment) {
+        return environmentRegion(environment, config.defaultRegion());
+    }
+
+    /** The region the environment's ARN names; {@code defaultRegion} answers for one without an ARN. */
+    static String environmentRegion(Environment environment, String defaultRegion) {
+        return AwsArnUtils.regionOrDefault(environment.getArn(), defaultRegion);
     }
 
     /**
@@ -544,7 +656,7 @@ public class MwaaEnvironmentManager {
         Exception last = null;
         for (int attempt = 1; attempt <= 60; attempt++) {
             try {
-                ExecResult result = execInContainer(containerId,
+                ContainerExec.Result result = execInContainer(containerId,
                         new String[]{"pg_isready", "-h", "127.0.0.1", "-U", "airflow"});
                 if (result.exitCode() == 0) {
                     return;
@@ -592,11 +704,8 @@ public class MwaaEnvironmentManager {
             return false;
         }
         try {
-            lifecycleManager.getDockerClient()
-                    .copyArchiveToContainerCmd(containerId)
-                    .withTarInputStream(new ByteArrayInputStream(tarSingleFile(relativePath, content)))
-                    .withRemotePath(remoteDir)
-                    .exec();
+            RetryingTarCopier.copyBytes(lifecycleManager.getDockerClient(), containerId, remoteDir,
+                    relativePath, content, 0644);
             return true;
         } catch (Exception e) {
             LOG.warnv("Could not copy {0} into MWAA container {1}: {2}", relativePath, containerId, e.getMessage());
@@ -604,58 +713,14 @@ public class MwaaEnvironmentManager {
         }
     }
 
-    private static byte[] tarSingleFile(String entryName, byte[] content) {
-        try {
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
-            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(out)) {
-                TarArchiveEntry entry = new TarArchiveEntry(entryName);
-                entry.setSize(content.length);
-                entry.setMode(0644);
-                tar.putArchiveEntry(entry);
-                tar.write(content);
-                tar.closeArchiveEntry();
-            }
-            return out.toByteArray();
-        } catch (IOException e) {
-            throw new IllegalStateException("Could not build in-memory tar for " + entryName, e);
-        }
-    }
-
-    ExecResult execInContainer(String containerId, String[] cmd) throws Exception {
-        var dockerClient = lifecycleManager.getDockerClient();
-        var exec = dockerClient.execCreateCmd(containerId)
-                .withCmd(cmd)
-                .withAttachStdout(true)
-                .withAttachStderr(true)
-                .exec();
-
-        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-        boolean completed = dockerClient.execStartCmd(exec.getId())
-                .exec(new ResultCallback.Adapter<Frame>() {
-                    @Override
-                    public void onNext(Frame frame) {
-                        if (frame.getStreamType() == StreamType.STDERR) {
-                            stderr.writeBytes(frame.getPayload());
-                        } else {
-                            stdout.writeBytes(frame.getPayload());
-                        }
-                    }
-                })
-                .awaitCompletion(30, TimeUnit.SECONDS);
-
-        if (!completed) {
-            throw new RuntimeException("exec timed out in container " + containerId);
-        }
-        Long exitCode = dockerClient.inspectExecCmd(exec.getId()).exec().getExitCodeLong();
-        return new ExecResult(exitCode != null ? exitCode : -1,
-                stdout.toString(StandardCharsets.UTF_8), stderr.toString(StandardCharsets.UTF_8));
+    ContainerExec.Result execInContainer(String containerId, String[] cmd) throws Exception {
+        return ContainerExec.run(lifecycleManager.getDockerClient(), containerId, cmd, 30).throwIfTimedOut(containerId);
     }
 
     private static String generateSecret(int bytes) {
         byte[] buf = new byte[bytes];
         new SecureRandom().nextBytes(buf);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(buf);
+        return Base64Url.encode(buf);
     }
 
     /** A Fernet key must be 32 url-safe base64-encoded bytes (Airflow's {@code AIRFLOW__CORE__FERNET_KEY}). */
@@ -665,5 +730,21 @@ public class MwaaEnvironmentManager {
         return Base64.getUrlEncoder().encodeToString(buf);
     }
 
+    /** Airflow web/API user created at bootstrap; InvokeRestApi authenticates as this user. */
+    public static final String AIRFLOW_ADMIN_USER = "admin";
+
+
+    private static String environmentIdentity(Environment environment) {
+        return environmentAccount(environment) + "." + environmentRegion(environment) + "." + environment.getName();
+    }
+
+    static String environmentRegion(Environment environment) {
+        return AwsArnUtils.regionOrDefault(environment.getArn(), "us-east-1");
+    }
+
+
     public record ExecResult(long exitCode, String stdout, String stderr) {}
+
+    private static final String API_AUTH_BACKENDS =
+            "airflow.api.auth.backend.basic_auth,airflow.api.auth.backend.session";
 }

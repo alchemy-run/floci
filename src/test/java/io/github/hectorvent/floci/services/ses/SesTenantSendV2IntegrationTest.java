@@ -6,7 +6,8 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
-import java.util.List;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
@@ -15,11 +16,11 @@ import static org.hamcrest.Matchers.notNullValue;
 /**
  * Integration tests for SES v2 tenant-scoped sending (Phase 4): the {@code TenantName} member on
  * {@code SendEmail} and {@code SendBulkEmail}. A send whose resources are not associated with the
- * tenant is refused with a 403 {@code AccessDeniedException} listing every missing ARN, probed for
+ * tenant is refused with a 403 {@code AccessDeniedException} listing every missing ARN — probed for
  * the From identity (exact-address precedence included) and the configuration set; the
  * stored-template gate is inferred from the association model, not observed. The send-path
  * tenant-not-found wording differs from the management operations (no angle brackets, account id
- * included, probe-confirmed). The tenant's SendingStatus is not checked, nothing can move it off
+ * included, probe-confirmed). The tenant's SendingStatus is not checked — nothing can move it off
  * ENABLED in the emulator.
  */
 @QuarkusTest
@@ -34,8 +35,6 @@ class SesTenantSendV2IntegrationTest {
     private static final String CONFIG_SET = "floci-send-cs";
     private static final String TEMPLATE = "floci-send-tpl";
     private static final String ARN_PREFIX = "arn:aws:ses:us-east-1:000000000000:";
-    private static String hostedZoneId;
-    private static String dkimChanges;
 
     private static io.restassured.specification.RequestSpecification v2() {
         return given().contentType("application/json").header("Authorization", AUTH);
@@ -60,55 +59,12 @@ class SesTenantSendV2IntegrationTest {
     void setup_tenantAndResources() {
         v2().body("{\"TenantName\":\"" + TENANT + "\"}")
                 .when().post("/v2/email/tenants").then().statusCode(200);
-        List<String> tokens = v2().body("{\"EmailIdentity\":\"" + DOMAIN + "\"}")
-                .when().post("/v2/email/identities").then().statusCode(200)
-                .body("VerifiedForSendingStatus", equalTo(false))
-                .extract().jsonPath().getList("DkimAttributes.Tokens", String.class);
-        verifyDomain(tokens);
+        // Verified, so the addresses under it may send once the tenant gate lets them through.
+        SesDomainIdentityTestHelper.createVerified(DOMAIN, AUTH);
         v2().body("{\"ConfigurationSetName\":\"" + CONFIG_SET + "\"}")
                 .when().post("/v2/email/configuration-sets").then().statusCode(200);
         v2().body("{\"TemplateName\":\"" + TEMPLATE + "\",\"TemplateContent\":{\"Subject\":\"s\",\"Text\":\"t\"}}")
                 .when().post("/v2/email/templates").then().statusCode(200);
-    }
-
-    private static void verifyDomain(List<String> tokens) {
-        String location = given().contentType("application/xml")
-                .body("""
-                        <CreateHostedZoneRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
-                          <Name>%s</Name>
-                          <CallerReference>ses-tenant-send-dkim</CallerReference>
-                        </CreateHostedZoneRequest>
-                        """.formatted(DOMAIN))
-                .when().post("/2013-04-01/hostedzone").then().statusCode(201)
-                .extract().header("Location");
-        hostedZoneId = location.substring(location.lastIndexOf('/') + 1);
-        StringBuilder changes = new StringBuilder();
-        for (String token : tokens) {
-            changes.append("""
-                    <Change>
-                      <Action>CREATE</Action>
-                      <ResourceRecordSet>
-                        <Name>%s._domainkey.%s.</Name>
-                        <Type>CNAME</Type>
-                        <TTL>300</TTL>
-                        <ResourceRecords>
-                          <ResourceRecord><Value>%s.dkim.amazonses.com.</Value></ResourceRecord>
-                        </ResourceRecords>
-                      </ResourceRecordSet>
-                    </Change>
-                    """.formatted(token, DOMAIN, token));
-        }
-        dkimChanges = """
-                <ChangeResourceRecordSetsRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
-                  <ChangeBatch><Changes>%s</Changes></ChangeBatch>
-                </ChangeResourceRecordSetsRequest>
-                """.formatted(changes);
-        given().contentType("application/xml").body(dkimChanges)
-                .when().post("/2013-04-01/hostedzone/" + hostedZoneId + "/rrset")
-                .then().statusCode(200);
-        v2().when().get("/v2/email/identities/" + DOMAIN).then().statusCode(200)
-                .body("VerifiedForSendingStatus", equalTo(true))
-                .body("VerificationStatus", equalTo("SUCCESS"));
     }
 
     @Test
@@ -211,7 +167,7 @@ class SesTenantSendV2IntegrationTest {
                 .when().post("/v2/email/outbound-emails").then().statusCode(200)
                 .body("MessageId", notNullValue());
 
-        // An exact-address identity takes precedence over the (associated) domain identity, the
+        // An exact-address identity takes precedence over the (associated) domain identity — the
         // probed AWS 403 named the address identity's ARN in exactly this setup.
         v2().body("{\"EmailIdentity\":\"" + FROM + "\"}")
                 .when().post("/v2/email/identities").then().statusCode(200);
@@ -241,6 +197,21 @@ class SesTenantSendV2IntegrationTest {
                 .when().post("/v2/email/outbound-emails").then().statusCode(403)
                 .body("message", equalTo("Tenant not associated with resources ["
                         + ARN_PREFIX + "identity/floci-raw.example.com]."));
+
+        // A message with no recipients anywhere is reported after the tenant lookup but ahead of
+        // the association gate (probe-confirmed).
+        String noRecipients = Base64.getEncoder().encodeToString(
+                "From: probe@floci-raw.example.com\r\nSubject: s\r\n\r\nbody".getBytes(StandardCharsets.UTF_8));
+        v2().body("{\"TenantName\":\"" + TENANT + "\","
+                        + "\"Content\":{\"Raw\":{\"Data\":\"" + noRecipients + "\"}}}")
+                .when().post("/v2/email/outbound-emails").then().statusCode(400)
+                .body("__type", equalTo("BadRequestException"))
+                .body("message", equalTo("Missing required header 'To'."));
+        v2().body("{\"TenantName\":\"ghost-tenant\","
+                        + "\"Content\":{\"Raw\":{\"Data\":\"" + noRecipients + "\"}}}")
+                .when().post("/v2/email/outbound-emails").then().statusCode(404)
+                .body("message", equalTo(
+                        "Tenant ghost-tenant for AwsAccountId 000000000000 not found."));
     }
 
     @Test
@@ -252,7 +223,7 @@ class SesTenantSendV2IntegrationTest {
                 .when().put("/v2/email/identities/" + DOMAIN + "/configuration-set")
                 .then().statusCode(200);
 
-        // No explicit ConfigurationSetName, the identity's default is the effective one, and it
+        // No explicit ConfigurationSetName — the identity's default is the effective one, and it
         // needs the association just the same.
         v2().body(simpleSend(TENANT, ""))
                 .when().post("/v2/email/outbound-emails").then().statusCode(403)
@@ -279,7 +250,7 @@ class SesTenantSendV2IntegrationTest {
                         + "\"DefaultContent\":{\"Template\":{\"TemplateName\":\"" + TEMPLATE + "\","
                         + "\"TemplateData\":\"{}\"}},\"BulkEmailEntries\":[]}")
                 .when().post("/v2/email/outbound-bulk-emails").then().statusCode(400);
-        // An all-blank inline template is a shape error too, 400 before the ghost tenant's 404.
+        // An all-blank inline template is a shape error too — 400 before the ghost tenant's 404.
         v2().body("{\"FromEmailAddress\":\"" + FROM + "\",\"TenantName\":\"ghost-tenant\","
                         + "\"DefaultContent\":{\"Template\":{\"TemplateContent\":{},"
                         + "\"TemplateData\":\"{}\"}},"
@@ -320,10 +291,5 @@ class SesTenantSendV2IntegrationTest {
         v2().when().delete("/v2/email/identities/" + FROM).then().statusCode(200);
         v2().when().delete("/v2/email/identities/" + DOMAIN).then().statusCode(200);
         v2().when().delete("/v2/email/identities/floci-raw.example.com").then().statusCode(200);
-        given().contentType("application/xml")
-                .body(dkimChanges.replace("<Action>CREATE</Action>", "<Action>DELETE</Action>"))
-                .when().post("/2013-04-01/hostedzone/" + hostedZoneId + "/rrset")
-                .then().statusCode(200);
-        given().when().delete("/2013-04-01/hostedzone/" + hostedZoneId).then().statusCode(200);
     }
 }

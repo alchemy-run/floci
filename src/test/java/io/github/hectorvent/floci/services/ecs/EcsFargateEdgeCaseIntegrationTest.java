@@ -6,10 +6,12 @@ import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
 import static io.restassured.RestAssured.given;
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItems;
@@ -138,7 +140,7 @@ class EcsFargateEdgeCaseIntegrationTest {
                 container.formatted("gpu", "\"resourceRequirements\":[{\"type\":\"GPU\",\"value\":\"1\"}]"), 400)
                 .then().body("message", containsString("gpu"));
         call("RegisterTaskDefinition",
-                container.formatted("swap", "\"linuxParameters\":{\"maxSwap\":128}"), 400)
+                container.formatted("swap", "\"linuxParameters\":{\"maxSwap\":128,\"swappiness\":10}"), 400)
                 .then().body("message", containsString("maxSwap"));
         call("RegisterTaskDefinition",
                 container.formatted("swappiness", "\"linuxParameters\":{\"swappiness\":10}"), 400)
@@ -150,6 +152,207 @@ class EcsFargateEdgeCaseIntegrationTest {
                 + "\"placementConstraints\":[{\"type\":\"memberOf\",\"expression\":\"attribute:ecs.os-type==linux\"}],"
                 + "\"containerDefinitions\":[{\"name\":\"app\",\"image\":\"nginx:latest\"}]}", 400)
                 .then().body("message", containsString("placementConstraints"));
+    }
+
+    // Each message below is what RegisterTaskDefinition answered on AWS (eu-west-1, 2026-10-03),
+    // without a trailing period unless AWS writes one.
+    @Test
+    void fargateRefusesTheLinuxParametersItCannotHonour() {
+        String body = "{\"family\":\"edge-linux-%s\","
+                + "\"requiresCompatibilities\":[\"FARGATE\"],\"networkMode\":\"awsvpc\","
+                + "\"cpu\":\"256\",\"memory\":\"512\",\"containerDefinitions\":"
+                + "[{\"name\":\"app\",\"image\":\"nginx:latest\",\"linuxParameters\":%s}]}";
+
+        call("RegisterTaskDefinition", body.formatted("devices", "{\"devices\":[{\"hostPath\":\"/dev/null\"}]}"), 400)
+                .then().body("message", equalTo("Fargate compatible task definitions do not support devices"));
+        call("RegisterTaskDefinition", body.formatted("shm", "{\"sharedMemorySize\":64}"), 400)
+                .then().body("message", equalTo("Fargate compatible task definitions do not support sharedMemorySize"));
+        call("RegisterTaskDefinition", body.formatted("swap", "{\"maxSwap\":10,\"swappiness\":10}"), 400)
+                .then().body("message", equalTo("Fargate compatible task definitions do not support maxSwap"));
+        call("RegisterTaskDefinition", body.formatted("swappiness", "{\"swappiness\":10}"), 400)
+                .then().body("message", equalTo("Fargate compatible task definitions do not support swappiness"));
+        call("RegisterTaskDefinition", body.formatted("netadmin",
+                "{\"capabilities\":{\"add\":[\"SYS_PTRACE\",\"NET_ADMIN\",\"SYS_ADMIN\"]}}"), 400)
+                .then().body("message", equalTo("NET_ADMIN is not allowed on Fargate."));
+        // Fargate's one capability is matched as written: in lower case it is refused by name.
+        call("RegisterTaskDefinition", body.formatted("lowerptrace", "{\"capabilities\":{\"add\":[\"sys_ptrace\"]}}"), 400)
+                .then().body("message", equalTo("sys_ptrace is not allowed on Fargate."));
+
+        // The first rule a definition breaks is the one reported, in this order.
+        call("RegisterTaskDefinition", body.formatted("order1", "{\"devices\":[{\"hostPath\":\"/dev/null\"}],"
+                + "\"sharedMemorySize\":64,\"capabilities\":{\"add\":[\"NET_ADMIN\"]}}"), 400)
+                .then().body("message", equalTo("Fargate compatible task definitions do not support devices"));
+        call("RegisterTaskDefinition", body.formatted("order2", "{\"swappiness\":10,\"sharedMemorySize\":64}"), 400)
+                .then().body("message", equalTo("Fargate compatible task definitions do not support sharedMemorySize"));
+        call("RegisterTaskDefinition", body.formatted("order3",
+                "{\"swappiness\":10,\"capabilities\":{\"add\":[\"NET_ADMIN\"]}}"), 400)
+                .then().body("message", equalTo("Fargate compatible task definitions do not support swappiness"));
+
+        call("RegisterTaskDefinition", body.formatted("nodevices", "{\"devices\":[]}"), 200);
+        call("RegisterTaskDefinition", body.formatted("ptrace",
+                "{\"capabilities\":{\"add\":[\"SYS_PTRACE\"],\"drop\":[\"net_raw\",\"ALL\"]}}"), 200);
+        call("RegisterTaskDefinition", body.formatted("init",
+                "{\"initProcessEnabled\":true,\"tmpfs\":[{\"containerPath\":\"/t\",\"size\":16}]}"), 200);
+    }
+
+    @Test
+    void linuxParametersAreCheckedWhateverTheLaunchType() {
+        String body = "{\"family\":\"edge-linux-ec2-%s\",\"requiresCompatibilities\":[\"EC2\"],"
+                + "\"networkMode\":\"bridge\",\"memory\":\"512\",\"containerDefinitions\":"
+                + "[{\"name\":\"app\",\"image\":\"nginx:latest\",\"linuxParameters\":%s}]}";
+
+        call("RegisterTaskDefinition", body.formatted("swap", "{\"maxSwap\":10}"), 400)
+                .then().body("message",
+                        equalTo("When a container has a swap memory, it must also specify a swappiness value."));
+        call("RegisterTaskDefinition", body.formatted("capprefix", "{\"capabilities\":{\"add\":[\"CAP_NET_ADMIN\"]}}"), 400)
+                .then().body("message", equalTo("Unrecognized Linux capabilities in add: [CAP_NET_ADMIN]"));
+        call("RegisterTaskDefinition", body.formatted("unknowndrop", "{\"capabilities\":{\"drop\":[\"FOO\"]}}"), 400)
+                .then().body("message", equalTo("Unrecognized Linux capabilities in drop: [FOO]"));
+        call("RegisterTaskDefinition", body.formatted("lower", "{\"capabilities\":{\"add\":[\"net_admin\"]}}"), 200);
+
+        // The swap rule comes before Fargate's own, which would otherwise name maxSwap.
+        call("RegisterTaskDefinition", "{\"family\":\"edge-linux-fargate-swap\","
+                + "\"requiresCompatibilities\":[\"FARGATE\"],\"networkMode\":\"awsvpc\","
+                + "\"cpu\":\"256\",\"memory\":\"512\",\"containerDefinitions\":"
+                + "[{\"name\":\"app\",\"image\":\"nginx:latest\",\"linuxParameters\":{\"maxSwap\":10}}]}", 400)
+                .then().body("message",
+                        equalTo("When a container has a swap memory, it must also specify a swappiness value."));
+    }
+
+    /** Measured on RegisterTaskDefinition (eu-west-1, 2026-10-16), each with AWS's message. */
+    @Test
+    void devicesTmpfsSharedMemoryAndSwapAreChecked() {
+        String body = "{\"family\":\"edge-linux-values-%s\",\"requiresCompatibilities\":[\"EC2\"],"
+                + "\"networkMode\":\"bridge\",\"memory\":\"512\",\"containerDefinitions\":"
+                + "[{\"name\":\"app\",\"image\":\"nginx:latest\",\"linuxParameters\":%s}]}";
+        String[][] refused = {
+                {"nohost", "{\"devices\":[{\"containerPath\":\"/dev/x\"}]}", "Device cannot have empty hostPath"},
+                {"perm", "{\"devices\":[{\"hostPath\":\"/dev/null\",\"permissions\":[\"READ\"]}]}",
+                        "Invalid permission: READ for device /dev/null"},
+                {"nopath", "{\"tmpfs\":[{\"size\":64}]}", "All tmpfs mounts must have a specified containerPath value."},
+                {"nosize", "{\"tmpfs\":[{\"containerPath\":\"/t\"}]}",
+                        "The container has an invalid tmpfs size value specified. It must be a non-zero, non-negative integer."},
+                {"zerosize", "{\"tmpfs\":[{\"containerPath\":\"/t\",\"size\":0}]}",
+                        "The container has an invalid tmpfs size value specified. It must be a non-zero, non-negative integer."},
+                {"option", "{\"tmpfs\":[{\"containerPath\":\"/t\",\"size\":64,\"mountOptions\":[\"NOEXEC\"]}]}",
+                        "The NOEXEC tmpfs mount option specified is invalid."},
+                {"shm", "{\"sharedMemorySize\":0}",
+                        "The container has an invalid shared memory volume size. It must be a non-zero, non-negative integer."},
+                {"negswap", "{\"maxSwap\":-1,\"swappiness\":150}",
+                        "The container has an invalid swap memory size. It must be non-negative integer."},
+                {"swappiness", "{\"maxSwap\":1024,\"swappiness\":150}",
+                        "The container has an invalid swappiness value. It must be between 0 and 100."},
+                {"order", "{\"tmpfs\":[{\"containerPath\":\"/t\",\"size\":0}],\"devices\":[{\"containerPath\":\"/x\"}]}",
+                        "Device cannot have empty hostPath"},
+        };
+        for (String[] c : refused) {
+            call("RegisterTaskDefinition", body.formatted(c[0], c[1]), 400).then().body("message", equalTo(c[2]));
+        }
+
+        call("RegisterTaskDefinition", body.formatted("ok", "{\"tmpfs\":[{\"containerPath\":\"/t\",\"size\":64,"
+                + "\"mountOptions\":[\"mode=1777\",\"noexec\"]}],\"maxSwap\":0,\"swappiness\":0}"), 200);
+    }
+
+    /** Measured: a swappiness without maxSwap is dropped, and capabilities get both lists. */
+    @Test
+    void theStoredLinuxParametersAreTheOnesAwsKeeps() {
+        String body = "{\"family\":\"edge-linux-stored\",\"requiresCompatibilities\":[\"EC2\"],"
+                + "\"networkMode\":\"bridge\",\"memory\":\"512\",\"containerDefinitions\":"
+                + "[{\"name\":\"app\",\"image\":\"nginx:latest\",\"linuxParameters\":"
+                + "{\"swappiness\":10,\"sharedMemorySize\":64,\"capabilities\":{\"drop\":[\"NET_RAW\"]}}}]}";
+
+        call("RegisterTaskDefinition", body, 200).then()
+                .body("taskDefinition.containerDefinitions[0].linuxParameters.swappiness", nullValue())
+                .body("taskDefinition.containerDefinitions[0].linuxParameters.sharedMemorySize", equalTo(64))
+                .body("taskDefinition.containerDefinitions[0].linuxParameters.capabilities.add", hasSize(0))
+                .body("taskDefinition.containerDefinitions[0].linuxParameters.capabilities.drop[0]", equalTo("NET_RAW"));
+    }
+
+    /**
+     * Measured with raw requests (eu-west-1, 2026-10-18): a member of the wrong JSON type is
+     * refused by RegisterTaskDefinition's deserializer, with these messages, before any rule on the
+     * values; a list where none is expected carries no message.
+     */
+    @Test
+    void aLinuxParametersMemberOfTheWrongJsonTypeIsRefusedFirst() {
+        String body = "{\"family\":\"edge-linux-types-%s\",\"requiresCompatibilities\":[\"EC2\"],"
+                + "\"networkMode\":\"bridge\",\"memory\":\"512\",\"containerDefinitions\":"
+                + "[{\"name\":\"app\",\"image\":\"nginx:latest\",\"linuxParameters\":%s}]}";
+        String[][] refused = {
+                {"lp", "\"x\"", "Unexpected field type"},
+                {"caps", "{\"capabilities\":\"x\"}", "Unexpected field type"},
+                {"devices", "{\"devices\":\"x\"}", "Unexpected field type"},
+                {"devobj", "{\"devices\":{\"hostPath\":\"/dev/null\"}}", "Start of structure or map found where not expected"},
+                {"devitem", "{\"devices\":[\"not-a-device\"]}", "Unexpected value type in payload"},
+                {"tmpfsitem", "{\"tmpfs\":[\"not-a-mount\"]}", "Unexpected value type in payload"},
+                {"addnum", "{\"capabilities\":{\"add\":[5]}}", "NUMBER_VALUE cannot be converted to String"},
+                {"hosttrue", "{\"devices\":[{\"hostPath\":true}]}", "TRUE_VALUE cannot be converted to String"},
+                {"shmstring", "{\"sharedMemorySize\":\"64\"}", "STRING_VALUE cannot be converted to Integer"},
+                {"shmfalse", "{\"sharedMemorySize\":false}", "FALSE_VALUE cannot be converted to Integer"},
+                {"initnum", "{\"initProcessEnabled\":1}", "NUMBER_VALUE cannot be converted to Boolean"},
+                {"inittext", "{\"initProcessEnabled\":\"abc\"}", "Unexpected token received from parser"},
+                {"order", "{\"capabilities\":{\"add\":[\"CAP_X\"]},\"devices\":[\"x\"]}",
+                        "Unexpected value type in payload"},
+        };
+        for (String[] c : refused) {
+            call("RegisterTaskDefinition", body.formatted(c[0], c[1]), 400).then()
+                    .body("__type", containsString("InvalidParameterException"))
+                    .body("message", equalTo(c[2]));
+        }
+        call("RegisterTaskDefinition", body.formatted("capslist", "{\"capabilities\":[]}"), 400).then()
+                .body("__type", containsString("InvalidParameterException"))
+                .body("message", nullValue());
+
+        // Read as AWS reads them, then checked: a null device is an empty one, half a MiB is none.
+        call("RegisterTaskDefinition", body.formatted("devnull", "{\"devices\":[null]}"), 400).then()
+                .body("message", equalTo("Device cannot have empty hostPath"));
+        call("RegisterTaskDefinition", body.formatted("shmhalf", "{\"sharedMemorySize\":0.5}"), 400).then()
+                .body("message", equalTo(
+                        "The container has an invalid shared memory volume size. It must be a non-zero, non-negative integer."));
+    }
+
+    /**
+     * Measured: numbers are stored as the integers AWS reads (the fraction dropped, the range
+     * capped), a boolean as text is read in any case, and a null member or list entry is absent.
+     */
+    @Test
+    void numbersBooleansAndNullsAreStoredAsAwsReadsThem() {
+        String body = "{\"family\":\"edge-linux-read-%s\",\"requiresCompatibilities\":[\"EC2\"],"
+                + "\"networkMode\":\"bridge\",\"memory\":\"512\",\"containerDefinitions\":"
+                + "[{\"name\":\"app\",\"image\":\"nginx:latest\",\"linuxParameters\":%s}]}";
+        String linux = "taskDefinition.containerDefinitions[0].linuxParameters.";
+
+        call("RegisterTaskDefinition", body.formatted("fractions", "{\"sharedMemorySize\":1.9,\"maxSwap\":1.5,"
+                + "\"swappiness\":10.5,\"tmpfs\":[{\"containerPath\":\"/t\",\"size\":2.5}]}"), 200).then()
+                .body(linux + "sharedMemorySize", equalTo(1))
+                .body(linux + "maxSwap", equalTo(1))
+                .body(linux + "swappiness", equalTo(10))
+                .body(linux + "tmpfs[0].size", equalTo(2));
+        call("RegisterTaskDefinition", body.formatted("capped", "{\"sharedMemorySize\":3000000000,"
+                + "\"initProcessEnabled\":\"False\",\"capabilities\":{\"add\":[null]},\"devices\":null}"), 200).then()
+                .body(linux + "sharedMemorySize", equalTo(Integer.MAX_VALUE))
+                .body(linux + "initProcessEnabled", equalTo(false))
+                .body(linux + "capabilities.add", hasSize(0))
+                .body(linux + "capabilities.drop", hasSize(0))
+                .body(linux + "devices", nullValue());
+    }
+
+    /**
+     * A device hands the container the host's hardware, so Floci refuses one as it refuses a host
+     * volume, by default and after AWS's own checks: floci.services.ecs.host-volume-roots or
+     * allow-unsafe-host-volumes let it through.
+     */
+    @Test
+    void aDeviceIsRefusedByDefaultLikeAHostVolume() {
+        String body = "{\"family\":\"edge-linux-device\",\"requiresCompatibilities\":[\"EC2\"],"
+                + "\"networkMode\":\"bridge\",\"memory\":\"512\",\"containerDefinitions\":"
+                + "[{\"name\":\"app\",\"image\":\"nginx:latest\","
+                + "\"linuxParameters\":{\"devices\":[{\"hostPath\":\"/dev/null\"}]}}]}";
+
+        call("RegisterTaskDefinition", body, 400).then()
+                .body("__type", containsString("InvalidParameterException"))
+                .body("message", containsString(
+                        "containerDefinitions[].linuxParameters.devices[].hostPath is rejected by default: /dev/null"));
     }
 
     @Test
@@ -499,7 +702,7 @@ class EcsFargateEdgeCaseIntegrationTest {
         // The cluster scopes the listing rather than filtering it, so it pairs with startedBy.
         assertTrue(call("ListTasks", "{\"cluster\":\"" + CLUSTER + "\",\"startedBy\":\"edge-batch-7\"}", 200)
                 .jsonPath().getList("taskArns").contains(tagged));
-        // A family filter cannot be combined with startedBy.
+        // Any other filter alongside startedBy is still refused.
         call("ListTasks", "{\"cluster\":\"" + CLUSTER + "\",\"family\":\"" + family
                 + "\",\"startedBy\":\"edge-batch-7\"}", 400)
                 .then().body("message", containsString("only filter"));
@@ -522,6 +725,35 @@ class EcsFargateEdgeCaseIntegrationTest {
         second.then().body("taskArns", hasSize(1));
         assertEquals(null, second.jsonPath().getString("nextToken"),
                 "the last page carries no token");
+    }
+
+    @Test
+    void listTasksTakesTheServiceNameOrItsArn() {
+        String family = seed("edge-list-service");
+        String serviceArn = call("CreateService", "{\"cluster\":\"" + CLUSTER
+                + "\",\"serviceName\":\"edge-list-svc\",\"taskDefinition\":\"" + family
+                + "\",\"desiredCount\":1,\"launchType\":\"FARGATE\"," + NETWORK + "}", 200)
+                .jsonPath().getString("service.serviceArn");
+        String idleArn = call("CreateService", "{\"cluster\":\"" + CLUSTER
+                + "\",\"serviceName\":\"edge-list-idle-svc\",\"taskDefinition\":\"" + family
+                + "\",\"desiredCount\":0,\"launchType\":\"FARGATE\"," + NETWORK + "}", 200)
+                .jsonPath().getString("service.serviceArn");
+
+        // The reconciler launches the service's task on its own schedule.
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofMillis(200))
+                .until(() -> listTaskArns("edge-list-svc").size() == 1);
+        List<String> byName = listTaskArns("edge-list-svc");
+
+        assertEquals(byName, listTaskArns(serviceArn), "the service ARN must select the same task");
+        assertEquals(byName, listTaskArns(serviceArn.replace("service/" + CLUSTER + "/", "service/")),
+                "the old service/<name> ARN format must select it too");
+        assertEquals(List.of(), listTaskArns(idleArn),
+                "another service's ARN must not select this service's task");
+    }
+
+    private static List<String> listTaskArns(String serviceName) {
+        return call("ListTasks", "{\"cluster\":\"" + CLUSTER + "\",\"serviceName\":\"" + serviceName
+                + "\"}", 200).jsonPath().getList("taskArns");
     }
 
     @Test
@@ -624,94 +856,6 @@ class EcsFargateEdgeCaseIntegrationTest {
         call("RunTask", "{\"cluster\":\"" + CLUSTER + "\",\"taskDefinition\":\"edge-delete-lifecycle:1\","
                 + "\"launchType\":\"FARGATE\"," + NETWORK + "}", 400)
                 .then().body("message", containsString("being deleted"));
-    }
-
-    @Test
-    void aFamilyNeverReusesTheRevisionNumbersOfDeletedRevisions() {
-        registerSize("edge-reuse-td", "256", "512", 200);
-        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"edge-reuse-td:1\"}", 200);
-        call("DeleteTaskDefinitions", "{\"taskDefinitions\":[\"edge-reuse-td:1\"]}", 200);
-
-        Response registered = call("RegisterTaskDefinition", "{\"family\":\"edge-reuse-td\","
-                + "\"requiresCompatibilities\":[\"FARGATE\"],\"networkMode\":\"awsvpc\","
-                + "\"cpu\":\"256\",\"memory\":\"512\","
-                + "\"containerDefinitions\":[{\"name\":\"app\",\"image\":\"nginx:latest\"}]}", 200);
-        registered.then().body("taskDefinition.revision", equalTo(2))
-                .body("taskDefinition.status", equalTo("ACTIVE"));
-
-        // The deleted revision keeps its own status rather than being replaced by the new one.
-        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-reuse-td:1\"}", 200)
-                .then().body("taskDefinition.status", equalTo("DELETE_IN_PROGRESS"));
-        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-reuse-td\"}", 200)
-                .then().body("taskDefinition.revision", equalTo(2));
-    }
-
-    @Test
-    void aBareFamilyNamesItsLatestActiveRevision() {
-        registerSize("edge-latest-active", "256", "512", 200);
-        registerSize("edge-latest-active", "256", "512", 200);
-        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"edge-latest-active:2\"}", 200);
-
-        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-latest-active\"}", 200)
-                .then().body("taskDefinition.revision", equalTo(1))
-                .body("taskDefinition.status", equalTo("ACTIVE"));
-
-        // Once nothing in the family is ACTIVE, the family alone resolves to nothing.
-        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"edge-latest-active:1\"}", 200);
-        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-latest-active\"}", 400)
-                .then().body("__type", containsString("ClientException"));
-        // A named revision is still describable in whatever status it is in.
-        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-latest-active:2\"}", 200)
-                .then().body("taskDefinition.status", equalTo("INACTIVE"));
-    }
-
-    @Test
-    void anInactiveRevisionCannotStartTasksOrServices() {
-        String family = seed("edge-inactive-launch");
-        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"" + family + ":1\"}", 200);
-
-        call("RunTask", "{\"cluster\":\"" + CLUSTER + "\",\"taskDefinition\":\"" + family + ":1\","
-                + "\"launchType\":\"FARGATE\"," + NETWORK + "}", 400)
-                .then().body("__type", containsString("ClientException"))
-                .body("message", containsString("inactive"));
-        call("CreateService", "{\"cluster\":\"" + CLUSTER + "\",\"serviceName\":\"edge-inactive-svc\","
-                + "\"taskDefinition\":\"" + family + ":1\",\"desiredCount\":0,"
-                + "\"launchType\":\"FARGATE\"," + NETWORK + "}", 400)
-                .then().body("__type", containsString("ClientException"))
-                .body("message", containsString("inactive"));
-    }
-
-    @Test
-    void aServiceCannotMoveOntoARevisionThatLeftActive() {
-        String family = seed("edge-update-onto-gone");
-        registerSize(family, "256", "512", 200);
-        call("CreateService", "{\"cluster\":\"" + CLUSTER + "\",\"serviceName\":\"edge-update-gone-svc\","
-                + "\"taskDefinition\":\"" + family + ":2\",\"desiredCount\":0,"
-                + "\"launchType\":\"FARGATE\"," + NETWORK + "}", 200);
-        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"" + family + ":1\"}", 200);
-        call("DeleteTaskDefinitions", "{\"taskDefinitions\":[\"" + family + ":1\"]}", 200);
-
-        call("UpdateService", "{\"cluster\":\"" + CLUSTER + "\",\"service\":\"edge-update-gone-svc\","
-                + "\"taskDefinition\":\"" + family + ":1\"}", 400)
-                .then().body("message", containsString("being deleted"));
-        call("DescribeServices", "{\"cluster\":\"" + CLUSTER
-                + "\",\"services\":[\"edge-update-gone-svc\"]}", 200)
-                .then().body("services[0].taskDefinition", containsString(family + ":2"));
-    }
-
-    @Test
-    void deregisteringOrDeletingARevisionAgainChangesNothing() {
-        registerSize("edge-delete-again", "256", "512", 200);
-        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"edge-delete-again:1\"}", 200);
-        call("DeleteTaskDefinitions", "{\"taskDefinitions\":[\"edge-delete-again:1\"]}", 200);
-
-        // A revision being deleted never returns to INACTIVE.
-        call("DeregisterTaskDefinition", "{\"taskDefinition\":\"edge-delete-again:1\"}", 200)
-                .then().body("taskDefinition.status", equalTo("DELETE_IN_PROGRESS"));
-        call("DeleteTaskDefinitions", "{\"taskDefinitions\":[\"edge-delete-again:1\"]}", 200)
-                .then().body("taskDefinitions[0].status", equalTo("DELETE_IN_PROGRESS"));
-        call("DescribeTaskDefinition", "{\"taskDefinition\":\"edge-delete-again:1\"}", 200)
-                .then().body("taskDefinition.status", equalTo("DELETE_IN_PROGRESS"));
     }
 
     @Test
@@ -1294,6 +1438,19 @@ class EcsFargateEdgeCaseIntegrationTest {
                 .then().body("message", containsString("containerInstances"));
     }
 
+    @Test
+    void executeCommandOnlySupportsInteractiveSessions() {
+        String family = seed("edge-interactive");
+        String taskArn = call("RunTask", "{\"cluster\":\"" + CLUSTER + "\",\"taskDefinition\":\""
+                + family + "\",\"launchType\":\"FARGATE\"," + NETWORK
+                + ",\"enableExecuteCommand\":true}", 200)
+                .jsonPath().getString("tasks[0].taskArn");
+
+        call("ExecuteCommand", "{\"cluster\":\"" + CLUSTER + "\",\"task\":\"" + taskArn
+                + "\",\"container\":\"app\",\"command\":\"/bin/sh\",\"interactive\":false}", 400)
+                .then().body("message", containsString("interactive"));
+    }
+
     // ── The Service shape's own members ──────────────────────────────────────
 
     @Test
@@ -1618,5 +1775,35 @@ class EcsFargateEdgeCaseIntegrationTest {
                 .then()
                 .body("serviceRevisions", hasSize(0))
                 .body("failures[0].reason", equalTo("MISSING"));
+    }
+
+    @Test
+    void deletingAServiceDeletesItsDeploymentsAndRevisions() {
+        String family = seed("edge-deleted-td");
+        call("CreateService", "{\"cluster\":\"" + CLUSTER + "\",\"serviceName\":\"edge-deleted-svc\","
+                + "\"taskDefinition\":\"" + family + "\",\"desiredCount\":0,"
+                + "\"launchType\":\"FARGATE\"," + NETWORK + "}", 200);
+        String list = "{\"cluster\":\"" + CLUSTER + "\",\"service\":\"edge-deleted-svc\"}";
+        Response listed = call("ListServiceDeployments", list, 200);
+        String deploymentArn = listed.jsonPath().getString("serviceDeployments[0].serviceDeploymentArn");
+        String revisionArn = listed.jsonPath().getString("serviceDeployments[0].targetServiceRevisionArn");
+
+        call("DeleteService", list, 200);
+
+        call("ListServiceDeployments", list, 200)
+                .then().body("serviceDeployments", hasSize(0));
+        call("DescribeServiceDeployments", "{\"serviceDeploymentArns\":[\"" + deploymentArn + "\"]}", 200)
+                .then()
+                .body("serviceDeployments", hasSize(0))
+                .body("failures[0].arn", equalTo(deploymentArn))
+                .body("failures[0].reason", equalTo("MISSING"));
+        call("DescribeServiceRevisions", "{\"serviceRevisionArns\":[\"" + revisionArn + "\"]}", 200)
+                .then()
+                .body("serviceRevisions", hasSize(0))
+                .body("failures[0].reason", equalTo("MISSING"));
+        call("DescribeServices", "{\"cluster\":\"" + CLUSTER + "\",\"services\":[\"edge-deleted-svc\"]}", 200)
+                .then()
+                .body("services[0].status", equalTo("INACTIVE"))
+                .body("services[0].currentServiceDeployment", nullValue());
     }
 }

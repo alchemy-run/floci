@@ -73,6 +73,7 @@ public class ScheduleDispatcher implements Resettable {
     private final ScheduleInvoker invoker;
     private final SqsService sqsService;
     private final String baseUrl;
+    private final String defaultRegion;
     private final long tickIntervalSeconds;
     private final boolean enabled;
     private final ScheduledExecutorService executor;
@@ -89,6 +90,7 @@ public class ScheduleDispatcher implements Resettable {
         this.invoker = invoker;
         this.sqsService = sqsService;
         this.baseUrl = config.baseUrl();
+        this.defaultRegion = config.defaultRegion();
         this.tickIntervalSeconds = config.services().scheduler().tickIntervalSeconds();
         this.enabled = config.services().scheduler().enabled()
                 && config.services().scheduler().invocationEnabled();
@@ -206,8 +208,9 @@ public class ScheduleDispatcher implements Resettable {
 
         // Record the fire before delivering so a failing occurrence never holds back the next one.
         recordFire(schedule, now);
+        String executionId = ScheduleInvoker.newExecutionId();
         attempt(schedule, new Occurrence(schedule.getArn(), nextFire),
-                Delivery.first(kind, schedule, null), now);
+                Delivery.first(kind, schedule, executionId), now);
     }
 
     private Instant computeNextFire(Schedule schedule, Kind kind, Instant now) {
@@ -224,10 +227,12 @@ public class ScheduleDispatcher implements Resettable {
             }
             case RATE -> {
                 long intervalMs = SchedulerExpressionParser.parseRateMillis(expr);
-                Instant base = lastFireByArn.getOrDefault(arn, schedule.getCreationDate() != null
-                        ? schedule.getCreationDate()
-                        : now);
-                yield base.plusMillis(intervalMs);
+                Instant lastFire = lastFireByArn.get(arn);
+                if (lastFire != null) {
+                    yield lastFire.plusMillis(intervalMs);
+                }
+                yield schedule.getStartDate() != null ? schedule.getStartDate()
+                        : schedule.getCreationDate() != null ? schedule.getCreationDate() : now;
             }
             case CRON -> {
                 Instant base = lastFireByArn.getOrDefault(arn, schedule.getCreationDate() != null
@@ -239,10 +244,11 @@ public class ScheduleDispatcher implements Resettable {
     }
 
     private void attempt(Schedule schedule, Occurrence occurrence, Delivery delivery, Instant now) {
-        delivery = delivery.withRequestBody(invoker.materializeRequest(schedule, occurrence.scheduledAt(),
-                delivery.retryAttempts() + 1, delivery.executionId()));
+        String requestBody = invoker.materializeRequest(schedule, occurrence.scheduledAt(),
+                delivery.executionId(), delivery.attemptNumber());
+        delivery = delivery.withRequestBody(requestBody);
         try {
-            invoker.invoke(schedule, occurrence.scheduledAt(), delivery.retryAttempts() + 1, delivery.executionId());
+            invoker.invoke(schedule, occurrence.scheduledAt(), delivery.executionId(), delivery.attemptNumber());
         } catch (Exception e) {
             LOG.warnv("Schedule {0} invocation failed: {1}", schedule.getArn(), e.getMessage());
             Delivery failed = delivery.failedWith(e, now);
@@ -303,7 +309,7 @@ public class ScheduleDispatcher implements Resettable {
         attributes.put("IS_PAYLOAD_TRUNCATED", stringAttribute("false"));
         attributes.put("RETRY_ATTEMPTS", stringAttribute(String.valueOf(delivery.retryAttempts())));
         attributes.put("SCHEDULED_TIME", stringAttribute(
-                occurrence.scheduledAt().truncatedTo(ChronoUnit.SECONDS).toString()));
+                ScheduleInvoker.formatScheduledTime(occurrence.scheduledAt())));
         attributes.put("SCHEDULE_ARN", stringAttribute(schedule.getArn()));
         attributes.put("TARGET_ARN", stringAttribute(target.getArn()));
 
@@ -365,8 +371,8 @@ public class ScheduleDispatcher implements Resettable {
         return "DELETE".equalsIgnoreCase(schedule.getActionAfterCompletion());
     }
 
-    private static String regionOf(Schedule schedule) {
-        return ScheduleInvoker.regionOf(schedule);
+    private String regionOf(Schedule schedule) {
+        return ScheduleInvoker.regionOf(schedule, defaultRegion);
     }
 
     private record Occurrence(String scheduleArn, Instant scheduledAt) {
@@ -376,10 +382,9 @@ public class ScheduleDispatcher implements Resettable {
                             int retryAttempts, String errorCode, String errorMessage,
                             String requestBody, Instant nextAttemptAt) {
 
-        static Delivery first(Kind kind, Schedule schedule, String requestBody) {
-            String executionId = UUID.randomUUID().toString().replace("-", "").substring(0, 16);
+        static Delivery first(Kind kind, Schedule schedule, String executionId) {
             return new Delivery(kind, schedule.getLastModificationDate(), executionId, 0, null, null,
-                    requestBody, null);
+                    null, null);
         }
 
         Delivery withRequestBody(String body) {
@@ -387,9 +392,15 @@ public class ScheduleDispatcher implements Resettable {
                     body, nextAttemptAt);
         }
 
+        /** The 1-based number of the attempt this delivery makes: the first attempt plus its retries. */
+        int attemptNumber() {
+            return retryAttempts + 1;
+        }
+
+        /** Each attempted invocation gets its own execution id, as AWS documents for the context attribute. */
         Delivery nextRetry() {
-            return new Delivery(kind, lastModificationDate, executionId, retryAttempts + 1, errorCode, errorMessage,
-                    requestBody, null);
+            return new Delivery(kind, lastModificationDate, ScheduleInvoker.newExecutionId(), retryAttempts + 1,
+                    errorCode, errorMessage, requestBody, null);
         }
 
         Delivery failedWith(Exception e, Instant now) {

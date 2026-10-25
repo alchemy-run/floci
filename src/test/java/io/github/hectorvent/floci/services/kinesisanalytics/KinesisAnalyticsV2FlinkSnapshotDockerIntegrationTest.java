@@ -17,6 +17,7 @@ import java.net.http.HttpResponse;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.function.Supplier;
 
 import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -88,7 +89,7 @@ class KinesisAnalyticsV2FlinkSnapshotDockerIntegrationTest {
                 .contentType(CONTENT_TYPE).body(body).when().post("/").then();
     }
 
-    private static String await(String what, java.util.function.Supplier<String> probe, String wanted)
+    private static String await(String what, Supplier<String> probe, String wanted)
             throws InterruptedException {
         String last = null;
         for (int i = 0; i < 90; i++) {

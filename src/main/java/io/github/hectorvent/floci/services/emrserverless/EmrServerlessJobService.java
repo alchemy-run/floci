@@ -16,6 +16,7 @@ import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.emrserverless.model.Application;
 import io.github.hectorvent.floci.services.iam.IamPolicyEvaluator;
 import io.github.hectorvent.floci.services.iam.IamService;
+import io.github.hectorvent.floci.services.iam.RequestPrincipal;
 import io.github.hectorvent.floci.services.iam.model.CallerContext;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import jakarta.annotation.PostConstruct;
@@ -61,7 +62,8 @@ public class EmrServerlessJobService implements ContainerTeardown, Resettable {
                                   EmulatorConfig config,
                                   @ConfigProperty(name = "floci.services.emrserverless.job-timeout-seconds",
                                           defaultValue = "300") int timeoutSeconds) {
-        this.jobs = storageFactory.create("emrserverless", "emr-serverless-job-runs.json",
+        // Upstream's EmrServerlessJobRunService owns emr-serverless-job-runs.json with its own record type.
+        this.jobs = storageFactory.create("emrserverless", "emr-serverless-legacy-job-runs.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.runner = runner;
         this.mapper = mapper;
@@ -452,7 +454,8 @@ public class EmrServerlessJobService implements ContainerTeardown, Resettable {
                     ((ObjectNode) entry).put("Resource", arn);
                 }
             }
-            if (policies.evaluateResourcePolicy(List.of(trust.toString()), "emr-serverless.amazonaws.com",
+            if (policies.evaluateResourcePolicyFor(List.of(trust.toString()),
+                    RequestPrincipal.service("emr-serverless.amazonaws.com"),
                     "sts:AssumeRole", arn, Map.of("aws:SourceAccount", List.of(account),
                             "aws:SourceArn", List.of(applicationArn))) != IamPolicyEvaluator.ResourcePolicyDecision.ALLOW) {
                 throw invalid("EMR Serverless cannot assume the execution role");

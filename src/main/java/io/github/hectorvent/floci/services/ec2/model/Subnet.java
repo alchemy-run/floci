@@ -22,8 +22,6 @@ public class Subnet {
     private boolean assignIpv6AddressOnCreation = false;
     private boolean enableDns64 = false;
     private boolean mapCustomerOwnedIpOnLaunch = false;
-    private boolean enableResourceNameDnsARecordOnLaunch = false;
-    private boolean enableResourceNameDnsAAAARecordOnLaunch = false;
     private String ownerId;
     private String region;
     private String subnetArn;
@@ -68,16 +66,6 @@ public class Subnet {
     public boolean isMapCustomerOwnedIpOnLaunch() { return mapCustomerOwnedIpOnLaunch; }
     public void setMapCustomerOwnedIpOnLaunch(boolean mapCustomerOwnedIpOnLaunch) { this.mapCustomerOwnedIpOnLaunch = mapCustomerOwnedIpOnLaunch; }
 
-    public boolean isEnableResourceNameDnsARecordOnLaunch() { return enableResourceNameDnsARecordOnLaunch; }
-    public void setEnableResourceNameDnsARecordOnLaunch(boolean enableResourceNameDnsARecordOnLaunch) {
-        this.enableResourceNameDnsARecordOnLaunch = enableResourceNameDnsARecordOnLaunch;
-    }
-
-    public boolean isEnableResourceNameDnsAAAARecordOnLaunch() { return enableResourceNameDnsAAAARecordOnLaunch; }
-    public void setEnableResourceNameDnsAAAARecordOnLaunch(boolean enableResourceNameDnsAAAARecordOnLaunch) {
-        this.enableResourceNameDnsAAAARecordOnLaunch = enableResourceNameDnsAAAARecordOnLaunch;
-    }
-
     public String getOwnerId() { return ownerId; }
     public void setOwnerId(String ownerId) { this.ownerId = ownerId; }
 
@@ -92,4 +80,20 @@ public class Subnet {
 
     public List<VpcIpv6CidrBlockAssociation> getIpv6CidrBlockAssociationSet() { return ipv6CidrBlockAssociationSet; }
     public void setIpv6CidrBlockAssociationSet(List<VpcIpv6CidrBlockAssociation> ipv6CidrBlockAssociationSet) { this.ipv6CidrBlockAssociationSet = ipv6CidrBlockAssociationSet; }
+
+    private boolean enableResourceNameDnsARecordOnLaunch = false;
+
+    private boolean enableResourceNameDnsAAAARecordOnLaunch = false;
+
+    public boolean isEnableResourceNameDnsARecordOnLaunch() { return enableResourceNameDnsARecordOnLaunch; }
+
+    public void setEnableResourceNameDnsARecordOnLaunch(boolean enableResourceNameDnsARecordOnLaunch) {
+        this.enableResourceNameDnsARecordOnLaunch = enableResourceNameDnsARecordOnLaunch;
+    }
+
+    public boolean isEnableResourceNameDnsAAAARecordOnLaunch() { return enableResourceNameDnsAAAARecordOnLaunch; }
+
+    public void setEnableResourceNameDnsAAAARecordOnLaunch(boolean enableResourceNameDnsAAAARecordOnLaunch) {
+        this.enableResourceNameDnsAAAARecordOnLaunch = enableResourceNameDnsAAAARecordOnLaunch;
+    }
 }

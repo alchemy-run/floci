@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.ses;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ses.model.DedicatedIpPool;
@@ -15,6 +16,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * Dedicated IP pools (the {@code dedicatedIpPoolStore}), extracted from {@link SesService} as part of
@@ -23,7 +25,7 @@ import java.util.Set;
  * checks pool existence through {@link #dedicatedIpPoolExists}.
  */
 @ApplicationScoped
-public class SesDedicatedIpService {
+public class SesDedicatedIpService implements SesTaggable {
 
     private static final Logger LOG = Logger.getLogger(SesDedicatedIpService.class);
 
@@ -79,6 +81,12 @@ public class SesDedicatedIpService {
         return dedicatedIpPoolStore.get(dedicatedIpPoolKey(region, poolName)).isPresent();
     }
 
+    public PaginatedResult<String> listDedicatedIpPools(String region, SesListPaging paging, Integer pageSize,
+                                                        String nextToken) {
+        return paging.page(region, listDedicatedIpPools(region), Function.identity(), pageSize, nextToken);
+    }
+
+    /** By name, the order Floci settles on where SES's own changes with the page size. */
     public List<String> listDedicatedIpPools(String region) {
         String prefix = "dedicatedIpPool::" + region + "::";
         return dedicatedIpPoolStore.scan(k -> k.startsWith(prefix)).stream()
@@ -99,6 +107,7 @@ public class SesDedicatedIpService {
         LOG.infov("Deleted SES dedicated IP pool: {0} in region {1}", poolName, region);
     }
 
+    @Override
     public List<Tag> listTags(String poolName, String region) {
         DedicatedIpPool pool = dedicatedIpPoolStore.get(dedicatedIpPoolKey(region, poolName))
                 .orElseThrow(() -> tagTargetNotFound(poolName));
@@ -109,6 +118,7 @@ public class SesDedicatedIpService {
      * Merges the incoming tags into the stored pool. The lookup and write share the mutation lock
      * so tagging can't resurrect a concurrently deleted pool or lose a concurrent tag update.
      */
+    @Override
     public void tag(String poolName, String region, List<Tag> newTags) {
         String key = dedicatedIpPoolKey(region, poolName);
         synchronized (poolMutationLock) {
@@ -120,6 +130,7 @@ public class SesDedicatedIpService {
         LOG.infov("Tagged SES dedicated IP pool: {0} in region {1} (+{2} tags)", poolName, region, newTags.size());
     }
 
+    @Override
     public void untag(String poolName, String region, List<String> tagKeys) {
         String key = dedicatedIpPoolKey(region, poolName);
         synchronized (poolMutationLock) {
@@ -149,6 +160,12 @@ public class SesDedicatedIpService {
     // so an account has no dedicated IPs: GetDedicatedIps is empty and any
     // IP-targeted operation reports the IP as not found, matching real AWS for an
     // account with no leased IPs (verified 2026-06-21).
+
+    /** Always empty (see the section note above), but the page size and token are still checked. */
+    public PaginatedResult<String> listDedicatedIps(String region, SesListPaging paging, Integer pageSize,
+                                                    String nextToken) {
+        return paging.page(region, List.<String>of(), Function.identity(), pageSize, nextToken);
+    }
 
     private AwsException dedicatedIpNotFound(String ip) {
         return new AwsException("NotFoundException",

@@ -14,8 +14,9 @@ import io.github.hectorvent.floci.services.glue.model.Partition;
 import io.github.hectorvent.floci.services.glue.model.Table;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
-import io.github.hectorvent.floci.services.lakeformation.model.DataLakeSettings;
+import io.github.hectorvent.floci.services.lakeformation.model.DataCellsFilterResource;
 import io.github.hectorvent.floci.services.lakeformation.model.DataLakePrincipal;
+import io.github.hectorvent.floci.services.lakeformation.model.DataLakeSettings;
 import io.github.hectorvent.floci.services.lakeformation.model.PrincipalResourcePermissions;
 import io.github.hectorvent.floci.services.lakeformation.model.Resource;
 import io.github.hectorvent.floci.services.lakeformation.model.ResourceInfo;
@@ -337,7 +338,7 @@ public class LakeFormationDataAccessService {
                     (allColumns ? full : partial).addAll(grant.getPermissions());
                 }
             } else if (resource.getDataCellsFilter() != null) {
-                var filter = resource.getDataCellsFilter();
+                DataCellsFilterResource filter = resource.getDataCellsFilter();
                 if (sameTable(filter.getTableCatalogId(), filter.getDatabaseName(), target)
                         && target.name().equalsIgnoreCase(filter.getTableName())) {
                     partial.addAll(grant.getPermissions());
@@ -381,7 +382,7 @@ public class LakeFormationDataAccessService {
         String accountId = regions.getAccountId();
         String accessKey = authorization == null ? null : accounts.extractAccessKeyId(authorization);
         String arn = iam.resolveCallerArn(accessKey)
-                .orElseGet(() -> AwsArnUtils.Arn.of("iam", "", accountId, "root").toString());
+                .orElseGet(() -> regions.buildGlobalArn("iam", accountId, "root"));
         List<String> identifiers = new ArrayList<>();
         identifiers.add(arn);
         try {
@@ -389,8 +390,7 @@ public class LakeFormationDataAccessService {
             if ("sts".equals(parsed.service()) && parsed.resource().startsWith("assumed-role/")) {
                 String roleName = parsed.resource().split("/")[1];
                 identifiers.add(iam.findRole(parsed.accountId(), roleName).map(IamRole::getArn)
-                        .orElseGet(() -> AwsArnUtils.Arn.of("iam", "", parsed.accountId(), "role/" + roleName)
-                                .toString()));
+                        .orElseGet(() -> regions.buildGlobalArn("iam", parsed.accountId(), "role/" + roleName)));
             }
         } catch (IllegalArgumentException ignored) {
             // A non-ARN identity only matches grants made to that literal identifier.

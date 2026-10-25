@@ -5,9 +5,9 @@ import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.model.Frame;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.ContainerTeardown;
 import io.github.hectorvent.floci.core.common.RegionResolver;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
 import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
@@ -41,6 +41,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.PathMatcher;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
@@ -52,6 +53,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
@@ -570,7 +572,7 @@ public class CodeBuildRunner implements ContainerTeardown {
         try {
             if (!Files.exists(sourceDir)) return;
             boolean hasFiles;
-            try (var ls = Files.list(sourceDir)) {
+            try (Stream<Path> ls = Files.list(sourceDir)) {
                 hasFiles = ls.findAny().isPresent();
             }
             if (!hasFiles) return;
@@ -632,7 +634,7 @@ public class CodeBuildRunner implements ContainerTeardown {
 
     private void createTarFromDir(Path dir, ByteArrayOutputStream out) throws IOException {
         try (TarArchiveOutputStream tar = newTarStream(out);
-             var stream = Files.walk(dir)) {
+             Stream<Path> stream = Files.walk(dir)) {
             for (Path path : (Iterable<Path>) stream::iterator) {
                 if (path.equals(dir)) continue;
                 String entryName = dir.relativize(path).toString();
@@ -645,7 +647,7 @@ public class CodeBuildRunner implements ContainerTeardown {
                     entry.setSize(Files.size(path));
                     entry.setMode(0644);
                     tar.putArchiveEntry(entry);
-                    try (var fis = Files.newInputStream(path)) {
+                    try (InputStream fis = Files.newInputStream(path)) {
                         fis.transferTo(tar);
                     }
                     tar.closeArchiveEntry();
@@ -816,7 +818,7 @@ public class CodeBuildRunner implements ContainerTeardown {
         }
         for (String pattern : patterns) {
             if ("**/*".equals(pattern) || "**".equals(pattern)) {
-                try (var stream = Files.walk(baseDir)) {
+                try (Stream<Path> stream = Files.walk(baseDir)) {
                     stream.filter(Files::isRegularFile).forEach(result::add);
                 }
             } else if (!pattern.contains("*") && !pattern.contains("?")
@@ -829,8 +831,8 @@ public class CodeBuildRunner implements ContainerTeardown {
                     LOG.warnv("Artifact file not found: {0}", direct);
                 }
             } else {
-                var matcher = baseDir.getFileSystem().getPathMatcher("glob:" + pattern);
-                try (var stream = Files.walk(baseDir)) {
+                PathMatcher matcher = baseDir.getFileSystem().getPathMatcher("glob:" + pattern);
+                try (Stream<Path> stream = Files.walk(baseDir)) {
                     stream.filter(Files::isRegularFile)
                             .filter(p -> matcher.matches(baseDir.relativize(p)))
                             .forEach(result::add);

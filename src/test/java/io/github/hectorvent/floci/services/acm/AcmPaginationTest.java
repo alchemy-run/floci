@@ -1,7 +1,9 @@
 package io.github.hectorvent.floci.services.acm;
 
+import io.github.hectorvent.floci.testing.AcmDnsRecordValidationProfile;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
@@ -23,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests for ListCertificates pagination functionality.
  */
 @QuarkusTest
+@TestProfile(AcmDnsRecordValidationProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AcmPaginationTest {

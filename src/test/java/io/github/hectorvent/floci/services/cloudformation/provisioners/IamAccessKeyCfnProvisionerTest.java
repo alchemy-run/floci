@@ -118,6 +118,22 @@ class IamAccessKeyCfnProvisionerTest {
     }
 
     @Test
+    void createWithExpiredStatusIsTakenToo() throws Exception {
+        // The resource's Allowed values line reads "Active | Inactive | Expired", so Expired is a
+        // status the template may declare and not one to refuse.
+        AccessKey key = new AccessKey();
+        key.setAccessKeyId("AKIA1");
+        key.setSecretAccessKey("secret-1");
+        when(iam.createAccessKey("alice")).thenReturn(key);
+
+        provisioner.provision(resource(), props("{\"UserName\": \"alice\", \"Status\": \"Expired\"}"),
+                ctx(null));
+
+        verify(iam).createAccessKey("alice");
+        verify(iam).updateAccessKey("alice", "AKIA1", "Expired");
+    }
+
+    @Test
     void aBogusStatusIsRejectedBeforeCreatingAKey() {
         AwsException e = assertThrows(AwsException.class, () -> provisioner.provision(
                 resource(), props("{\"UserName\": \"alice\", \"Status\": \"Bogus\"}"), ctx(null)));

@@ -2,18 +2,17 @@ package io.github.hectorvent.floci.services.cloudfront;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.PublicKeys;
 
 import java.net.InetAddress;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.security.AlgorithmParameters;
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.PublicKey;
 import java.security.Signature;
 import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPublicKey;
-import java.security.spec.ECGenParameterSpec;
 import java.security.spec.ECParameterSpec;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.X509EncodedKeySpec;
@@ -250,10 +249,7 @@ public final class CloudFrontSignatureVerifier {
             return rsa.getModulus().bitLength() == 2048;
         }
         if (publicKey instanceof ECPublicKey ec) {
-            AlgorithmParameters parameters = AlgorithmParameters.getInstance("EC");
-            parameters.init(new ECGenParameterSpec("secp256r1"));
-            ECParameterSpec p256 =
-                    parameters.getParameterSpec(ECParameterSpec.class);
+            ECParameterSpec p256 = PublicKeys.namedCurve("secp256r1");
             ECParameterSpec actual = ec.getParams();
             return actual.getCurve().equals(p256.getCurve())
                     && actual.getGenerator().equals(p256.getGenerator())

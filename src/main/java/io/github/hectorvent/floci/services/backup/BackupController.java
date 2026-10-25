@@ -4,7 +4,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.backup.model.*;
 import io.github.hectorvent.floci.services.backup.model.BackupJob;
 import io.github.hectorvent.floci.services.backup.model.BackupPlan;
 import io.github.hectorvent.floci.services.backup.model.BackupRule;
@@ -12,6 +14,7 @@ import io.github.hectorvent.floci.services.backup.model.BackupSelection;
 import io.github.hectorvent.floci.services.backup.model.BackupVault;
 import io.github.hectorvent.floci.services.backup.model.Lifecycle;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.*;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
@@ -25,6 +28,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
+import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -36,6 +40,8 @@ import java.util.Map;
 @Produces(MediaType.APPLICATION_JSON)
 @Consumes(MediaType.APPLICATION_JSON)
 public class BackupController {
+
+    private static final Logger LOG = Logger.getLogger(BackupController.class);
 
     private final BackupService service;
     private final RegionResolver regionResolver;
@@ -70,12 +76,35 @@ public class BackupController {
         return Response.status(200).entity(out).build();
     }
 
+    @PUT
+    @Path("/logically-air-gapped-backup-vaults/{backupVaultName}")
+    public Response createLogicallyAirGappedBackupVault(@Context HttpHeaders headers,
+                                                         @PathParam("backupVaultName") String vaultName,
+                                                         String body) throws IOException {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode req = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+        BackupVault vault = service.createLogicallyAirGappedBackupVault(vaultName,
+                textOrNull(req, "EncryptionKeyArn"),
+                textOrNull(req, "CreatorRequestId"),
+                readStringMap(req, "BackupVaultTags"),
+                longOrNull(req, "MinRetentionDays"),
+                longOrNull(req, "MaxRetentionDays"),
+                region);
+
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("BackupVaultName", vault.getBackupVaultName());
+        out.put("BackupVaultArn", vault.getBackupVaultArn());
+        out.put("CreationDate", vault.getCreationDate());
+        out.put("VaultState", vault.getVaultState());
+        return Response.status(200).entity(out).build();
+    }
+
     @GET
     @Path("/backup-vaults/{backupVaultName}")
     public Response describeBackupVault(@Context HttpHeaders headers,
                                          @PathParam("backupVaultName") String vaultName) {
         String region = regionResolver.resolveRegion(headers);
-        ObjectNode vault = objectMapper.valueToTree(service.describeBackupVault(vaultName, region));
+        ObjectNode vault = vaultJson(service.describeBackupVault(vaultName, region));
         vault.remove(List.of("AccessPolicy", "SNSTopicArn", "BackupVaultEvents"));
         return Response.ok(vault).build();
     }
@@ -91,69 +120,145 @@ public class BackupController {
 
     @GET
     @Path("/backup-vaults/")
-    public Response listBackupVaults(@Context HttpHeaders headers) {
+    public Response listBackupVaults(@Context HttpHeaders headers,
+                                      @QueryParam("vaultType") String byVaultType) {
         String region = regionResolver.resolveRegion(headers);
-        List<BackupVault> vaults = service.listBackupVaults(region);
+        List<BackupVault> vaults = service.listBackupVaults(region, byVaultType);
         ObjectNode out = objectMapper.createObjectNode();
         ArrayNode list = out.putArray("BackupVaultList");
-        for (BackupVault vault : vaults) {
-            ObjectNode item = objectMapper.valueToTree(vault);
-            item.remove(List.of("AccessPolicy", "SNSTopicArn", "BackupVaultEvents"));
-            list.add(item);
-        }
+        vaults.forEach(v -> list.add(vaultJson(v)));
         return Response.ok(out).build();
     }
 
-    @GET
-    @Path("/backup-vaults/{backupVaultName}/notification-configuration")
-    public Response getBackupVaultNotifications(@Context HttpHeaders headers,
-                                                @PathParam("backupVaultName") String vaultName) {
-        return Response.ok(service.getVaultNotifications(vaultName, regionResolver.resolveRegion(headers))).build();
+    /** The vault as AWS reports it: its stored form minus Floci's internal incarnation id. */
+    private ObjectNode vaultJson(BackupVault vault) {
+        ObjectNode node = objectMapper.valueToTree(vault);
+        node.remove(BackupVault.VAULT_ID_FIELD);
+        // AWS reports a standard vault as BACKUP_VAULT. Stored standard vaults (including ones
+        // persisted before VaultType existed) leave it null, so it is filled here at read time.
+        if (vault.getVaultType() == null) {
+            node.put("VaultType", "BACKUP_VAULT");
+        }
+        return node;
     }
+
+    // ── Vault access policy ────────────────────────────────────────────────────
+    //
+    // These three used to be one unconditional GET that always answered
+    // ResourceNotFoundException, on the reasoning that a policy is "an optional,
+    // never-configured aspect of a vault in the emulator". That error contract was
+    // right and is kept below for the genuinely-unconfigured case; what was missing is
+    // any way to configure one. A vault could be created and never given a policy, a
+    // lock or a notification target, so every Gruntwork example that configures a vault
+    // failed at apply.
 
     @PUT
-    @Path("/backup-vaults/{backupVaultName}/notification-configuration")
-    public Response putBackupVaultNotifications(@Context HttpHeaders headers,
-                                                @PathParam("backupVaultName") String vaultName, String body) throws IOException {
-        JsonNode request = objectMapper.readTree(body);
-        service.putVaultNotifications(vaultName, textOrNull(request, "SNSTopicArn"),
-                readStringList(request.path("BackupVaultEvents")), regionResolver.resolveRegion(headers));
-        return Response.ok().build();
-    }
-
-    @DELETE
-    @Path("/backup-vaults/{backupVaultName}/notification-configuration")
-    public Response deleteBackupVaultNotifications(@Context HttpHeaders headers,
-                                                   @PathParam("backupVaultName") String vaultName) {
-        service.deleteVaultNotifications(vaultName, regionResolver.resolveRegion(headers));
-        return Response.ok().build();
+    @Path("/backup-vaults/{backupVaultName}/access-policy")
+    public Response putBackupVaultAccessPolicy(@Context HttpHeaders headers,
+                                                @PathParam("backupVaultName") String vaultName,
+                                                String body) throws IOException {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode req = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+        // AWS accepts Policy as a JSON string. Terraform sends a string; the console
+        // sends a string. An object is accepted too and re-serialised, because refusing
+        // it would be stricter than AWS for no benefit to the caller.
+        JsonNode policyNode = req.path("Policy");
+        String policy = policyNode.isMissingNode() || policyNode.isNull() ? null
+                : (policyNode.isTextual() ? policyNode.asText() : policyNode.toString());
+        service.putBackupVaultAccessPolicy(vaultName, region, policy);
+        return Response.noContent().build();
     }
 
     @GET
     @Path("/backup-vaults/{backupVaultName}/access-policy")
     public Response getBackupVaultAccessPolicy(@Context HttpHeaders headers,
-                                               @PathParam("backupVaultName") String vaultName) {
+                                                @PathParam("backupVaultName") String vaultName) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(Map.of("BackupVaultName", vaultName,
-                "BackupVaultArn", service.describeBackupVault(vaultName, region).getBackupVaultArn(),
-                "Policy", service.getVaultPolicy(vaultName, region))).build();
-    }
-
-    @PUT
-    @Path("/backup-vaults/{backupVaultName}/access-policy")
-    public Response putBackupVaultAccessPolicy(@Context HttpHeaders headers,
-                                               @PathParam("backupVaultName") String vaultName, String body) throws IOException {
-        service.putVaultPolicy(vaultName, textOrNull(objectMapper.readTree(body), "Policy"),
-                regionResolver.resolveRegion(headers));
-        return Response.ok().build();
+        String policy = service.getBackupVaultAccessPolicy(vaultName, region);
+        BackupVault vault = service.describeBackupVault(vaultName, region);
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("BackupVaultName", vault.getBackupVaultName());
+        out.put("BackupVaultArn", vault.getBackupVaultArn());
+        out.put("Policy", policy);
+        return Response.ok(out).build();
     }
 
     @DELETE
     @Path("/backup-vaults/{backupVaultName}/access-policy")
     public Response deleteBackupVaultAccessPolicy(@Context HttpHeaders headers,
-                                                  @PathParam("backupVaultName") String vaultName) {
-        service.deleteVaultPolicy(vaultName, regionResolver.resolveRegion(headers));
-        return Response.ok().build();
+                                                   @PathParam("backupVaultName") String vaultName) {
+        String region = regionResolver.resolveRegion(headers);
+        service.deleteBackupVaultAccessPolicy(vaultName, region);
+        return Response.noContent().build();
+    }
+
+    // ── Vault notifications ────────────────────────────────────────────────────
+
+    @PUT
+    @Path("/backup-vaults/{backupVaultName}/notification-configuration")
+    public Response putBackupVaultNotifications(@Context HttpHeaders headers,
+                                                 @PathParam("backupVaultName") String vaultName,
+                                                 String body) throws IOException {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode req = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+        // null, not an empty list, when the member is absent: the service answers a missing
+        // parameter with MissingParameterValueException and an empty one with
+        // InvalidParameterValueException, and readStringList cannot tell them apart.
+        JsonNode eventsNode = req.path("BackupVaultEvents");
+        List<String> events = eventsNode.isMissingNode() || eventsNode.isNull() ? null
+                : readStringList(eventsNode);
+        service.putBackupVaultNotifications(vaultName, region, stringOrNull(req, "SNSTopicArn"), events);
+        return Response.noContent().build();
+    }
+
+    @GET
+    @Path("/backup-vaults/{backupVaultName}/notification-configuration")
+    public Response getBackupVaultNotifications(@Context HttpHeaders headers,
+                                                 @PathParam("backupVaultName") String vaultName) {
+        String region = regionResolver.resolveRegion(headers);
+        BackupVaultNotifications notifications = service.getBackupVaultNotifications(vaultName, region);
+        BackupVault vault = service.describeBackupVault(vaultName, region);
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("BackupVaultName", vault.getBackupVaultName());
+        out.put("BackupVaultArn", vault.getBackupVaultArn());
+        out.put("SNSTopicArn", notifications.getSnsTopicArn());
+        ArrayNode events = out.putArray("BackupVaultEvents");
+        notifications.getBackupVaultEvents().forEach(events::add);
+        return Response.ok(out).build();
+    }
+
+    @DELETE
+    @Path("/backup-vaults/{backupVaultName}/notification-configuration")
+    public Response deleteBackupVaultNotifications(@Context HttpHeaders headers,
+                                                    @PathParam("backupVaultName") String vaultName) {
+        String region = regionResolver.resolveRegion(headers);
+        service.deleteBackupVaultNotifications(vaultName, region);
+        return Response.noContent().build();
+    }
+
+    // ── Vault lock ─────────────────────────────────────────────────────────────
+
+    @PUT
+    @Path("/backup-vaults/{backupVaultName}/vault-lock")
+    public Response putBackupVaultLockConfiguration(@Context HttpHeaders headers,
+                                                     @PathParam("backupVaultName") String vaultName,
+                                                     String body) throws IOException {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode req = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+        service.putBackupVaultLockConfiguration(vaultName, region,
+                longOrNull(req, "MinRetentionDays"),
+                longOrNull(req, "MaxRetentionDays"),
+                longOrNull(req, "ChangeableForDays"));
+        return Response.noContent().build();
+    }
+
+    @DELETE
+    @Path("/backup-vaults/{backupVaultName}/vault-lock")
+    public Response deleteBackupVaultLockConfiguration(@Context HttpHeaders headers,
+                                                        @PathParam("backupVaultName") String vaultName) {
+        String region = regionResolver.resolveRegion(headers);
+        service.deleteBackupVaultLockConfiguration(vaultName, region);
+        return Response.noContent().build();
     }
 
     // ── Plan ───────────────────────────────────────────────────────────────────
@@ -336,22 +441,34 @@ public class BackupController {
 
     @GET
     @Path("/backup-jobs/{backupJobId}")
-    public Response describeBackupJob(@Context HttpHeaders headers, @PathParam("backupJobId") String jobId) {
-        return Response.ok(service.describeBackupJob(jobId, regionResolver.resolveRegion(headers))).build();
+    public Response describeBackupJob(@PathParam("backupJobId") String jobId) {
+        return Response.ok(jobJson(service.describeBackupJob(jobId))).build();
     }
 
     @POST
     @Path("/backup-jobs/{backupJobId}")
-    public Response stopBackupJob(@Context HttpHeaders headers, @PathParam("backupJobId") String jobId) {
-        service.stopBackupJob(jobId, regionResolver.resolveRegion(headers));
+    public Response stopBackupJob(@PathParam("backupJobId") String jobId) {
+        service.stopBackupJob(jobId);
         return Response.noContent().build();
     }
 
     @GET
     @Path("/backup-jobs/")
-    public Response listBackupJobs(@Context HttpHeaders headers, @Context UriInfo uri) {
-        String region = regionResolver.resolveRegion(headers);
-        return Response.ok(service.page("BackupJobs", service.listBackupJobs(region), query(uri), region)).build();
+    public Response listBackupJobs(@QueryParam("byBackupVaultName") String byVaultName,
+                                    @QueryParam("byState") String byState,
+                                    @QueryParam("byResourceArn") String byResourceArn,
+                                    @QueryParam("byResourceType") String byResourceType) {
+        List<BackupJob> jobs = service.listBackupJobs(byVaultName, byState, byResourceArn, byResourceType);
+        ObjectNode out = objectMapper.createObjectNode();
+        ArrayNode list = out.putArray("BackupJobs");
+        jobs.forEach(job -> list.add(jobJson(job)));
+        return Response.ok(out).build();
+    }
+
+    private ObjectNode jobJson(BackupJob job) {
+        ObjectNode node = objectMapper.valueToTree(job);
+        node.remove(BackupVault.VAULT_ID_FIELD);
+        return node;
     }
 
     // ── Recovery Point ─────────────────────────────────────────────────────────
@@ -369,11 +486,14 @@ public class BackupController {
 
     @GET
     @Path("/backup-vaults/{backupVaultName}/recovery-points/")
-    public Response listRecoveryPointsByBackupVault(@Context HttpHeaders headers, @Context UriInfo uri,
+    public Response listRecoveryPointsByBackupVault(@Context HttpHeaders headers,
                                                      @PathParam("backupVaultName") String vaultName) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(service.page("RecoveryPoints", service.listRecoveryPointsByBackupVault(vaultName, region),
-                query(uri), region)).build();
+        List<RecoveryPoint> points = service.listRecoveryPointsByBackupVault(vaultName, region);
+        ObjectNode out = objectMapper.createObjectNode();
+        ArrayNode list = out.putArray("RecoveryPoints");
+        points.forEach(list::addPOJO);
+        return Response.ok(out).build();
     }
 
     @DELETE
@@ -385,6 +505,125 @@ public class BackupController {
         service.deleteRecoveryPoint(vaultName, recoveryPointArn, region);
         return Response.noContent().build();
     }
+
+    // ── Untag (POST /untag/{arn} with body — distinct from shared DELETE /tags pattern) ──
+
+    @POST
+    @Path("/untag/{resourceArn: .*}")
+    public Response untagResource(@PathParam("resourceArn") String resourceArn,
+                                   String body) throws IOException {
+        JsonNode req = objectMapper.readTree(body);
+        List<String> tagKeys = readStringList(req.path("TagKeyList"));
+        service.untagResource(resourceArn, tagKeys);
+        return Response.noContent().build();
+    }
+
+    // ── Supported resource types ───────────────────────────────────────────────
+
+    @GET
+    @Path("/supported-resource-types")
+    public Response getSupportedResourceTypes() {
+        ObjectNode out = objectMapper.createObjectNode();
+        ArrayNode list = out.putArray("ResourceTypes");
+        service.getSupportedResourceTypes().forEach(list::add);
+        return Response.ok(out).build();
+    }
+
+    // ── Helpers ────────────────────────────────────────────────────────────────
+
+    // Absent and null both mean "not supplied", which for these members is meaningful:
+    // omitting ChangeableForDays is what selects compliance mode.
+    //
+    // A present value must be an INTEGRAL NUMBER, and is rejected rather than coerced.
+    // asLong() would silently accept anything: 1.5 truncates to 1, true becomes 1, and
+    // the string "7" becomes 7 -- so a request AWS rejects with a serialization error
+    // would instead succeed here against a value the caller never asked for, and a
+    // retention floor could be set from a number that was never sent. Matches the
+    // existing shape in KinesisJsonHandler#optionalMaxRecordSize and
+    // TimestreamInfluxDbValidation, which reject on !isIntegralNumber() for the same
+    // reason. Found by Greptile on the fork PR.
+    private static Long longOrNull(JsonNode node, String field) {
+        JsonNode n = node.path(field);
+        if (n.isMissingNode() || n.isNull()) {
+            return null;
+        }
+        // canConvertToLong as well as isIntegralNumber, because the first alone leaves
+        // one coercion open: 18446744073709551623 IS an integral number, and
+        // longValue() keeps its low 64 bits, wrapping it to 7, which then passes the
+        // retention checks as if the caller had sent it. Kinesis guards the same way
+        // with canConvertToInt (KinesisJsonHandler#optionalMaxRecordSize). Rejecting
+        // a value we cannot represent is the whole point of not coercing.
+        if (!n.isIntegralNumber() || !n.canConvertToLong()) {
+            throw new AwsException("InvalidParameterValueException",
+                    field + " must be an integer", 400);
+        }
+        return n.longValue();
+    }
+
+    private static String textOrNull(JsonNode node, String field) {
+        JsonNode n = node.path(field);
+        return n.isMissingNode() || n.isNull() ? null : n.asText();
+    }
+
+    /**
+     * Like {@link #textOrNull} but refuses to invent a string out of something that is not one.
+     *
+     * <p>{@code asText()} coerces: a request carrying {@code "SNSTopicArn": 123} yields the
+     * nonblank string {@code "123"}, which passes every present-and-nonblank check the service
+     * makes and is stored as the topic. The configuration then reads back as valid while naming a
+     * topic that cannot exist. This is the same coercion Greptile found in {@link #longOrNull}
+     * above, in the other direction, and it gets the same answer: reject a value we would have to
+     * fabricate rather than read.
+     *
+     * <p>Used for the fields where the fabricated value would survive validation. The advisory
+     * ones -- CreatorRequestId and the like -- stay on textOrNull, because a coerced value there
+     * is stored and echoed and misleads nobody.
+     */
+    private static String stringOrNull(JsonNode node, String field) {
+        JsonNode n = node.path(field);
+        if (n.isMissingNode() || n.isNull()) {
+            return null;
+        }
+        if (!n.isTextual()) {
+            throw new AwsException("InvalidParameterValueException",
+                    field + " must be a string", 400);
+        }
+        return n.asText();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, String> readStringMap(JsonNode node, String field) {
+        JsonNode mapNode = node.path(field);
+        if (mapNode.isMissingNode() || mapNode.isNull()) {
+            return new HashMap<>();
+        }
+        return objectMapper.convertValue(mapNode, Map.class);
+    }
+
+    private static List<String> readStringList(JsonNode node) {
+        List<String> result = new ArrayList<>();
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return result;
+        }
+        node.forEach(n -> result.add(n.asText()));
+        return result;
+    }
+
+    private List<BackupRule> readRules(JsonNode rulesNode) throws IOException {
+        List<BackupRule> rules = new ArrayList<>();
+        if (rulesNode == null || rulesNode.isMissingNode() || !rulesNode.isArray()) {
+            return rules;
+        }
+        for (JsonNode ruleNode : rulesNode) {
+            rules.add(objectMapper.treeToValue(ruleNode, BackupRule.class));
+        }
+        return rules;
+    }
+
+
+
+
+
 
     @GET
     @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}/restore-metadata")
@@ -481,64 +720,5 @@ public class BackupController {
         Map<String, String> query = new HashMap<>();
         uri.getQueryParameters().forEach((key, values) -> query.put(key, values.getFirst()));
         return query;
-    }
-
-    // ── Untag (POST /untag/{arn} with body — distinct from shared DELETE /tags pattern) ──
-
-    @POST
-    @Path("/untag/{resourceArn: .*}")
-    public Response untagResource(@PathParam("resourceArn") String resourceArn,
-                                   String body) throws IOException {
-        JsonNode req = objectMapper.readTree(body);
-        List<String> tagKeys = readStringList(req.path("TagKeyList"));
-        service.untagResource(resourceArn, tagKeys);
-        return Response.noContent().build();
-    }
-
-    // ── Supported resource types ───────────────────────────────────────────────
-
-    @GET
-    @Path("/supported-resource-types")
-    public Response getSupportedResourceTypes() {
-        ObjectNode out = objectMapper.createObjectNode();
-        ArrayNode list = out.putArray("ResourceTypes");
-        service.getSupportedResourceTypes().forEach(list::add);
-        return Response.ok(out).build();
-    }
-
-    // ── Helpers ────────────────────────────────────────────────────────────────
-
-    private static String textOrNull(JsonNode node, String field) {
-        JsonNode n = node.path(field);
-        return n.isMissingNode() || n.isNull() ? null : n.asText();
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, String> readStringMap(JsonNode node, String field) {
-        JsonNode mapNode = node.path(field);
-        if (mapNode.isMissingNode() || mapNode.isNull()) {
-            return new HashMap<>();
-        }
-        return objectMapper.convertValue(mapNode, Map.class);
-    }
-
-    private static List<String> readStringList(JsonNode node) {
-        List<String> result = new ArrayList<>();
-        if (node == null || node.isMissingNode() || node.isNull()) {
-            return result;
-        }
-        node.forEach(n -> result.add(n.asText()));
-        return result;
-    }
-
-    private List<BackupRule> readRules(JsonNode rulesNode) throws IOException {
-        List<BackupRule> rules = new ArrayList<>();
-        if (rulesNode == null || rulesNode.isMissingNode() || !rulesNode.isArray()) {
-            return rules;
-        }
-        for (JsonNode ruleNode : rulesNode) {
-            rules.add(objectMapper.treeToValue(ruleNode, BackupRule.class));
-        }
-        return rules;
     }
 }

@@ -2,9 +2,9 @@ package io.github.hectorvent.floci.services.cloudformation.provisioners;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
@@ -45,6 +45,12 @@ public class CodePipelineCfnProvisioner implements CfnResourceProvisioner {
         return Set.of("AWS::CodePipeline::Pipeline",
                 "AWS::CodePipeline::CustomActionType",
                 "AWS::CodePipeline::Webhook");
+    }
+
+    /** A custom action type's id is its own {@code category|Custom|provider|version}, which names no parent. */
+    @Override
+    public boolean idPrefixCanNameParent(String resourceType) {
+        return !"AWS::CodePipeline::CustomActionType".equals(resourceType);
     }
 
     @Override

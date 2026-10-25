@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.iam;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.cbor.CBORFactory;
 import jakarta.ws.rs.container.ContainerRequestContext;
 import jakarta.ws.rs.core.MediaType;
 import org.jboss.logging.Logger;
@@ -13,9 +14,10 @@ import java.net.URLDecoder;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 
-final class RequestBodyReader {
+public final class RequestBodyReader {
 
     private static final Logger LOG = Logger.getLogger(RequestBodyReader.class);
+    private static final ObjectMapper CBOR_MAPPER = new ObjectMapper(new CBORFactory());
     private static final String BUFFERED_BODY_PROPERTY =
             "io.github.hectorvent.floci.services.iam.RequestBodyReader.bufferedBody";
 
@@ -44,7 +46,10 @@ final class RequestBodyReader {
         return body;
     }
 
-    static String formField(ContainerRequestContext ctx, String key) {
+    public static String formField(ContainerRequestContext ctx, String key) {
+        if ("GET".equalsIgnoreCase(ctx.getMethod()) && IamActionRegistry.isQueryRequest(ctx)) {
+            return ctx.getUriInfo().getQueryParameters().getFirst(key);
+        }
         MediaType mt = ctx.getMediaType();
         if (mt == null
                 || !"application".equalsIgnoreCase(mt.getType())
@@ -68,10 +73,10 @@ final class RequestBodyReader {
         return null;
     }
 
-    static String jsonField(ContainerRequestContext ctx, ObjectMapper objectMapper, String key) {
+    static String documentField(ContainerRequestContext ctx, ObjectMapper objectMapper, String key) {
         MediaType mt = ctx.getMediaType();
         if (mt == null || !"application".equalsIgnoreCase(mt.getType())
-                || mt.getSubtype() == null || !mt.getSubtype().startsWith("x-amz-json")) {
+                || mt.getSubtype() == null || (!isCbor(mt) && !mt.getSubtype().startsWith("x-amz-json"))) {
             return null;
         }
         byte[] body = buffer(ctx);
@@ -79,12 +84,24 @@ final class RequestBodyReader {
             return null;
         }
         try {
-            JsonNode value = objectMapper.readTree(body).path(key);
+            JsonNode value = readTree(body, mt, objectMapper).path(key);
             return value.isTextual() ? value.asText() : null;
         } catch (IOException e) {
-            LOG.debugv(e, "Failed to parse JSON request body for IAM enforcement");
+            LOG.debugv(e, "Failed to parse request document for IAM enforcement");
             return null;
         }
+    }
+
+    /** Both CBOR wire protocols carry the same document members as JSON requests. */
+    static boolean isCbor(MediaType mediaType) {
+        return mediaType != null
+                && "application".equalsIgnoreCase(mediaType.getType())
+                && ("cbor".equalsIgnoreCase(mediaType.getSubtype())
+                        || "x-amz-cbor-1.1".equalsIgnoreCase(mediaType.getSubtype()));
+    }
+
+    static JsonNode readTree(byte[] body, MediaType mediaType, ObjectMapper json) throws IOException {
+        return (isCbor(mediaType) ? CBOR_MAPPER : json).readTree(body);
     }
 
     private static Charset resolveCharset(MediaType mt) {

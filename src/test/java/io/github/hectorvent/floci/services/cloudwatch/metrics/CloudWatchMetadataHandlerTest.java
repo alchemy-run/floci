@@ -47,8 +47,8 @@ class CloudWatchMetadataHandlerTest {
         insightStore = AccountAwareStorageBackend.inMemory(ACCOUNT);
         metadata = new CloudWatchMetadataService(metadataStore, regions, mapper, metrics);
         insights = new CloudWatchInsightsService(insightStore, mapper, regions, metadata);
-        var dashboards = new CloudWatchDashboardsService(new InMemoryStorage<>(), regions);
-        var streams = new CloudWatchMetricStreamsService(new InMemoryStorage<>(), regions);
+        CloudWatchDashboardsService dashboards = new CloudWatchDashboardsService(new InMemoryStorage<>(), regions);
+        CloudWatchMetricStreamsService streams = new CloudWatchMetricStreamsService(new InMemoryStorage<>(), regions);
         json = new CloudWatchMetricsJsonHandler(metrics, dashboards, streams, mapper);
         json.metadataService = metadata;
         json.insightsService = insights;
@@ -151,7 +151,7 @@ class CloudWatchMetadataHandlerTest {
     void detectorConfigurationSurvivesServiceRecreationAndListsInPages() throws Exception {
         call("PutAnomalyDetector", "{\"Namespace\":\"App\",\"MetricName\":\"A\",\"Stat\":\"Sum\"}");
         call("PutAnomalyDetector", "{\"Namespace\":\"App\",\"MetricName\":\"B\",\"Stat\":\"Sum\"}");
-        var restored = new CloudWatchMetadataService(metadataStore, regions, mapper, metrics);
+        CloudWatchMetadataService restored = new CloudWatchMetadataService(metadataStore, regions, mapper, metrics);
         JsonNode page = restored.describeDetectors(mapper.readTree("{\"MaxResults\":1}"), REGION);
         assertEquals(1, page.path("AnomalyDetectors").size());
         assertTrue(page.has("NextToken"));

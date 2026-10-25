@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.lambda;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.MethodOrderer;
@@ -139,7 +140,7 @@ class LambdaPermissionTagLayerIntegrationTest {
         // Policy is a JSON string — parse it and verify statements
         ObjectMapper om = new ObjectMapper();
         String policyJson = om.readTree(response).get("Policy").asText();
-        var policy = om.readTree(policyJson);
+        JsonNode policy = om.readTree(policyJson);
         assert policy.get("Statement").size() == 2;
     }
 
@@ -177,7 +178,7 @@ class LambdaPermissionTagLayerIntegrationTest {
 
         ObjectMapper om = new ObjectMapper();
         String policyJson = om.readTree(response).get("Policy").asText();
-        var policy = om.readTree(policyJson);
+        JsonNode policy = om.readTree(policyJson);
         assert policy.get("Statement").size() == 1;
     }
 
@@ -273,6 +274,25 @@ class LambdaPermissionTagLayerIntegrationTest {
             .body("Tags.team", equalTo("platform"));
     }
 
+    @Test
+    @Order(16)
+    void tagResource_keyOutsideTheAwsPattern_returns400() {
+        given()
+            .contentType("application/json")
+            .body("""
+                {"Tags": {"a,b": "x"}}
+                """)
+        .when()
+            .post("/2017-03-31/tags/" + FN_ARN)
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", equalTo("1 validation error detected: Value '{a,b=x}' at 'tags' failed to satisfy"
+                    + " constraint: Map keys must satisfy constraint: [Member must have length less than or"
+                    + " equal to 128, Member must have length greater than or equal to 1, Member must satisfy"
+                    + " regular expression pattern: ([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)]"));
+    }
+
     // ── ListLayers / ListLayerVersions ────────────────────────────────────────
 
     @Test
@@ -284,58 +304,6 @@ class LambdaPermissionTagLayerIntegrationTest {
         .then()
             .statusCode(200)
             .body("Layers", empty());
-    }
-
-    @Test
-    @Order(19)
-    void addPermission_functionUrlCondition_roundTripsOnGetPolicy() throws Exception {
-        given()
-            .contentType("application/json")
-            .body("""
-                {
-                    "StatementId": "FunctionURLAllowPublicInvoke",
-                    "Action": "lambda:InvokeFunction",
-                    "Principal": "*",
-                    "InvokedViaFunctionUrl": true
-                }
-                """)
-        .when()
-            .post("/2015-03-31/functions/" + FN + "/policy")
-        .then()
-            .statusCode(201);
-
-        String response = given()
-        .when()
-            .get("/2015-03-31/functions/" + FN + "/policy")
-        .then()
-            .statusCode(200)
-            .extract().body().asString();
-
-        ObjectMapper om = new ObjectMapper();
-        String policyJson = om.readTree(response).get("Policy").asText();
-        var policy = om.readTree(policyJson);
-        var match = policy.get("Statement").elements();
-        com.fasterxml.jackson.databind.JsonNode found = null;
-        while (match.hasNext()) {
-            var node = match.next();
-            if ("FunctionURLAllowPublicInvoke".equals(node.path("Sid").asText())) {
-                found = node;
-            }
-        }
-        assert found != null;
-        assert found.path("Condition").path("Bool").path("lambda:InvokedViaFunctionUrl").asText().equals("true");
-    }
-
-    @Test
-    @Order(19)
-    void getAccountSettings_returnsLimits() {
-        given()
-        .when()
-            .get("/2016-08-19/account-settings")
-        .then()
-            .statusCode(200)
-            .body("AccountLimit.ConcurrentExecutions", greaterThan(0))
-            .body("AccountUsage.FunctionCount", greaterThanOrEqualTo(1));
     }
 
     @Test

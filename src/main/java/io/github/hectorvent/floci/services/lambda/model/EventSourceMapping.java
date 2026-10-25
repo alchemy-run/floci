@@ -33,12 +33,11 @@ public class EventSourceMapping {
     private Integer maximumRetryAttempts;
     private Integer maximumRecordAgeInSeconds;
     private DestinationConfig destinationConfig;
-    private Map<String, String> tags = new HashMap<>();
     private FilterCriteria filterCriteria;
     private Map<String, Object> selfManagedEventSource;
-    private Map<String, Object> amazonManagedKafkaEventSourceConfig;
     private List<String> topics = new ArrayList<>();
     private List<Map<String, Object>> sourceAccessConfigurations = new ArrayList<>();
+    private Map<String, String> tags = new HashMap<>();
 
     public EventSourceMapping() {
     }
@@ -102,7 +101,7 @@ public class EventSourceMapping {
 
     public Map<String, String> getShardSequenceNumbers() { return shardSequenceNumbers; }
     public void setShardSequenceNumbers(Map<String, String> shardSequenceNumbers) {
-        this.shardSequenceNumbers = shardSequenceNumbers != null ? shardSequenceNumbers : new java.util.HashMap<>();
+        this.shardSequenceNumbers = shardSequenceNumbers != null ? shardSequenceNumbers : new HashMap<>();
     }
 
     public ScalingConfig getScalingConfig() { return scalingConfig; }
@@ -145,14 +144,6 @@ public class EventSourceMapping {
         this.destinationConfig = destinationConfig;
     }
 
-    public Map<String, String> getTags() {
-        return tags;
-    }
-
-    public void setTags(Map<String, String> tags) {
-        this.tags = tags != null ? tags : new HashMap<>();
-    }
-
     public FilterCriteria getFilterCriteria() {
         return filterCriteria;
     }
@@ -169,14 +160,6 @@ public class EventSourceMapping {
         this.selfManagedEventSource = selfManagedEventSource;
     }
 
-    public Map<String, Object> getAmazonManagedKafkaEventSourceConfig() {
-        return amazonManagedKafkaEventSourceConfig;
-    }
-
-    public void setAmazonManagedKafkaEventSourceConfig(Map<String, Object> amazonManagedKafkaEventSourceConfig) {
-        this.amazonManagedKafkaEventSourceConfig = amazonManagedKafkaEventSourceConfig;
-    }
-
     public List<String> getTopics() {
         return topics;
     }
@@ -191,6 +174,14 @@ public class EventSourceMapping {
 
     public void setSourceAccessConfigurations(List<Map<String, Object>> sourceAccessConfigurations) {
         this.sourceAccessConfigurations = sourceAccessConfigurations != null ? sourceAccessConfigurations : new ArrayList<>();
+    }
+
+    public Map<String, String> getTags() {
+        return tags;
+    }
+
+    public void setTags(Map<String, String> tags) {
+        this.tags = tags != null ? tags : new HashMap<>();
     }
 
     @RegisterForReflection
@@ -259,5 +250,15 @@ public class EventSourceMapping {
         public void setPattern(String pattern) {
             this.pattern = pattern;
         }
+    }
+
+    private Map<String, Object> amazonManagedKafkaEventSourceConfig;
+
+    public Map<String, Object> getAmazonManagedKafkaEventSourceConfig() {
+        return amazonManagedKafkaEventSourceConfig;
+    }
+
+    public void setAmazonManagedKafkaEventSourceConfig(Map<String, Object> amazonManagedKafkaEventSourceConfig) {
+        this.amazonManagedKafkaEventSourceConfig = amazonManagedKafkaEventSourceConfig;
     }
 }

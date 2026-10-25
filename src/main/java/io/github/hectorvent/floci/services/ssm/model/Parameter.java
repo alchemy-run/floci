@@ -1,12 +1,15 @@
 package io.github.hectorvent.floci.services.ssm.model;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.JsonNode;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RegisterForReflection
@@ -37,18 +40,30 @@ public class Parameter {
     @JsonProperty("DataType")
     private String dataType = "text";
 
-    @JsonProperty("Tier")
-    private String tier = "Standard";
-
     @JsonProperty("KeyId")
     private String keyId;
 
     @JsonProperty("AllowedPattern")
     private String allowedPattern;
 
+    @JsonProperty("Tier")
+    private String tier;
+
+    // Each policy object as submitted; DescribeParameters re-serializes it as the PolicyText.
+    @JsonProperty("Policies")
+    private List<JsonNode> policies;
+
     @JsonProperty("Tags")
     @JsonAlias({"tags", "Tags"})
     private Map<String, String> tags = new HashMap<>();
+
+    // Only set on a copy answering a name:version or name:label read; never persisted.
+    @JsonIgnore
+    private String selector;
+
+    // Only set on a Secrets Manager reference: AWS's GetSecretValue result as a JSON string.
+    @JsonIgnore
+    private String sourceResult;
 
     public Parameter() {}
 
@@ -84,15 +99,24 @@ public class Parameter {
     public String getDataType() { return dataType; }
     public void setDataType(String dataType) { this.dataType = dataType; }
 
-    public String getTier() { return tier; }
-    public void setTier(String tier) { this.tier = tier; }
-
     public String getKeyId() { return keyId; }
     public void setKeyId(String keyId) { this.keyId = keyId; }
 
     public String getAllowedPattern() { return allowedPattern; }
     public void setAllowedPattern(String allowedPattern) { this.allowedPattern = allowedPattern; }
 
+    public String getTier() { return tier; }
+    public void setTier(String tier) { this.tier = tier; }
+
+    public List<JsonNode> getPolicies() { return policies; }
+    public void setPolicies(List<JsonNode> policies) { this.policies = policies; }
+
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
+
+    public String getSelector() { return selector; }
+    public void setSelector(String selector) { this.selector = selector; }
+
+    public String getSourceResult() { return sourceResult; }
+    public void setSourceResult(String sourceResult) { this.sourceResult = sourceResult; }
 }

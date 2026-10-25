@@ -7,8 +7,12 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Interprets AppSync field directives for both {@link AuthorizationDataFetcher} and
- * {@link SidecarFieldAuthorizationPlanner}.
+ * What {@code @aws_auth}/{@code @aws_iam}/{@code @aws_cognito_user_pools}/etc. mean for a field,
+ * the actual AWS-specific interpretation, shared by {@link SidecarFieldAuthorizationPlanner}
+ * (issue #2917). Used to live as part of the live in-process {@code DataFetcher} wrapper this
+ * class was originally named for; that wrapper is gone now that execution happens in the
+ * (AWS-agnostic) GraphQL sidecar, but the directive-name-to-{@link AuthenticationType} mapping
+ * itself didn't change, so it's kept here rather than duplicated.
  */
 final class AppSyncAuthRequirements {
 

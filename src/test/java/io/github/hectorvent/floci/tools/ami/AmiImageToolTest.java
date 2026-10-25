@@ -1,18 +1,18 @@
 package io.github.hectorvent.floci.tools.ami;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import io.github.hectorvent.floci.core.common.Digests;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.security.MessageDigest;
-import java.util.HexFormat;
+import java.util.stream.Stream;
 
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AmiImageToolTest {
     @TempDir
@@ -151,15 +151,13 @@ class AmiImageToolTest {
     void toolTreeDoesNotContainShellScripts() throws Exception {
         Path tools = Path.of("src/main/java/io/github/hectorvent/floci/tools/ami");
         if (Files.isDirectory(tools)) {
-            try (var stream = Files.walk(tools)) {
+            try (Stream<Path> stream = Files.walk(tools)) {
                 assertFalse(stream.anyMatch(path -> path.getFileName().toString().endsWith(".sh")));
             }
         }
     }
 
     private static String sha256(Path path) throws Exception {
-        MessageDigest digest = MessageDigest.getInstance("SHA-256");
-        digest.update(Files.readAllBytes(path));
-        return HexFormat.of().formatHex(digest.digest());
+        return Digests.sha256Hex(Files.readAllBytes(path));
     }
 }

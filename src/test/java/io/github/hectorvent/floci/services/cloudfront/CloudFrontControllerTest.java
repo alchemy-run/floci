@@ -1,7 +1,5 @@
 package io.github.hectorvent.floci.services.cloudfront;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.services.cloudfront.edge.CloudFrontFunctionRuntime;
 import io.github.hectorvent.floci.core.common.XmlParser;
 import io.github.hectorvent.floci.services.cloudfront.model.CloudFrontFunction;
 import io.github.hectorvent.floci.services.cloudfront.model.ContinuousDeploymentPolicy;
@@ -17,6 +15,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -36,7 +35,7 @@ class CloudFrontControllerTest {
         when(service.listDistributions(null, Integer.MAX_VALUE))
                 .thenReturn(List.of(first, second, third, fourth));
 
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         try (Response firstPage = controller.listDistributions(null, 2);
              Response secondPage = controller.listDistributions("B", 2)) {
@@ -63,13 +62,13 @@ class CloudFrontControllerTest {
         CloudFrontFunction second = function("beta");
         CloudFrontFunction third = function("gamma");
         CloudFrontFunction fourth = function("omega");
-        when(service.getAccountId()).thenReturn("000000000000");
+        when(service.arn(anyString())).thenAnswer(call -> "arn:aws:cloudfront::000000000000:" + call.getArgument(0));
         when(service.listFunctions(null, null, 3))
                 .thenReturn(List.of(first, second, third));
         when(service.listFunctions(null, "beta", 3))
                 .thenReturn(List.of(third, fourth));
 
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         try (Response firstPage = controller.listFunctions(null, null, 2);
              Response secondPage = controller.listFunctions(null, "beta", 2)) {
@@ -96,7 +95,7 @@ class CloudFrontControllerTest {
         when(service.listContinuousDeploymentPolicies("A", 2))
                 .thenReturn(List.of(second));
 
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         try (Response firstPage = controller.listContinuousDeploymentPolicies(null, 1);
              Response secondPage = controller.listContinuousDeploymentPolicies("A", 1)) {
@@ -113,7 +112,7 @@ class CloudFrontControllerTest {
     @Test
     void distributionConfigRoundTripsLambdaAndCloudFrontFunctionAssociations() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("""
                 <LambdaFunctionAssociations><Quantity>1</Quantity><Items><LambdaFunctionAssociation>
@@ -164,7 +163,7 @@ class CloudFrontControllerTest {
     @Test
     void defaultCacheBehaviorEchoesTrustedSignersSoTheAwsProviderDoesNotSegfault() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("");
 
@@ -197,7 +196,7 @@ class CloudFrontControllerTest {
     @Test
     void defaultCacheBehaviorEchoesCachedMethodsWithoutDuplicatingAllowedMethods() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         // AWS nests CachedMethods inside AllowedMethods. A parser that doesn't scope Method
         // elements to the right block folds the CachedMethods items into AllowedMethods too,
@@ -247,7 +246,7 @@ class CloudFrontControllerTest {
     @Test
     void orderedCacheBehaviorRoundTripsLambdaFunctionAssociations() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("").replace("</DefaultCacheBehavior>", """
                 </DefaultCacheBehavior>
@@ -292,7 +291,7 @@ class CloudFrontControllerTest {
         // A hand-written parser copy-pasted for CacheBehavior once silently dropped
         // RealtimeLogConfigArn, since only the DefaultCacheBehavior copy captured it.
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("").replace("</DefaultCacheBehavior>", """
                 </DefaultCacheBehavior>
@@ -329,7 +328,7 @@ class CloudFrontControllerTest {
     @Test
     void invalidLambdaFunctionAssociationEventTypeIsRejected() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("""
                 <LambdaFunctionAssociations><Quantity>1</Quantity><Items><LambdaFunctionAssociation>
@@ -347,7 +346,7 @@ class CloudFrontControllerTest {
     @Test
     void lambdaFunctionAssociationsQuantityMismatchIsRejected() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("""
                 <LambdaFunctionAssociations><Quantity>2</Quantity><Items><LambdaFunctionAssociation>
@@ -364,7 +363,7 @@ class CloudFrontControllerTest {
     @Test
     void customOriginConfigEchoesOriginSslProtocolsSoTheAwsProviderDoesNotSegfault() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         // A custom origin whose request omits OriginSslProtocols, as the aws provider sends for a
         // minimal distribution. The provider flattens CustomOriginConfig.OriginSslProtocols.Items with
@@ -396,7 +395,7 @@ class CloudFrontControllerTest {
     @Test
     void customOriginConfigRoundTripsSubmittedOriginSslProtocols() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("").replace(
                 "<OriginProtocolPolicy>https-only</OriginProtocolPolicy></CustomOriginConfig>",
@@ -430,7 +429,7 @@ class CloudFrontControllerTest {
     @Test
     void originSslProtocolsQuantityMismatchIsRejected() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("").replace(
                 "<OriginProtocolPolicy>https-only</OriginProtocolPolicy></CustomOriginConfig>",
@@ -446,41 +445,9 @@ class CloudFrontControllerTest {
     }
 
     @Test
-    void originReadTimeoutAboveTheAwsMaximumIsRejected() {
-        CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
-
-        String body = distributionConfigBody("").replace(
-                "<OriginProtocolPolicy>https-only</OriginProtocolPolicy></CustomOriginConfig>",
-                "<OriginProtocolPolicy>https-only</OriginProtocolPolicy>"
-                        + "<OriginReadTimeout>121</OriginReadTimeout></CustomOriginConfig>");
-
-        try (Response created = controller.createDistribution(null, body)) {
-            assertEquals(400, created.getStatus());
-            assertTrue(((String) created.getEntity()).contains("InvalidOriginReadTimeout"));
-        }
-    }
-
-    @Test
-    void originKeepaliveTimeoutOfZeroIsRejected() {
-        CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
-
-        String body = distributionConfigBody("").replace(
-                "<OriginProtocolPolicy>https-only</OriginProtocolPolicy></CustomOriginConfig>",
-                "<OriginProtocolPolicy>https-only</OriginProtocolPolicy>"
-                        + "<OriginKeepaliveTimeout>0</OriginKeepaliveTimeout></CustomOriginConfig>");
-
-        try (Response created = controller.createDistribution(null, body)) {
-            assertEquals(400, created.getStatus());
-            assertTrue(((String) created.getEntity()).contains("InvalidOriginKeepaliveTimeout"));
-        }
-    }
-
-    @Test
     void nonNumericOriginReadTimeoutIsRejected() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("").replace(
                 "<OriginProtocolPolicy>https-only</OriginProtocolPolicy></CustomOriginConfig>",
@@ -494,9 +461,25 @@ class CloudFrontControllerTest {
     }
 
     @Test
+    void nonNumericConnectionTimeoutIsRejected() {
+        CloudFrontService service = mock(CloudFrontService.class);
+        CloudFrontController controller = new CloudFrontController(service);
+
+        String body = distributionConfigBody("").replace(
+                "<OriginProtocolPolicy>https-only</OriginProtocolPolicy></CustomOriginConfig>",
+                "<OriginProtocolPolicy>https-only</OriginProtocolPolicy></CustomOriginConfig>"
+                        + "<ConnectionTimeout>fast</ConnectionTimeout>");
+
+        try (Response created = controller.createDistribution(null, body)) {
+            assertEquals(400, created.getStatus());
+            assertTrue(((String) created.getEntity()).contains("InvalidArgument"));
+        }
+    }
+
+    @Test
     void responseCompletionTimeoutBelowOriginReadTimeoutIsRejected() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("").replace(
                 "<OriginProtocolPolicy>https-only</OriginProtocolPolicy></CustomOriginConfig>",
@@ -513,7 +496,7 @@ class CloudFrontControllerTest {
     @Test
     void responseCompletionTimeoutAtLeastOriginReadTimeoutIsAccepted() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
         when(service.createDistribution(any(), any())).thenReturn(distribution("dist-rct"));
 
         String body = distributionConfigBody("").replace(
@@ -530,7 +513,7 @@ class CloudFrontControllerTest {
     @Test
     void responseCompletionTimeoutBelowTheImplicitOriginReadTimeoutDefaultIsRejected() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("").replace(
                 "<OriginProtocolPolicy>https-only</OriginProtocolPolicy></CustomOriginConfig>",
@@ -546,7 +529,7 @@ class CloudFrontControllerTest {
     @Test
     void defaultCacheBehaviorRoundTripsForwardedValues() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody(
                 "<ForwardedValues><QueryString>true</QueryString>"
@@ -577,7 +560,7 @@ class CloudFrontControllerTest {
     @Test
     void defaultCacheBehaviorRoundTripsAnExplicitZeroDefaultTtl() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         // default_ttl = 0 with forwarded_values is the usual "do not cache". Treating 0 as "unset"
         // drops it from the read-back, so the provider sees the attribute disappear and diffs forever.
@@ -609,7 +592,7 @@ class CloudFrontControllerTest {
     @Test
     void defaultCacheBehaviorOmitsTtlsTheClientNeverSubmitted() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody(
                 "<ForwardedValues><QueryString>false</QueryString>"
@@ -637,7 +620,7 @@ class CloudFrontControllerTest {
     @Test
     void forwardedValuesRoundTripsHeadersQueryStringCacheKeysAndWhitelistedCookies() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         // Headers, QueryStringCacheKeys and Cookies.WhitelistedNames are Quantity/Items pairs. Echoing
         // a bare Quantity 0 loses them, so the provider reads the lists back empty and diffs each plan.
@@ -693,7 +676,7 @@ class CloudFrontControllerTest {
     @Test
     void customOriginConfigRoundTripsTimeoutsAndSslProtocols() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = """
                 <DistributionConfig xmlns="http://cloudfront.amazonaws.com/doc/2020-05-31/">
@@ -749,7 +732,7 @@ class CloudFrontControllerTest {
     @Test
     void customOriginConfigDefaultsTimeoutsWhenUnspecified() {
         CloudFrontService service = mock(CloudFrontService.class);
-        CloudFrontController controller = new CloudFrontController(service, mock(CloudFrontFunctionRuntime.class), new ObjectMapper());
+        CloudFrontController controller = new CloudFrontController(service);
 
         String body = distributionConfigBody("");
 

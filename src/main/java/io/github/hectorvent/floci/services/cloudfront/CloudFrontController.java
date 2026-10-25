@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.cloudfront;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsNamespaces;
@@ -17,6 +18,7 @@ import org.jboss.logging.Logger;
 import javax.xml.stream.XMLStreamConstants;
 import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
+
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -25,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.regex.Matcher;
 
 @Path("/2020-05-31")
 public class CloudFrontController {
@@ -47,30 +50,20 @@ public class CloudFrontController {
 
     /**
      * Origin timeout constraints from the CloudFront {@code CustomOriginConfig} and
-     * {@code Origin} API references. {@code OriginReadTimeout} accepts 1-120 seconds, default 30.
-     * {@code OriginKeepaliveTimeout} accepts 1-300 seconds, default 5. {@code ResponseCompletionTimeout}
-     * has no enforced maximum when unset (represented here as 0), but when set must be at least
-     * {@code OriginReadTimeout}.
+     * {@code Origin} API references. The range checks for the origin timeout settings live in
+     * {@link CloudFrontService#createDistribution} so the CloudFormation path shares one copy;
+     * the parser only rejects non-numeric values. {@code ResponseCompletionTimeout} has no
+     * enforced maximum when unset (represented here as 0), but when set must be at least
+     * {@code OriginReadTimeout}. The timeout bounds live in {@link CloudFrontOriginTimeouts},
+     * shared with the serving layer that applies them.
      */
-    private static final int DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS = 30;
-    private static final int MIN_ORIGIN_READ_TIMEOUT_SECONDS = 1;
-    private static final int MAX_ORIGIN_READ_TIMEOUT_SECONDS = 120;
-    private static final int DEFAULT_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 5;
-    private static final int MIN_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 1;
-    private static final int MAX_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 300;
     private static final int DEFAULT_RESPONSE_COMPLETION_TIMEOUT_SECONDS = 0;
 
     private final CloudFrontService service;
-    private final CloudFrontFunctionRuntime functionRuntime;
-    private final ObjectMapper mapper;
 
     @Inject
-    public CloudFrontController(CloudFrontService service,
-                                CloudFrontFunctionRuntime functionRuntime,
-                                ObjectMapper mapper) {
+    public CloudFrontController(CloudFrontService service) {
         this.service = service;
-        this.functionRuntime = functionRuntime;
-        this.mapper = mapper;
     }
 
     // ── Distributions ─────────────────────────────────────────────────────────
@@ -478,7 +471,7 @@ public class CloudFrontController {
                                               @QueryParam("Type") String type) {
         try {
             Page<OriginRequestPolicy> page = page(
-                    service.listOriginRequestPolicies(marker, paginationFetchLimit(maxItems)),
+                    service.listOriginRequestPolicies(marker, paginationFetchLimit(maxItems), type),
                     maxItems, OriginRequestPolicy::getId);
 
             XmlBuilder xml = new XmlBuilder()
@@ -489,7 +482,8 @@ public class CloudFrontController {
                     .start("Items");
             for (OriginRequestPolicy p : page.items()) {
                 xml.start("OriginRequestPolicySummary")
-                        .elem("Type", "custom")
+                        .elem("Type", CloudFrontService.isManagedOriginRequestPolicy(p.getId())
+                                ? "managed" : "custom")
                         .raw(xmlOriginRequestPolicyResponse(p))
                         .end("OriginRequestPolicySummary");
             }
@@ -929,83 +923,6 @@ public class CloudFrontController {
         }
     }
 
-    /**
-     * Runs a function against a caller-supplied event object and returns the
-     * result, its logs and its error message — the same runtime the emulated
-     * edge uses, so a local {@code test-function} result and a locally-served
-     * request agree.
-     */
-    @POST
-    @Path("/function/{Name}/test")
-    public Response testFunction(@PathParam("Name") String name,
-                                 @HeaderParam("If-Match") String ifMatch,
-                                 String body) {
-        try {
-            if (ifMatch == null || ifMatch.isEmpty()) {
-                throw new AwsException("InvalidIfMatchVersion",
-                        "The If-Match version is missing or not valid for the resource.", 400);
-            }
-            String stage = XmlParser.extractFirst(body, "Stage", "DEVELOPMENT");
-            CloudFrontFunction fn = service.describeFunction(name, stage);
-            if (!ifMatch.equals(fn.getEtag())) {
-                throw new AwsException("InvalidIfMatchVersion",
-                        "The If-Match version is missing or not valid for the resource.", 400);
-            }
-            JsonNode event = parseEventObject(XmlParser.extractFirst(body, "EventObject", null));
-            CloudFrontFunctionRuntime.Execution execution = functionRuntime.execute(fn, event);
-
-            XmlBuilder xml = new XmlBuilder()
-                    .start("TestResult", NS)
-                    .raw(xmlFunctionResponse(fn))
-                    .elem("ComputeUtilization", execution.computeUtilization())
-                    .start("FunctionExecutionLogs");
-            for (String log : execution.logs()) {
-                xml.elem("member", log);
-            }
-            xml.end("FunctionExecutionLogs");
-            if (execution.ok()) {
-                xml.elem("FunctionOutput", functionOutput(execution));
-            } else {
-                xml.elem("FunctionErrorMessage", execution.error());
-            }
-            xml.end("TestResult");
-            return Response.ok(xml.build(), XML).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    /** The {@code EventObject} blob is base64 in the REST-XML wire format. */
-    private JsonNode parseEventObject(String encoded) {
-        if (encoded == null || encoded.isBlank()) {
-            throw new AwsException("InvalidArgument", "EventObject is required.", 400);
-        }
-        try {
-            byte[] decoded;
-            try {
-                decoded = Base64.getDecoder().decode(encoded.replaceAll("\\s", ""));
-            } catch (IllegalArgumentException notBase64) {
-                decoded = encoded.getBytes(java.nio.charset.StandardCharsets.UTF_8);
-            }
-            return mapper.readTree(decoded);
-        } catch (Exception e) {
-            throw new AwsException("InvalidArgument",
-                    "EventObject is not a valid JSON event object: " + e.getMessage(), 400);
-        }
-    }
-
-    /** CloudFront returns the result wrapped as {@code {"request":…}} or {@code {"response":…}}. */
-    private String functionOutput(CloudFrontFunctionRuntime.Execution execution) {
-        try {
-            var wrapper = mapper.createObjectNode();
-            wrapper.set(execution.isResponse() ? "response" : "request", execution.output());
-            return mapper.writeValueAsString(wrapper);
-        } catch (Exception e) {
-            throw new AwsException("InvalidArgument",
-                    "Could not serialize the function output: " + e.getMessage(), 400);
-        }
-    }
-
     @DELETE
     @Path("/function/{Name}")
     public Response deleteFunction(@PathParam("Name") String name,
@@ -1047,8 +964,7 @@ public class CloudFrontController {
                         .raw(xmlKeyValueStoreAssociations(fn.getKeyValueStoreArns()))
                         .end("FunctionConfig")
                         .start("FunctionMetadata")
-                        .elem("FunctionARN", AwsArnUtils.Arn.of("cloudfront", "", service.getAccountId(),
-                                "function/" + fn.getName()).toString())
+                        .elem("FunctionARN", service.arn("function/" + fn.getName()))
                         .elem("Stage", fn.getStage())
                         .elem("CreatedTime", fn.getCreatedTime() != null ? fn.getCreatedTime().toString() : "")
                         .elem("LastModifiedTime",
@@ -1839,182 +1755,6 @@ public class CloudFrontController {
         }
     }
 
-    // ── VPC Origins ───────────────────────────────────────────────────────────
-
-    @POST
-    @Path("/vpc-origin")
-    public Response createVpcOrigin(String body) {
-        try {
-            VpcOrigin origin = parseVpcOrigin(body);
-            Map<String, String> tags = parseTags(body);
-            origin = service.createVpcOrigin(origin, tags);
-            return Response.created(URI.create("/2020-05-31/vpc-origin/" + origin.getId()))
-                    .type(XML)
-                    .header("ETag", origin.getEtag())
-                    .header("Location", "/2020-05-31/vpc-origin/" + origin.getId())
-                    .entity(xmlVpcOrigin(origin))
-                    .build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @GET
-    @Path("/vpc-origin/{Id}")
-    public Response getVpcOrigin(@PathParam("Id") String id) {
-        try {
-            VpcOrigin origin = service.getVpcOrigin(id);
-            return Response.ok(xmlVpcOrigin(origin), XML).header("ETag", origin.getEtag()).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @PUT
-    @Path("/vpc-origin/{Id}")
-    public Response updateVpcOrigin(@PathParam("Id") String id,
-                                    @HeaderParam("If-Match") String ifMatch,
-                                    String body) {
-        try {
-            if (ifMatch == null || ifMatch.isEmpty()) {
-                throw new AwsException("InvalidIfMatchVersion",
-                        "The If-Match version is missing or not valid for the resource.", 400);
-            }
-            VpcOrigin origin = parseVpcOrigin(body);
-            origin = service.updateVpcOrigin(id, ifMatch, origin);
-            return Response.ok(xmlVpcOrigin(origin), XML).header("ETag", origin.getEtag()).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @DELETE
-    @Path("/vpc-origin/{Id}")
-    public Response deleteVpcOrigin(@PathParam("Id") String id,
-                                    @HeaderParam("If-Match") String ifMatch) {
-        try {
-            if (ifMatch == null || ifMatch.isEmpty()) {
-                throw new AwsException("InvalidIfMatchVersion",
-                        "The If-Match version is missing or not valid for the resource.", 400);
-            }
-            service.deleteVpcOrigin(id, ifMatch);
-            return Response.noContent().build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @GET
-    @Path("/vpc-origin")
-    public Response listVpcOrigins(@QueryParam("Marker") String marker,
-                                   @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
-        try {
-            List<VpcOrigin> origins = service.listVpcOrigins(marker, maxItems);
-            boolean truncated = origins.size() == maxItems;
-            XmlBuilder xml = new XmlBuilder()
-                    .start("VpcOriginList", NS)
-                    .elem("Marker", marker != null ? marker : "")
-                    .elem("MaxItems", maxItems)
-                    .elem("IsTruncated", truncated)
-                    .elem("Quantity", origins.size())
-                    .start("Items");
-            for (VpcOrigin o : origins) {
-                xml.raw(xmlVpcOriginSummary(o));
-            }
-            xml.end("Items").end("VpcOriginList");
-            return Response.ok(xml.build(), XML).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    // ── Key Value Stores ──────────────────────────────────────────────────────
-
-    @POST
-    @Path("/key-value-store")
-    public Response createKeyValueStore(String body) {
-        try {
-            KeyValueStore store = parseKeyValueStore(body);
-            Map<String, String> tags = parseTags(body);
-            store = service.createKeyValueStore(store, tags);
-            return Response.created(URI.create("/2020-05-31/key-value-store/" + store.getName()))
-                    .type(XML)
-                    .header("ETag", store.getEtag())
-                    .header("Location", "/2020-05-31/key-value-store/" + store.getName())
-                    .entity(xmlKeyValueStore(store))
-                    .build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @GET
-    @Path("/key-value-store/{Name}")
-    public Response describeKeyValueStore(@PathParam("Name") String name) {
-        try {
-            KeyValueStore store = service.describeKeyValueStore(name);
-            return Response.ok(xmlKeyValueStore(store), XML).header("ETag", store.getEtag()).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @PUT
-    @Path("/key-value-store/{Name}")
-    public Response updateKeyValueStore(@PathParam("Name") String name,
-                                        @HeaderParam("If-Match") String ifMatch,
-                                        String body) {
-        try {
-            if (ifMatch == null || ifMatch.isEmpty()) {
-                throw new AwsException("InvalidIfMatchVersion",
-                        "The If-Match version is missing or not valid for the resource.", 400);
-            }
-            String comment = XmlParser.extractFirst(body, "Comment", "");
-            KeyValueStore store = service.updateKeyValueStore(name, ifMatch, comment);
-            return Response.ok(xmlKeyValueStore(store), XML).header("ETag", store.getEtag()).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @DELETE
-    @Path("/key-value-store/{Name}")
-    public Response deleteKeyValueStore(@PathParam("Name") String name,
-                                        @HeaderParam("If-Match") String ifMatch) {
-        try {
-            if (ifMatch == null || ifMatch.isEmpty()) {
-                throw new AwsException("InvalidIfMatchVersion",
-                        "The If-Match version is missing or not valid for the resource.", 400);
-            }
-            service.deleteKeyValueStore(name, ifMatch);
-            return Response.noContent().build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
-    @GET
-    @Path("/key-value-store")
-    public Response listKeyValueStores(@QueryParam("Marker") String marker,
-                                       @QueryParam("MaxItems") @DefaultValue("100") int maxItems,
-                                       @QueryParam("Status") String status) {
-        try {
-            List<KeyValueStore> stores = service.listKeyValueStores(marker, maxItems, status);
-            XmlBuilder xml = new XmlBuilder()
-                    .start("KeyValueStoreList", NS)
-                    .elem("MaxItems", maxItems)
-                    .elem("Quantity", stores.size())
-                    .start("Items");
-            for (KeyValueStore store : stores) {
-                xml.raw(xmlKeyValueStore(store));
-            }
-            xml.end("Items").end("KeyValueStoreList");
-            return Response.ok(xml.build(), XML).build();
-        } catch (AwsException e) {
-            return xmlErrorResponse(e);
-        }
-    }
-
     // ── XML builders ──────────────────────────────────────────────────────────
 
     private String xmlDistribution(Distribution dist) {
@@ -2226,10 +1966,11 @@ public class CloudFrontController {
                     .elem("HTTPSPort", coc.getOrDefault("HTTPSPort", "443").toString())
                     .elem("OriginProtocolPolicy",
                             coc.getOrDefault("OriginProtocolPolicy", "https-only").toString())
-                    .elem("OriginReadTimeout",
-                            coc.getOrDefault("OriginReadTimeout", DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS).toString())
+                    .elem("OriginReadTimeout", coc.getOrDefault("OriginReadTimeout",
+                            CloudFrontOriginTimeouts.DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS).toString())
                     .elem("OriginKeepaliveTimeout",
-                            coc.getOrDefault("OriginKeepaliveTimeout", DEFAULT_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS)
+                            coc.getOrDefault("OriginKeepaliveTimeout",
+                                    CloudFrontOriginTimeouts.DEFAULT_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS)
                                     .toString())
                     .raw(xmlOriginSslProtocols(coc.get("OriginSslProtocols")))
                     .end("CustomOriginConfig");
@@ -2693,97 +2434,13 @@ public class CloudFrontController {
                 .raw(xmlKeyValueStoreAssociations(fn.getKeyValueStoreArns()))
                 .end("FunctionConfig")
                 .start("FunctionMetadata")
-                .elem("FunctionARN",
-                        AwsArnUtils.Arn.of("cloudfront", "", service.getAccountId(), "function/" + fn.getName()).toString())
+                .elem("FunctionARN", service.arn("function/" + fn.getName()))
                 .elem("Stage", fn.getStage())
                 .elem("CreatedTime", fn.getCreatedTime() != null ? fn.getCreatedTime().toString() : "")
                 .elem("LastModifiedTime",
                         fn.getLastModifiedTime() != null ? fn.getLastModifiedTime().toString() : "")
                 .end("FunctionMetadata")
                 .end("FunctionSummary")
-                .build();
-    }
-
-    private String xmlKeyValueStoreAssociations(List<String> arns) {
-        List<String> items = arns != null ? arns : List.of();
-        XmlBuilder xml = new XmlBuilder()
-                .start("KeyValueStoreAssociations")
-                .elem("Quantity", items.size());
-        if (!items.isEmpty()) {
-            xml.start("Items");
-            for (String arn : items) {
-                xml.start("KeyValueStoreAssociation")
-                        .elem("KeyValueStoreARN", arn)
-                        .end("KeyValueStoreAssociation");
-            }
-            xml.end("Items");
-        }
-        xml.end("KeyValueStoreAssociations");
-        return xml.build();
-    }
-
-    private String xmlVpcOrigin(VpcOrigin origin) {
-        List<String> protocols = origin.getOriginSslProtocols() != null
-                ? origin.getOriginSslProtocols() : List.of();
-        XmlBuilder xml = new XmlBuilder()
-                .start("VpcOrigin")
-                .elem("Id", origin.getId())
-                .elem("Arn", origin.getArn() != null ? origin.getArn() : "")
-                .elem("AccountId", origin.getAccountId() != null ? origin.getAccountId() : "")
-                .elem("Status", origin.getStatus() != null ? origin.getStatus() : "Deployed")
-                .elem("CreatedTime", origin.getCreatedTime() != null ? origin.getCreatedTime().toString() : "")
-                .elem("LastModifiedTime",
-                        origin.getLastModifiedTime() != null ? origin.getLastModifiedTime().toString() : "")
-                .start("VpcOriginEndpointConfig")
-                .elem("Name", origin.getName() != null ? origin.getName() : "")
-                .elem("Arn", origin.getOriginEndpointArn() != null ? origin.getOriginEndpointArn() : "")
-                .elem("HTTPPort", origin.getHttpPort())
-                .elem("HTTPSPort", origin.getHttpsPort())
-                .elem("OriginProtocolPolicy",
-                        origin.getOriginProtocolPolicy() != null ? origin.getOriginProtocolPolicy() : "https-only")
-                .start("OriginSslProtocols")
-                .elem("Quantity", protocols.size());
-        if (!protocols.isEmpty()) {
-            xml.start("Items");
-            for (String protocol : protocols) {
-                xml.elem("SslProtocol", protocol);
-            }
-            xml.end("Items");
-        }
-        xml.end("OriginSslProtocols")
-                .end("VpcOriginEndpointConfig")
-                .end("VpcOrigin");
-        return xml.build();
-    }
-
-    private String xmlVpcOriginSummary(VpcOrigin origin) {
-        return new XmlBuilder()
-                .start("VpcOriginSummary")
-                .elem("Id", origin.getId())
-                .elem("Name", origin.getName() != null ? origin.getName() : "")
-                .elem("Status", origin.getStatus() != null ? origin.getStatus() : "Deployed")
-                .elem("CreatedTime", origin.getCreatedTime() != null ? origin.getCreatedTime().toString() : "")
-                .elem("LastModifiedTime",
-                        origin.getLastModifiedTime() != null ? origin.getLastModifiedTime().toString() : "")
-                .elem("Arn", origin.getArn() != null ? origin.getArn() : "")
-                .elem("AccountId", origin.getAccountId() != null ? origin.getAccountId() : "")
-                .elem("OriginEndpointArn",
-                        origin.getOriginEndpointArn() != null ? origin.getOriginEndpointArn() : "")
-                .end("VpcOriginSummary")
-                .build();
-    }
-
-    private String xmlKeyValueStore(KeyValueStore store) {
-        return new XmlBuilder()
-                .start("KeyValueStore")
-                .elem("Name", store.getName() != null ? store.getName() : "")
-                .elem("Id", store.getId())
-                .elem("Comment", store.getComment() != null ? store.getComment() : "")
-                .elem("ARN", store.getArn() != null ? store.getArn() : "")
-                .elem("Status", store.getStatus() != null ? store.getStatus() : "READY")
-                .elem("LastModifiedTime",
-                        store.getLastModifiedTime() != null ? store.getLastModifiedTime().toString() : "")
-                .end("KeyValueStore")
                 .build();
     }
 
@@ -3170,21 +2827,15 @@ public class CloudFrontController {
                         case "ConnectionAttempts" -> {
                             if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
                                     && !inVpcOriginConfig && current != null) {
-                                try {
-                                    current.setConnectionAttempts(Integer.parseInt(r.getElementText()));
-                                } catch (NumberFormatException e) {
-                                    LOG.debugv("Ignoring malformed ConnectionAttempts during parse: {0}", e.getMessage());
-                                }
+                                current.setConnectionAttempts(parseNonNegativeTimeout(
+                                        "ConnectionAttempts", r.getElementText()));
                             }
                         }
                         case "ConnectionTimeout" -> {
                             if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
                                     && !inVpcOriginConfig && current != null) {
-                                try {
-                                    current.setConnectionTimeout(Integer.parseInt(r.getElementText()));
-                                } catch (NumberFormatException e) {
-                                    LOG.debugv("Ignoring malformed ConnectionTimeout during parse: {0}", e.getMessage());
-                                }
+                                current.setConnectionTimeout(parseNonNegativeTimeout(
+                                        "ConnectionTimeout", r.getElementText()));
                             }
                         }
                         case "VpcOriginId" -> {
@@ -3224,10 +2875,9 @@ public class CloudFrontController {
                                 continue;
                             }
                             if (inCustomOriginConfig && customConfig != null) {
-                                customConfig.put("OriginKeepaliveTimeout", parseBoundedTimeout(
+                                customConfig.put("OriginKeepaliveTimeout", parseNonNegativeTimeout(
                                         "InvalidOriginKeepaliveTimeout", "OriginKeepaliveTimeout",
-                                        r.getElementText(), MIN_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS,
-                                        MAX_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS));
+                                        r.getElementText()));
                             }
                         }
                         case "OriginReadTimeout" -> {
@@ -3236,10 +2886,9 @@ public class CloudFrontController {
                                 continue;
                             }
                             if (inCustomOriginConfig && customConfig != null) {
-                                originReadTimeoutSeconds = parseBoundedTimeout(
+                                originReadTimeoutSeconds = parseNonNegativeTimeout(
                                         "InvalidOriginReadTimeout", "OriginReadTimeout",
-                                        r.getElementText(), MIN_ORIGIN_READ_TIMEOUT_SECONDS,
-                                        MAX_ORIGIN_READ_TIMEOUT_SECONDS);
+                                        r.getElementText());
                                 customConfig.put("OriginReadTimeout", originReadTimeoutSeconds);
                             }
                         }
@@ -3361,7 +3010,7 @@ public class CloudFrontController {
                                 Integer completionTimeout = current.getResponseCompletionTimeout();
                                 int effectiveReadTimeout = originReadTimeoutSeconds != null
                                         ? originReadTimeoutSeconds
-                                        : DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS;
+                                        : CloudFrontOriginTimeouts.DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS;
                                 if (completionTimeout != null && completionTimeout > 0
                                         && completionTimeout < effectiveReadTimeout) {
                                     throw new AwsException(
@@ -3407,17 +3056,6 @@ public class CloudFrontController {
                 "InvalidArgument",
                 "The origin custom headers structure is invalid.",
                 400);
-    }
-
-    private static int parseBoundedTimeout(String errorCode, String field, String rawValue, int min, int max) {
-        int value = parseNonNegativeTimeout(errorCode, field, rawValue);
-        if (value < min || value > max) {
-            throw new AwsException(
-                    errorCode,
-                    "The parameter " + field + " must be between " + min + " and " + max + " seconds.",
-                    400);
-        }
-        return value;
     }
 
     private static int parseNonNegativeTimeout(String field, String rawValue) {
@@ -3964,15 +3602,6 @@ public class CloudFrontController {
         return policy;
     }
 
-    private static String extractXmlElement(String body, String localName) {
-        if (body == null || body.isEmpty()) {
-            return null;
-        }
-        String pattern = "(?is)<(?:[\\w.-]+:)?" + localName + "\\b[^>]*>.*?</(?:[\\w.-]+:)?" + localName + ">";
-        java.util.regex.Matcher matcher = java.util.regex.Pattern.compile(pattern).matcher(body);
-        return matcher.find() ? matcher.group() : null;
-    }
-
     private OriginAccessControl parseOriginAccessControl(String body) {
         OriginAccessControl oac = new OriginAccessControl();
         oac.setName(XmlParser.extractFirst(body, "Name", null));
@@ -3999,53 +3628,6 @@ public class CloudFrontController {
         fn.setFunctionCode(decodeFunctionCode(XmlParser.extractFirst(body, "FunctionCode", null)));
         fn.setKeyValueStoreArns(XmlParser.extractAll(body, "KeyValueStoreARN"));
         return fn;
-    }
-
-    /**
-     * {@code FunctionCode} is a blob, so the REST-XML wire format carries it
-     * base64-encoded. Store the source itself — that is what the runtime runs
-     * and what the size limit applies to. Hand-written XML that carries plain
-     * source is accepted as-is.
-     */
-    private String decodeFunctionCode(String value) {
-        if (value == null || value.isBlank()) {
-            return value;
-        }
-        try {
-            byte[] decoded = Base64.getDecoder().decode(value.replaceAll("\\s", ""));
-            return new String(decoded, java.nio.charset.StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException notBase64) {
-            return value;
-        }
-    }
-
-    private VpcOrigin parseVpcOrigin(String body) {
-        VpcOrigin origin = new VpcOrigin();
-        origin.setName(XmlParser.extractFirst(body, "Name", null));
-        origin.setOriginEndpointArn(XmlParser.extractFirst(body, "Arn", null));
-        origin.setOriginProtocolPolicy(XmlParser.extractFirst(body, "OriginProtocolPolicy", "https-only"));
-        try {
-            origin.setHttpPort(Integer.parseInt(XmlParser.extractFirst(body, "HTTPPort", "80")));
-        } catch (NumberFormatException ignored) {
-            origin.setHttpPort(80);
-        }
-        try {
-            origin.setHttpsPort(Integer.parseInt(XmlParser.extractFirst(body, "HTTPSPort", "443")));
-        } catch (NumberFormatException ignored) {
-            origin.setHttpsPort(443);
-        }
-        List<String> protocols = XmlParser.extractAll(body, "SslProtocol");
-        if (!protocols.isEmpty()) {
-            origin.setOriginSslProtocols(protocols);
-        }
-        return origin;
-    }
-
-    private KeyValueStore parseKeyValueStore(String body) {
-        KeyValueStore store = new KeyValueStore();
-        store.setName(XmlParser.extractFirst(body, "Name", null));
-        store.setComment(XmlParser.extractFirst(body, "Comment", ""));
-        return store;
     }
 
     // ── Phase 2 XML builders ──────────────────────────────────────────────────
@@ -4143,16 +3725,6 @@ public class CloudFrontController {
         xml.end("EndPoints")
                 .end("RealtimeLogConfig");
         return xml.build();
-    }
-
-    private String xmlPublicKeyItems(List<String> items) {
-        XmlBuilder xml = new XmlBuilder().start("Items");
-        if (items != null) {
-            for (String item : items) {
-                xml.elem("PublicKey", item);
-            }
-        }
-        return xml.end("Items").build();
     }
 
     private String xmlStreamingDistributionResponse(StreamingDistribution sd) {
@@ -4335,5 +3907,432 @@ public class CloudFrontController {
             }
         }
         return tags;
+    }
+
+    /**
+     * Origin timeout constraints from the CloudFront {@code CustomOriginConfig} and
+     * {@code Origin} API references. {@code OriginReadTimeout} accepts 1-120 seconds, default 30.
+     * {@code OriginKeepaliveTimeout} accepts 1-300 seconds, default 5. {@code ResponseCompletionTimeout}
+     * has no enforced maximum when unset (represented here as 0), but when set must be at least
+     * {@code OriginReadTimeout}.
+     */
+    private static final int DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS = 30;
+
+    private static final int MIN_ORIGIN_READ_TIMEOUT_SECONDS = 1;
+
+    private static final int MAX_ORIGIN_READ_TIMEOUT_SECONDS = 120;
+
+    private static final int DEFAULT_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 5;
+
+    private static final int MIN_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 1;
+
+    private static final int MAX_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS = 300;
+
+    @Inject
+    CloudFrontFunctionRuntime functionRuntime;
+
+    @Inject
+    ObjectMapper mapper;
+
+    /**
+     * Runs a function against a caller-supplied event object and returns the
+     * result, its logs and its error message — the same runtime the emulated
+     * edge uses, so a local {@code test-function} result and a locally-served
+     * request agree.
+     */
+    @POST
+    @Path("/function/{Name}/test")
+    public Response testFunction(@PathParam("Name") String name,
+                                 @HeaderParam("If-Match") String ifMatch,
+                                 String body) {
+        try {
+            if (ifMatch == null || ifMatch.isEmpty()) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            String stage = XmlParser.extractFirst(body, "Stage", "DEVELOPMENT");
+            CloudFrontFunction fn = service.describeFunction(name, stage);
+            if (!ifMatch.equals(fn.getEtag())) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            JsonNode event = parseEventObject(XmlParser.extractFirst(body, "EventObject", null));
+            CloudFrontFunctionRuntime.Execution execution = functionRuntime.execute(fn, event);
+
+            XmlBuilder xml = new XmlBuilder()
+                    .start("TestResult", NS)
+                    .raw(xmlFunctionResponse(fn))
+                    .elem("ComputeUtilization", execution.computeUtilization())
+                    .start("FunctionExecutionLogs");
+            for (String log : execution.logs()) {
+                xml.elem("member", log);
+            }
+            xml.end("FunctionExecutionLogs");
+            if (execution.ok()) {
+                xml.elem("FunctionOutput", functionOutput(execution));
+            } else {
+                xml.elem("FunctionErrorMessage", execution.error());
+            }
+            xml.end("TestResult");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    /** The {@code EventObject} blob is base64 in the REST-XML wire format. */
+    private JsonNode parseEventObject(String encoded) {
+        if (encoded == null || encoded.isBlank()) {
+            throw new AwsException("InvalidArgument", "EventObject is required.", 400);
+        }
+        try {
+            byte[] decoded;
+            try {
+                decoded = Base64.getDecoder().decode(encoded.replaceAll("\\s", ""));
+            } catch (IllegalArgumentException notBase64) {
+                decoded = encoded.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+            }
+            return mapper.readTree(decoded);
+        } catch (Exception e) {
+            throw new AwsException("InvalidArgument",
+                    "EventObject is not a valid JSON event object: " + e.getMessage(), 400);
+        }
+    }
+
+    /** CloudFront returns the result wrapped as {@code {"request":…}} or {@code {"response":…}}. */
+    private String functionOutput(CloudFrontFunctionRuntime.Execution execution) {
+        try {
+            ObjectNode wrapper = mapper.createObjectNode();
+            wrapper.set(execution.isResponse() ? "response" : "request", execution.output());
+            return mapper.writeValueAsString(wrapper);
+        } catch (Exception e) {
+            throw new AwsException("InvalidArgument",
+                    "Could not serialize the function output: " + e.getMessage(), 400);
+        }
+    }
+
+    @POST
+    @Path("/vpc-origin")
+    public Response createVpcOrigin(String body) {
+        try {
+            VpcOrigin origin = parseVpcOrigin(body);
+            Map<String, String> tags = parseTags(body);
+            origin = service.createVpcOrigin(origin, tags);
+            return Response.created(URI.create("/2020-05-31/vpc-origin/" + origin.getId()))
+                    .type(XML)
+                    .header("ETag", origin.getEtag())
+                    .header("Location", "/2020-05-31/vpc-origin/" + origin.getId())
+                    .entity(xmlVpcOrigin(origin))
+                    .build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/vpc-origin/{Id}")
+    public Response getVpcOrigin(@PathParam("Id") String id) {
+        try {
+            VpcOrigin origin = service.getVpcOrigin(id);
+            return Response.ok(xmlVpcOrigin(origin), XML).header("ETag", origin.getEtag()).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @PUT
+    @Path("/vpc-origin/{Id}")
+    public Response updateVpcOrigin(@PathParam("Id") String id,
+                                    @HeaderParam("If-Match") String ifMatch,
+                                    String body) {
+        try {
+            if (ifMatch == null || ifMatch.isEmpty()) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            VpcOrigin origin = parseVpcOrigin(body);
+            origin = service.updateVpcOrigin(id, ifMatch, origin);
+            return Response.ok(xmlVpcOrigin(origin), XML).header("ETag", origin.getEtag()).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @DELETE
+    @Path("/vpc-origin/{Id}")
+    public Response deleteVpcOrigin(@PathParam("Id") String id,
+                                    @HeaderParam("If-Match") String ifMatch) {
+        try {
+            if (ifMatch == null || ifMatch.isEmpty()) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            service.deleteVpcOrigin(id, ifMatch);
+            return Response.noContent().build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/vpc-origin")
+    public Response listVpcOrigins(@QueryParam("Marker") String marker,
+                                   @QueryParam("MaxItems") @DefaultValue("100") int maxItems) {
+        try {
+            List<VpcOrigin> origins = service.listVpcOrigins(marker, maxItems);
+            boolean truncated = origins.size() == maxItems;
+            XmlBuilder xml = new XmlBuilder()
+                    .start("VpcOriginList", NS)
+                    .elem("Marker", marker != null ? marker : "")
+                    .elem("MaxItems", maxItems)
+                    .elem("IsTruncated", truncated)
+                    .elem("Quantity", origins.size())
+                    .start("Items");
+            for (VpcOrigin o : origins) {
+                xml.raw(xmlVpcOriginSummary(o));
+            }
+            xml.end("Items").end("VpcOriginList");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @POST
+    @Path("/key-value-store")
+    public Response createKeyValueStore(String body) {
+        try {
+            KeyValueStore store = parseKeyValueStore(body);
+            Map<String, String> tags = parseTags(body);
+            store = service.createKeyValueStore(store, tags);
+            return Response.created(URI.create("/2020-05-31/key-value-store/" + store.getName()))
+                    .type(XML)
+                    .header("ETag", store.getEtag())
+                    .header("Location", "/2020-05-31/key-value-store/" + store.getName())
+                    .entity(xmlKeyValueStore(store))
+                    .build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/key-value-store/{Name}")
+    public Response describeKeyValueStore(@PathParam("Name") String name) {
+        try {
+            KeyValueStore store = service.describeKeyValueStore(name);
+            return Response.ok(xmlKeyValueStore(store), XML).header("ETag", store.getEtag()).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @PUT
+    @Path("/key-value-store/{Name}")
+    public Response updateKeyValueStore(@PathParam("Name") String name,
+                                        @HeaderParam("If-Match") String ifMatch,
+                                        String body) {
+        try {
+            if (ifMatch == null || ifMatch.isEmpty()) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            String comment = XmlParser.extractFirst(body, "Comment", "");
+            KeyValueStore store = service.updateKeyValueStore(name, ifMatch, comment);
+            return Response.ok(xmlKeyValueStore(store), XML).header("ETag", store.getEtag()).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @DELETE
+    @Path("/key-value-store/{Name}")
+    public Response deleteKeyValueStore(@PathParam("Name") String name,
+                                        @HeaderParam("If-Match") String ifMatch) {
+        try {
+            if (ifMatch == null || ifMatch.isEmpty()) {
+                throw new AwsException("InvalidIfMatchVersion",
+                        "The If-Match version is missing or not valid for the resource.", 400);
+            }
+            service.deleteKeyValueStore(name, ifMatch);
+            return Response.noContent().build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    @GET
+    @Path("/key-value-store")
+    public Response listKeyValueStores(@QueryParam("Marker") String marker,
+                                       @QueryParam("MaxItems") @DefaultValue("100") int maxItems,
+                                       @QueryParam("Status") String status) {
+        try {
+            List<KeyValueStore> stores = service.listKeyValueStores(marker, maxItems, status);
+            XmlBuilder xml = new XmlBuilder()
+                    .start("KeyValueStoreList", NS)
+                    .elem("MaxItems", maxItems)
+                    .elem("Quantity", stores.size())
+                    .start("Items");
+            for (KeyValueStore store : stores) {
+                xml.raw(xmlKeyValueStore(store));
+            }
+            xml.end("Items").end("KeyValueStoreList");
+            return Response.ok(xml.build(), XML).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+
+    private String xmlVpcOrigin(VpcOrigin origin) {
+        List<String> protocols = origin.getOriginSslProtocols() != null
+                ? origin.getOriginSslProtocols() : List.of();
+        XmlBuilder xml = new XmlBuilder()
+                .start("VpcOrigin")
+                .elem("Id", origin.getId())
+                .elem("Arn", origin.getArn() != null ? origin.getArn() : "")
+                .elem("AccountId", origin.getAccountId() != null ? origin.getAccountId() : "")
+                .elem("Status", origin.getStatus() != null ? origin.getStatus() : "Deployed")
+                .elem("CreatedTime", origin.getCreatedTime() != null ? origin.getCreatedTime().toString() : "")
+                .elem("LastModifiedTime",
+                        origin.getLastModifiedTime() != null ? origin.getLastModifiedTime().toString() : "")
+                .start("VpcOriginEndpointConfig")
+                .elem("Name", origin.getName() != null ? origin.getName() : "")
+                .elem("Arn", origin.getOriginEndpointArn() != null ? origin.getOriginEndpointArn() : "")
+                .elem("HTTPPort", origin.getHttpPort())
+                .elem("HTTPSPort", origin.getHttpsPort())
+                .elem("OriginProtocolPolicy",
+                        origin.getOriginProtocolPolicy() != null ? origin.getOriginProtocolPolicy() : "https-only")
+                .start("OriginSslProtocols")
+                .elem("Quantity", protocols.size());
+        if (!protocols.isEmpty()) {
+            xml.start("Items");
+            for (String protocol : protocols) {
+                xml.elem("SslProtocol", protocol);
+            }
+            xml.end("Items");
+        }
+        xml.end("OriginSslProtocols")
+                .end("VpcOriginEndpointConfig")
+                .end("VpcOrigin");
+        return xml.build();
+    }
+
+    private String xmlVpcOriginSummary(VpcOrigin origin) {
+        return new XmlBuilder()
+                .start("VpcOriginSummary")
+                .elem("Id", origin.getId())
+                .elem("Name", origin.getName() != null ? origin.getName() : "")
+                .elem("Status", origin.getStatus() != null ? origin.getStatus() : "Deployed")
+                .elem("CreatedTime", origin.getCreatedTime() != null ? origin.getCreatedTime().toString() : "")
+                .elem("LastModifiedTime",
+                        origin.getLastModifiedTime() != null ? origin.getLastModifiedTime().toString() : "")
+                .elem("Arn", origin.getArn() != null ? origin.getArn() : "")
+                .elem("AccountId", origin.getAccountId() != null ? origin.getAccountId() : "")
+                .elem("OriginEndpointArn",
+                        origin.getOriginEndpointArn() != null ? origin.getOriginEndpointArn() : "")
+                .end("VpcOriginSummary")
+                .build();
+    }
+
+    private String xmlKeyValueStore(KeyValueStore store) {
+        return new XmlBuilder()
+                .start("KeyValueStore")
+                .elem("Name", store.getName() != null ? store.getName() : "")
+                .elem("Id", store.getId())
+                .elem("Comment", store.getComment() != null ? store.getComment() : "")
+                .elem("ARN", store.getArn() != null ? store.getArn() : "")
+                .elem("Status", store.getStatus() != null ? store.getStatus() : "READY")
+                .elem("LastModifiedTime",
+                        store.getLastModifiedTime() != null ? store.getLastModifiedTime().toString() : "")
+                .end("KeyValueStore")
+                .build();
+    }
+
+    private static int parseBoundedTimeout(String errorCode, String field, String rawValue, int min, int max) {
+        int value = parseNonNegativeTimeout(errorCode, field, rawValue);
+        if (value < min || value > max) {
+            throw new AwsException(
+                    errorCode,
+                    "The parameter " + field + " must be between " + min + " and " + max + " seconds.",
+                    400);
+        }
+        return value;
+    }
+
+
+
+    private VpcOrigin parseVpcOrigin(String body) {
+        VpcOrigin origin = new VpcOrigin();
+        origin.setName(XmlParser.extractFirst(body, "Name", null));
+        origin.setOriginEndpointArn(XmlParser.extractFirst(body, "Arn", null));
+        origin.setOriginProtocolPolicy(XmlParser.extractFirst(body, "OriginProtocolPolicy", "https-only"));
+        try {
+            origin.setHttpPort(Integer.parseInt(XmlParser.extractFirst(body, "HTTPPort", "80")));
+        } catch (NumberFormatException ignored) {
+            origin.setHttpPort(80);
+        }
+        try {
+            origin.setHttpsPort(Integer.parseInt(XmlParser.extractFirst(body, "HTTPSPort", "443")));
+        } catch (NumberFormatException ignored) {
+            origin.setHttpsPort(443);
+        }
+        List<String> protocols = XmlParser.extractAll(body, "SslProtocol");
+        if (!protocols.isEmpty()) {
+            origin.setOriginSslProtocols(protocols);
+        }
+        return origin;
+    }
+
+    private KeyValueStore parseKeyValueStore(String body) {
+        KeyValueStore store = new KeyValueStore();
+        store.setName(XmlParser.extractFirst(body, "Name", null));
+        store.setComment(XmlParser.extractFirst(body, "Comment", ""));
+        return store;
+    }
+
+    /**
+     * {@code FunctionCode} is a blob, so the REST-XML wire format carries it
+     * base64-encoded. Store the source itself — that is what the runtime runs
+     * and what the size limit applies to. Hand-written XML that carries plain
+     * source is accepted as-is.
+     */
+    private String decodeFunctionCode(String value) {
+        if (value == null || value.isBlank()) {
+            return value;
+        }
+        try {
+            byte[] decoded = Base64.getDecoder().decode(value.replaceAll("\\s", ""));
+            return new String(decoded, java.nio.charset.StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException notBase64) {
+            return value;
+        }
+    }
+
+    private static String extractXmlElement(String body, String localName) {
+        if (body == null || body.isEmpty()) {
+            return null;
+        }
+        String pattern = "(?is)<(?:[\\w.-]+:)?" + localName + "\\b[^>]*>.*?</(?:[\\w.-]+:)?" + localName + ">";
+        Matcher matcher = java.util.regex.Pattern.compile(pattern).matcher(body);
+        return matcher.find() ? matcher.group() : null;
+    }
+
+    private String xmlKeyValueStoreAssociations(List<String> arns) {
+        List<String> items = arns != null ? arns : List.of();
+        XmlBuilder xml = new XmlBuilder()
+                .start("KeyValueStoreAssociations")
+                .elem("Quantity", items.size());
+        if (!items.isEmpty()) {
+            xml.start("Items");
+            for (String arn : items) {
+                xml.start("KeyValueStoreAssociation")
+                        .elem("KeyValueStoreARN", arn)
+                        .end("KeyValueStoreAssociation");
+            }
+            xml.end("Items");
+        }
+        xml.end("KeyValueStoreAssociations");
+        return xml.build();
     }
 }

@@ -1,13 +1,20 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
+import io.github.hectorvent.floci.core.common.XmlParser;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.List;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipOutputStream;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -17,8 +24,8 @@ import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
-import static org.hamcrest.Matchers.startsWith;
 import static org.hamcrest.Matchers.nullValue;
+import static org.hamcrest.Matchers.startsWith;
 
 @QuarkusTest
 class SamTransformIntegrationTest {
@@ -101,7 +108,8 @@ class SamTransformIntegrationTest {
     }
 
     @Test
-    void samFunction_withAutoPublishAlias_createsVersionAndAlias() {
+    @Tag("docker")
+    void samFunction_withAutoPublishAlias_createsVersionAndAlias() throws Exception {
         String stackName = "sam-alias-stack";
         stacksToDelete.add(stackName);
 
@@ -141,15 +149,10 @@ class SamTransformIntegrationTest {
         .then()
             .statusCode(200)
             .body("Name", equalTo("production"))
-            // $LATEST rather than the published version real SAM targets — see #1987/#1988 and the
-            // comment in expandAutoPublishAlias. The invoke below is what actually matters.
-            .body("FunctionVersion", equalTo("$LATEST"))
+            .body("FunctionVersion", equalTo("1"))
             .body("AliasArn", containsString(":function:sam-alias-func:production"));
 
-        // The behavior the whole expansion exists for: an alias-qualified invoke runs the function.
-        // Asserting only that the alias *record* exists is not enough — an alias pointing at a
-        // published version satisfies that and still times out on invoke (#1987), which is how an
-        // earlier revision of this change shipped a broken alias past its own tests.
+        // Exercise the published code through the generated alias, not only its metadata.
         given()
             .contentType("application/json")
             .body("{}")
@@ -158,6 +161,44 @@ class SamTransformIntegrationTest {
         .then()
             .statusCode(200)
             .header("X-Amz-Function-Error", nullValue())
+            .header("X-Amz-Executed-Version", equalTo("1"))
+            .body("ok", equalTo(true));
+
+        ByteArrayOutputStream changedCode = new ByteArrayOutputStream();
+        try (ZipOutputStream zip = new ZipOutputStream(changedCode)) {
+            zip.putNextEntry(new ZipEntry("index.js"));
+            zip.write("exports.handler = async () => ({ ok: false });".getBytes(StandardCharsets.UTF_8));
+            zip.closeEntry();
+        }
+        given()
+            .contentType("application/json")
+            .body("{\"ZipFile\":\"" + Base64.getEncoder().encodeToString(changedCode.toByteArray()) + "\"}")
+        .when()
+            .put("/2015-03-31/functions/sam-alias-func/code")
+        .then()
+            .statusCode(200);
+
+        given()
+            .contentType("application/json")
+            .body("{}")
+        .when()
+            .post("/2015-03-31/functions/sam-alias-func/invocations")
+        .then()
+            .statusCode(200)
+            .header("X-Amz-Function-Error", nullValue())
+            .header("X-Amz-Executed-Version", equalTo("$LATEST"))
+            .body("ok", equalTo(false));
+
+        // Updating $LATEST must neither repoint the SAM alias nor replace its published code.
+        given()
+            .contentType("application/json")
+            .body("{}")
+        .when()
+            .post("/2015-03-31/functions/sam-alias-func:production/invocations")
+        .then()
+            .statusCode(200)
+            .header("X-Amz-Function-Error", nullValue())
+            .header("X-Amz-Executed-Version", equalTo("1"))
             .body("ok", equalTo(true));
 
         given()
@@ -181,6 +222,293 @@ class SamTransformIntegrationTest {
         assertThat(resourcesXml, containsString("<ResourceType>AWS::Lambda::Version</ResourceType>"));
         assertThat(resourcesXml, containsString("<ResourceType>AWS::Lambda::Alias</ResourceType>"));
         assertThat(resourcesXml, containsString("<LogicalResourceId>AliasFunctionAliasProduction</LogicalResourceId>"));
+    }
+
+    @Test
+    @Tag("docker")
+    void samAutoPublishAliasFollowsATemplateCodeChangeToANewVersion() {
+        String stackName = "sam-alias-update-stack";
+        stacksToDelete.add(stackName);
+        String template = """
+            Transform: AWS::Serverless-2016-10-31
+            Resources:
+              Function:
+                Type: AWS::Serverless::Function
+                Properties:
+                  FunctionName: sam-alias-update-func
+                  Handler: index.handler
+                  Runtime: nodejs20.x
+                  AutoPublishAlias: production
+                  InlineCode: "exports.handler = async () => ({ release: '%s' });"
+            """;
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("first")).formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "CREATE_COMPLETE");
+
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("second")).formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "UPDATE_COMPLETE");
+
+        // The changed code names a new version resource, which publishes version 2, and the alias follows it.
+        given().when().get("/2015-03-31/functions/sam-alias-update-func/aliases/production")
+            .then().statusCode(200).body("FunctionVersion", equalTo("2"));
+        given().contentType("application/json").body("{}")
+        .when().post("/2015-03-31/functions/sam-alias-update-func:production/invocations")
+        .then()
+            .statusCode(200)
+            .header("X-Amz-Function-Error", nullValue())
+            .header("X-Amz-Executed-Version", equalTo("2"))
+            .body("release", equalTo("second"));
+    }
+
+    @Test
+    void samAutoPublishCodeSha256DecidesWhenANewVersionPublishes() {
+        String stackName = "sam-code-sha-stack";
+        String function = "sam-code-sha-func";
+        stacksToDelete.add(stackName);
+        String template = """
+            Transform: AWS::Serverless-2016-10-31
+            Resources:
+              Function:
+                Type: AWS::Serverless::Function
+                Properties:
+                  FunctionName: sam-code-sha-func
+                  Handler: index.handler
+                  Runtime: nodejs20.x
+                  AutoPublishAlias: live
+                  AutoPublishCodeSha256: "%s"
+                  InlineCode: "exports.handler = async () => ({ release: '%s' });"
+            """;
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("aaaaaaaaaa", "first"))
+            .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "CREATE_COMPLETE");
+
+        // As in SAM, the given hash names the version, so new code under the same value is not published.
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("aaaaaaaaaa", "second"))
+            .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "UPDATE_COMPLETE");
+        given().when().get("/2015-03-31/functions/" + function + "/aliases/live")
+            .then().statusCode(200).body("FunctionVersion", equalTo("1"));
+
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("bbbbbbbbbb", "second"))
+            .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "UPDATE_COMPLETE");
+        given().when().get("/2015-03-31/functions/" + function + "/aliases/live")
+            .then().statusCode(200).body("FunctionVersion", equalTo("2"));
+        given().when().get("/2015-03-31/functions/" + function + "/versions")
+            .then().statusCode(200).body("Versions.Version", equalTo(List.of("$LATEST", "1", "2")));
+    }
+
+    /** Under AutoPublishAliasAllProperties a property outside the default hash, here Timeout, publishes. */
+    @Test
+    void samAutoPublishAliasAllPropertiesPublishesATimeoutChange() {
+        String stackName = "sam-all-properties-stack";
+        String function = "sam-all-properties-func";
+        stacksToDelete.add(stackName);
+        String template = """
+            Transform: AWS::Serverless-2016-10-31
+            Resources:
+              Function:
+                Type: AWS::Serverless::Function
+                Properties:
+                  FunctionName: sam-all-properties-func
+                  Handler: index.handler
+                  Runtime: nodejs20.x
+                  Timeout: %d
+                  AutoPublishAlias: live
+                  AutoPublishAliasAllProperties: true
+                  InlineCode: "exports.handler = async () => ({});"
+            """;
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted(3)).formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "CREATE_COMPLETE");
+
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted(9)).formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "UPDATE_COMPLETE");
+
+        given().when().get("/2015-03-31/functions/" + function + "/aliases/live")
+            .then().statusCode(200).body("FunctionVersion", equalTo("2"));
+        given().queryParam("Qualifier", "live")
+        .when().get("/2015-03-31/functions/" + function + "/configuration")
+            .then().statusCode(200).body("Version", equalTo("2")).body("Timeout", equalTo(9));
+    }
+
+    /** With VersionDeletionPolicy: Delete, the version a code change replaces is reported deleted. */
+    @Test
+    void samVersionDeletionPolicyDeleteAppliesToTheReplacedVersion() {
+        String stackName = "sam-version-delete-stack";
+        String function = "sam-version-delete-func";
+        stacksToDelete.add(stackName);
+        String template = """
+            Transform: AWS::Serverless-2016-10-31
+            Resources:
+              Function:
+                Type: AWS::Serverless::Function
+                Properties:
+                  FunctionName: sam-version-delete-func
+                  Handler: index.handler
+                  Runtime: nodejs20.x
+                  AutoPublishAlias: live
+                  VersionDeletionPolicy: Delete
+                  InlineCode: "exports.handler = async () => ({ release: '%s' });"
+            """;
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("first")).formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "CREATE_COMPLETE");
+
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("second")).formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "UPDATE_COMPLETE");
+
+        given().when().get("/2015-03-31/functions/" + function + "/aliases/live")
+            .then().statusCode(200).body("FunctionVersion", equalTo("2"));
+        String events = given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DescribeStackEvents").formParam("StackName", stackName)
+        .when().post("/").then().statusCode(200).extract().asString();
+        // FunctionVersion6a52d0f87f is the id SAM gives the first InlineCode.
+        List<String> oldVersionStatuses = XmlParser.extractGroups(events, "member").stream()
+            .filter(event -> "FunctionVersion6a52d0f87f".equals(event.get("LogicalResourceId")))
+            .map(event -> event.get("ResourceStatus"))
+            .toList();
+        assertThat(oldVersionStatuses, hasItem("DELETE_COMPLETE"));
+        assertThat(oldVersionStatuses, not(hasItem("DELETE_SKIPPED")));
+        // floci reports the version deleted but keeps every version it publishes; AWS deletes it.
+        given().when().get("/2015-03-31/functions/" + function + "/versions")
+            .then().statusCode(200).body("Versions.Version", equalTo(List.of("$LATEST", "1", "2")));
+    }
+
+    /**
+     * A code change names a new version resource: the change set adds it, modifies the alias and
+     * removes the old version, which, retained as SAM retains it, stays published.
+     */
+    @Test
+    void samAutoPublishAliasCodeChangeSetSwapsTheVersionResource() {
+        String stackName = "sam-alias-changeset-stack";
+        String function = "sam-alias-changeset-func";
+        stacksToDelete.add(stackName);
+        String template = """
+            Transform: AWS::Serverless-2016-10-31
+            Resources:
+              Function:
+                Type: AWS::Serverless::Function
+                Properties:
+                  FunctionName: sam-alias-changeset-func
+                  Handler: index.handler
+                  Runtime: nodejs20.x
+                  AutoPublishAlias: live
+                  InlineCode: "exports.handler = async () => ({ release: '%s' });"
+            """;
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("first")).formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "CREATE_COMPLETE");
+
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateChangeSet").formParam("StackName", stackName)
+            .formParam("ChangeSetName", "second").formParam("ChangeSetType", "UPDATE")
+            .formParam("TemplateBody", template.formatted("second")).formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        String changeSet = given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DescribeChangeSet").formParam("StackName", stackName)
+            .formParam("ChangeSetName", "second")
+        .when().post("/").then().statusCode(200).extract().asString();
+        // The ids SAM gives the two InlineCode values.
+        List<String> changes = XmlParser.extractGroups(changeSet, "ResourceChange").stream()
+            .map(change -> change.get("Action") + " " + change.get("LogicalResourceId"))
+            .toList();
+        assertThat(changes, hasItems("Add FunctionVersion7ce4e6a12f", "Remove FunctionVersion6a52d0f87f",
+            "Modify FunctionAliasLive", "Modify Function"));
+
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "ExecuteChangeSet").formParam("StackName", stackName)
+            .formParam("ChangeSetName", "second")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "UPDATE_COMPLETE");
+
+        given().when().get("/2015-03-31/functions/" + function + "/aliases/live")
+            .then().statusCode(200).body("FunctionVersion", equalTo("2"));
+        given().when().get("/2015-03-31/functions/" + function + "/versions")
+            .then().statusCode(200).body("Versions.Version", equalTo(List.of("$LATEST", "1", "2")));
+        String events = given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DescribeStackEvents").formParam("StackName", stackName)
+        .when().post("/").then().statusCode(200).extract().asString();
+        List<String> oldVersionStatuses = XmlParser.extractGroups(events, "member").stream()
+            .filter(event -> "FunctionVersion6a52d0f87f".equals(event.get("LogicalResourceId")))
+            .map(event -> event.get("ResourceStatus"))
+            .toList();
+        assertThat(oldVersionStatuses, hasItem("DELETE_SKIPPED"));
+        assertThat(oldVersionStatuses, not(hasItem("DELETE_COMPLETE")));
+    }
+
+    @Test
+    void samAutoPublishAliasKeepsPublishedConfigurationAndQualifiesForProvisionedConcurrency() {
+        String stackName = "sam-published-config-stack";
+        String function = "sam-published-config-func";
+        stacksToDelete.add(stackName);
+        String template = """
+            Transform: AWS::Serverless-2016-10-31
+            Resources:
+              Function:
+                Type: AWS::Serverless::Function
+                Properties:
+                  FunctionName: sam-published-config-func
+                  Handler: index.handler
+                  Runtime: nodejs20.x
+                  MemorySize: 128
+                  AutoPublishAlias: production
+                  Environment:
+                    Variables:
+                      MARKER: original
+                  InlineCode: exports.handler = async () => ({ ok:true });
+            """;
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template).formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "CREATE_COMPLETE");
+
+        given().when().get("/2015-03-31/functions/" + function + "/aliases/production")
+            .then().statusCode(200).body("FunctionVersion", equalTo("1"));
+        given().contentType("application/json")
+            .body("{\"MemorySize\":256,\"Environment\":{\"Variables\":{\"MARKER\":\"changed\"}}}")
+        .when().put("/2015-03-31/functions/" + function + "/configuration")
+            .then().statusCode(200);
+        given().when().get("/2015-03-31/functions/" + function + "/configuration")
+            .then().statusCode(200).body("MemorySize", equalTo(256))
+            .body("Environment.Variables.MARKER", equalTo("changed"));
+        given().queryParam("Qualifier", "production")
+        .when().get("/2015-03-31/functions/" + function + "/configuration")
+            .then().statusCode(200).body("Version", equalTo("1"))
+            .body("MemorySize", equalTo(128)).body("Environment.Variables.MARKER", equalTo("original"));
+
+        // No allocation exists, but the generated alias is an eligible immutable target.
+        given().queryParam("Qualifier", "production")
+        .when().get("/2019-09-30/functions/" + function + "/provisioned-concurrency")
+            .then().statusCode(404)
+            .body("__type", equalTo("ProvisionedConcurrencyConfigNotFoundException"));
     }
 
     @Test
@@ -1321,7 +1649,7 @@ class SamTransformIntegrationTest {
             .extract().asString();
 
         // AGENTS.md:289-291 asks for the exact Fn::GetAtt key set the provisioner publishes
-        // (CloudFormationResourceProvisioner.java:4231-4233): Arn, Name, StateMachineRevisionId.
+        // (StepFunctionsCfnProvisioner): Arn, Name, StateMachineRevisionId.
         // Asserting only "not a stub ARN" (as red loop 2 did) would also pass on an empty Output.
         String machineArn = stackOutputValue(describeStacks, "MachineArn");
         assertThat(machineArn, startsWith("arn:aws:states:"));
@@ -1665,8 +1993,8 @@ class SamTransformIntegrationTest {
 
     private static byte[] buildHandlerZip() {
         try {
-            var baos = new java.io.ByteArrayOutputStream();
-            try (var zos = new java.util.zip.ZipOutputStream(baos)) {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            try (ZipOutputStream zos = new ZipOutputStream(baos)) {
                 zos.putNextEntry(new java.util.zip.ZipEntry("index.js"));
                 zos.write("exports.handler=async(e)=>({statusCode:200})".getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 zos.closeEntry();

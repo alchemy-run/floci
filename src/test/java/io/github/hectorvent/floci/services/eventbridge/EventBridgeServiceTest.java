@@ -4,11 +4,14 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
-import io.github.hectorvent.floci.services.eventbridge.model.ApiDestination;
-import io.github.hectorvent.floci.services.eventbridge.model.Connection;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
+import io.github.hectorvent.floci.services.eventbridge.model.ApiDestination;
+import io.github.hectorvent.floci.services.eventbridge.model.ApiDestinationState;
+import io.github.hectorvent.floci.services.eventbridge.model.Archive;
+import io.github.hectorvent.floci.services.eventbridge.model.Connection;
 import io.github.hectorvent.floci.services.eventbridge.model.EventBus;
 import io.github.hectorvent.floci.services.eventbridge.model.Replay;
 import io.github.hectorvent.floci.services.eventbridge.model.ReplayState;
@@ -16,35 +19,45 @@ import io.github.hectorvent.floci.services.eventbridge.model.Rule;
 import io.github.hectorvent.floci.services.eventbridge.model.RuleState;
 import io.github.hectorvent.floci.services.eventbridge.model.Target;
 import io.github.hectorvent.floci.services.resourcegroupstagging.ResourceGroupsTaggingService;
+import io.github.hectorvent.floci.testing.PartitionMatrix;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.NullAndEmptySource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class EventBridgeServiceTest {
 
     private static final String REGION = "us-east-1";
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final String DEFAULT_BUS = "arn:aws:events:us-east-1:000000000000:event-bus/default";
 
     private EventBridgeService service;
-    private EventBridgeInvoker invokerMock;
+    private TargetDispatcher dispatcherMock;
     private StorageBackend<String, Replay> replayStore;
     private ReplayDispatcher replayDispatcherMock;
 
     @BeforeEach
     void setUp() {
-        invokerMock = mock(EventBridgeInvoker.class);
+        dispatcherMock = mock(TargetDispatcher.class);
         replayStore = new InMemoryStorage<>();
         replayDispatcherMock = mock(ReplayDispatcher.class);
         service = new EventBridgeService(
@@ -59,7 +72,7 @@ class EventBridgeServiceTest {
                 new RegionResolver("us-east-1", "000000000000"),
                 new ObjectMapper(),
                 null,
-                invokerMock,
+                dispatcherMock,
                 replayDispatcherMock,
                 new ResourceGroupsTaggingService(null)
         );
@@ -101,6 +114,67 @@ class EventBridgeServiceTest {
         service.createEventBus("my-bus", null, null, REGION);
         assertThrows(AwsException.class, () ->
                 service.createEventBus("my-bus", null, null, REGION));
+    }
+
+    @Test
+    void tagResourceRejectsArnFromAnotherAccount() {
+        EventBus bus = service.createEventBus("owned-bus", null, null, REGION);
+        String foreignAccountArn = bus.getArn().replace(":000000000000:", ":111111111111:");
+
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.tagResource(foreignAccountArn, Map.of("env", "test"), REGION));
+
+        assertEquals("ResourceNotFoundException", error.getErrorCode());
+        assertTrue(service.listTagsForResource(bus.getArn(), REGION).isEmpty());
+    }
+
+    @Test
+    void tagResourceRejectsArnFromAnotherRegion() {
+        EventBus bus = service.createEventBus("owned-bus", null, null, REGION);
+        String foreignRegionArn = bus.getArn().replace(":us-east-1:", ":eu-west-1:");
+
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.tagResource(foreignRegionArn, Map.of("env", "test"), REGION));
+
+        assertEquals("ResourceNotFoundException", error.getErrorCode());
+        assertTrue(service.listTagsForResource(bus.getArn(), REGION).isEmpty());
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void tagResourceAcceptsResourceArnFromRequestedPartition(PartitionMatrix.PartitionCase partitionCase) {
+        String region = partitionCase.region();
+        EventBus bus = service.createEventBus("partition-bus", null, null, region);
+
+        service.tagResource(bus.getArn(), Map.of("env", "test"), region);
+
+        assertEquals(Map.of("env", "test"), service.listTagsForResource(bus.getArn(), region));
+        PartitionMatrix.assertArnIn(partitionCase, bus.getArn());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "event-bus/missing", "event-bus/", "rule/missing", "archive/missing", "replay/missing"
+    })
+    void listTagsForResourceRejectsMissingOrUnsupportedResources(String resource) {
+        String arn = "arn:aws:events:us-east-1:000000000000:" + resource;
+
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.listTagsForResource(arn, REGION));
+
+        assertEquals("ResourceNotFoundException", error.getErrorCode());
+    }
+
+    @Test
+    void listTagsForResourceRejectsArnFromAnotherAccount() {
+        EventBus bus = service.createEventBus("owned-bus", null, null, REGION);
+        service.tagResource(bus.getArn(), Map.of("env", "test"), REGION);
+        String foreignAccountArn = bus.getArn().replace(":000000000000:", ":111111111111:");
+
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.listTagsForResource(foreignAccountArn, REGION));
+
+        assertEquals("ResourceNotFoundException", error.getErrorCode());
     }
 
     @Test
@@ -219,6 +293,122 @@ class EventBridgeServiceTest {
         assertEquals(2, result.size());
     }
 
+    // ──────────────────────────── Archives ────────────────────────────
+
+    @Test
+    void createArchiveAcceptsTheDefaultBusAndAnExistingCustomBus() {
+        String custom = service.createEventBus("orders", null, null, REGION).getArn();
+
+        assertEquals("arn:aws:events:us-east-1:000000000000:event-bus/default", service.createArchive(
+                "on-default", "arn:aws:events:us-east-1:000000000000:event-bus/default", null, null, 0, REGION)
+                .getEventSourceArn());
+        assertEquals(custom, service.createArchive("on-custom", custom, null, null, 0, REGION)
+                .getEventSourceArn());
+    }
+
+    /** The messages AWS returns; the account is checked before the region. */
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "arn:aws:events:us-east-1:000000000000:event-bus/missing|ResourceNotFoundException|"
+                    + "Event bus missing does not exist.",
+            "arn:aws:events:eu-west-1:000000000000:event-bus/default|ValidationException|"
+                    + "Parameter EventSourceArn is not valid. Reason: Creating cross-region archive is not permitted.",
+            "arn:aws:events:us-east-1:111111111111:event-bus/default|AccessDeniedException|"
+                    + "Archive event source arn:aws:events:us-east-1:111111111111:event-bus/default "
+                    + "does not belong to account 000000000000.",
+            "arn:aws:events:eu-west-1:111111111111:event-bus/missing|AccessDeniedException|"
+                    + "Archive event source arn:aws:events:eu-west-1:111111111111:event-bus/missing "
+                    + "does not belong to account 000000000000."
+    })
+    void createArchiveRejectsASourceThatIsNotAnExistingBusOfThisAccountAndRegion(
+            String sourceArn, String code, String message) {
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.createArchive("orders-archive", sourceArn, null, null, 0, REGION));
+
+        assertEquals(code, error.getErrorCode());
+        assertEquals(message, error.getMessage());
+        assertEquals(400, error.getHttpStatus());
+        assertTrue(service.listArchives(null, null, null, REGION).isEmpty());
+    }
+
+    /** One out-of-range field each, with the message AWS returns for it. */
+    static Stream<Arguments> outOfRangeArchiveFields() {
+        String description = "d".repeat(513);
+        String pattern = patternOfLength(4097);
+        return Stream.of(
+                Arguments.of(null, null, -1, "1 validation error detected: Value '-1' at 'retentionDays' "
+                        + "failed to satisfy constraint: Member must have value greater than or equal to 0"),
+                Arguments.of(description, null, 0, "1 validation error detected: Value '" + description
+                        + "' at 'description' failed to satisfy constraint: "
+                        + "Member must have length less than or equal to 512"),
+                Arguments.of(null, pattern, 0, "1 validation error detected: Value '" + pattern
+                        + "' at 'eventPattern' failed to satisfy constraint: "
+                        + "Member must have length less than or equal to 4096"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("outOfRangeArchiveFields")
+    void createArchiveRejectsAnOutOfRangeField(String description, String pattern, int retention, String message) {
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.createArchive("orders-archive", DEFAULT_BUS, description, pattern, retention, REGION));
+
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals(message, error.getMessage());
+        assertEquals(400, error.getHttpStatus());
+        assertTrue(service.listArchives(null, null, null, REGION).isEmpty());
+    }
+
+    @ParameterizedTest
+    @MethodSource("outOfRangeArchiveFields")
+    void updateArchiveRejectsAnOutOfRangeFieldBeforeLookingTheArchiveUp(
+            String description, String pattern, int retention, String message) {
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.updateArchive("missing-archive", description, pattern, retention, REGION));
+
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals(message, error.getMessage());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
+    void createArchiveReportsEveryViolationInAwsOrderBeforeCheckingTheSource() {
+        String description = "d".repeat(513);
+        String pattern = patternOfLength(4097);
+
+        AwsException error = assertThrows(AwsException.class, () -> service.createArchive("orders-archive",
+                "arn:aws:events:us-east-1:000000000000:event-bus/missing", description, pattern, -1, REGION));
+
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals("3 validation errors detected: "
+                + "Value '-1' at 'retentionDays' failed to satisfy constraint: "
+                + "Member must have value greater than or equal to 0; "
+                + "Value '" + description + "' at 'description' failed to satisfy constraint: "
+                + "Member must have length less than or equal to 512; "
+                + "Value '" + pattern + "' at 'eventPattern' failed to satisfy constraint: "
+                + "Member must have length less than or equal to 4096", error.getMessage());
+        assertEquals(400, error.getHttpStatus());
+    }
+
+    @Test
+    void archiveFieldsAtTheirLimitsAreAccepted() {
+        String description = "d".repeat(512);
+        String pattern = patternOfLength(4096);
+
+        service.createArchive("orders-archive", DEFAULT_BUS, description, pattern, 0, REGION);
+        service.updateArchive("orders-archive", description, pattern, 0, REGION);
+
+        Archive archive = service.describeArchive("orders-archive", REGION);
+        assertEquals(description, archive.getDescription());
+        assertEquals(pattern, archive.getEventPattern());
+        assertEquals(0, archive.getRetentionDays());
+    }
+
+    private static String patternOfLength(int length) {
+        String pattern = "{\"source\":[\"" + "a".repeat(length - 15) + "\"]}";
+        assertEquals(length, pattern.length());
+        return pattern;
+    }
+
     // ──────────────────────────── Rules ────────────────────────────
 
     @Test
@@ -247,7 +437,19 @@ class EventBridgeServiceTest {
     @Test
     void putRuleForNonExistentBusThrows() {
         assertThrows(AwsException.class, () ->
-                service.putRule("rule", "missing-bus", null, null, null, null, null, null, REGION));
+                service.putRule("rule", "missing-bus", "{\"source\":[\"my.app\"]}", null, null,
+                        null, null, null, REGION));
+    }
+
+    @ParameterizedTest
+    @NullAndEmptySource
+    void putRuleWithoutPatternOrScheduleThrowsValidation(String missing) {
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.putRule("rule", null, missing, missing, RuleState.ENABLED, null, null, null, REGION));
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+        assertEquals("Parameter(s) EventPattern or ScheduleExpression must be specified.", error.getMessage());
+        assertTrue(service.listRules(null, null, REGION).isEmpty());
     }
 
     @Test
@@ -305,6 +507,79 @@ class EventBridgeServiceTest {
 
         List<Rule> result = service.listRules(null, "prod-", REGION);
         assertEquals(2, result.size());
+    }
+
+    @Test
+    void listRulesPagesEachRuleExactlyOnceInNameOrder() {
+        for (String name : List.of("page-c", "page-a", "page-d", "page-b", "other")) {
+            service.putRule(name, null, null, "rate(1 minute)", RuleState.ENABLED,
+                    null, null, null, REGION);
+        }
+
+        List<String> seen = new ArrayList<>();
+        String token = null;
+        int pages = 0;
+        do {
+            PaginatedResult<Rule> page = service.listRules(null, "page-", 1, token, REGION);
+            assertEquals(1, page.items().size());
+            seen.add(page.items().get(0).getName());
+            token = page.nextToken();
+            pages++;
+        } while (token != null);
+
+        assertEquals(List.of("page-a", "page-b", "page-c", "page-d"), seen);
+        assertEquals(4, pages);
+    }
+
+    @Test
+    void listRulesOmitsNextTokenWhenEverythingFits() {
+        service.putRule("fit-a", null, null, "rate(1 minute)", RuleState.ENABLED, null, null, null, REGION);
+        service.putRule("fit-b", null, null, "rate(1 minute)", RuleState.ENABLED, null, null, null, REGION);
+
+        PaginatedResult<Rule> exact = service.listRules(null, null, 2, null, REGION);
+        assertEquals(2, exact.items().size());
+        assertNull(exact.nextToken());
+
+        PaginatedResult<Rule> unbounded = service.listRules(null, null, null, null, REGION);
+        assertEquals(2, unbounded.items().size());
+        assertNull(unbounded.nextToken());
+    }
+
+    @Test
+    void listRulesPagesOnACustomBusWithoutLeakingDefaultBusRules() {
+        service.createEventBus("paging-bus", null, null, REGION);
+        service.putRule("custom-1", "paging-bus", null, "rate(1 minute)", RuleState.ENABLED,
+                null, null, null, REGION);
+        service.putRule("custom-2", "paging-bus", null, "rate(1 minute)", RuleState.ENABLED,
+                null, null, null, REGION);
+        service.putRule("custom-3", null, null, "rate(1 minute)", RuleState.ENABLED,
+                null, null, null, REGION);
+
+        PaginatedResult<Rule> first = service.listRules("paging-bus", "custom-", 1, null, REGION);
+        assertEquals("custom-1", first.items().get(0).getName());
+        assertNotNull(first.nextToken());
+
+        PaginatedResult<Rule> second = service.listRules("paging-bus", "custom-", 1, first.nextToken(), REGION);
+        assertEquals("custom-2", second.items().get(0).getName());
+        assertNull(second.nextToken());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, -1, 101})
+    void listRulesRejectsOutOfRangeLimit(int limit) {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.listRules(null, null, limit, null, REGION));
+        assertEquals("ValidationException", ex.getErrorCode());
+        assertTrue(ex.getMessage().contains("'" + limit + "' at 'limit'"), ex.getMessage());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"not base64 !", "Zm9vOmJhcg"})
+    void listRulesRejectsATokenItDidNotMint(String token) {
+        AwsException ex = assertThrows(AwsException.class,
+                () -> service.listRules(null, null, 1, token, REGION));
+        assertEquals("InvalidToken", ex.getErrorCode());
+        assertEquals(400, ex.getHttpStatus());
     }
 
     // ──────────────────────────── Targets ────────────────────────────
@@ -365,6 +640,231 @@ class EventBridgeServiceTest {
         assertEquals(1, result.successfulCount());
         assertEquals(0, result.failedCount());
         assertEquals(1, service.listTargetsByRule("my-rule", null, REGION).size());
+        verify(dispatcherMock).dropPendingRetries(
+                service.describeRule("my-rule", null, REGION).getArn(), List.of("t1"));
+    }
+
+    @Test
+    void putTargetsStoresRetryPolicyAndDeadLetterConfig() {
+        service.putRule("my-rule", null, "{\"source\":[\"my.app\"]}", null, RuleState.ENABLED,
+                null, null, null, REGION);
+        Target target = new Target("t1", "arn:aws:sqs:us-east-1:000000000000:queue", null, null);
+        target.setRoleArn("arn:aws:iam::000000000000:role/eventbridge-target");
+        target.setRetryPolicy(new Target.RetryPolicy(4, 120));
+        target.setDeadLetterConfig(new Target.DeadLetterConfig("arn:aws:sqs:us-east-1:000000000000:dlq"));
+
+        service.putTargets("my-rule", null, List.of(target), REGION);
+
+        Target stored = service.listTargetsByRule("my-rule", null, REGION).getFirst();
+        assertEquals(target.getRoleArn(), stored.getRoleArn());
+        assertEquals(new Target.RetryPolicy(4, 120), stored.getRetryPolicy());
+        assertEquals(new Target.DeadLetterConfig("arn:aws:sqs:us-east-1:000000000000:dlq"),
+                stored.getDeadLetterConfig());
+    }
+
+    @Test
+    void crossAccountBusUpdateReplacesStoredTargetWithoutArn() {
+        service.putRule("role-rule", null, "{}", null, RuleState.ENABLED, null, null, null, REGION);
+        service.putTargets("role-rule", null, List.of(new Target("bus", null, null, null)), REGION);
+        String arn = "arn:aws:events:us-east-1:111111111111:event-bus/destination";
+
+        service.putTargets("role-rule", null, List.of(new Target("bus", arn, null, null)), REGION);
+
+        List<Target> stored = service.listTargetsByRule("role-rule", null, REGION);
+        assertEquals(1, stored.size());
+        assertEquals(arn, stored.getFirst().getArn());
+        assertNull(stored.getFirst().getRoleArn());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "aws, us-east-1",
+            "aws-us-gov, us-gov-west-1",
+            "aws-cn, cn-north-1"
+    })
+    void omittedRoleOnCrossAccountBusUpdateRetainsTheStoredRole(String partition, String region) {
+        service.putRule("role-rule", null, "{}", null, RuleState.ENABLED, null, null, null, region);
+        String arn = "arn:" + partition + ":events:" + region + ":111111111111:event-bus/destination";
+        Target original = new Target("bus", arn, null, null);
+        original.setRoleArn("arn:" + partition + ":iam::000000000000:role/eventbridge-target");
+        service.putTargets("role-rule", null, List.of(original), region);
+
+        Target updated = new Target("bus", arn, "{\"updated\":true}", null);
+        service.putTargets("role-rule", null, List.of(updated), region);
+
+        Target stored = service.listTargetsByRule("role-rule", null, region).getFirst();
+        assertEquals(original.getRoleArn(), stored.getRoleArn());
+        assertEquals(updated.getInput(), stored.getInput());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "arn:aws:events:us-east-1:000000000000:event-bus/local",
+            "arn:aws:states:us-east-1:111111111111:stateMachine:workflow",
+            "arn:aws:events:us-east-1:111111111111:rule/other"
+    })
+    void omittedRoleDoesNotRetainRolesForOtherTargetTypes(String arn) {
+        service.putRule("role-rule", null, "{}", null, RuleState.ENABLED, null, null, null, REGION);
+        Target original = new Target("target", arn, null, null);
+        original.setRoleArn("arn:aws:iam::000000000000:role/original");
+        service.putTargets("role-rule", null, List.of(original), REGION);
+
+        service.putTargets("role-rule", null, List.of(new Target("target", arn, null, null)), REGION);
+
+        assertNull(service.listTargetsByRule("role-rule", null, REGION).getFirst().getRoleArn());
+    }
+
+    @Test
+    void replacingCrossAccountBusArnOrIdDoesNotCopyTheOldRole() {
+        service.putRule("role-rule", null, "{}", null, RuleState.ENABLED, null, null, null, REGION);
+        String arn = "arn:aws:events:us-east-1:111111111111:event-bus/original";
+        Target original = new Target("bus", arn, null, null);
+        original.setRoleArn("arn:aws:iam::000000000000:role/original");
+        service.putTargets("role-rule", null, List.of(original), REGION);
+
+        service.putTargets("role-rule", null, List.of(new Target("other-id", arn, null, null)), REGION);
+        service.putTargets("role-rule", null, List.of(new Target("bus", arn + "-changed", null, null)), REGION);
+
+        assertTrue(service.listTargetsByRule("role-rule", null, REGION).stream()
+                .allMatch(target -> target.getRoleArn() == null));
+    }
+
+    @Test
+    void explicitRoleUpdateReplacesCrossAccountBusRole() {
+        service.putRule("role-rule", null, "{}", null, RuleState.ENABLED, null, null, null, REGION);
+        String arn = "arn:aws:events:us-east-1:111111111111:event-bus/destination";
+        Target original = new Target("bus", arn, null, null);
+        original.setRoleArn("arn:aws:iam::000000000000:role/original");
+        service.putTargets("role-rule", null, List.of(original), REGION);
+        Target updated = new Target("bus", arn, null, null);
+        updated.setRoleArn("arn:aws:iam::000000000000:role/replacement");
+
+        service.putTargets("role-rule", null, List.of(updated), REGION);
+
+        List<Target> stored = service.listTargetsByRule("role-rule", null, REGION);
+        assertEquals(1, stored.size());
+        assertEquals(updated.getRoleArn(), stored.getFirst().getRoleArn());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 1601})
+    void putTargetsRejectsRoleArnOutsideModelLengthBounds(int length) {
+        Target valid = new Target("valid", "arn:aws:states:us-east-1:000000000000:stateMachine:valid", null, null);
+        Target invalid = new Target("invalid", valid.getArn(), null, null);
+        String role = "r".repeat(length);
+        invalid.setRoleArn(role);
+        String constraint = length == 0 ? "greater than or equal to 1" : "less than or equal to 1600";
+
+        assertPutTargetsValidation("1 validation error detected: Value '" + role + "' at "
+                + "'targets.2.member.roleArn' failed to satisfy constraint: Member must have length " + constraint,
+                valid, invalid);
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {1, 1600})
+    void putTargetsAcceptsRoleArnAtModelLengthBounds(int length) {
+        service.putRule("role-rule", null, "{}", null, RuleState.ENABLED, null, null, null, REGION);
+        Target target = new Target("workflow", "arn:aws:states:us-east-1:000000000000:stateMachine:example", null, null);
+        target.setRoleArn("r".repeat(length));
+
+        service.putTargets("role-rule", null, List.of(target), REGION);
+
+        assertEquals(target.getRoleArn(), service.listTargetsByRule("role-rule", null, REGION).getFirst().getRoleArn());
+    }
+
+    @Test
+    void putTargetsRejectsRetryAttemptsAboveMaximumBeforeLookingUpTheRule() {
+        Target target = new Target("t1", "arn:aws:sqs:us-east-1:000000000000:queue", null, null);
+        target.setRetryPolicy(new Target.RetryPolicy(186, null));
+
+        assertPutTargetsValidation("1 validation error detected: Value '186' at "
+                + "'targets.1.member.retryPolicy.maximumRetryAttempts' failed to satisfy constraint: "
+                + "Member must have value less than or equal to 185", target);
+    }
+
+    @Test
+    void putTargetsRejectsEventAgeBelowMinimumOnTheSecondTarget() {
+        Target valid = new Target("t1", "arn:aws:sqs:us-east-1:000000000000:queue", null, null);
+        valid.setRetryPolicy(new Target.RetryPolicy(0, 60));
+        Target invalid = new Target("t2", "arn:aws:sqs:us-east-1:000000000000:queue", null, null);
+        invalid.setRetryPolicy(new Target.RetryPolicy(null, 59));
+
+        assertPutTargetsValidation("1 validation error detected: Value '59' at "
+                + "'targets.2.member.retryPolicy.maximumEventAgeInSeconds' failed to satisfy constraint: "
+                + "Member must have value greater than or equal to 60", valid, invalid);
+    }
+
+    @Test
+    void putTargetsRejectsEmptyDeadLetterArn() {
+        Target target = new Target("t1", "arn:aws:sqs:us-east-1:000000000000:queue", null, null);
+        target.setDeadLetterConfig(new Target.DeadLetterConfig(""));
+
+        assertPutTargetsValidation("1 validation error detected: Value '' at "
+                + "'targets.1.member.deadLetterConfig.arn' failed to satisfy constraint: "
+                + "Member must have length greater than or equal to 1", target);
+    }
+
+    @Test
+    void putTargetsRejectsDeadLetterArnAboveMaximumLength() {
+        String arn = "a".repeat(1601);
+        Target target = new Target("t1", "arn:aws:sqs:us-east-1:000000000000:queue", null, null);
+        target.setDeadLetterConfig(new Target.DeadLetterConfig(arn));
+
+        assertPutTargetsValidation("1 validation error detected: Value '" + arn + "' at "
+                + "'targets.1.member.deadLetterConfig.arn' failed to satisfy constraint: "
+                + "Member must have length less than or equal to 1600", target);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void putEventsHandsTheDispatcherTheRuleArnAndItsCurrentTargets() {
+        Rule rule = service.putRule("my-rule", null, "{\"source\":[\"my.app\"]}", null, RuleState.ENABLED,
+                null, null, null, REGION);
+        Target first = new Target("t1", "arn:aws:sqs:us-east-1:000000000000:queue-1", null, null);
+        service.putTargets("my-rule", null, List.of(first), REGION);
+
+        service.putEvents(List.of(Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{}")), REGION);
+
+        ArgumentCaptor<Supplier<List<Target>>> currentTargets = ArgumentCaptor.forClass(Supplier.class);
+        verify(dispatcherMock).dispatch(eq(rule.getArn()), eq(first), anyString(), eq(REGION),
+                currentTargets.capture());
+        Target second = new Target("t2", "arn:aws:sqs:us-east-1:000000000000:queue-2", null, null);
+        service.putTargets("my-rule", null, List.of(second), REGION);
+        assertEquals(List.of("t1", "t2"),
+                currentTargets.getValue().get().stream().map(Target::getId).toList());
+    }
+
+    @Test
+    void putEventsDoesNotMatchAScheduleOnlyRule() {
+        service.putRule("nightly", null, null, "rate(1 day)", RuleState.ENABLED,
+                null, null, null, REGION);
+        Target target = new Target("t1", "arn:aws:sqs:us-east-1:000000000000:queue-1", null, null);
+        service.putTargets("nightly", null, List.of(target), REGION);
+
+        service.putEvents(List.of(Map.of("Source", "aws.ecs", "DetailType", "ECS Deployment State Change",
+                "Detail", "{}")), REGION);
+
+        verify(dispatcherMock, never()).dispatch(anyString(), any(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void putEventsMatchesARuleWithBothAPatternAndASchedule() {
+        Rule rule = service.putRule("both", null, "{\"source\":[\"my.app\"]}", "rate(1 day)",
+                RuleState.ENABLED, null, null, null, REGION);
+        Target target = new Target("t1", "arn:aws:sqs:us-east-1:000000000000:queue-1", null, null);
+        service.putTargets("both", null, List.of(target), REGION);
+
+        service.putEvents(List.of(Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{}")), REGION);
+
+        verify(dispatcherMock).dispatch(eq(rule.getArn()), eq(target), anyString(), eq(REGION), any());
+    }
+
+    private void assertPutTargetsValidation(String expectedMessage, Target... targets) {
+        AwsException error = assertThrows(AwsException.class, () ->
+                service.putTargets("missing-rule", null, List.of(targets), REGION));
+        assertEquals("ValidationException", error.getErrorCode());
+        assertEquals(400, error.getHttpStatus());
+        assertEquals(expectedMessage, error.getMessage());
     }
 
     // ──────────────────────────── Pattern Matching ────────────────────────────
@@ -470,7 +970,7 @@ class EventBridgeServiceTest {
         assertEquals(0, result.failedCount());
         assertEquals(1, result.entries().size());
         assertNotNull(result.entries().getFirst().get("EventId"));
-        verify(invokerMock).invokeTarget(eq(target), any(String.class), eq(REGION));
+        verify(dispatcherMock).dispatch(anyString(), eq(target), any(String.class), eq(REGION), any());
     }
 
     @Test
@@ -491,7 +991,7 @@ class EventBridgeServiceTest {
         assertEquals(0, result.failedCount());
         assertEquals(1, result.entries().size());
         assertNotNull(result.entries().getFirst().get("EventId"));
-        verify(invokerMock).invokeTarget(eq(target), any(String.class), eq(REGION));
+        verify(dispatcherMock).dispatch(anyString(), eq(target), any(String.class), eq(REGION), any());
     }
 
     @Test
@@ -512,7 +1012,7 @@ class EventBridgeServiceTest {
         assertEquals(0, result.failedCount());
         assertEquals(1, result.entries().size());
         assertNotNull(result.entries().getFirst().get("EventId"));
-        verify(invokerMock).invokeTarget(eq(target), any(String.class), eq(REGION));
+        verify(dispatcherMock).dispatch(anyString(), eq(target), any(String.class), eq(REGION), any());
     }
 
     @Test
@@ -748,7 +1248,7 @@ class EventBridgeServiceTest {
         assertEquals(0, result.failedCount());
 
         ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
-        verify(invokerMock).invokeTarget(eq(target), json.capture(), eq("eu-west-1"));
+        verify(dispatcherMock).dispatch(anyString(), eq(target), json.capture(), eq("eu-west-1"), any());
         JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
         assertEquals("eu-west-1", envelope.path("region").asText(),
                 "envelope.region should reflect the PutEvents call's region, not the resolver default");
@@ -776,7 +1276,7 @@ class EventBridgeServiceTest {
         service.putEvents(List.of(entry), "us-west-2");
 
         ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
-        verify(invokerMock).invokeTarget(eq(target), json.capture(), eq("us-west-2"));
+        verify(dispatcherMock).dispatch(anyString(), eq(target), json.capture(), eq("us-west-2"), any());
         JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
         assertEquals("ap-northeast-1", envelope.path("region").asText(),
                 "entry.Region should win over the PutEvents call region");
@@ -803,7 +1303,7 @@ class EventBridgeServiceTest {
                 Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{}")), "eu-west-1");
 
         ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
-        verify(invokerMock).invokeTarget(eq(target), json.capture(), eq("eu-west-1"));
+        verify(dispatcherMock).dispatch(anyString(), eq(target), json.capture(), eq("eu-west-1"), any());
         JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
         assertEquals("eu-west-1", envelope.path("region").asText(),
                 "envelope and pattern matching must agree on the entry's effective region");
@@ -827,7 +1327,7 @@ class EventBridgeServiceTest {
         service.putEvents(List.of(
                 Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{}")), "eu-west-1");
 
-        verify(invokerMock, Mockito.never()).invokeTarget(eq(target), any(), any());
+        verify(dispatcherMock, Mockito.never()).dispatch(any(), eq(target), any(), any(), any());
     }
 
     @Test
@@ -846,93 +1346,364 @@ class EventBridgeServiceTest {
                 Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{}")), REGION);
 
         ArgumentCaptor<String> json = ArgumentCaptor.forClass(String.class);
-        verify(invokerMock).invokeTarget(eq(target), json.capture(), eq(REGION));
+        verify(dispatcherMock).dispatch(anyString(), eq(target), json.capture(), eq(REGION), any());
         JsonNode envelope = OBJECT_MAPPER.readTree(json.getValue());
         assertEquals(REGION, envelope.path("region").asText());
         assertEquals("000000000000", envelope.path("account").asText());
     }
 
     @Test
-    void listRuleNamesByTargetFindsMatchingRules() {
-        service.getOrCreateDefaultBus(REGION);
-        service.putRule("consume", null, "{\"source\":[\"app\"]}", null, RuleState.ENABLED,
-                null, null, null, REGION);
-        Target target = new Target();
-        target.setId("fn");
-        target.setArn("arn:aws:lambda:us-east-1:000000000000:function:consumer");
-        service.putTargets("consume", null, List.of(target), REGION);
-
-        List<String> names = service.listRuleNamesByTarget(
-                "arn:aws:lambda:us-east-1:000000000000:function:consumer", null, REGION);
-        assertEquals(List.of("consume"), names);
-        assertTrue(service.listRuleNamesByTarget(
-                "arn:aws:lambda:us-east-1:000000000000:function:other", null, REGION).isEmpty());
-    }
-
-    @Test
-    void legacyConnectionAuthParametersRemainAvailableToSanitization() throws Exception {
-        Map<String, Object> legacy = Map.of(
-                "name", "legacy", "connectionState", "AUTHORIZED",
-                "authParametersJson", "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"key\",\"ApiKeyValue\":\"secret\"}}");
-        Connection connection = OBJECT_MAPPER.readValue(OBJECT_MAPPER.writeValueAsString(legacy), Connection.class);
-
-        assertEquals("AUTHORIZED", connection.getConnectionState().name());
-        assertEquals("secret", OBJECT_MAPPER.readTree(connection.getAuthParameters())
-                .path("ApiKeyAuthParameters").path("ApiKeyValue").asText());
-    }
-
-    @Test
-    void connectionAndApiDestinationLifecycle() {
-        Connection created = service.createConnection(
-                "partner", "desc", "API_KEY",
+    void createAndDescribeApiDestination() {
+        Connection conn = service.createConnection("my-conn", "test conn", "API_KEY",
                 "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"x-api-key\",\"ApiKeyValue\":\"secret\"}}",
                 null, null, REGION);
-        assertEquals("AUTHORIZED", created.getConnectionState().name());
-        assertTrue(created.getConnectionArn().contains("connection/partner/"));
-        assertNotNull(created.getSecretArn());
 
-        Connection described = service.describeConnection("partner", REGION);
-        assertEquals("desc", described.getDescription());
-        assertEquals("API_KEY", described.getAuthorizationType());
+        ApiDestination dest = service.createApiDestination(
+                "my-dest", "description", conn.getConnectionArn(),
+                "https://api.example.com/events", "POST", 10, REGION);
 
-        service.updateConnection("partner", "updated", null, null, null, null, REGION);
-        assertEquals("updated", service.describeConnection("partner", REGION).getDescription());
+        assertNotNull(dest.getArn());
+        assertEquals("my-dest", dest.getName());
+        assertEquals("description", dest.getDescription());
+        assertEquals(conn.getConnectionArn(), dest.getConnectionArn());
+        assertEquals("https://api.example.com/events", dest.getInvocationEndpoint());
+        assertEquals("POST", dest.getHttpMethod());
+        assertEquals(10, dest.getInvocationRateLimitPerSecond());
+        assertEquals(ApiDestinationState.ACTIVE, dest.getApiDestinationState());
 
-        ApiDestination destination = service.createApiDestination(
-                "webhook", null, created.getConnectionArn(),
-                "https://example.com/events", "POST", 5, REGION);
-        assertEquals("ACTIVE", destination.getApiDestinationState());
-        assertEquals(5, destination.getInvocationRateLimitPerSecond());
-        assertEquals(5, service.describeApiDestination("webhook", REGION)
-                .getInvocationRateLimitPerSecond());
-
-        service.updateApiDestination("webhook", null, null, null, null, 10, REGION);
-        assertEquals(10, service.describeApiDestination("webhook", REGION)
-                .getInvocationRateLimitPerSecond());
-
-        AwsException inUse = assertThrows(AwsException.class,
-                () -> service.deleteConnection("partner", REGION));
-        assertEquals("ConcurrentModificationException", inUse.getErrorCode());
-
-        service.deleteApiDestination("webhook", REGION);
-        assertThrows(AwsException.class, () -> service.describeApiDestination("webhook", REGION));
-        service.deleteConnection("partner", REGION);
-        assertThrows(AwsException.class, () -> service.describeConnection("partner", REGION));
+        ApiDestination described = service.describeApiDestination("my-dest", REGION);
+        assertEquals(dest.getArn(), described.getArn());
+        assertEquals("my-dest", described.getName());
     }
 
     @Test
-    void createArchiveRequiresExistingBus() {
-        AwsException missing = assertThrows(AwsException.class, () ->
-                service.createArchive("arch",
-                        "arn:aws:events:us-east-1:000000000000:event-bus/missing-bus",
-                        null, null, 1, REGION));
-        assertEquals("ResourceNotFoundException", missing.getErrorCode());
-        assertTrue(missing.getMessage().contains("missing-bus"));
+    void createApiDestination_validations() {
+        Connection conn = service.createConnection("conn-val", null, "API_KEY",
+                "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"x-key\",\"ApiKeyValue\":\"val\"}}",
+                null, null, REGION);
 
-        EventBus bus = service.createEventBus("archive-src", null, null, REGION);
-        var archive = service.createArchive("arch", bus.getArn(), "kept",
-                "{\"source\":[\"app\"]}", 1, REGION);
-        assertEquals(bus.getArn(), archive.getEventSourceArn());
-        assertEquals(1, archive.getRetentionDays());
+        // Name missing
+        assertThrows(AwsException.class, () -> service.createApiDestination(
+                null, "desc", conn.getConnectionArn(), "https://api.com", "POST", 5, REGION));
+
+        // Invalid method
+        assertThrows(AwsException.class, () -> service.createApiDestination(
+                "dest-1", "desc", conn.getConnectionArn(), "https://api.com", "INVALID_METHOD", 5, REGION));
+
+        // Non-existent connection
+        assertThrows(AwsException.class, () -> service.createApiDestination(
+                "dest-2", "desc", "arn:aws:events:us-east-1:000000000000:connection/unknown/123",
+                "https://api.com", "POST", 5, REGION));
+
+        // Duplicate name
+        service.createApiDestination("dup-dest", "desc", conn.getConnectionArn(), "https://api.com", "POST", 5, REGION);
+        assertThrows(AwsException.class, () -> service.createApiDestination(
+                "dup-dest", "desc2", conn.getConnectionArn(), "https://api.com", "GET", 5, REGION));
+    }
+
+    @Test
+    void createApiDestination_rejectsNonHttpEndpoint() {
+        Connection conn = service.createConnection("conn-endpoint", null, "API_KEY",
+                "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"x-key\",\"ApiKeyValue\":\"val\"}}",
+                null, null, REGION);
+
+        for (String endpoint : List.of("ftp://example.com/x", "file:///etc/passwd", "https:///no-host",
+                "https://:8080/path", "https://*.example.com/hook", "not a url")) {
+            AwsException ex = assertThrows(AwsException.class, () -> service.createApiDestination(
+                    "bad-endpoint", null, conn.getConnectionArn(), endpoint, "POST", null, REGION));
+            assertEquals("ValidationException", ex.getErrorCode());
+        }
+        assertThrows(AwsException.class, () -> service.describeApiDestination("bad-endpoint", REGION));
+
+        ApiDestination wildcardPath = service.createApiDestination("wildcard-path", null, conn.getConnectionArn(),
+                "https://api.example.com/hook/*", "POST", null, REGION);
+        assertEquals("https://api.example.com/hook/*", wildcardPath.getInvocationEndpoint());
+    }
+
+    @Test
+    void updateApiDestination_leavesDestinationUntouchedWhenAnyFieldIsInvalid() {
+        Connection conn = service.createConnection("conn-atomic", null, "API_KEY",
+                "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"x-key\",\"ApiKeyValue\":\"val\"}}",
+                null, null, REGION);
+        service.createApiDestination("atomic-upd", "original", conn.getConnectionArn(),
+                "https://api.com/v1", "POST", null, REGION);
+
+        assertThrows(AwsException.class, () -> service.updateApiDestination(
+                "atomic-upd", "changed", null, null, "INVALID_METHOD", null, REGION));
+
+        ApiDestination described = service.describeApiDestination("atomic-upd", REGION);
+        assertEquals("original", described.getDescription());
+        assertEquals("POST", described.getHttpMethod());
+    }
+
+    @Test
+    void updateApiDestination_rejectsNonHttpEndpoint() {
+        Connection conn = service.createConnection("conn-endpoint-upd", null, "API_KEY",
+                "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"x-key\",\"ApiKeyValue\":\"val\"}}",
+                null, null, REGION);
+        service.createApiDestination("endpoint-upd", null, conn.getConnectionArn(),
+                "https://api.com/v1", "POST", null, REGION);
+
+        AwsException ex = assertThrows(AwsException.class, () -> service.updateApiDestination(
+                "endpoint-upd", null, null, "file:///etc/passwd", null, null, REGION));
+        assertEquals("ValidationException", ex.getErrorCode());
+        assertEquals("https://api.com/v1",
+                service.describeApiDestination("endpoint-upd", REGION).getInvocationEndpoint());
+    }
+
+    @Test
+    void findApiDestinationByArn_ignoresAnArnFromBeforeTheDestinationWasRecreated() {
+        Connection conn = service.createConnection("conn-recreate", null, "API_KEY",
+                "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"x-key\",\"ApiKeyValue\":\"val\"}}",
+                null, null, REGION);
+        ApiDestination first = service.createApiDestination("recreated", null, conn.getConnectionArn(),
+                "https://api.com/v1", "POST", null, REGION);
+        service.deleteApiDestination("recreated", REGION);
+        ApiDestination second = service.createApiDestination("recreated", null, conn.getConnectionArn(),
+                "https://api.com/v2", "POST", null, REGION);
+
+        assertNull(service.findApiDestinationByArn(first.getArn(), REGION));
+        assertEquals("https://api.com/v2",
+                service.findApiDestinationByArn(second.getArn(), REGION).getInvocationEndpoint());
+    }
+
+    @Test
+    void restoreApiDestination_putsBackUnsetFieldsToo() {
+        Connection conn = service.createConnection("conn-restore", null, "API_KEY",
+                "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"x-key\",\"ApiKeyValue\":\"val\"}}",
+                null, null, REGION);
+        service.createApiDestination("restored", "changed", conn.getConnectionArn(),
+                "https://api.com/v2", "PUT", 5, REGION);
+
+        service.restoreApiDestination("restored", null, conn.getConnectionArn(),
+                "https://api.com/v1", "POST", null, REGION);
+
+        ApiDestination restored = service.describeApiDestination("restored", REGION);
+        assertNull(restored.getDescription());
+        assertNull(restored.getInvocationRateLimitPerSecond());
+        assertEquals("https://api.com/v1", restored.getInvocationEndpoint());
+        assertEquals("POST", restored.getHttpMethod());
+    }
+
+    @Test
+    void listApiDestinations_isSortedByName() {
+        Connection conn = service.createConnection("conn-sorted", null, "API_KEY",
+                "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"x-key\",\"ApiKeyValue\":\"val\"}}",
+                null, null, REGION);
+        for (String name : List.of("sorted-c", "sorted-a", "sorted-b")) {
+            service.createApiDestination(name, null, conn.getConnectionArn(), "https://api.com", "GET", null, REGION);
+        }
+
+        List<String> names = service.listApiDestinations("sorted-", null, REGION).stream()
+                .map(ApiDestination::getName).toList();
+        assertEquals(List.of("sorted-a", "sorted-b", "sorted-c"), names);
+    }
+
+    @Test
+    void updateAndDeleteApiDestination() {
+        Connection conn1 = service.createConnection("conn-upd1", null, "API_KEY",
+                "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"k\",\"ApiKeyValue\":\"v\"}}", null, null, REGION);
+        Connection conn2 = service.createConnection("conn-upd2", null, "API_KEY",
+                "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"k\",\"ApiKeyValue\":\"v\"}}", null, null, REGION);
+
+        service.createApiDestination("upd-dest", "initial", conn1.getConnectionArn(), "https://api.com/v1", "POST", 5, REGION);
+
+        ApiDestination updated = service.updateApiDestination("upd-dest", "updated desc", conn2.getConnectionArn(),
+                "https://api.com/v2", "PUT", 20, REGION);
+
+        assertEquals("updated desc", updated.getDescription());
+        assertEquals(conn2.getConnectionArn(), updated.getConnectionArn());
+        assertEquals("https://api.com/v2", updated.getInvocationEndpoint());
+        assertEquals("PUT", updated.getHttpMethod());
+        assertEquals(20, updated.getInvocationRateLimitPerSecond());
+
+        service.deleteApiDestination("upd-dest", REGION);
+        assertThrows(AwsException.class, () -> service.describeApiDestination("upd-dest", REGION));
+    }
+
+    @Test
+    void listApiDestinations() {
+        Connection conn = service.createConnection("conn-list", null, "API_KEY",
+                "{\"ApiKeyAuthParameters\":{\"ApiKeyName\":\"k\",\"ApiKeyValue\":\"v\"}}", null, null, REGION);
+
+        service.createApiDestination("prefix-dest-1", null, conn.getConnectionArn(), "https://api.com", "GET", null, REGION);
+        service.createApiDestination("prefix-dest-2", null, conn.getConnectionArn(), "https://api.com", "GET", null, REGION);
+        service.createApiDestination("other-dest", null, conn.getConnectionArn(), "https://api.com", "GET", null, REGION);
+
+        List<ApiDestination> all = service.listApiDestinations(null, null, REGION);
+        assertTrue(all.size() >= 3);
+
+        List<ApiDestination> prefixed = service.listApiDestinations("prefix-", null, REGION);
+        assertEquals(2, prefixed.size());
+    }
+
+    // ──────────────────────────── PutEvents MalformedDetail ────────────────────────────
+
+    @Test
+    void putEventsRejectsMalformedDetailWithErrorCode() {
+        List<Map<String, Object>> entries = List.of(
+                Map.of("Source", "s", "DetailType", "d", "Detail", "{")
+        );
+
+        EventBridgeService.PutEventsResult result = service.putEvents(entries, REGION);
+
+        assertEquals(1, result.failedCount());
+        assertEquals(1, result.entries().size());
+        Map<String, String> entry = result.entries().getFirst();
+        assertNull(entry.get("EventId"));
+        assertEquals("MalformedDetail", entry.get("ErrorCode"));
+        assertNotNull(entry.get("ErrorMessage"));
+    }
+
+    @Test
+    void putEventsMalformedDetailDoesNotBlockValidEntriesInSameBatch() {
+        List<Map<String, Object>> entries = List.of(
+                Map.of("Source", "good", "DetailType", "d", "Detail", "{\"ok\":true}"),
+                Map.of("Source", "bad", "DetailType", "d", "Detail", "{"),
+                Map.of("Source", "also-good", "DetailType", "d", "Detail", "{}")
+        );
+
+        EventBridgeService.PutEventsResult result = service.putEvents(entries, REGION);
+
+        assertEquals(1, result.failedCount());
+        assertEquals(3, result.entries().size());
+
+        assertNotNull(result.entries().get(0).get("EventId"));
+        assertNull(result.entries().get(0).get("ErrorCode"));
+
+        assertNull(result.entries().get(1).get("EventId"));
+        assertEquals("MalformedDetail", result.entries().get(1).get("ErrorCode"));
+
+        assertNotNull(result.entries().get(2).get("EventId"));
+        assertNull(result.entries().get(2).get("ErrorCode"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"{", "not json at all", "[}", "{\"key\": }", "{'single': 'quotes'}"})
+    void putEventsRejectsVariousFormsOfInvalidDetailJson(String malformedDetail) {
+        List<Map<String, Object>> entries = List.of(
+                Map.of("Source", "s", "DetailType", "d", "Detail", malformedDetail)
+        );
+
+        EventBridgeService.PutEventsResult result = service.putEvents(entries, REGION);
+
+        assertEquals(1, result.failedCount());
+        Map<String, String> entry = result.entries().getFirst();
+        assertEquals("MalformedDetail", entry.get("ErrorCode"));
+        assertNull(entry.get("EventId"));
+    }
+
+    @Test
+    void putEventsRejectsMalformedDetailWithTrailingGarbage() {
+        EventBridgeService.PutEventsResult result = service.putEvents(
+                List.of(Map.of("Source", "s", "DetailType", "d",
+                        "Detail", "{} garbage")),
+                REGION);
+        assertMalformedDetail(result);
+    }
+
+    @Test
+    void putEventsRejectsTwoConcatenatedValidJsonObjects() {
+        EventBridgeService.PutEventsResult result = service.putEvents(
+                List.of(Map.of("Source", "s", "DetailType", "d",
+                        "Detail", "{\"a\":1}{\"b\":2}")),
+                REGION);
+        assertMalformedDetail(result);
+    }
+
+    @Test
+    void putEventsRejectsTwoConcatenatedEmptyObjects() {
+        EventBridgeService.PutEventsResult result = service.putEvents(
+                List.of(Map.of("Source", "s", "DetailType", "d",
+                        "Detail", "{} {}")),
+                REGION);
+        assertMalformedDetail(result);
+    }
+
+    @Test
+    void putEventsAcceptsSingleObjectWithTrailingWhitespace() {
+        EventBridgeService.PutEventsResult result = service.putEvents(
+                List.of(Map.of("Source", "s", "DetailType", "d",
+                        "Detail", "{\"a\":1}   \n\t")),
+                REGION);
+        assertEquals(0, result.failedCount());
+        assertNotNull(result.entries().getFirst().get("EventId"));
+    }
+
+    @Test
+    void putEventsRejectsNonObjectDetail() {
+        assertMalformedDetail(service.putEvents(
+                List.of(Map.of("Source", "s", "DetailType", "d",
+                        "Detail", "[1,2,3]")),
+                REGION));
+        assertMalformedDetail(service.putEvents(
+                List.of(Map.of("Source", "s", "DetailType", "d",
+                        "Detail", "123")),
+                REGION));
+    }
+
+    private static void assertMalformedDetail(EventBridgeService.PutEventsResult r) {
+        assertEquals(1, r.failedCount());
+        Map<String, String> entry = r.entries().getFirst();
+        assertEquals("MalformedDetail", entry.get("ErrorCode"));
+        assertNull(entry.get("EventId"));
+    }
+
+    @Test
+    void putEventsReportsMissingRequiredFieldsDistinctlyFromMalformedDetail() {
+        EventBridgeService.PutEventsResult result = service.putEvents(
+                List.of(
+                        Map.of("Source", "s", "DetailType", "d"),                        // missing Detail
+                        Map.of("Source", "s", "DetailType", "d", "Detail", "not json"),   // malformed Detail
+                        Map.of("Source", "s", "Detail", "{}"),                           // missing DetailType
+                        Map.of("DetailType", "d", "Detail", "{}")                        // missing Source
+                ),
+                REGION);
+
+        assertEquals(4, result.failedCount());
+
+        Map<String, String> missingDetail = result.entries().getFirst();
+        assertEquals("InvalidArgument", missingDetail.get("ErrorCode"));
+        assertEquals("Parameter Detail is not valid. Reason: Detail is a required argument.",
+                missingDetail.get("ErrorMessage"));
+        assertNull(missingDetail.get("EventId"));
+
+        Map<String, String> malformedDetail = result.entries().get(1);
+        assertEquals("MalformedDetail", malformedDetail.get("ErrorCode"));
+        assertEquals("The JSON provided is not valid.", malformedDetail.get("ErrorMessage"));
+        assertNull(malformedDetail.get("EventId"));
+
+        Map<String, String> missingDetailType = result.entries().get(2);
+        assertEquals("InvalidArgument", missingDetailType.get("ErrorCode"));
+        assertEquals("Parameter DetailType is not valid. Reason: DetailType is a required argument.",
+                missingDetailType.get("ErrorMessage"));
+        assertNull(missingDetailType.get("EventId"));
+
+        Map<String, String> missingSource = result.entries().get(3);
+        assertEquals("InvalidArgument", missingSource.get("ErrorCode"));
+        assertEquals("Parameter Source is not valid. Reason: Source is a required argument.",
+                missingSource.get("ErrorMessage"));
+        assertNull(missingSource.get("EventId"));
+    }
+
+    @Test
+    void putEventsReportsSourceFirstWhenMultipleRequiredFieldsAreMissing() {
+        EventBridgeService.PutEventsResult result = service.putEvents(List.of(Map.of("Detail", "{}")), REGION);
+        assertEquals(1, result.failedCount());
+        assertEquals("Parameter Source is not valid. Reason: Source is a required argument.",
+                result.entries().get(0).get("ErrorMessage"));
+    }
+
+    @Test
+    void serviceEventEntryCarriesTheResourceAndAnEmptyResourcesListWithoutOne() {
+        Map<String, Object> entry = EventBridgeService.serviceEventEntry("aws.ssm", "Parameter Store Change",
+                "{\"operation\":\"Create\"}", "arn:aws:ssm:us-east-1:000000000000:parameter/a");
+
+        assertEquals(Map.of("Source", "aws.ssm", "DetailType", "Parameter Store Change",
+                "Detail", "{\"operation\":\"Create\"}",
+                "Resources", new ObjectMapper().createArrayNode().add("arn:aws:ssm:us-east-1:000000000000:parameter/a")),
+                entry);
+        assertEquals(0, ((ArrayNode) EventBridgeService.serviceEventEntry("s", "d", "{}", null).get("Resources")).size());
+        assertEquals(0, ((ArrayNode) EventBridgeService.serviceEventEntry("s", "d", "{}", " ").get("Resources")).size());
     }
 }

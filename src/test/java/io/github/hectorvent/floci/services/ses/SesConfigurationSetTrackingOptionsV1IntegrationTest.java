@@ -7,8 +7,6 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
-import java.util.List;
-
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
@@ -33,75 +31,6 @@ class SesConfigurationSetTrackingOptionsV1IntegrationTest {
     private static final String DOMAIN = "track-v1.floci.test";
     private static final String CS = "v1-cs-tracking";
 
-    private static void verifyDomainIdentityViaRoute53(String domain, String callerReference) {
-        List<String> tokens = given()
-            .contentType("application/json")
-            .header("Authorization", AUTH_V2)
-            .body("{\"EmailIdentity\": \"" + domain + "\"}")
-        .when()
-            .post("/v2/email/identities")
-        .then()
-            .statusCode(200)
-            .extract()
-            .jsonPath()
-            .getList("DkimAttributes.Tokens", String.class);
-
-        String locationHeader = given()
-            .contentType("application/xml")
-            .body("""
-                <?xml version="1.0" encoding="UTF-8"?>
-                <CreateHostedZoneRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
-                  <Name>floci.test</Name>
-                  <CallerReference>""" + callerReference + """
-                  </CallerReference>
-                </CreateHostedZoneRequest>
-                """)
-        .when()
-            .post("/2013-04-01/hostedzone")
-        .then()
-            .statusCode(201)
-            .extract()
-            .header("Location");
-
-        String zoneId = locationHeader.substring(locationHeader.lastIndexOf('/') + 1);
-        StringBuilder body = new StringBuilder("""
-                <?xml version="1.0" encoding="UTF-8"?>
-                <ChangeResourceRecordSetsRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
-                  <ChangeBatch>
-                    <Changes>
-                """);
-        for (String token : tokens) {
-            body.append("""
-                      <Change>
-                        <Action>CREATE</Action>
-                        <ResourceRecordSet>
-                          <Name>""").append(token).append("._domainkey.").append(domain).append(".</Name>\n")
-                    .append("""
-                          <Type>CNAME</Type>
-                          <TTL>300</TTL>
-                          <ResourceRecords>
-                            <ResourceRecord><Value>""").append(token).append(".dkim.amazonses.com.</Value></ResourceRecord>\n")
-                    .append("""
-                          </ResourceRecords>
-                        </ResourceRecordSet>
-                      </Change>
-                    """);
-        }
-        body.append("""
-                    </Changes>
-                  </ChangeBatch>
-                </ChangeResourceRecordSetsRequest>
-                """);
-
-        given()
-            .contentType("application/xml")
-            .body(body.toString())
-        .when()
-            .post("/2013-04-01/hostedzone/" + zoneId + "/rrset")
-        .then()
-            .statusCode(200);
-    }
-
     private static RequestSpecification query(String action) {
         return given()
                 .contentType("application/x-www-form-urlencoded")
@@ -112,7 +41,7 @@ class SesConfigurationSetTrackingOptionsV1IntegrationTest {
     @Test
     @Order(1)
     void setup_verifyDomain_andCreateConfigSet() {
-        verifyDomainIdentityViaRoute53(DOMAIN, "v1-cs-tracking");
+        SesDomainIdentityTestHelper.createVerified(DOMAIN, AUTH_V2);
         query("CreateConfigurationSet").formParam("ConfigurationSet.Name", CS)
             .when().post("/").then().statusCode(200);
     }
@@ -172,7 +101,7 @@ class SesConfigurationSetTrackingOptionsV1IntegrationTest {
     @Test
     @Order(6)
     void updateTrackingOptions_changesDomain() {
-        verifyDomainIdentityViaRoute53("other." + DOMAIN, "v1-cs-tracking-other");
+        SesDomainIdentityTestHelper.createVerified("other." + DOMAIN, AUTH_V2);
         query("UpdateConfigurationSetTrackingOptions")
             .formParam("ConfigurationSetName", CS)
             .formParam("TrackingOptions.CustomRedirectDomain", "other." + DOMAIN)

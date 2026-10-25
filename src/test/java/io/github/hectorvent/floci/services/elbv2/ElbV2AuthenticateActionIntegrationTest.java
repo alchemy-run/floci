@@ -2,6 +2,9 @@ package io.github.hectorvent.floci.services.elbv2;
 
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.RestAssured;
+import io.restassured.config.EncoderConfig;
+import io.restassured.http.ContentType;
 import io.restassured.path.xml.XmlPath;
 import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.MethodOrderer;
@@ -9,8 +12,10 @@ import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.junit.jupiter.api.Assertions.assertAll;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 
@@ -29,6 +34,10 @@ class ElbV2AuthenticateActionIntegrationTest {
     private static final String AUTH =
             "AWS4-HMAC-SHA256 Credential=test/20260427/us-east-1/elasticloadbalancing/aws4_request";
 
+    private static final String ACM_AUTH =
+            "AWS4-HMAC-SHA256 Credential=test/20260427/us-east-1/acm/aws4_request";
+
+    private static String certificateArn;
     private static String lbArn;
     private static String tgArn;
     private static String listenerArn;
@@ -41,6 +50,13 @@ class ElbV2AuthenticateActionIntegrationTest {
     @Test
     @Order(1)
     void seedLoadBalancerAndTargetGroup() {
+        certificateArn = given().contentType("application/x-amz-json-1.1")
+                .config(RestAssured.config().encoderConfig(EncoderConfig.encoderConfig()
+                        .encodeContentTypeAs("application/x-amz-json-1.1", ContentType.TEXT)))
+                .header("Authorization", ACM_AUTH)
+                .header("X-Amz-Target", "CertificateManager.RequestCertificate")
+                .body("{\"DomainName\":\"auth-action.example.test\",\"ValidationMethod\":\"DNS\"}")
+                .when().post("/").then().statusCode(200).extract().path("CertificateArn");
         lbArn = XmlPath.from(xml(given()
                 .formParam("Action", "CreateLoadBalancer")
                 .formParam("Name", "auth-action-lb")
@@ -68,6 +84,7 @@ class ElbV2AuthenticateActionIntegrationTest {
                 .formParam("Action", "CreateListener")
                 .formParam("LoadBalancerArn", lbArn)
                 .formParam("Protocol", "HTTPS")
+                .formParam("Certificates.member.1.CertificateArn", certificateArn)
                 .formParam("Port", "443")
                 .formParam("DefaultActions.member.1.Type", "authenticate-oidc")
                 .formParam("DefaultActions.member.1.Order", "1")
@@ -80,8 +97,6 @@ class ElbV2AuthenticateActionIntegrationTest {
                 .formParam(base + "OnUnauthenticatedRequest", "authenticate")
                 .formParam(base + "AuthenticationRequestExtraParams.entry.1.key", "prompt")
                 .formParam(base + "AuthenticationRequestExtraParams.entry.1.value", "login")
-                .formParam(base + "AuthenticationRequestExtraParams.member.1.key", "display")
-                .formParam(base + "AuthenticationRequestExtraParams.member.1.value", "page")
                 .formParam("DefaultActions.member.2.Type", "forward")
                 .formParam("DefaultActions.member.2.Order", "2")
                 .formParam("DefaultActions.member.2.TargetGroupArn", tgArn)))
@@ -104,13 +119,9 @@ class ElbV2AuthenticateActionIntegrationTest {
         assertEquals("client-abc", described.getString(action + "ClientId"));
         assertEquals("authenticate", described.getString(action + "OnUnauthenticatedRequest"));
         assertEquals("prompt",
-                described.getString(action + "AuthenticationRequestExtraParams.entry[0].key"));
+                described.getString(action + "AuthenticationRequestExtraParams.entry.key"));
         assertEquals("login",
-                described.getString(action + "AuthenticationRequestExtraParams.entry[0].value"));
-        assertEquals("display",
-                described.getString(action + "AuthenticationRequestExtraParams.entry[1].key"));
-        assertEquals("page",
-                described.getString(action + "AuthenticationRequestExtraParams.entry[1].value"));
+                described.getString(action + "AuthenticationRequestExtraParams.entry.value"));
 
         // The model documents all three defaults, and AWS reports the resolved value.
         assertEquals("AWSELBAuthSessionCookie", described.getString(action + "SessionCookieName"));
@@ -172,6 +183,7 @@ class ElbV2AuthenticateActionIntegrationTest {
                 .formParam("Action", "CreateListener")
                 .formParam("LoadBalancerArn", lbArn)
                 .formParam("Protocol", "HTTPS")
+                .formParam("Certificates.member.1.CertificateArn", certificateArn)
                 .formParam("Port", "9443")
                 .formParam("DefaultActions.member.1.Type", "authenticate-oidc")
                 .formParam(base + "Issuer", "https://idp.example.com")
@@ -258,6 +270,7 @@ class ElbV2AuthenticateActionIntegrationTest {
                 .formParam("Action", "CreateListener")
                 .formParam("LoadBalancerArn", lbArn)
                 .formParam("Protocol", "HTTPS")
+                .formParam("Certificates.member.1.CertificateArn", certificateArn)
                 .formParam("Port", "8443")
                 .formParam("DefaultActions.member.1.Type", "authenticate-oidc")
                 .formParam("DefaultActions.member.1.AuthenticateOidcConfig.Issuer",
@@ -267,4 +280,34 @@ class ElbV2AuthenticateActionIntegrationTest {
             .then().statusCode(400)
                 .body("ErrorResponse.Error.Code", equalTo("ValidationError"));
     }
+
+    @Test
+    @Order(8)
+    void cleanupAuthenticatedListenerFixture() {
+        assertAll("Delete the authenticated listener before its certificate",
+                () -> {
+                    if (lbArn != null) {
+                        given().header("Authorization", AUTH).formParam("Action", "DeleteLoadBalancer")
+                                .formParam("LoadBalancerArn", lbArn).when().post("/").then().statusCode(200);
+                    }
+                },
+                () -> {
+                    if (tgArn != null) {
+                        given().header("Authorization", AUTH).formParam("Action", "DeleteTargetGroup")
+                                .formParam("TargetGroupArn", tgArn).when().post("/").then().statusCode(200);
+                    }
+                },
+                () -> {
+                    if (certificateArn != null) {
+                        given().contentType("application/x-amz-json-1.1")
+                                .config(RestAssured.config().encoderConfig(EncoderConfig.encoderConfig()
+                                        .encodeContentTypeAs("application/x-amz-json-1.1", ContentType.TEXT)))
+                                .header("Authorization", ACM_AUTH)
+                                .header("X-Amz-Target", "CertificateManager.DeleteCertificate")
+                                .body("{\"CertificateArn\":\"" + certificateArn + "\"}")
+                                .when().post("/").then().statusCode(200);
+                    }
+                });
+    }
+
 }

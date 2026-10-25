@@ -126,6 +126,10 @@ class Ec2VolumeThroughputAndIamProfileIntegrationTest {
     @Test
     @Order(20)
     void instanceWithIamProfileExposesItInDescribeAndAssociations() {
+        String profileId = given().header("Authorization", AUTH_HEADER.replace("/ec2/", "/iam/"))
+                .formParam("Action", "CreateInstanceProfile").formParam("InstanceProfileName", "my-profile")
+                .post("/").then().statusCode(200)
+                .extract().path("CreateInstanceProfileResponse.CreateInstanceProfileResult.InstanceProfile.InstanceProfileId");
         String instanceId = given()
                 .header("Authorization", AUTH_HEADER)
                 .formParam("Action", "RunInstances")
@@ -153,7 +157,7 @@ class Ec2VolumeThroughputAndIamProfileIntegrationTest {
                 .body("DescribeInstancesResponse.reservationSet.item.instancesSet.item.iamInstanceProfile.arn",
                         equalTo("arn:aws:iam::000000000000:instance-profile/my-profile"))
                 .body("DescribeInstancesResponse.reservationSet.item.instancesSet.item.iamInstanceProfile.id",
-                        startsWith("AIPA"));
+                        equalTo(profileId));
 
         // DescribeIamInstanceProfileAssociations must resolve the association.
         given()

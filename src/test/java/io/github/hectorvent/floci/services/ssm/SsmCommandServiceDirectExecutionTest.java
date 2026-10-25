@@ -5,14 +5,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
-import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ssm.model.Command;
 import io.github.hectorvent.floci.services.ssm.model.CommandInvocation;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -23,7 +25,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -40,6 +44,12 @@ class SsmCommandServiceDirectExecutionTest {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final RegionResolver regionResolver = mock(RegionResolver.class);
+
+    @BeforeEach
+    void requestRegion() {
+        when(regionResolver.getRegion()).thenReturn("us-west-2");
+    }
+
 
     @Test
     void agentRegistrationChecksEc2BackingOnFirstRegistrationOnly() throws Exception {
@@ -72,8 +82,8 @@ class SsmCommandServiceDirectExecutionTest {
         SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
         Instant start = Instant.parse("2026-06-07T00:00:00Z");
         Instant end = Instant.parse("2026-06-07T00:00:01Z");
-        when(executor.supports(eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
-        when(executor.executeIfSupported(eq("i-container"), eq("AWS-RunShellScript"), any(), eq(60)))
+        when(executor.supports(any(), eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
+        when(executor.executeIfSupported(any(), eq("i-container"), eq("AWS-RunShellScript"), any(), eq(3600)))
                 .thenReturn(Optional.of(new SsmDirectCommandExecutor.ExecutionResult(
                         "Success", "hello\n", "", 0, start, end)));
 
@@ -111,7 +121,7 @@ class SsmCommandServiceDirectExecutionTest {
     @Test
     void unsupportedDirectExecutionFallsBackToAgentQueue() throws Exception {
         SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
-        when(executor.supports(eq("i-agent"), eq("AWS-RunShellScript"))).thenReturn(false);
+        when(executor.supports(any(), eq("i-agent"), eq("AWS-RunShellScript"))).thenReturn(false);
 
         SsmCommandService service = new SsmCommandService(
                 new InMemoryStorageFactory(),
@@ -140,7 +150,7 @@ class SsmCommandServiceDirectExecutionTest {
     @Test
     void unavailableInstanceFailsQueuedCommandInvocation() throws Exception {
         SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
-        when(executor.supports(eq("i-stale"), eq("AWS-RunShellScript"))).thenReturn(false);
+        when(executor.supports(any(), eq("i-stale"), eq("AWS-RunShellScript"))).thenReturn(false);
 
         SsmCommandService service = new SsmCommandService(
                 new InMemoryStorageFactory(),
@@ -172,7 +182,7 @@ class SsmCommandServiceDirectExecutionTest {
     @Test
     void unavailableInstancesFailQueuedCommandInvocationsInBulk() throws Exception {
         SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
-        when(executor.supports(any(), eq("AWS-RunShellScript"))).thenReturn(false);
+        when(executor.supports(any(), any(), eq("AWS-RunShellScript"))).thenReturn(false);
 
         SsmCommandService service = new SsmCommandService(
                 new InMemoryStorageFactory(),
@@ -207,8 +217,8 @@ class SsmCommandServiceDirectExecutionTest {
         SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
         Instant start = Instant.parse("2026-06-07T00:00:00Z");
         Instant end = Instant.parse("2026-06-07T00:00:30Z");
-        when(executor.supports(eq("i-timeout"), eq("AWS-RunShellScript"))).thenReturn(true);
-        when(executor.executeIfSupported(eq("i-timeout"), eq("AWS-RunShellScript"), any(), eq(30)))
+        when(executor.supports(any(), eq("i-timeout"), eq("AWS-RunShellScript"))).thenReturn(true);
+        when(executor.executeIfSupported(any(), eq("i-timeout"), eq("AWS-RunShellScript"), any(), eq(30)))
                 .thenReturn(Optional.of(new SsmDirectCommandExecutor.ExecutionResult(
                         "TimedOut", "", "Timed out after 30s", -1, start, end)));
 
@@ -223,7 +233,8 @@ class SsmCommandServiceDirectExecutionTest {
                   "InstanceIds": ["i-timeout"],
                   "DocumentName": "AWS-RunShellScript",
                   "Parameters": {
-                    "commands": ["sleep 100"]
+                    "commands": ["sleep 100"],
+                    "executionTimeout": ["30"]
                   },
                   "TimeoutSeconds": 30
                 }
@@ -259,8 +270,8 @@ class SsmCommandServiceDirectExecutionTest {
         SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
         Instant start = Instant.parse("2026-06-07T00:00:00Z");
         Instant end = Instant.parse("2026-06-07T00:00:01Z");
-        when(executor.supports(eq("i-race"), eq("AWS-RunShellScript"))).thenReturn(true);
-        when(executor.executeIfSupported(eq("i-race"), eq("AWS-RunShellScript"), any(), eq(60)))
+        when(executor.supports(any(), eq("i-race"), eq("AWS-RunShellScript"))).thenReturn(true);
+        when(executor.executeIfSupported(any(), eq("i-race"), eq("AWS-RunShellScript"), any(), eq(3600)))
                 .thenReturn(Optional.of(new SsmDirectCommandExecutor.ExecutionResult(
                         "Success", "done\n", "", 0, start, end)));
 
@@ -335,8 +346,8 @@ class SsmCommandServiceDirectExecutionTest {
         SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
         Instant start = Instant.parse("2026-06-07T00:00:00Z");
         Instant end = Instant.parse("2026-06-07T00:00:01Z");
-        when(executor.supports(eq("i-race"), eq("AWS-RunShellScript"))).thenReturn(true);
-        when(executor.executeIfSupported(eq("i-race"), eq("AWS-RunShellScript"), any(), eq(60)))
+        when(executor.supports(any(), eq("i-race"), eq("AWS-RunShellScript"))).thenReturn(true);
+        when(executor.executeIfSupported(any(), eq("i-race"), eq("AWS-RunShellScript"), any(), eq(3600)))
                 .thenReturn(Optional.of(new SsmDirectCommandExecutor.ExecutionResult(
                         "Success", "done\n", "", 0, start, end)));
 
@@ -356,7 +367,7 @@ class SsmCommandServiceDirectExecutionTest {
 
         SsmCommandService commandService = new SsmCommandService(
                 new SingleCommandStoreFactory(commandStore), objectMapper, regionResolver, executor);
-        SsmJsonHandler jsonHandler = new SsmJsonHandler(mock(SsmService.class), commandService, objectMapper);
+        SsmJsonHandler jsonHandler = new SsmJsonHandler(mock(SsmService.class), commandService, objectMapper, null);
 
         Command command = commandService.sendCommand(objectMapper.readTree("""
                 {
@@ -374,7 +385,7 @@ class SsmCommandServiceDirectExecutionTest {
         ObjectNode listRequest = objectMapper.createObjectNode().put("CommandId", command.getCommandId());
         AtomicBoolean listReturned = new AtomicBoolean(false);
         Thread listThread = new Thread(() -> {
-            jsonHandler.handle("ListCommands", listRequest, "us-west-2");
+            jsonHandler.handle("ListCommands", listRequest, "us-west-2", null);
             listReturned.set(true);
         });
         listThread.start();
@@ -426,8 +437,8 @@ class SsmCommandServiceDirectExecutionTest {
             for (int i = 0; i < instanceCount; i++) {
                 String instanceId = "i-" + i;
                 instanceIds.add(instanceId);
-                when(executor.supports(eq(instanceId), eq("AWS-RunShellScript"))).thenReturn(true);
-                when(executor.executeIfSupported(eq(instanceId), eq("AWS-RunShellScript"), any(), eq(60)))
+                when(executor.supports(any(), eq(instanceId), eq("AWS-RunShellScript"))).thenReturn(true);
+                when(executor.executeIfSupported(any(), eq(instanceId), eq("AWS-RunShellScript"), any(), eq(3600)))
                         .thenAnswer(invocation -> {
                             barrier.await(5, TimeUnit.SECONDS);
                             return Optional.of(new SsmDirectCommandExecutor.ExecutionResult(
@@ -460,9 +471,9 @@ class SsmCommandServiceDirectExecutionTest {
         SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
         Instant start = Instant.parse("2026-06-07T00:00:00Z");
         Instant end = Instant.parse("2026-06-07T00:00:01Z");
-        when(executor.supports(eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
-        when(executor.supports(eq("i-agent"), eq("AWS-RunShellScript"))).thenReturn(false);
-        when(executor.executeIfSupported(eq("i-container"), eq("AWS-RunShellScript"), any(), eq(60)))
+        when(executor.supports(any(), eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
+        when(executor.supports(any(), eq("i-agent"), eq("AWS-RunShellScript"))).thenReturn(false);
+        when(executor.executeIfSupported(any(), eq("i-container"), eq("AWS-RunShellScript"), any(), eq(3600)))
                 .thenReturn(Optional.of(new SsmDirectCommandExecutor.ExecutionResult(
                         "Success", "done\n", "", 0, start, end)));
 
@@ -485,10 +496,10 @@ class SsmCommandServiceDirectExecutionTest {
 
         assertEquals("InProgress", command.getStatus());
         assertEquals("In Progress", command.getStatusDetails());
-        waitForInvocationStatus(service, command.getCommandId(), "i-container", "us-west-2", "Success");
-        Command updatedCommand = service.listCommands(command.getCommandId(), null, "us-west-2").getFirst();
-        assertEquals(1, updatedCommand.getCompletedCount());
-        assertEquals(0, command.getErrorCount());
+        // The invocation turns Success before the command rollup runs, so wait on the rollup itself.
+        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> assertEquals(1,
+                service.listCommands(command.getCommandId(), null, "us-west-2").getFirst().getCompletedCount()));
+        assertEquals(0, service.listCommands(command.getCommandId(), null, "us-west-2").getFirst().getErrorCount());
         assertEquals("Success",
                 service.getCommandInvocation(command.getCommandId(), "i-container", "us-west-2").getStatus());
         assertEquals("Pending",
@@ -503,8 +514,8 @@ class SsmCommandServiceDirectExecutionTest {
         CountDownLatch release = new CountDownLatch(1);
         Instant start = Instant.parse("2026-06-07T00:00:00Z");
         Instant end = Instant.parse("2026-06-07T00:00:01Z");
-        when(executor.supports(eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
-        when(executor.executeIfSupported(eq("i-container"), eq("AWS-RunShellScript"), any(), eq(60)))
+        when(executor.supports(any(), eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
+        when(executor.executeIfSupported(any(), eq("i-container"), eq("AWS-RunShellScript"), any(), eq(3600)))
                 .thenAnswer(invocation -> {
                     started.countDown();
                     assertTrue(release.await(5, TimeUnit.SECONDS));
@@ -543,8 +554,8 @@ class SsmCommandServiceDirectExecutionTest {
     @Test
     void directExecutionThatBecomesUnsupportedFallsBackToAgentQueue() throws Exception {
         SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
-        when(executor.supports(eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
-        when(executor.executeIfSupported(eq("i-container"), eq("AWS-RunShellScript"), any(), eq(60)))
+        when(executor.supports(any(), eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
+        when(executor.executeIfSupported(any(), eq("i-container"), eq("AWS-RunShellScript"), any(), eq(3600)))
                 .thenReturn(Optional.empty());
 
         SsmCommandService service = new SsmCommandService(
@@ -576,8 +587,8 @@ class SsmCommandServiceDirectExecutionTest {
         SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
         String stdout = "o".repeat(24_010) + "tail";
         String stderr = "e".repeat(8_010) + "tail";
-        when(executor.supports(eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
-        when(executor.executeIfSupported(eq("i-container"), eq("AWS-RunShellScript"), any(), eq(60)))
+        when(executor.supports(any(), eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
+        when(executor.executeIfSupported(any(), eq("i-container"), eq("AWS-RunShellScript"), any(), eq(3600)))
                 .thenReturn(Optional.of(new SsmDirectCommandExecutor.ExecutionResult(
                         "Failed", stdout, stderr, 1, Instant.parse("2026-06-07T00:00:00Z"), Instant.parse("2026-06-07T00:00:01Z"))));
 
@@ -606,35 +617,145 @@ class SsmCommandServiceDirectExecutionTest {
         assertEquals("e".repeat(8_000), invocation.getStandardErrorContent());
     }
 
-    private static String waitForCommandStatus(SsmCommandService service, String commandId, String region) throws InterruptedException {
-        for (int i = 0; i < 50; i++) {
-            Command command = service.listCommands(commandId, null, region).getFirst();
-            if (!"InProgress".equals(command.getStatus())) {
-                return command.getStatus();
+    @Test
+    void everyDirectExecutionTargetStartsAtOnceOnAVirtualThread() throws Exception {
+        int instanceCount = Runtime.getRuntime().availableProcessors() * 4 + 16;
+        SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
+        Instant start = Instant.parse("2026-06-07T00:00:00Z");
+        Instant end = Instant.parse("2026-06-07T00:00:01Z");
+        CountDownLatch allStarted = new CountDownLatch(instanceCount);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicBoolean ranOnPlatformThread = new AtomicBoolean();
+        when(executor.supports(any(), any(), eq("AWS-RunShellScript"))).thenReturn(true);
+        when(executor.executeIfSupported(any(), any(), eq("AWS-RunShellScript"), any(), eq(3600)))
+                .thenAnswer(invocation -> {
+                    if (!Thread.currentThread().isVirtual()) {
+                        ranOnPlatformThread.set(true);
+                    }
+                    allStarted.countDown();
+                    assertTrue(release.await(30, TimeUnit.SECONDS), "test did not release executions in time");
+                    return Optional.of(new SsmDirectCommandExecutor.ExecutionResult(
+                            "Success", "done\n", "", 0, start, end));
+                });
+
+        SsmCommandService service = new SsmCommandService(
+                new InMemoryStorageFactory(), objectMapper, regionResolver, executor);
+
+        // SendCommand takes at most 50 InstanceIds, so the burst is split across several commands.
+        List<Command> commands = new ArrayList<>();
+        for (int first = 0; first < instanceCount; first += 50) {
+            ObjectNode request = objectMapper.createObjectNode();
+            ArrayNode instanceIdsNode = request.putArray("InstanceIds");
+            for (int i = first; i < Math.min(first + 50, instanceCount); i++) {
+                instanceIdsNode.add("i-burst-" + i);
             }
-            TimeUnit.MILLISECONDS.sleep(20);
+            request.put("DocumentName", "AWS-RunShellScript");
+            request.putObject("Parameters").putArray("commands").add("sleep 60");
+            request.put("TimeoutSeconds", 60);
+            commands.add(service.sendCommand(request, "us-west-2"));
         }
-        return service.listCommands(commandId, null, region).getFirst().getStatus();
+
+        try {
+            assertTrue(allStarted.await(10, TimeUnit.SECONDS), (instanceCount - allStarted.getCount())
+                    + " of " + instanceCount + " targets started while every earlier target was still running");
+            assertFalse(ranOnPlatformThread.get(), "a direct execution held a platform thread");
+        } finally {
+            release.countDown();
+        }
+        for (Command command : commands) {
+            assertEquals("Success", waitForCommandStatus(service, command.getCommandId(), "us-west-2"));
+        }
     }
 
-    private static void waitForInvocationStatus(SsmCommandService service, String commandId, String instanceId, String region, String status) throws InterruptedException {
-        for (int i = 0; i < 50; i++) {
-            if (status.equals(service.getCommandInvocation(commandId, instanceId, region).getStatus())) {
-                return;
-            }
-            TimeUnit.MILLISECONDS.sleep(20);
-        }
+    @Test
+    void invocationFailedDuringDirectExecutionStaysFailedWhenExecutionFallsBackToAgentQueue() throws Exception {
+        SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
+        CountDownLatch executing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Thread> executionThread = new AtomicReference<>();
+        when(executor.supports(any(), eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
+        when(executor.executeIfSupported(any(), eq("i-container"), eq("AWS-RunShellScript"), any(), eq(3600)))
+                .thenAnswer(invocation -> {
+                    executionThread.set(Thread.currentThread());
+                    executing.countDown();
+                    assertTrue(release.await(10, TimeUnit.SECONDS), "test did not release execution in time");
+                    return Optional.empty();
+                });
+
+        SsmCommandService service = new SsmCommandService(
+                new InMemoryStorageFactory(), objectMapper, regionResolver, executor);
+
+        Command command = service.sendCommand(objectMapper.readTree("""
+                {
+                  "InstanceIds": ["i-container"],
+                  "DocumentName": "AWS-RunShellScript",
+                  "Parameters": {
+                    "commands": ["echo hello"]
+                  },
+                  "TimeoutSeconds": 60
+                }
+                """), "us-west-2");
+
+        assertTrue(executing.await(10, TimeUnit.SECONDS), "direct execution did not start");
+        assertEquals(1, service.failActiveInvocationsForInstance("us-west-2", "i-container", "Undeliverable"));
+        release.countDown();
+        assertTrue(executionThread.get().join(Duration.ofSeconds(10)), "direct execution did not finish");
+
+        CommandInvocation invocation = service.getCommandInvocation(command.getCommandId(), "i-container", "us-west-2");
+        assertEquals("Failed", invocation.getStatus());
+        assertTrue(service.getMessages("i-container", "request-id", 30).isEmpty());
     }
 
-    private static int waitForMessageCount(SsmCommandService service, String instanceId) throws InterruptedException {
-        for (int i = 0; i < 50; i++) {
-            int messageCount = service.getMessages(instanceId, "request-id", 30).size();
-            if (messageCount > 0) {
-                return messageCount;
-            }
-            TimeUnit.MILLISECONDS.sleep(20);
-        }
-        return 0;
+    @Test
+    void invocationCancelledDuringDirectExecutionStaysCancelledWhenExecutionFinishes() throws Exception {
+        SsmDirectCommandExecutor executor = mock(SsmDirectCommandExecutor.class);
+        CountDownLatch executing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Thread> executionThread = new AtomicReference<>();
+        Instant start = Instant.parse("2026-06-07T00:00:00Z");
+        Instant end = Instant.parse("2026-06-07T00:00:01Z");
+        when(executor.supports(any(), eq("i-container"), eq("AWS-RunShellScript"))).thenReturn(true);
+        when(executor.executeIfSupported(any(), eq("i-container"), eq("AWS-RunShellScript"), any(), eq(3600)))
+                .thenAnswer(invocation -> {
+                    executionThread.set(Thread.currentThread());
+                    executing.countDown();
+                    assertTrue(release.await(10, TimeUnit.SECONDS), "test did not release execution in time");
+                    return Optional.of(new SsmDirectCommandExecutor.ExecutionResult(
+                            "Success", "done\n", "", 0, start, end));
+                });
+
+        SsmCommandService service = new SsmCommandService(
+                new InMemoryStorageFactory(), objectMapper, regionResolver, executor);
+
+        Command command = service.sendCommand(objectMapper.readTree("""
+                {
+                  "InstanceIds": ["i-container"],
+                  "DocumentName": "AWS-RunShellScript",
+                  "Parameters": {
+                    "commands": ["sleep 60"]
+                  },
+                  "TimeoutSeconds": 60
+                }
+                """), "us-west-2");
+
+        assertTrue(executing.await(10, TimeUnit.SECONDS), "direct execution did not start");
+        service.cancelCommand(command.getCommandId(), null, "us-west-2");
+        release.countDown();
+        assertTrue(executionThread.get().join(Duration.ofSeconds(10)), "direct execution did not finish");
+
+        assertEquals("Cancelled",
+                service.getCommandInvocation(command.getCommandId(), "i-container", "us-west-2").getStatus());
+    }
+
+    private static String waitForCommandStatus(SsmCommandService service, String commandId, String region) {
+        return await().atMost(Duration.ofSeconds(5)).pollInterval(Duration.ofMillis(20))
+                .until(() -> service.listCommands(commandId, null, region).getFirst().getStatus(),
+                        status -> !"InProgress".equals(status));
+    }
+
+    private static int waitForMessageCount(SsmCommandService service, String instanceId) {
+        return await().atMost(Duration.ofSeconds(5)).pollInterval(Duration.ofMillis(20))
+                .until(() -> service.getMessages(instanceId, "request-id", 30).size(), count -> count > 0);
     }
 
     private static final class InMemoryStorageFactory extends StorageFactory {

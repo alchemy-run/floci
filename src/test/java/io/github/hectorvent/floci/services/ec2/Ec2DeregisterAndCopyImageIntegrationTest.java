@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.ec2;
 
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.XmlParser;
 import io.github.hectorvent.floci.services.ec2.model.BlockDeviceMapping;
 import io.github.hectorvent.floci.services.ec2.model.EbsBlockDevice;
 import io.github.hectorvent.floci.services.ec2.model.Image;
@@ -8,6 +9,7 @@ import io.github.hectorvent.floci.services.ec2.model.Instance;
 import io.github.hectorvent.floci.services.ec2.model.NetworkInterface;
 import io.github.hectorvent.floci.services.ec2.model.Tag;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.specification.RequestSpecification;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
@@ -61,7 +63,7 @@ class Ec2DeregisterAndCopyImageIntegrationTest {
             "AWS4-HMAC-SHA256 Credential=test/20260205/us-west-2/ec2/aws4_request";
 
     private String ec2(String auth, String action, String... formParams) {
-        var req = given().formParam("Action", action).header("Authorization", auth);
+        RequestSpecification req = given().formParam("Action", action).header("Authorization", auth);
         for (int i = 0; i < formParams.length; i += 2) {
             req = req.formParam(formParams[i], formParams[i + 1]);
         }
@@ -210,7 +212,7 @@ class Ec2DeregisterAndCopyImageIntegrationTest {
                 "x86_64", "/dev/xvda", List.of(mapping("/dev/xvda", "snap-" + hex())));
         String keptSnapshot = snapshotIdOf(kept);
         service.deregisterImage(EAST, kept.getImageId(), false);
-        assertEquals(1, service.describeSnapshots(EAST, List.of(keptSnapshot), null, null).size());
+        assertEquals(1, service.describeSnapshots(EAST, List.of(keptSnapshot), null, Map.of()).size());
 
         Image deleted = service.registerImage(EAST, uniqueName("floci-delete-snapshots"), null,
                 "x86_64", "/dev/xvda", List.of(mapping("/dev/xvda", "snap-" + hex())));
@@ -219,7 +221,19 @@ class Ec2DeregisterAndCopyImageIntegrationTest {
                 service.deregisterImage(EAST, deleted.getImageId(), true);
         assertEquals(List.of(new Ec2Service.SnapshotDeletion(deletedSnapshot, "success")), results);
         assertThrows(AwsException.class,
-                () -> service.describeSnapshots(EAST, List.of(deletedSnapshot), null, null));
+                () -> service.describeSnapshots(EAST, List.of(deletedSnapshot), null, Map.of()));
+    }
+
+    @Test
+    void aSnapshotDeletedWithItsImageTakesItsTags() {
+        Image image = service.registerImage(EAST, uniqueName("floci-tagged-snapshot"), null,
+                "x86_64", "/dev/xvda", List.of(mapping("/dev/xvda", "snap-" + hex())));
+        String snapshotId = snapshotIdOf(image);
+        service.createTags(EAST, List.of(snapshotId), List.of(new Tag("Team", "snapshots")));
+
+        service.deregisterImage(EAST, image.getImageId(), true);
+
+        assertTrue(service.describeTags(EAST, Map.of("resource-id", List.of(snapshotId))).isEmpty());
     }
 
     @Test
@@ -236,7 +250,7 @@ class Ec2DeregisterAndCopyImageIntegrationTest {
                 service.deregisterImage(EAST, first.getImageId(), true);
 
         assertEquals(List.of(new Ec2Service.SnapshotDeletion(snapshotId, "skipped")), results);
-        assertEquals(1, service.describeSnapshots(EAST, List.of(snapshotId), null, null).size());
+        assertEquals(1, service.describeSnapshots(EAST, List.of(snapshotId), null, Map.of()).size());
         assertTrue(service.describeImages(EAST, List.of(first.getImageId()), null).isEmpty(),
                 "the AMI is still deregistered even when its snapshot is kept");
     }
@@ -260,14 +274,18 @@ class Ec2DeregisterAndCopyImageIntegrationTest {
         assertNotEquals(sourceId, copyId);
         assertTrue(copyId.startsWith("ami-"));
 
+        // Compared by imageId rather than anywhere in the XML: the copy names its source in
+        // sourceImageId.
         String west = ec2(WEST_AUTH, "DescribeImages", "Owner.1", "self");
-        assertTrue(west.contains(copyId), "the copy must be visible in the destination region");
+        List<String> westIds = XmlParser.extractAll(west, "imageId");
+        assertTrue(westIds.contains(copyId), "the copy must be visible in the destination region");
         assertTrue(west.contains(copyName));
-        assertFalse(west.contains(sourceId), "the source AMI stays in its own region");
+        assertFalse(westIds.contains(sourceId), "the source AMI stays in its own region");
 
         String east = ec2(EAST_AUTH, "DescribeImages", "Owner.1", "self");
-        assertTrue(east.contains(sourceId));
-        assertFalse(east.contains(copyId), "the copy must not leak back into the source region");
+        List<String> eastIds = XmlParser.extractAll(east, "imageId");
+        assertTrue(eastIds.contains(sourceId));
+        assertFalse(eastIds.contains(copyId), "the copy must not leak back into the source region");
     }
 
     @Test
@@ -299,8 +317,8 @@ class Ec2DeregisterAndCopyImageIntegrationTest {
                 uniqueName("floci-copy-snap-dst"), null);
 
         assertNotEquals(snapshotIdOf(source), snapshotIdOf(copy));
-        assertEquals(1, service.describeSnapshots(WEST, List.of(snapshotIdOf(copy)), null, null).size());
-        assertEquals(1, service.describeSnapshots(EAST, List.of(snapshotIdOf(source)), null, null).size());
+        assertEquals(1, service.describeSnapshots(WEST, List.of(snapshotIdOf(copy)), null, Map.of()).size());
+        assertEquals(1, service.describeSnapshots(EAST, List.of(snapshotIdOf(source)), null, Map.of()).size());
     }
 
     @Test

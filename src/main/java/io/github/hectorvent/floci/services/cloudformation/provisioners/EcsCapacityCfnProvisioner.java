@@ -20,7 +20,7 @@ import java.util.Set;
 /**
  * CloudFormation provisioning for ECS capacity: {@code AWS::ECS::CapacityProvider} and
  * {@code AWS::ECS::ClusterCapacityProviderAssociations}. Injects only {@link EcsService}, per the
- * per-service provisioner decomposition of {@code CloudFormationResourceProvisioner}.
+ * per-service provisioner decomposition of the former CloudFormation monolith.
  *
  * <p>CloudFormation spells these properties in PascalCase while {@code EcsService} stores the ECS
  * JSON API's camelCase shape (that is what {@code CreateCapacityProvider} puts there). The whole
@@ -47,6 +47,12 @@ public class EcsCapacityCfnProvisioner implements CfnResourceProvisioner {
     @Override
     public Set<String> resourceTypes() {
         return Set.of(CAPACITY_PROVIDER, ASSOCIATIONS);
+    }
+
+    /** A cluster's associations are named by the {@code Cluster} they are given, its name when given by name. */
+    @Override
+    public boolean takesParentPhysicalId(String resourceType) {
+        return ASSOCIATIONS.equals(resourceType);
     }
 
     @Override

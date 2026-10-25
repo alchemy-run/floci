@@ -3,8 +3,8 @@ package io.github.hectorvent.floci.services.ssm;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -14,6 +14,8 @@ import java.time.Instant;
 import java.util.Base64;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
@@ -43,6 +45,8 @@ class SsmSendCommandIntegrationTest {
     @BeforeEach
     void resetDirectExecution() {
         reset(directCommandExecutor);
+        when(directCommandExecutor.executeIfSupported(any(), anyString(), anyString(), any(), anyInt()))
+                .thenReturn(Optional.empty());
         when(directCommandExecutor.executeIfSupported(anyString(), anyString(), any(), anyInt()))
                 .thenReturn(Optional.empty());
     }
@@ -408,13 +412,14 @@ class SsmSendCommandIntegrationTest {
     void sendCommandDirectlyExecutesForContainerBackedInstance() {
         Instant start = Instant.parse("2026-06-07T00:00:00Z");
         Instant end = Instant.parse("2026-06-07T00:00:01Z");
-        when(directCommandExecutor.supports(eq("i-direct-container"), eq("AWS-RunShellScript")))
+        when(directCommandExecutor.supports(any(), eq("i-direct-container"), eq("AWS-RunShellScript")))
                 .thenReturn(true);
         when(directCommandExecutor.executeIfSupported(
+                any(),
                 eq("i-direct-container"),
                 eq("AWS-RunShellScript"),
                 any(),
-                eq(60)))
+                eq(3600)))
                 .thenReturn(Optional.of(new SsmDirectCommandExecutor.ExecutionResult(
                         "Success", "direct-output\n", "", 0, start, end)));
 
@@ -474,6 +479,61 @@ class SsmSendCommandIntegrationTest {
         .then()
             .statusCode(200)
             .body("Messages", empty());
+    }
+
+    // ── InstanceIds limit ──────────────────────────────────────────────────
+
+    @Test
+    @Order(13)
+    void sendCommandRejectsMoreThanFiftyInstanceIds() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.SendCommand")
+            .contentType(SSM_CT)
+            .body("""
+                {
+                    "InstanceIds": %s,
+                    "DocumentName": "AWS-RunShellScript",
+                    "Parameters": {
+                        "commands": ["echo hello"]
+                    }
+                }
+                """.formatted(instanceIdsJson(51)))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", containsString("at 'instanceIds' failed to satisfy constraint"))
+            .body("message", containsString("less than or equal to 50"));
+    }
+
+    @Test
+    @Order(14)
+    void sendCommandAcceptsFiftyInstanceIds() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.SendCommand")
+            .contentType(SSM_CT)
+            .body("""
+                {
+                    "InstanceIds": %s,
+                    "DocumentName": "AWS-RunShellScript",
+                    "Parameters": {
+                        "commands": ["echo hello"]
+                    }
+                }
+                """.formatted(instanceIdsJson(50)))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Command.TargetCount", equalTo(50))
+            .body("Command.InstanceIds", hasSize(50));
+    }
+
+    private static String instanceIdsJson(int count) {
+        return IntStream.range(0, count)
+                .mapToObj(i -> "\"i-limit-" + i + "\"")
+                .collect(Collectors.joining(",", "[", "]"));
     }
 
     private static String buildReplyPayload(String stdout, String status, int returnCode) {

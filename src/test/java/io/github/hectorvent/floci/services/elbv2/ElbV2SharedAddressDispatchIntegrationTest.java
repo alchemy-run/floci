@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.elbv2;
 
+import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
 import io.quarkus.test.junit.TestProfile;
@@ -135,6 +136,9 @@ class ElbV2SharedAddressDispatchIntegrationTest {
                 .formParam("Name", name)
                 .formParam("Type", "application")
                 .formParam("Scheme", "internet-facing")
+                // An Application Load Balancer takes two subnets in two Availability Zones.
+                .formParam("Subnets.member.1", Ec2Service.defaultSubnetId("us-east-1", "a"))
+                .formParam("Subnets.member.2", Ec2Service.defaultSubnetId("us-east-1", "b"))
                 .header("Authorization", AUTH)
             .when()
                 .post("/")

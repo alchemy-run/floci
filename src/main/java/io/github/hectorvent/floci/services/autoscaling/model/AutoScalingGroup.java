@@ -5,6 +5,8 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -32,7 +34,7 @@ public class AutoScalingGroup {
     private int healthCheckGracePeriod = 0;
     private List<AsgInstance> instances = new ArrayList<>();
     private List<String> terminationPolicies = new ArrayList<>();
-    private List<String> suspendedProcesses = new ArrayList<>();
+    private volatile SuspensionState suspensionState = new SuspensionState(List.of(), Map.of());
     // AttachTrafficSources (the modern elbv2/vpc-lattice ASG-to-load-balancer wiring API,
     // which aws_autoscaling_traffic_source_attachment uses instead of the older
     // AttachLoadBalancerTargetGroups) - identifier -> type ("elbv2", "elb", "vpc-lattice").
@@ -50,6 +52,13 @@ public class AutoScalingGroup {
     private Boolean capacityRebalance;
     private Integer maxInstanceLifetime;
     private Integer defaultInstanceWarmup;
+    private String serviceLinkedRoleArn;
+    private InstanceMaintenancePolicy instanceMaintenancePolicy;
+    private AvailabilityZoneDistribution availabilityZoneDistribution;
+    private CapacityReservationSpecification capacityReservationSpecification;
+    // Set only by EnableMetricsCollection/DisableMetricsCollection. 1Minute is the only granularity
+    // the model allows, so the metric names are all that needs storing.
+    private List<String> enabledMetrics = new ArrayList<>();
 
     public AutoScalingGroup() {}
 
@@ -110,8 +119,28 @@ public class AutoScalingGroup {
     public List<String> getTerminationPolicies() { return terminationPolicies; }
     public void setTerminationPolicies(List<String> v) { this.terminationPolicies = v; }
 
-    public List<String> getSuspendedProcesses() { return suspendedProcesses; }
-    public void setSuspendedProcesses(List<String> v) { this.suspendedProcesses = v; }
+    /** One immutable view keeps a process name attached to its recorded suspension interval. */
+    public record SuspensionState(List<String> processes, Map<String, Instant> times) {
+        public SuspensionState {
+            processes = processes == null ? List.of() : List.copyOf(processes);
+            times = times == null ? Map.of() : Collections.unmodifiableMap(new LinkedHashMap<>(times));
+        }
+    }
+
+    public List<String> getSuspendedProcesses() { return suspensionState.processes(); }
+    public void setSuspendedProcesses(List<String> v) {
+        suspensionState = new SuspensionState(v, suspensionState.times());
+    }
+
+    public Map<String, Instant> getSuspendedProcessTimes() { return suspensionState.times(); }
+    public void setSuspendedProcessTimes(Map<String, Instant> v) {
+        suspensionState = new SuspensionState(suspensionState.processes(), v);
+    }
+
+    public SuspensionState suspensionState() { return suspensionState; }
+    public void updateSuspensionState(List<String> processes, Map<String, Instant> times) {
+        suspensionState = new SuspensionState(processes, times);
+    }
 
     public Map<String, String> getTrafficSourceTypeByIdentifier() { return trafficSourceTypeByIdentifier; }
     public void setTrafficSourceTypeByIdentifier(Map<String, String> v) { this.trafficSourceTypeByIdentifier = v; }
@@ -142,4 +171,19 @@ public class AutoScalingGroup {
 
     public Integer getDefaultInstanceWarmup() { return defaultInstanceWarmup; }
     public void setDefaultInstanceWarmup(Integer v) { this.defaultInstanceWarmup = v; }
+
+    public String getServiceLinkedRoleArn() { return serviceLinkedRoleArn; }
+    public void setServiceLinkedRoleArn(String v) { this.serviceLinkedRoleArn = v; }
+
+    public InstanceMaintenancePolicy getInstanceMaintenancePolicy() { return instanceMaintenancePolicy; }
+    public void setInstanceMaintenancePolicy(InstanceMaintenancePolicy v) { this.instanceMaintenancePolicy = v; }
+
+    public AvailabilityZoneDistribution getAvailabilityZoneDistribution() { return availabilityZoneDistribution; }
+    public void setAvailabilityZoneDistribution(AvailabilityZoneDistribution v) { this.availabilityZoneDistribution = v; }
+
+    public CapacityReservationSpecification getCapacityReservationSpecification() { return capacityReservationSpecification; }
+    public void setCapacityReservationSpecification(CapacityReservationSpecification v) { this.capacityReservationSpecification = v; }
+
+    public List<String> getEnabledMetrics() { return enabledMetrics; }
+    public void setEnabledMetrics(List<String> v) { this.enabledMetrics = v != null ? new ArrayList<>(v) : new ArrayList<>(); }
 }

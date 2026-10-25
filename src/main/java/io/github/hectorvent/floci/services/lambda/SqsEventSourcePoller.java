@@ -2,11 +2,12 @@ package io.github.hectorvent.floci.services.lambda;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
-import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.services.lambda.model.EventSourceMapping;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
@@ -26,16 +27,18 @@ import java.util.HashSet;
 import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.function.LongSupplier;
 import java.util.stream.Collectors;
 
 /**
  * Polls SQS queues on behalf of Lambda Event Source Mappings.
  * Uses Vert.x periodic timers so polling is non-blocking.
- * Injects LambdaExecutorService + LambdaFunctionStore directly (not LambdaService)
+ * Injects LambdaExecutorService + LambdaTargetResolver directly (not LambdaService)
  * to avoid a circular CDI dependency.
  */
 @ApplicationScoped
@@ -49,7 +52,7 @@ public class SqsEventSourcePoller implements Resettable {
     private final Vertx vertx;
     private final SqsService sqsService;
     private final LambdaExecutorService executorService;
-    private final LambdaFunctionStore functionStore;
+    private final LambdaTargetResolver targetResolver;
     private final EsmStore esmStore;
     private final long pollIntervalMs;
     private final String baseUrl;
@@ -72,14 +75,14 @@ public class SqsEventSourcePoller implements Resettable {
     @Inject
     public SqsEventSourcePoller(Vertx vertx, SqsService sqsService,
                                 LambdaExecutorService executorService,
-                                LambdaFunctionStore functionStore,
+                                LambdaTargetResolver targetResolver,
                                 EsmStore esmStore, EmulatorConfig config,
                                 ObjectMapper objectMapper,
                                 PipesFilterMatcher filterMatcher) {
         this.vertx = vertx;
         this.sqsService = sqsService;
         this.executorService = executorService;
-        this.functionStore = functionStore;
+        this.targetResolver = targetResolver;
         this.esmStore = esmStore;
         this.pollIntervalMs = config.services().lambda().pollIntervalMs();
         this.baseUrl = config.effectiveBaseUrl();
@@ -152,21 +155,23 @@ public class SqsEventSourcePoller implements Resettable {
         }
     }
 
-    /** Package-private (not private) only so unit tests can drive a single poll directly. */
-    void pollAndInvoke(EventSourceMapping esm) {
+    /**
+     * Package-private (not private) only so unit tests can drive a single poll directly and wait
+     * for it to finish through the returned future.
+     */
+    Future<?> pollAndInvoke(EventSourceMapping esm) {
         // Skip this tick if a previous poll for this ESM is still in progress.
         // This prevents concurrent deliveries of the same message when the Lambda
         // cold-start / execution time exceeds the SQS visibility timeout.
         if (activePolls.putIfAbsent(esm.getUuid(), Boolean.TRUE) != null) {
-            return;
+            return CompletableFuture.completedFuture(null);
         }
-        pollExecutor.submit(() -> {
+        return pollExecutor.submit(() -> {
             try {
                 // Look up the function first so we can set an appropriate visibility
                 // timeout: fn.timeout + 30s keeps messages hidden while Lambda runs.
                 // Use account-scoped lookup since this runs outside request scope.
-                LambdaFunction fn = functionStore.getForAccount(esm.getAccountId(), esm.getRegion(), esm.getFunctionName())
-                        .orElse(null);
+                LambdaFunction fn = targetResolver.resolveMappingTarget(esm).orElse(null);
                 if (fn == null) {
                     LOG.warnv("ESM {0}: function {1} not found in region {2}, skipping",
                             esm.getUuid(), esm.getFunctionName(), esm.getRegion());
@@ -261,8 +266,10 @@ public class SqsEventSourcePoller implements Resettable {
                 LOG.infov("ESM {0}: invoking function {1}", esm.getUuid(), fn.getFunctionName());
                 InvokeResult result;
                 try {
-                    result = executorService.invoke(
-                            fn, eventJson.getBytes(), InvocationType.RequestResponse);
+                    String qualifier = LambdaTargetResolver.mappingQualifier(esm);
+                    result = qualifier == null
+                            ? executorService.invoke(fn, eventJson.getBytes(), InvocationType.RequestResponse)
+                            : executorService.invoke(fn, eventJson.getBytes(), InvocationType.RequestResponse, 0, qualifier);
                 } catch (AwsException e) {
                     if ("TooManyRequestsException".equals(e.getErrorCode())) {
                         LOG.infov("ESM {0}: function {1} throttled, messages will return to queue after visibility timeout",
@@ -373,7 +380,7 @@ public class SqsEventSourcePoller implements Resettable {
         }
         Set<String> receivedIds = received.stream().map(Message::getMessageId).collect(Collectors.toSet());
         try {
-            var failures = objectMapper.readTree(result.getPayload()).get("batchItemFailures");
+            JsonNode failures = objectMapper.readTree(result.getPayload()).get("batchItemFailures");
             if (failures == null || failures.isNull()) {
                 return Set.of();
             }
@@ -381,8 +388,8 @@ public class SqsEventSourcePoller implements Resettable {
                 return failWholeBatch(esm, receivedIds, "batchItemFailures is not an array");
             }
             Set<String> failedIds = new HashSet<>();
-            for (var item : failures) {
-                var id = item.get("itemIdentifier");
+            for (JsonNode item : failures) {
+                JsonNode id = item.get("itemIdentifier");
                 if (id == null || id.isNull() || id.asText().isEmpty()) {
                     return failWholeBatch(esm, receivedIds, "entry has a missing, null or empty itemIdentifier");
                 }
@@ -406,7 +413,7 @@ public class SqsEventSourcePoller implements Resettable {
 
     String buildSqsEvent(List<Message> messages, EventSourceMapping esm) {
         try {
-            var records = objectMapper.createArrayNode();
+            ArrayNode records = objectMapper.createArrayNode();
             for (Message msg : messages) {
                 records.add(buildSqsRecordNode(msg, esm));
             }

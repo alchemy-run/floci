@@ -1,8 +1,10 @@
 package io.github.hectorvent.floci.services.mwaa;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.TagHandler;
 import io.github.hectorvent.floci.core.common.docker.PortAllocator;
@@ -16,7 +18,6 @@ import io.github.hectorvent.floci.services.mwaa.model.UpdateEnvironmentRequest;
 import io.github.hectorvent.floci.services.mwaa.proxy.MwaaProxyManager;
 import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.s3.model.S3Object;
-import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -343,11 +344,6 @@ public class MwaaService implements TagHandler {
                 "WebServerHostname", hostnameFromUrl(environment.getWebserverUrl()));
     }
 
-    /** True when environments run without Airflow containers ({@code floci.services.mwaa.mock}). */
-    public boolean isMockMode() {
-        return config.services().mwaa().mock();
-    }
-
     boolean isValidCliToken(String environmentIdentity, String token) {
         Set<String> tokens = cliTokensByEnvironment.get(environmentIdentity);
         return tokens != null && tokens.contains(token);
@@ -422,7 +418,7 @@ public class MwaaService implements TagHandler {
     private static String generateToken() {
         byte[] buf = new byte[24];
         new SecureRandom().nextBytes(buf);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(buf);
+        return Base64Url.encode(buf);
     }
 
     @Override
@@ -720,7 +716,7 @@ public class MwaaService implements TagHandler {
         return region + "/" + name;
     }
 
-    static String environmentIdentity(Environment environment) {
+    String environmentIdentity(Environment environment) {
         return environmentAccount(environment) + "/" + environmentRegion(environment) + "/" + environment.getName();
     }
 
@@ -728,8 +724,12 @@ public class MwaaService implements TagHandler {
         return MwaaEnvironmentManager.environmentAccount(environment);
     }
 
-    private static String environmentRegion(Environment environment) {
-        return MwaaEnvironmentManager.environmentRegion(environment);
+    private String environmentRegion(Environment environment) {
+        return MwaaEnvironmentManager.environmentRegion(environment, regionResolver.getDefaultRegion());
     }
 
+    /** True when environments run without Airflow containers ({@code floci.services.mwaa.mock}). */
+    public boolean isMockMode() {
+        return config.services().mwaa().mock();
+    }
 }

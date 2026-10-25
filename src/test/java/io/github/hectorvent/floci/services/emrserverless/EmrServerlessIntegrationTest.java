@@ -1,25 +1,39 @@
 package io.github.hectorvent.floci.services.emrserverless;
 
+import io.github.hectorvent.floci.testing.EmrServerlessRequests;
+import io.github.hectorvent.floci.testing.MutableClock;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.config.JsonConfig;
+import io.restassured.config.RestAssuredConfig;
+import io.restassured.path.json.config.JsonPathConfig;
 import io.restassured.specification.RequestSpecification;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
-import static io.restassured.RestAssured.given;
+import java.math.BigDecimal;
+import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
+
 import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 public class EmrServerlessIntegrationTest {
 
-    private static final String JSON_CONTENT_TYPE = "application/json";
+    private static final RestAssuredConfig DECIMAL_NUMBERS = RestAssuredConfig.config()
+            .jsonConfig(JsonConfig.jsonConfig().numberReturnType(JsonPathConfig.NumberReturnType.BIG_DECIMAL));
     private static String applicationId;
+
+    @Inject
+    MutableClock clock;
 
     @BeforeAll
     static void configureRestAssured() {
@@ -27,9 +41,7 @@ public class EmrServerlessIntegrationTest {
     }
 
     private RequestSpecification givenReq() {
-        return given()
-            .header("Authorization", "AWS4-HMAC-SHA256 Credential=TEST/20260819/us-east-1/emr-serverless/aws4_request, SignedHeaders=host;x-amz-date, Signature=test")
-            .contentType(JSON_CONTENT_TYPE);
+        return EmrServerlessRequests.emrServerless("us-east-1");
     }
 
     @Test
@@ -79,31 +91,6 @@ public class EmrServerlessIntegrationTest {
     }
 
     @Test
-    void applicationTypesUseAwsResponseCasing() {
-        for (String type : new String[] {"SPARK", "HIVE"}) {
-            String expected = type.equals("SPARK") ? "Spark" : "Hive";
-            String id = givenReq().body("""
-                    {"name":"type-contract-%s","releaseLabel":"emr-7.5.0",
-                     "type":"%s","clientToken":"type-contract-%s"}
-                    """.formatted(type, type, type))
-                    .post("/applications").then().statusCode(200).extract().path("applicationId");
-            try {
-                givenReq().get("/applications/" + id).then().statusCode(200)
-                        .body("application.type", equalTo(expected));
-                givenReq().get("/applications").then().statusCode(200)
-                        .body("applications.find { it.id == '" + id + "' }.type", equalTo(expected));
-            } finally {
-                givenReq().delete("/applications/" + id).then().statusCode(200);
-            }
-        }
-        givenReq().body("""
-                {"name":"invalid-type","releaseLabel":"emr-7.5.0",
-                 "type":"INVALID","clientToken":"invalid-type-contract"}
-                """)
-                .post("/applications").then().statusCode(400);
-    }
-
-    @Test
     @Order(2)
     void createApplication() {
         applicationId = givenReq()
@@ -140,7 +127,7 @@ public class EmrServerlessIntegrationTest {
             .statusCode(200)
             .extract().path("applicationId");
             
-        assertEquals(applicationId, retryApplicationId, "Idempotent create should return the same application ID");
+        org.junit.jupiter.api.Assertions.assertEquals(applicationId, retryApplicationId, "Idempotent create should return the same application ID");
     }
 
     @Test
@@ -153,7 +140,8 @@ public class EmrServerlessIntegrationTest {
             .statusCode(200)
             .body("application.applicationId", equalTo(applicationId))
             .body("application.name", equalTo("my-test-app"))
-            .body("application.state", equalTo("CREATED"));
+            .body("application.state", equalTo("CREATED"))
+            .body("application", not(hasKey("clientToken")));
     }
 
     @Test
@@ -252,19 +240,17 @@ public class EmrServerlessIntegrationTest {
                     },
                     "interactiveConfiguration": {
                         "studioEnabled": true
-                    }
+                    },
+                    "runtimeConfiguration": [
+                        {"classification": "spark-defaults", "properties": {"spark.executor.memory": "4g"}}
+                    ]
                 }
                 """)
         .when()
             .patch("/applications/" + applicationId)
         .then()
             .statusCode(200)
-            .body("application.applicationId", equalTo(applicationId))
-            .body("application.arn", containsString("/applications/" + applicationId))
-            .body("application.releaseLabel", equalTo("emr-6.7.0"))
-            .body("application.initialCapacity.DRIVER.workerCount", equalTo(2))
-            .body("application.interactiveConfiguration.studioEnabled", equalTo(true))
-            .body("applicationId", nullValue());
+            .body("applicationId", equalTo(applicationId));
             
         // Verify releaseLabel and new configurations updated
         givenReq()
@@ -274,146 +260,9 @@ public class EmrServerlessIntegrationTest {
             .statusCode(200)
             .body("application.releaseLabel", equalTo("emr-6.7.0"))
             .body("application.monitoringConfiguration", notNullValue())
-            .body("application.interactiveConfiguration", notNullValue());
-    }
-
-    @Test
-    void executionListsUseAwsEnvelopesAndValidateTheApplication() {
-        String id = givenReq().body("""
-                {"name":"execution-lists","releaseLabel":"emr-7.5.0",
-                 "type":"SPARK","clientToken":"execution-lists"}
-                """).post("/applications").then().statusCode(200).extract().path("applicationId");
-        try {
-            for (String collection : new String[] {"jobruns", "sessions"}) {
-                String field = collection.equals("jobruns") ? "jobRuns" : "sessions";
-                String path = "/applications/" + id + "/" + collection;
-                givenReq().get(path).then().statusCode(200)
-                        .body(field, empty()).body("nextToken", nullValue());
-                for (String maxResults : new String[] {"0", "51", "invalid"}) {
-                    givenReq().queryParam("maxResults", maxResults).get(path).then().statusCode(400)
-                            .body("__type", equalTo("ValidationException"));
-                }
-                givenReq().queryParam("nextToken", "!").get(path).then().statusCode(400)
-                        .body("__type", equalTo("ValidationException"));
-                givenReq().get("/applications/0000000000000000/" + collection).then().statusCode(404)
-                        .body("__type", equalTo("ResourceNotFoundException"));
-            }
-        } finally {
-            givenReq().delete("/applications/" + id).then().statusCode(200);
-        }
-    }
-
-    @Test
-    void sessionPrerequisitesAndMissingExecutionRoleDoNotFabricateResources() {
-        String executionRequest = """
-                {"clientToken":"execution-probe",
-                 "executionRoleArn":"arn:aws:iam::000000000000:role/execution-probe",
-                 "jobDriver":{"sparkSubmit":{"entryPoint":"local:///example.py"}}}
-                """;
-        for (boolean sessionsEnabled : new boolean[] {false, true}) {
-            String id = givenReq().body("""
-                    {"name":"execution-probe-%s","releaseLabel":"emr-7.5.0",
-                     "type":"SPARK","clientToken":"execution-probe-%s",
-                     "tags":{"purpose":"envelope-regression"},
-                     "interactiveConfiguration":{"sessionEnabled":%s}}
-                    """.formatted(sessionsEnabled, sessionsEnabled, sessionsEnabled))
-                    .post("/applications").then().statusCode(200).extract().path("applicationId");
-            String path = "/applications/" + id;
-            try {
-                givenReq().get(path).then().statusCode(200)
-                        .body("application.interactiveConfiguration.sessionEnabled", equalTo(sessionsEnabled));
-                givenReq().body("""
-                        {"clientToken":"update-probe","autoStopConfiguration":{"enabled":true,"idleTimeoutMinutes":5}}
-                        """).patch(path).then().statusCode(200)
-                        .body("application.applicationId", equalTo(id))
-                        .body("application.tags.purpose", equalTo("envelope-regression"))
-                        .body("application.autoStopConfiguration.idleTimeoutMinutes", equalTo(5));
-                givenReq().body(executionRequest).post(path + "/sessions").then()
-                        .statusCode(sessionsEnabled ? 501 : 400)
-                        .body("__type", equalTo(sessionsEnabled
-                                ? "UnsupportedOperationException" : "ValidationException"));
-                givenReq().body("{}").post(path + "/sessions").then().statusCode(400)
-                        .body("__type", equalTo("ValidationException"));
-                givenReq().body(executionRequest).post(path + "/jobruns").then().statusCode(400)
-                        .body("__type", equalTo("ValidationException"))
-                        .body("message", containsString("execution role does not exist"));
-                givenReq().queryParam("resourceId", "00abcdefabcdef01")
-                        .queryParam("resourceType", "SPARK_DRIVER").get(path + "/dashboard").then()
-                        .statusCode(403).body("__type", equalTo("AccessDeniedException"))
-                        .body("message", matchesPattern("User: arn:aws:\\S+ is not authorized "
-                                + "to perform: emr-serverless:GetResourceDashboard"));
-                givenReq().queryParam("resourceType", "SPARK_DRIVER").get(path + "/dashboard").then()
-                        .statusCode(400).body("__type", equalTo("ValidationException"));
-                givenReq().get(path + "/jobruns").then().statusCode(200).body("jobRuns", empty());
-                givenReq().get(path + "/sessions").then().statusCode(200).body("sessions", empty());
-                givenReq().get(path).then().statusCode(200).body("application.state", equalTo("CREATED"));
-            } finally {
-                givenReq().delete(path).then().statusCode(200);
-            }
-        }
-        givenReq().body(executionRequest).post("/applications/0000000000000000/sessions").then()
-                .statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
-        givenReq().body(executionRequest).post("/applications/0000000000000000/jobruns").then()
-                .statusCode(404).body("__type", equalTo("ResourceNotFoundException"));
-        givenReq().queryParam("resourceId", "00abcdefabcdef01").queryParam("resourceType", "SPARK_DRIVER")
-                .get("/applications/0000000000000000/dashboard").then().statusCode(403)
-                .body("__type", equalTo("AccessDeniedException"));
-    }
-
-    @Test
-    void applicationsAndClientTokensAreIsolatedByAccountAndRegion() {
-        String request = """
-                {"name":"scope-regression","releaseLabel":"emr-7.5.0",
-                 "type":"SPARK","clientToken":"scope-regression"}
-                """;
-        String[][] scopes = {{"111111111111", "us-east-1"}, {"111111111111", "us-west-2"},
-                {"222222222222", "us-east-1"}};
-        String[] ids = new String[scopes.length];
-        try {
-            for (int i = 0; i < scopes.length; i++) {
-                ids[i] = givenScope(scopes[i][0], scopes[i][1]).body(request).post("/applications")
-                        .then().statusCode(200).extract().path("applicationId");
-                givenScope(scopes[i][0], scopes[i][1]).body(request).post("/applications")
-                        .then().statusCode(200).body("applicationId", equalTo(ids[i]));
-            }
-            for (int i = 0; i < scopes.length; i++) {
-                String account = scopes[i][0];
-                String region = scopes[i][1];
-                givenScope(account, region).get("/applications").then().statusCode(200)
-                        .body("applications.id", hasItem(ids[i]));
-                for (int j = 0; j < scopes.length; j++) {
-                    if (i == j) {
-                        continue;
-                    }
-                    assertNotEquals(ids[i], ids[j]);
-                    String path = "/applications/" + ids[j];
-                    givenScope(account, region).get("/applications").then().statusCode(200)
-                            .body("applications.id", not(hasItem(ids[j])));
-                    for (String suffix : new String[] {"", "/jobruns", "/sessions"}) {
-                        givenScope(account, region).get(path + suffix).then().statusCode(404)
-                                .body("__type", equalTo("ResourceNotFoundException"));
-                    }
-                    givenScope(account, region).body("{\"releaseLabel\":\"emr-7.6.0\"}")
-                            .patch(path).then().statusCode(404);
-                    givenScope(account, region).post(path + "/start").then().statusCode(404);
-                    givenScope(account, region).post(path + "/stop").then().statusCode(404);
-                    givenScope(account, region).delete(path).then().statusCode(404);
-                }
-            }
-        } finally {
-            for (int i = 0; i < scopes.length; i++) {
-                if (ids[i] != null) {
-                    givenScope(scopes[i][0], scopes[i][1]).delete("/applications/" + ids[i])
-                            .then().statusCode(200);
-                }
-            }
-        }
-    }
-
-    private RequestSpecification givenScope(String account, String region) {
-        return given().header("Authorization", "AWS4-HMAC-SHA256 Credential=" + account
-                        + "/20260922/" + region + "/emr-serverless/aws4_request, SignedHeaders=host;x-amz-date, Signature=test")
-                .contentType(JSON_CONTENT_TYPE);
+            .body("application.interactiveConfiguration", notNullValue())
+            .body("application.runtimeConfiguration[0].classification", equalTo("spark-defaults"))
+            .body("application.runtimeConfiguration[0].properties.'spark.executor.memory'", equalTo("4g"));
     }
 
     @Test
@@ -425,11 +274,158 @@ public class EmrServerlessIntegrationTest {
         .then()
             .statusCode(200);
 
-        // Verify it's gone
         givenReq()
         .when()
             .get("/applications/" + applicationId)
         .then()
-            .statusCode(404);
+            .statusCode(200)
+            .body("application.state", equalTo("TERMINATED"));
+
+        givenReq()
+        .when()
+            .get("/applications")
+        .then()
+            .statusCode(200)
+            .body("applications.find { it.id == '" + applicationId + "' }", nullValue());
+
+        givenReq()
+        .when()
+            .post("/applications/" + applicationId + "/start")
+        .then()
+            .statusCode(400);
+
+        givenReq()
+        .when()
+            .post("/applications/" + applicationId + "/stop")
+        .then()
+            .statusCode(400);
+
+        givenReq()
+        .when()
+            .get("/applications/" + applicationId)
+        .then()
+            .statusCode(200)
+            .body("application.state", equalTo("TERMINATED"));
+    }
+
+    @Test
+    @Order(9)
+    void applicationTimestampsAreEpochSecondsWithMilliseconds() {
+        // A Region of its own, so ListApplications holds this application and no other test's.
+        String region = "ap-southeast-4";
+        clock.advance(Duration.ofMillis(250));
+        BigDecimal before = BigDecimal.valueOf(clock.instant().toEpochMilli(), 3);
+        String id = EmrServerlessRequests.emrServerless(region)
+            .body("""
+                {"name": "stamped-app", "releaseLabel": "emr-6.6.0", "type": "SPARK", "clientToken": "%s"}
+                """.formatted(UUID.randomUUID()))
+        .when()
+            .post("/applications")
+        .then()
+            .statusCode(200)
+            .extract().path("applicationId");
+
+        BigDecimal createdAt = EmrServerlessRequests.emrServerless(region).config(DECIMAL_NUMBERS)
+        .when()
+            .get("/applications/" + id)
+        .then()
+            .statusCode(200)
+            .extract().path("application.createdAt");
+        BigDecimal updatedAt = EmrServerlessRequests.emrServerless(region).config(DECIMAL_NUMBERS)
+            .get("/applications/" + id)
+            .then().statusCode(200).extract().path("application.updatedAt");
+        BigDecimal listed = EmrServerlessRequests.emrServerless(region).config(DECIMAL_NUMBERS)
+            .get("/applications")
+            .then().statusCode(200).extract().path("applications[0].createdAt");
+
+        // The test clock moves a millisecond on every read, so the application was created a little later.
+        assertTrue(createdAt.compareTo(before) > 0 && createdAt.compareTo(before.add(BigDecimal.ONE)) < 0,
+                "createdAt " + createdAt + " is not just after " + before);
+        assertTrue(createdAt.stripTrailingZeros().scale() <= 3, "createdAt " + createdAt + " is finer than milliseconds");
+        assertEquals(0, createdAt.compareTo(updatedAt), "updatedAt " + updatedAt + " differs from createdAt " + createdAt);
+        assertEquals(0, createdAt.compareTo(listed), "ListApplications reports createdAt " + listed);
+    }
+
+    @Test
+    @Order(10)
+    void listApplicationsRefusesStatesThatDoNotExistAndPagesOutsideOneToFifty() {
+        givenReq()
+            .queryParam("states", "RUNNING")
+            .queryParam("maxResults", 51)
+        .when()
+            .get("/applications")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", equalTo("2 validation errors detected: "
+                    + "Value '51' at 'maxResults' failed to satisfy constraint: "
+                    + "Member must have value less than or equal to 50; "
+                    + "Value '[RUNNING]' at 'states' failed to satisfy constraint: Member must satisfy constraint: "
+                    + "[Member must satisfy enum value set: "
+                    + "[CREATING, CREATED, STARTING, STARTED, STOPPING, STOPPED, TERMINATED]]"));
+
+        givenReq()
+            .queryParam("states", List.of("CREATING", "CREATED", "STARTING", "STARTED", "STOPPING", "STOPPED",
+                    "TERMINATED", "CREATED"))
+        .when()
+            .get("/applications")
+        .then()
+            .statusCode(400)
+            .body("message", equalTo("1 validation error detected: "
+                    + "Value '[CREATING, CREATED, STARTING, STARTED, STOPPING, STOPPED, TERMINATED, CREATED]' "
+                    + "at 'states' failed to satisfy constraint: Member must have length less than or equal to 7"));
+    }
+
+    @Test
+    @Order(11)
+    void createApplicationKeepsEveryConfigurationItTakes() {
+        String id = givenReq()
+            .body("""
+                {
+                    "name": "configured-app",
+                    "releaseLabel": "emr-7.5.0",
+                    "type": "SPARK",
+                    "clientToken": "%s",
+                    "imageConfiguration": {
+                        "imageUri": "public.ecr.aws/emr-serverless/spark/emr-7.5.0:latest",
+                        "applicationLevelDigestResolution": true
+                    },
+                    "runtimeConfiguration": [
+                        {"classification": "spark-defaults", "properties": {"spark.driver.cores": "2"}}
+                    ],
+                    "monitoringConfiguration": {"s3MonitoringConfiguration": {"logUri": "s3://bucket/logs/"}},
+                    "schedulerConfiguration": {"queueTimeoutMinutes": 30, "maxConcurrentRuns": 5},
+                    "diskEncryptionConfiguration": {
+                        "encryptionKeyArn": "arn:aws:kms:us-east-1:000000000000:key/1234abcd-12ab-34cd-56ef-1234567890ab"
+                    },
+                    "interactiveConfiguration": {"studioEnabled": true, "livyEndpointEnabled": false},
+                    "identityCenterConfiguration": {
+                        "identityCenterInstanceArn": "arn:aws:sso:::instance/ssoins-1234567890abcdef"
+                    },
+                    "jobLevelCostAllocationConfiguration": {"enabled": true}
+                }
+                """.formatted(UUID.randomUUID()))
+        .when()
+            .post("/applications")
+        .then()
+            .statusCode(200)
+            .extract().path("applicationId");
+
+        givenReq()
+        .when()
+            .get("/applications/" + id)
+        .then()
+            .statusCode(200)
+            .body("application.imageConfiguration.applicationLevelDigestResolution", equalTo(true))
+            .body("application.runtimeConfiguration[0].classification", equalTo("spark-defaults"))
+            .body("application.runtimeConfiguration[0].properties.'spark.driver.cores'", equalTo("2"))
+            .body("application.monitoringConfiguration.s3MonitoringConfiguration.logUri", equalTo("s3://bucket/logs/"))
+            .body("application.schedulerConfiguration.maxConcurrentRuns", equalTo(5))
+            .body("application.diskEncryptionConfiguration.encryptionKeyArn",
+                    equalTo("arn:aws:kms:us-east-1:000000000000:key/1234abcd-12ab-34cd-56ef-1234567890ab"))
+            .body("application.interactiveConfiguration.studioEnabled", equalTo(true))
+            .body("application.identityCenterConfiguration.identityCenterInstanceArn",
+                    equalTo("arn:aws:sso:::instance/ssoins-1234567890abcdef"))
+            .body("application.jobLevelCostAllocationConfiguration.enabled", equalTo(true));
     }
 }

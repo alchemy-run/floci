@@ -6,6 +6,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
@@ -29,11 +30,17 @@ import io.github.hectorvent.floci.services.glue.model.LastCrawlInfo;
 import io.github.hectorvent.floci.services.glue.model.Partition;
 import io.github.hectorvent.floci.services.glue.model.PartitionIndex;
 import io.github.hectorvent.floci.services.glue.model.PartitionIndexDescriptor;
+import io.github.hectorvent.floci.services.glue.model.Predicate;
+import io.github.hectorvent.floci.services.glue.model.Schedule;
 import io.github.hectorvent.floci.services.glue.model.SchemaReference;
 import io.github.hectorvent.floci.services.glue.model.SecurityConfiguration;
 import io.github.hectorvent.floci.services.glue.model.StorageDescriptor;
 import io.github.hectorvent.floci.services.glue.model.Table;
+import io.github.hectorvent.floci.services.glue.model.Trigger;
+import io.github.hectorvent.floci.services.glue.model.TriggerAction;
+import io.github.hectorvent.floci.services.glue.model.TriggerCondition;
 import io.github.hectorvent.floci.services.glue.model.UserDefinedFunction;
+import io.github.hectorvent.floci.services.glue.model.Workflow;
 import io.github.hectorvent.floci.services.glue.schemaregistry.GlueSchemaRegistryService;
 import io.github.hectorvent.floci.services.glue.schemaregistry.SchemaToColumnsConverter;
 import io.github.hectorvent.floci.services.glue.schemaregistry.model.SchemaId;
@@ -81,6 +88,11 @@ public class GlueService {
     static final String COLUMN_TYPE = "ColumnType";
     static final String ANALYZED_TIME = "AnalyzedTime";
     static final String STATISTICS_DATA = "StatisticsData";
+    private static final Map<String, List<String>> NUMERIC_STATISTICS_FIELDS = Map.of(
+            "StringColumnStatisticsData",
+            List.of("MaximumLength", "AverageLength", "NumberOfNulls", "NumberOfDistinctValues"),
+            "BinaryColumnStatisticsData",
+            List.of("MaximumLength", "AverageLength", "NumberOfNulls"));
     private static final Pattern COMPARISON_EXPRESSION = Pattern.compile(
             "\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(=|<>|<=|>=|<|>)\\s*('?[^']*'?|[^\\s]+)\\s*",
             Pattern.CASE_INSENSITIVE);
@@ -130,7 +142,8 @@ public class GlueService {
             "ENDPOINT_TYPE", "ROLE_ARN", "REGION", "WORKGROUP_NAME", "CLUSTER_IDENTIFIER", "DATABASE");
     private static final String CONNECTION_STATUS_READY = "READY";
 
-    // Catalog stores are account- and region-scoped, so a fixed key addresses each singleton.
+    // The catalog holds one resource policy and one security configuration; both stores are
+    // account-scoped by StorageFactory, so a fixed key is the whole address.
     private static final String CATALOG_KEY = "catalog";
     private static final ObjectMapper POLICY_JSON = new ObjectMapper();
     private static final Set<String> POLICY_EXISTS_CONDITIONS = Set.of("MUST_EXIST", "NOT_EXIST", "NONE");
@@ -149,11 +162,22 @@ public class GlueService {
     // Glue's partition index states. FAILED also exists but is only reachable through a backfill
     // failure, which is not emulated.
     private static final String INDEX_STATUS_CREATING = "CREATING";
-    private static final String CRAWLER_READY = "READY";
-    private static final String CRAWLER_RUNNING = "RUNNING";
-    private static final String CRAWLER_STOPPING = "STOPPING";
     private static final String INDEX_STATUS_ACTIVE = "ACTIVE";
     private static final String INDEX_STATUS_DELETING = "DELETING";
+
+    private static final String SCHEDULE_SCHEDULED = "SCHEDULED";
+    private static final String SCHEDULE_NOT_SCHEDULED = "NOT_SCHEDULED";
+    private static final Pattern CRON_FIELD = Pattern.compile("[0-9A-Za-z*?/,#-]+");
+    private static final Set<String> TRIGGER_TYPES = Set.of("SCHEDULED", "CONDITIONAL", "ON_DEMAND", "EVENT");
+    // The job run and crawl states a trigger condition may name (JobRunState / CrawlState in the model
+    // allow more, but only final states are meaningful as conditions).
+    private static final Set<String> CONDITION_JOB_STATES = Set.of("SUCCEEDED", "STOPPED", "FAILED", "TIMEOUT");
+    private static final Set<String> CONDITION_CRAWL_STATES = Set.of("SUCCEEDED", "CANCELLED", "FAILED");
+    private static final int MAX_TRIGGERS_PAGE_SIZE = 200;
+    private static final int MAX_WORKFLOWS_PAGE_SIZE = 25;
+    private static final int MAX_BATCH_GET_WORKFLOWS = 25;
+    // BatchGetCrawlers takes a CrawlerNameList, which the API model caps at 100 names.
+    private static final int MAX_BATCH_GET_CRAWLERS = 100;
 
     private final StorageBackend<String, Database> databaseStore;
     private final StorageBackend<String, Table> tableStore;
@@ -164,71 +188,60 @@ public class GlueService {
     private final StorageBackend<String, Map<String, Object>> partitionColumnStatisticsStore;
     private final StorageBackend<String, UserDefinedFunction> functionStore;
     private final StorageBackend<String, Job> jobStore;
-    private final StorageBackend<String, JobRun> jobRunStore;
-    private final StorageBackend<String, Map<String, Object>> jobBookmarkStore;
     private final StorageBackend<String, Crawler> crawlerStore;
     private final StorageBackend<String, Classifier> classifierStore;
     private final StorageBackend<String, Connection> connectionStore;
     private final StorageBackend<String, GluePolicy> resourcePolicyStore;
     private final StorageBackend<String, DataCatalogEncryptionSettings> encryptionSettingsStore;
     private final StorageBackend<String, SecurityConfiguration> securityConfigurationStore;
-    private final StorageBackend<String, Map<String, String>> resourceTagStore;
+    private final StorageBackend<String, Trigger> triggerStore;
+    private final StorageBackend<String, Workflow> workflowStore;
     private final GlueSchemaRegistryService schemaRegistryService;
     private final RegionResolver regionResolver;
     private final ResourceGroupsTaggingService resourceGroupsTaggingService;
     private final KmsService kmsService;
-    private final GlueCrawlerRunner crawlerRunner;
-
-    public GlueService(StorageFactory storageFactory,
-                       GlueSchemaRegistryService schemaRegistryService,
-                       RegionResolver regionResolver,
-                       ResourceGroupsTaggingService resourceGroupsTaggingService,
-                       KmsService kmsService) {
-        this(storageFactory, schemaRegistryService, regionResolver, resourceGroupsTaggingService, kmsService, null);
-    }
 
     @Inject
     public GlueService(StorageFactory storageFactory,
                        GlueSchemaRegistryService schemaRegistryService,
                        RegionResolver regionResolver,
                        ResourceGroupsTaggingService resourceGroupsTaggingService,
-                       KmsService kmsService,
-                       GlueCrawlerRunner crawlerRunner) {
-        this.databaseStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "databases.json", new TypeReference<>() {}), regionResolver);
-        this.tableStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "tables.json", new TypeReference<>() {}), regionResolver);
-        this.tableVersionStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "table_versions.json", new TypeReference<>() {}), regionResolver);
-        this.columnStatisticsStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "column_statistics.json", new TypeReference<>() {}), regionResolver);
-        this.partitionStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "partitions.json", new TypeReference<>() {}), regionResolver);
-        this.partitionIndexStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "partition_indexes.json", new TypeReference<>() {}), regionResolver);
-        this.partitionColumnStatisticsStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "partition_column_statistics.json", new TypeReference<>() {}), regionResolver);
-        this.functionStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "functions.json", new TypeReference<>() {}), regionResolver);
+                       KmsService kmsService) {
+        this.databaseStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "databases.json", new TypeReference<>() {}), regionResolver);
+        this.tableStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "tables.json", new TypeReference<>() {}), regionResolver);
+        this.tableVersionStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "table_versions.json", new TypeReference<>() {}), regionResolver);
+        this.columnStatisticsStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "column_statistics.json", new TypeReference<>() {}), regionResolver);
+        this.partitionStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "partitions.json", new TypeReference<>() {}), regionResolver);
+        this.partitionIndexStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "partition_indexes.json", new TypeReference<>() {}), regionResolver);
+        this.partitionColumnStatisticsStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "partition_column_statistics.json", new TypeReference<>() {}), regionResolver);
+        this.functionStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "functions.json", new TypeReference<>() {}), regionResolver);
         this.jobStore = storageFactory.create("glue", "jobs.json", new TypeReference<>() {});
-        this.jobRunStore = storageFactory.create("glue", "job_runs.json", new TypeReference<>() {});
-        this.jobBookmarkStore = storageFactory.create("glue", "job_bookmarks.json", new TypeReference<>() {});
         this.crawlerStore = storageFactory.create("glue", "crawlers.json", new TypeReference<>() {});
         this.classifierStore = storageFactory.create("glue", "classifiers.json", new TypeReference<>() {});
-        this.connectionStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "connections.json", new TypeReference<>() {}), regionResolver);
-        this.resourcePolicyStore = new GlueCatalogStorage<>(
-                storageFactory.create("glue", "resource_policy.json", new TypeReference<>() {}), regionResolver);
+        this.connectionStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "connections.json", new TypeReference<>() {}), regionResolver);
+        this.resourcePolicyStore = new GlueCatalogStorage<>(storageFactory.create(
+                "glue", "resource_policy.json", new TypeReference<>() {}), regionResolver);
         this.encryptionSettingsStore = new GlueCatalogStorage<>(storageFactory.create(
                 "glue", "catalog_encryption_settings.json", new TypeReference<>() {}), regionResolver);
         this.securityConfigurationStore = storageFactory.create(
-                "glue", "security_configurations.json", new TypeReference<>() {});
-        this.resourceTagStore = storageFactory.create("glue", "resource_tags.json", new TypeReference<>() {});
+            "glue", "security_configurations.json", new TypeReference<>() {});
+        this.triggerStore = storageFactory.create("glue", "triggers.json", new TypeReference<>() {});
+        this.workflowStore = storageFactory.create("glue", "workflows.json", new TypeReference<>() {});
         this.schemaRegistryService = schemaRegistryService;
         this.regionResolver = regionResolver;
         this.resourceGroupsTaggingService = resourceGroupsTaggingService;
         this.kmsService = kmsService;
-        this.crawlerRunner = crawlerRunner;
+        this.jobBookmarkStore = storageFactory.create("glue", "job_bookmarks.json", new TypeReference<>() {});
+        this.resourceTagStore = storageFactory.create("glue", "resource_tags.json", new TypeReference<>() {});
     }
 
     GlueService(StorageBackend<String, Database> databaseStore,
@@ -246,60 +259,35 @@ public class GlueService {
                 StorageBackend<String, GluePolicy> resourcePolicyStore,
                 StorageBackend<String, DataCatalogEncryptionSettings> encryptionSettingsStore,
                 StorageBackend<String, SecurityConfiguration> securityConfigurationStore,
+                StorageBackend<String, Trigger> triggerStore,
+                StorageBackend<String, Workflow> workflowStore,
                 GlueSchemaRegistryService schemaRegistryService,
                 RegionResolver regionResolver,
                 ResourceGroupsTaggingService resourceGroupsTaggingService,
                 KmsService kmsService) {
-        this(databaseStore, tableStore, tableVersionStore, columnStatisticsStore, partitionStore,
-                partitionIndexStore, partitionColumnStatisticsStore, functionStore, jobStore, crawlerStore,
-                classifierStore, connectionStore, resourcePolicyStore, encryptionSettingsStore,
-                securityConfigurationStore, schemaRegistryService, regionResolver, resourceGroupsTaggingService,
-                kmsService, null);
-    }
-
-    GlueService(StorageBackend<String, Database> databaseStore,
-                StorageBackend<String, Table> tableStore,
-                StorageBackend<String, Table> tableVersionStore,
-                StorageBackend<String, Map<String, Object>> columnStatisticsStore,
-                StorageBackend<String, Partition> partitionStore,
-                StorageBackend<String, PartitionIndexDescriptor> partitionIndexStore,
-                StorageBackend<String, Map<String, Object>> partitionColumnStatisticsStore,
-                StorageBackend<String, UserDefinedFunction> functionStore,
-                StorageBackend<String, Job> jobStore,
-                StorageBackend<String, Crawler> crawlerStore,
-                StorageBackend<String, Classifier> classifierStore,
-                StorageBackend<String, Connection> connectionStore,
-                StorageBackend<String, GluePolicy> resourcePolicyStore,
-                StorageBackend<String, DataCatalogEncryptionSettings> encryptionSettingsStore,
-                StorageBackend<String, SecurityConfiguration> securityConfigurationStore,
-                GlueSchemaRegistryService schemaRegistryService,
-                RegionResolver regionResolver,
-                ResourceGroupsTaggingService resourceGroupsTaggingService,
-                KmsService kmsService,
-                GlueCrawlerRunner crawlerRunner) {
-        this.databaseStore = new GlueCatalogStorage<>(databaseStore, regionResolver);
-        this.tableStore = new GlueCatalogStorage<>(tableStore, regionResolver);
-        this.tableVersionStore = new GlueCatalogStorage<>(tableVersionStore, regionResolver);
-        this.columnStatisticsStore = new GlueCatalogStorage<>(columnStatisticsStore, regionResolver);
-        this.partitionStore = new GlueCatalogStorage<>(partitionStore, regionResolver);
-        this.partitionIndexStore = new GlueCatalogStorage<>(partitionIndexStore, regionResolver);
-        this.partitionColumnStatisticsStore = new GlueCatalogStorage<>(partitionColumnStatisticsStore, regionResolver);
-        this.functionStore = new GlueCatalogStorage<>(functionStore, regionResolver);
+        this.databaseStore = databaseStore;
+        this.tableStore = tableStore;
+        this.tableVersionStore = tableVersionStore;
+        this.columnStatisticsStore = columnStatisticsStore;
+        this.partitionStore = partitionStore;
+        this.partitionIndexStore = partitionIndexStore;
+        this.partitionColumnStatisticsStore = partitionColumnStatisticsStore;
+        this.functionStore = functionStore;
         this.jobStore = jobStore;
-        this.jobRunStore = new InMemoryStorage<>();
-        this.jobBookmarkStore = new InMemoryStorage<>();
         this.crawlerStore = crawlerStore;
         this.classifierStore = classifierStore;
-        this.connectionStore = new GlueCatalogStorage<>(connectionStore, regionResolver);
-        this.resourcePolicyStore = new GlueCatalogStorage<>(resourcePolicyStore, regionResolver);
-        this.encryptionSettingsStore = new GlueCatalogStorage<>(encryptionSettingsStore, regionResolver);
+        this.connectionStore = connectionStore;
+        this.resourcePolicyStore = resourcePolicyStore;
+        this.encryptionSettingsStore = encryptionSettingsStore;
         this.securityConfigurationStore = securityConfigurationStore;
-        this.resourceTagStore = new InMemoryStorage<>();
+        this.triggerStore = triggerStore;
+        this.workflowStore = workflowStore;
         this.schemaRegistryService = schemaRegistryService;
         this.regionResolver = regionResolver;
         this.resourceGroupsTaggingService = resourceGroupsTaggingService;
         this.kmsService = kmsService;
-        this.crawlerRunner = crawlerRunner;
+        this.jobBookmarkStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
+        this.resourceTagStore = new io.github.hectorvent.floci.core.storage.InMemoryStorage<>();
     }
 
     public SecurityConfiguration createSecurityConfiguration(String name, JsonNode encryptionConfiguration,
@@ -830,7 +818,7 @@ public class GlueService {
             Optional<Map<String, Object>> statistics =
                     columnStatisticsStore.get(columnStatisticsKey(table.getDatabaseName(), table.getName(), columnName));
             if (statistics.isPresent()) {
-                columnStatistics.add(new LinkedHashMap<>(statistics.get()));
+                columnStatistics.add(withNumericDefaults(statistics.get()));
             }
             else {
                 errors.add(new ColumnError(
@@ -1162,6 +1150,7 @@ public class GlueService {
         List<ColumnError> errors = new ArrayList<>();
         for (String columnName : columnNames) {
             partitionColumnStatisticsStore.get(partitionColumnStatisticsKey(databaseName, tableName, partitionValues, columnName))
+                    .map(GlueService::withNumericDefaults)
                     .ifPresentOrElse(columnStatistics::add, () -> errors.add(columnStatisticsNotFoundError(columnName)));
         }
         return new ColumnStatisticsResult(columnStatistics, errors);
@@ -1313,7 +1302,7 @@ public class GlueService {
     }
 
     private static String encodePartitionValue(String value) {
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(value.getBytes(StandardCharsets.UTF_8));
+        return Base64Url.encode(value);
     }
 
     private static String partitionColumnStatisticsKey(
@@ -1343,6 +1332,34 @@ public class GlueService {
         return stringValue;
     }
 
+    /**
+     * Glue reads back the numeric string and binary statistics a writer left out as 0, and clients such as Trino
+     * unbox them without a null check, so every statistic read back carries all of them, whatever the stored
+     * record holds.
+     */
+    private static Map<String, Object> withNumericDefaults(Map<String, Object> statistics) {
+        Map<String, Object> stored = new LinkedHashMap<>(statistics);
+        if (!(stored.get(STATISTICS_DATA) instanceof Map<?, ?> data)) {
+            return stored;
+        }
+        Map<String, Object> storedData = copyOf(data);
+        NUMERIC_STATISTICS_FIELDS.forEach((typeKey, fields) -> {
+            if (storedData.get(typeKey) instanceof Map<?, ?> typed) {
+                Map<String, Object> filled = copyOf(typed);
+                fields.forEach(field -> filled.putIfAbsent(field, 0));
+                storedData.put(typeKey, filled);
+            }
+        });
+        stored.put(STATISTICS_DATA, storedData);
+        return stored;
+    }
+
+    private static Map<String, Object> copyOf(Map<?, ?> source) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        source.forEach((key, value) -> copy.put(String.valueOf(key), value));
+        return copy;
+    }
+
     private static Object requireColumnStatisticsField(Map<String, Object> statistics, String field) {
         Object value = statistics.get(field);
         if (value == null) {
@@ -1350,232 +1367,6 @@ public class GlueService {
         }
         return value;
     }
-
-    // ---- Jobs / crawlers / connections -----------------------------------
-
-
-    public String startJobRun(String jobName, Map<String, String> arguments) {
-        getJob(jobName);
-        JobRun run = new JobRun();
-        run.setId("jr_" + UUID.randomUUID().toString().replace("-", ""));
-        run.setJobName(jobName);
-        run.setJobRunState("SUCCEEDED");
-        Instant now = Instant.now();
-        run.setStartedOn(now);
-        run.setCompletedOn(now);
-        run.setArguments(arguments);
-        jobRunStore.put(run.getId(), run);
-        jobBookmarkStore.put(jobName, defaultBookmark(jobName, run.getId()));
-        return run.getId();
-    }
-
-    public JobRun getJobRun(String jobName, String runId) {
-        JobRun run = jobRunStore.get(runId)
-                .orElseThrow(() -> new AwsException("EntityNotFoundException", "Job run not found: " + runId, 400));
-        if (!jobName.equals(run.getJobName())) {
-            throw new AwsException("EntityNotFoundException", "Job run not found: " + runId, 400);
-        }
-        return run;
-    }
-
-    public List<JobRun> getJobRuns(String jobName) {
-        getJob(jobName);
-        return jobRunStore.scan(k -> true).stream()
-                .filter(run -> jobName.equals(run.getJobName()))
-                .sorted(Comparator.comparing(JobRun::getStartedOn, Comparator.nullsLast(Comparator.reverseOrder())))
-                .toList();
-    }
-
-    public Map<String, Object> batchStopJobRun(String jobName, List<String> jobRunIds) {
-        List<Map<String, Object>> successful = new ArrayList<>();
-        List<Map<String, Object>> errors = new ArrayList<>();
-        for (String runId : jobRunIds == null ? List.<String>of() : jobRunIds) {
-            Optional<JobRun> found = jobRunStore.get(runId);
-            if (found.isEmpty() || !jobName.equals(found.get().getJobName())) {
-                errors.add(Map.of(
-                        "JobName", jobName,
-                        "JobRunId", runId,
-                        "ErrorDetail", Map.of(
-                                "ErrorCode", "EntityNotFoundException",
-                                "ErrorMessage", "Job run not found: " + runId)));
-                continue;
-            }
-            JobRun run = found.get();
-            if ("RUNNING".equals(run.getJobRunState()) || "STARTING".equals(run.getJobRunState())
-                    || "STOPPING".equals(run.getJobRunState())) {
-                run.setJobRunState("STOPPED");
-                run.setCompletedOn(Instant.now());
-                jobRunStore.put(runId, run);
-            }
-            successful.add(Map.of("JobName", jobName, "JobRunId", runId));
-        }
-        return Map.of("SuccessfulSubmissions", successful, "Errors", errors);
-    }
-
-    public Map<String, Object> getJobBookmark(String jobName, String runId) {
-        getJob(jobName);
-        return jobBookmarkStore.get(jobName)
-                .orElseThrow(() -> new AwsException("EntityNotFoundException",
-                        "Job bookmark not found: " + jobName, 400));
-    }
-
-    public Map<String, Object> resetJobBookmark(String jobName, String runId) {
-        getJob(jobName);
-        if (jobBookmarkStore.get(jobName).isEmpty()) {
-            throw new AwsException("EntityNotFoundException",
-                    "Job bookmark not found: " + jobName, 400);
-        }
-        Map<String, Object> bookmark = defaultBookmark(jobName, runId);
-        jobBookmarkStore.put(jobName, bookmark);
-        return bookmark;
-    }
-
-
-    public void startCrawler(String name) {
-        Objects.requireNonNull(crawlerRunner, "Glue crawler runner is not configured");
-        String accountId = regionResolver.getAccountId();
-        String region = regionResolver.getRegion();
-        synchronized (crawlerStore) {
-            Crawler crawler = getCrawler(name);
-            if (crawlerActive(crawler)) {
-                throw new AwsException("CrawlerRunningException", "Crawler is already running: " + name, 400);
-            }
-            crawler.setState(CRAWLER_RUNNING);
-            crawlerStore.put(name, crawler);
-        }
-        Instant startTime = Instant.now();
-        crawlerRunner.launch(accountId, region, () -> runCrawl(name, accountId, startTime));
-    }
-
-    public void stopCrawler(String name) {
-        synchronized (crawlerStore) {
-            Crawler crawler = getCrawler(name);
-            if (CRAWLER_STOPPING.equals(crawler.getState())) {
-                throw new AwsException("CrawlerStoppingException", "Crawler is stopping: " + name, 400);
-            }
-            if (!CRAWLER_RUNNING.equals(crawler.getState())) {
-                throw new AwsException("CrawlerNotRunningException", "Crawler is not running: " + name, 400);
-            }
-            crawler.setState(CRAWLER_STOPPING);
-            crawlerStore.put(name, crawler);
-        }
-    }
-
-    private static boolean crawlerActive(Crawler crawler) {
-        return CRAWLER_RUNNING.equals(crawler.getState()) || CRAWLER_STOPPING.equals(crawler.getState());
-    }
-
-    private boolean crawlStopRequested(String name) {
-        return crawlerStore.get(name).map(crawler -> !CRAWLER_RUNNING.equals(crawler.getState())).orElse(true);
-    }
-
-    void runCrawl(String name, String accountId, Instant startTime) {
-        try {
-            Crawler crawler = getCrawler(name);
-            if (crawlStopRequested(name)) {
-                finishCrawl(name, "CANCELLED", null, startTime);
-                return;
-            }
-            if (crawler.getDatabaseName() == null || crawler.getDatabaseName().isBlank()) {
-                throw new AwsException("InvalidInputException", "Crawler " + name + " has no DatabaseName.", 400);
-            }
-            getDatabase(crawler.getDatabaseName());
-            List<GlueCrawlerRunner.CrawledTable> tables =
-                    crawlerRunner.crawl(crawler, accountId, () -> crawlStopRequested(name));
-            if (crawlStopRequested(name)) {
-                finishCrawl(name, "CANCELLED", null, startTime);
-                return;
-            }
-            applyCrawl(crawler, tables);
-            finishCrawl(name, "SUCCEEDED", null, startTime);
-        } catch (AwsException e) {
-            finishCrawl(name, "FAILED", e.getMessage(), startTime);
-        } catch (RuntimeException e) {
-            LOG.warnv(e, "Glue crawler {0} failed", name);
-            finishCrawl(name, "FAILED", "Internal Service Exception", startTime);
-        }
-    }
-
-    private void applyCrawl(Crawler crawler, List<GlueCrawlerRunner.CrawledTable> tables) {
-        String databaseName = crawler.getDatabaseName();
-        boolean updateInDatabase = crawler.getSchemaChangePolicy() == null
-                || !"LOG".equals(crawler.getSchemaChangePolicy().getUpdateBehavior());
-        for (GlueCrawlerRunner.CrawledTable crawled : tables) {
-            Table table = crawled.table();
-            Optional<Table> existing = tableStore.get(tableKey(databaseName, table.getName()));
-            if (existing.isEmpty()) {
-                createTable(databaseName, table);
-            } else if (updateInDatabase) {
-                table.setDescription(existing.get().getDescription());
-                updateTable(databaseName, table, null, false);
-            } else {
-                continue;
-            }
-            if (!crawled.partitions().isEmpty()) {
-                batchCreatePartitions(databaseName, table.getName(), crawled.partitions());
-            }
-        }
-    }
-
-    private void finishCrawl(String name, String status, String errorMessage, Instant startTime) {
-        synchronized (crawlerStore) {
-            Optional<Crawler> stored = crawlerStore.get(name);
-            if (stored.isEmpty()) {
-                return;
-            }
-            Crawler crawler = stored.get();
-            LastCrawlInfo lastCrawl = new LastCrawlInfo();
-            lastCrawl.setStatus(status);
-            lastCrawl.setStartTime(startTime);
-            lastCrawl.setErrorMessage(errorMessage);
-            lastCrawl.setMessagePrefix(UUID.randomUUID().toString());
-            crawler.setLastCrawl(lastCrawl);
-            crawler.setCrawlElapsedTime(0L);
-            crawler.setState(CRAWLER_READY);
-            crawlerStore.put(name, crawler);
-        }
-        LOG.infov("Glue Crawler {0} finished: {1}", name, status);
-    }
-
-    public boolean handlesResourceArn(String resourceArn) {
-        if (resourceArn == null) {
-            return false;
-        }
-        return resourceArn.contains(":job/")
-                || resourceArn.contains(":crawler/")
-                || resourceArn.contains(":connection/")
-                || resourceArn.contains(":database/")
-                || resourceArn.contains(":table/");
-    }
-
-
-    public Map<String, String> getTags(String resourceArn) {
-        return getTags(resourceArn, regionResolver.getRegion());
-    }
-
-    private void putResourceTags(String arn, Map<String, String> tags, String region) {
-        if (tags == null || tags.isEmpty()) {
-            return;
-        }
-        resourceTagStore.put(arn, new LinkedHashMap<>(tags));
-        resourceGroupsTaggingService.tagResources(List.of(arn), tags, region);
-    }
-
-    private void deleteResourceTags(String arn, String region) {
-        resourceTagStore.delete(arn);
-        resourceGroupsTaggingService.deleteResources(List.of(arn), region);
-    }
-
-    private Map<String, Object> defaultBookmark(String jobName, String runId) {
-        Map<String, Object> bookmark = new LinkedHashMap<>();
-        bookmark.put("JobName", jobName);
-        bookmark.put("RunId", runId == null ? "" : runId);
-        bookmark.put("Attempt", 0);
-        bookmark.put("Version", 0);
-        return bookmark;
-    }
-
-
 
     private static String normalizeName(String name) {
         return name.toLowerCase(Locale.ROOT);
@@ -1789,6 +1580,14 @@ public class GlueService {
         return regionResolver.buildArn("glue", region, "crawler/" + crawlerName);
     }
 
+    private String triggerArn(String region, String triggerName) {
+        return regionResolver.buildArn("glue", region, "trigger/" + triggerName);
+    }
+
+    private String workflowArn(String region, String workflowName) {
+        return regionResolver.buildArn("glue", region, "workflow/" + workflowName);
+    }
+
     private static Pattern compileFunctionPattern(String pattern) {
         if (pattern == null) {
             return Pattern.compile(".*");
@@ -1979,13 +1778,13 @@ public class GlueService {
         validateRequired(job.getName(), "Name");
         validateRequired(job.getRole(), "Role");
         validateRequired(job.getCommand(), "Command");
-
+        
         // Jobs and crawlers skip normalizeName because AWS preserves their case
         String name = job.getName();
         if (jobStore.get(name).isPresent()) {
             throw new AwsException("AlreadyExistsException", "Job " + name + " already exists.", 400);
         }
-
+        
         if (job.getGlueVersion() == null) {
             job.setGlueVersion("5.1");
         }
@@ -1997,7 +1796,7 @@ public class GlueService {
                 job.setTimeout(2880);
             }
         }
-
+        
         Instant now = Instant.now();
         job.setCreatedOn(now);
         job.setLastModifiedOn(now);
@@ -2022,6 +1821,46 @@ public class GlueService {
         List<Job> all = jobStore.scan(k -> true);
         all.sort(Comparator.comparing(Job::getName));
         return paginate(all, maxResults, nextToken);
+    }
+
+    public Page<String> listJobs(Integer maxResults, String nextToken, Map<String, String> tags, String region) {
+        List<String> names = new ArrayList<>();
+        for (Job job : jobStore.scan(k -> true)) {
+            if (tags == null || tags.isEmpty() || hasTags(jobArn(region, job.getName()), tags, region)) {
+                names.add(job.getName());
+            }
+        }
+        names.sort(Comparator.naturalOrder());
+        return paginate(names, maxResults, nextToken);
+    }
+
+    public BatchGetJobsResult batchGetJobs(List<String> names) {
+        if (names == null || names.isEmpty()) {
+            throw new AwsException("InvalidInputException", "JobNames is required.", 400);
+        }
+        List<Job> jobs = new ArrayList<>();
+        List<String> notFound = new ArrayList<>();
+        for (String name : names) {
+            Optional<Job> job = name == null ? Optional.empty() : jobStore.get(name);
+            if (job.isPresent()) {
+                jobs.add(job.get());
+            } else {
+                notFound.add(name);
+            }
+        }
+        return new BatchGetJobsResult(jobs, notFound);
+    }
+
+    public record BatchGetJobsResult(List<Job> jobs, List<String> jobsNotFound) {}
+
+    private boolean hasTags(String arn, Map<String, String> wanted, String region) {
+        Map<String, String> actual = resourceGroupsTaggingService.getTagsForResource(region, arn);
+        for (Map.Entry<String, String> tag : wanted.entrySet()) {
+            if (!Objects.equals(actual.get(tag.getKey()), tag.getValue())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     public void updateJob(String name, JobUpdate update) {
@@ -2073,10 +1912,6 @@ public class GlueService {
         // Jobs and crawlers skip normalizeName because AWS preserves their case
         String normalizedName = name;
         jobStore.delete(normalizedName);
-        jobRunStore.scan(k -> true).stream()
-                .filter(run -> name.equals(run.getJobName()))
-                .map(JobRun::getId)
-                .forEach(jobRunStore::delete);
         jobBookmarkStore.delete(name);
         deleteResourceTags(jobArn(region, normalizedName), region);
         LOG.infov("Deleted Glue Job: {0}", name);
@@ -2250,7 +2085,7 @@ public class GlueService {
         validateRequired(crawler.getName(), "Name");
         validateRequired(crawler.getRole(), "Role");
         validateRequired(crawler.getTargets(), "Targets");
-
+        
         CrawlerTargets t = crawler.getTargets();
         boolean hasTargets = (t.getS3Targets() != null && !t.getS3Targets().isEmpty()) ||
                              (t.getJdbcTargets() != null && !t.getJdbcTargets().isEmpty()) ||
@@ -2297,6 +2132,416 @@ public class GlueService {
         return paginate(all, maxResults, nextToken);
     }
 
+    public Page<String> listCrawlers(Integer maxResults, String nextToken, Map<String, String> tags,
+                                     String region) {
+        List<String> names = new ArrayList<>();
+        for (Crawler crawler : crawlerStore.scan(k -> true)) {
+            if (tags == null || tags.isEmpty() || hasTags(crawlerArn(region, crawler.getName()), tags, region)) {
+                names.add(crawler.getName());
+            }
+        }
+        names.sort(Comparator.naturalOrder());
+        return paginate(names, maxResults, nextToken);
+    }
+
+    public BatchGetCrawlersResult batchGetCrawlers(List<String> names) {
+        if (names == null) {
+            throw new AwsException("InvalidInputException", "CrawlerNames is required.", 400);
+        }
+        if (names.size() > MAX_BATCH_GET_CRAWLERS) {
+            throw new AwsException("InvalidInputException",
+                    "CrawlerNames must contain at most " + MAX_BATCH_GET_CRAWLERS + " names.", 400);
+        }
+        List<Crawler> crawlers = new ArrayList<>();
+        List<String> notFound = new ArrayList<>();
+        for (String name : names) {
+            Optional<Crawler> crawler = name == null ? Optional.empty() : crawlerStore.get(name);
+            if (crawler.isPresent()) {
+                crawlers.add(crawler.get());
+            } else {
+                notFound.add(name);
+            }
+        }
+        return new BatchGetCrawlersResult(crawlers, notFound);
+    }
+
+    public record BatchGetCrawlersResult(List<Crawler> crawlers, List<String> crawlersNotFound) {}
+
+    public void updateCrawlerSchedule(String name, String expression) {
+        validateRequired(name, "CrawlerName");
+        Crawler crawler = getCrawler(name);
+        if (expression == null || expression.isBlank()) {
+            crawler.setSchedule(null);
+        } else {
+            validateCronExpression(expression);
+            Schedule schedule = crawler.getSchedule() != null ? crawler.getSchedule() : new Schedule();
+            schedule.setScheduleExpression(expression);
+            if (schedule.getState() == null) {
+                schedule.setState(SCHEDULE_SCHEDULED);
+            }
+            crawler.setSchedule(schedule);
+        }
+        crawler.setLastUpdated(Instant.now());
+        crawlerStore.put(name, crawler);
+    }
+
+    /**
+     * Glue schedules are AWS cron expressions: cron(Minutes Hours Day-of-month Month Day-of-week Year),
+     * with {@code ?} in exactly one of the two day fields.
+     */
+    static void validateCronExpression(String expression) {
+        String message = "Schedule must be a cron expression, for example cron(15 12 * * ? *).";
+        if (expression == null || !expression.startsWith("cron(") || !expression.endsWith(")")) {
+            throw new AwsException("InvalidInputException", message, 400);
+        }
+        String[] fields = expression.substring(5, expression.length() - 1).trim().split("\\s+");
+        if (fields.length != 6) {
+            throw new AwsException("InvalidInputException", message, 400);
+        }
+        for (String field : fields) {
+            if (!CRON_FIELD.matcher(field).matches()) {
+                throw new AwsException("InvalidInputException", message, 400);
+            }
+        }
+        if ("?".equals(fields[2]) == "?".equals(fields[4])) {
+            throw new AwsException("InvalidInputException",
+                    "Exactly one of day-of-month and day-of-week must be '?' in " + expression, 400);
+        }
+    }
+
+    public void startCrawlerSchedule(String name) {
+        validateRequired(name, "CrawlerName");
+        Crawler crawler = getCrawler(name);
+        Schedule schedule = crawler.getSchedule();
+        if (schedule == null || schedule.getScheduleExpression() == null) {
+            throw new AwsException("NoScheduleException", "Crawler " + name + " has no schedule.", 400);
+        }
+        if (SCHEDULE_SCHEDULED.equals(schedule.getState())) {
+            throw new AwsException("SchedulerRunningException",
+                    "The schedule of crawler " + name + " is already running.", 400);
+        }
+        schedule.setState(SCHEDULE_SCHEDULED);
+        crawlerStore.put(name, crawler);
+    }
+
+    public void stopCrawlerSchedule(String name) {
+        validateRequired(name, "CrawlerName");
+        Crawler crawler = getCrawler(name);
+        Schedule schedule = crawler.getSchedule();
+        if (schedule == null || !SCHEDULE_SCHEDULED.equals(schedule.getState())) {
+            throw new AwsException("SchedulerNotRunningException",
+                    "The schedule of crawler " + name + " is not running.", 400);
+        }
+        schedule.setState(SCHEDULE_NOT_SCHEDULED);
+        crawlerStore.put(name, crawler);
+    }
+
+    // ---- Workflows --------------------------------------------------------------------------
+
+    public void createWorkflow(Workflow workflow, Map<String, String> tags, String region) {
+        validateRequired(workflow.getName(), "Name");
+        validateWorkflowConcurrency(workflow.getMaxConcurrentRuns());
+        String name = workflow.getName();
+        if (workflowStore.get(name).isPresent()) {
+            throw new AwsException("AlreadyExistsException", "Workflow " + name + " already exists.", 400);
+        }
+        Instant now = Instant.now();
+        workflow.setCreatedOn(now);
+        workflow.setLastModifiedOn(now);
+        workflowStore.put(name, workflow);
+        if (tags != null && !tags.isEmpty()) {
+            resourceGroupsTaggingService.tagResources(List.of(workflowArn(region, name)), tags, region);
+        }
+        LOG.infov("Created Glue workflow {0}", name);
+    }
+
+    public Workflow getWorkflow(String name) {
+        validateRequired(name, "Name");
+        return workflowStore.get(name)
+                .orElseThrow(() -> new AwsException("EntityNotFoundException", "Workflow " + name + " not found.", 400));
+    }
+
+    public Page<String> listWorkflows(Integer maxResults, String nextToken) {
+        if (maxResults != null && (maxResults < 1 || maxResults > MAX_WORKFLOWS_PAGE_SIZE)) {
+            throw new AwsException("InvalidInputException",
+                    "MaxResults must be between 1 and " + MAX_WORKFLOWS_PAGE_SIZE, 400);
+        }
+        List<String> names = new ArrayList<>();
+        for (Workflow workflow : workflowStore.scan(k -> true)) {
+            names.add(workflow.getName());
+        }
+        names.sort(Comparator.naturalOrder());
+        return paginate(names, maxResults, nextToken);
+    }
+
+    public BatchGetWorkflowsResult batchGetWorkflows(List<String> names) {
+        if (names == null || names.isEmpty() || names.size() > MAX_BATCH_GET_WORKFLOWS) {
+            throw new AwsException("InvalidInputException",
+                    "Names must contain between 1 and " + MAX_BATCH_GET_WORKFLOWS + " names.", 400);
+        }
+        List<Workflow> workflows = new ArrayList<>();
+        List<String> missing = new ArrayList<>();
+        for (String name : names) {
+            Optional<Workflow> workflow = name == null ? Optional.empty() : workflowStore.get(name);
+            if (workflow.isPresent()) {
+                workflows.add(workflow.get());
+            } else {
+                missing.add(name);
+            }
+        }
+        return new BatchGetWorkflowsResult(workflows, missing);
+    }
+
+    public record BatchGetWorkflowsResult(List<Workflow> workflows, List<String> missingWorkflows) {}
+
+    /** Applies the members an UpdateWorkflow request sets; the rest of the workflow is kept. */
+    public void updateWorkflow(String name, String description, Map<String, String> defaultRunProperties,
+                               Integer maxConcurrentRuns) {
+        Workflow workflow = getWorkflow(name);
+        validateWorkflowConcurrency(maxConcurrentRuns);
+        if (description != null) {
+            workflow.setDescription(description);
+        }
+        if (defaultRunProperties != null) {
+            workflow.setDefaultRunProperties(defaultRunProperties);
+        }
+        if (maxConcurrentRuns != null) {
+            workflow.setMaxConcurrentRuns(maxConcurrentRuns);
+        }
+        workflow.setLastModifiedOn(Instant.now());
+        workflowStore.put(name, workflow);
+    }
+
+    /**
+     * DeleteWorkflow declares no EntityNotFoundException: deleting a missing workflow succeeds. The
+     * workflow's triggers are left in place, as the API does not say they are removed.
+     */
+    public void deleteWorkflow(String name, String region) {
+        validateRequired(name, "Name");
+        workflowStore.delete(name);
+        resourceGroupsTaggingService.deleteResources(List.of(workflowArn(region, name)), region);
+    }
+
+    public List<Trigger> triggersOfWorkflow(String workflowName) {
+        List<Trigger> triggers = new ArrayList<>();
+        for (Trigger trigger : allTriggers()) {
+            if (workflowName.equals(trigger.getWorkflowName())) {
+                triggers.add(trigger);
+            }
+        }
+        return triggers;
+    }
+
+    private static void validateWorkflowConcurrency(Integer maxConcurrentRuns) {
+        if (maxConcurrentRuns != null && maxConcurrentRuns < 1) {
+            throw new AwsException("InvalidInputException", "MaxConcurrentRuns must be at least 1.", 400);
+        }
+    }
+
+    // ---- Triggers ---------------------------------------------------------------------------
+
+    public void createTrigger(Trigger trigger, Map<String, String> tags, String region) {
+        validateRequired(trigger.getName(), "Name");
+        validateRequired(trigger.getType(), "Type");
+        if (!TRIGGER_TYPES.contains(trigger.getType())) {
+            throw new AwsException("InvalidInputException", "Invalid trigger type: " + trigger.getType(), 400);
+        }
+        if (trigger.getWorkflowName() != null) {
+            getWorkflow(trigger.getWorkflowName());
+        } else if ("EVENT".equals(trigger.getType())) {
+            throw new AwsException("InvalidInputException", "An EVENT trigger must belong to a workflow.", 400);
+        }
+        validateTriggerDefinition(trigger);
+        String name = trigger.getName();
+        if (triggerStore.get(name).isPresent()) {
+            throw new AwsException("AlreadyExistsException", "Trigger " + name + " already exists.", 400);
+        }
+        triggerStore.put(name, trigger);
+        if (tags != null && !tags.isEmpty()) {
+            resourceGroupsTaggingService.tagResources(List.of(triggerArn(region, name)), tags, region);
+        }
+        LOG.infov("Created Glue trigger {0}", name);
+    }
+
+    public Trigger getTrigger(String name) {
+        validateRequired(name, "Name");
+        return triggerStore.get(name)
+                .orElseThrow(() -> new AwsException("EntityNotFoundException", "Trigger " + name + " not found.", 400));
+    }
+
+    public List<Trigger> allTriggers() {
+        List<Trigger> triggers = triggerStore.scan(k -> true);
+        triggers.sort(Comparator.comparing(Trigger::getName));
+        return triggers;
+    }
+
+    public void putTrigger(Trigger trigger) {
+        triggerStore.put(trigger.getName(), trigger);
+    }
+
+    /**
+     * GetTriggers. With DependentJobName, the triggers that can start that job; AWS documents that
+     * all triggers are returned when none can.
+     */
+    public Page<Trigger> getTriggers(String dependentJobName, Integer maxResults, String nextToken) {
+        if (maxResults != null && (maxResults < 1 || maxResults > MAX_TRIGGERS_PAGE_SIZE)) {
+            throw new AwsException("InvalidInputException",
+                    "MaxResults must be between 1 and " + MAX_TRIGGERS_PAGE_SIZE, 400);
+        }
+        return paginate(triggersStarting(dependentJobName), maxResults, nextToken);
+    }
+
+    public Page<String> listTriggers(String dependentJobName, Integer maxResults, String nextToken,
+                                     Map<String, String> tags, String region) {
+        List<String> names = new ArrayList<>();
+        for (Trigger trigger : triggersStarting(dependentJobName)) {
+            if (tags == null || tags.isEmpty() || hasTags(triggerArn(region, trigger.getName()), tags, region)) {
+                names.add(trigger.getName());
+            }
+        }
+        return paginate(names, maxResults, nextToken);
+    }
+
+    public BatchGetTriggersResult batchGetTriggers(List<String> names) {
+        if (names == null || names.isEmpty()) {
+            throw new AwsException("InvalidInputException", "TriggerNames is required.", 400);
+        }
+        List<Trigger> triggers = new ArrayList<>();
+        List<String> notFound = new ArrayList<>();
+        for (String name : names) {
+            Optional<Trigger> trigger = name == null ? Optional.empty() : triggerStore.get(name);
+            if (trigger.isPresent()) {
+                triggers.add(trigger.get());
+            } else {
+                notFound.add(name);
+            }
+        }
+        return new BatchGetTriggersResult(triggers, notFound);
+    }
+
+    public record BatchGetTriggersResult(List<Trigger> triggers, List<String> triggersNotFound) {}
+
+    /**
+     * Applies the members a TriggerUpdate sets; the rest of the trigger is kept. The update is built
+     * and validated on a copy, so a rejected update leaves the stored trigger as it was.
+     */
+    public Trigger updateTrigger(String name, Trigger update) {
+        validateRequired(update, "TriggerUpdate");
+        Trigger stored = getTrigger(name);
+        Trigger trigger = new Trigger();
+        trigger.setName(stored.getName());
+        trigger.setWorkflowName(stored.getWorkflowName());
+        trigger.setType(stored.getType());
+        trigger.setState(stored.getState());
+        trigger.setDescription(stored.getDescription());
+        trigger.setSchedule(stored.getSchedule());
+        trigger.setActions(stored.getActions());
+        trigger.setPredicate(stored.getPredicate());
+        trigger.setEventBatchingCondition(stored.getEventBatchingCondition());
+        if (update.getDescription() != null) {
+            trigger.setDescription(update.getDescription());
+        }
+        if (update.getSchedule() != null) {
+            trigger.setSchedule(update.getSchedule());
+        }
+        if (update.getActions() != null) {
+            trigger.setActions(update.getActions());
+        }
+        if (update.getPredicate() != null) {
+            trigger.setPredicate(update.getPredicate());
+        }
+        if (update.getEventBatchingCondition() != null) {
+            trigger.setEventBatchingCondition(update.getEventBatchingCondition());
+        }
+        validateTriggerDefinition(trigger);
+        triggerStore.put(name, trigger);
+        return trigger;
+    }
+
+    /** DeleteTrigger declares no EntityNotFoundException: deleting a missing trigger succeeds. */
+    public void deleteTrigger(String name, String region) {
+        validateRequired(name, "Name");
+        triggerStore.delete(name);
+        resourceGroupsTaggingService.deleteResources(List.of(triggerArn(region, name)), region);
+    }
+
+    private List<Trigger> triggersStarting(String dependentJobName) {
+        List<Trigger> all = allTriggers();
+        if (dependentJobName == null) {
+            return all;
+        }
+        getJob(dependentJobName);
+        List<Trigger> starting = new ArrayList<>();
+        for (Trigger trigger : all) {
+            for (TriggerAction action : trigger.getActions()) {
+                if (dependentJobName.equals(action.getJobName())) {
+                    starting.add(trigger);
+                    break;
+                }
+            }
+        }
+        return starting.isEmpty() ? all : starting;
+    }
+
+    private void validateTriggerDefinition(Trigger trigger) {
+        List<TriggerAction> actions = trigger.getActions();
+        if (actions == null || actions.isEmpty()) {
+            throw new AwsException("InvalidInputException", "Actions must contain at least one action.", 400);
+        }
+        for (TriggerAction action : actions) {
+            boolean hasJob = action.getJobName() != null;
+            boolean hasCrawler = action.getCrawlerName() != null;
+            if (hasJob == hasCrawler) {
+                throw new AwsException("InvalidInputException",
+                        "Each action must name exactly one of JobName and CrawlerName.", 400);
+            }
+            if (hasJob) {
+                getJob(action.getJobName());
+            } else {
+                getCrawler(action.getCrawlerName());
+            }
+            if (action.getTimeout() != null && action.getTimeout() < 1) {
+                throw new AwsException("InvalidInputException", "Timeout must be at least 1 minute.", 400);
+            }
+        }
+        if ("SCHEDULED".equals(trigger.getType())) {
+            validateCronExpression(trigger.getSchedule());
+        }
+        if ("CONDITIONAL".equals(trigger.getType())) {
+            validatePredicate(trigger.getPredicate());
+        }
+    }
+
+    private void validatePredicate(Predicate predicate) {
+        if (predicate == null || predicate.getConditions() == null || predicate.getConditions().isEmpty()) {
+            throw new AwsException("InvalidInputException", "A CONDITIONAL trigger needs a predicate.", 400);
+        }
+        if (predicate.getLogical() != null && !Set.of("AND", "ANY").contains(predicate.getLogical())) {
+            throw new AwsException("InvalidInputException", "Logical must be AND or ANY.", 400);
+        }
+        for (TriggerCondition condition : predicate.getConditions()) {
+            if (condition.getLogicalOperator() != null && !"EQUALS".equals(condition.getLogicalOperator())) {
+                throw new AwsException("InvalidInputException", "LogicalOperator must be EQUALS.", 400);
+            }
+            if (condition.getJobName() != null) {
+                if (condition.getState() == null || !CONDITION_JOB_STATES.contains(condition.getState())) {
+                    throw new AwsException("InvalidInputException",
+                            "A job condition's State must be one of " + CONDITION_JOB_STATES, 400);
+                }
+                getJob(condition.getJobName());
+            } else if (condition.getCrawlerName() != null) {
+                if (condition.getCrawlState() == null || !CONDITION_CRAWL_STATES.contains(condition.getCrawlState())) {
+                    throw new AwsException("InvalidInputException",
+                            "A crawler condition's CrawlState must be one of " + CONDITION_CRAWL_STATES, 400);
+                }
+                getCrawler(condition.getCrawlerName());
+            } else {
+                throw new AwsException("InvalidInputException",
+                        "Each condition must name a JobName or a CrawlerName.", 400);
+            }
+        }
+    }
+
     public void updateCrawler(Crawler update) {
         validateRequired(update.getName(), "Name");
         // Jobs and crawlers skip normalizeName because AWS preserves their case
@@ -2304,9 +2549,6 @@ public class GlueService {
         Crawler existing = crawlerStore.get(name)
                 .orElseThrow(() -> new AwsException("EntityNotFoundException", "Crawler " + update.getName() + " not found.", 400));
 
-        if (crawlerActive(existing)) {
-            throw new AwsException("CrawlerRunningException", "Crawler is running: " + name, 400);
-        }
         Crawler updated = new Crawler();
         updated.setName(existing.getName());
         updated.setCreationTime(existing.getCreationTime());
@@ -2341,9 +2583,6 @@ public class GlueService {
         if (crawlerStore.get(normalizedName).isEmpty()) {
             throw new AwsException("EntityNotFoundException", "Crawler " + name + " not found.", 400);
         }
-        if (crawlerActive(getCrawler(name))) {
-            throw new AwsException("CrawlerRunningException", "Crawler is running: " + name, 400);
-        }
         crawlerStore.delete(normalizedName);
         deleteResourceTags(crawlerArn(region, normalizedName), region);
         LOG.infov("Deleted Glue Crawler: {0}", name);
@@ -2364,7 +2603,9 @@ public class GlueService {
         connection.setCreationTime(now);
         connection.setLastUpdatedTime(now);
         connectionStore.put(name, connection);
-        putResourceTags(connectionArn(region, name), tags, region);
+        if (tags != null && !tags.isEmpty()) {
+            resourceGroupsTaggingService.tagResources(List.of(connectionArn(region, name)), tags, region);
+        }
         LOG.infov("Created Glue Connection: {0}", name);
         // Nothing is validated against the data store, so there is no IN_PROGRESS phase to report.
         return CONNECTION_STATUS_READY;
@@ -2431,7 +2672,7 @@ public class GlueService {
             throw new AwsException("EntityNotFoundException", "Connection " + name + " not found.", 400);
         }
         connectionStore.delete(name);
-        deleteResourceTags(connectionArn(region, name), region);
+        resourceGroupsTaggingService.deleteResources(List.of(connectionArn(region, name)), region);
         LOG.infov("Deleted Glue Connection: {0}", name);
     }
 
@@ -2761,7 +3002,8 @@ public class GlueService {
     }
 
     private void validateResourceExists(String arn) {
-        String[] parts = arn.split(":");
+        // At most six parts: a job, table or other name may itself contain ':'.
+        String[] parts = arn.split(":", 6);
         if (parts.length >= 6) {
             String resource = parts[5];
             if (resource.startsWith("job/")) {
@@ -2769,6 +3011,12 @@ public class GlueService {
                 return;
             } else if (resource.startsWith("crawler/")) {
                 getCrawler(resource.substring(8));
+                return;
+            } else if (resource.startsWith("trigger/")) {
+                getTrigger(resource.substring(8));
+                return;
+            } else if (resource.startsWith("workflow/")) {
+                getWorkflow(resource.substring(9));
                 return;
             } else if (resource.startsWith("connection/")) {
                 getConnection(resource.substring(11), false);
@@ -2795,7 +3043,7 @@ public class GlueService {
 
     public record Page<T>(List<T> items, String nextToken) {}
 
-    private <T> Page<T> paginate(List<T> all, Integer maxResults, String nextToken) {
+    <T> Page<T> paginate(List<T> all, Integer maxResults, String nextToken) {
         if (maxResults != null && (maxResults < 1 || maxResults > 1000)) {
             throw new AwsException("InvalidInputException", "MaxResults must be between 1 and 1000", 400);
         }
@@ -2815,4 +3063,116 @@ public class GlueService {
         String newToken = end < all.size() ? String.valueOf(end) : null;
         return new Page<>(List.copyOf(all.subList(start, end)), newToken);
     }
+
+    private static final String CRAWLER_READY = "READY";
+
+
+
+
+    private final StorageBackend<String, Map<String, Object>> jobBookmarkStore;
+
+
+    @Inject
+    GlueCrawlerRunner crawlerRunner;
+
+
+
+
+
+    /** A job run's bookmark: the run just started becomes the job's latest. */
+    public void recordJobRunBookmark(String jobName, String runId) {
+        jobBookmarkStore.put(jobName, defaultBookmark(jobName, runId));
+    }
+
+    public Map<String, Object> getJobBookmark(String jobName, String runId) {
+        getJob(jobName);
+        return jobBookmarkStore.get(jobName)
+                .orElseThrow(() -> new AwsException("EntityNotFoundException",
+                        "Job bookmark not found: " + jobName, 400));
+    }
+
+    public Map<String, Object> resetJobBookmark(String jobName, String runId) {
+        getJob(jobName);
+        if (jobBookmarkStore.get(jobName).isEmpty()) {
+            throw new AwsException("EntityNotFoundException",
+                    "Job bookmark not found: " + jobName, 400);
+        }
+        Map<String, Object> bookmark = defaultBookmark(jobName, runId);
+        jobBookmarkStore.put(jobName, bookmark);
+        return bookmark;
+    }
+
+
+
+
+
+    /**
+     * Crawls a crawler's targets and writes the tables it finds into its database, as a finished
+     * crawl does. The crawl state itself is GlueCrawlerRunService's.
+     */
+    public void crawlIntoCatalog(String name) {
+        Crawler crawler = getCrawler(name);
+        // A crawler with no database has nowhere to write; its run is upstream's simulated one.
+        if (crawlerRunner == null || crawler.getDatabaseName() == null || crawler.getDatabaseName().isBlank()) {
+            return;
+        }
+        getDatabase(crawler.getDatabaseName());
+        applyCrawl(crawler, crawlerRunner.crawl(crawler, regionResolver.getAccountId(), () -> false));
+    }
+
+
+    private void applyCrawl(Crawler crawler, List<GlueCrawlerRunner.CrawledTable> tables) {
+        String databaseName = crawler.getDatabaseName();
+        boolean updateInDatabase = crawler.getSchemaChangePolicy() == null
+                || !"LOG".equals(crawler.getSchemaChangePolicy().getUpdateBehavior());
+        for (GlueCrawlerRunner.CrawledTable crawled : tables) {
+            Table table = crawled.table();
+            Optional<Table> existing = tableStore.get(tableKey(databaseName, table.getName()));
+            if (existing.isEmpty()) {
+                createTable(databaseName, table);
+            } else if (updateInDatabase) {
+                table.setDescription(existing.get().getDescription());
+                updateTable(databaseName, table, null, false);
+            } else {
+                continue;
+            }
+            if (!crawled.partitions().isEmpty()) {
+                batchCreatePartitions(databaseName, table.getName(), crawled.partitions());
+            }
+        }
+    }
+
+
+    public boolean handlesResourceArn(String resourceArn) {
+        if (resourceArn == null) {
+            return false;
+        }
+        return resourceArn.contains(":job/")
+                || resourceArn.contains(":crawler/")
+                || resourceArn.contains(":connection/")
+                || resourceArn.contains(":database/")
+                || resourceArn.contains(":table/");
+    }
+
+    public Map<String, String> getTags(String resourceArn) {
+        return getTags(resourceArn, regionResolver.getRegion());
+    }
+
+
+
+    private Map<String, Object> defaultBookmark(String jobName, String runId) {
+        Map<String, Object> bookmark = new LinkedHashMap<>();
+        bookmark.put("JobName", jobName);
+        bookmark.put("RunId", runId == null ? "" : runId);
+        bookmark.put("Attempt", 0);
+        bookmark.put("Version", 0);
+        return bookmark;
+    }
+
+    private void deleteResourceTags(String arn, String region) {
+        resourceTagStore.delete(arn);
+        resourceGroupsTaggingService.deleteResources(List.of(arn), region);
+    }
+
+    private final StorageBackend<String, Map<String, String>> resourceTagStore;
 }

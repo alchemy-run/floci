@@ -76,12 +76,24 @@ public class Domain {
     @JsonProperty("VolumeId")
     private String volumeId;
 
+    /**
+     * The domain's Docker volume name. Stamped at creation with the current prefix; null on
+     * records written before this field existed, which are backfilled with the frozen legacy
+     * name so their data stays reachable.
+     */
+    @JsonProperty("DockerVolumeName")
+    private String dockerVolumeName;
+
+    /**
+     * Who owns the storage the domain's container mounts; null on records written before
+     * this field existed, whose volumes are always Floci-managed.
+     */
+    @JsonProperty("VolumeOwnership")
+    private VolumeOwnership volumeOwnership;
+
     @JsonProperty("CreatedAt")
     @JsonFormat(shape = JsonFormat.Shape.NUMBER)
     private Instant createdAt;
-
-    @JsonProperty("Maintenances")
-    private List<DomainMaintenance> maintenances = new ArrayList<>();
 
     public Domain() {}
 
@@ -237,6 +249,22 @@ public class Domain {
         this.volumeId = volumeId;
     }
 
+    public String getDockerVolumeName() {
+        return dockerVolumeName;
+    }
+
+    public void setDockerVolumeName(String dockerVolumeName) {
+        this.dockerVolumeName = dockerVolumeName;
+    }
+
+    public VolumeOwnership getVolumeOwnership() {
+        return volumeOwnership;
+    }
+
+    public void setVolumeOwnership(VolumeOwnership volumeOwnership) {
+        this.volumeOwnership = volumeOwnership;
+    }
+
     public Instant getCreatedAt() {
         return createdAt;
     }
@@ -252,6 +280,9 @@ public class Domain {
     public void setAccountId(String accountId) {
         this.accountId = accountId;
     }
+
+    @JsonProperty("Maintenances")
+    private List<DomainMaintenance> maintenances = new ArrayList<>();
 
     public List<DomainMaintenance> getMaintenances() {
         return maintenances;

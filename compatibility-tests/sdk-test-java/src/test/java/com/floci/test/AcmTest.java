@@ -69,7 +69,7 @@ class AcmTest {
     // ============================================
     // Helper: generate a self-signed certificate using openssl
     // ============================================
-    private static byte[][] generateSelfSignedCert() throws Exception {
+    static byte[][] generateSelfSignedCert() throws Exception {
         Path keyFile = Files.createTempFile("test-key", ".pem");
         Path certFile = Files.createTempFile("test-cert", ".pem");
         try {
@@ -110,7 +110,7 @@ class AcmTest {
         arnsToCleanup.add(requestedCertArn);
 
         assertThat(requestedCertArn).isNotNull();
-        assertThat(requestedCertArn).matches("arn:aws:acm:.*:.*:certificate/.*");
+        assertThat(requestedCertArn).matches("arn:" + TestFixtures.partition() + ":acm:.*:.*:certificate/.*");
     }
 
     @Test
@@ -275,7 +275,7 @@ class AcmTest {
         arnsToCleanup.add(importedCertArn);
 
         assertThat(importedCertArn).isNotNull();
-        assertThat(importedCertArn).matches("arn:aws:acm:.*:.*:certificate/.*");
+        assertThat(importedCertArn).matches("arn:" + TestFixtures.partition() + ":acm:.*:.*:certificate/.*");
     }
 
     @Test
@@ -389,7 +389,7 @@ class AcmTest {
                 .expiryEvents(e -> e.daysBeforeExpiry(45))
                 .idempotencyToken(TestFixtures.uniqueName()));
 
-        var response = acm.getAccountConfiguration(b -> b.build());
+        GetAccountConfigurationResponse response = acm.getAccountConfiguration(b -> b.build());
 
         assertThat(response.expiryEvents()).isNotNull();
         assertThat(response.expiryEvents().daysBeforeExpiry()).isEqualTo(45);
@@ -403,7 +403,7 @@ class AcmTest {
     @Order(40)
     @DisplayName("Describe a non-existent certificate throws exception")
     void testDescribeNonExistentCertificate() {
-        String fakeArn = "arn:aws:acm:us-east-1:000000000000:certificate/00000000-0000-0000-0000-000000000000";
+        String fakeArn = TestFixtures.arn("acm", "000000000000", "certificate/00000000-0000-0000-0000-000000000000");
 
         assertThatThrownBy(() -> acm.describeCertificate(b -> b
                 .certificateArn(fakeArn)))

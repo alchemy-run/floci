@@ -9,7 +9,6 @@ import java.time.Instant;
 public class Connection {
 
     private String name;
-    private String connectionId;
     private String connectionArn;
     private String description;
     private String authorizationType;
@@ -32,9 +31,6 @@ public class Connection {
 
     public String getConnectionArn() { return connectionArn; }
     public void setConnectionArn(String connectionArn) { this.connectionArn = connectionArn; }
-
-    public String getConnectionId() { return connectionId; }
-    public void setConnectionId(String connectionId) { this.connectionId = connectionId; }
 
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
@@ -70,4 +66,10 @@ public class Connection {
 
     public Instant getLastAuthorizedTime() { return lastAuthorizedTime; }
     public void setLastAuthorizedTime(Instant lastAuthorizedTime) { this.lastAuthorizedTime = lastAuthorizedTime; }
+
+    private String connectionId;
+
+    public String getConnectionId() { return connectionId; }
+
+    public void setConnectionId(String connectionId) { this.connectionId = connectionId; }
 }

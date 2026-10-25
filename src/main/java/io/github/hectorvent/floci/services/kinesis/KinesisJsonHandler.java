@@ -1,17 +1,18 @@
 package io.github.hectorvent.floci.services.kinesis;
 
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.AwsErrorResponse;
-import io.github.hectorvent.floci.core.common.AwsEventStreamEncoder;
-import io.github.hectorvent.floci.core.common.AwsException;
-import io.github.hectorvent.floci.services.kinesis.model.KinesisRecord;
-import io.github.hectorvent.floci.services.kinesis.model.KinesisShard;
-import io.github.hectorvent.floci.services.kinesis.model.KinesisStream;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsErrorResponse;
+import io.github.hectorvent.floci.core.common.AwsEventStreamEncoder;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.services.kinesis.model.KinesisConsumer;
+import io.github.hectorvent.floci.services.kinesis.model.KinesisRecord;
+import io.github.hectorvent.floci.services.kinesis.model.KinesisShard;
+import io.github.hectorvent.floci.services.kinesis.model.KinesisStream;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -36,17 +37,17 @@ public class KinesisJsonHandler {
 
     private final KinesisService service;
     private final ObjectMapper objectMapper;
-    private final long listShardsNextTokenTtlMillis;
+    private final long nextTokenTtlMillis;
 
     @Inject
     public KinesisJsonHandler(KinesisService service, ObjectMapper objectMapper, EmulatorConfig config) {
         this(service, objectMapper, config.services().kinesis().listShardsNextTokenTtlMillis());
     }
 
-    KinesisJsonHandler(KinesisService service, ObjectMapper objectMapper, long listShardsNextTokenTtlMillis) {
+    KinesisJsonHandler(KinesisService service, ObjectMapper objectMapper, long nextTokenTtlMillis) {
         this.service = service;
         this.objectMapper = objectMapper;
-        this.listShardsNextTokenTtlMillis = listShardsNextTokenTtlMillis;
+        this.nextTokenTtlMillis = nextTokenTtlMillis;
     }
 
     public Response handle(String action, JsonNode request, String region) {
@@ -64,12 +65,12 @@ public class KinesisJsonHandler {
             case "AddTagsToStream" -> handleAddTagsToStream(request, region);
             case "RemoveTagsFromStream" -> handleRemoveTagsFromStream(request, region);
             case "ListTagsForStream" -> handleListTagsForStream(request, region);
-            case "ListTagsForResource" -> handleListTagsForResource(request, region);
-            case "TagResource" -> handleTagResource(request, region);
-            case "UntagResource" -> handleUntagResource(request, region);
-            case "GetResourcePolicy" -> handleGetResourcePolicy(request, region);
-            case "PutResourcePolicy" -> handlePutResourcePolicy(request, region);
             case "DeleteResourcePolicy" -> handleDeleteResourcePolicy(request, region);
+            case "PutResourcePolicy" -> handlePutResourcePolicy(request, region);
+            case "GetResourcePolicy" -> handleGetResourcePolicy(request, region);
+            case "UntagResource" -> handleUntagResource(request, region);
+            case "TagResource" -> handleTagResource(request, region);
+            case "ListTagsForResource" -> handleListTagsForResource(request, region);
             case "StartStreamEncryption" -> handleStartStreamEncryption(request, region);
             case "StopStreamEncryption" -> handleStopStreamEncryption(request, region);
             case "SplitShard" -> handleSplitShard(request, region);
@@ -84,11 +85,11 @@ public class KinesisJsonHandler {
             case "EnableEnhancedMonitoring" -> handleEnableEnhancedMonitoring(request, region);
             case "DisableEnhancedMonitoring" -> handleDisableEnhancedMonitoring(request, region);
             case "UpdateStreamMode" -> handleUpdateStreamMode(request, region);
-            case "UpdateShardCount" -> handleUpdateShardCount(request, region);
             case "UpdateMaxRecordSize" -> handleUpdateMaxRecordSize(request, region);
-            case "UpdateStreamWarmThroughput" -> handleUpdateStreamWarmThroughput(request, region);
-            case "DescribeAccountSettings" -> handleDescribeAccountSettings();
             case "DescribeLimits" -> handleDescribeLimits(region);
+            case "DescribeAccountSettings" -> handleDescribeAccountSettings();
+            case "UpdateStreamWarmThroughput" -> handleUpdateStreamWarmThroughput(request, region);
+            case "UpdateShardCount" -> handleUpdateShardCount(request, region);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
                     .build();
@@ -175,42 +176,6 @@ public class KinesisJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private Response handleUpdateStreamWarmThroughput(JsonNode request, String region) {
-        String streamName = resolveStreamName(request);
-        if (!request.has("WarmThroughputMiBps") || !request.path("WarmThroughputMiBps").isNumber()) {
-            throw new AwsException("InvalidArgumentException", "WarmThroughputMiBps is required", 400);
-        }
-        KinesisService.UpdateStreamWarmThroughputResult result = service.updateStreamWarmThroughput(
-                streamName, request.path("WarmThroughputMiBps").asInt(), region);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("StreamARN", result.streamArn());
-        response.put("StreamName", result.streamName());
-        ObjectNode warm = response.putObject("WarmThroughput");
-        if (result.targetMiBps() != null) {
-            warm.put("TargetMiBps", result.targetMiBps());
-        }
-        if (result.currentMiBps() != null) {
-            warm.put("CurrentMiBps", result.currentMiBps());
-        }
-        return Response.ok(response).build();
-    }
-
-    private Response handleDescribeAccountSettings() {
-        ObjectNode response = objectMapper.createObjectNode();
-        response.putObject("MinimumThroughputBillingCommitment").put("Status", "ENABLED");
-        return Response.ok(response).build();
-    }
-
-    private Response handleDescribeLimits(String region) {
-        KinesisService.DescribeLimitsResult limits = service.describeLimits(region);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("ShardLimit", limits.shardLimit());
-        response.put("OpenShardCount", limits.openShardCount());
-        response.put("OnDemandStreamCount", limits.onDemandStreamCount());
-        response.put("OnDemandStreamCountLimit", limits.onDemandStreamCountLimit());
-        return Response.ok(response).build();
-    }
-
     /**
      * MaxRecordSizeInKiB is modelled as an integer, so a float or a value outside int range is a
      * type error rather than something to truncate into the range check.
@@ -276,11 +241,34 @@ public class KinesisJsonHandler {
     }
 
     private Response handleListStreams(JsonNode request, String region) {
-        List<KinesisStream> streams = service.listStreamObjects(region);
+        int limit = 100;
+        if (request.hasNonNull("Limit")) {
+            JsonNode value = request.get("Limit");
+            if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 1 || value.intValue() > 10000) {
+                throw new AwsException("InvalidArgumentException", "Limit must be an integer between 1 and 10000", 400);
+            }
+            limit = Math.min(value.intValue(), 100);
+        }
+        JsonNode start = request.path("ExclusiveStartStreamName");
+        String startName = start.asText(null);
+        if (!start.isMissingNode() && !start.isNull()
+                && (!start.isTextual() || !startName.matches("[a-zA-Z0-9_.-]{1,128}"))) {
+            throw new AwsException("InvalidArgumentException", "ExclusiveStartStreamName must be a valid stream name", 400);
+        }
+        JsonNode token = request.path("NextToken");
+        if (!token.isMissingNode() && !token.isNull() && !token.isTextual()) {
+            throw invalidNextToken();
+        }
+        String after = token.isTextual() ? streamCursorFromToken(decodeNextToken(token.textValue()), region) : startName;
+        List<KinesisStream> streams = service.listStreamObjects(region).stream()
+                .filter(stream -> after == null || stream.getStreamName().compareTo(after) > 0)
+                .sorted(java.util.Comparator.comparing(KinesisStream::getStreamName))
+                .toList();
+        List<KinesisStream> page = streams.stream().limit(limit).toList();
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode names = response.putArray("StreamNames");
         ArrayNode summaries = response.putArray("StreamSummaries");
-        for (KinesisStream stream : streams) {
+        for (KinesisStream stream : page) {
             names.add(stream.getStreamName());
             ObjectNode summary = summaries.addObject();
             summary.put("StreamName", stream.getStreamName());
@@ -292,8 +280,27 @@ public class KinesisJsonHandler {
                         epochSeconds(stream.getStreamCreationTimestamp()));
             }
         }
-        response.put("HasMoreStreams", false);
+        response.put("HasMoreStreams", streams.size() > limit);
+        if (streams.size() > limit) {
+            response.put("NextToken", encodeNextToken("ListStreams|" + region,
+                    Base64Url.encode(page.getLast().getStreamName()), System.currentTimeMillis()));
+        }
         return Response.ok(response).build();
+    }
+
+    private String streamCursorFromToken(PaginationToken token, String region) {
+        if (!("ListStreams|" + region).equals(token.scope())) {
+            throw invalidNextToken();
+        }
+        try {
+            String cursor = new String(Base64.getUrlDecoder().decode(token.cursor()), StandardCharsets.UTF_8);
+            if (!Base64Url.encode(cursor).equals(token.cursor())) {
+                throw invalidNextToken();
+            }
+            return cursor;
+        } catch (IllegalArgumentException e) {
+            throw invalidNextToken();
+        }
     }
 
     private Response handleDescribeStream(JsonNode request, String region) {
@@ -385,7 +392,7 @@ public class KinesisJsonHandler {
     private Response handleRegisterStreamConsumer(JsonNode request, String region) {
         String streamArn = request.path("StreamARN").asText();
         String consumerName = request.path("ConsumerName").asText();
-        var consumer = service.registerStreamConsumer(
+        KinesisConsumer consumer = service.registerStreamConsumer(
                 streamArn, consumerName, readTagMap(request.path("Tags")), region);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("Consumer", consumerToNode(consumer));
@@ -404,7 +411,7 @@ public class KinesisJsonHandler {
         String streamArn = request.has("StreamARN") ? request.path("StreamARN").asText() : null;
         String consumerName = request.has("ConsumerName") ? request.path("ConsumerName").asText() : null;
         String consumerArn = request.has("ConsumerARN") ? request.path("ConsumerARN").asText() : null;
-        var consumer = service.describeStreamConsumer(streamArn, consumerName, consumerArn, region);
+        KinesisConsumer consumer = service.describeStreamConsumer(streamArn, consumerName, consumerArn, region);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("ConsumerDescription", consumerToNode(consumer));
         return Response.ok(response).build();
@@ -412,7 +419,7 @@ public class KinesisJsonHandler {
 
     private Response handleListStreamConsumers(JsonNode request, String region) {
         String streamArn = request.path("StreamARN").asText();
-        var consumers = service.listStreamConsumers(streamArn, region);
+        List<KinesisConsumer> consumers = service.listStreamConsumers(streamArn, region);
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode array = response.putArray("Consumers");
         consumers.forEach(c -> array.add(consumerToNode(c)));
@@ -536,105 +543,6 @@ public class KinesisJsonHandler {
         });
         response.put("HasMoreTags", false);
         return Response.ok(response).build();
-    }
-
-    private String resolveResourceArn(JsonNode request) {
-        String resourceArn = request.path("ResourceARN").asText(null);
-        if (resourceArn == null || resourceArn.isBlank()) {
-            resourceArn = request.path("ResourceArn").asText(null);
-        }
-        if (resourceArn == null || resourceArn.isBlank()) {
-            throw new AwsException("InvalidArgumentException", "ResourceARN is required", 400);
-        }
-        return resourceArn;
-    }
-
-    private String resolveStreamNameFromResourceArn(JsonNode request) {
-        return extractStreamNameFromArn(resolveResourceArn(request));
-    }
-
-    private boolean isConsumerArn(String resourceArn) {
-        return resourceArn.contains("/consumer/");
-    }
-
-    private Map<String, String> readTagMap(JsonNode tagsNode) {
-        Map<String, String> tags = new HashMap<>();
-        if (tagsNode == null || tagsNode.isMissingNode() || tagsNode.isNull()) {
-            return tags;
-        }
-        if (tagsNode.isArray()) {
-            tagsNode.forEach(tag -> tags.put(tag.path("Key").asText(), tag.path("Value").asText()));
-        } else if (tagsNode.isObject()) {
-            tagsNode.fields().forEachRemaining(entry -> tags.put(entry.getKey(), entry.getValue().asText()));
-        }
-        return tags;
-    }
-
-    private ObjectNode tagsResponse(Map<String, String> tags) {
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode tagsArray = response.putArray("Tags");
-        tags.forEach((k, v) -> {
-            ObjectNode tagNode = tagsArray.addObject();
-            tagNode.put("Key", k);
-            tagNode.put("Value", v);
-        });
-        return response;
-    }
-
-    private Response handleListTagsForResource(JsonNode request, String region) {
-        String resourceArn = resolveResourceArn(request);
-        Map<String, String> tags = isConsumerArn(resourceArn)
-                ? service.listTagsForConsumer(resourceArn, region)
-                : service.listTagsForStream(extractStreamNameFromArn(resourceArn), region);
-        return Response.ok(tagsResponse(tags)).build();
-    }
-
-    private Response handleTagResource(JsonNode request, String region) {
-        String resourceArn = resolveResourceArn(request);
-        Map<String, String> tags = readTagMap(request.path("Tags"));
-        if (isConsumerArn(resourceArn)) {
-            service.addTagsToConsumer(resourceArn, tags, region);
-        } else {
-            service.addTagsToStream(extractStreamNameFromArn(resourceArn), tags, region);
-        }
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleUntagResource(JsonNode request, String region) {
-        String resourceArn = resolveResourceArn(request);
-        List<String> tagKeys = new ArrayList<>();
-        request.path("TagKeys").forEach(node -> tagKeys.add(node.asText()));
-        if (isConsumerArn(resourceArn)) {
-            service.removeTagsFromConsumer(resourceArn, tagKeys, region);
-        } else {
-            service.removeTagsFromStream(extractStreamNameFromArn(resourceArn), tagKeys, region);
-        }
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleGetResourcePolicy(JsonNode request, String region) {
-        String streamName = resolveStreamNameFromResourceArn(request);
-        String policy = service.getResourcePolicy(streamName, region);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("Policy", policy);
-        return Response.ok(response).build();
-    }
-
-    private Response handlePutResourcePolicy(JsonNode request, String region) {
-        String streamName = resolveStreamNameFromResourceArn(request);
-        JsonNode policyNode = request.get("Policy");
-        if (policyNode == null || policyNode.isNull() || policyNode.isMissingNode()) {
-            throw new AwsException("InvalidArgumentException", "Policy is required", 400);
-        }
-        String policy = policyNode.isTextual() ? policyNode.asText() : policyNode.toString();
-        service.putResourcePolicy(streamName, policy, region);
-        return Response.ok(objectMapper.createObjectNode()).build();
-    }
-
-    private Response handleDeleteResourcePolicy(JsonNode request, String region) {
-        String streamName = resolveStreamNameFromResourceArn(request);
-        service.deleteResourcePolicy(streamName, region);
-        return Response.ok(objectMapper.createObjectNode()).build();
     }
 
     // Shared by CreateStream and AddTagsToStream so the two paths cannot drift: the same
@@ -875,7 +783,7 @@ public class KinesisJsonHandler {
 
     private Response handleListShards(JsonNode request, String region) {
         String nextToken = request.hasNonNull("NextToken") ? request.path("NextToken").asText() : null;
-        ShardToken token = nextToken == null ? null : decodeShardToken(nextToken);
+        PaginationToken token = nextToken == null ? null : decodeNextToken(nextToken);
         String resolvedStreamName = token == null
                 ? resolveStreamName(request)
                 : streamNameFromToken(request, token);
@@ -897,7 +805,7 @@ public class KinesisJsonHandler {
         int start = token == null ? 0 : resumeShardIndex(token, snapshot);
         List<KinesisShard> page = paginateShards(snapshot.subList(start, snapshot.size()), maxResults);
         String nextCursor = start + page.size() < snapshot.size() && !page.isEmpty()
-                ? encodeShardToken(resolvedStreamName, page.get(page.size() - 1).getShardId(),
+                ? encodeNextToken(resolvedStreamName, page.get(page.size() - 1).getShardId(),
                         System.currentTimeMillis())
                 : null;
 
@@ -930,37 +838,44 @@ public class KinesisJsonHandler {
     }
 
     /**
-     * Opaque, stream-bound cursor for ListShards. It carries the stream name, the last shard id of
-     * the emitted page, and the issue time, so a client can resume from the token alone without
-     * resending the stream name and without depending on a shard's position in the live list.
+     * Opaque cursor shared by ListStreams and ListShards, bound to a scope and issue time.
+     * ListStreams scopes include the operation and region; ListShards scopes name the stream.
      */
-    static String encodeShardToken(String streamName, String lastShardId, long issuedAtEpochMilli) {
-        String raw = streamName + "|" + lastShardId + "|" + issuedAtEpochMilli;
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+    static String encodeNextToken(String scope, String cursor, long issuedAtEpochMilli) {
+        String raw = scope + "|" + cursor + "|" + issuedAtEpochMilli;
+        return Base64Url.encode(raw);
     }
 
-    ShardToken decodeShardToken(String nextToken) {
+    private PaginationToken decodeNextToken(String nextToken) {
+        if (nextToken.isEmpty() || nextToken.length() > 1_048_576) {
+            throw invalidNextToken();
+        }
         String decoded;
         try {
             decoded = new String(Base64.getUrlDecoder().decode(nextToken), StandardCharsets.UTF_8);
         } catch (IllegalArgumentException e) {
             throw invalidNextToken();
         }
-        String[] parts = decoded.split("\\|", -1);
-        if (parts.length != 3 || parts[0].isEmpty() || parts[1].isEmpty()) {
+        int timestampSeparator = decoded.lastIndexOf('|');
+        int cursorSeparator = decoded.lastIndexOf('|', timestampSeparator - 1);
+        if (cursorSeparator < 1) {
             throw invalidNextToken();
         }
         long issuedAtEpochMilli;
         try {
-            issuedAtEpochMilli = Long.parseLong(parts[2]);
+            issuedAtEpochMilli = Long.parseLong(decoded.substring(timestampSeparator + 1));
         } catch (NumberFormatException e) {
             throw invalidNextToken();
         }
-        if (System.currentTimeMillis() - issuedAtEpochMilli >= listShardsNextTokenTtlMillis) {
+        long now = System.currentTimeMillis();
+        if (issuedAtEpochMilli > now) {
+            throw invalidNextToken();
+        }
+        if (issuedAtEpochMilli <= now - nextTokenTtlMillis) {
             throw new AwsException("ExpiredNextTokenException", "The NextToken has expired.", 400);
         }
-        return new ShardToken(parts[0], parts[1], issuedAtEpochMilli);
+        return new PaginationToken(decoded.substring(0, cursorSeparator),
+                decoded.substring(cursorSeparator + 1, timestampSeparator), issuedAtEpochMilli);
     }
 
     /**
@@ -969,24 +884,27 @@ public class KinesisJsonHandler {
      * {@code StreamARN} is tolerated when it names the same stream the token does, which keeps an
      * SDK that fills the ARN in for routing working, and rejected when it names a different one.
      */
-    private String streamNameFromToken(JsonNode request, ShardToken token) {
+    private String streamNameFromToken(JsonNode request, PaginationToken token) {
+        if (token.scope().contains("|") || token.cursor().isEmpty()) {
+            throw invalidNextToken();
+        }
         if (request.hasNonNull("StreamName")) {
             throw new AwsException("InvalidArgumentException",
                     "StreamName cannot be specified together with NextToken.", 400);
         }
         if (request.hasNonNull("StreamARN")) {
             String arnStreamName = parseStreamNameFromArn(request.path("StreamARN").asText());
-            if (!token.streamName().equals(arnStreamName)) {
+            if (!token.scope().equals(arnStreamName)) {
                 throw new AwsException("InvalidArgumentException",
                         "The NextToken does not belong to the stream named by StreamARN.", 400);
             }
         }
-        return token.streamName();
+        return token.scope();
     }
 
-    private static int resumeShardIndex(ShardToken token, List<KinesisShard> shards) {
+    private static int resumeShardIndex(PaginationToken token, List<KinesisShard> shards) {
         for (int i = 0; i < shards.size(); i++) {
-            if (shards.get(i).getShardId().equals(token.lastShardId())) {
+            if (shards.get(i).getShardId().equals(token.cursor())) {
                 return i + 1;
             }
         }
@@ -998,10 +916,9 @@ public class KinesisJsonHandler {
     }
 
     /**
-     * Decoded ListShards cursor: the stream it belongs to, the last shard id it covered, and when it
-     * was issued (epoch millis, for expiry).
+     * Decoded scoped cursor and its issue time (epoch millis).
      */
-    record ShardToken(String streamName, String lastShardId, long issuedAtEpochMilli) {
+    private record PaginationToken(String scope, String cursor, long issuedAtEpochMilli) {
     }
 
     /**
@@ -1054,4 +971,179 @@ public class KinesisJsonHandler {
         return Response.ok(response).build();
     }
 
+    private Response handleUpdateStreamWarmThroughput(JsonNode request, String region) {
+        String streamName = resolveStreamName(request);
+        if (!request.has("WarmThroughputMiBps") || !request.path("WarmThroughputMiBps").isNumber()) {
+            throw new AwsException("InvalidArgumentException", "WarmThroughputMiBps is required", 400);
+        }
+        KinesisService.UpdateStreamWarmThroughputResult result = service.updateStreamWarmThroughput(
+                streamName, request.path("WarmThroughputMiBps").asInt(), region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("StreamARN", result.streamArn());
+        response.put("StreamName", result.streamName());
+        ObjectNode warm = response.putObject("WarmThroughput");
+        if (result.targetMiBps() != null) {
+            warm.put("TargetMiBps", result.targetMiBps());
+        }
+        if (result.currentMiBps() != null) {
+            warm.put("CurrentMiBps", result.currentMiBps());
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeAccountSettings() {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.putObject("MinimumThroughputBillingCommitment").put("Status", "ENABLED");
+        return Response.ok(response).build();
+    }
+
+    private Response handleDescribeLimits(String region) {
+        KinesisService.DescribeLimitsResult limits = service.describeLimits(region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("ShardLimit", limits.shardLimit());
+        response.put("OpenShardCount", limits.openShardCount());
+        response.put("OnDemandStreamCount", limits.onDemandStreamCount());
+        response.put("OnDemandStreamCountLimit", limits.onDemandStreamCountLimit());
+        return Response.ok(response).build();
+    }
+
+    private String resolveResourceArn(JsonNode request) {
+        String resourceArn = request.path("ResourceARN").asText(null);
+        if (resourceArn == null || resourceArn.isBlank()) {
+            resourceArn = request.path("ResourceArn").asText(null);
+        }
+        if (resourceArn == null || resourceArn.isBlank()) {
+            throw new AwsException("InvalidArgumentException", "ResourceARN is required", 400);
+        }
+        return resourceArn;
+    }
+
+    private String resolveStreamNameFromResourceArn(JsonNode request) {
+        return extractStreamNameFromArn(resolveResourceArn(request));
+    }
+
+    private boolean isConsumerArn(String resourceArn) {
+        return resourceArn.contains("/consumer/");
+    }
+
+    private Map<String, String> readTagMap(JsonNode tagsNode) {
+        Map<String, String> tags = new HashMap<>();
+        if (tagsNode == null || tagsNode.isMissingNode() || tagsNode.isNull()) {
+            return tags;
+        }
+        if (tagsNode.isArray()) {
+            tagsNode.forEach(tag -> tags.put(tag.path("Key").asText(), tag.path("Value").asText()));
+        } else if (tagsNode.isObject()) {
+            tagsNode.fields().forEachRemaining(entry -> tags.put(entry.getKey(), entry.getValue().asText()));
+        }
+        return tags;
+    }
+
+    private ObjectNode tagsResponse(Map<String, String> tags) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode tagsArray = response.putArray("Tags");
+        tags.forEach((k, v) -> {
+            ObjectNode tagNode = tagsArray.addObject();
+            tagNode.put("Key", k);
+            tagNode.put("Value", v);
+        });
+        return response;
+    }
+
+    private Response handleListTagsForResource(JsonNode request, String region) {
+        String resourceArn = resolveResourceArn(request);
+        Map<String, String> tags = isConsumerArn(resourceArn)
+                ? service.listTagsForConsumer(resourceArn, region)
+                : service.listTagsForStream(extractStreamNameFromArn(resourceArn), region);
+        return Response.ok(tagsResponse(tags)).build();
+    }
+
+    private Response handleTagResource(JsonNode request, String region) {
+        String resourceArn = resolveResourceArn(request);
+        Map<String, String> tags = readTagMap(request.path("Tags"));
+        if (isConsumerArn(resourceArn)) {
+            service.addTagsToConsumer(resourceArn, tags, region);
+        } else {
+            service.addTagsToStream(extractStreamNameFromArn(resourceArn), tags, region);
+        }
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleUntagResource(JsonNode request, String region) {
+        String resourceArn = resolveResourceArn(request);
+        List<String> tagKeys = new ArrayList<>();
+        request.path("TagKeys").forEach(node -> tagKeys.add(node.asText()));
+        if (isConsumerArn(resourceArn)) {
+            service.removeTagsFromConsumer(resourceArn, tagKeys, region);
+        } else {
+            service.removeTagsFromStream(extractStreamNameFromArn(resourceArn), tagKeys, region);
+        }
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleGetResourcePolicy(JsonNode request, String region) {
+        String streamName = resolveStreamNameFromResourceArn(request);
+        String policy = service.getResourcePolicy(streamName, region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("Policy", policy);
+        return Response.ok(response).build();
+    }
+
+    private Response handlePutResourcePolicy(JsonNode request, String region) {
+        String streamName = resolveStreamNameFromResourceArn(request);
+        JsonNode policyNode = request.get("Policy");
+        if (policyNode == null || policyNode.isNull() || policyNode.isMissingNode()) {
+            throw new AwsException("InvalidArgumentException", "Policy is required", 400);
+        }
+        String policy = policyNode.isTextual() ? policyNode.asText() : policyNode.toString();
+        service.putResourcePolicy(streamName, policy, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private Response handleDeleteResourcePolicy(JsonNode request, String region) {
+        String streamName = resolveStreamNameFromResourceArn(request);
+        service.deleteResourcePolicy(streamName, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    /**
+     * Opaque, stream-bound cursor for ListShards. It carries the stream name, the last shard id of
+     * the emitted page, and the issue time, so a client can resume from the token alone without
+     * resending the stream name and without depending on a shard's position in the live list.
+     */
+    static String encodeShardToken(String streamName, String lastShardId, long issuedAtEpochMilli) {
+        String raw = streamName + "|" + lastShardId + "|" + issuedAtEpochMilli;
+        return Base64.getUrlEncoder().withoutPadding()
+                .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
+    }
+
+    ShardToken decodeShardToken(String nextToken) {
+        String decoded;
+        try {
+            decoded = new String(Base64.getUrlDecoder().decode(nextToken), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            throw invalidNextToken();
+        }
+        String[] parts = decoded.split("\\|", -1);
+        if (parts.length != 3 || parts[0].isEmpty() || parts[1].isEmpty()) {
+            throw invalidNextToken();
+        }
+        long issuedAtEpochMilli;
+        try {
+            issuedAtEpochMilli = Long.parseLong(parts[2]);
+        } catch (NumberFormatException e) {
+            throw invalidNextToken();
+        }
+        if (System.currentTimeMillis() - issuedAtEpochMilli >= nextTokenTtlMillis) {
+            throw new AwsException("ExpiredNextTokenException", "The NextToken has expired.", 400);
+        }
+        return new ShardToken(parts[0], parts[1], issuedAtEpochMilli);
+    }
+
+    /**
+     * Decoded ListShards cursor: the stream it belongs to, the last shard id it covered, and when it
+     * was issued (epoch millis, for expiry).
+     */
+    record ShardToken(String streamName, String lastShardId, long issuedAtEpochMilli) {
+    }
 }

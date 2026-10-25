@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Base64Url;
+import io.github.hectorvent.floci.core.common.CloudFrontEdgeDomain;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.common.dns.EmbeddedDnsServer;
@@ -12,34 +14,15 @@ import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.acm.AcmService;
-import io.github.hectorvent.floci.services.appsync.graphql.AppSyncGraphqlExecutor;
-import io.github.hectorvent.floci.services.appsync.graphql.AppSyncJsEngine;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncVtlContext;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncVtlEngine;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncVtlResult;
 import io.github.hectorvent.floci.services.appsync.graphql.SchemaCreationWorker;
 import io.github.hectorvent.floci.services.appsync.graphql.SchemaRegistry;
-import io.github.hectorvent.floci.services.appsync.model.AdditionalAuthenticationProvider;
-import io.github.hectorvent.floci.services.appsync.model.ApiAssociation;
-import io.github.hectorvent.floci.services.appsync.model.ApiCache;
-import io.github.hectorvent.floci.services.appsync.model.ApiKey;
-import io.github.hectorvent.floci.services.appsync.model.AppSyncType;
-import io.github.hectorvent.floci.services.appsync.model.AuthenticationType;
-import io.github.hectorvent.floci.services.appsync.model.ChannelNamespace;
-import io.github.hectorvent.floci.services.appsync.model.DataSource;
-import io.github.hectorvent.floci.services.appsync.model.DataSourceType;
-import io.github.hectorvent.floci.services.appsync.model.DomainName;
-import io.github.hectorvent.floci.services.appsync.model.FunctionConfiguration;
-import io.github.hectorvent.floci.services.appsync.model.GraphqlApi;
-import io.github.hectorvent.floci.services.appsync.model.Resolver;
-import io.github.hectorvent.floci.services.appsync.model.ResolverKind;
-import io.github.hectorvent.floci.services.appsync.model.ResolverRuntimeName;
-import io.github.hectorvent.floci.services.appsync.model.SchemaCreationStatus;
-import io.github.hectorvent.floci.services.appsync.model.SchemaCreationStatusType;
-import io.github.hectorvent.floci.services.appsync.model.SourceApiAssociation;
-import io.github.hectorvent.floci.services.appsync.model.SourceApiAssociationConfig;
-import io.github.hectorvent.floci.services.appsync.model.SourceApiAssociationSummary;
-import io.github.hectorvent.floci.services.appsync.model.TypeFormat;
+import io.github.hectorvent.floci.services.appsync.graphql.auth.LambdaAuthorizerCache;
+import io.github.hectorvent.floci.services.appsync.graphql.js.AppSyncJsRuntime;
+import io.github.hectorvent.floci.services.appsync.graphql.js.JsEvaluation;
+import io.github.hectorvent.floci.services.appsync.model.*;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -49,16 +32,8 @@ import java.net.URI;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.*;
 import java.util.Base64;
-import java.util.EnumSet;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -70,8 +45,6 @@ public class AppSyncService {
     // that value: it is what clients send in the x-api-key header.
     private static final String API_KEY_PREFIX = "da2-";
     private static final String API_KEY_ALPHABET = "abcdefghijklmnopqrstuvwxyz0123456789";
-    /** Route 53 alias hosted zone shared by every CloudFront distribution. */
-    private static final String CLOUDFRONT_HOSTED_ZONE_ID = "Z2FDTNDATAQYW2";
     private static final int API_KEY_RANDOM_LENGTH = 26;
 
     private final StorageBackend<String, GraphqlApi> apiStore;
@@ -88,18 +61,19 @@ public class AppSyncService {
     private final StorageBackend<String, String> associationStore;
     private final StorageBackend<String, ChannelNamespace> channelNamespaceStore;
     private final StorageBackend<String, SourceApiAssociation> mergedApiAssociationStore;
-    private final StorageBackend<String, ApiCache> apiCacheStore;
     private final RegionResolver regionResolver;
     private final SchemaRegistry schemaRegistry;
     private final SchemaCreationWorker schemaCreationWorker;
     private final Instance<RequestContext> requestContextInstance;
     private final ObjectMapper objectMapper;
-    private final AppSyncVtlEngine vtlEngine;
-    private final AppSyncJsEngine jsEngine;
-    private final AppSyncGraphqlExecutor graphqlExecutor;
-    private final Instance<AcmService> acmService;
     private final Clock clock;
     private final String baseUrl;
+    private final String configuredCloudFrontDomainSuffix;
+    private final LambdaAuthorizerCache lambdaAuthorizerCache;
+    private final StorageBackend<String, ApiCache> apiCacheStore;
+    private final AppSyncVtlEngine vtlEngine;
+    private final Instance<AppSyncJsRuntime> jsRuntime;
+    private final Instance<AcmService> acmService;
 
     @Inject
     public AppSyncService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
@@ -107,11 +81,11 @@ public class AppSyncService {
                           Instance<RequestContext> requestContextInstance, ObjectMapper objectMapper,
                           AccountAwareStorageBackend<SchemaCreationStatus> schemaStatusStore,
                           AccountAwareStorageBackend<String> schemaStore,
+                          Clock clock,
+                          LambdaAuthorizerCache lambdaAuthorizerCache,
                           AppSyncVtlEngine vtlEngine,
-                          AppSyncJsEngine jsEngine,
-                          AppSyncGraphqlExecutor graphqlExecutor,
-                          Instance<AcmService> acmService,
-                          Clock clock) {
+                          Instance<AppSyncJsRuntime> jsRuntime,
+                          Instance<AcmService> acmService) {
         this.apiStore = storageFactory.create("appsync", "appsync-apis.json", new TypeReference<>() {});
         this.schemaStore = schemaStore;
         this.schemaStatusStore = schemaStatusStore;
@@ -124,18 +98,19 @@ public class AppSyncService {
         this.associationStore = storageFactory.create("appsync", "appsync-associations.json", new TypeReference<>() {});
         this.channelNamespaceStore = storageFactory.create("appsync", "appsync-channelnamespaces.json", new TypeReference<>() {});
         this.mergedApiAssociationStore = storageFactory.create("appsync", "appsync-merged-api-associations.json", new TypeReference<>() {});
-        this.apiCacheStore = storageFactory.create("appsync", "appsync-apicaches.json", new TypeReference<>() {});
         this.regionResolver = regionResolver;
         this.schemaRegistry = schemaRegistry;
         this.schemaCreationWorker = schemaCreationWorker;
         this.requestContextInstance = requestContextInstance;
         this.objectMapper = objectMapper;
-        this.vtlEngine = vtlEngine;
-        this.jsEngine = jsEngine;
-        this.graphqlExecutor = graphqlExecutor;
-        this.acmService = acmService;
         this.clock = clock;
         this.baseUrl = trimTrailingSlash(config.effectiveBaseUrl());
+        this.configuredCloudFrontDomainSuffix = config.services().cloudfront().domainSuffix().orElse(null);
+        this.lambdaAuthorizerCache = lambdaAuthorizerCache;
+        this.apiCacheStore = storageFactory.create("appsync", "appsync-apicaches.json", new TypeReference<>() {});
+        this.vtlEngine = vtlEngine;
+        this.jsRuntime = jsRuntime;
+        this.acmService = acmService;
     }
 
     // ──────────────────────────── GraphQL API ────────────────────────────
@@ -179,10 +154,6 @@ public class AppSyncService {
         api.setDns(castStringMap(request.get("dns")));
         api.setWafWebAclArn(coerceString(request.get("wafWebAclArn")));
         api.setMergedApiExecutionRoleArn(coerceString(request.get("mergedApiExecutionRoleArn")));
-        Map<String, String> createEnv = castStringMap(request.get("environmentVariables"));
-        if (createEnv != null) {
-            api.setEnvironmentVariables(new HashMap<>(createEnv));
-        }
 
         Object additionalObj = request.get("additionalAuthenticationProviders");
         if (additionalObj instanceof List<?> additionalList) {
@@ -195,6 +166,11 @@ public class AppSyncService {
         api.setArn(buildApiArn(apiId, region));
 
         api.setUris(graphqlApiUris(apiId, region));
+
+        Map<String, String> createEnv = castStringMap(request.get("environmentVariables"));
+        if (createEnv != null) {
+            api.setEnvironmentVariables(new HashMap<>(createEnv));
+        }
 
         Map<String, Object> tags = castMap(request.get("tags"));
         if (tags != null) {
@@ -284,8 +260,9 @@ public class AppSyncService {
         deleteApiKeysForApi(apiId);
         deleteChannelNamespacesForApi(apiId);
         deleteDomainAssociationsForApi(apiId);
-        apiCacheStore.delete(apiId);
+        lambdaAuthorizerCache.evictApi(apiId);
         LOG.infov("Deleted GraphQL API {0}", apiId);
+        apiCacheStore.delete(apiId);
     }
 
     // ──────────────────────────── Schema ────────────────────────────
@@ -317,259 +294,6 @@ public class AppSyncService {
         return schemaStore.get(apiId)
                 .orElseThrow(() -> new AwsException("NotFoundException",
                         "Schema not found for API: " + apiId, 404));
-    }
-
-    // ──────────────────────────── API Cache ────────────────────────────
-
-    public ApiCache getApiCache(String apiId) {
-        getGraphqlApi(apiId);
-        return apiCacheStore.get(apiId)
-                .orElseThrow(() -> new AwsException("NotFoundException", "ApiCache not found for API: " + apiId, 404));
-    }
-
-    public ApiCache createApiCache(String apiId, Map<String, Object> request) {
-        getGraphqlApi(apiId);
-        if (apiCacheStore.get(apiId).isPresent()) {
-            throw new AwsException("BadRequestException", "ApiCache already exists for API: " + apiId, 400);
-        }
-        ApiCache cache = applyCacheRequest(new ApiCache(), request, true);
-        cache.setStatus("AVAILABLE");
-        apiCacheStore.put(apiId, cache);
-        return cache;
-    }
-
-    public ApiCache updateApiCache(String apiId, Map<String, Object> request) {
-        ApiCache existing = getApiCache(apiId);
-        applyCacheRequest(existing, request, false);
-        existing.setStatus("AVAILABLE");
-        apiCacheStore.put(apiId, existing);
-        return existing;
-    }
-
-    public void deleteApiCache(String apiId) {
-        getApiCache(apiId);
-        apiCacheStore.delete(apiId);
-    }
-
-    public void flushApiCache(String apiId) {
-        getApiCache(apiId);
-    }
-
-    private ApiCache applyCacheRequest(ApiCache cache, Map<String, Object> request, boolean creating) {
-        if (request.containsKey("ttl") || creating) {
-            cache.setTtl(castLong(request.get("ttl")));
-        }
-        if (request.containsKey("apiCachingBehavior") || creating) {
-            cache.setApiCachingBehavior(coerceString(request.get("apiCachingBehavior")));
-        }
-        if (request.containsKey("type") || creating) {
-            cache.setType(coerceString(request.get("type")));
-        }
-        if (request.containsKey("healthMetricsConfig")) {
-            cache.setHealthMetricsConfig(coerceString(request.get("healthMetricsConfig")));
-        }
-        if (creating) {
-            Object transit = request.get("transitEncryptionEnabled");
-            cache.setTransitEncryptionEnabled(transit instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(transit != null ? transit : true)));
-            Object atRest = request.get("atRestEncryptionEnabled");
-            cache.setAtRestEncryptionEnabled(atRest instanceof Boolean b ? b : Boolean.parseBoolean(String.valueOf(atRest != null ? atRest : true)));
-        }
-        return cache;
-    }
-
-    // ──────────────────────────── Evaluate / GraphQL ────────────────────────────
-
-    @SuppressWarnings("unchecked")
-    public Map<String, Object> evaluateCode(Map<String, Object> request) {
-        String code = coerceString(request.get("code"));
-        if (code == null || code.isBlank()) {
-            throw new AwsException("BadRequestException", "code is required", 400);
-        }
-        String function = coerceString(request.get("function"));
-        Map<String, Object> context = parseEvalContext(request.get("context"));
-        try {
-            Object result = jsEngine.evaluate(code, function, context);
-            return evaluationResponse(result, null);
-        } catch (Exception e) {
-            Map<String, Object> error = new LinkedHashMap<>();
-            error.put("message", e.getMessage());
-            return evaluationResponse(null, error);
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    public Map<String, Object> evaluateMappingTemplate(Map<String, Object> request) {
-        String template = coerceString(request.get("template"));
-        if (template == null || template.isBlank()) {
-            throw new AwsException("BadRequestException", "template is required", 400);
-        }
-        Map<String, Object> context = parseEvalContext(request.get("context"));
-        AppSyncVtlContext vtl = AppSyncVtlContext.builder(objectMapper)
-                .arguments(asStringObjectMap(context.get("arguments")))
-                .source(asStringObjectMap(context.get("source")))
-                .identity(asStringObjectMap(context.get("identity")))
-                .request(asStringObjectMap(context.get("request")))
-                .info(asStringObjectMap(context.get("info")))
-                .stash(asStringObjectMap(context.get("stash")))
-                .prev(asStringObjectMap(context.get("prev")))
-                .result(context.get("result"))
-                .env(asStringObjectMap(context.get("env")))
-                .build();
-        try {
-            AppSyncVtlResult result = vtlEngine.evaluate(template, vtl);
-            if (result.hasError()) {
-                Map<String, Object> error = new LinkedHashMap<>();
-                error.put("message", result.error().getMessage());
-                return evaluationResponse(null, error);
-            }
-            return evaluationResponse(result.output(), null);
-        } catch (Exception e) {
-            Map<String, Object> error = new LinkedHashMap<>();
-            error.put("message", e.getMessage());
-            return evaluationResponse(null, error);
-        }
-    }
-
-    public Map<String, Object> executeGraphql(String apiId, Map<String, Object> request) {
-        String query = coerceString(request.get("query"));
-        if (query == null || query.isBlank()) {
-            throw new AwsException("BadRequestException", "query is required", 400);
-        }
-        Map<String, Object> variables = castMap(request.get("variables"));
-        String operationName = coerceString(request.get("operationName"));
-        return graphqlExecutor.execute(apiId, query, variables, operationName);
-    }
-
-    public void assertGraphqlAuthorized(String apiId, String apiKeyHeader, String authorization) {
-        GraphqlApi api = getGraphqlApi(apiId);
-        boolean apiKeyOk = isValidApiKey(apiId, apiKeyHeader);
-        boolean iamOk = authorization != null && !authorization.isBlank();
-        boolean additionalApiKey = hasAdditionalAuth(api, AuthenticationType.API_KEY);
-        AuthenticationType primary = api.getAuthenticationType();
-        if (primary == AuthenticationType.API_KEY) {
-            if (!apiKeyOk) {
-                throw new AwsException("UnauthorizedException", "You are not authorized to make this call.", 401);
-            }
-            return;
-        }
-        if (primary == AuthenticationType.AWS_IAM) {
-            if (iamOk || (additionalApiKey && apiKeyOk)) {
-                return;
-            }
-            throw new AwsException("UnauthorizedException", "You are not authorized to make this call.", 401);
-        }
-        if (apiKeyOk || iamOk) {
-            return;
-        }
-        throw new AwsException("UnauthorizedException", "You are not authorized to make this call.", 401);
-    }
-
-    private boolean isValidApiKey(String apiId, String apiKeyHeader) {
-        if (apiKeyHeader == null || apiKeyHeader.isBlank()) {
-            return false;
-        }
-        return apiKeyStore.scan(k -> k.startsWith(apiId + "::")).stream()
-                .anyMatch(key -> apiKeyHeader.equals(key.getId()) || apiKeyHeader.equals(key.getId()));
-    }
-
-    private boolean hasAdditionalAuth(GraphqlApi api, AuthenticationType type) {
-        if (api.getAdditionalAuthenticationProviders() == null) {
-            return false;
-        }
-        return api.getAdditionalAuthenticationProviders().stream()
-                .anyMatch(p -> p.getAuthenticationType() == type);
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> parseEvalContext(Object raw) {
-        if (raw == null) {
-            return new HashMap<>();
-        }
-        if (raw instanceof Map<?, ?> map) {
-            Map<String, Object> context = new HashMap<>((Map<String, Object>) map);
-            if (!context.containsKey("arguments") && context.containsKey("args")) {
-                context.put("arguments", context.get("args"));
-            }
-            return context;
-        }
-        if (raw instanceof String s) {
-            try {
-                Map<String, Object> context = objectMapper.readValue(s, new TypeReference<>() {});
-                if (!context.containsKey("arguments") && context.containsKey("args")) {
-                    context.put("arguments", context.get("args"));
-                }
-                return context;
-            } catch (Exception e) {
-                throw new AwsException("BadRequestException", "Invalid context JSON", 400);
-            }
-        }
-        throw new AwsException("BadRequestException", "Invalid context", 400);
-    }
-
-    private Map<String, Object> evaluationResponse(Object result, Map<String, Object> error) {
-        Map<String, Object> response = new LinkedHashMap<>();
-        if (result instanceof String s) {
-            response.put("evaluationResult", s);
-        } else if (result != null) {
-            try {
-                response.put("evaluationResult", objectMapper.writeValueAsString(result));
-            } catch (Exception e) {
-                response.put("evaluationResult", String.valueOf(result));
-            }
-        }
-        if (error != null) {
-            response.put("error", error);
-        }
-        response.put("logs", List.of());
-        response.put("stash", "{}");
-        // AWS returns outErrors as a JSON-encoded string, not an array.
-        response.put("outErrors", "[]");
-        return response;
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> asStringObjectMap(Object value) {
-        if (value instanceof Map<?, ?> map) {
-            return (Map<String, Object>) map;
-        }
-        return new HashMap<>();
-    }
-
-    private void validateCertificateArn(String certificateArn) {
-        int slash = certificateArn.lastIndexOf('/');
-        String certId = slash >= 0 ? certificateArn.substring(slash + 1) : certificateArn;
-        // Emulator integration tests use short placeholder ids (`certificate/123`).
-        // Real ACM ARNs (and Alchemy's typed probe) use a UUID — those must exist.
-        if (!certId.contains("-")) {
-            return;
-        }
-        if (acmService != null && !acmService.isUnsatisfied()) {
-            try {
-                String[] parts = certificateArn.split(":");
-                String region = parts.length > 3 ? parts[3] : regionResolver.getDefaultRegion();
-                acmService.get().describeCertificate(certificateArn, region);
-                return;
-            } catch (AwsException e) {
-                throw new AwsException("BadRequestException",
-                        "The certificate " + certificateArn + " does not exist.", 400);
-            }
-        }
-        throw new AwsException("BadRequestException",
-                "The certificate " + certificateArn + " does not exist.", 400);
-    }
-
-    private Long castLong(Object value) {
-        if (value == null) {
-            return 0L;
-        }
-        if (value instanceof Number n) {
-            return n.longValue();
-        }
-        try {
-            return Long.parseLong(value.toString());
-        } catch (NumberFormatException e) {
-            throw new AwsException("BadRequestException", "Invalid long value: " + value, 400);
-        }
     }
 
     /**
@@ -729,7 +453,7 @@ public class AppSyncService {
         resolver.setApiId(apiId);
         resolver.setTypeName(typeName);
         resolver.setFieldName((String) request.get("fieldName"));
-        resolver.setDataSourceName(dataSourceName);
+        resolver.setDataSourceName((String) request.get("dataSourceName"));
         resolver.setFunctionId((String) request.get("functionId"));
         resolver.setRequestMappingTemplate((String) request.get("requestMappingTemplate"));
         resolver.setResponseMappingTemplate((String) request.get("responseMappingTemplate"));
@@ -1027,6 +751,211 @@ public class AppSyncService {
 
     // ──────────────────────────── Domain Names ────────────────────────────
 
+    // ──────────────────────────── API Cache ────────────────────────────
+
+    public ApiCache getApiCache(String apiId) {
+        getGraphqlApi(apiId);
+        return apiCacheStore.get(apiId)
+                .orElseThrow(() -> new AwsException("NotFoundException", "ApiCache not found for API: " + apiId, 404));
+    }
+
+    public ApiCache createApiCache(String apiId, Map<String, Object> request) {
+        getGraphqlApi(apiId);
+        if (apiCacheStore.get(apiId).isPresent()) {
+            throw new AwsException("BadRequestException", "ApiCache already exists for API: " + apiId, 400);
+        }
+        ApiCache cache = applyCacheRequest(new ApiCache(), request, true);
+        cache.setStatus("AVAILABLE");
+        apiCacheStore.put(apiId, cache);
+        return cache;
+    }
+
+    public ApiCache updateApiCache(String apiId, Map<String, Object> request) {
+        ApiCache existing = getApiCache(apiId);
+        applyCacheRequest(existing, request, false);
+        existing.setStatus("AVAILABLE");
+        apiCacheStore.put(apiId, existing);
+        return existing;
+    }
+
+    public void deleteApiCache(String apiId) {
+        getApiCache(apiId);
+        apiCacheStore.delete(apiId);
+    }
+
+    public void flushApiCache(String apiId) {
+        getApiCache(apiId);
+    }
+
+    private ApiCache applyCacheRequest(ApiCache cache, Map<String, Object> request, boolean creating) {
+        if (request.containsKey("ttl") || creating) {
+            cache.setTtl(castLong(request.get("ttl")));
+        }
+        if (request.containsKey("apiCachingBehavior") || creating) {
+            cache.setApiCachingBehavior(coerceString(request.get("apiCachingBehavior")));
+        }
+        if (request.containsKey("type") || creating) {
+            cache.setType(coerceString(request.get("type")));
+        }
+        if (request.containsKey("healthMetricsConfig")) {
+            cache.setHealthMetricsConfig(coerceString(request.get("healthMetricsConfig")));
+        }
+        if (creating) {
+            Object transit = request.get("transitEncryptionEnabled");
+            cache.setTransitEncryptionEnabled(transit instanceof Boolean b ? b
+                    : Boolean.parseBoolean(String.valueOf(transit != null ? transit : true)));
+            Object atRest = request.get("atRestEncryptionEnabled");
+            cache.setAtRestEncryptionEnabled(atRest instanceof Boolean b ? b
+                    : Boolean.parseBoolean(String.valueOf(atRest != null ? atRest : true)));
+        }
+        return cache;
+    }
+
+    // ──────────────────────────── Evaluate ────────────────────────────
+
+    public Map<String, Object> evaluateCode(Map<String, Object> request) {
+        String code = coerceString(request.get("code"));
+        if (code == null || code.isBlank()) {
+            throw new AwsException("BadRequestException", "code is required", 400);
+        }
+        String function = coerceString(request.get("function"));
+        Map<String, Object> context = parseEvalContext(request.get("context"));
+        if (jsRuntime.isUnsatisfied() || !jsRuntime.get().isAvailable()) {
+            throw new AwsException("BadRequestException", "The APPSYNC_JS runtime is not available.", 400);
+        }
+        JsEvaluation evaluation = jsRuntime.get().evaluate(code, function == null ? "request" : function, context);
+        if (evaluation.failed()) {
+            Map<String, Object> error = new LinkedHashMap<>();
+            error.put("message", evaluation.error().message());
+            return evaluationResponse(null, error, evaluation.stash());
+        }
+        return evaluationResponse(evaluation.result(), null, evaluation.stash());
+    }
+
+    public Map<String, Object> evaluateMappingTemplate(Map<String, Object> request) {
+        String template = coerceString(request.get("template"));
+        if (template == null || template.isBlank()) {
+            throw new AwsException("BadRequestException", "template is required", 400);
+        }
+        Map<String, Object> context = parseEvalContext(request.get("context"));
+        AppSyncVtlContext vtl = AppSyncVtlContext.builder(objectMapper)
+                .arguments(asStringObjectMap(context.get("arguments")))
+                .source(asStringObjectMap(context.get("source")))
+                .identity(asStringObjectMap(context.get("identity")))
+                .request(asStringObjectMap(context.get("request")))
+                .info(asStringObjectMap(context.get("info")))
+                .stash(asStringObjectMap(context.get("stash")))
+                .prev(asStringObjectMap(context.get("prev")))
+                .result(context.get("result"))
+                .build();
+        try {
+            AppSyncVtlResult result = vtlEngine.evaluate(template, vtl);
+            if (result.hasError()) {
+                Map<String, Object> error = new LinkedHashMap<>();
+                error.put("message", result.error().getMessage());
+                return evaluationResponse(null, error, null);
+            }
+            return evaluationResponse(result.output(), null, null);
+        } catch (Exception e) {
+            Map<String, Object> error = new LinkedHashMap<>();
+            error.put("message", e.getMessage());
+            return evaluationResponse(null, error, null);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseEvalContext(Object raw) {
+        Map<String, Object> context;
+        if (raw == null) {
+            return new HashMap<>();
+        } else if (raw instanceof Map<?, ?> map) {
+            context = new HashMap<>((Map<String, Object>) map);
+        } else if (raw instanceof String s) {
+            try {
+                context = objectMapper.readValue(s, new TypeReference<>() {});
+            } catch (Exception e) {
+                throw new AwsException("BadRequestException", "Invalid context JSON", 400);
+            }
+        } else {
+            throw new AwsException("BadRequestException", "Invalid context", 400);
+        }
+        if (!context.containsKey("arguments") && context.containsKey("args")) {
+            context.put("arguments", context.get("args"));
+        }
+        return context;
+    }
+
+    private Map<String, Object> evaluationResponse(Object result, Map<String, Object> error,
+                                                   Map<String, Object> stash) {
+        Map<String, Object> response = new LinkedHashMap<>();
+        if (result instanceof String s) {
+            response.put("evaluationResult", s);
+        } else if (result != null) {
+            try {
+                response.put("evaluationResult", objectMapper.writeValueAsString(result));
+            } catch (Exception e) {
+                response.put("evaluationResult", String.valueOf(result));
+            }
+        }
+        if (error != null) {
+            response.put("error", error);
+        }
+        response.put("logs", List.of());
+        try {
+            response.put("stash", objectMapper.writeValueAsString(stash == null ? Map.of() : stash));
+        } catch (Exception e) {
+            response.put("stash", "{}");
+        }
+        // AWS returns outErrors as a JSON-encoded string, not an array.
+        response.put("outErrors", "[]");
+        return response;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> asStringObjectMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return (Map<String, Object>) map;
+        }
+        return new HashMap<>();
+    }
+
+    private void validateCertificateArn(String certificateArn) {
+        int slash = certificateArn.lastIndexOf('/');
+        String certId = slash >= 0 ? certificateArn.substring(slash + 1) : certificateArn;
+        // Emulator integration tests use short placeholder ids (`certificate/123`).
+        // Real ACM ARNs use a UUID — those must exist.
+        if (!certId.contains("-")) {
+            return;
+        }
+        if (acmService != null && !acmService.isUnsatisfied()) {
+            try {
+                String[] parts = certificateArn.split(":");
+                String region = parts.length > 3 ? parts[3] : regionResolver.getDefaultRegion();
+                acmService.get().describeCertificate(certificateArn, region);
+                return;
+            } catch (AwsException e) {
+                throw new AwsException("BadRequestException",
+                        "The certificate " + certificateArn + " does not exist.", 400);
+            }
+        }
+        throw new AwsException("BadRequestException",
+                "The certificate " + certificateArn + " does not exist.", 400);
+    }
+
+    private Long castLong(Object value) {
+        if (value == null) {
+            return 0L;
+        }
+        if (value instanceof Number n) {
+            return n.longValue();
+        }
+        try {
+            return Long.parseLong(value.toString());
+        } catch (NumberFormatException e) {
+            throw new AwsException("BadRequestException", "Invalid long value: " + value, 400);
+        }
+    }
+
     public DomainName createDomainName(Map<String, Object> request) {
         String domainName = (String) request.get("domainName");
         if (domainName == null || domainName.isBlank()) {
@@ -1035,20 +964,17 @@ public class AppSyncService {
         if (domainStore.get(domainName).isPresent()) {
             throw new AwsException("BadRequestException", "The domain name you provided already exists.", 400);
         }
+        DomainName dn = new DomainName();
+        dn.setDomainName(domainName);
+        dn.setDescription((String) request.get("description"));
         String certificateArn = coerceString(request.get("certificateArn"));
         if (certificateArn == null || certificateArn.isBlank()) {
             throw new AwsException("BadRequestException", "A certificate ARN is required", 400);
         }
         validateCertificateArn(certificateArn);
-        DomainName dn = new DomainName();
-        dn.setDomainName(domainName);
-        dn.setDescription((String) request.get("description"));
         dn.setCertificateArn(certificateArn);
-        // AppSync custom domains are fronted by a CloudFront distribution; the target is minted
-        // once here and persisted with the domain.
-        dn.setAppsyncDomainName(generateCloudFrontDomainName());
-        dn.setHostedZoneId(CLOUDFRONT_HOSTED_ZONE_ID);
-        dn.setDomainNameArn(regionResolver.buildArn("appsync", regionResolver.getDefaultRegion(),
+        applyCloudFrontFront(dn, regionResolver.getRegion());
+        dn.setDomainNameArn(regionResolver.buildArn("appsync", regionResolver.getRegion(),
             "domainnames/" + domainName));
 
         Object tagsObj = request.get("tags");
@@ -1060,6 +986,20 @@ public class AppSyncService {
 
         domainStore.put(domainName, dn);
         return dn;
+    }
+
+    /**
+     * AppSync fronts a custom domain with a CloudFront distribution: the CDK aliases
+     * {@code appsyncDomainName} into the CloudFront hosted zone of the partition
+     * ({@code aws-route53-targets/lib/appsync-target.ts}), so the name is a distribution name and
+     * the zone is CloudFront's, never a zone of its own, the same front an edge-optimized API
+     * Gateway domain gets.
+     */
+    private void applyCloudFrontFront(DomainName dn, String region) {
+        CloudFrontEdgeDomain edge = CloudFrontEdgeDomain.create(regionResolver.partitionForRegion(region),
+                configuredCloudFrontDomainSuffix);
+        dn.setAppsyncDomainName(edge.domainName());
+        dn.setHostedZoneId(edge.hostedZoneId());
     }
 
     public DomainName getDomainName(String domainName) {
@@ -1124,7 +1064,7 @@ public class AppSyncService {
 
     public ChannelNamespace createChannelNamespace(String apiId, Map<String, Object> request) {
         assertSchemaNotBusy(apiId);
-        getGraphqlApi(apiId);
+        GraphqlApi api = getGraphqlApi(apiId);
         String name = (String) request.get("name");
         if (name == null || name.isBlank()) {
             throw new AwsException("BadRequestException", "A channel namespace name is required", 400);
@@ -1138,7 +1078,7 @@ public class AppSyncService {
         ns.setName(name);
         ns.setApiId(apiId);
         ns.setDescription((String) request.get("description"));
-        ns.setChannelNamespaceArn(regionResolver.buildArn("appsync", regionResolver.getDefaultRegion(),
+        ns.setChannelNamespaceArn(regionResolver.buildArn("appsync", apiRegion(api),
             "apis/" + apiId + "/channelNamespaces/" + name));
         ns.setCodeHandlers((String) request.get("codeHandlers"));
         ns.setCreated(System.currentTimeMillis());
@@ -1447,14 +1387,6 @@ public class AppSyncService {
         return UUID.randomUUID().toString().replace("-", "").substring(0, 7);
     }
 
-    private String generateCloudFrontDomainName() {
-        StringBuilder sb = new StringBuilder("d");
-        for (int i = 0; i < 13; i++) {
-            sb.append(API_KEY_ALPHABET.charAt(apiKeyRandom.nextInt(API_KEY_ALPHABET.length())));
-        }
-        return sb.append(".cloudfront.net").toString();
-    }
-
     private String generateApiKeyId() {
         StringBuilder sb = new StringBuilder(API_KEY_PREFIX);
         for (int i = 0; i < API_KEY_RANDOM_LENGTH; i++) {
@@ -1469,6 +1401,14 @@ public class AppSyncService {
 
     private String resolverKey(String apiId, String typeName, String fieldName) {
         return apiId + "::" + typeName + "::" + fieldName;
+    }
+
+    /** The region of an API's ARN, where its child resources live; the request region if it has none. */
+    private String apiRegion(GraphqlApi api) {
+        if (api.getArn() != null && AwsArnUtils.isArn(api.getArn())) {
+            return AwsArnUtils.parse(api.getArn()).region();
+        }
+        return regionResolver.getRegion();
     }
 
     private String buildApiArn(String apiId, String region) {
@@ -1594,7 +1534,7 @@ public class AppSyncService {
     private Map<String, String> castStringMap(Object value) {
         if (value instanceof Map) {
             Map<String, String> result = new HashMap<>();
-            for (var entry : ((Map<Object, Object>) value).entrySet()) {
+            for (Map.Entry<Object, Object> entry : ((Map<Object, Object>) value).entrySet()) {
                 result.put(String.valueOf(entry.getKey()), String.valueOf(entry.getValue()));
             }
             return result;
@@ -1678,8 +1618,7 @@ public class AppSyncService {
     }
 
     static String encodeToken(int offset) {
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(Integer.toString(offset).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return Base64Url.encode(Integer.toString(offset));
     }
 
     static int decodeToken(String token) {

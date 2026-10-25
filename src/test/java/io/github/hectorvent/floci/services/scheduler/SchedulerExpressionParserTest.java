@@ -6,6 +6,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -63,12 +64,32 @@ class SchedulerExpressionParserTest {
         assertEquals(3_600_000L, SchedulerExpressionParser.parseRateMillis("rate(1 hour)"));
         assertEquals(86_400_000L, SchedulerExpressionParser.parseRateMillis("rate(1 day)"));
         assertEquals(604_800_000L, SchedulerExpressionParser.parseRateMillis("rate(1 week)"));
+        assertEquals(1_209_600_000L, SchedulerExpressionParser.parseRateMillis("rate(2 weeks)"));
+        assertThrows(IllegalArgumentException.class,
+                () -> SchedulerExpressionParser.validate("rate(1 week)", null));
     }
 
     @Test
     void parseRateRejectsZero() {
         assertThrows(IllegalArgumentException.class,
                 () -> SchedulerExpressionParser.parseRateMillis("rate(0 minutes)"));
+    }
+
+    @Test
+    void validatesRateUnitAgreementWithoutChangingStoredExpressionParsing() {
+        for (String unit : List.of("minute", "hour", "day")) {
+            assertDoesNotThrow(() -> SchedulerExpressionParser.validate("rate(1 " + unit + ")", null));
+            assertDoesNotThrow(() -> SchedulerExpressionParser.validate("rate(5 " + unit + "s)", null));
+            assertThrows(IllegalArgumentException.class,
+                    () -> SchedulerExpressionParser.validate("rate(1 " + unit + "s)", null));
+            assertThrows(IllegalArgumentException.class,
+                    () -> SchedulerExpressionParser.validate("rate(5 " + unit + ")", null));
+        }
+        assertDoesNotThrow(() -> SchedulerExpressionParser.validate("RATE(1 HOUR)", null));
+        assertThrows(IllegalArgumentException.class,
+                () -> SchedulerExpressionParser.validate("RATE(1 HOURS)", null));
+        assertEquals(3_600_000L, SchedulerExpressionParser.parseRateMillis("rate(1 hours)"));
+        assertEquals(18_000_000L, SchedulerExpressionParser.parseRateMillis("rate(5 hour)"));
     }
 
     @Test
@@ -88,6 +109,25 @@ class SchedulerExpressionParserTest {
         Instant nextBerlin = SchedulerExpressionParser.nextCronFire("cron(0 10 * * ? *)", from, "Europe/Berlin");
         assertNotEquals(nextUtc, nextBerlin,
                 "10:00 UTC and 10:00 Europe/Berlin are different absolute instants");
+    }
+
+    @Test
+    void cronSkipsNonexistentLocalTimeDuringSpringForward() {
+        // Los Angeles advances from 01:59 to 03:00 on 2026-03-08.
+        assertEquals(Instant.parse("2026-03-09T09:30:00Z"),
+                SchedulerExpressionParser.nextCronFire("cron(30 2 * * ? *)",
+                        Instant.parse("2026-03-08T09:00:00Z"), "America/Los_Angeles"));
+    }
+
+    @Test
+    void cronRunsOnlyOnceDuringFallBack() {
+        // 01:30 happens twice on 2026-11-01; AWS invokes only at its first occurrence.
+        String expression = "cron(30 1 * * ? *)";
+        Instant first = SchedulerExpressionParser.nextCronFire(expression,
+                Instant.parse("2026-11-01T07:00:00Z"), "America/Los_Angeles");
+        assertEquals(Instant.parse("2026-11-01T08:30:00Z"), first);
+        assertEquals(Instant.parse("2026-11-02T09:30:00Z"),
+                SchedulerExpressionParser.nextCronFire(expression, first, "America/Los_Angeles"));
     }
 
     @Test

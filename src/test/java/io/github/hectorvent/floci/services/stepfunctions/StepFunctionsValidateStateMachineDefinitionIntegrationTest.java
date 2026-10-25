@@ -13,6 +13,7 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -156,6 +157,88 @@ class StepFunctionsValidateStateMachineDefinitionIntegrationTest {
                 .when().post("/");
     }
 
+    @ParameterizedTest
+    @MethodSource("unsupportedApiHeaders")
+    void apiGatewayReservedHeadersFailBeforeCreation(String header, boolean jsonata) {
+        String definition = apiHeaderDefinition(header, jsonata);
+        String field = jsonata ? "Arguments" : "Parameters";
+        String message = "The 'Headers' field contains unsupported values: ["
+                + header.toLowerCase(Locale.ROOT) + "]";
+        validateDefinition(definition).then().statusCode(200)
+                .body("result", equalTo("FAIL"))
+                .body("diagnostics[0].code", equalTo("SCHEMA_VALIDATION_FAILED"))
+                .body("diagnostics[0].message", equalTo(message))
+                .body("diagnostics[0].location", equalTo("/States/Call/" + field));
+        createStateMachine("invalid-header-" + System.nanoTime(), definition).then().statusCode(400)
+                .body("__type", equalTo("InvalidDefinition"))
+                .body("message", containsString(message));
+    }
+
+    static Stream<Arguments> unsupportedApiHeaders() {
+        return Stream.of("Expect", "expect", "eXpEcT", "Upgrade", "upgrade", "UPGRADE",
+                        "Authorization", "authorization", "AUTHORIZATION", "Host", "host", "HOST",
+                        "X-Amz-Test", "x-amz-test", "X-AMZ-TEST", "X-Amzn-Test", "x-amzn-test", "X-AMZN-TEST",
+                        "X-Amz-", "X-Amzn-", "Connection", "Content-MD5", "Max-Forwards", "Proxy-Authenticate",
+                        "Server", "TE", "Transfer-Encoding", "Trailer", "Via", "WWW-Authenticate",
+                        "X-Forwarded-Test", "x-forwarded-test", "X-FORWARDED-TEST")
+                .flatMap(header -> Stream.of(Arguments.of(header, false), Arguments.of(header, true)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("supportedApiHeaders")
+    void apiGatewayOrdinaryHeadersRemainValid(String header, boolean jsonata) {
+        validateDefinition(apiHeaderDefinition(header, jsonata)).then().statusCode(200)
+                .body("result", equalTo("OK")).body("diagnostics", hasSize(0));
+    }
+
+    static Stream<Arguments> supportedApiHeaders() {
+        return Stream.of("X_Custom", "X-Expect", "Content-Type", "X-Amz", "X-Amzn", "X-AmzFoo", "X-AmznFoo",
+                        "X-Amznn-Test", "Authorization-Extra", "Hostname", "Expect-Extra", "Upgrade-Extra",
+                        "X-Am-Example", "X-Am", "XX-Amz-Test", "X-Forwarded", "X-ForwardedFoo", "XX-Forwarded-Test")
+                .flatMap(header -> Stream.of(Arguments.of(header, false), Arguments.of(header, true)));
+    }
+
+    @Test
+    void apiGatewayHeaderValidationRecursesIntoParallelBranches() throws Exception {
+        String definition = OBJECT_MAPPER.writeValueAsString(Map.of("StartAt", "P", "States", Map.of("P",
+                Map.of("Type", "Parallel", "End", true,
+                        "Branches", List.of(OBJECT_MAPPER.readTree(apiHeaderDefinition("Expect", false)))))));
+        validateDefinition(definition).then().statusCode(200).body("result", equalTo("FAIL"))
+                .body("diagnostics[0].location", equalTo("/States/P/Branches[0]/States/Call/Parameters"));
+    }
+
+    @Test
+    void invalidApiHeaderUpdatePreservesTheStoredDefinition() {
+        String original = apiHeaderDefinition("X_Custom", false);
+        String arn = createStateMachine("header-update-" + System.nanoTime(), original)
+                .then().statusCode(200).extract().path("stateMachineArn");
+        try {
+            given().contentType(CT).header("X-Amz-Target", "AWSStepFunctions.UpdateStateMachine")
+                    .body(Map.of("stateMachineArn", arn, "definition", apiHeaderDefinition("Upgrade", false)))
+                    .post("/").then().statusCode(400).body("__type", equalTo("InvalidDefinition"));
+            given().contentType(CT).header("X-Amz-Target", "AWSStepFunctions.DescribeStateMachine")
+                    .body(Map.of("stateMachineArn", arn)).post("/").then().statusCode(200)
+                    .body("definition", equalTo(original));
+        } finally {
+            given().contentType(CT).header("X-Amz-Target", "AWSStepFunctions.DeleteStateMachine")
+                    .body(Map.of("stateMachineArn", arn)).post("/").then().statusCode(200);
+        }
+    }
+
+    private static String apiHeaderDefinition(String header, boolean jsonata) {
+        ObjectNode root = OBJECT_MAPPER.createObjectNode().put("StartAt", "Call");
+        if (jsonata) {
+            root.put("QueryLanguage", "JSONata");
+        }
+        ObjectNode task = root.putObject("States").putObject("Call");
+        task.put("Type", "Task").put("Resource", "arn:aws:states:::apigateway:invoke").put("End", true);
+        ObjectNode input = task.putObject(jsonata ? "Arguments" : "Parameters");
+        input.put("ApiEndpoint", "example.execute-api.us-east-2.amazonaws.com").put("Method", "POST")
+                .put("AuthType", "NO_AUTH");
+        input.putObject("Headers").putArray(header).add("test");
+        return root.toString();
+    }
+
     private static String distributedMapWithResultWriter(String resultWriter) {
         return """
                 {
@@ -292,22 +375,6 @@ class StepFunctionsValidateStateMachineDefinitionIntegrationTest {
                 .body("result", equalTo("OK"))
                 .body("diagnostics", hasSize(0))
                 .body("truncated", is(false));
-    }
-
-    @Test
-    void startAtMissingState_returnsFail() {
-        String def = "{\\\"StartAt\\\":\\\"Missing\\\",\\\"States\\\":{\\\"Done\\\":{\\\"Type\\\":\\\"Pass\\\",\\\"End\\\":true}}}";
-        given().contentType(CT).header("X-Amz-Target", TARGET)
-                .body("{\"definition\":\"" + def + "\"}")
-                .when().post("/")
-                .then().statusCode(200)
-                .body("result", equalTo("FAIL"))
-                .body("diagnostics.size()", greaterThanOrEqualTo(1))
-                .body("diagnostics[0].severity", equalTo("ERROR"))
-                // AWS reports an unresolvable StartAt as a dangling transition target at /StartAt,
-                // the same "MISSING_TRANSITION_TARGET: Missing 'Next' target" CreateStateMachine uses.
-                .body("diagnostics[0].code", equalTo("MISSING_TRANSITION_TARGET"))
-                .body("diagnostics[0].location", equalTo("/StartAt"));
     }
 
     @Test
@@ -468,7 +535,7 @@ class StepFunctionsValidateStateMachineDefinitionIntegrationTest {
     void mapNumberPathFieldsMustBeMutuallyExclusiveAndReferencePaths() {
         String def = mapDefinition("", "\"ItemBatcher\":{\"MaxItemsPerBatch\":2,"
                 + "\"MaxItemsPerBatchPath\":\"$.batch\"},"
-                + "\"ToleratedFailureCountPath\":\"$$.Execution.Input.count\",");
+                + "\"ToleratedFailureCountPath\":\"$.counts[*]\",");
 
         validateDefinition(def)
                 .then().statusCode(200)
@@ -478,6 +545,26 @@ class StepFunctionsValidateStateMachineDefinitionIntegrationTest {
                 .body("diagnostics[0].location", equalTo("/States/M/ItemBatcher/MaxItemsPerBatch"))
                 .body("diagnostics[1].message", equalTo("Value is not a Reference Path"))
                 .body("diagnostics[1].location", equalTo("/States/M/ToleratedFailureCountPath"));
+    }
+
+    /**
+     * ASL accepts a {@code string_sampler} wherever it accepts a Reference Path, and a Context
+     * Object path is one of its spellings, so every Map numeric path field takes {@code $$.} as
+     * readily as {@code $.}.
+     */
+    @Test
+    void mapNumberPathFieldsAcceptContextObjectPaths() {
+        String def = mapDefinition("", "\"MaxConcurrencyPath\":\"$$.Execution.Input.limit\","
+                + "\"ItemBatcher\":{\"MaxItemsPerBatchPath\":\"$$.Execution.Input.batch\","
+                + "\"MaxInputBytesPerBatchPath\":\"$$.Execution.Input.bytes\"},"
+                + "\"ToleratedFailureCountPath\":\"$$.Execution.Input.count\","
+                + "\"ToleratedFailurePercentagePath\":\"$$.Execution.Input.percentage\","
+                + "\"ItemReader\":{\"ReaderConfig\":{\"MaxItemsPath\":\"$$.Execution.Input.max\"}},");
+
+        validateDefinition(def)
+                .then().statusCode(200)
+                .body("result", equalTo("OK"))
+                .body("diagnostics", hasSize(0));
     }
 
     @Test

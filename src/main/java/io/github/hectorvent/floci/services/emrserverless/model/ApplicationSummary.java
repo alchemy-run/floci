@@ -1,19 +1,24 @@
 package io.github.hectorvent.floci.services.emrserverless.model;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import io.quarkus.runtime.annotations.RegisterForReflection;
+
+import java.time.Instant;
 
 @RegisterForReflection
 public class ApplicationSummary {
     private String architecture;
     private String arn;
-    private Long createdAt;
+    @JsonFormat(shape = JsonFormat.Shape.NUMBER)
+    private Instant createdAt;
     private String id;
     private String name;
     private String releaseLabel;
     private String state;
     private String stateDetails;
     private String type;
-    private Long updatedAt;
+    @JsonFormat(shape = JsonFormat.Shape.NUMBER)
+    private Instant updatedAt;
 
     public ApplicationSummary() {}
 
@@ -33,11 +38,11 @@ public class ApplicationSummary {
         this.arn = arn;
     }
 
-    public Long getCreatedAt() {
+    public Instant getCreatedAt() {
         return createdAt;
     }
 
-    public void setCreatedAt(Long createdAt) {
+    public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
     }
 
@@ -89,11 +94,11 @@ public class ApplicationSummary {
         this.type = type;
     }
 
-    public Long getUpdatedAt() {
+    public Instant getUpdatedAt() {
         return updatedAt;
     }
 
-    public void setUpdatedAt(Long updatedAt) {
+    public void setUpdatedAt(Instant updatedAt) {
         this.updatedAt = updatedAt;
     }
 }

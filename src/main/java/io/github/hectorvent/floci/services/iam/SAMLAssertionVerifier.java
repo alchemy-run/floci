@@ -1,12 +1,20 @@
 package io.github.hectorvent.floci.services.iam;
 
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
+import io.github.hectorvent.floci.core.common.AwsRegionFacts;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.services.iam.model.IamSamlProvider;
+import io.github.hectorvent.floci.services.iam.model.SAMLProvider;
+import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
+import javax.xml.crypto.dsig.CanonicalizationMethod;
+import javax.xml.crypto.dsig.Transform;
 import javax.xml.crypto.dsig.XMLSignature;
 import javax.xml.crypto.dsig.XMLSignatureFactory;
 import javax.xml.crypto.dsig.dom.DOMValidateContext;
+
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -17,12 +25,18 @@ import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
+import java.util.Set;
 
 /** Verifies the specific SAML assertion contract consumed by STS. */
 final class SAMLAssertionVerifier {
     private static final String SAML = "urn:oasis:names:tc:SAML:2.0:assertion";
     private static final String DS = "http://www.w3.org/2000/09/xmldsig#";
     private static final String AUDIENCE = "urn:amazon:webservices";
+    static final String ASSERTION_INVALID = "The SAML assertion is invalid.";
+    static final String SIGNATURE_INVALID = "Response signature invalid";
+    // SAML 2.0 core 5.4.4. AWS rejects any other reference transform as an invalid signature.
+    private static final Set<String> ALLOWED_TRANSFORMS = Set.of(
+            Transform.ENVELOPED, CanonicalizationMethod.EXCLUSIVE, CanonicalizationMethod.EXCLUSIVE_WITH_COMMENTS);
 
     private SAMLAssertionVerifier() {}
 
@@ -30,10 +44,10 @@ final class SAMLAssertionVerifier {
                     Instant expiration, List<RolePair> roles) {}
     record RolePair(String roleArn, String principalArn) {}
 
-    static Verified verify(String encoded, IamSamlProvider provider, Instant now) throws InvalidAssertionException {
+    static Verified verify(String encoded, SAMLProvider provider, Instant now) throws InvalidAssertionException {
         try {
             byte[] bytes = Base64.getDecoder().decode(encoded);
-            var document = SAMLXml.document(new String(bytes, java.nio.charset.StandardCharsets.UTF_8));
+            Document document = SAMLXml.document(new String(bytes, StandardCharsets.UTF_8));
             Element assertion = document.getDocumentElement();
             if ("Response".equals(assertion.getLocalName())) {
                 assertion = first(assertion, SAML, "Assertion");
@@ -51,8 +65,20 @@ final class SAMLAssertionVerifier {
             if (signature == null) {
                 throw invalid("signature missing");
             }
+            Element signedInfo = first(signature, DS, "SignedInfo");
+            if (signedInfo == null) {
+                throw invalid("signed info missing");
+            }
+            // Checked on the DOM because unmarshalling some transform parameters fails in the native image.
+            NodeList transforms = signedInfo.getElementsByTagNameNS(DS, "Transform");
+            for (int i = 0; i < transforms.getLength(); i++) {
+                String algorithm = ((Element) transforms.item(i)).getAttribute("Algorithm");
+                if (!ALLOWED_TRANSFORMS.contains(algorithm)) {
+                    throw new InvalidAssertionException("reference transform " + algorithm, SIGNATURE_INVALID);
+                }
+            }
             X509Certificate certificate = certificate(provider.getCertificate());
-            var context = new DOMValidateContext(certificate.getPublicKey(), signature);
+            DOMValidateContext context = new DOMValidateContext(certificate.getPublicKey(), signature);
             context.setProperty("org.jcp.xml.dsig.secureValidation", Boolean.TRUE);
             XMLSignature xmlSignature = XMLSignatureFactory.getInstance("DOM").unmarshalXMLSignature(context);
             if (xmlSignature.getSignedInfo().getReferences().size() != 1
@@ -109,7 +135,7 @@ final class SAMLAssertionVerifier {
                 }
                 String recipient = confirmationData.getAttribute("Recipient");
                 Instant confirmationExpiry = instant(confirmationData.getAttribute("NotOnOrAfter"));
-                if ("https://signin.aws.amazon.com/saml".equals(recipient)
+                if (expectedRecipient(provider).equals(recipient)
                         && confirmationExpiry != null && now.isBefore(confirmationExpiry)) {
                     validBearer = true;
                     break;
@@ -132,9 +158,9 @@ final class SAMLAssertionVerifier {
                     if (pair.length != 2) {
                         throw invalid("role pair format");
                     }
-                    if (pair[0].startsWith("arn:aws:iam::") && pair[1].contains(":saml-provider/")) {
+                    if (AwsArnUtils.isArnFor(pair[0], "iam") && pair[1].contains(":saml-provider/")) {
                         roles.add(new RolePair(pair[0], pair[1]));
-                    } else if (pair[1].startsWith("arn:aws:iam::") && pair[0].contains(":saml-provider/")) {
+                    } else if (AwsArnUtils.isArnFor(pair[1], "iam") && pair[0].contains(":saml-provider/")) {
                         roles.add(new RolePair(pair[1], pair[0]));
                     } else {
                         throw invalid("role pair ARN");
@@ -144,8 +170,8 @@ final class SAMLAssertionVerifier {
             if (roles.isEmpty()) {
                 throw invalid("role pair missing");
             }
-            String nameQualifier = java.util.Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-1")
-                    .digest((issuer + provider.getArn()).getBytes(StandardCharsets.UTF_8)));
+            String nameQualifier = java.util.Base64.getEncoder().encodeToString(
+                    Digests.sha1((issuer + provider.getArn()).getBytes(StandardCharsets.UTF_8)));
             return new Verified(issuer, name, subjectType, nameQualifier, notOnOrAfter, roles);
         } catch (InvalidAssertionException e) {
             throw e;
@@ -196,8 +222,38 @@ final class SAMLAssertionVerifier {
     }
 
     static final class InvalidAssertionException extends Exception {
-        InvalidAssertionException(Throwable cause) { super(cause); }
-        InvalidAssertionException(String message) { super(message); }
+        private final String awsMessage;
+
+        InvalidAssertionException(Throwable cause) {
+            super(cause);
+            this.awsMessage = ASSERTION_INVALID;
+        }
+
+        InvalidAssertionException(String message) {
+            this(message, ASSERTION_INVALID);
+        }
+
+        InvalidAssertionException(String reason, String awsMessage) {
+            super(reason);
+            this.awsMessage = awsMessage;
+        }
+
+        String awsMessage() {
+            return awsMessage;
+        }
     }
 
+    /**
+     * The console sign-on URL a bearer assertion must name, in the provider's partition. The CDK
+     * publishes none for {@code aws-iso-e}, {@code aws-iso-f} and {@code aws-eusc}; there the
+     * commercial URL is kept, as every partition used before the per-partition table, rather than
+     * refusing every assertion.
+     */
+    // Package-private for unit testing.
+    static String expectedRecipient(SAMLProvider provider) {
+        String partition = AwsArnUtils.parse(provider.getArn()).partition();
+        return AwsRegionFacts.samlSignOnUrl(partition)
+                .or(() -> AwsRegionFacts.samlSignOnUrl("aws"))
+                .orElseThrow();
+    }
 }

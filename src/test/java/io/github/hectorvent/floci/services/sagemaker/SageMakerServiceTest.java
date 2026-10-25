@@ -11,6 +11,7 @@ import io.github.hectorvent.floci.services.sagemaker.model.SageMakerEntities.Mod
 import io.github.hectorvent.floci.services.sagemaker.model.SageMakerEntities.TrainingJobResource;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -218,7 +219,7 @@ class SageMakerServiceTest {
         EndpointResource ep = endpoints.scan(key -> true).get(0);
         assertEquals(List.of("busybox:stable"), service.deployedImages(ep));
         ep.endpointStatus = "InService";
-        ep.resolvedImages = new java.util.LinkedHashMap<>(java.util.Map.of("busybox:stable",
+        ep.resolvedImages = new LinkedHashMap<>(java.util.Map.of("busybox:stable",
                 "busybox@sha256:" + "a".repeat(64)));
         assertTrue(service.finalizeEndpointStart(ep));
 

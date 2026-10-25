@@ -2,6 +2,7 @@ package com.floci.test;
 
 import org.junit.jupiter.api.*;
 import software.amazon.awssdk.services.iam.IamClient;
+import software.amazon.awssdk.services.iam.model.AccessDetail;
 import software.amazon.awssdk.services.iam.model.AddRoleToInstanceProfileRequest;
 import software.amazon.awssdk.services.iam.model.AddUserToGroupRequest;
 import software.amazon.awssdk.services.iam.model.AttachRolePolicyRequest;
@@ -18,6 +19,8 @@ import software.amazon.awssdk.services.iam.model.CreatePolicyRequest;
 import software.amazon.awssdk.services.iam.model.CreatePolicyResponse;
 import software.amazon.awssdk.services.iam.model.CreateRoleRequest;
 import software.amazon.awssdk.services.iam.model.CreateRoleResponse;
+import software.amazon.awssdk.services.iam.model.CreateSamlProviderRequest;
+import software.amazon.awssdk.services.iam.model.CreateSamlProviderResponse;
 import software.amazon.awssdk.services.iam.model.CreateUserRequest;
 import software.amazon.awssdk.services.iam.model.CreateUserResponse;
 import software.amazon.awssdk.services.iam.model.DeleteAccessKeyRequest;
@@ -25,29 +28,42 @@ import software.amazon.awssdk.services.iam.model.DeleteGroupRequest;
 import software.amazon.awssdk.services.iam.model.DeleteInstanceProfileRequest;
 import software.amazon.awssdk.services.iam.model.DeleteLoginProfileRequest;
 import software.amazon.awssdk.services.iam.model.DeletePolicyRequest;
-import software.amazon.awssdk.services.iam.model.DeleteRoleRequest;
 import software.amazon.awssdk.services.iam.model.DeleteRolePolicyRequest;
+import software.amazon.awssdk.services.iam.model.DeleteRoleRequest;
+import software.amazon.awssdk.services.iam.model.DeleteSamlProviderRequest;
 import software.amazon.awssdk.services.iam.model.DeleteUserRequest;
 import software.amazon.awssdk.services.iam.model.DetachRolePolicyRequest;
 import software.amazon.awssdk.services.iam.model.DetachUserPolicyRequest;
+import software.amazon.awssdk.services.iam.model.GenerateOrganizationsAccessReportRequest;
+import software.amazon.awssdk.services.iam.model.GenerateOrganizationsAccessReportResponse;
+import software.amazon.awssdk.services.iam.model.GenerateServiceLastAccessedDetailsRequest;
+import software.amazon.awssdk.services.iam.model.GenerateServiceLastAccessedDetailsResponse;
 import software.amazon.awssdk.services.iam.model.GetAccountSummaryResponse;
-import software.amazon.awssdk.services.iam.model.SummaryKeyType;
 import software.amazon.awssdk.services.iam.model.GetGroupRequest;
 import software.amazon.awssdk.services.iam.model.GetGroupResponse;
 import software.amazon.awssdk.services.iam.model.GetInstanceProfileRequest;
 import software.amazon.awssdk.services.iam.model.GetInstanceProfileResponse;
 import software.amazon.awssdk.services.iam.model.GetLoginProfileRequest;
 import software.amazon.awssdk.services.iam.model.GetLoginProfileResponse;
+import software.amazon.awssdk.services.iam.model.GetOrganizationsAccessReportRequest;
+import software.amazon.awssdk.services.iam.model.GetOrganizationsAccessReportResponse;
 import software.amazon.awssdk.services.iam.model.GetPolicyRequest;
 import software.amazon.awssdk.services.iam.model.GetPolicyResponse;
 import software.amazon.awssdk.services.iam.model.GetPolicyVersionRequest;
 import software.amazon.awssdk.services.iam.model.GetPolicyVersionResponse;
-import software.amazon.awssdk.services.iam.model.GetRoleRequest;
-import software.amazon.awssdk.services.iam.model.GetRoleResponse;
 import software.amazon.awssdk.services.iam.model.GetRolePolicyRequest;
 import software.amazon.awssdk.services.iam.model.GetRolePolicyResponse;
+import software.amazon.awssdk.services.iam.model.GetRoleRequest;
+import software.amazon.awssdk.services.iam.model.GetRoleResponse;
+import software.amazon.awssdk.services.iam.model.GetSamlProviderRequest;
+import software.amazon.awssdk.services.iam.model.GetSamlProviderResponse;
+import software.amazon.awssdk.services.iam.model.GetServiceLastAccessedDetailsRequest;
+import software.amazon.awssdk.services.iam.model.GetServiceLastAccessedDetailsResponse;
+import software.amazon.awssdk.services.iam.model.GetServiceLastAccessedDetailsWithEntitiesRequest;
+import software.amazon.awssdk.services.iam.model.GetServiceLastAccessedDetailsWithEntitiesResponse;
 import software.amazon.awssdk.services.iam.model.GetUserRequest;
 import software.amazon.awssdk.services.iam.model.GetUserResponse;
+import software.amazon.awssdk.services.iam.model.JobStatusType;
 import software.amazon.awssdk.services.iam.model.ListAccessKeysRequest;
 import software.amazon.awssdk.services.iam.model.ListAccessKeysResponse;
 import software.amazon.awssdk.services.iam.model.ListAttachedRolePoliciesRequest;
@@ -60,29 +76,49 @@ import software.amazon.awssdk.services.iam.model.ListGroupsForUserResponse;
 import software.amazon.awssdk.services.iam.model.ListInstanceProfileTagsRequest;
 import software.amazon.awssdk.services.iam.model.ListInstanceProfileTagsResponse;
 import software.amazon.awssdk.services.iam.model.ListInstanceProfilesResponse;
+import software.amazon.awssdk.services.iam.model.ListPoliciesGrantingServiceAccessEntry;
+import software.amazon.awssdk.services.iam.model.ListPoliciesGrantingServiceAccessRequest;
+import software.amazon.awssdk.services.iam.model.ListPoliciesGrantingServiceAccessResponse;
+import software.amazon.awssdk.services.iam.model.ListPoliciesResponse;
 import software.amazon.awssdk.services.iam.model.ListRolePoliciesRequest;
 import software.amazon.awssdk.services.iam.model.ListRolePoliciesResponse;
 import software.amazon.awssdk.services.iam.model.ListRolesResponse;
+import software.amazon.awssdk.services.iam.model.ListSamlProviderTagsRequest;
+import software.amazon.awssdk.services.iam.model.ListSamlProviderTagsResponse;
+import software.amazon.awssdk.services.iam.model.ListSamlProvidersResponse;
 import software.amazon.awssdk.services.iam.model.ListUserTagsRequest;
 import software.amazon.awssdk.services.iam.model.ListUserTagsResponse;
 import software.amazon.awssdk.services.iam.model.ListUsersResponse;
 import software.amazon.awssdk.services.iam.model.NoSuchEntityException;
+import software.amazon.awssdk.services.iam.model.Policy;
 import software.amazon.awssdk.services.iam.model.PolicyScopeType;
 import software.amazon.awssdk.services.iam.model.PutRolePolicyRequest;
 import software.amazon.awssdk.services.iam.model.RemoveRoleFromInstanceProfileRequest;
 import software.amazon.awssdk.services.iam.model.RemoveUserFromGroupRequest;
+import software.amazon.awssdk.services.iam.model.Role;
 import software.amazon.awssdk.services.iam.model.SimulatePrincipalPolicyRequest;
+import software.amazon.awssdk.services.iam.model.SimulatePrincipalPolicyResponse;
 import software.amazon.awssdk.services.iam.model.StatusType;
+import software.amazon.awssdk.services.iam.model.SummaryKeyType;
 import software.amazon.awssdk.services.iam.model.Tag;
 import software.amazon.awssdk.services.iam.model.TagInstanceProfileRequest;
+import software.amazon.awssdk.services.iam.model.TagSamlProviderRequest;
 import software.amazon.awssdk.services.iam.model.TagUserRequest;
 import software.amazon.awssdk.services.iam.model.UntagInstanceProfileRequest;
+import software.amazon.awssdk.services.iam.model.UntagSamlProviderRequest;
 import software.amazon.awssdk.services.iam.model.UntagUserRequest;
 import software.amazon.awssdk.services.iam.model.UpdateAccessKeyRequest;
 import software.amazon.awssdk.services.iam.model.UpdateLoginProfileRequest;
+import software.amazon.awssdk.services.iam.model.UpdateSamlProviderRequest;
+import software.amazon.awssdk.services.organizations.OrganizationsClient;
+import software.amazon.awssdk.services.organizations.model.Organization;
+import software.amazon.awssdk.services.organizations.model.OrganizationFeatureSet;
+import software.amazon.awssdk.services.organizations.model.PolicyType;
+import software.amazon.awssdk.services.organizations.model.Root;
 
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.*;
@@ -97,7 +133,7 @@ class IamTest {
     private static final String ROLE_NAME = "sdk-test-role";
     private static final String POLICY_NAME = "sdk-test-policy";
     private static final String INSTANCE_PROFILE_NAME = "sdk-test-profile";
-    private static final String AWS_MANAGED_POLICY_PREFIX = "arn:aws:iam::aws:policy/";
+    private static final String AWS_MANAGED_POLICY_PREFIX = TestFixtures.globalArn("iam", "aws", "policy/");
     private static final String ADMIN_POLICY_ARN = AWS_MANAGED_POLICY_PREFIX + "AdministratorAccess";
     private static final String READ_ONLY_POLICY_ARN = AWS_MANAGED_POLICY_PREFIX + "ReadOnlyAccess";
     private static final String LAMBDA_BASIC_POLICY_ARN =
@@ -107,8 +143,24 @@ class IamTest {
     private static final String POLICY_DOCUMENT = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
             + "\"Action\":\"s3:GetObject\",\"Resource\":\"*\"}]}";
     private static final String LOGIN_PROFILE_PASSWORD = "Sdk-Test-P4ssword!";
+    private static final String SAML_PROVIDER_NAME = "sdk-test-saml-provider";
+    /**
+     * The Organizations access report reads an organization, and only its management account can
+     * ask for one. This suite builds that organization under an account of its own so it never
+     * contends with the one the Organizations suite builds for the default account.
+     */
+    private static final String REPORT_MANAGEMENT_ACCOUNT = "555555555557";
+    private static final String SAML_METADATA_DOCUMENT = "<md:EntityDescriptor "
+            + "xmlns:md=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"https://idp.example.test/sdk-test\">"
+            + "<md:IDPSSODescriptor><md:KeyDescriptor use=\"signing\"><ds:KeyInfo "
+            + "xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:X509Data><ds:X509Certificate>"
+            + "c2RrLXRlc3QtY2VydGlmaWNhdGU=</ds:X509Certificate></ds:X509Data></ds:KeyInfo></md:KeyDescriptor>"
+            + "</md:IDPSSODescriptor></md:EntityDescriptor>";
+    private static final String SAML_METADATA_DOCUMENT_UPDATED = SAML_METADATA_DOCUMENT
+            .replace("sdk-test", "sdk-test-updated").replace("c2RrLXRlc3QtY2VydGlmaWNhdGU=", "dXBkYXRlZC1jZXJ0");
     private static String policyArn;
     private static String accessKeyId;
+    private static String samlProviderArn;
 
     @BeforeAll
     static void setup() {
@@ -341,10 +393,69 @@ class IamTest {
     @Test
     @Order(17)
     void listRoles() {
-        ListRolesResponse response = iam.listRoles();
-
-        assertThat(response.roles())
+        assertThat(iam.listRolesPaginator().roles())
                 .anyMatch(r -> ROLE_NAME.equals(r.roleName()));
+    }
+
+    @Test
+    @Order(17)
+    void listRolesPagesThroughMaxItemsAndMarker() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String path = "/sdk-page-roles-" + suffix + "/";
+        List<String> names = List.of("sdk-page-" + suffix + "-a", "sdk-page-" + suffix + "-b",
+                "sdk-page-" + suffix + "-c");
+        names.forEach(name -> iam.createRole(CreateRoleRequest.builder()
+                .roleName(name).path(path).assumeRolePolicyDocument(TRUST_POLICY).build()));
+        try {
+            List<ListRolesResponse> pages = iam.listRolesPaginator(request -> request
+                    .pathPrefix(path).maxItems(2)).stream().toList();
+
+            assertThat(pages).hasSize(2);
+            assertThat(pages.get(0).isTruncated()).isTrue();
+            assertThat(pages.get(0).marker()).isNotBlank();
+            assertThat(pages.get(1).isTruncated()).isFalse();
+            assertThat(pages.get(1).marker()).isNull();
+            assertThat(pages.stream().flatMap(page -> page.roles().stream()).map(Role::roleName).toList())
+                    .containsExactlyElementsOf(names);
+        } finally {
+            names.forEach(name -> iam.deleteRole(DeleteRoleRequest.builder().roleName(name).build()));
+        }
+    }
+
+    @Test
+    @Order(17)
+    void listPoliciesPagesThroughMaxItemsAndMarker() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String path = "/sdk-page-policies-" + suffix + "/";
+        List<String> arns = new ArrayList<>();
+        for (String letter : List.of("a", "b", "c")) {
+            arns.add(iam.createPolicy(CreatePolicyRequest.builder().policyName("sdk-page-" + suffix + "-" + letter)
+                    .path(path).policyDocument(POLICY_DOCUMENT).build()).policy().arn());
+        }
+        try {
+            List<ListPoliciesResponse> pages = iam.listPoliciesPaginator(request -> request
+                    .scope(PolicyScopeType.LOCAL).pathPrefix(path).maxItems(2)).stream().toList();
+
+            assertThat(pages).hasSize(2);
+            assertThat(pages.get(0).isTruncated()).isTrue();
+            assertThat(pages.get(0).marker()).isNotBlank();
+            assertThat(pages.get(1).isTruncated()).isFalse();
+            assertThat(pages.get(1).marker()).isNull();
+            assertThat(pages.stream().flatMap(page -> page.policies().stream()).map(Policy::arn).toList())
+                    .containsExactlyElementsOf(arns);
+        } finally {
+            arns.forEach(arn -> iam.deletePolicy(DeletePolicyRequest.builder().policyArn(arn).build()));
+        }
+    }
+
+    @Test
+    @Order(17)
+    void listPoliciesReturnsOneHundredWhenMaxItemsIsOmitted() {
+        ListPoliciesResponse response = iam.listPolicies(request -> request.scope(PolicyScopeType.AWS));
+
+        assertThat(response.policies()).hasSize(100);
+        assertThat(response.isTruncated()).isTrue();
+        assertThat(response.marker()).isNotBlank();
     }
 
     // ── Managed Policies ───────────────────────────────────────────────
@@ -446,7 +557,11 @@ class IamTest {
     @Order(101)
     void getAccountSummary() {
         GetAccountSummaryResponse response = iam.getAccountSummary();
-        assertThat(response.summaryMap()).hasSize(34);
+        // GlobalEndpointTokenVersion reports the global STS endpoint, which only the commercial partition has.
+        boolean globalSts = "aws".equals(TestFixtures.partition());
+        assertThat(response.summaryMap()).hasSize(globalSts ? 34 : 33);
+        assertThat(response.summaryMap().containsKey(SummaryKeyType.GLOBAL_ENDPOINT_TOKEN_VERSION))
+                .isEqualTo(globalSts);
         assertThat(response.summaryMap().get(SummaryKeyType.USERS_QUOTA)).isEqualTo(5000);
         assertThat(response.summaryMap().get(SummaryKeyType.GROUPS_QUOTA)).isEqualTo(300);
         assertThat(response.summaryMap().get(SummaryKeyType.ROLES_QUOTA)).isEqualTo(1000);
@@ -459,8 +574,8 @@ class IamTest {
     @Test
     @Order(24)
     void simulatePrincipalPolicy() {
-        var response = iam.simulatePrincipalPolicy(SimulatePrincipalPolicyRequest.builder()
-                .policySourceArn("arn:aws:iam::000000000000:user/" + USER_NAME)
+        SimulatePrincipalPolicyResponse response = iam.simulatePrincipalPolicy(SimulatePrincipalPolicyRequest.builder()
+                .policySourceArn(TestFixtures.globalArn("iam", "000000000000", "user/" + USER_NAME))
                 .actionNames("s3:GetObject", "ec2:RunInstances")
                 .resourceArns("*")
                 .build());
@@ -569,6 +684,80 @@ class IamTest {
     void untagInstanceProfile() {
         iam.untagInstanceProfile(UntagInstanceProfileRequest.builder()
                 .instanceProfileName(INSTANCE_PROFILE_NAME).tagKeys("env").build());
+    }
+
+    // ── SAML Identity Provider ──────────────────────────────────────────
+
+    @Test
+    @Order(47)
+    void createSamlProvider() {
+        CreateSamlProviderResponse response = iam.createSAMLProvider(CreateSamlProviderRequest.builder()
+                .name(SAML_PROVIDER_NAME).samlMetadataDocument(SAML_METADATA_DOCUMENT)
+                .tags(Tag.builder().key("owner").value("sdk-test").build())
+                .build());
+
+        samlProviderArn = response.samlProviderArn();
+        assertThat(samlProviderArn).contains(SAML_PROVIDER_NAME);
+        assertThat(response.tags()).anyMatch(t -> "owner".equals(t.key()) && "sdk-test".equals(t.value()));
+    }
+
+    @Test
+    @Order(48)
+    void getSamlProvider() {
+        GetSamlProviderResponse response = iam.getSAMLProvider(GetSamlProviderRequest.builder()
+                .samlProviderArn(samlProviderArn).build());
+
+        assertThat(response.samlMetadataDocument()).contains("sdk-test");
+    }
+
+    @Test
+    @Order(49)
+    void listSamlProviders() {
+        ListSamlProvidersResponse response = iam.listSAMLProviders();
+
+        assertThat(response.samlProviderList()).anyMatch(p -> samlProviderArn.equals(p.arn()));
+    }
+
+    @Test
+    @Order(50)
+    void tagSamlProvider() {
+        iam.tagSAMLProvider(TagSamlProviderRequest.builder()
+                .samlProviderArn(samlProviderArn)
+                .tags(Tag.builder().key("env").value("sdk-test").build())
+                .build());
+    }
+
+    @Test
+    @Order(51)
+    void listSamlProviderTags() {
+        ListSamlProviderTagsResponse response = iam.listSAMLProviderTags(
+                ListSamlProviderTagsRequest.builder().samlProviderArn(samlProviderArn).build());
+
+        assertThat(response.tags()).anyMatch(t -> "env".equals(t.key()));
+    }
+
+    @Test
+    @Order(52)
+    void untagSamlProvider() {
+        iam.untagSAMLProvider(UntagSamlProviderRequest.builder()
+                .samlProviderArn(samlProviderArn).tagKeys("env").build());
+    }
+
+    @Test
+    @Order(53)
+    void updateSamlProvider() {
+        iam.updateSAMLProvider(UpdateSamlProviderRequest.builder()
+                .samlProviderArn(samlProviderArn).samlMetadataDocument(SAML_METADATA_DOCUMENT_UPDATED).build());
+
+        GetSamlProviderResponse response = iam.getSAMLProvider(GetSamlProviderRequest.builder()
+                .samlProviderArn(samlProviderArn).build());
+        assertThat(response.samlMetadataDocument()).contains("sdk-test-updated");
+    }
+
+    @Test
+    @Order(54)
+    void deleteSamlProvider() {
+        iam.deleteSAMLProvider(DeleteSamlProviderRequest.builder().samlProviderArn(samlProviderArn).build());
     }
 
     // ── Login Profile ──────────────────────────────────────────────────
@@ -703,5 +892,168 @@ class IamTest {
                 .userName(USER_NAME)
                 .policyArn(AWS_MANAGED_POLICY_PREFIX + "NoSuchManagedPolicyXyz").build()))
                 .isInstanceOf(NoSuchEntityException.class);
+    }
+
+    // ── Last-Accessed Reporting ────────────────────────────────────────
+
+    @Test
+    @Order(102)
+    void generateAndGetServiceLastAccessedDetails() {
+        GenerateServiceLastAccessedDetailsResponse generated = iam.generateServiceLastAccessedDetails(
+                GenerateServiceLastAccessedDetailsRequest.builder()
+                        .arn(TestFixtures.globalArn("iam", "000000000000", "user/" + USER_NAME)).build());
+
+        assertThat(generated.jobId()).hasSize(36);
+
+        GetServiceLastAccessedDetailsResponse details = iam.getServiceLastAccessedDetails(
+                GetServiceLastAccessedDetailsRequest.builder().jobId(generated.jobId()).build());
+
+        assertThat(details.jobStatusAsString()).isEqualTo("COMPLETED");
+        assertThat(details.jobCreationDate()).isNotNull();
+        assertThat(details.jobCompletionDate()).isNotNull();
+        // A service the entity could reach is listed even though it was never used, so the
+        // attempt details are the part that stays null, not the service itself.
+        assertThat(details.servicesLastAccessed())
+                .allSatisfy(service -> {
+                    assertThat(service.serviceNamespace()).isNotBlank();
+                    assertThat(service.lastAuthenticated()).isNull();
+                    assertThat(service.totalAuthenticatedEntities()).isNull();
+                });
+    }
+
+    @Test
+    @Order(103)
+    void getServiceLastAccessedDetailsWithEntitiesDescribesReachingEntities() {
+        GenerateServiceLastAccessedDetailsResponse generated = iam.generateServiceLastAccessedDetails(
+                GenerateServiceLastAccessedDetailsRequest.builder()
+                        .arn(TestFixtures.globalArn("iam", "000000000000", "user/" + USER_NAME)).build());
+
+        GetServiceLastAccessedDetailsWithEntitiesResponse details =
+                iam.getServiceLastAccessedDetailsWithEntities(
+                        GetServiceLastAccessedDetailsWithEntitiesRequest.builder()
+                                .jobId(generated.jobId()).serviceNamespace("s3").build());
+
+        assertThat(details.jobStatusAsString()).isEqualTo("COMPLETED");
+        // Entities are those that could reach the service, so the access time is what stays null.
+        assertThat(details.entityDetailsList())
+                .allSatisfy(entity -> {
+                    assertThat(entity.entityInfo().arn()).isNotBlank();
+                    assertThat(entity.entityInfo().id()).isNotBlank();
+                    assertThat(entity.entityInfo().typeAsString()).isIn("USER", "ROLE", "GROUP");
+                    assertThat(entity.lastAuthenticated()).isNull();
+                });
+    }
+
+    @Test
+    @Order(104)
+    void getServiceLastAccessedDetailsForUnknownJobThrows() {
+        assertThatThrownBy(() -> iam.getServiceLastAccessedDetails(
+                GetServiceLastAccessedDetailsRequest.builder()
+                        .jobId("00000000-0000-0000-0000-000000000000").build()))
+                .isInstanceOf(NoSuchEntityException.class);
+    }
+
+    @Test
+    @Order(105)
+    void listPoliciesGrantingServiceAccessEchoesEachRequestedNamespace() {
+        ListPoliciesGrantingServiceAccessResponse response = iam.listPoliciesGrantingServiceAccess(
+                ListPoliciesGrantingServiceAccessRequest.builder()
+                        .arn(TestFixtures.globalArn("iam", "000000000000", "user/" + USER_NAME))
+                        .serviceNamespaces("s3", "dynamodb").build());
+
+        assertThat(response.policiesGrantingServiceAccess())
+                .extracting(ListPoliciesGrantingServiceAccessEntry::serviceNamespace)
+                .containsExactly("s3", "dynamodb");
+    }
+
+    // ── Organizations Access Report ────────────────────────────────────
+
+    @Test
+    @Order(106)
+    void generateAndGetOrganizationsAccessReport() {
+        try (OrganizationsClient organizations =
+                     TestFixtures.organizationsClient(REPORT_MANAGEMENT_ACCOUNT);
+             IamClient managementIam = TestFixtures.iamClient(REPORT_MANAGEMENT_ACCOUNT)) {
+            Organization organization = organizations
+                    .createOrganization(r -> r.featureSet(OrganizationFeatureSet.ALL))
+                    .organization();
+
+            // Every assertion runs inside the try, so a failure still deletes the organization:
+            // one left behind fails the next run's CreateOrganization for this account.
+            try {
+                Root root = organizations.listRoots().roots().get(0);
+                // The report is SCP logic, which the root has to have service control policies
+                // enabled for before it can be asked about.
+                organizations.enablePolicyType(r -> r.rootId(root.id())
+                        .policyType(PolicyType.SERVICE_CONTROL_POLICY));
+
+                GenerateOrganizationsAccessReportResponse generated =
+                        managementIam.generateOrganizationsAccessReport(
+                                GenerateOrganizationsAccessReportRequest.builder()
+                                        .entityPath(organization.id() + "/" + root.id()).build());
+
+                assertThat(generated.jobId()).hasSize(36);
+
+                GetOrganizationsAccessReportResponse report =
+                        managementIam.getOrganizationsAccessReport(
+                                GetOrganizationsAccessReportRequest.builder()
+                                        .jobId(generated.jobId()).build());
+
+                assertThat(report.jobStatus()).isEqualTo(JobStatusType.COMPLETED);
+                assertThat(report.jobCreationDate()).isNotNull();
+                assertThat(report.jobCompletionDate()).isNotNull();
+                assertThat(report.errorDetails()).isNull();
+                // The management account is not limited by SCPs, so its report is the whole
+                // catalog, and nothing was ever reached, so the two counts are the same number.
+                assertThat(report.numberOfServicesAccessible()).isPositive();
+                assertThat(report.numberOfServicesNotAccessed())
+                        .isEqualTo(report.numberOfServicesAccessible());
+                // Those counts describe the whole report while AccessDetails carries one page of
+                // it. The catalog is larger than the default MaxItems, so this page is truncated
+                // and comes with the marker the next one starts at.
+                assertThat(report.accessDetails())
+                        .isNotEmpty()
+                        .hasSizeLessThanOrEqualTo(report.numberOfServicesAccessible())
+                        .allSatisfy(IamTest::assertServiceNobodyReached);
+                assertThat(report.isTruncated()).isTrue();
+                assertThat(report.marker()).isNotBlank();
+
+                GetOrganizationsAccessReportResponse nextPage =
+                        managementIam.getOrganizationsAccessReport(
+                                GetOrganizationsAccessReportRequest.builder()
+                                        .jobId(generated.jobId())
+                                        .marker(report.marker()).build());
+
+                // The page the marker points at is parsed the same way, down to the members:
+                // nothing says a later page carries the same shape, and the SDK can hand back a
+                // detail with its required members missing.
+                assertThat(nextPage.jobStatus()).isEqualTo(JobStatusType.COMPLETED);
+                assertThat(nextPage.numberOfServicesAccessible())
+                        .isEqualTo(report.numberOfServicesAccessible());
+                assertThat(nextPage.numberOfServicesNotAccessed())
+                        .isEqualTo(report.numberOfServicesNotAccessed());
+                assertThat(nextPage.accessDetails())
+                        .isNotEmpty()
+                        .doesNotContainAnyElementsOf(report.accessDetails())
+                        .allSatisfy(IamTest::assertServiceNobodyReached);
+            } finally {
+                organizations.deleteOrganization();
+            }
+        }
+    }
+
+    /**
+     * A service in the report that principals are allowed to reach and nobody ever did. Floci
+     * records no access, so every entry takes that shape: the two required members, a zero count
+     * and none of the three the API reference's own example omits for a service with no attempt
+     * behind it.
+     */
+    private static void assertServiceNobodyReached(AccessDetail detail) {
+        assertThat(detail.serviceName()).isNotBlank();
+        assertThat(detail.serviceNamespace()).isNotBlank();
+        assertThat(detail.totalAuthenticatedEntities()).isZero();
+        assertThat(detail.lastAuthenticatedTime()).isNull();
+        assertThat(detail.region()).isNull();
+        assertThat(detail.entityPath()).isNull();
     }
 }

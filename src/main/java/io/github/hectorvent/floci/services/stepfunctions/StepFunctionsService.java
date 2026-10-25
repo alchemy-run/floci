@@ -1,21 +1,23 @@
 package io.github.hectorvent.floci.services.stepfunctions;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
 import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.services.stepfunctions.model.Activity;
 import io.github.hectorvent.floci.services.stepfunctions.model.ActivityTask;
 import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
@@ -26,7 +28,6 @@ import io.github.hectorvent.floci.services.stepfunctions.model.RoutingConfigurat
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachine;
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachineAlias;
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachineVersion;
-import io.github.hectorvent.floci.core.common.Resettable;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -42,9 +43,9 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.function.IntConsumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.function.IntConsumer;
 
 @ApplicationScoped
 public class StepFunctionsService implements Resettable, ResourceProvider {
@@ -60,7 +61,35 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
     private final StorageBackend<String, MapRun> mapRunStore;
     private final Map<String, ExecutionHistory> historyCache = new ConcurrentHashMap<>();
     private final Map<String, BlockingQueue<ActivityTask>> activityQueues = new ConcurrentHashMap<>();
-    private final Map<String, CompletableFuture<JsonNode>> pendingTaskTokens = new ConcurrentHashMap<>();
+    private final Map<String, PendingTask> pendingTaskTokens = new ConcurrentHashMap<>();
+    private int tokenResetsInProgress;
+    // Only recent closures are classified as TaskTimedOut: five minutes, at most 1,024 tokens.
+    // Evicted/older tokens remain InvalidToken. No task payloads are retained.
+    private final Map<String, ClosedTask> closedTaskTokens = new LinkedHashMap<>();
+    private static final long CLOSED_TOKEN_RETENTION_NANOS = TimeUnit.MINUTES.toNanos(5);
+    private static final int MAX_CLOSED_TOKENS = 1024;
+
+    private record PendingTask(String accountId, CompletableFuture<JsonNode> future, TaskResult result) {}
+
+    record TaskResult(JsonNode output, AslExecutor.FailStateException failure) {
+        JsonNode get() {
+            if (failure != null) {
+                throw failure;
+            }
+            return output;
+        }
+
+        void complete(CompletableFuture<JsonNode> future) {
+            if (failure != null) {
+                future.completeExceptionally(failure);
+            } else {
+                future.complete(output);
+            }
+        }
+    }
+
+    record TokenWait(TokenTimeout timeout, TaskResult result) {}
+    private record ClosedTask(String accountId, long closedAtNanos) {}
     // When each pending token last showed progress, so a Task's HeartbeatSeconds can bound the gap
     // between heartbeats instead of the whole wait.
     private final Map<String, Long> taskHeartbeatNanos = new ConcurrentHashMap<>();
@@ -71,6 +100,7 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
     private final AslExecutor aslExecutor;
     private final ObjectMapper objectMapper;
     private final SfnMockLoader mockLoader;
+    private final StepFunctionsEventPublisher eventPublisher;
 
     // Fields that are valid only in JSONPath mode. Validated against real AWS:
     // creating a JSONata state machine with any of these fields returns SCHEMA_VALIDATION_FAILED.
@@ -103,12 +133,8 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
     // expression there and the deny list above stops applying once the walk enters one.
     private static final Set<String> JSONATA_PAYLOAD_FIELDS = Set.of(
             "Output", "Assign", "Arguments", "ItemSelector", "BatchInput");
-    private static final Set<String> ITEM_READER_RESOURCES = Set.of(
-            "arn:aws:states:::s3:getObject",
-            "arn:aws:states:::s3:listObjectsV2");
     private static final Set<String> ITEM_READER_INPUT_TYPES = Set.of(
             "MANIFEST", "JSON", "CSV", "JSONL", "PARQUET");
-    private static final String RESULT_WRITER_RESOURCE = "arn:aws:states:::s3:putObject";
     private static final Set<String> RESULT_WRITER_TRANSFORMATIONS = Set.of("NONE", "COMPACT", "FLATTEN");
     private static final Set<String> RESULT_WRITER_OUTPUT_TYPES = Set.of("JSON", "JSONL");
     // Measured against real AWS: TimeoutSeconds is accepted on Task only, Catch and Retry are
@@ -127,7 +153,7 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
     @Inject
     public StepFunctionsService(StorageFactory storageFactory, RegionResolver regionResolver,
                                 AslExecutor aslExecutor, ObjectMapper objectMapper,
-                                SfnMockLoader mockLoader) {
+                                SfnMockLoader mockLoader, StepFunctionsEventPublisher eventPublisher) {
         this.stateMachineStore = storageFactory.create("stepfunctions", "sfn-state-machines.json",
                 new TypeReference<Map<String, StateMachine>>() {});
         this.executionStore = storageFactory.create("stepfunctions", "sfn-executions.json",
@@ -145,14 +171,35 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         this.aslExecutor = aslExecutor;
         this.objectMapper = objectMapper;
         this.mockLoader = mockLoader;
+        this.eventPublisher = eventPublisher;
     }
 
     public void clear() {
         historyCache.clear();
         activityQueues.clear();
-        pendingTaskTokens.values().forEach(f -> f.completeExceptionally(new RuntimeException("StepFunctionsService cleared")));
-        pendingTaskTokens.clear();
-        taskHeartbeatNanos.clear();
+        Map<String, PendingTask> pending;
+        synchronized (this) {
+            tokenResetsInProgress++;
+            pendingTaskTokens.replaceAll((token, task) -> task.result() != null ? task
+                    : new PendingTask(task.accountId(), task.future(), new TaskResult(null,
+                            new AslExecutor.FailStateException("States.TaskFailed", "StepFunctionsService cleared"))));
+            pending = new HashMap<>(pendingTaskTokens);
+            closedTaskTokens.clear();
+            taskHeartbeatNanos.clear();
+        }
+        try {
+            for (Map.Entry<String, PendingTask> entry : pending.entrySet()) {
+                PendingTask task = entry.getValue();
+                task.result().complete(task.future());
+                synchronized (this) {
+                    pendingTaskTokens.remove(entry.getKey(), task);
+                }
+            }
+        } finally {
+            synchronized (this) {
+                tokenResetsInProgress--;
+            }
+        }
     }
 
     @Override
@@ -423,14 +470,6 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         stateMachineStore.put(arn, updated);
         LOG.infov("Updated State Machine: {0}", arn);
         return new UpdateStateMachineResult(copyStateMachine(updated), version);
-    }
-
-    public StateMachine updateStateMachine(String arn, String definition, String roleArn,
-                                           JsonNode loggingConfiguration, JsonNode tracingConfiguration) {
-        return updateStateMachine(arn, new UpdateStateMachineRequest(definition, roleArn,
-                loggingConfiguration, loggingConfiguration != null,
-                tracingConfiguration, tracingConfiguration != null,
-                null, false, false, null)).stateMachine();
     }
 
     public StateMachine describeStateMachine(String arn) {
@@ -733,17 +772,17 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
     // ──────────────────────────── Executions ────────────────────────────
 
     public Execution startExecution(String stateMachineArn, String name, String input, String region) {
-        var selection = splitTestCaseSuffix(stateMachineArn);
-        var resolved = resolveStateMachineForExecution(selection.stateMachineArn());
-        var sm = resolved.stateMachine();
-        var mockedTestCase = resolveMockedTestCase(sm, selection);
-        var execName = (name != null && !name.isBlank()) ? name : UUID.randomUUID().toString();
+        TestCaseSelection selection = splitTestCaseSuffix(stateMachineArn);
+        ResolvedStateMachine resolved = resolveStateMachineForExecution(selection.stateMachineArn());
+        StateMachine sm = resolved.stateMachine();
+        MockedTestCase mockedTestCase = resolveMockedTestCase(sm, selection);
+        String execName = (name != null && !name.isBlank()) ? name : UUID.randomUUID().toString();
         boolean express = "EXPRESS".equals(sm.getType());
         // An EXPRESS name is not unique on AWS: every start is its own execution that runs alongside
         // the others, so the ARN (which is also the execution-store key) carries a per-start id after
         // the name, under the express: namespace startSyncExecution already uses. A STANDARD execution
         // keeps the name-derived ARN whose uniqueness AWS enforces.
-        var arn = express
+        String arn = express
                 ? regionResolver.buildArn("states", region,
                         "express:" + sm.getName() + ":" + execName + ":" + UUID.randomUUID())
                 : regionResolver.buildArn("states", region, "execution:" + sm.getName() + ":" + execName);
@@ -779,7 +818,7 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
                     executionStore.put(arn, exec);
                 }
             });
-            var startEvent = new HistoryEvent();
+            HistoryEvent startEvent = new HistoryEvent();
             startEvent.setId(1L);
             startEvent.setPreviousEventId(0L);
             startEvent.setType("ExecutionStarted");
@@ -793,19 +832,26 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         }
 
         LOG.infov("Started execution: {0}", arn);
+        if (!express) {
+            eventPublisher.emitStatusChange(exec);
+        }
 
         // The executor appends to this same history, so the cache entry put above is already the
-        // finished history by the time this runs.
+        // finished history by the time this runs. The worker also lands here after StopExecution
+        // aborted it; that ABORTED event is StopExecution's to emit, so it is not emitted twice.
         aslExecutor.executeAsync(sm, exec, history, mockedTestCase, (updatedExec, updatedHistory) -> {
             executionStore.put(updatedExec.getExecutionArn(), updatedExec);
             LOG.infov("Execution {0} completed with status {1}", updatedExec.getExecutionArn(), updatedExec.getStatus());
+            if (!express && !"ABORTED".equals(updatedExec.getStatus())) {
+                eventPublisher.emitStatusChange(updatedExec);
+            }
         });
 
         return exec;
     }
 
     public Execution startSyncExecution(String stateMachineArn, String name, String input, String region) {
-        var selection = splitTestCaseSuffix(stateMachineArn);
+        TestCaseSelection selection = splitTestCaseSuffix(stateMachineArn);
         if (selection.testCaseName() != null) {
             // Matches Step Functions Local, which rejects a test case suffix here.
             throw new AwsException("UnsupportedOperation",
@@ -814,8 +860,8 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         }
         // A bare trailing '#' is not stripped on this operation: Step Functions Local looks up
         // the raw ARN and fails with StateMachineDoesNotExist, so Floci does the same.
-        var resolved = resolveStateMachineForExecution(stateMachineArn);
-        var sm = resolved.stateMachine();
+        ResolvedStateMachine resolved = resolveStateMachineForExecution(stateMachineArn);
+        StateMachine sm = resolved.stateMachine();
         if (!"EXPRESS".equals(sm.getType())) {
             throw new AwsException("StateMachineTypeNotSupported",
                     "StartSyncExecution is only supported for EXPRESS state machines", 400);
@@ -830,7 +876,7 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         String arn = regionResolver.buildArn("states", region,
                 "express:" + sm.getName() + ":" + startDate + ":" + execName);
 
-        var exec = new Execution();
+        Execution exec = new Execution();
         exec.setExecutionArn(arn);
         exec.setStateMachineArn(resolved.baseArn());
         exec.setStateMachineVersionArn(resolved.versionArn());
@@ -839,8 +885,8 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         exec.setInput(input);
         exec.setStatus("RUNNING");
 
-        var history = new ArrayList<HistoryEvent>();
-        var startEvent = new HistoryEvent();
+        ArrayList<HistoryEvent> history = new ArrayList<>();
+        HistoryEvent startEvent = new HistoryEvent();
         startEvent.setId(1L);
         startEvent.setPreviousEventId(0L);
         startEvent.setType("ExecutionStarted");
@@ -900,11 +946,11 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
      * no test case and the execution runs unmocked, matching Step Functions Local.
      */
     private static TestCaseSelection splitTestCaseSuffix(String stateMachineArn) {
-        var separator = stateMachineArn != null ? stateMachineArn.indexOf('#') : -1;
+        int separator = stateMachineArn != null ? stateMachineArn.indexOf('#') : -1;
         if (separator < 0) {
             return new TestCaseSelection(stateMachineArn, null);
         }
-        var testCaseName = stateMachineArn.substring(separator + 1);
+        String testCaseName = stateMachineArn.substring(separator + 1);
         return new TestCaseSelection(stateMachineArn.substring(0, separator),
                 testCaseName.isBlank() ? null : testCaseName);
     }
@@ -913,16 +959,16 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         if (selection.testCaseName() == null) {
             return null;
         }
-        var mockedTestCase = mockLoader.requireTestCase(sm.getName(), selection.testCaseName());
+        MockedTestCase mockedTestCase = mockLoader.requireTestCase(sm.getName(), selection.testCaseName());
         warnOnMockedStatesMissingFromDefinition(sm, mockedTestCase);
         return mockedTestCase;
     }
 
     private void warnOnMockedStatesMissingFromDefinition(StateMachine sm, MockedTestCase testCase) {
         try {
-            var stateNames = new HashSet<String>();
+            HashSet<String> stateNames = new HashSet<>();
             collectStateNames(objectMapper.readTree(sm.getDefinition()), stateNames);
-            for (var stateName : testCase.stateResponses().keySet()) {
+            for (String stateName : testCase.stateResponses().keySet()) {
                 if (!stateNames.contains(stateName)) {
                     LOG.warnv("Mock test case {0} references state {1} which does not exist in state machine {2}",
                             testCase.testCaseName(), stateName, sm.getName());
@@ -935,7 +981,7 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
 
     private static void collectStateNames(JsonNode node, Set<String> names) {
         if (node.isObject()) {
-            var states = node.get("States");
+            JsonNode states = node.get("States");
             if (states != null && states.isObject()) {
                 states.fieldNames().forEachRemaining(names::add);
             }
@@ -974,6 +1020,9 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
             return;
         }
         executionStore.put(arn, exec);
+        if (StepFunctionsEventPublisher.isStandard(exec)) {
+            eventPublisher.emitStatusChange(exec);
+        }
     }
 
     /**
@@ -1144,6 +1193,19 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         return activityStore.scan(k -> k.startsWith(prefix) && k.contains(":activity:"));
     }
 
+    public PaginatedResult<Activity> listActivities(String region, Integer maxResults, String nextToken) {
+        if (maxResults != null && (maxResults < 0 || maxResults > 1000)) {
+            throw new AwsException("ValidationException", "maxResults must be between 0 and 1000.", 400);
+        }
+        if (nextToken != null && (nextToken.isEmpty() || nextToken.length() > 1024)) {
+            throw new AwsException("ValidationException", "nextToken length must be between 1 and 1024.", 400);
+        }
+        int pageSize = maxResults == null || maxResults == 0 ? 100 : maxResults;
+        return Pagination.paginate(listActivities(region), Activity::getActivityArn, pageSize, nextToken,
+                "states:activities:" + region,
+                token -> new AwsException("InvalidToken", "Invalid nextToken.", 400));
+    }
+
     public void deleteActivity(String arn) {
         activityStore.delete(arn);
         activityQueues.remove(arn);
@@ -1171,10 +1233,17 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         queue.add(new ActivityTask(taskToken, input));
     }
 
-    public CompletableFuture<JsonNode> registerPendingToken(String token) {
+    public CompletableFuture<JsonNode> registerPendingToken(String token, String accountId) {
+        Objects.requireNonNull(accountId);
         CompletableFuture<JsonNode> future = new CompletableFuture<>();
-        pendingTaskTokens.put(token, future);
-        taskHeartbeatNanos.put(token, System.nanoTime());
+        synchronized (this) {
+            if (tokenResetsInProgress == 0) {
+                pendingTaskTokens.put(token, new PendingTask(accountId, future, null));
+                taskHeartbeatNanos.put(token, System.nanoTime());
+                return future;
+            }
+        }
+        future.completeExceptionally(new AslExecutor.FailStateException("States.TaskFailed", "StepFunctionsService cleared"));
         return future;
     }
 
@@ -1188,60 +1257,122 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         return reportedAt != null ? reportedAt : System.nanoTime();
     }
 
-    /**
-     * Forgets a token the waiting task has stopped listening for, so a later SendTaskSuccess,
-     * SendTaskFailure or SendTaskHeartbeat naming it reports no pending task.
-     */
-    public void discardPendingToken(String taskToken) {
-        if (taskToken == null) {
-            return;
+    enum TokenTimeout { NONE, CLAIMED, EXECUTION, TASK, HEARTBEAT }
+
+    /** Selects an expired clock and closes its token under the callback and heartbeat lock. */
+    synchronized TokenWait expirePendingToken(String taskToken, long now, long executionDeadlineNanos,
+                                                 long timeoutDeadlineNanos, int heartbeatSeconds) {
+        PendingTask pending = pendingTaskTokens.get(taskToken);
+        if (pending == null) {
+            return new TokenWait(TokenTimeout.TASK, null);
         }
-        pendingTaskTokens.remove(taskToken);
-        taskHeartbeatNanos.remove(taskToken);
+        if (pending.result() != null) {
+            return new TokenWait(TokenTimeout.CLAIMED, pending.result());
+        }
+        TokenTimeout expired;
+        if (now >= executionDeadlineNanos) {
+            expired = TokenTimeout.EXECUTION;
+        } else if (now >= timeoutDeadlineNanos) {
+            expired = TokenTimeout.TASK;
+        } else if (heartbeatSeconds > 0 && now >= lastTaskHeartbeatNanos(taskToken)
+                + TimeUnit.SECONDS.toNanos(heartbeatSeconds)) {
+            expired = TokenTimeout.HEARTBEAT;
+        } else {
+            return new TokenWait(TokenTimeout.NONE, null);
+        }
+        discardPendingToken(taskToken);
+        return new TokenWait(expired, null);
     }
 
-    // ──────────────────────────── Tasks ────────────────────────────
+    /** Retires a token when its task stops waiting, including timeout and resource failure. */
+    public synchronized void discardPendingToken(String taskToken) {
+        if (taskToken != null) {
+            PendingTask pending = pendingTaskTokens.remove(taskToken);
+            taskHeartbeatNanos.remove(taskToken);
+            if (pending != null) {
+                rememberClosed(taskToken, pending.accountId());
+            }
+        }
+    }
 
-    /**
-     * @return whether the token named a task that was waiting for it. The
-     *         {@code aws-sdk:sfn:sendTaskSuccess} Task integration fails the calling state when it
-     *         did not, the way AWS answers an unknown token with {@code InvalidToken}.
-     */
+    private void rememberClosed(String token, String accountId) {
+        long now = System.nanoTime();
+        closedTaskTokens.entrySet().removeIf(entry -> now - entry.getValue().closedAtNanos()
+                >= CLOSED_TOKEN_RETENTION_NANOS);
+        closedTaskTokens.put(token, new ClosedTask(accountId, now));
+        while (closedTaskTokens.size() > MAX_CLOSED_TOKENS) {
+            closedTaskTokens.remove(closedTaskTokens.keySet().iterator().next());
+        }
+    }
+
+    private PendingTask requirePendingTask(String token) {
+        String accountId = regionResolver.getAccountId();
+        PendingTask pending = token == null ? null : pendingTaskTokens.get(token);
+        if (pending != null) {
+            requireTokenOwner(pending.accountId(), accountId);
+            if (pending.result() != null) {
+                throw new AwsException("TaskTimedOut", "The associated task has already been closed.", 400);
+            }
+            return pending;
+        }
+        ClosedTask closed = token == null ? null : closedTaskTokens.get(token);
+        if (closed != null && System.nanoTime() - closed.closedAtNanos() >= CLOSED_TOKEN_RETENTION_NANOS) {
+            closedTaskTokens.remove(token);
+            closed = null;
+        }
+        if (closed != null) {
+            requireTokenOwner(closed.accountId(), accountId);
+            throw new AwsException("TaskTimedOut", "The associated task has already been closed.", 400);
+        }
+        throw new AwsException("InvalidToken", "Invalid Token: 'Invalid token'", 400);
+    }
+
+    private void requireTokenOwner(String owner, String caller) {
+        if (!owner.equals(caller)) {
+            throw new AwsException("AccessDeniedException", "Not authorized to access this resource.", 400);
+        }
+    }
+
+    CompletableFuture<JsonNode> claimPendingTask(String token, TaskResult result) {
+        synchronized (this) {
+            PendingTask pending = requirePendingTask(token);
+            pendingTaskTokens.put(token, new PendingTask(pending.accountId(), pending.future(), result));
+            taskHeartbeatNanos.remove(token);
+            rememberClosed(token, pending.accountId());
+            return pending.future();
+        }
+    }
+
+    /** Claims an owned callback exactly once; completion runs outside the token lock. */
     public boolean sendTaskSuccess(String taskToken, String output) {
-        CompletableFuture<JsonNode> future = taskToken != null ? pendingTaskTokens.remove(taskToken) : null;
-        if (future == null) {
-            LOG.warnv("SendTaskSuccess: no pending task for token {0}", taskToken);
-            return false;
+        JsonNode result;
+        synchronized (this) {
+            requirePendingTask(taskToken);
         }
         try {
-            future.complete(objectMapper.readTree(output));
-        } catch (Exception e) {
-            future.completeExceptionally(new RuntimeException("Invalid JSON output: " + e.getMessage()));
+            result = objectMapper.readTree(output);
+        } catch (JsonProcessingException | IllegalArgumentException e) {
+            throw new AwsException("InvalidOutput", "Output is not valid JSON.", 400);
         }
+        if (result == null || result.isMissingNode()) {
+            throw new AwsException("InvalidOutput", "Output is not valid JSON.", 400);
+        }
+        TaskResult completion = new TaskResult(result, null);
+        CompletableFuture<JsonNode> future = claimPendingTask(taskToken, completion);
+        completion.complete(future);
         return true;
     }
 
-    /**
-     * @return whether the token named a task that was waiting for it, as in
-     *         {@link #sendTaskSuccess(String, String)}.
-     */
     public boolean sendTaskFailure(String taskToken, String cause, String error) {
-        CompletableFuture<JsonNode> future = taskToken != null ? pendingTaskTokens.remove(taskToken) : null;
-        if (future == null) {
-            LOG.warnv("SendTaskFailure: no pending task for token {0}", taskToken);
-            return false;
-        }
-        future.completeExceptionally(new AslExecutor.FailStateException(error, cause));
+        TaskResult completion = new TaskResult(null, new AslExecutor.FailStateException(error, cause));
+        CompletableFuture<JsonNode> future = claimPendingTask(taskToken, completion);
+        completion.complete(future);
         return true;
     }
 
-    /**
-     * Resets the gap a Task's {@code HeartbeatSeconds} allows, rejecting unknown tokens.
-     */
-    public void sendTaskHeartbeat(String taskToken) {
-        if (taskToken == null || taskToken.isBlank() || !pendingTaskTokens.containsKey(taskToken)) {
-            throw new AwsException("InvalidToken", "Invalid token: '" + taskToken + "'", 400);
-        }
+    /** A foreign, closed or unknown token cannot refresh a task's heartbeat. */
+    public synchronized void sendTaskHeartbeat(String taskToken) {
+        requirePendingTask(taskToken);
         taskHeartbeatNanos.put(taskToken, System.nanoTime());
     }
 
@@ -1639,7 +1770,7 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
     }
 
     private JsonNode defaultLoggingConfiguration() {
-        var configuration = objectMapper.createObjectNode();
+        ObjectNode configuration = objectMapper.createObjectNode();
         configuration.put("level", "OFF");
         configuration.put("includeExecutionData", false);
         configuration.putArray("destinations");
@@ -2157,9 +2288,9 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         Set<String> topLevelStateNames = new HashSet<>();
         states.fieldNames().forEachRemaining(topLevelStateNames::add);
 
-        var fields = states.fields();
+        Iterator<Map.Entry<String, JsonNode>> fields = states.fields();
         while (fields.hasNext()) {
-            var entry = fields.next();
+            Map.Entry<String, JsonNode> entry = fields.next();
             validateState("/States/" + entry.getKey(), entry.getValue(), topLevelJsonata,
                     topLevelStateNames, errors);
         }
@@ -2376,6 +2507,9 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
 
         validateFieldsAllowedForType(statePath, stateDef, stateType, errors);
         validateTransitionTargets(statePath, stateDef, siblingStateNames, errors);
+        if ("Task".equals(stateType)) {
+            validateApiGatewayHeaders(statePath, stateDef, stateIsJsonata, errors);
+        }
 
         // Measured on AWS: the downgrade is the whole answer for that state, and the fields its
         // refused language forbids are not named on top of it. Only this check is skipped; every
@@ -2424,6 +2558,30 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
                             topLevelJsonata, errors);
                 }
             }
+        }
+    }
+
+    private static void validateApiGatewayHeaders(String statePath, JsonNode stateDef,
+                                                  boolean jsonata, List<String> errors) {
+        if (StatesIntegration.parse(stateDef.path("Resource").asText(null))
+                .filter(integration -> integration.isAnySuffix("apigateway", "invoke")).isEmpty()) {
+            return;
+        }
+        String field = jsonata ? "Arguments" : "Parameters";
+        JsonNode headers = stateDef.path(field).path("Headers");
+        if (!headers.isObject()) {
+            return;
+        }
+        List<String> unsupported = new ArrayList<>();
+        headers.fieldNames().forEachRemaining(name -> {
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (ApiGatewayTaskInvoker.isReservedDefinitionHeader(lower)) {
+                unsupported.add(lower);
+            }
+        });
+        if (!unsupported.isEmpty()) {
+            errors.add(EXPLICIT_LOCATION_MARKER + "The 'Headers' field contains unsupported values: "
+                    + unsupported + MARKER_PAYLOAD_SEPARATOR + statePath + "/" + field);
         }
     }
 
@@ -2682,9 +2840,18 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         }
     }
 
+    /**
+     * A Reference Path selects a single node, so wildcards, filters and slices are rejected. The
+     * root is either the state input ({@code $}) or the Context Object ({@code $$}): ASL takes a
+     * {@code string_sampler} wherever it takes a Reference Path, and a context path is one of its
+     * spellings, so {@code "$$.Execution.Input.count"} is as valid as {@code "$.count"}.
+     */
     private static boolean isReferencePath(String path) {
         if (path == null || path.isEmpty() || path.charAt(0) != '$') {
             return false;
+        }
+        if (path.startsWith("$$")) {
+            path = path.substring(1);
         }
         int index = 1;
         while (index < path.length()) {
@@ -2747,11 +2914,21 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         return true;
     }
 
+    private static boolean isItemReaderResource(String resource) {
+        return StatesIntegration.parse(resource)
+                .filter(integration -> integration.is("s3", "getObject") || integration.is("s3", "listObjectsV2"))
+                .isPresent();
+    }
+
+    private static boolean isResultWriterResource(String resource) {
+        return StatesIntegration.parse(resource).filter(integration -> integration.is("s3", "putObject")).isPresent();
+    }
+
     private void validateItemReader(String statePath, JsonNode stateDef, boolean jsonata,
                                     List<String> errors) {
         JsonNode itemReader = stateDef.get("ItemReader");
         String resource = itemReader.path("Resource").asText(null);
-        if (resource != null && !ITEM_READER_RESOURCES.contains(resource)) {
+        if (resource != null && !isItemReaderResource(resource)) {
             errors.add("The field 'Resource' does not match any of the allowed values. Examples: "
                     + "[arn:<partition>:states:::s3:getObject, arn:<partition>:states:::s3:listObjectsV2]"
                     + " at " + statePath + "/ItemReader/Resource");
@@ -2808,9 +2985,9 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
         }
 
         if (hasResource && (!writer.get("Resource").isTextual()
-                || !RESULT_WRITER_RESOURCE.equals(writer.get("Resource").asText()))) {
+                || !isResultWriterResource(writer.get("Resource").asText()))) {
             errors.add("The field 'Resource' does not match the allowed value "
-                    + RESULT_WRITER_RESOURCE + " at " + writerPath);
+                    + "arn:<partition>:states:::s3:putObject at " + writerPath);
         }
 
         if (hasDestination && !destinationIsExpression) {
@@ -2860,6 +3037,17 @@ public class StepFunctionsService implements Resettable, ResourceProvider {
             }
         }
     }
+
+
+
+    public StateMachine updateStateMachine(String arn, String definition, String roleArn,
+                                           JsonNode loggingConfiguration, JsonNode tracingConfiguration) {
+        return updateStateMachine(arn, new UpdateStateMachineRequest(definition, roleArn,
+                loggingConfiguration, loggingConfiguration != null,
+                tracingConfiguration, tracingConfiguration != null,
+                null, false, false, null)).stateMachine();
+    }
+
 
     public double redriveExecution(String executionArn) {
         Execution exec = describeExecution(executionArn);

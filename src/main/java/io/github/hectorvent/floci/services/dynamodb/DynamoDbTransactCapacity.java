@@ -19,7 +19,7 @@ final class DynamoDbTransactCapacity {
 
     static DynamoDbWriteCapacity.Cost write(TableDefinition table, JsonNode oldItem, JsonNode newItem) {
         DynamoDbWriteCapacity.Cost cost = DynamoDbWriteCapacity.forWrite(table, oldItem, newItem);
-        return new DynamoDbWriteCapacity.Cost(cost.table() * 2, cost.gsi(), cost.lsi());
+        return cost.withTable(cost.table() * 2);
     }
 
     static DynamoDbWriteCapacity.Cost conditionCheck(JsonNode item) {

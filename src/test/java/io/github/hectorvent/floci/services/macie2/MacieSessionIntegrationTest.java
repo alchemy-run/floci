@@ -1,7 +1,7 @@
 package io.github.hectorvent.floci.services.macie2;
 
-import io.restassured.specification.RequestSpecification;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.specification.RequestSpecification;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -80,43 +80,6 @@ class ContainerBuilderTest {
     }
 
     @Test
-    void sourceModeDnsUsesHelperAddressWithoutPublicFallbacks() {
-        TestFixture fixture = new TestFixture();
-        when(fixture.embeddedDnsServer.getServerIp()).thenReturn(Optional.of("172.18.0.9"));
-        when(fixture.embeddedDnsServer.isSourceMode()).thenReturn(true);
-
-        ContainerSpec spec = fixture.builder.newContainer("alpine")
-                .withDnsServer("1.1.1.1")
-                .withEmbeddedDns()
-                .build();
-
-        assertEquals(List.of("172.18.0.9"), spec.dnsServers());
-        assertEquals(List.of("host.docker.internal:host-gateway"), spec.extraHosts());
-    }
-
-    @Test
-    void sourceModeDnsPreservesExplicitHostGatewayMappingAddedAfterDns() {
-        TestFixture fixture = new TestFixture();
-        when(fixture.embeddedDnsServer.getServerIp()).thenReturn(Optional.of("172.18.0.9"));
-        when(fixture.embeddedDnsServer.isSourceMode()).thenReturn(true);
-        ContainerSpec spec = fixture.builder.newContainer("alpine")
-                .withEmbeddedDns()
-                .withExtraHost("host.docker.internal", "192.0.2.2")
-                .build();
-        assertEquals(List.of("host.docker.internal:192.0.2.2"), spec.extraHosts());
-    }
-
-    @Test
-    void defaultExtraHostPreservesAnExplicitMapping() {
-        TestFixture fixture = new TestFixture();
-        ContainerSpec spec = fixture.builder.newContainer("alpine")
-                .withExtraHost("localhost.floci.io", "10.0.0.2")
-                .withDefaultExtraHost("localhost.floci.io", "host-gateway")
-                .build();
-        assertEquals(List.of("localhost.floci.io:10.0.0.2"), spec.extraHosts());
-    }
-
-    @Test
     void withEmbeddedDns_noOpWhenEmbeddedDnsNotRunning() {
         TestFixture fixture = new TestFixture();
         // getServerIp() empty (default) — no Floci IP, so no fallbacks are injected either.
@@ -126,6 +89,20 @@ class ContainerBuilderTest {
                 .build();
 
         assertEquals(List.of(), spec.dnsServers());
+    }
+
+    @Test
+    void withEmbeddedDns_preservesExplicitResolversWithoutAddingFallbacks() {
+        TestFixture fixture = new TestFixture();
+        when(fixture.embeddedDnsServer.getServerIp()).thenReturn(Optional.of("172.18.0.4"));
+
+        ContainerSpec spec = fixture.builder.newContainer("alpine")
+                .withDnsServer("172.18.0.8")
+                .withDnsServer("172.18.0.9")
+                .withEmbeddedDns()
+                .build();
+
+        assertEquals(List.of("172.18.0.8", "172.18.0.9"), spec.dnsServers());
     }
 
     @Test
@@ -350,6 +327,15 @@ class ContainerBuilderTest {
                 .build();
 
         assertEquals("ghcr.io/floci-io/mirror/floci/ami-ubuntu:24.04-arm64", spec.image());
+    }
+
+    @Test
+    void imageRegistryBaseLeavesAnImageIdAlone() {
+        TestFixture fixture = new TestFixture();
+        when(fixture.docker.imageRegistryBase()).thenReturn(Optional.of("ghcr.io/floci-io/mirror"));
+        String imageId = "sha256:" + "a".repeat(64);
+
+        assertEquals(imageId, fixture.builder.newContainer(imageId).build().image());
     }
 
     private static class TestFixture {

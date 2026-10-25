@@ -1791,7 +1791,7 @@ public class ElastiCacheService implements ResourceProvider {
         String region = regionResolver.getRegion();
         List<Subnet> resolved;
         try {
-            resolved = ec2Service.describeSubnets(region, subnetIds, Map.of());
+            resolved = ec2Service.requireSubnets(region, subnetIds);
         } catch (AwsException e) {
             // EC2 rejects an unknown id outright; ElastiCache reports it as its own invalid-subnet error.
             if (e.getErrorCode() != null && e.getErrorCode().startsWith("InvalidSubnetID.")) {

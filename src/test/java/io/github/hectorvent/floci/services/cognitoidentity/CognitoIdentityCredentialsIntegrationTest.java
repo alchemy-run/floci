@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.cognitoidentity;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.services.cognito.CognitoIdentityService;
 import io.github.hectorvent.floci.services.cognito.model.CognitoFederatedIdentity;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
@@ -38,7 +39,7 @@ class CognitoIdentityCredentialsIntegrationTest {
 
     // The compatibility service has the same simple name as the canonical service.
     @Inject
-    io.github.hectorvent.floci.services.cognito.CognitoIdentityService legacyService;
+    CognitoIdentityService legacyService;
 
     @BeforeAll
     static void configureRestAssured() {

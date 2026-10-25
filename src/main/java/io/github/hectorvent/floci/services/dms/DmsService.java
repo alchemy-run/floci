@@ -43,6 +43,7 @@ import java.util.UUID;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -634,7 +635,7 @@ public class DmsService implements Resettable {
     }
 
     public List<OrderableInstance> orderableReplicationInstances(String region) {
-        List<String> zones = ec2Service.describeAvailabilityZones(region).stream()
+        List<String> zones = ec2Service.describeAvailabilityZones(region, java.util.List.of(), java.util.List.of(), java.util.List.of()).stream()
                 .map(zone -> zone.get("zoneName"))
                 .filter(Objects::nonNull)
                 .toList();
@@ -1475,14 +1476,14 @@ public class DmsService implements Resettable {
 
     /** A probe that was running when the emulator stopped will never report; record that honestly. */
     private void failInterruptedProbes() {
-        for (var entry : connections.scanAllAccountEntries(key -> true)) {
+        for (AccountAwareStorageBackend.AccountEntry<DmsConnection> entry : connections.scanAllAccountEntries(key -> true)) {
             if ("testing".equals(entry.value().getStatus())) {
                 entry.value().setStatus("failed");
                 entry.value().setLastFailureMessage("The emulator stopped before the connection test completed.");
                 connections.putForAccount(entry.accountId(), entry.key(), entry.value());
             }
         }
-        for (var entry : schemaRefreshes.scanAllAccountEntries(key -> true)) {
+        for (AccountAwareStorageBackend.AccountEntry<SchemaRefresh> entry : schemaRefreshes.scanAllAccountEntries(key -> true)) {
             if ("refreshing".equals(entry.value().getStatus())) {
                 entry.value().setStatus("failed");
                 entry.value().setLastFailureMessage("The emulator stopped before the schema refresh completed.");
@@ -1615,7 +1616,7 @@ public class DmsService implements Resettable {
 
     // ── Shared helpers ──────────────────────────────────────────────────────
 
-    private static <T> PaginatedResult<T> paginate(List<T> items, java.util.function.Function<T, String> cursor,
+    private static <T> PaginatedResult<T> paginate(List<T> items, Function<T, String> cursor,
                                                    Integer maxRecords, String marker) {
         return Pagination.paginate(items, cursor, maxRecords, marker, DmsRequests.DEFAULT_MAX_RECORDS,
                 DmsRequests.MAXIMUM_MAX_RECORDS, "InvalidParameterValueException");

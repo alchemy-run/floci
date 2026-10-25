@@ -102,6 +102,15 @@ class SesIdentityDkimLookupCacheTest {
         verify(route53Service, times(4)).listResourceRecordSets(eq("zone-1"), eq(null), eq(null), eq(Integer.MAX_VALUE));
     }
 
+    @Test
+    void dnsDetectionUsesTheReportedSigningHostedZone() {
+        Identity identity = storePendingDomainIdentity();
+        stubRoute53(identity, buildMatchingRecords(identity));
+
+        assertEquals("Success", identities.getIdentityVerificationAttributes(DOMAIN, REGION)
+                .getDkimVerificationStatus());
+    }
+
     private Identity storePendingDomainIdentity() {
         Identity identity = new Identity(DOMAIN, "Domain");
         identity.setVerificationStatus("Pending");

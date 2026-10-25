@@ -1,13 +1,13 @@
 package io.github.hectorvent.floci.services.dynamodb;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.dynamodb.model.KeySchemaElement;
 import io.github.hectorvent.floci.services.dynamodb.model.KinesisStreamingDestination;
 import io.github.hectorvent.floci.services.dynamodb.model.TableDefinition;
 import io.github.hectorvent.floci.services.kinesis.KinesisService;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -140,6 +140,12 @@ public class KinesisStreamingForwarder {
 
     public void forward(String eventName, JsonNode oldItem, JsonNode newItem,
                         TableDefinition table, String region, String ownerAccountId) {
+        forward(eventName, oldItem, newItem, table, region, ownerAccountId, false);
+    }
+
+    /** {@code ttlDeletion} marks a removal made by the time to live sweep rather than by a caller. */
+    public void forward(String eventName, JsonNode oldItem, JsonNode newItem,
+                        TableDefinition table, String region, String ownerAccountId, boolean ttlDeletion) {
         List<KinesisStreamingDestination> destinations = table.getKinesisStreamingDestinations();
         if (destinations == null || destinations.isEmpty()) {
             return;
@@ -169,7 +175,7 @@ public class KinesisStreamingForwarder {
             for (String precision : precisionByStreamArn.values()) {
                 if (!dataByPrecision.containsKey(precision)) {
                     ObjectNode payload = buildPayload(eventId, eventName, keys, newItem, oldItem,
-                            table.getTableName(), region, now, precision);
+                            table.getTableName(), region, now, precision, ttlDeletion);
                     dataByPrecision.put(precision, objectMapper.writeValueAsBytes(payload));
                 }
             }
@@ -374,6 +380,12 @@ public class KinesisStreamingForwarder {
         }
     }
 
+    /** Emulator reset and shutdown: discard every destination's buffer, stop its drains, and drop its state. */
+    public void clear() {
+        states.values().forEach(this::invalidate);
+        states.clear();
+    }
+
     @PreDestroy
     public void shutdown() {
         scheduler.shutdown();
@@ -435,12 +447,17 @@ public class KinesisStreamingForwarder {
 
     private ObjectNode buildPayload(String eventId, String eventName, JsonNode keys,
                                     JsonNode newImage, JsonNode oldImage,
-                                    String tableName, String region, Instant timestamp, String precision) {
+                                    String tableName, String region, Instant timestamp, String precision,
+                                    boolean ttlDeletion) {
         ObjectNode payload = objectMapper.createObjectNode();
         payload.put("awsRegion", region);
         payload.put("eventID", eventId);
         payload.put("eventName", eventName);
-        payload.putNull("userIdentity");
+        if (ttlDeletion) {
+            DynamoDbTtlIdentity.putOn(payload, DynamoDbTtlIdentity.Shape.EVENT_RECORD);
+        } else {
+            payload.putNull("userIdentity");
+        }
         payload.put("recordFormat", "application/json");
         payload.put("tableName", tableName);
         payload.put("eventSource", "aws:dynamodb");

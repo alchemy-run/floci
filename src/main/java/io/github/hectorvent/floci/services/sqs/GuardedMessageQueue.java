@@ -4,8 +4,10 @@ import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.services.sqs.model.Message;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Optional;
@@ -26,6 +28,8 @@ class GuardedMessageQueue {
     private final List<Message> messages;
     private final StorageBackend<String, List<Message>> messageStore;
     private final String storageKey;
+    private final String receiptHandleSecret;
+    private final SqsQueueActivity activity = new SqsQueueActivity();
     private volatile boolean closed;
 
     @FunctionalInterface
@@ -40,13 +44,19 @@ class GuardedMessageQueue {
     }
 
     GuardedMessageQueue(StorageBackend<String, List<Message>> messageStore, String storageKey) {
-        this(new ArrayList<>(), messageStore, storageKey);
+        this(new ArrayList<>(), messageStore, storageKey, ReceiptHandle.DEFAULT_SECRET);
     }
 
     GuardedMessageQueue(List<Message> initial, StorageBackend<String, List<Message>> messageStore, String storageKey) {
+        this(initial, messageStore, storageKey, ReceiptHandle.DEFAULT_SECRET);
+    }
+
+    GuardedMessageQueue(List<Message> initial, StorageBackend<String, List<Message>> messageStore, String storageKey,
+                        String receiptHandleSecret) {
         this.messages = new ArrayList<>(initial);
         this.messageStore = messageStore;
         this.storageKey = storageKey;
+        this.receiptHandleSecret = receiptHandleSecret;
     }
 
     record ClaimResult(List<Message> claimed, List<Message> dlqCandidates) {
@@ -54,8 +64,14 @@ class GuardedMessageQueue {
 
     void addMessage(Message message) {
         try (Guard _ = hold()) {
+            int mark = messages.size();
             messages.add(message);
-            persist();
+            try {
+                persist();
+            } catch (RuntimeException e) {
+                messages.remove(mark);
+                throw e;
+            }
         }
     }
 
@@ -111,7 +127,7 @@ class GuardedMessageQueue {
             return false;
         }
 
-        msg.setReceiptHandle(UUID.randomUUID().toString());
+        msg.setReceiptHandle(ReceiptHandle.issue(storageKey, msg.getMessageId(), receiptHandleSecret).encode());
         msg.setVisibleAt(Instant.now().plusSeconds(effectiveTimeout));
         claimed.add(msg);
         return true;
@@ -154,41 +170,71 @@ class GuardedMessageQueue {
         }
     }
 
-    Optional<Message> removeByReceiptHandle(String receiptHandle) {
+    enum HandleResult { APPLIED, MESSAGE_GONE, HANDLE_EXPIRED }
+
+    record Removal(HandleResult result, Message message) {
+    }
+
+    Removal removeByReceiptHandle(ReceiptHandle handle, boolean fifo) {
         try (Guard _ = hold()) {
-            Message removed = null;
-            for (Iterator<Message> it = messages.iterator(); it.hasNext(); ) {
-                Message m = it.next();
-                if (receiptHandle.equals(m.getReceiptHandle())) {
-                    removed = m;
-                    it.remove();
-                    break;
-                }
+            Message msg = findByMessageId(handle.messageId());
+            HandleResult result = checkHandle(msg, handle, fifo);
+            if (result != HandleResult.APPLIED) {
+                return new Removal(result, null);
             }
-            if (removed != null) {
-                persist();
-            }
-            return Optional.ofNullable(removed);
+            messages.remove(msg);
+            persist();
+            return new Removal(HandleResult.APPLIED, msg);
         }
     }
 
-    boolean changeVisibility(String receiptHandle, int visibilityTimeout) {
+    HandleResult changeVisibility(ReceiptHandle handle, int visibilityTimeout, boolean fifo) {
         try (Guard _ = hold()) {
-            for (Message msg : messages) {
-                if (receiptHandle.equals(msg.getReceiptHandle())) {
-                    msg.setVisibleAt(Instant.now().plusSeconds(visibilityTimeout));
-                    persist();
-                    return true;
-                }
+            Message msg = findByMessageId(handle.messageId());
+            HandleResult result = checkHandle(msg, handle, fifo);
+            if (result == HandleResult.APPLIED) {
+                msg.setVisibleAt(Instant.now().plusSeconds(visibilityTimeout));
+                persist();
             }
-            return false;
+            return result;
         }
+    }
+
+    private Message findByMessageId(String messageId) {
+        for (Message msg : messages) {
+            if (messageId.equals(msg.getMessageId())) {
+                return msg;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * On a standard queue an older handle of the message still works. On a FIFO queue only the
+     * handle of the receive still in flight does.
+     */
+    private static HandleResult checkHandle(Message msg, ReceiptHandle handle, boolean fifo) {
+        if (msg == null) {
+            return HandleResult.MESSAGE_GONE;
+        }
+        if (fifo && (!handle.encode().equals(msg.getReceiptHandle()) || msg.isVisible())) {
+            return HandleResult.HANDLE_EXPIRED;
+        }
+        return HandleResult.APPLIED;
     }
 
     void removeMessages(List<Message> toRemove) {
         try (Guard _ = hold()) {
             messages.removeAll(toRemove);
             persist();
+        }
+    }
+
+    void removeExpired(Instant cutoff) {
+        try (Guard _ = hold()) {
+            if (messages.removeIf(msg -> msg.isExpired(cutoff))) {
+                persist();
+            }
         }
     }
 
@@ -260,6 +306,42 @@ class GuardedMessageQueue {
         }
     }
 
+    record Gauges(MessageCounts counts, long ageOfOldestMessageSeconds, long groupsWithInflightMessages) {
+        boolean isEmpty() {
+            return counts.visible() + counts.inFlight() + counts.delayed() == 0;
+        }
+    }
+
+    /**
+     * The queue contents AWS/SQS reports each minute. The age is that of the oldest message by the
+     * time its retention started, so a message moved to a FIFO dead-letter queue or by a move task
+     * counts from the move.
+     */
+    Gauges gauges(Instant now) {
+        try (Guard _ = hold()) {
+            Instant oldest = null;
+            Set<String> groupsInFlight = new HashSet<>();
+            for (Message m : messages) {
+                if (!m.isVisible() && m.getReceiptHandle() != null && m.getMessageGroupId() != null) {
+                    groupsInFlight.add(m.getMessageGroupId());
+                }
+                // ponytail: AWS also leaves out a standard-queue message received 3+ times in this queue;
+                // that needs a per-queue receive count, since a redriven message keeps its total.
+                Instant enqueued = m.getRetentionStartTimestamp() != null
+                        ? m.getRetentionStartTimestamp() : m.getSentTimestamp();
+                if (enqueued != null && (oldest == null || enqueued.isBefore(oldest))) {
+                    oldest = enqueued;
+                }
+            }
+            long age = oldest == null ? 0 : Math.max(0, Duration.between(oldest, now).toSeconds());
+            return new Gauges(messageCounts(), age, groupsInFlight.size());
+        }
+    }
+
+    SqsQueueActivity activity() {
+        return activity;
+    }
+
     List<Message> peekAll() {
         try (Guard _ = hold()) {
             return new ArrayList<>(messages);
@@ -322,5 +404,36 @@ class GuardedMessageQueue {
         int slash = trimmed.indexOf('/');
         String candidate = slash > 0 ? trimmed.substring(0, slash) : trimmed;
         return candidate.matches("\\d{12}") ? candidate : null;
+    }
+
+    Optional<Message> removeByReceiptHandle(String receiptHandle) {
+        try (Guard _ = hold()) {
+            Message removed = null;
+            for (Iterator<Message> it = messages.iterator(); it.hasNext(); ) {
+                Message m = it.next();
+                if (receiptHandle.equals(m.getReceiptHandle())) {
+                    removed = m;
+                    it.remove();
+                    break;
+                }
+            }
+            if (removed != null) {
+                persist();
+            }
+            return Optional.ofNullable(removed);
+        }
+    }
+
+    boolean changeVisibility(String receiptHandle, int visibilityTimeout) {
+        try (Guard _ = hold()) {
+            for (Message msg : messages) {
+                if (receiptHandle.equals(msg.getReceiptHandle())) {
+                    msg.setVisibleAt(Instant.now().plusSeconds(visibilityTimeout));
+                    persist();
+                    return true;
+                }
+            }
+            return false;
+        }
     }
 }

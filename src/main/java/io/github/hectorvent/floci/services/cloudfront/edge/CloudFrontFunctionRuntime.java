@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.cloudfront.edge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -133,7 +134,7 @@ public class CloudFrontFunctionRuntime {
         frame.set("event", event);
         frame.put("timeoutMs", config.services().cloudfront().functionTimeoutMs());
         frame.put("maxCodeBytes", config.services().cloudfront().functionMaxCodeBytes());
-        var kvsIds = frame.putArray("kvsIds");
+        ArrayNode kvsIds = frame.putArray("kvsIds");
         stores.forEach(kvsIds::add);
 
         CompletableFuture<Execution> future = new CompletableFuture<>();

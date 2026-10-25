@@ -31,11 +31,13 @@ public class TableDefinition {
     private Map<String, String> tags;
     private List<GlobalSecondaryIndex> globalSecondaryIndexes;
     private List<LocalSecondaryIndex> localSecondaryIndexes;
+    private List<VectorIndex> vectorIndexes;
     private String billingMode; // "PROVISIONED" or "PAY_PER_REQUEST"
     private String ttlAttributeName;
     private boolean ttlEnabled;
     private boolean pointInTimeRecoveryEnabled;
     private int pointInTimeRecoveryRecoveryPeriodInDays;
+    private Instant pointInTimeRecoveryStartDateTime;
     private boolean deletionProtectionEnabled;
     private boolean streamEnabled;
     private String streamArn;
@@ -48,11 +50,10 @@ public class TableDefinition {
     private String tableClass; // "STANDARD" or "STANDARD_INFREQUENT_ACCESS"
     private Integer onDemandMaxReadRequestUnits;
     private Integer onDemandMaxWriteRequestUnits;
-    private String contributorInsightsStatus;
-    private Map<String, String> indexContributorInsightsStatus;
     // Replica regions for a global table (single-process emulator backs them all with this table's
     // data; the list drives the DescribeTable Replicas/GlobalTableVersion projection).
     private List<String> replicaRegions;
+    private String globalTableHomeRegion;
     // Resource-based policy attached via PutResourcePolicy (JSON policy document text), and the
     // opaque revision id AWS hands back so callers can pass ExpectedRevisionId for optimistic
     // concurrency on subsequent Put/DeleteResourcePolicy calls. Null when no policy is attached.
@@ -65,17 +66,16 @@ public class TableDefinition {
         this.tags = new HashMap<>();
         this.globalSecondaryIndexes = new ArrayList<>();
         this.localSecondaryIndexes = new ArrayList<>();
+        this.vectorIndexes = new ArrayList<>();
         this.pointInTimeRecoveryRecoveryPeriodInDays = 35;
         this.kinesisStreamingDestinations = new ArrayList<>();
-        this.contributorInsightsStatus = "DISABLED";
-        this.indexContributorInsightsStatus = new HashMap<>();
         this.replicaRegions = new ArrayList<>();
     }
 
     public TableDefinition(String tableName,
                             List<KeySchemaElement> keySchema,
                             List<AttributeDefinition> attributeDefinitions) {
-        this(tableName, keySchema, attributeDefinitions, "us-east-1", "000000000000");
+        this(tableName, keySchema, attributeDefinitions, "us-east-1", "000000000000"); // partition-literal: test-shaped constructor default
     }
 
     public TableDefinition(String tableName,
@@ -95,10 +95,9 @@ public class TableDefinition {
         this.tags = new HashMap<>();
         this.globalSecondaryIndexes = new ArrayList<>();
         this.localSecondaryIndexes = new ArrayList<>();
+        this.vectorIndexes = new ArrayList<>();
         this.pointInTimeRecoveryRecoveryPeriodInDays = 35;
         this.kinesisStreamingDestinations = new ArrayList<>();
-        this.contributorInsightsStatus = "DISABLED";
-        this.indexContributorInsightsStatus = new HashMap<>();
         this.replicaRegions = new ArrayList<>();
     }
 
@@ -142,6 +141,16 @@ public class TableDefinition {
         this.localSecondaryIndexes = localSecondaryIndexes != null ? localSecondaryIndexes : new ArrayList<>();
     }
 
+    public List<VectorIndex> getVectorIndexes() {
+        if (vectorIndexes == null) {
+            vectorIndexes = new ArrayList<>();
+        }
+        return vectorIndexes;
+    }
+    public void setVectorIndexes(List<VectorIndex> vectorIndexes) {
+        this.vectorIndexes = vectorIndexes != null ? vectorIndexes : new ArrayList<>();
+    }
+
     public String getBillingMode() { return billingMode; }
     public void setBillingMode(String billingMode) { this.billingMode = billingMode; }
 
@@ -159,6 +168,11 @@ public class TableDefinition {
     public int getPointInTimeRecoveryRecoveryPeriodInDays() { return pointInTimeRecoveryRecoveryPeriodInDays; }
     public void setPointInTimeRecoveryRecoveryPeriodInDays(int pointInTimeRecoveryRecoveryPeriodInDays) {
         this.pointInTimeRecoveryRecoveryPeriodInDays = pointInTimeRecoveryRecoveryPeriodInDays;
+    }
+
+    public Instant getPointInTimeRecoveryStartDateTime() { return pointInTimeRecoveryStartDateTime; }
+    public void setPointInTimeRecoveryStartDateTime(Instant pointInTimeRecoveryStartDateTime) {
+        this.pointInTimeRecoveryStartDateTime = pointInTimeRecoveryStartDateTime;
     }
 
     public boolean isDeletionProtectionEnabled() { return deletionProtectionEnabled; }
@@ -212,6 +226,13 @@ public class TableDefinition {
         this.replicaRegions = replicaRegions != null ? replicaRegions : new ArrayList<>();
     }
 
+    // The region that owns the table once it has become a global table. On AWS a global table lists
+    // its own home region as an ACTIVE replica alongside the others; null means a plain table.
+    public String getGlobalTableHomeRegion() { return globalTableHomeRegion; }
+    public void setGlobalTableHomeRegion(String globalTableHomeRegion) {
+        this.globalTableHomeRegion = globalTableHomeRegion;
+    }
+
     public Integer getOnDemandMaxReadRequestUnits() { return onDemandMaxReadRequestUnits; }
     public void setOnDemandMaxReadRequestUnits(Integer v) { this.onDemandMaxReadRequestUnits = v; }
 
@@ -220,39 +241,6 @@ public class TableDefinition {
 
     public String getResourcePolicy() { return resourcePolicy; }
     public void setResourcePolicy(String resourcePolicy) { this.resourcePolicy = resourcePolicy; }
-
-    public String getContributorInsightsStatus() {
-        return contributorInsightsStatus != null ? contributorInsightsStatus : "DISABLED";
-    }
-    public void setContributorInsightsStatus(String contributorInsightsStatus) {
-        this.contributorInsightsStatus = contributorInsightsStatus != null ? contributorInsightsStatus : "DISABLED";
-    }
-
-    public Map<String, String> getIndexContributorInsightsStatus() {
-        if (indexContributorInsightsStatus == null) {
-            indexContributorInsightsStatus = new HashMap<>();
-        }
-        return indexContributorInsightsStatus;
-    }
-    public void setIndexContributorInsightsStatus(Map<String, String> status) {
-        this.indexContributorInsightsStatus = status != null ? status : new HashMap<>();
-    }
-
-    public String contributorInsightsStatusFor(String indexName) {
-        if (indexName == null || indexName.isBlank()) {
-            return getContributorInsightsStatus();
-        }
-        return getIndexContributorInsightsStatus().getOrDefault(indexName, "DISABLED");
-    }
-
-    public void setContributorInsightsStatusFor(String indexName, String status) {
-        String resolved = status != null ? status : "DISABLED";
-        if (indexName == null || indexName.isBlank()) {
-            setContributorInsightsStatus(resolved);
-            return;
-        }
-        getIndexContributorInsightsStatus().put(indexName, resolved);
-    }
 
     public String getResourcePolicyRevisionId() { return resourcePolicyRevisionId; }
     public void setResourcePolicyRevisionId(String resourcePolicyRevisionId) { this.resourcePolicyRevisionId = resourcePolicyRevisionId; }
@@ -309,5 +297,54 @@ public class TableDefinition {
         return localSecondaryIndexes.stream()
                 .filter(l -> indexName.equals(l.getIndexName()))
                 .findFirst();
+    }
+
+    @JsonIgnore
+    public Optional<VectorIndex> findVectorIndex(String indexName) {
+        if (vectorIndexes == null || vectorIndexes.isEmpty() || indexName == null) {
+            return Optional.empty();
+        }
+        return vectorIndexes.stream()
+                .filter(v -> indexName.equals(v.getIndexName()))
+                .findFirst();
+    }
+
+    private String contributorInsightsStatus;
+
+    private Map<String, String> indexContributorInsightsStatus;
+
+    public String getContributorInsightsStatus() {
+        return contributorInsightsStatus != null ? contributorInsightsStatus : "DISABLED";
+    }
+
+    public void setContributorInsightsStatus(String contributorInsightsStatus) {
+        this.contributorInsightsStatus = contributorInsightsStatus != null ? contributorInsightsStatus : "DISABLED";
+    }
+
+    public Map<String, String> getIndexContributorInsightsStatus() {
+        if (indexContributorInsightsStatus == null) {
+            indexContributorInsightsStatus = new HashMap<>();
+        }
+        return indexContributorInsightsStatus;
+    }
+
+    public void setIndexContributorInsightsStatus(Map<String, String> status) {
+        this.indexContributorInsightsStatus = status != null ? status : new HashMap<>();
+    }
+
+    public String contributorInsightsStatusFor(String indexName) {
+        if (indexName == null || indexName.isBlank()) {
+            return getContributorInsightsStatus();
+        }
+        return getIndexContributorInsightsStatus().getOrDefault(indexName, "DISABLED");
+    }
+
+    public void setContributorInsightsStatusFor(String indexName, String status) {
+        String resolved = status != null ? status : "DISABLED";
+        if (indexName == null || indexName.isBlank()) {
+            setContributorInsightsStatus(resolved);
+            return;
+        }
+        getIndexContributorInsightsStatus().put(indexName, resolved);
     }
 }

@@ -1,21 +1,42 @@
 package io.github.hectorvent.floci.services.ssm;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.path.json.JsonPath;
+import io.restassured.response.Response;
+import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.UUID;
+import java.util.stream.Stream;
+
+import static io.github.hectorvent.floci.testing.CfnRequests.cfn;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.*;
+import static org.junit.jupiter.api.Assertions.assertAll;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class SsmIntegrationTest {
 
     private static final String SSM_CONTENT_TYPE = "application/x-amz-json-1.1";
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @BeforeAll
     static void configureRestAssured() {
@@ -590,184 +611,6 @@ class SsmIntegrationTest {
             .statusCode(200)
             .body("WindowIdentities.size()", equalTo(0))
             .body("$", not(hasKey("NextToken")));
-    }
-
-    @Test
-    void putParameter_withTags_visibleViaListTagsAndDescribe() {
-        given()
-            .header("X-Amz-Target", "AmazonSSM.PutParameter")
-            .contentType(SSM_CONTENT_TYPE)
-            .body("""
-                {
-                    "Name": "/alchemy/tagged",
-                    "Value": "v1",
-                    "Type": "String",
-                    "Description": "tagged param",
-                    "Tier": "Standard",
-                    "Tags": [
-                        {"Key": "Environment", "Value": "test"}
-                    ]
-                }
-                """)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("Version", equalTo(1))
-            .body("Tier", equalTo("Standard"));
-
-        given()
-            .header("X-Amz-Target", "AmazonSSM.ListTagsForResource")
-            .contentType(SSM_CONTENT_TYPE)
-            .body("""
-                { "ResourceType": "Parameter", "ResourceId": "/alchemy/tagged" }
-                """)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("TagList.find { it.Key == 'Environment' }.Value", equalTo("test"));
-
-        given()
-            .header("X-Amz-Target", "AmazonSSM.DescribeParameters")
-            .contentType(SSM_CONTENT_TYPE)
-            .body("""
-                {
-                    "ParameterFilters": [
-                        {"Key": "Name", "Option": "Equals", "Values": ["/alchemy/tagged"]}
-                    ]
-                }
-                """)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("Parameters[0].Description", equalTo("tagged param"))
-            .body("Parameters[0].Tier", equalTo("Standard"))
-            .body("Parameters[0].ARN", containsString(":parameter/alchemy/tagged"));
-    }
-
-    @Test
-    void putParameter_tagsWithOverwrite_rejected() {
-        given()
-            .header("X-Amz-Target", "AmazonSSM.PutParameter")
-            .contentType(SSM_CONTENT_TYPE)
-            .body("""
-                { "Name": "/alchemy/overwrite-tags", "Value": "v1", "Type": "String" }
-                """)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200);
-
-        given()
-            .header("X-Amz-Target", "AmazonSSM.PutParameter")
-            .contentType(SSM_CONTENT_TYPE)
-            .body("""
-                {
-                    "Name": "/alchemy/overwrite-tags",
-                    "Value": "v2",
-                    "Type": "String",
-                    "Overwrite": true,
-                    "Tags": [{"Key": "k", "Value": "v"}]
-                }
-                """)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(400)
-            .body("__type", equalTo("ValidationException"));
-    }
-
-    @Test
-    void labelAndUnlabelParameterVersion() {
-        given()
-            .header("X-Amz-Target", "AmazonSSM.PutParameter")
-            .contentType(SSM_CONTENT_TYPE)
-            .body("""
-                { "Name": "/alchemy/label-cycle", "Value": "v1", "Type": "String" }
-                """)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200);
-
-        given()
-            .header("X-Amz-Target", "AmazonSSM.LabelParameterVersion")
-            .contentType(SSM_CONTENT_TYPE)
-            .body("""
-                { "Name": "/alchemy/label-cycle", "Labels": ["current"] }
-                """)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("ParameterVersion", equalTo(1))
-            .body("InvalidLabels.size()", equalTo(0));
-
-        given()
-            .header("X-Amz-Target", "AmazonSSM.UnlabelParameterVersion")
-            .contentType(SSM_CONTENT_TYPE)
-            .body("""
-                {
-                    "Name": "/alchemy/label-cycle",
-                    "ParameterVersion": 1,
-                    "Labels": ["current"]
-                }
-                """)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("RemovedLabels", contains("current"))
-            .body("InvalidLabels.size()", equalTo(0));
-    }
-
-    @Test
-    void putSecureStringSeedsAwsManagedKmsAlias() {
-        given()
-            .header("X-Amz-Target", "AmazonSSM.PutParameter")
-            .contentType(SSM_CONTENT_TYPE)
-            .body("""
-                {
-                    "Name": "/app/secure",
-                    "Value": "super-secret",
-                    "Type": "SecureString"
-                }
-                """)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("Version", equalTo(1));
-
-        given()
-            .header("X-Amz-Target", "AmazonSSM.GetParameter")
-            .contentType(SSM_CONTENT_TYPE)
-            .body("""
-                {
-                    "Name": "/app/secure",
-                    "WithDecryption": true
-                }
-                """)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("Parameter.Type", equalTo("SecureString"))
-            .body("Parameter.Value", equalTo("super-secret"));
-
-        given()
-            .header("X-Amz-Target", "TrentService.DescribeKey")
-            .contentType("application/x-amz-json-1.1")
-            .body("""
-                { "KeyId": "alias/aws/ssm" }
-                """)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("KeyMetadata.Arn", containsString(":key/"));
     }
 
     @Test
@@ -1485,6 +1328,24 @@ class SsmIntegrationTest {
             .body("Parameter.Version", equalTo(1))
             .body("Parameter.ARN", equalTo("arn:aws:ssm:us-east-1::parameter" + al2023));
 
+        String al2023Arm64 = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64";
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "%s" }
+                """.formatted(al2023Arm64))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameter.Name", equalTo(al2023Arm64))
+            .body("Parameter.Value", equalTo("ami-amazonlinux2023-arm64"))
+            .body("Parameter.Type", equalTo("String"))
+            .body("Parameter.Version", equalTo(1))
+            .body("Parameter.ARN", equalTo("arn:aws:ssm:us-east-1::parameter" + al2023Arm64));
+
         given()
             .header("X-Amz-Target", "AmazonSSM.GetParameters")
             .contentType(SSM_CONTENT_TYPE)
@@ -1498,6 +1359,24 @@ class SsmIntegrationTest {
             .body("Parameters.Name", contains(al2023))
             .body("InvalidParameters", contains("/aws/service/ami-amazon-linux-latest/no-such-variant"));
 
+        String eksOptimizedAmi = "/aws/service/eks/optimized-ami/1.31/amazon-linux-2023/x86_64/standard/recommended/image_id";
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "%s" }
+                """.formatted(eksOptimizedAmi))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameter.Name", equalTo(eksOptimizedAmi))
+            .body("Parameter.Value", equalTo("ami-0abcdef1234567891"))
+            .body("Parameter.Type", equalTo("String"))
+            .body("Parameter.Version", equalTo(1))
+            .body("Parameter.ARN", equalTo("arn:aws:ssm:us-east-1::parameter" + eksOptimizedAmi));
+
         given()
             .header("X-Amz-Target", "AmazonSSM.GetParametersByPath")
             .contentType(SSM_CONTENT_TYPE)
@@ -1508,7 +1387,7 @@ class SsmIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("Parameters.Name", hasItems(al2023,
+            .body("Parameters.Name", hasItems(al2023, al2023Arm64,
                     "/aws/service/ami-amazon-linux-latest/amzn2-ami-hvm-x86_64-gp2"));
 
         given()
@@ -1690,6 +1569,30 @@ class SsmIntegrationTest {
     }
 
     @Test
+    void addTagsToResourceWithAKeyOutsideTheAwsPatternReturns400BeforeTheLookup() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.AddTagsToResource")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                {
+                    "ResourceType": "Parameter",
+                    "ResourceId": "/demo/no-such-param-for-tag-validation",
+                    "Tags": [
+                        {"Key": "a,b", "Value": "x"}
+                    ]
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", equalTo("1 validation error detected: Value at 'tags.1.member.key' failed to"
+                    + " satisfy constraint: Member must satisfy regular expression pattern:"
+                    + " ^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"));
+    }
+
+    @Test
     @Order(20)
     void describeParametersAppliesParameterFilters() {
         putFilterFixture("/dpf/prod/db", "String", "");
@@ -1755,6 +1658,303 @@ class SsmIntegrationTest {
         describeParametersError("{ \"MaxResults\": 51 }", "ValidationException");
     }
 
+    @Test
+    void parameterArn_hasParameterSlashAndAddressesTagOperations() {
+        String suffix = Long.toString(System.nanoTime());
+        String plain = "arn-plain-" + suffix;
+        String nested = "/arn/nested-" + suffix;
+        putFilterFixture(plain, "String", "");
+        putFilterFixture(nested, "String", "");
+
+        String plainArn = parameterArn(plain, ":parameter/" + plain);
+        parameterArn(nested, ":parameter" + nested);
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.AddTagsToResource")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "ResourceType": "Parameter", "ResourceId": "%s", "Tags": [{"Key": "env", "Value": "dev"}] }
+                """.formatted(plainArn))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.ListTagsForResource")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "ResourceType": "Parameter", "ResourceId": "%s" }
+                """.formatted(plainArn))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("TagList", hasSize(1))
+            .body("TagList[0].Key", equalTo("env"))
+            .body("TagList[0].Value", equalTo("dev"));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.DeleteParameters")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("{ \"Names\": [\"" + plain + "\", \"" + nested + "\"] }")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("DeletedParameters", hasSize(2));
+    }
+
+    private String parameterArn(String name, String expectedArnSuffix) {
+        return given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("{ \"Name\": \"" + name + "\" }")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameter.ARN", endsWith(expectedArnSuffix))
+            .extract().path("Parameter.ARN");
+    }
+
+    @Test
+    void describeParametersReturnsKeyIdAllowedPatternTierAndPolicies() {
+        String policy = "{\\\"Type\\\":\\\"Expiration\\\",\\\"Version\\\":\\\"1.0\\\","
+                + "\\\"Attributes\\\":{\\\"Timestamp\\\":\\\"2099-01-01T00:00:00.000Z\\\"}}";
+        putFilterFixture("/attr/secure", "SecureString", ", \"KeyId\": \"alias/custom\", \"AllowedPattern\": \"^v$\","
+                + " \"Tier\": \"Advanced\", \"Policies\": \"[" + policy + "]\"");
+        putFilterFixture("/attr/default-key", "SecureString", "");
+        putFilterFixture("/attr/plain", "String", "");
+
+        String policyText = describeParameters("""
+                { "ParameterFilters": [{ "Key": "Name", "Values": ["/attr/secure"] }] }
+                """)
+            .body("Parameters[0].KeyId", equalTo("alias/custom"))
+            .body("Parameters[0].AllowedPattern", equalTo("^v$"))
+            .body("Parameters[0].Tier", equalTo("Advanced"))
+            .body("Parameters[0].Policies", hasSize(1))
+            .body("Parameters[0].Policies[0].PolicyType", equalTo("Expiration"))
+            .body("Parameters[0].Policies[0].PolicyStatus", equalTo("Pending"))
+            .extract().path("Parameters[0].Policies[0].PolicyText");
+        assertEquals("2099-01-01T00:00:00.000Z", JsonPath.from(policyText).getString("Attributes.Timestamp"));
+
+        describeParameters("""
+                { "ParameterFilters": [{ "Key": "Name", "Values": ["/attr/default-key"] }] }
+                """)
+            .body("Parameters[0].KeyId", equalTo("alias/aws/ssm"))
+            .body("Parameters[0].Tier", equalTo("Standard"))
+            .body("Parameters[0]", not(hasKey("AllowedPattern")))
+            .body("Parameters[0]", not(hasKey("Policies")));
+        describeParameters("""
+                { "ParameterFilters": [{ "Key": "Name", "Values": ["/attr/plain"] }] }
+                """)
+            .body("Parameters[0]", not(hasKey("KeyId")))
+            .body("Parameters[0].Tier", equalTo("Standard"));
+
+        // The stored tier and key, not the defaults, are what the filters see.
+        describeParameters("""
+                { "ParameterFilters": [
+                    { "Key": "Name", "Option": "BeginsWith", "Values": ["/attr/"] },
+                    { "Key": "Tier", "Values": ["Advanced"] }
+                ] }
+                """)
+            .body("Parameters.Name", contains("/attr/secure"));
+        describeParameters("""
+                { "ParameterFilters": [
+                    { "Key": "Name", "Option": "BeginsWith", "Values": ["/attr/"] },
+                    { "Key": "KeyId", "Values": ["alias/custom"] }
+                ] }
+                """)
+            .body("Parameters.Name", contains("/attr/secure"));
+
+        // An overwrite that omits Tier keeps the Advanced tier.
+        putFilterFixture("/attr/secure", "SecureString", ", \"Overwrite\": true");
+        describeParameters("""
+                { "ParameterFilters": [{ "Key": "Name", "Values": ["/attr/secure"] }] }
+                """)
+            .body("Parameters[0].Version", equalTo(2))
+            .body("Parameters[0].Tier", equalTo("Advanced"));
+    }
+
+    @Test
+    void putParameterIntelligentTieringResolvesToAdvancedOnlyWhenNeeded() {
+        putFilterFixture("/attr-it/small", "String", ", \"Tier\": \"Intelligent-Tiering\"");
+        putFilterFixture("/attr-it/policy", "String", ", \"Tier\": \"Intelligent-Tiering\", \"Policies\":"
+                + " \"[{\\\"Type\\\":\\\"NoChangeNotification\\\",\\\"Version\\\":\\\"1.0\\\","
+                + "\\\"Attributes\\\":{\\\"After\\\":\\\"30\\\",\\\"Unit\\\":\\\"Days\\\"}}]\"");
+        describeParameters("""
+                { "ParameterFilters": [{ "Key": "Path", "Values": ["/attr-it"] }] }
+                """)
+            .body("Parameters.find { it.Name == '/attr-it/small' }.Tier", equalTo("Standard"))
+            .body("Parameters.find { it.Name == '/attr-it/policy' }.Tier", equalTo("Advanced"));
+    }
+
+    @Test
+    void putParameterIntelligentTieringCutsOverAbove4096Utf8Bytes() {
+        // An e-acute is one char but two UTF-8 bytes, so the multibyte values sit under 4096 chars.
+        putIntelligentTiering("/attr-it-size/ascii-4096", "a".repeat(4096));
+        putIntelligentTiering("/attr-it-size/ascii-4097", "a".repeat(4097));
+        putIntelligentTiering("/attr-it-size/utf8-4096", "\\u00e9".repeat(2048));
+        putIntelligentTiering("/attr-it-size/utf8-4098", "\\u00e9".repeat(2049));
+        describeParameters("""
+                { "ParameterFilters": [{ "Key": "Path", "Values": ["/attr-it-size"] }] }
+                """)
+            .body("Parameters.find { it.Name == '/attr-it-size/ascii-4096' }.Tier", equalTo("Standard"))
+            .body("Parameters.find { it.Name == '/attr-it-size/ascii-4097' }.Tier", equalTo("Advanced"))
+            .body("Parameters.find { it.Name == '/attr-it-size/utf8-4096' }.Tier", equalTo("Standard"))
+            .body("Parameters.find { it.Name == '/attr-it-size/utf8-4098' }.Tier", equalTo("Advanced"));
+    }
+
+    @Test
+    void putParameterIntelligentTieringOverwriteKeepsAnAdvancedParameterAdvanced() {
+        putFilterFixture("/attr-it-keep/p", "String", ", \"Tier\": \"Advanced\"");
+        putFilterFixture("/attr-it-keep/p", "String", ", \"Tier\": \"Intelligent-Tiering\", \"Overwrite\": true");
+        describeParameters("""
+                { "ParameterFilters": [{ "Key": "Name", "Values": ["/attr-it-keep/p"] }] }
+                """)
+            .body("Parameters[0].Version", equalTo(2))
+            .body("Parameters[0].Tier", equalTo("Advanced"));
+    }
+
+    @Test
+    void putParameterRejectsATierOutsideTheEnumAndStoresNothing() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/attr-bad-tier/p", "Value": "v", "Type": "String", "Tier": "Premium" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", containsString("Value 'Premium' at 'tier'"));
+        describeParameters("""
+                { "ParameterFilters": [{ "Key": "Name", "Values": ["/attr-bad-tier/p"] }] }
+                """)
+            .body("Parameters", hasSize(0));
+    }
+
+    private void putIntelligentTiering(String name, String jsonEscapedValue) {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("{ \"Name\": \"" + name + "\", \"Value\": \"" + jsonEscapedValue
+                    + "\", \"Type\": \"String\", \"Tier\": \"Intelligent-Tiering\" }")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+    }
+
+    @Test
+    void putParameterRejectsAValueOutsideAllowedPattern() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/attr/pattern", "Value": "nope", "Type": "String", "AllowedPattern": "^v$" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ParameterPatternMismatchException"));
+    }
+
+    @Test
+    void putParameterTreatsAnEmptyAllowedPatternAsNoPattern() {
+        putFilterFixture("/attr/empty-pattern", "String", ", \"AllowedPattern\": \"\"");
+        describeParameters("""
+                { "ParameterFilters": [{ "Key": "Name", "Values": ["/attr/empty-pattern"] }] }
+                """)
+            .body("Parameters[0].Version", equalTo(1))
+            .body("Parameters[0]", not(hasKey("AllowedPattern")));
+    }
+
+    @Test
+    void putParameterOverwriteKeepsPoliciesUntilNewOrEmptyPoliciesAreSent() {
+        putFilterFixture("/pol/keep", "String", ", \"Tier\": \"Advanced\", \"Policies\":"
+                + " \"[{\\\"Type\\\":\\\"NoChangeNotification\\\",\\\"Version\\\":\\\"1.0\\\","
+                + "\\\"Attributes\\\":{\\\"After\\\":\\\"30\\\",\\\"Unit\\\":\\\"Days\\\"}}]\"");
+        String byName = """
+                { "ParameterFilters": [{ "Key": "Name", "Values": ["/pol/keep"] }] }
+                """;
+
+        putFilterFixture("/pol/keep", "String", ", \"Overwrite\": true");
+        describeParameters(byName)
+            .body("Parameters[0].Version", equalTo(2))
+            .body("Parameters[0].Policies.PolicyType", contains("NoChangeNotification"));
+
+        putFilterFixture("/pol/keep", "String", ", \"Overwrite\": true, \"Policies\": \"[]\"");
+        describeParameters(byName)
+            .body("Parameters[0].Version", equalTo(3))
+            .body("Parameters[0]", not(hasKey("Policies")));
+    }
+
+    @Test
+    void putParameterRejectsMalformedAllowedPattern() {
+        putParameterError("""
+                { "Name": "/pol/bad-pattern", "Value": "v", "Type": "String", "AllowedPattern": "[" }
+                """, "InvalidAllowedPatternException");
+    }
+
+    @Test
+    void putParameterBoundsCatastrophicAllowedPatternBacktracking() {
+        // Nested groups defeat the JDK's loop memoization; unbounded, this match runs for hours.
+        String body = "{ \"Name\": \"/pol/redos\", \"Value\": \"" + "a".repeat(40)
+                + "!\", \"Type\": \"String\", \"AllowedPattern\": \"^((a+)+)+$\" }";
+        assertTimeoutPreemptively(Duration.ofSeconds(10),
+                () -> putParameterError(body, "InvalidAllowedPatternException"));
+    }
+
+    @Test
+    void putParameterRejectsAllowedPatternOver1024Chars() {
+        putParameterError("{ \"Name\": \"/pol/long-pattern\", \"Value\": \"a\", \"Type\": \"String\","
+                + " \"AllowedPattern\": \"" + "a".repeat(1025) + "\" }", "ValidationException");
+    }
+
+    @Test
+    void putParameterRejectsPoliciesThatAreNotAJsonArray() {
+        putParameterError("""
+                { "Name": "/pol/bad-policies", "Value": "v", "Type": "String", "Policies": "{}" }
+                """, "ValidationException");
+    }
+
+    @Test
+    void putParameterTreatsEmptyOptionalFieldsAsAbsent() {
+        // Terraform's aws_ssm_parameter sends every optional field, unset ones as "".
+        putFilterFixture("/empty/plain", "String",
+                ", \"AllowedPattern\": \"\", \"Tier\": \"\", \"Policies\": \"\"");
+        putFilterFixture("/empty/secure", "SecureString", ", \"KeyId\": \"\", \"AllowedPattern\": \"\"");
+
+        describeParameters("""
+                { "ParameterFilters": [{ "Key": "Name", "Values": ["/empty/plain"] }] }
+                """)
+            .body("Parameters[0]", not(hasKey("AllowedPattern")))
+            .body("Parameters[0]", not(hasKey("Policies")))
+            .body("Parameters[0].Tier", equalTo("Standard"));
+        describeParameters("""
+                { "ParameterFilters": [{ "Key": "Name", "Values": ["/empty/secure"] }] }
+                """)
+            .body("Parameters[0].KeyId", equalTo("alias/aws/ssm"))
+            .body("Parameters[0]", not(hasKey("AllowedPattern")));
+    }
+
+    private void putParameterError(String body, String errorType) {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body(body)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo(errorType));
+    }
+
     private void putFilterFixture(String name, String type, String extra) {
         given()
             .header("X-Amz-Target", "AmazonSSM.PutParameter")
@@ -1764,6 +1964,495 @@ class SsmIntegrationTest {
             .post("/")
         .then()
             .statusCode(200);
+    }
+
+    @Test
+    void getParameterWithVersionAndLabelSelectors() {
+        for (String value : new String[] {"key1", "key2"}) {
+            given()
+                .header("X-Amz-Target", "AmazonSSM.PutParameter")
+                .contentType(SSM_CONTENT_TYPE)
+                .body("""
+                    { "Name": "/selector/param", "Value": "%s", "Type": "SecureString", "Overwrite": true }
+                    """.formatted(value))
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200);
+        }
+        given()
+            .header("X-Amz-Target", "AmazonSSM.LabelParameterVersion")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/selector/param", "ParameterVersion": 1, "Labels": ["previous", "2", "aws:reserved"] }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("ParameterVersion", equalTo(1))
+            .body("InvalidLabels", containsInAnyOrder("2", "aws:reserved"));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/selector/param:1", "WithDecryption": true }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameter.Name", equalTo("/selector/param"))
+            .body("Parameter.Selector", equalTo(":1"))
+            .body("Parameter.Value", equalTo("key1"))
+            .body("Parameter.Version", equalTo(1));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/selector/param:2", "WithDecryption": true }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameter.Name", equalTo("/selector/param"))
+            .body("Parameter.Selector", equalTo(":2"))
+            .body("Parameter.Value", equalTo("key2"))
+            .body("Parameter.Version", equalTo(2));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/selector/param:previous" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameter.Selector", equalTo(":previous"))
+            .body("Parameter.Version", equalTo(1));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/selector/param:9" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ParameterVersionNotFound"));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameters")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Names": ["/selector/param:1", "/selector/param:9"] }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameters.Value", contains("key1"))
+            .body("InvalidParameters", contains("/selector/param:9"));
+    }
+
+    @Test
+    void labelParameterVersion_validationErrors() {
+        String prefix = "1 validation error detected: ";
+        String memberRange = "Member must satisfy constraint: [Member must have length less than or equal to 100, "
+                + "Member must have length greater than or equal to 1]";
+        labelParameterVersion("""
+                { "Name": "/test/param", "Labels": [] }
+                """)
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", equalTo(prefix + "Value '[]' at 'labels' failed to satisfy constraint: "
+                    + "Member must have length greater than or equal to 1"));
+
+        labelParameterVersion("""
+                { "Name": "/test/param", "Labels": [""] }
+                """)
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", equalTo(prefix + "Value '[]' at 'labels' failed to satisfy constraint: " + memberRange));
+
+        String tooLong = "a".repeat(101);
+        labelParameterVersion("""
+                { "Name": "/test/param", "Labels": ["%s"] }
+                """.formatted(tooLong))
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", equalTo(prefix + "Value '[" + tooLong + "]' at 'labels' failed to satisfy constraint: "
+                    + memberRange));
+
+        labelParameterVersion("""
+                { "Name": "/test/param", "Labels": ["l1","l2","l3","l4","l5","l6","l7","l8","l9","l10","l11"] }
+                """)
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", equalTo(prefix + "Value '[l1, l2, l3, l4, l5, l6, l7, l8, l9, l10, l11]' at 'labels' "
+                    + "failed to satisfy constraint: Member must have length less than or equal to 10"));
+
+        labelParameterVersion("""
+                { "Name": "/test/param", "Labels": [5] }
+                """)
+            .statusCode(400)
+            .body("__type", equalTo("SerializationException"))
+            .body("message", equalTo("NUMBER_VALUE can not be converted to a String"));
+    }
+
+    private io.restassured.response.ValidatableResponse labelParameterVersion(String body) {
+        return given()
+            .header("X-Amz-Target", "AmazonSSM.LabelParameterVersion")
+            .contentType(SSM_CONTENT_TYPE)
+            .body(body)
+        .when()
+            .post("/")
+        .then();
+    }
+
+    @Test
+    void unlabelParameterVersionRemovesLabels() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/unlabel/param", "Value": "v1", "Type": "String" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+        given()
+            .header("X-Amz-Target", "AmazonSSM.LabelParameterVersion")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/unlabel/param", "ParameterVersion": 1, "Labels": ["prod", "stable"] }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.UnlabelParameterVersion")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/unlabel/param", "ParameterVersion": 1, "Labels": ["prod", "missing"] }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("RemovedLabels", contains("prod"))
+            .body("InvalidLabels", contains("missing"));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/unlabel/param:prod" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("ParameterVersionNotFound"));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameterHistory")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/unlabel/param" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameters[0].Labels", contains("stable"));
+    }
+
+    @Test
+    void unlabelParameterVersion_errors() {
+        given()
+            .header("X-Amz-Target", "AmazonSSM.PutParameter")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/unlabel/errors", "Value": "v1", "Type": "String" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+        given()
+            .header("X-Amz-Target", "AmazonSSM.LabelParameterVersion")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/unlabel/errors", "ParameterVersion": 1, "Labels": ["prod"] }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        unlabel("{}")
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", equalTo("3 validation errors detected: "
+                    + "Value null at 'name' failed to satisfy constraint: Member must not be null; "
+                    + "Value null at 'parameterVersion' failed to satisfy constraint: Member must not be null; "
+                    + "Value null at 'labels' failed to satisfy constraint: Member must not be null"));
+        unlabel("""
+                { "Name": "", "ParameterVersion": 1, "Labels": [] }
+                """)
+            .statusCode(400)
+            .body("message", equalTo("2 validation errors detected: "
+                    + "Value '' at 'name' failed to satisfy constraint: Member must have length greater than or equal to 1; "
+                    + "Value '[]' at 'labels' failed to satisfy constraint: Member must have length greater than or equal to 1"));
+        unlabel("""
+                { "Name": "/unlabel/errors", "ParameterVersion": "1", "Labels": ["prod"] }
+                """)
+            .statusCode(400)
+            .body("__type", equalTo("SerializationException"))
+            .body("message", equalTo("STRING_VALUE can not be converted to a Long"));
+        unlabel("""
+                { "Name": "/unlabel/errors", "ParameterVersion": 1, "Labels": [5] }
+                """)
+            .statusCode(400)
+            .body("__type", equalTo("SerializationException"))
+            .body("message", equalTo("NUMBER_VALUE can not be converted to a String"));
+        unlabel("""
+                { "Name": "arn:aws:ssm:us-east-1:000000000000:parameter/unlabel/errors", "ParameterVersion": 1, "Labels": ["prod"] }
+                """)
+            .statusCode(400)
+            .body("__type", equalTo("ValidationException"))
+            .body("message", equalTo("Parameter ARN is not supported for this operation."));
+        unlabel("""
+                { "Name": "/unlabel/errors", "ParameterVersion": 5, "Labels": ["prod"] }
+                """)
+            .statusCode(400)
+            .body("__type", equalTo("ParameterVersionNotFound"))
+            .body("message", equalTo("Systems Manager could not find version 5 of /unlabel/errors. "
+                    + "Verify the version and try again."));
+        unlabel("""
+                { "Name": "/unlabel/no-such-param", "ParameterVersion": 1, "Labels": ["prod"] }
+                """)
+            .statusCode(400)
+            .body("__type", equalTo("ParameterNotFound"))
+            .body("message", equalTo("Parameter /unlabel/no-such-param not found."));
+
+        given()
+            .header("X-Amz-Target", "AmazonSSM.GetParameterHistory")
+            .contentType(SSM_CONTENT_TYPE)
+            .body("""
+                { "Name": "/unlabel/errors" }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Parameters[0].Labels", contains("prod"));
+
+        // AWS truncates a fractional version rather than rejecting it.
+        unlabel("""
+                { "Name": "/unlabel/errors", "ParameterVersion": 1.9, "Labels": ["prod"] }
+                """)
+            .statusCode(200)
+            .body("RemovedLabels", contains("prod"));
+    }
+
+    static Stream<Arguments> malformedUnlabelScalars() {
+        return Stream.of(
+                Arguments.of("ParameterVersion", "\"1\"", "STRING_VALUE can not be converted to a Long"),
+                Arguments.of("ParameterVersion", "{}", "Start of structure or map found where not expected."),
+                Arguments.of("ParameterVersion", "[]", "Start of list found where not expected"),
+                Arguments.of("ParameterVersion", "true", "TRUE_VALUE can not be converted to a Long"),
+                Arguments.of("ParameterVersion", "false", "FALSE_VALUE can not be converted to a Long"),
+                Arguments.of("Name", "{}", "Start of structure or map found where not expected."),
+                Arguments.of("Name", "[]", "Start of list found where not expected"),
+                Arguments.of("Name", "5", "NUMBER_VALUE can not be converted to a String"),
+                Arguments.of("Labels", "[{}]", "Start of structure or map found where not expected."),
+                Arguments.of("Labels", "[[]]", "Start of list found where not expected"),
+                Arguments.of("Labels", "[5]", "NUMBER_VALUE can not be converted to a String"));
+    }
+
+    @ParameterizedTest
+    @MethodSource("malformedUnlabelScalars")
+    void unlabelScalarErrorsPreserveLabels(String field, String input, String expectedMessage) {
+        String name = "/scalar-errors/" + UUID.randomUUID();
+        given().header("X-Amz-Target", "AmazonSSM.PutParameter").contentType(SSM_CONTENT_TYPE)
+                .body("{\"Name\":\"" + name + "\",\"Type\":\"String\",\"Value\":\"original\"}")
+                .when().post("/").then().statusCode(200);
+        try {
+            String valid = "{\"Name\":\"" + name + "\",\"ParameterVersion\":1,\"Labels\":[\"prod\"]}";
+            labelParameterVersion(valid).statusCode(200);
+            String malformed = "{\"Name\":" + ("Name".equals(field) ? input : "\"" + name + "\"")
+                    + ",\"ParameterVersion\":" + ("ParameterVersion".equals(field) ? input : "1")
+                    + ",\"Labels\":" + ("Labels".equals(field) ? input : "[\"prod\"]") + "}";
+            Response rejected = unlabel(malformed).extract().response();
+            Response history = given().header("X-Amz-Target", "AmazonSSM.GetParameterHistory")
+                    .contentType(SSM_CONTENT_TYPE).body("{\"Name\":\"" + name + "\"}")
+                    .when().post("/");
+            assertAll("deserialization errors preserve parameter labels",
+                    () -> assertEquals(400, rejected.statusCode()),
+                    () -> assertEquals("SerializationException", rejected.jsonPath().getString("__type")),
+                    () -> assertEquals(expectedMessage, rejected.jsonPath().getString("message")),
+                    () -> assertEquals(200, history.statusCode()),
+                    () -> assertEquals(List.of("prod"), history.jsonPath().getList("Parameters[0].Labels")));
+            unlabel(valid).statusCode(200).body("RemovedLabels", contains("prod"));
+        } finally {
+            given().header("X-Amz-Target", "AmazonSSM.DeleteParameter").contentType(SSM_CONTENT_TYPE)
+                    .body("{\"Name\":\"" + name + "\"}")
+                    .when().post("/").then().statusCode(200);
+        }
+    }
+
+    private io.restassured.response.ValidatableResponse unlabel(String body) {
+        return given()
+            .header("X-Amz-Target", "AmazonSSM.UnlabelParameterVersion")
+            .contentType(SSM_CONTENT_TYPE)
+            .body(body)
+        .when()
+            .post("/")
+        .then();
+    }
+
+    @Test
+    void parameterChangesArePublishedToTheDefaultEventBus() throws Exception {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String base = "/events-" + suffix;
+        String queueUrl = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateQueue")
+            .formParam("QueueName", "ssm-events-" + suffix)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().xmlPath().getString("CreateQueueResponse.CreateQueueResult.QueueUrl");
+        String queueArn = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "GetQueueAttributes")
+            .formParam("QueueUrl", queueUrl)
+            .formParam("AttributeName.1", "QueueArn")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().xmlPath().getString("**.find { it.Name == 'QueueArn' }.Value");
+        String pattern = "{\"source\":[\"aws.ssm\"],\"detail-type\":[\"Parameter Store Change\"],"
+                + "\"detail\":{\"name\":[{\"prefix\":\"" + base + "/\"}]}}";
+        events("PutRule", MAPPER.createObjectNode().put("Name", "ssm-events-" + suffix).put("EventPattern", pattern));
+        events("PutTargets", MAPPER.readTree("{\"Rule\":\"ssm-events-" + suffix + "\","
+                + "\"Targets\":[{\"Id\":\"1\",\"Arn\":\"" + queueArn + "\"}]}"));
+
+        ssm("PutParameter", "{\"Name\":\"" + base + "/a\",\"Value\":\"v1\",\"Type\":\"String\",\"Description\":\"d\"}")
+            .statusCode(200);
+        ssm("PutParameter", "{\"Name\":\"" + base + "/a\",\"Value\":\"v2\",\"Type\":\"String\",\"Description\":\"d\","
+                + "\"Overwrite\":true}")
+            .statusCode(200);
+        ssm("LabelParameterVersion", "{\"Name\":\"" + base + "/a\",\"ParameterVersion\":2,\"Labels\":[\"stable\"]}")
+            .statusCode(200);
+        ssm("UnlabelParameterVersion", "{\"Name\":\"" + base + "/a\",\"ParameterVersion\":2,\"Labels\":[\"stable\"]}")
+            .statusCode(200);
+        ssm("PutParameter", "{\"Name\":\"" + base + "/a\",\"Value\":\"v3\",\"Type\":\"String\"}")
+            .statusCode(400)
+            .body("__type", equalTo("ParameterAlreadyExists"));
+        String arn = ssm("GetParameter", "{\"Name\":\"" + base + "/a\"}").statusCode(200)
+            .extract().path("Parameter.ARN");
+        ssm("DeleteParameter", "{\"Name\":\"" + base + "/a\"}").statusCode(200);
+        ssm("PutParameter", "{\"Name\":\"" + base + "/b\",\"Value\":\"v\",\"Type\":\"String\"}").statusCode(200);
+        ssm("DeleteParameters", "{\"Names\":[\"" + base + "/b\",\"" + base + "/missing\"]}").statusCode(200);
+
+        String stack = "ssm-events-" + suffix;
+        cfn("CreateStack", stack).formParam("TemplateBody", "{\"Resources\":{\"P\":{\"Type\":\"AWS::SSM::Parameter\","
+                + "\"Properties\":{\"Name\":\"" + base + "/cfn\",\"Type\":\"String\",\"Value\":\"v\"}}}}")
+            .when().post("/").then().statusCode(200);
+        CfnStackWaits.awaitStatus(stack, "CREATE_COMPLETE");
+        cfn("DeleteStack", stack).when().post("/").then().statusCode(200);
+
+        List<JsonNode> received = receiveEvents(queueUrl, 9);
+        assertEquals(List.of("Create " + base + "/a", "Update " + base + "/a",
+                        "LabelParameterVersion " + base + "/a", "UnlabelParameterVersion " + base + "/a",
+                        "Delete " + base + "/a",
+                        "Create " + base + "/b", "Delete " + base + "/b",
+                        "Create " + base + "/cfn", "Delete " + base + "/cfn"),
+                received.stream().map(e -> e.at("/detail/operation").asText() + " " + e.at("/detail/name").asText())
+                        .toList());
+        JsonNode created = received.getFirst();
+        assertEquals("aws.ssm", created.path("source").asText());
+        assertEquals("Parameter Store Change", created.path("detail-type").asText());
+        assertEquals(arn, created.at("/resources/0").asText());
+        assertEquals("us-east-1", created.path("region").asText());
+        assertFalse(created.path("account").asText().isEmpty());
+        assertEquals(MAPPER.readTree("{\"operation\":\"Create\",\"name\":\"" + base + "/a\",\"type\":\"String\","
+                + "\"description\":\"d\"}"), created.path("detail"));
+        assertEquals(MAPPER.readTree("{\"operation\":\"LabelParameterVersion\",\"name\":\"" + base + "/a\","
+                + "\"type\":\"String\",\"description\":\"d\",\"label\":\"stable\",\"fromVersion\":\"\",\"toVersion\":\"2\"}"),
+                received.get(2).path("detail"));
+        assertEquals(MAPPER.readTree("{\"operation\":\"UnlabelParameterVersion\",\"name\":\"" + base + "/a\","
+                + "\"type\":\"String\",\"description\":\"d\",\"labels\":[\"stable\"],\"fromVersion\":\"2\",\"toVersion\":\"\"}"),
+                received.get(3).path("detail"));
+
+        events("RemoveTargets", MAPPER.readTree("{\"Rule\":\"ssm-events-" + suffix + "\",\"Ids\":[\"1\"]}"));
+        events("DeleteRule", MAPPER.createObjectNode().put("Name", "ssm-events-" + suffix));
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DeleteQueue")
+            .formParam("QueueUrl", queueUrl)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+    }
+
+    private static ValidatableResponse ssm(String action, String body) {
+        return given()
+            .header("X-Amz-Target", "AmazonSSM." + action)
+            .contentType(SSM_CONTENT_TYPE)
+            .body(body)
+        .when()
+            .post("/")
+        .then();
+    }
+
+    private static void events(String action, JsonNode body) {
+        given()
+            .header("X-Amz-Target", "AWSEvents." + action)
+            .contentType(SSM_CONTENT_TYPE)
+            .body(body.toString())
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+    }
+
+    private static List<JsonNode> receiveEvents(String queueUrl, int expected) throws Exception {
+        List<JsonNode> received = new ArrayList<>();
+        long deadline = System.currentTimeMillis() + 10_000;
+        while (received.size() < expected && System.currentTimeMillis() < deadline) {
+            List<String> bodies = given()
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "ReceiveMessage")
+                .formParam("QueueUrl", queueUrl)
+                .formParam("MaxNumberOfMessages", "10")
+                .formParam("WaitTimeSeconds", "1")
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200)
+                .extract().xmlPath().getList("ReceiveMessageResponse.ReceiveMessageResult.Message.Body");
+            for (String body : bodies) {
+                received.add(MAPPER.readTree(body));
+            }
+        }
+        return received;
     }
 
     private io.restassured.response.ValidatableResponse describeParameters(String body) {

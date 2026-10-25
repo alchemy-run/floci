@@ -2,6 +2,10 @@ package io.github.hectorvent.floci.services.signin;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.AwsPartition;
+import io.github.hectorvent.floci.core.common.AwsPartitions;
+import io.github.hectorvent.floci.core.common.Base64Url;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.SessionCreds;
@@ -11,9 +15,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Clock;
 import java.time.Duration;
@@ -35,8 +39,11 @@ import java.util.regex.Pattern;
 @ApplicationScoped
 public class SigninService {
 
-    static final String SAME_DEVICE_CLIENT = "arn:aws:signin:::devtools/same-device";
-    static final String CROSS_DEVICE_CLIENT = "arn:aws:signin:::devtools/cross-device";
+    // The device-auth client ids are these literals in every partition: the Sign-In model's ClientId
+    // pattern is arn:aws:signin:::devtools/(cross-device|same-device), and the AWS CLI sends them as is.
+    static final String SAME_DEVICE_CLIENT = "arn:aws:signin:::devtools/same-device"; // partition-literal: the model's ClientId pattern, one spelling for every partition
+    static final String CROSS_DEVICE_CLIENT = "arn:aws:signin:::devtools/cross-device"; // partition-literal: the model's ClientId pattern, one spelling for every partition
+    static final String CONFIRMATION_PATH = "/v1/sessions/confirmation";
     static final int ACCESS_TOKEN_TTL_SECONDS = 900;
     private static final long AUTHORIZATION_CODE_TTL_SECONDS = 300;
     private static final long REFRESH_TOKEN_TTL_SECONDS = 12 * 60 * 60;
@@ -47,8 +54,6 @@ public class SigninService {
     private static final int MAX_REFRESH_TOKEN_LENGTH = 2048;
     private static final int MAX_STATE_LENGTH = 128;
     private static final Pattern PKCE_VALUE_PATTERN = Pattern.compile("[A-Za-z0-9._~-]{43,128}");
-    private static final Pattern AWS_SIGNIN_HOST_PATTERN =
-            Pattern.compile("[a-z]{2}-[a-z-]+-\\d+\\.signin\\.aws\\.amazon\\.com");
 
     private final IamService iamService;
     private final RegionResolver regionResolver;
@@ -72,6 +77,18 @@ public class SigninService {
     public String beginAuthorization(String clientId, String codeChallenge, String codeChallengeMethod,
                                      String redirectUri, String responseType, String scope, String state,
                                      String resource) {
+        return beginAuthorization(clientId, codeChallenge, codeChallengeMethod, redirectUri, responseType,
+                scope, state, resource, null);
+    }
+
+    /**
+     * @param requestOrigin the base URI the authorize request arrived on, or null when unknown. The
+     *        AWS CLI builds the cross-device redirect from the Sign-In endpoint it resolved, so
+     *        with an endpoint override that redirect is this emulator's own confirmation page.
+     */
+    public String beginAuthorization(String clientId, String codeChallenge, String codeChallengeMethod,
+                                     String redirectUri, String responseType, String scope, String state,
+                                     String resource, URI requestOrigin) {
         validateClient(clientId);
         if (!"SHA-256".equals(codeChallengeMethod)) {
             throw new SigninException("invalid_request", "code_challenge_method must be SHA-256");
@@ -83,7 +100,7 @@ public class SigninService {
         if (!"code".equals(responseType) || !"openid".equals(scope)) {
             throw new SigninException("invalid_request", "response_type=code and scope=openid are required");
         }
-        validateRedirectUri(clientId, redirectUri);
+        validateRedirectUri(clientId, redirectUri, requestOrigin, AwsPartitions.byId(regionResolver.getPartition()));
         if (state == null || state.isEmpty() || state.length() > MAX_STATE_LENGTH) {
             throw new SigninException("invalid_request", "state must be 1-128 characters");
         }
@@ -251,7 +268,7 @@ public class SigninService {
         String secretAccessKey = randomAlphaNumeric(40);
         String sessionToken = randomAlphaNumeric(200);
         Instant expiration = issuedAt.plusSeconds(ACCESS_TOKEN_TTL_SECONDS);
-        String principalArn = "arn:aws:iam::" + accountId + ":root";
+        String principalArn = regionResolver.buildGlobalArn("iam", accountId, "root");
         iamService.registerSessionForAccount(
                 accountId, accessKeyId, secretAccessKey, sessionToken, principalArn, expiration, null);
 
@@ -276,7 +293,7 @@ public class SigninService {
             long now = issuedAt.getEpochSecond();
             String header = encodeJson(Map.of("alg", "none", "typ", "JWT"));
             String payload = encodeJson(Map.of(
-                    "iss", "https://signin.amazonaws.com",
+                    "iss", "https://signin.amazonaws.com", // partition-literal: floci's own issuer; the console issuer has no published source
                     "sub", principalArn,
                     "aud", clientId,
                     "aws_account_id", accountId,
@@ -289,20 +306,13 @@ public class SigninService {
     }
 
     private String encodeJson(Map<String, ?> value) throws JsonProcessingException {
-        return Base64.getUrlEncoder().withoutPadding()
-                .encodeToString(objectMapper.writeValueAsBytes(value));
+        return Base64Url.encode(objectMapper.writeValueAsBytes(value));
     }
 
     private static boolean matchesPkce(String challenge, String verifier) {
-        try {
-            byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(verifier.getBytes(StandardCharsets.US_ASCII));
-            String calculated = Base64.getUrlEncoder().withoutPadding().encodeToString(digest);
-            return MessageDigest.isEqual(calculated.getBytes(StandardCharsets.US_ASCII),
-                    challenge.getBytes(StandardCharsets.US_ASCII));
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("SHA-256 is required by the AWS Sign-In protocol", e);
-        }
+        String calculated = Base64Url.encode(Digests.sha256(verifier.getBytes(StandardCharsets.US_ASCII)));
+        return MessageDigest.isEqual(calculated.getBytes(StandardCharsets.US_ASCII),
+                challenge.getBytes(StandardCharsets.US_ASCII));
     }
 
     private static void validateClient(String clientId) {
@@ -315,7 +325,8 @@ public class SigninService {
         return value != null && PKCE_VALUE_PATTERN.matcher(value).matches();
     }
 
-    private static void validateRedirectUri(String clientId, String redirectUri) {
+    private static void validateRedirectUri(String clientId, String redirectUri, URI requestOrigin,
+                                            AwsPartition partition) {
         if (redirectUri == null || redirectUri.isEmpty() || redirectUri.length() > MAX_REDIRECT_URI_LENGTH) {
             throw new SigninException("invalid_request", "redirect_uri must be 1-2048 characters");
         }
@@ -329,7 +340,7 @@ public class SigninService {
 
         boolean valid = SAME_DEVICE_CLIENT.equals(clientId)
                 ? isSameDeviceRedirect(uri)
-                : isCrossDeviceRedirect(uri);
+                : isCrossDeviceRedirect(uri, partition) || isOwnConfirmationRedirect(uri, requestOrigin);
         if (!valid) {
             throw new SigninException("invalid_request", "redirect_uri is invalid for the AWS Sign-In client");
         }
@@ -445,15 +456,65 @@ public class SigninService {
                 && uri.getUserInfo() == null;
     }
 
-    private static boolean isCrossDeviceRedirect(URI uri) {
+    private static boolean isCrossDeviceRedirect(URI uri, AwsPartition partition) {
         return "https".equalsIgnoreCase(uri.getScheme())
-                && uri.getHost() != null
-                && AWS_SIGNIN_HOST_PATTERN.matcher(uri.getHost()).matches()
+                && isSigninHost(uri.getHost(), partition)
                 && uri.getPort() == -1
-                && "/v1/sessions/confirmation".equals(uri.getRawPath())
+                && CONFIRMATION_PATH.equals(uri.getRawPath())
                 && uri.getRawQuery() == null
                 && uri.getRawFragment() == null
                 && uri.getUserInfo() == null;
+    }
+
+    /**
+     * True when {@code host} is the AWS Sign-In host of one of {@code partition}'s regions. The
+     * authorize request is an unsigned browser navigation, so the partition is the deployment's.
+     */
+    private static boolean isSigninHost(String host, AwsPartition partition) {
+        if (host == null) {
+            return false;
+        }
+        int dot = host.indexOf('.');
+        if (dot <= 0) {
+            return false;
+        }
+        String region = host.substring(0, dot);
+        return (partition.isPublishedRegion(region) || partition.matchesRegionRegex(region))
+                && partition.signinHostname(region).filter(host::equals).isPresent();
+    }
+
+    private static boolean isOwnConfirmationRedirect(URI uri, URI requestOrigin) {
+        return requestOrigin != null
+                && uri.getScheme() != null
+                && uri.getScheme().equalsIgnoreCase(requestOrigin.getScheme())
+                && uri.getHost() != null
+                && uri.getHost().equalsIgnoreCase(requestOrigin.getHost())
+                && effectivePort(uri) == effectivePort(requestOrigin)
+                && CONFIRMATION_PATH.equals(uri.getRawPath())
+                && uri.getRawQuery() == null
+                && uri.getRawFragment() == null
+                && uri.getUserInfo() == null;
+    }
+
+    private static int effectivePort(URI uri) {
+        if (uri.getPort() != -1) {
+            return uri.getPort();
+        }
+        return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
+    }
+
+    /**
+     * The code the cross-device confirmation page shows, in the form the AWS CLI decodes: base64
+     * of {@code state=<state>&code=<code>}.
+     */
+    public String verificationCode(String code, String state) {
+        if (code == null || code.isEmpty() || code.length() > MAX_AUTHORIZATION_CODE_LENGTH
+                || state == null || state.isEmpty() || state.length() > MAX_STATE_LENGTH) {
+            throw new SigninException("invalid_request", "The confirmation request is invalid");
+        }
+        String query = "state=" + URLEncoder.encode(state, StandardCharsets.UTF_8)
+                + "&code=" + URLEncoder.encode(code, StandardCharsets.UTF_8);
+        return Base64.getEncoder().encodeToString(query.getBytes(StandardCharsets.UTF_8));
     }
 
     private static int remainingSeconds(Instant now, Instant expiresAt) {
@@ -479,7 +540,7 @@ public class SigninService {
     private String randomToken(int bytes) {
         byte[] value = new byte[bytes];
         random.nextBytes(value);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(value);
+        return Base64Url.encode(value);
     }
 
     private String randomAlphaNumeric(int length) {

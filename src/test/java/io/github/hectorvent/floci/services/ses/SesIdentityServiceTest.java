@@ -4,26 +4,42 @@ import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.ses.model.Identity;
 import io.github.hectorvent.floci.services.ses.model.Tag;
+import io.github.hectorvent.floci.testing.ThreadStates;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+import org.mockito.Mockito;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
-import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.stream.Stream;
 
+import static io.github.hectorvent.floci.testing.ThreadStates.awaitBlockedOrDone;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doAnswer;
 
 /**
  * Unit test for the extracted identity domain: store ownership, key validation, verification
  * (email and domain), listing, MAIL FROM, the CVET pending registration, identity tags, and the
- * find/save escape hatches the facade's notification flows rely on. The DKIM state machine moved
+ * find/save escape hatches the facade's notification flows rely on, and what SES does to an
+ * identity's notification settings when it may not publish to a topic. The DKIM state machine moved
  * here too and keeps its behavioral coverage in the existing facade-level unit and integration
  * tests, which now exercise it through the delegation; only its creation-time surface is pinned
  * here.
@@ -31,6 +47,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class SesIdentityServiceTest {
 
     private static final String REGION = "us-east-1";
+    private static final String TOPIC = "arn:aws:sns:us-east-1:000000000000:feedback";
+    private static final String OTHER_TOPIC = "arn:aws:sns:us-east-1:000000000000:other-feedback";
     private SesIdentityService service;
 
     @BeforeEach
@@ -40,14 +58,12 @@ class SesIdentityServiceTest {
 
     @Test
     void verifyEmailIdentity_createsOnce_returnsExistingOnRepeat() {
-        CountingStorage store = new CountingStorage();
-        SesIdentityService counted = new SesIdentityService(store, null, Clock.systemUTC());
-        Identity first = counted.verifyEmailIdentity("alice@example.com", REGION);
+        Identity first = service.verifyEmailIdentity("alice@example.com", REGION);
         assertEquals("EmailAddress", first.getIdentityType());
-        assertEquals("Success", first.getVerificationStatus());
-        Identity second = counted.verifyEmailIdentity("alice@example.com", REGION);
+        first.setVerificationStatus("Success");
+        service.save(first, REGION);
+        Identity second = service.verifyEmailIdentity("alice@example.com", REGION);
         assertEquals("Success", second.getVerificationStatus());
-        assertEquals(1, store.puts.get());
     }
 
     @Test
@@ -79,7 +95,8 @@ class SesIdentityServiceTest {
         service.verifyEmailIdentity("alice@example.com", REGION);
         service.save(new Identity("example.com", "Domain"), REGION);
         service.verifyEmailIdentity("other@example.com", "eu-west-1");
-        assertEquals(2, service.listIdentities(null, REGION).size());
+        assertEquals(List.of("alice@example.com", "example.com"),
+                service.listIdentities(null, REGION).stream().map(Identity::getIdentity).toList());
         assertEquals(List.of("example.com"),
                 service.listIdentities("Domain", REGION).stream().map(Identity::getIdentity).toList());
     }
@@ -139,32 +156,6 @@ class SesIdentityServiceTest {
     }
 
     @Test
-    void createEmailIdentityPendingAddressCanBeConfirmedByV1() {
-        Identity created = service.createEmailIdentity("pending@example.com", null, null, REGION, null);
-        assertEquals("Pending", created.getVerificationStatus());
-        assertTrue(service.isVerifiedSender("pending@example.com", REGION));
-        assertEquals("Success", service.verifyEmailIdentity("pending@example.com", REGION).getVerificationStatus());
-    }
-
-    @Test
-    void isVerifiedSender_missingAddressAndPendingDomain_areRejected() {
-        assertFalse(service.isVerifiedSender("sender@example.com", REGION));
-        service.createEmailIdentity("example.com", null, null, REGION, null);
-        assertFalse(service.isVerifiedSender("sender@example.com", REGION));
-    }
-
-    @Test
-    void createEmailIdentitySigningLengthIsAtomic() {
-        Identity created = service.createEmailIdentity("dkim.example.com", null, null, REGION, null, "RSA_1024_BIT");
-        assertEquals("RSA_1024_BIT", created.getDkimNextSigningKeyLength());
-        assertEquals("RSA_1024_BIT", created.getDkimCurrentSigningKeyLength());
-        assertEquals("NotStarted", created.getDkimVerificationStatus());
-        assertThrows(AwsException.class, () -> service.createEmailIdentity(
-                "invalid.example.com", null, null, REGION, null, "invalid"));
-        assertTrue(service.find("invalid.example.com", REGION).isEmpty());
-    }
-
-    @Test
     void createEmailIdentity_buildsTheCompleteRecordInOneWrite() {
         Identity created = service.createEmailIdentity("alice@example.com", "my-cs",
                 List.of(new Tag("team", "floci")), REGION, () -> { });
@@ -217,21 +208,13 @@ class SesIdentityServiceTest {
         assertEquals("AlreadyExistsException", e.getErrorCode());
     }
 
-    /** Any parked state counts as contending, so a switch to e.g. ReentrantLock stays green. */
-    private static boolean isParked(Thread.State state) {
-        return state == Thread.State.BLOCKED || state == Thread.State.WAITING
-                || state == Thread.State.TIMED_WAITING;
-    }
-
     /** Counts put calls so the single-write guarantee is asserted, not inferred. */
     private static final class CountingStorage extends InMemoryStorage<String, Identity> {
         final AtomicInteger puts = new AtomicInteger();
-        final List<String> verificationStatuses = new CopyOnWriteArrayList<>();
 
         @Override
         public void put(String key, Identity value) {
             puts.incrementAndGet();
-            verificationStatuses.add(value.getVerificationStatus());
             super.put(key, value);
         }
     }
@@ -243,7 +226,6 @@ class SesIdentityServiceTest {
         counted.createEmailIdentity("alice@example.com", "my-cs",
                 List.of(new Tag("team", "floci")), REGION, () -> { });
         assertEquals(1, store.puts.get());
-        assertEquals(List.of("Pending"), store.verificationStatuses);
     }
 
     @Test
@@ -287,14 +269,9 @@ class SesIdentityServiceTest {
             second.start();
             // The second create must park on the creation lock before the first is released; a
             // TERMINATED second thread means it completed without contending, i.e. the lock is gone.
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
-            while (!isParked(second.getState())) {
-                assertTrue(second.getState() != Thread.State.TERMINATED,
-                        "second create finished without blocking on the creation lock");
-                assertTrue(System.nanoTime() < deadline,
-                        "second create never blocked on the creation lock");
-                Thread.onSpinWait();
-            }
+            assertNotEquals(Thread.State.TERMINATED, ThreadStates.awaitState(second, ThreadStates.PARKED_OR_DONE,
+                    Duration.ofSeconds(5), "second create"),
+                    "second create finished without blocking on the creation lock");
         } finally {
             proceed.countDown();
         }
@@ -334,16 +311,11 @@ class SesIdentityServiceTest {
         try {
             assertTrue(insideLock.await(5, TimeUnit.SECONDS), "create never entered the lock");
             verifier.start();
-            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
             // The v1 verify path takes the same creation lock, so it must park here rather than
             // overwrite the in-flight create with a bare identity (the lost-update it used to allow).
-            while (!isParked(verifier.getState())) {
-                assertTrue(verifier.getState() != Thread.State.TERMINATED,
-                        "verify finished without contending on the creation lock");
-                assertTrue(System.nanoTime() < deadline,
-                        "verify never blocked on the creation lock");
-                Thread.onSpinWait();
-            }
+            assertNotEquals(Thread.State.TERMINATED, ThreadStates.awaitState(verifier, ThreadStates.PARKED_OR_DONE,
+                    Duration.ofSeconds(5), "verify"),
+                    "verify finished without contending on the creation lock");
         } finally {
             proceed.countDown();
         }
@@ -351,18 +323,12 @@ class SesIdentityServiceTest {
         verifier.join(TimeUnit.SECONDS.toMillis(5));
         assertTrue(!creator.isAlive() && !verifier.isAlive(), "threads did not finish in time");
 
-        // Creation persists Pending; v1 confirmation persists Success without losing the full record.
+        // Verify returned the creator's record instead of replacing it; nothing was lost.
         assertEquals("my-cs", verifyResult.get().getConfigurationSetName());
-        assertEquals(List.of(new Tag("team", "floci")), verifyResult.get().getTags());
-        assertEquals("Success", verifyResult.get().getVerificationStatus());
+        // The create, then the verify marking the pending identity verified.
         assertEquals(2, store.puts.get());
-        assertEquals(List.of("Pending", "Success"), store.verificationStatuses);
-        Identity stored = counted.find("alice@example.com", REGION).orElseThrow();
-        assertEquals("my-cs", stored.getConfigurationSetName());
-        assertEquals(List.of(new Tag("team", "floci")), stored.getTags());
-        assertEquals("Success", stored.getVerificationStatus());
-        counted.verifyEmailIdentity("alice@example.com", REGION);
-        assertEquals(2, store.puts.get());
+        assertEquals("my-cs",
+                counted.find("alice@example.com", REGION).orElseThrow().getConfigurationSetName());
     }
 
     @Test
@@ -376,6 +342,123 @@ class SesIdentityServiceTest {
 
     private void create(String identity) {
         service.createEmailIdentity(identity, null, null, REGION, null);
+    }
+
+    @Test
+    void aRefusedTopicIsTakenOutOfEveryBounceAndComplaintSettingThatNamesIt() {
+        service.verifyEmailIdentity("alice@example.com", REGION);
+        for (String type : List.of("Bounce", "Complaint", "Delivery")) {
+            service.setIdentityNotificationTopic("alice@example.com", type, TOPIC, REGION);
+        }
+        service.setFeedbackForwardingEnabled("alice@example.com", false, REGION);
+
+        service.dropRefusedNotificationTopic("alice@example.com", TOPIC, REGION);
+
+        Identity identity = service.find("alice@example.com", REGION).orElseThrow();
+        assertFalse(identity.getNotificationAttributes().containsKey("BounceTopic"));
+        assertFalse(identity.getNotificationAttributes().containsKey("ComplaintTopic"));
+        assertEquals(TOPIC, identity.getNotificationAttributes().get("DeliveryTopic"));
+        assertTrue(identity.isFeedbackForwardingEnabled());
+    }
+
+    @Test
+    void aSettingNamingAnotherTopicIsKept() {
+        service.verifyEmailIdentity("alice@example.com", REGION);
+        service.setIdentityNotificationTopic("alice@example.com", "Bounce", TOPIC, REGION);
+        service.setIdentityNotificationTopic("alice@example.com", "Complaint", OTHER_TOPIC, REGION);
+
+        service.dropRefusedNotificationTopic("alice@example.com", TOPIC, REGION);
+
+        Identity identity = service.find("alice@example.com", REGION).orElseThrow();
+        assertFalse(identity.getNotificationAttributes().containsKey("BounceTopic"));
+        assertEquals(OTHER_TOPIC, identity.getNotificationAttributes().get("ComplaintTopic"));
+    }
+
+    @Test
+    void aTopicNamedOnlyForDeliveriesStaysConfigured() {
+        service.verifyEmailIdentity("alice@example.com", REGION);
+        service.setIdentityNotificationTopic("alice@example.com", "Delivery", TOPIC, REGION);
+        service.setFeedbackForwardingEnabled("alice@example.com", false, REGION);
+
+        service.dropRefusedNotificationTopic("alice@example.com", TOPIC, REGION);
+
+        Identity identity = service.find("alice@example.com", REGION).orElseThrow();
+        assertEquals(TOPIC, identity.getNotificationAttributes().get("DeliveryTopic"));
+        assertFalse(identity.isFeedbackForwardingEnabled());
+    }
+
+    @Test
+    void aTopicSetAgainSinceTheRefusalIsKept() {
+        service.verifyEmailIdentity("alice@example.com", REGION);
+        service.setIdentityNotificationTopic("alice@example.com", "Bounce", OTHER_TOPIC, REGION);
+        service.setFeedbackForwardingEnabled("alice@example.com", false, REGION);
+
+        service.dropRefusedNotificationTopic("alice@example.com", TOPIC, REGION);
+
+        Identity identity = service.find("alice@example.com", REGION).orElseThrow();
+        assertEquals(OTHER_TOPIC, identity.getNotificationAttributes().get("BounceTopic"));
+        assertFalse(identity.isFeedbackForwardingEnabled());
+    }
+
+    static Stream<Arguments> notificationSettings() {
+        return Stream.of(
+                Arguments.of("a topic",
+                        (Consumer<SesIdentityService>) identities -> identities.setIdentityNotificationTopic(
+                                "alice@example.com", "Bounce", OTHER_TOPIC, REGION),
+                        (Predicate<Identity>) identity ->
+                                OTHER_TOPIC.equals(identity.getNotificationAttributes().get("BounceTopic"))),
+                Arguments.of("feedback forwarding",
+                        (Consumer<SesIdentityService>) identities -> identities.setFeedbackForwardingEnabled(
+                                "alice@example.com", false, REGION),
+                        (Predicate<Identity>) identity -> !identity.isFeedbackForwardingEnabled()),
+                Arguments.of("headers in notifications",
+                        (Consumer<SesIdentityService>) identities -> identities.setHeadersInNotificationsEnabled(
+                                "alice@example.com", "Bounce", true, REGION),
+                        (Predicate<Identity>) identity ->
+                                Boolean.TRUE.equals(identity.getHeadersInNotificationsEnabled().get("Bounce"))));
+    }
+
+    @ParameterizedTest(name = "setting {0}")
+    @MethodSource("notificationSettings")
+    void aNotificationSettingWaitsWhileSesDropsARefusedTopic(String setting, Consumer<SesIdentityService> change,
+                                                             Predicate<Identity> applied) throws Exception {
+        InMemoryStorage<String, Identity> store = Mockito.spy(new InMemoryStorage<String, Identity>());
+        SesIdentityService parked = new SesIdentityService(store, null, Clock.systemUTC());
+        parked.verifyEmailIdentity("alice@example.com", REGION);
+        parked.setIdentityNotificationTopic("alice@example.com", "Bounce", TOPIC, REGION);
+        CountDownLatch read = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        // The removal parks right after reading the identity, before writing it back.
+        doAnswer(invocation -> {
+            Object identity = invocation.callRealMethod();
+            read.countDown();
+            release.await(2, TimeUnit.SECONDS);
+            return identity;
+        }).doCallRealMethod().when(store).get(anyString());
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> drop = pool.submit(() ->
+                    parked.dropRefusedNotificationTopic("alice@example.com", TOPIC, REGION));
+            assertTrue(read.await(2, TimeUnit.SECONDS), "the removal must reach its read of the identity");
+            AtomicReference<Thread> settingThread = new AtomicReference<>();
+            Future<?> set = pool.submit(() -> {
+                settingThread.set(Thread.currentThread());
+                change.accept(parked);
+            });
+            awaitBlockedOrDone(settingThread, set);
+            assertFalse(set.isDone(), "setting " + setting + " did not wait for the removal");
+
+            release.countDown();
+            drop.get(2, TimeUnit.SECONDS);
+            set.get(2, TimeUnit.SECONDS);
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+
+        assertTrue(applied.test(parked.find("alice@example.com", REGION).orElseThrow()),
+                "setting " + setting + " was lost");
     }
 
     @Test

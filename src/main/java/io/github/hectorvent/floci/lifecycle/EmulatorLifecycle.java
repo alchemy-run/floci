@@ -8,33 +8,39 @@ import io.github.hectorvent.floci.core.storage.PersistentPathValidator;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.lifecycle.inithook.InitializationHook;
 import io.github.hectorvent.floci.lifecycle.inithook.InitializationHooksRunner;
+import io.github.hectorvent.floci.services.amazonmq.container.RabbitMqManager;
+import io.github.hectorvent.floci.services.appsync.graphql.SchemaCreationWorker;
+import io.github.hectorvent.floci.services.docdb.container.DocDbContainerManager;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbRuntime;
 import io.github.hectorvent.floci.services.ec2.Ec2MetadataServer;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
-import io.github.hectorvent.floci.services.floci.ui.FlociUiManager;
-import io.github.hectorvent.floci.services.amazonmq.container.RabbitMqManager;
-import io.github.hectorvent.floci.services.kinesisanalytics.container.FlinkContainerManager;
-import io.github.hectorvent.floci.services.iam.IamService;
+import io.github.hectorvent.floci.services.ecs.EcsService;
+import io.github.hectorvent.floci.services.ecs.container.EcsTaskRoleCredentialsServer;
+import io.github.hectorvent.floci.services.eks.EksService;
 import io.github.hectorvent.floci.services.elasticache.ElastiCacheMemcachedService;
 import io.github.hectorvent.floci.services.elasticache.ElastiCacheService;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheContainerManager;
 import io.github.hectorvent.floci.services.elasticache.container.ElastiCacheMemcachedContainerManager;
 import io.github.hectorvent.floci.services.elasticache.proxy.ElastiCacheProxyManager;
-import io.github.hectorvent.floci.services.docdb.container.DocDbContainerManager;
+import io.github.hectorvent.floci.services.elb.ElbClassicService;
+import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
+import io.github.hectorvent.floci.services.floci.ui.FlociUiManager;
+import io.github.hectorvent.floci.services.iam.IamService;
+import io.github.hectorvent.floci.services.kinesisanalytics.container.FlinkContainerManager;
 import io.github.hectorvent.floci.services.lambda.DynamoDbStreamsEventSourcePoller;
 import io.github.hectorvent.floci.services.lambda.KinesisEventSourcePoller;
 import io.github.hectorvent.floci.services.lambda.SqsEventSourcePoller;
+import io.github.hectorvent.floci.services.lambda.durable.DurableExecutionService;
+import io.github.hectorvent.floci.services.memorydb.container.MemoryDbContainerManager;
+import io.github.hectorvent.floci.services.memorydb.proxy.MemoryDbProxyManager;
 import io.github.hectorvent.floci.services.neptune.container.NeptuneContainerManager;
 import io.github.hectorvent.floci.services.neptune.proxy.NeptuneProxyManager;
 import io.github.hectorvent.floci.services.pipes.PipesService;
-import io.github.hectorvent.floci.services.appsync.graphql.SchemaCreationWorker;
-import io.github.hectorvent.floci.services.elb.ElbClassicService;
-import io.github.hectorvent.floci.services.elbv2.ElbV2Service;
 import io.github.hectorvent.floci.services.rds.RdsService;
-import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsService;
-import io.github.hectorvent.floci.services.memorydb.container.MemoryDbContainerManager;
-import io.github.hectorvent.floci.services.memorydb.proxy.MemoryDbProxyManager;
 import io.github.hectorvent.floci.services.rds.container.RdsContainerManager;
 import io.github.hectorvent.floci.services.rds.proxy.RdsProxyManager;
+import io.github.hectorvent.floci.services.redshift.RedshiftDynamoDbZeroEtlConsumer;
+import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsService;
 import io.github.hectorvent.floci.services.timestreaminfluxdb.TimestreamInfluxDbService;
 import io.quarkus.runtime.Quarkus;
 import io.quarkus.runtime.ShutdownDelayInitiatedEvent;
@@ -51,12 +57,12 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
 
 @ApplicationScoped
 public class EmulatorLifecycle {
 
     private static final Logger LOG = Logger.getLogger(EmulatorLifecycle.class);
-    private static final int TLS_HTTP_BACKEND_PORT = 4510;
 
     @ConfigProperty(name = "quarkus.application.version", defaultValue = "")
     Optional<String> appVersion = Optional.empty();
@@ -68,6 +74,10 @@ public class EmulatorLifecycle {
      */
     @ConfigProperty(name = "localstack.parity", defaultValue = "true")
     String localstackParity = "true";
+
+    /** The port Quarkus HTTP listens on; under TLS, TlsConfigSource pins it to the internal backend. */
+    @ConfigProperty(name = "quarkus.http.port")
+    int httpPort = 4566;
 
     private final StorageFactory storageFactory;
     private final ServiceRegistry serviceRegistry;
@@ -90,6 +100,7 @@ public class EmulatorLifecycle {
     private final RdsService rdsService;
     private final TimestreamInfluxDbService timestreamInfluxDbService;
     private final ElbV2Service elbV2Service;
+    private final EcsService ecsService;
     private final ElbClassicService elbClassicService;
     private final InitializationHooksRunner initializationHooksRunner;
     private final SqsEventSourcePoller sqsPoller;
@@ -97,13 +108,20 @@ public class EmulatorLifecycle {
     private final DynamoDbStreamsEventSourcePoller dynamodbStreamsPoller;
     private final PipesService pipesService;
     private final Ec2MetadataServer ec2MetadataServer;
+    private final EcsTaskRoleCredentialsServer ecsTaskRoleCredentialsServer;
     private final EcrRegistryManager ecrRegistryManager;
     private final FlociUiManager flociUiManager;
     private final InitLifecycleState initLifecycleState;
     private final SchemaCreationWorker schemaCreationWorker;
     private final StepFunctionsService stepFunctionsService;
+    private final DurableExecutionService durableExecutionService;
     private final Instance<ContainerTeardown> containerTeardowns;
     private final PersistentPathValidator persistentPathValidator;
+    private final EksService eksService;
+    private final DynamoDbRuntime dynamoDbRuntime;
+    private final RedshiftDynamoDbZeroEtlConsumer redshiftZeroEtlConsumer;
+    // Set on the boot thread, read by the async HttpServerStart observer.
+    private volatile CompletableFuture<Void> metadataServerStarted = CompletableFuture.completedFuture(null);
 
     @Inject
     public EmulatorLifecycle(StorageFactory storageFactory, ServiceRegistry serviceRegistry,
@@ -127,19 +145,25 @@ public class EmulatorLifecycle {
                              TimestreamInfluxDbService timestreamInfluxDbService,
                              ElbV2Service elbV2Service,
                              ElbClassicService elbClassicService,
+                             EcsService ecsService,
                              InitializationHooksRunner initializationHooksRunner,
                              SqsEventSourcePoller sqsPoller,
                              KinesisEventSourcePoller kinesisPoller,
                              DynamoDbStreamsEventSourcePoller dynamodbStreamsPoller,
                              PipesService pipesService,
                              Ec2MetadataServer ec2MetadataServer,
+                             EcsTaskRoleCredentialsServer ecsTaskRoleCredentialsServer,
                              EcrRegistryManager ecrRegistryManager,
                              FlociUiManager flociUiManager,
                              InitLifecycleState initLifecycleState,
                              SchemaCreationWorker schemaCreationWorker,
                              StepFunctionsService stepFunctionsService,
+                             DurableExecutionService durableExecutionService,
                              Instance<ContainerTeardown> containerTeardowns,
-                             PersistentPathValidator persistentPathValidator) {
+                             PersistentPathValidator persistentPathValidator,
+                             DynamoDbRuntime dynamoDbRuntime,
+                             RedshiftDynamoDbZeroEtlConsumer redshiftZeroEtlConsumer,
+                             EksService eksService) {
         this.storageFactory = storageFactory;
         this.serviceRegistry = serviceRegistry;
         this.config = config;
@@ -162,19 +186,25 @@ public class EmulatorLifecycle {
         this.timestreamInfluxDbService = timestreamInfluxDbService;
         this.elbV2Service = elbV2Service;
         this.elbClassicService = elbClassicService;
+        this.ecsService = ecsService;
         this.initializationHooksRunner = initializationHooksRunner;
         this.sqsPoller = sqsPoller;
         this.kinesisPoller = kinesisPoller;
         this.dynamodbStreamsPoller = dynamodbStreamsPoller;
         this.pipesService = pipesService;
         this.ec2MetadataServer = ec2MetadataServer;
+        this.ecsTaskRoleCredentialsServer = ecsTaskRoleCredentialsServer;
         this.ecrRegistryManager = ecrRegistryManager;
         this.flociUiManager = flociUiManager;
         this.initLifecycleState = initLifecycleState;
         this.schemaCreationWorker = schemaCreationWorker;
         this.stepFunctionsService = stepFunctionsService;
+        this.durableExecutionService = durableExecutionService;
         this.containerTeardowns = containerTeardowns;
         this.persistentPathValidator = persistentPathValidator;
+        this.eksService = eksService;
+        this.dynamoDbRuntime = dynamoDbRuntime;
+        this.redshiftZeroEtlConsumer = redshiftZeroEtlConsumer;
     }
 
     void onStart(@Observes StartupEvent ignored) {
@@ -212,14 +242,24 @@ public class EmulatorLifecycle {
         if (sweptEc2Sessions > 0) {
             LOG.infov("Removed {0} orphaned EC2 instance session(s)", sweptEc2Sessions);
         }
+        int sweptEcsTaskRoleSessions = iamService.sweepOrphanedEcsTaskRoleSessions();
+        if (sweptEcsTaskRoleSessions > 0) {
+            LOG.infov("Removed {0} orphaned ECS task-role session(s)", sweptEcsTaskRoleSessions);
+        }
         schemaCreationWorker.recoverOrphans();
         schemaCreationWorker.rehydrateSchemas();
         stepFunctionsService.abortAbandonedExecutions();
+        if (config.services().lambda().enabled()) {
+            durableExecutionService.recoverAfterRestart();
+        }
 
+        // The selected DynamoDB backend is ready before any persisted stream consumer reads it.
+        dynamoDbRuntime.start();
         sqsPoller.startPersistedPollers();
         kinesisPoller.startPersistedPollers();
         dynamodbStreamsPoller.startPersistedPollers();
         pipesService.startPersistedPollers();
+        redshiftZeroEtlConsumer.startPersistedIntegrations();
         rdsService.restorePersistedRuntime();
         if (config.services().timestreamInfluxdb().enabled()) {
             timestreamInfluxDbService.restorePersistedRuntime();
@@ -240,10 +280,20 @@ public class EmulatorLifecycle {
         if (config.services().elb().enabled()) {
             elbClassicService.restorePersistedRuntime();
         }
+        // After the load balancers: the reconciler registers the tasks it starts as their targets.
+        if (config.services().ecs().enabled()) {
+            ecsService.restorePersistedRuntime();
+        }
 
         if (isMetadataServerNeeded()) {
-            ec2MetadataServer.start().exceptionally(ex -> {
+            metadataServerStarted = ec2MetadataServer.start().exceptionally(ex -> {
                 LOG.warnv("EC2 IMDS server failed to start: {0}", ex.getMessage());
+                return null;
+            });
+        }
+        if (config.services().ecs().taskRoleCredentials().enabled()) {
+            ecsTaskRoleCredentialsServer.start().exceptionally(ex -> {
+                LOG.warnv("ECS task-role credentials server failed to start: {0}", ex.getMessage());
                 return null;
             });
         }
@@ -258,17 +308,16 @@ public class EmulatorLifecycle {
     }
 
     void onHttpStart(@ObservesAsync HttpServerStart event) {
-        // Non-TLS: Quarkus listens on floci.port (quarkus.http.port: ${floci.port} in
-        // application.yml). TLS mode: TlsConfigSource pins the HTTP backend to 4510 and the
-        // public port is served by TlsProxyServer. Comparing against a hardcoded 4566 here
-        // made start/ready hooks never run when FLOCI_PORT was non-default (#2437).
-        int expectedPort = config.tls().enabled() ? TLS_HTTP_BACKEND_PORT : config.port();
-        if (event.options().getPort() != expectedPort) {
+        // Compare against quarkus.http.port, not floci.port: it can be overridden alone, and
+        // under TLS it is the internal backend while TlsProxyServer serves floci.port. A
+        // hardcoded 4566 here made start/ready hooks never run on a non-default port (#2437).
+        if (event.options().getPort() != httpPort) {
             return;
         }
         boolean hasStart = initializationHooksRunner.hasHooks(InitializationHook.START);
         boolean hasReady = initializationHooksRunner.hasHooks(InitializationHook.READY);
         if (!hasStart && !hasReady) {
+            restoreEksClusters();
             return;
         }
         try {
@@ -281,12 +330,33 @@ public class EmulatorLifecycle {
             }
             initLifecycleState.markReadyCompleted();
             logReady();
+            restoreEksClusters();
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             LOG.error("Startup hook execution interrupted — shutting down", e);
+            Quarkus.asyncExit();
         } catch (Exception e) {
             LOG.error("Startup hook execution failed — shutting down", e);
             Quarkus.asyncExit();
+        }
+    }
+
+    /**
+     * Creating EksService restarts persisted clusters; without this call that waited for the first EKS request.
+     * It runs once Floci's HTTP port and IMDS server listen, because a recreated cluster's Pod Identity and IMDS
+     * relays probe them before they route pod traffic there, and after the start and ready hooks, which it
+     * could otherwise hold up for as long as the clusters take to start.
+     */
+    private void restoreEksClusters() {
+        if (!config.services().eks().enabled() || config.services().eks().mock()) {
+            return;
+        }
+        try {
+            metadataServerStarted.join();
+            // The fork's EKS service restores its clusters when it is first used.
+        } catch (RuntimeException e) {
+            // EKS requests retry the bean's creation, as before; the rest of the emulator still starts.
+            LOG.error("Failed to restore persisted EKS clusters at startup", e);
         }
     }
 
@@ -328,10 +398,17 @@ public class EmulatorLifecycle {
         // SIGTERM grace window and trigger SIGKILL; if the flush ran last it would be skipped and
         // in-memory (hybrid) data would be lost on an otherwise-graceful shutdown. shutdownAll()
         // still runs at the end to stop the flush schedulers and capture any shutdown-time writes.
+        // DynamoDB stream consumers stop first, so the flush holds their final checkpoints.
+        runCleanup("DynamoDB Streams poller", dynamodbStreamsPoller::shutdown);
         runCleanup("storage flush", storageFactory::flushAll);
         runCleanup("EC2 metadata server", () -> {
             if (isMetadataServerNeeded()) {
                 ec2MetadataServer.stop();
+            }
+        });
+        runCleanup("ECS task-role credentials server", () -> {
+            if (config.services().ecs().taskRoleCredentials().enabled()) {
+                ecsTaskRoleCredentialsServer.stop();
             }
         });
         runCleanup("ElastiCache proxy", elastiCacheProxyManager::stopAll);
@@ -352,6 +429,7 @@ public class EmulatorLifecycle {
         // EC2 instances, in-flight build/job containers). Runs before shutdownAll() so any
         // state written while stopping is captured by the final flush.
         ContainerTeardowns.stopAll(containerTeardowns, LOG);
+        runCleanup("DynamoDB backend", dynamoDbRuntime::stop);
         runCleanup("storage shutdown", storageFactory::shutdownAll);
 
         LOG.info("=== AWS Local Emulator Stopped ===");

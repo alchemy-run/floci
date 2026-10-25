@@ -2,17 +2,22 @@ package io.github.hectorvent.floci.services.apigateway;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import io.github.hectorvent.floci.testutil.ExecuteApiRequestSigner;
+import io.github.hectorvent.floci.testutil.FreePorts;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.RestAssured;
 import io.restassured.http.ContentType;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 import java.io.IOException;
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +28,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -49,6 +55,8 @@ class ApiGatewayHttpProxyIntegrationTest {
     private static final AtomicReference<String> lastBody = new AtomicReference<>();
     private static final AtomicReference<String> lastForwardedHeader = new AtomicReference<>();
     private static final AtomicReference<String> lastAuthorization = new AtomicReference<>();
+    private static final AtomicReference<String> lastAmzDate = new AtomicReference<>();
+    private static final AtomicReference<String> lastCallerAuthorization = new AtomicReference<>();
     private static final AtomicReference<String> lastHost = new AtomicReference<>();
     private static final AtomicReference<List<String>> lastTraceHeaders = new AtomicReference<>();
 
@@ -61,9 +69,7 @@ class ApiGatewayHttpProxyIntegrationTest {
         backendServer.start();
         backendPort = backendServer.getAddress().getPort();
 
-        try (ServerSocket probe = new ServerSocket(0)) {
-            deadPort = probe.getLocalPort();
-        }
+        deadPort = FreePorts.anyInterfacePort();
     }
 
     @AfterAll
@@ -78,6 +84,8 @@ class ApiGatewayHttpProxyIntegrationTest {
         lastBody.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
         lastForwardedHeader.set(exchange.getRequestHeaders().getFirst("X-Forwarded-Tenant"));
         lastAuthorization.set(exchange.getRequestHeaders().getFirst("Authorization"));
+        lastAmzDate.set(exchange.getRequestHeaders().getFirst("X-Amz-Date"));
+        lastCallerAuthorization.set(exchange.getRequestHeaders().getFirst("X-Caller-Authorization"));
         lastHost.set(exchange.getRequestHeaders().getFirst("Host"));
         List<String> trace = exchange.getRequestHeaders().get("X-Trace");
         lastTraceHeaders.set(trace == null ? null : List.copyOf(trace));
@@ -105,6 +113,8 @@ class ApiGatewayHttpProxyIntegrationTest {
         lastBody.set(null);
         lastForwardedHeader.set(null);
         lastAuthorization.set(null);
+        lastAmzDate.set(null);
+        lastCallerAuthorization.set(null);
         lastHost.set(null);
         lastTraceHeaders.set(null);
     }
@@ -114,6 +124,16 @@ class ApiGatewayHttpProxyIntegrationTest {
      * HTTP_PROXY integration pointing at {@code targetUri}, deployed to stage {@code test}.
      */
     private String createProxyApi(String name, String targetUri, String requestParametersJson) {
+        return createProxyApi(name, targetUri, requestParametersJson, "NONE");
+    }
+
+    private String createProxyApi(String name, String targetUri, String requestParametersJson,
+                                  String authorizationType) {
+        return createProxyApi(name, targetUri, requestParametersJson, authorizationType, "/{proxy+}", "ANY");
+    }
+
+    private String createProxyApi(String name, String targetUri, String requestParametersJson,
+                                  String authorizationType, String resourcePath, String httpMethod) {
         String apiId = given()
                 .contentType(ContentType.JSON)
                 .body("{\"name\":\"" + name + "\"}")
@@ -125,15 +145,18 @@ class ApiGatewayHttpProxyIntegrationTest {
         String rootId = given().when().get("/restapis/" + apiId + "/resources")
                 .then().statusCode(200).extract().path("item[0].id");
 
-        String resourceId = given()
-                .contentType(ContentType.JSON)
-                .body("{\"pathPart\":\"{proxy+}\"}")
-                .when().post("/restapis/" + apiId + "/resources/" + rootId)
-                .then().statusCode(201).extract().path("id");
+        String resourceId = rootId;
+        for (String pathPart : resourcePath.substring(1).split("/")) {
+            resourceId = given()
+                    .contentType(ContentType.JSON)
+                    .body(Map.of("pathPart", pathPart))
+                    .when().post("/restapis/" + apiId + "/resources/" + resourceId)
+                    .then().statusCode(201).extract().path("id");
+        }
 
         given().contentType(ContentType.JSON)
-                .body("{\"authorizationType\":\"NONE\"}")
-                .when().put("/restapis/" + apiId + "/resources/" + resourceId + "/methods/ANY")
+                .body("{\"authorizationType\":\"" + authorizationType + "\"}")
+                .when().put("/restapis/" + apiId + "/resources/" + resourceId + "/methods/" + httpMethod)
                 .then().statusCode(201);
 
         String integrationBody = "{\"type\":\"HTTP_PROXY\",\"httpMethod\":\"ANY\",\"uri\":\"" + targetUri + "\""
@@ -141,17 +164,10 @@ class ApiGatewayHttpProxyIntegrationTest {
                 + "}";
         given().contentType(ContentType.JSON)
                 .body(integrationBody)
-                .when().put("/restapis/" + apiId + "/resources/" + resourceId + "/methods/ANY/integration")
+                .when().put("/restapis/" + apiId + "/resources/" + resourceId + "/methods/" + httpMethod + "/integration")
                 .then().statusCode(201);
 
-        String deploymentId = given().contentType(ContentType.JSON)
-                .body("{\"description\":\"v1\"}")
-                .when().post("/restapis/" + apiId + "/deployments")
-                .then().statusCode(201).extract().path("id");
-        given().contentType(ContentType.JSON)
-                .body("{\"stageName\":\"test\",\"deploymentId\":\"" + deploymentId + "\"}")
-                .when().post("/restapis/" + apiId + "/stages")
-                .then().statusCode(201);
+        createStage(apiId, deploy(apiId));
 
         return apiId;
     }
@@ -211,6 +227,88 @@ class ApiGatewayHttpProxyIntegrationTest {
         assertEquals("GET", lastMethod.get());
         assertEquals("/orders/42", lastPath.get());
         assertEquals("limit=5", lastQuery.get());
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "/{proxy+}, /checkpoint/status, /checkpoint/status",
+            "/api/v1/auth/signup/{proxy+}, /api/v1/auth/signup/status, /status",
+            "/api/v1/auth/signup/{proxy+}, /api/v1/auth/signup/checkpoint/status, /checkpoint/status"
+    })
+    void mapsOnlyTheGreedySuffixIntoTheIntegrationPath(String resourcePath, String requestPath,
+                                                      String expectedSuffix) {
+        resetRecordings();
+        String apiId = createProxyApi("http-proxy-greedy-path-api",
+                "http://127.0.0.1:" + backendPort + "/api/v1/auth/signup/{proxy}",
+                "{\"integration.request.path.proxy\":\"method.request.path.proxy\"}",
+                "NONE", resourcePath, "ANY");
+
+        given().when().get("/execute-api/" + apiId + "/test" + requestPath)
+                .then().statusCode(200);
+
+        assertEquals("GET", lastMethod.get());
+        assertEquals("/api/v1/auth/signup" + expectedSuffix, lastPath.get());
+    }
+
+    @Test
+    void substitutesNestedGreedySuffixWithoutExplicitParameterMapping() {
+        resetRecordings();
+        String apiId = createProxyApi("http-proxy-implicit-greedy-api",
+                "http://127.0.0.1:" + backendPort + "/files/{proxy}", null,
+                "NONE", "/files/{proxy+}", "ANY");
+
+        given().when().get("/execute-api/" + apiId + "/test/files/images/logo.png")
+                .then().statusCode(200);
+
+        assertEquals("/files/images/logo.png", lastPath.get());
+    }
+
+    @Test
+    void mapsGreedyParameterWithADifferentName() {
+        resetRecordings();
+        String apiId = createProxyApi("http-proxy-named-greedy-api",
+                "http://127.0.0.1:" + backendPort + "/static/{remainder}",
+                "{\"integration.request.path.remainder\":\"method.request.path.rest\"}",
+                "NONE", "/assets/{rest+}", "ANY");
+
+        given().when().get("/execute-api/" + apiId + "/test/assets/images/logo.png")
+                .then().statusCode(200);
+
+        assertEquals("/static/images/logo.png", lastPath.get());
+    }
+
+    @Test
+    void mapsOrdinaryNamedParameters() {
+        resetRecordings();
+        String apiId = createProxyApi("http-proxy-named-path-api",
+                "http://127.0.0.1:" + backendPort + "/tenants/{tenant}/files/{file}",
+                "{\"integration.request.path.tenant\":\"method.request.path.tenantId\","
+                        + "\"integration.request.path.file\":\"method.request.path.fileId\"}",
+                "NONE", "/accounts/{tenantId}/assets/{fileId}", "ANY");
+
+        given().when().get("/execute-api/" + apiId + "/test/accounts/acme/assets/logo.png")
+                .then().statusCode(200);
+
+        assertEquals("/tenants/acme/files/logo.png", lastPath.get());
+    }
+
+    @Test
+    void forwardsUnauthenticatedOptionsWithOnlyTheGreedySuffix() {
+        resetRecordings();
+        String apiId = createProxyApi("http-proxy-options-greedy-api",
+                "http://127.0.0.1:" + backendPort + "/api/v1/auth/signup/{proxy}",
+                "{\"integration.request.path.proxy\":\"method.request.path.proxy\"}",
+                "NONE", "/api/v1/auth/signup/{proxy+}", "OPTIONS");
+
+        given()
+                .header("Origin", "https://example.com")
+                .header("Access-Control-Request-Method", "GET")
+                .when().options("/execute-api/" + apiId + "/test/api/v1/auth/signup/checkpoint/status")
+                .then().statusCode(200);
+
+        assertEquals("OPTIONS", lastMethod.get());
+        assertEquals("/api/v1/auth/signup/checkpoint/status", lastPath.get());
+        assertNull(lastAuthorization.get());
     }
 
     @Test
@@ -315,6 +413,65 @@ class ApiGatewayHttpProxyIntegrationTest {
                 .then().statusCode(200);
 
         assertEquals("Bearer caller-supplied-token", lastAuthorization.get());
+    }
+
+    @Test
+    void dropsAuthorizationHeaderOnAwsIamRoute() throws Exception {
+        resetRecordings();
+        String apiId = createProxyApi("http-proxy-iam-auth-api", backendUri(), null, "AWS_IAM");
+        String path = "/execute-api/" + apiId + "/test/orders";
+        Map<String, String> signed = ExecuteApiRequestSigner.signedHeaders(
+                "GET", path, Map.of(), "localhost:" + RestAssured.port, null,
+                "test", "test", "us-east-1", Instant.now());
+
+        // AWS drops Authorization on its way to the integration when the method is AWS_IAM; the
+        // rest of the signed request, X-Amz-Date included, still reaches the backend.
+        given().headers(signed)
+                .when().get(path)
+                .then().statusCode(200);
+
+        assertEquals("/orders", lastPath.get());
+        assertNull(lastAuthorization.get());
+        assertEquals(signed.get("X-Amz-Date"), lastAmzDate.get());
+    }
+
+    @Test
+    void methodRequestAuthorizationStillResolvesInParameterMappingOnAwsIamRoute() throws Exception {
+        resetRecordings();
+        String apiId = createProxyApi("http-proxy-iam-auth-mapping-api", backendUri(),
+                "{\"integration.request.header.X-Caller-Authorization\":\"method.request.header.Authorization\"}",
+                "AWS_IAM");
+        String path = "/execute-api/" + apiId + "/test/orders";
+        Map<String, String> signed = ExecuteApiRequestSigner.signedHeaders(
+                "GET", path, Map.of(), "localhost:" + RestAssured.port, null,
+                "test", "test", "us-east-1", Instant.now());
+
+        // Only the header the integration receives is dropped: the method request still carries
+        // Authorization, so an explicit mapping from it resolves as it did before.
+        given().headers(signed)
+                .when().get(path)
+                .then().statusCode(200);
+
+        assertEquals(signed.get("Authorization"), lastCallerAuthorization.get());
+        assertNull(lastAuthorization.get());
+    }
+
+    @Test
+    void dropsSigV4AuthorizationHeaderOnNoneAuthRoute() {
+        resetRecordings();
+        String apiId = createProxyApi("http-proxy-sigv4-none-api", backendUri(), null);
+
+        // No signature is verified on a NONE route, but AWS still drops an Authorization header
+        // that carries one.
+        given()
+                .header("Authorization", "AWS4-HMAC-SHA256 "
+                        + "Credential=test/20260928/us-east-1/execute-api/aws4_request, "
+                        + "SignedHeaders=host;x-amz-date, Signature=abc123")
+                .when().get("/execute-api/" + apiId + "/test/orders")
+                .then().statusCode(200);
+
+        assertEquals("/orders", lastPath.get());
+        assertNull(lastAuthorization.get());
     }
 
     @Test

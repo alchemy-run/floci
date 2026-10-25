@@ -25,7 +25,7 @@ AWS_ACCESS_KEY_ID=<new-account-id> AWS_SECRET_ACCESS_KEY=x \
 ## Management account vs member accounts
 
 Authorization mirrors AWS. Every mutating action is restricted to the **management account**
-— the account that called `CreateOrganization` — and returns `AccessDeniedException` otherwise.
+that called `CreateOrganization`, and returns HTTP 400 `AccessDeniedException` otherwise.
 Member accounts can read the organization they belong to (`DescribeOrganization`, `ListRoots`,
 `ListParents`, `DescribeAccount`, `DescribePolicy`), act on handshakes addressed to them, and
 call `LeaveOrganization`. An account in no organization gets
@@ -33,9 +33,25 @@ call `LeaveOrganization`. An account in no organization gets
 
 ## Behaviour notes
 
+- OU responses include `Path`, and account responses include a single-entry `Paths` array.
+  Both use the current organization/root/OU ancestry, include the resource ID and trailing slash,
+  and reflect account moves. Delegated-administrator responses retain their separate shape.
+  List rendering reuses request-local parent IDs rather than re-reading each selected resource.
+  Concurrent removals do not invalidate an already selected page; a stale row with an ancestor
+  that is no longer available is omitted only after confirming that the row was removed or moved.
+- Management policy types include `INSPECTOR_POLICY`, `UPGRADE_ROLLOUT_POLICY`, `BEDROCK_POLICY`,
+  `S3_POLICY`, `NETWORK_SECURITY_DIRECTOR_POLICY`, and `GUARDDUTY_POLICY`. They use the existing
+  enable, create, attach, list, effective-policy, detach, delete, and disable flows. Policy content
+  is not validated against a per-type schema, and these policies do not configure the backing AWS services.
 - The AWS-managed `p-FullAWSAccess` SCP is created with the organization and attached to the
   root, every new OU and every new account. Detaching the last service control policy from a
   target is rejected with `ConstraintViolationException`, as on AWS.
+- A new root has no policy types enabled, whatever the feature set; `ListRoots` reports an
+  empty `PolicyTypes` until `EnablePolicyType` is called, and `CreatePolicy` / `AttachPolicy`
+  for a type that is not enabled fail with `PolicyTypeNotEnabledException`. SCPs only apply to
+  member accounts once `SERVICE_CONTROL_POLICY` is enabled. The deprecated
+  `AvailablePolicyTypes` on `DescribeOrganization` lists only `SERVICE_CONTROL_POLICY`, for an
+  `ALL` organization, as on AWS.
 - A `CONSOLIDATED_BILLING` organization has no available policy types. `EnableAllFeatures`
   promotes it to `ALL`; with no member accounts the handshake completes immediately. With member
   accounts it stays `REQUESTED` until one of them calls `AcceptHandshake` — AWS requires *every*

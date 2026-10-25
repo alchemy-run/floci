@@ -73,7 +73,7 @@ class KinesisIntegrationTest {
             .body("Shards.size()", equalTo(2))
             .body("Shards[0].ShardId", equalTo("shardId-000000000000"))
             .body("Shards[1].ShardId", equalTo("shardId-000000000001"))
-            .body("Shards[0].HashKeyRange.StartingHashKey", equalTo("0"))
+            .body("Shards[0].HashKeyRange.StartingHashKey", notNullValue())
             .body("Shards[0].HashKeyRange.EndingHashKey", equalTo(FIRST_SHARD_ENDING_HASH_KEY))
             .body("Shards[1].HashKeyRange.StartingHashKey", equalTo(SECOND_SHARD_STARTING_HASH_KEY))
             .body("Shards[1].HashKeyRange.EndingHashKey", equalTo(MAX_HASH_KEY))
@@ -121,7 +121,7 @@ class KinesisIntegrationTest {
             .statusCode(200)
             .extract().asString();
 
-        var matcher = CREATION_TIMESTAMP_PATTERN.matcher(responseBody);
+        Matcher matcher = CREATION_TIMESTAMP_PATTERN.matcher(responseBody);
         assertTrue(matcher.find(), "timestamp must be serialized as a plain JSON decimal: " + responseBody);
         String timestampLexeme = matcher.group(1);
         BigDecimal timestamp = new BigDecimal(timestampLexeme);

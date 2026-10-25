@@ -34,6 +34,11 @@ public final class SecurityGroupNftCompiler {
 
     public static String compile(Endpoint target, Collection<Endpoint> peers,
                                  Map<String, List<String>> prefixLists) {
+        return compile(target, peers, prefixLists, List.of());
+    }
+
+    public static String compile(Endpoint target, Collection<Endpoint> peers,
+                                 Map<String, List<String>> prefixLists, List<String> vpcResolvers) {
         if (target == null || target.groups() == null || target.groups().isEmpty()) {
             throw new IllegalArgumentException("Protected endpoint needs at least one security group");
         }
@@ -45,8 +50,17 @@ public final class SecurityGroupNftCompiler {
                 .append("add rule inet floci_sg ingress ct state established,related accept\n")
                 .append("add rule inet floci_sg egress ct state established,related accept\n");
 
-        // Docker's embedded DNS is loopback and covered above. DHCP and the
-        // link-local metadata endpoint are the other local infrastructure exceptions.
+        // Docker's embedded DNS listens on loopback but forwards from this namespace. Security
+        // groups never filter the VPC resolver on AWS. Only DNS is exempt, because the resolver
+        // address also serves Floci's API. DHCP and the link-local metadata endpoint are the
+        // other local infrastructure exceptions.
+        for (String server : vpcResolvers) {
+            String family = server.contains(":") ? "ip6" : "ip";
+            rules.append("add rule inet floci_sg egress ").append(family).append(" daddr ").append(server)
+                    .append(" udp dport 53 accept\n")
+                    .append("add rule inet floci_sg egress ").append(family).append(" daddr ").append(server)
+                    .append(" tcp dport 53 accept\n");
+        }
         rules.append("add rule inet floci_sg egress udp sport 68 udp dport 67 accept\n")
                 .append("add rule inet floci_sg ingress udp sport 67 udp dport 68 accept\n")
                 .append("add rule inet floci_sg egress ip daddr 169.254.169.254 accept\n")
@@ -119,62 +133,6 @@ public final class SecurityGroupNftCompiler {
         return rules.toString();
     }
 
-    static String compileNetworkOnly(Endpoint target, Collection<Endpoint> peers) {
-        StringBuilder rules = new StringBuilder(privateAddressTranslation(target, peers))
-                .append("flush chain inet floci_sg ingress\nflush chain inet floci_sg egress\n");
-        for (Endpoint peer : peers) {
-            if (!target.accountId().equals(peer.accountId()) || !target.region().equals(peer.region())
-                    || !target.vpcId().equals(peer.vpcId())) {
-                if (!ipv4(peer.transportAddress())) {
-                    throw new IllegalArgumentException("Private network isolation requires IPv4 endpoints");
-                }
-                appendRule(rules, "ingress", "saddr", peer.transportAddress(), "drop");
-                appendRule(rules, "egress", "daddr", peer.transportAddress(), "drop");
-            }
-        }
-        return rules.append("add rule inet floci_sg ingress accept\n")
-                .append("add rule inet floci_sg egress accept\n").toString();
-    }
-
-    /** Output DNAT runs before SG filtering; postrouting fixes the source after the route changes. */
-    static String privateAddressTranslation(Endpoint target, Collection<Endpoint> peers) {
-        StringBuilder rules = new StringBuilder(
-                "add chain inet floci_sg private_output { type nat hook output priority -100; policy accept; }\n")
-                .append("add chain inet floci_sg private_source { type nat hook postrouting priority 100; policy accept; }\n")
-                .append("flush chain inet floci_sg private_output\n")
-                .append("flush chain inet floci_sg private_source\n");
-        if (peers == null) {
-            return rules.toString();
-        }
-        Map<String, String> destinations = new LinkedHashMap<>();
-        for (Endpoint peer : peers) {
-            if (!target.accountId().equals(peer.accountId()) || !target.region().equals(peer.region())
-                    || !target.vpcId().equals(peer.vpcId())) {
-                continue;
-            }
-            if (!ipv4(peer.logicalAddress()) || !ipv4(peer.transportAddress()) || !ipv4(target.transportAddress())) {
-                throw new IllegalArgumentException("Private address translation requires IPv4 endpoints");
-            }
-            String previous = destinations.putIfAbsent(peer.logicalAddress(), peer.transportAddress());
-            if (previous != null && !previous.equals(peer.transportAddress())) {
-                throw new IllegalStateException("Two ENIs claim the same logical address in one VPC");
-            }
-        }
-        for (Map.Entry<String, String> entry : destinations.entrySet()) {
-            if (!entry.getKey().equals(entry.getValue())) {
-                rules.append("add rule inet floci_sg private_output ip daddr ").append(entry.getKey())
-                        .append(" dnat ip to ").append(entry.getValue()).append('\n');
-            }
-            rules.append("add rule inet floci_sg private_source ip daddr ").append(entry.getValue())
-                    .append(" snat ip to ").append(target.transportAddress()).append('\n');
-        }
-        return rules.toString();
-    }
-
-    private static boolean ipv4(String address) {
-        return address != null && address.indexOf(':') < 0 && literal(address);
-    }
-
     private static void appendRule(StringBuilder rules, String chain, String addressField,
                                    String address, String expression) {
         rules.append("add rule inet floci_sg ").append(chain).append(' ')
@@ -243,5 +201,61 @@ public final class SecurityGroupNftCompiler {
         } catch (UnknownHostException e) {
             return false;
         }
+    }
+
+    static String compileNetworkOnly(Endpoint target, Collection<Endpoint> peers) {
+        StringBuilder rules = new StringBuilder(privateAddressTranslation(target, peers))
+                .append("flush chain inet floci_sg ingress\nflush chain inet floci_sg egress\n");
+        for (Endpoint peer : peers) {
+            if (!target.accountId().equals(peer.accountId()) || !target.region().equals(peer.region())
+                    || !target.vpcId().equals(peer.vpcId())) {
+                if (!ipv4(peer.transportAddress())) {
+                    throw new IllegalArgumentException("Private network isolation requires IPv4 endpoints");
+                }
+                appendRule(rules, "ingress", "saddr", peer.transportAddress(), "drop");
+                appendRule(rules, "egress", "daddr", peer.transportAddress(), "drop");
+            }
+        }
+        return rules.append("add rule inet floci_sg ingress accept\n")
+                .append("add rule inet floci_sg egress accept\n").toString();
+    }
+
+    /** Output DNAT runs before SG filtering; postrouting fixes the source after the route changes. */
+    static String privateAddressTranslation(Endpoint target, Collection<Endpoint> peers) {
+        StringBuilder rules = new StringBuilder(
+                "add chain inet floci_sg private_output { type nat hook output priority -100; policy accept; }\n")
+                .append("add chain inet floci_sg private_source { type nat hook postrouting priority 100; policy accept; }\n")
+                .append("flush chain inet floci_sg private_output\n")
+                .append("flush chain inet floci_sg private_source\n");
+        if (peers == null) {
+            return rules.toString();
+        }
+        Map<String, String> destinations = new LinkedHashMap<>();
+        for (Endpoint peer : peers) {
+            if (!target.accountId().equals(peer.accountId()) || !target.region().equals(peer.region())
+                    || !target.vpcId().equals(peer.vpcId())) {
+                continue;
+            }
+            if (!ipv4(peer.logicalAddress()) || !ipv4(peer.transportAddress()) || !ipv4(target.transportAddress())) {
+                throw new IllegalArgumentException("Private address translation requires IPv4 endpoints");
+            }
+            String previous = destinations.putIfAbsent(peer.logicalAddress(), peer.transportAddress());
+            if (previous != null && !previous.equals(peer.transportAddress())) {
+                throw new IllegalStateException("Two ENIs claim the same logical address in one VPC");
+            }
+        }
+        for (Map.Entry<String, String> entry : destinations.entrySet()) {
+            if (!entry.getKey().equals(entry.getValue())) {
+                rules.append("add rule inet floci_sg private_output ip daddr ").append(entry.getKey())
+                        .append(" dnat ip to ").append(entry.getValue()).append('\n');
+            }
+            rules.append("add rule inet floci_sg private_source ip daddr ").append(entry.getValue())
+                    .append(" snat ip to ").append(target.transportAddress()).append('\n');
+        }
+        return rules.toString();
+    }
+
+    private static boolean ipv4(String address) {
+        return address != null && address.indexOf(':') < 0 && literal(address);
     }
 }

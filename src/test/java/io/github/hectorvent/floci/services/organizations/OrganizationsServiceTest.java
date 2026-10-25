@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.organizations;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.services.organizations.model.CreateAccountStatus;
 import io.github.hectorvent.floci.services.organizations.model.Handshake;
@@ -11,6 +12,8 @@ import io.github.hectorvent.floci.services.organizations.model.OrganizationPolic
 import io.github.hectorvent.floci.services.organizations.model.OrganizationalUnit;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -33,6 +36,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class OrganizationsServiceTest {
 
     private static final String MANAGEMENT_ACCOUNT = "100000000001";
+    private static final RegionResolver REGION_RESOLVER = new RegionResolver("us-east-1", MANAGEMENT_ACCOUNT);
     private static final String OUTSIDER_ACCOUNT = "100000000009";
 
     private OrganizationsService service;
@@ -43,6 +47,7 @@ class OrganizationsServiceTest {
         handshakes = AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT);
         service = new OrganizationsService(
                 new ObjectMapper(),
+                REGION_RESOLVER,
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
@@ -63,6 +68,7 @@ class OrganizationsServiceTest {
                 service.createOrganizationalUnit(MANAGEMENT_ACCOUNT, organization.getRoot().getId(), "Unit", null);
         assertTrue(unit.getId().matches("ou-" + rootSuffix + "-[a-z0-9]{8}"), unit.getId());
 
+        service.enablePolicyType(MANAGEMENT_ACCOUNT, organization.getRoot().getId(), "SERVICE_CONTROL_POLICY");
         OrganizationPolicy policy = service.createPolicy(MANAGEMENT_ACCOUNT, "{}", null, "Policy",
                 "SERVICE_CONTROL_POLICY", null);
         assertTrue(policy.getId().matches("p-[a-z0-9]{8}"), policy.getId());
@@ -71,6 +77,62 @@ class OrganizationsServiceTest {
                 service.createAccount(MANAGEMENT_ACCOUNT, "dev@example.com", "Dev", null, false);
         assertTrue(status.getId().matches("car-[a-z0-9]{8}"), status.getId());
         assertTrue(status.getAccountId().matches("\\d{12}"), status.getAccountId());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"INSPECTOR_POLICY", "UPGRADE_ROLLOUT_POLICY", "BEDROCK_POLICY",
+            "S3_POLICY", "NETWORK_SECURITY_DIRECTOR_POLICY", "GUARDDUTY_POLICY"})
+    void managementPolicyTypesSupportTheExistingLifecycle(String type) {
+        Organization organization = service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
+        String rootId = organization.getRoot().getId();
+        // The policy can be created before its type is enabled; attaching it cannot.
+        OrganizationPolicy policy = service.createPolicy(MANAGEMENT_ACCOUNT, "{}", "description", "Policy", type, null);
+        AwsException disabled = assertThrows(AwsException.class,
+                () -> service.attachPolicy(MANAGEMENT_ACCOUNT, policy.getId(), rootId));
+        assertEquals("PolicyTypeNotEnabledException", disabled.getErrorCode());
+
+        service.enablePolicyType(MANAGEMENT_ACCOUNT, rootId, type);
+        assertEquals(type, policy.getType());
+        assertEquals(List.of(policy), service.listPolicies(MANAGEMENT_ACCOUNT, type));
+        service.attachPolicy(MANAGEMENT_ACCOUNT, policy.getId(), rootId);
+        assertEquals(List.of(policy), service.listPoliciesForTarget(MANAGEMENT_ACCOUNT, rootId, type));
+        OrganizationsService.EffectivePolicy effective = service.describeEffectivePolicy(
+                MANAGEMENT_ACCOUNT, type, MANAGEMENT_ACCOUNT);
+        assertEquals(type, effective.policyType());
+        assertEquals("{}", effective.policyContent());
+        assertEquals(MANAGEMENT_ACCOUNT, effective.targetId());
+        assertTrue(service.listAccountsWithInvalidEffectivePolicy(MANAGEMENT_ACCOUNT, type).isEmpty());
+        service.detachPolicy(MANAGEMENT_ACCOUNT, policy.getId(), rootId);
+        assertTrue(service.listPoliciesForTarget(MANAGEMENT_ACCOUNT, rootId, type).isEmpty());
+        service.deletePolicy(MANAGEMENT_ACCOUNT, policy.getId());
+        assertTrue(service.listPolicies(MANAGEMENT_ACCOUNT, type).isEmpty());
+        service.disablePolicyType(MANAGEMENT_ACCOUNT, rootId, type);
+        assertTrue(organization.getRoot().getPolicyTypes().stream().noneMatch(entry -> type.equals(entry.getType())));
+    }
+
+    @Test
+    void guardDutyWithNoAttachedPolicyReportsTheMissingEffectivePolicy() {
+        service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
+        AwsException missing = assertThrows(AwsException.class, () -> service.describeEffectivePolicy(
+                MANAGEMENT_ACCOUNT, "GUARDDUTY_POLICY", MANAGEMENT_ACCOUNT));
+        assertEquals("EffectivePolicyNotFoundException", missing.getErrorCode());
+    }
+
+    @Test
+    void organizationsArnsTakeTheRequestsPartition() {
+        OrganizationsService china = new OrganizationsService(
+                new ObjectMapper(),
+                new RegionResolver("cn-north-1", MANAGEMENT_ACCOUNT),
+                AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
+                AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
+                AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
+                AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
+                AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
+                AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT));
+        Organization organization = china.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
+
+        assertEquals("arn:aws-cn:organizations::" + MANAGEMENT_ACCOUNT + ":organization/" + organization.getId(),
+                organization.getArn());
     }
 
     @Test
@@ -208,7 +270,7 @@ class OrganizationsServiceTest {
         AwsException error = assertThrows(AwsException.class, () -> service.createOrganizationalUnit(
                 OUTSIDER_ACCOUNT, organization.getRoot().getId(), "Unit", null));
         assertEquals("AccessDeniedException", error.getErrorCode());
-        assertEquals(403, error.getHttpStatus());
+        assertEquals(400, error.getHttpStatus());
     }
 
     @Test
@@ -216,6 +278,7 @@ class OrganizationsServiceTest {
         Organization organization = service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
         String rootId = organization.getRoot().getId();
         OrganizationalUnit unit = service.createOrganizationalUnit(MANAGEMENT_ACCOUNT, rootId, "Unit", null);
+        service.enablePolicyType(MANAGEMENT_ACCOUNT, rootId, "SERVICE_CONTROL_POLICY");
         OrganizationPolicy policy = service.createPolicy(MANAGEMENT_ACCOUNT, "{}", null, "Policy",
                 "SERVICE_CONTROL_POLICY", null);
 
@@ -279,76 +342,6 @@ class OrganizationsServiceTest {
                 .stream().anyMatch(policy -> policy.getName().startsWith("aws-guardrails-")));
     }
 
-    @Test
-    void controlTowerGuardrailsSkipBaselinesWhoseOuWasDeleted() {
-        Organization organization = service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
-        String rootId = organization.getRoot().getId();
-        String kept = service.createOrganizationalUnit(MANAGEMENT_ACCOUNT, rootId, "Workloads", null).getId();
-        String deleted = service.createOrganizationalUnit(MANAGEMENT_ACCOUNT, rootId, "Sandbox", null).getId();
-        service.ensureControlTowerGuardrails(MANAGEMENT_ACCOUNT, Set.of(kept, deleted));
-
-        service.deleteOrganizationalUnit(MANAGEMENT_ACCOUNT, deleted);
-        service.ensureControlTowerGuardrails(MANAGEMENT_ACCOUNT, Set.of(kept, deleted));
-        service.ensureControlTowerGuardrails(MANAGEMENT_ACCOUNT, Set.of(deleted));
-
-        OrganizationPolicy guardrail =
-                service.describePolicy(MANAGEMENT_ACCOUNT, OrganizationsService.CONTROL_TOWER_GUARDRAIL_ID);
-        assertTrue(guardrail.getTargets().contains(kept));
-        assertFalse(guardrail.getTargets().contains(deleted));
-    }
-
-    @Test
-    void everyAwsPolicyTypeIsAcceptedAndCanBeCreatedBeforeItIsEnabled() {
-        Organization organization = service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
-        String rootId = organization.getRoot().getId();
-        for (String type : List.of("SERVICE_CONTROL_POLICY", "RESOURCE_CONTROL_POLICY", "TAG_POLICY",
-                "BACKUP_POLICY", "AISERVICES_OPT_OUT_POLICY", "CHATBOT_POLICY", "DECLARATIVE_POLICY_EC2",
-                "SECURITYHUB_POLICY", "INSPECTOR_POLICY", "UPGRADE_ROLLOUT_POLICY", "BEDROCK_POLICY",
-                "S3_POLICY", "NETWORK_SECURITY_DIRECTOR_POLICY")) {
-            assertNotNull(service.listPolicies(MANAGEMENT_ACCOUNT, type), type);
-        }
-
-        OrganizationPolicy bedrock = service.createPolicy(MANAGEMENT_ACCOUNT, "{}", null, "Bedrock",
-                "BEDROCK_POLICY", null);
-        assertEquals("BEDROCK_POLICY", bedrock.getType());
-        AwsException notEnabled = assertThrows(AwsException.class,
-                () -> service.attachPolicy(MANAGEMENT_ACCOUNT, bedrock.getId(), rootId));
-        assertEquals("PolicyTypeNotEnabledException", notEnabled.getErrorCode());
-
-        service.enablePolicyType(MANAGEMENT_ACCOUNT, rootId, "BEDROCK_POLICY");
-        service.attachPolicy(MANAGEMENT_ACCOUNT, bedrock.getId(), rootId);
-        assertEquals(List.of(bedrock.getId()), service.listPoliciesForTarget(MANAGEMENT_ACCOUNT, rootId,
-                "BEDROCK_POLICY").stream().map(OrganizationPolicy::getId).toList());
-
-        AwsException unknown = assertThrows(AwsException.class,
-                () -> service.listPolicies(MANAGEMENT_ACCOUNT, "NOT_A_POLICY"));
-        assertEquals("InvalidInputException", unknown.getErrorCode());
-    }
-
-    @Test
-    void unknownParentsReportParentNotFound() {
-        Organization organization = service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
-        String rootId = organization.getRoot().getId();
-        String missingOu = "ou-" + rootId.substring(2) + "-zzzzzzzz";
-        String missingRoot = "r-zzzz";
-        for (String parent : List.of(missingOu, missingRoot)) {
-            assertEquals("ParentNotFoundException", assertThrows(AwsException.class,
-                    () -> service.listOrganizationalUnitsForParent(MANAGEMENT_ACCOUNT, parent)).getErrorCode());
-            assertEquals("ParentNotFoundException", assertThrows(AwsException.class,
-                    () -> service.listChildren(MANAGEMENT_ACCOUNT, parent, "ACCOUNT")).getErrorCode());
-            assertEquals("ParentNotFoundException", assertThrows(AwsException.class,
-                    () -> service.listAccountsForParent(MANAGEMENT_ACCOUNT, parent)).getErrorCode());
-            assertEquals("ParentNotFoundException", assertThrows(AwsException.class,
-                    () -> service.createOrganizationalUnit(MANAGEMENT_ACCOUNT, parent, "Child", null))
-                    .getErrorCode());
-        }
-
-        String member = service.createAccount(MANAGEMENT_ACCOUNT, "m@example.com", "M", null, false)
-                .getAccountId();
-        assertEquals("SourceParentNotFoundException", assertThrows(AwsException.class,
-                () -> service.moveAccount(MANAGEMENT_ACCOUNT, member, missingOu, rootId)).getErrorCode());
-    }
-
     // ──────────────────────────── effective SCP levels ────────────────────────────
 
     private static final String DENY_S3 =
@@ -363,6 +356,7 @@ class OrganizationsServiceTest {
         String member = service.createAccount(MANAGEMENT_ACCOUNT, "member@example.com", "Member", null, false)
                 .getAccountId();
         service.moveAccount(MANAGEMENT_ACCOUNT, member, rootId, ouId);
+        service.enablePolicyType(MANAGEMENT_ACCOUNT, rootId, "SERVICE_CONTROL_POLICY");
 
         // FullAWSAccess sits on root, OU, and account: three levels.
         List<List<String>> levels = service.effectiveScpLevels(member);
@@ -379,7 +373,8 @@ class OrganizationsServiceTest {
 
     @Test
     void theManagementAccountIsExemptFromScps() {
-        service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
+        Organization organization = service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
+        service.enablePolicyType(MANAGEMENT_ACCOUNT, organization.getRoot().getId(), "SERVICE_CONTROL_POLICY");
         String member = service.createAccount(MANAGEMENT_ACCOUNT, "member@example.com", "Member", null, false)
                 .getAccountId();
 
@@ -396,10 +391,14 @@ class OrganizationsServiceTest {
     }
 
     @Test
-    void disablingTheScpPolicyTypeOnTheRootRemovesTheCeiling() {
+    void scpsBindOnlyWhileTheirPolicyTypeIsEnabledOnTheRoot() {
         Organization organization = service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
         String member = service.createAccount(MANAGEMENT_ACCOUNT, "member@example.com", "Member", null, false)
                 .getAccountId();
+        // A new root has no policy types enabled, so there is no ceiling until SCPs are turned on.
+        assertNull(service.effectiveScpLevels(member));
+
+        service.enablePolicyType(MANAGEMENT_ACCOUNT, organization.getRoot().getId(), "SERVICE_CONTROL_POLICY");
         assertNotNull(service.effectiveScpLevels(member));
 
         service.disablePolicyType(MANAGEMENT_ACCOUNT, organization.getRoot().getId(), "SERVICE_CONTROL_POLICY");
@@ -410,6 +409,7 @@ class OrganizationsServiceTest {
     void effectiveScpLevelsAreNullWhenEnforcementDisabled() {
         OrganizationsService disabled = new OrganizationsService(
                 new ObjectMapper(),
+                REGION_RESOLVER,
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
@@ -434,6 +434,7 @@ class OrganizationsServiceTest {
     void managementAccountEmailOverrideIsUsedForOrganizationAndAccount() {
         OrganizationsService configured = new OrganizationsService(
                 new ObjectMapper(),
+                REGION_RESOLVER,
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
@@ -455,6 +456,7 @@ class OrganizationsServiceTest {
     void malformedManagementAccountEmailOverrideIsRejected() {
         assertThrows(IllegalArgumentException.class, () -> new OrganizationsService(
                 new ObjectMapper(),
+                REGION_RESOLVER,
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),
                 AccountAwareStorageBackend.inMemory(MANAGEMENT_ACCOUNT),

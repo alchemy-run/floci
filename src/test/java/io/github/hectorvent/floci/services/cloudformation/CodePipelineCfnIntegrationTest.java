@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
 import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeAll;
@@ -105,6 +106,7 @@ class CodePipelineCfnIntegrationTest {
             .formParam("Action", "DeleteStack")
             .formParam("StackName", STACK)
         .when().post("/").then().statusCode(200);
+        CfnStackWaits.awaitStackDeleted(STACK);
 
         given()
             .header("X-Amz-Target", "CodePipeline_20150709.GetPipeline")

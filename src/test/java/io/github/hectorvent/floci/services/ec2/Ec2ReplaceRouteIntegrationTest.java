@@ -1,17 +1,16 @@
 package io.github.hectorvent.floci.services.ec2;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsString;
-import static org.hamcrest.Matchers.equalTo;
-import static org.hamcrest.Matchers.not;
-
+import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
-import io.quarkus.test.junit.QuarkusTest;
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.not;
 
 /**
  * ReplaceRoute swaps the target of an existing route. AWS takes exactly one target per call, so
@@ -243,8 +242,9 @@ class Ec2ReplaceRouteIntegrationTest {
             .statusCode(200)
             .body("ReplaceRouteResponse.return", equalTo("true"));
 
-        // Order 7 leaves NAT on the IPv6 ::/0 route; only this IPv4 default moved.
-        given()
+        // ...and the NAT gateway this route used to carry is gone. Order 2 pins the gateway -> NAT
+        // direction; without this the reverse direction could carry the old target over unnoticed.
+        String table = given()
             .formParam("Action", "DescribeRouteTables")
             .formParam("RouteTableId.1", routeTableId)
             .header("Authorization", AUTH_HEADER)
@@ -252,7 +252,10 @@ class Ec2ReplaceRouteIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body(DEFAULT_ROUTE_NODE + ".gatewayId", equalTo(INTERNET_GATEWAY));
+            .body(DEFAULT_ROUTE_NODE + ".gatewayId", equalTo(INTERNET_GATEWAY))
+            .extract().asString();
+
+        assertThat(table, not(containsString(NAT_GATEWAY)));
     }
 
     /** A destination with no target at all must not blank the route and report success. */
@@ -299,33 +302,10 @@ class Ec2ReplaceRouteIntegrationTest {
             .body("Response.Errors.Error.Code", equalTo("InvalidParameterCombination"));
     }
 
-    @Test
-    @Order(7)
-    void replaceRouteCanTargetAnIpv6Destination() {
-        given()
-            .formParam("Action", "CreateRoute")
-            .formParam("RouteTableId", routeTableId)
-            .formParam("DestinationIpv6CidrBlock", "::/0")
-            .formParam("GatewayId", INTERNET_GATEWAY)
-            .header("Authorization", AUTH_HEADER)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200);
-
-        given()
-            .formParam("Action", "ReplaceRoute")
-            .formParam("RouteTableId", routeTableId)
-            .formParam("DestinationIpv6CidrBlock", "::/0")
-            .formParam("NatGatewayId", NAT_GATEWAY)
-            .header("Authorization", AUTH_HEADER)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body("ReplaceRouteResponse.return", equalTo("true"));
-    }
-
+    /**
+     * A ReplaceRoute naming no destination at all cannot identify a route; it must not 500. All
+     * three destination kinds are now accepted — see {@code Ec2Ipv6RouteTest}.
+     */
     @Test
     @Order(7)
     void replaceRouteWithoutADestinationIsRejected() {
@@ -355,5 +335,52 @@ class Ec2ReplaceRouteIntegrationTest {
         .then()
             .statusCode(400)
             .body("Response.Errors.Error.Code", equalTo("InvalidRouteTableID.NotFound"));
+    }
+
+    @Test
+    @Order(12)
+    void dryRunValidReplacementReportsSuccessWithoutChangingTheRoute() {
+        given()
+            .formParam("Action", "ReplaceRoute")
+            .formParam("RouteTableId", routeTableId)
+            .formParam("DestinationCidrBlock", DEFAULT_ROUTE)
+            .formParam("NatGatewayId", NAT_GATEWAY)
+            .formParam("DryRun", "true")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(412)
+            .body("Response.Errors.Error.Code", equalTo("DryRunOperation"));
+
+        String table = given()
+            .formParam("Action", "DescribeRouteTables")
+            .formParam("RouteTableId.1", routeTableId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(DEFAULT_ROUTE_NODE + ".gatewayId", equalTo(INTERNET_GATEWAY))
+            .extract().asString();
+
+        assertThat(table, not(containsString(NAT_GATEWAY)));
+    }
+
+    @Test
+    @Order(13)
+    void dryRunStillRejectsAnUnknownDestination() {
+        given()
+            .formParam("Action", "ReplaceRoute")
+            .formParam("RouteTableId", routeTableId)
+            .formParam("DestinationCidrBlock", UNROUTED_CIDR)
+            .formParam("NatGatewayId", NAT_GATEWAY)
+            .formParam("DryRun", "true")
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("Response.Errors.Error.Code", equalTo("InvalidRoute.NotFound"));
     }
 }

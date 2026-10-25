@@ -13,12 +13,12 @@ public class Address {
     private String allocationId;
     private String publicIp;
     private String domain = "vpc";
+    private String publicIpv4Pool;
+    private String networkBorderGroup;
     private String instanceId;
     private String associationId;
     private String networkInterfaceId;
     private String privateIpAddress;
-    private String publicIpv4Pool = "amazon";
-    private String networkBorderGroup;
     private String region;
     /**
      * The address AllocateAddress invented for this allocation, kept so disassociation can
@@ -38,6 +38,13 @@ public class Address {
     public String getDomain() { return domain; }
     public void setDomain(String domain) { this.domain = domain; }
 
+    // Older persisted allocations used the regional Amazon pool without recording its metadata.
+    public String getPublicIpv4Pool() { return publicIpv4Pool != null ? publicIpv4Pool : "amazon"; }
+    public void setPublicIpv4Pool(String publicIpv4Pool) { this.publicIpv4Pool = publicIpv4Pool; }
+
+    public String getNetworkBorderGroup() { return networkBorderGroup != null ? networkBorderGroup : region; }
+    public void setNetworkBorderGroup(String networkBorderGroup) { this.networkBorderGroup = networkBorderGroup; }
+
     public String getInstanceId() { return instanceId; }
     public void setInstanceId(String instanceId) { this.instanceId = instanceId; }
 
@@ -50,11 +57,6 @@ public class Address {
     public String getPrivateIpAddress() { return privateIpAddress; }
     public void setPrivateIpAddress(String privateIpAddress) { this.privateIpAddress = privateIpAddress; }
 
-    public String getPublicIpv4Pool() { return publicIpv4Pool; }
-    public void setPublicIpv4Pool(String publicIpv4Pool) { this.publicIpv4Pool = publicIpv4Pool; }
-
-    public String getNetworkBorderGroup() { return networkBorderGroup; }
-    public void setNetworkBorderGroup(String networkBorderGroup) { this.networkBorderGroup = networkBorderGroup; }
     public String getAllocatedPublicIp() { return allocatedPublicIp; }
     public void setAllocatedPublicIp(String allocatedPublicIp) { this.allocatedPublicIp = allocatedPublicIp; }
 

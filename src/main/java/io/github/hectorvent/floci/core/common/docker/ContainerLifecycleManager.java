@@ -1,8 +1,5 @@
 package io.github.hectorvent.floci.core.common.docker;
 
-import io.github.hectorvent.floci.config.ContainerCaBundle;
-import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.services.lambda.launcher.ImageCacheService;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.command.CreateContainerCmd;
@@ -10,8 +7,11 @@ import com.github.dockerjava.api.command.CreateContainerResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.command.InspectVolumeResponse;
 import com.github.dockerjava.api.command.ListVolumesResponse;
+import com.github.dockerjava.api.command.RemoveContainerCmd;
+import com.github.dockerjava.api.exception.ConflictException;
 import com.github.dockerjava.api.exception.DockerException;
 import com.github.dockerjava.api.exception.NotFoundException;
+import com.github.dockerjava.api.exception.NotModifiedException;
 import com.github.dockerjava.api.model.Bind;
 import com.github.dockerjava.api.model.Capability;
 import com.github.dockerjava.api.model.Container;
@@ -21,26 +21,33 @@ import com.github.dockerjava.api.model.HostConfig;
 import com.github.dockerjava.api.model.Mount;
 import com.github.dockerjava.api.model.MountType;
 import com.github.dockerjava.api.model.Ports;
+import com.github.dockerjava.api.model.Volume;
 import com.github.dockerjava.core.command.WaitContainerResultCallback;
+import io.github.hectorvent.floci.config.ContainerCaBundle;
+import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.config.EmulatorConfig.EcsServiceConfig.ImagePullBehavior;
+import io.github.hectorvent.floci.services.lambda.launcher.ImageCacheService;
+import io.github.hectorvent.floci.services.lambda.launcher.ImageCacheService.LaunchImage;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
-import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.jboss.logging.Logger;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
+import java.util.OptionalLong;
 import java.util.Set;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Pattern;
@@ -54,6 +61,13 @@ public class ContainerLifecycleManager {
 
     private static final Logger LOG = Logger.getLogger(ContainerLifecycleManager.class);
 
+    /**
+     * Label carrying a fresh id per {@code create()} invocation, used to tell this call's own
+     * replayed create apart from a genuinely concurrent caller's, see
+     * {@link #createWithConflictRecovery}.
+     */
+    static final String CREATE_ATTEMPT_LABEL = "floci_create_attempt_id";
+
     // Matches crun/runc's "join keyctl '<id>': Disk quota exceeded" error, which the OCI runtime
     // reports for the kernel session-keyring quota (kernel.keys.maxkeys), not actual disk space.
     // Under high concurrent container counts (podman machine's Fedora CoreOS default is 200 keys
@@ -61,13 +75,22 @@ public class ContainerLifecycleManager {
     private static final Pattern KEYRING_QUOTA_PATTERN =
             Pattern.compile("join keyctl.*disk quota exceeded", Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
+    /** Matches 3-4 octal digits (e.g. "0755", "755", "2775"), matching CreationInfo.Permissions. */
+    public static final Pattern PERMISSIONS_PATTERN = Pattern.compile("^[0-7]{3,4}$");
+
     private static final long NANO_CPUS_PER_CPU = 1_000_000_000L;
+    private static final String CONTAINER_NETWORK_MODE_PREFIX = "container:";
+
+    /** Host interface a port marked loopback-only publishes on. */
+    private static final String LOOPBACK_HOST_IP = "127.0.0.1";
+
+    private final Semaphore teardownSlots = new Semaphore(8, true);
 
     private final DockerClient dockerClient;
     private final ImageCacheService imageCacheService;
     private final ContainerDetector containerDetector;
-    private final PortAllocator portAllocator;
     private final EmulatorConfig config;
+    private final long archiveRetryBackoffMillis;
 
     /** Volumes whose shared-ownership root has already been initialised this process (run-once guard). */
     private final ConcurrentHashMap<String, Boolean> initializedSharedVolumes = new ConcurrentHashMap<>();
@@ -79,13 +102,21 @@ public class ContainerLifecycleManager {
     public ContainerLifecycleManager(DockerClient dockerClient,
                                      ImageCacheService imageCacheService,
                                      ContainerDetector containerDetector,
-                                     PortAllocator portAllocator,
                                      EmulatorConfig config) {
+        this(dockerClient, imageCacheService, containerDetector, config,
+                RetryingTarCopier.DEFAULT_BACKOFF_MS);
+    }
+
+    ContainerLifecycleManager(DockerClient dockerClient,
+                              ImageCacheService imageCacheService,
+                              ContainerDetector containerDetector,
+                              EmulatorConfig config,
+                              long archiveRetryBackoffMillis) {
         this.dockerClient = dockerClient;
         this.imageCacheService = imageCacheService;
         this.containerDetector = containerDetector;
-        this.portAllocator = portAllocator;
         this.config = config;
+        this.archiveRetryBackoffMillis = archiveRetryBackoffMillis;
     }
 
     /**
@@ -97,17 +128,44 @@ public class ContainerLifecycleManager {
      * @return information about the created container including resolved endpoints and published ports
      */
     public ContainerInfo createAndStart(ContainerSpec spec) {
-        String containerId = create(spec);
+        return createAndStart(spec, false);
+    }
+
+    /** Starts a disposable container, reclaiming its anonymous volumes if startup fails. */
+    public ContainerInfo createAndStartEphemeral(ContainerSpec spec) {
+        return createAndStart(spec, true);
+    }
+
+    private ContainerInfo createAndStart(ContainerSpec spec, boolean removeAnonymousVolumes) {
+        String resolvedImage = imageCacheService.ensureImageExists(spec.image());
+        String containerId = create(spec, resolvedImage, null, removeAnonymousVolumes);
         try {
-            ContainerInfo info = startCreated(containerId, spec);
-            return withPublishedHostPorts(info, spec);
-        } catch (Exception e) {
-            // A failed start (e.g. host-port conflict) must not leak the created
-            // container: retrying callers would accumulate Created containers and
-            // fixed-name callers would hit name conflicts on the next attempt.
-            removeIfExists(containerId);
-            throw e;
+            return withPublishedHostPorts(startCreated(containerId, spec), spec);
+        } catch (RuntimeException failure) {
+            removeFailedContainer(containerId, failure, removeAnonymousVolumes);
+            throw failure;
         }
+    }
+
+    private void removeFailedContainer(String containerId, RuntimeException failure, boolean removeAnonymousVolumes) {
+        if (!removeAnonymousVolumes) {
+            removeIfExists(containerId);
+            return;
+        }
+        try {
+            removeIfExistsStrict(containerId, true);
+        } catch (RuntimeException cleanupFailure) {
+            failure.addSuppressed(cleanupFailure);
+        }
+    }
+
+    /**
+     * Resolves the image a container launch is about to run, pulling it as the ECS agent does
+     * under {@code behavior}. A spec built from the returned image id runs exactly that image,
+     * whatever a later pull of the same reference moves its tag to.
+     */
+    public LaunchImage resolveImageForLaunch(String image, ImagePullBehavior behavior) {
+        return imageCacheService.resolveForLaunch(image, behavior);
     }
 
     /**
@@ -136,12 +194,16 @@ public class ContainerLifecycleManager {
     }
 
     private String create(ContainerSpec spec, String resolvedImage, String platform) {
-        String containerId = createWithCaBundle(spec, resolvedImage, platform);
+        return create(spec, resolvedImage, platform, false);
+    }
+
+    private String create(ContainerSpec spec, String resolvedImage, String platform, boolean removeAnonymousVolumes) {
+        String containerId = createWithCaBundle(spec, resolvedImage, platform, removeAnonymousVolumes);
         if (spec.hasNetworkConfiguration()) {
             try {
                 attachNetworkBeforeStart(containerId, spec);
             } catch (RuntimeException e) {
-                removeIfExists(containerId);
+                removeFailedContainer(containerId, e, removeAnonymousVolumes);
                 throw new IllegalStateException(
                         "Failed to attach pre-start network configuration for container " + containerId, e);
             }
@@ -149,7 +211,8 @@ public class ContainerLifecycleManager {
         return containerId;
     }
 
-    private String createWithCaBundle(ContainerSpec spec, String resolvedImage, String platform) {
+    private String createWithCaBundle(ContainerSpec spec, String resolvedImage, String platform,
+                                      boolean removeAnonymousVolumes) {
         LOG.debugv("Creating container from spec: image={0}, name={1}", spec.image(), spec.name());
 
         // Built once: a dynamic port binding allocates its host port here.
@@ -165,7 +228,11 @@ public class ContainerLifecycleManager {
         }
         // SSL_CERT_FILE and friends replace the image's trust store, so they must never name a
         // file that is not there. Start over without them: the container keeps its own trust.
-        dockerClient.removeContainerCmd(containerId).withForce(true).exec();
+        if (removeAnonymousVolumes) {
+            removeIfExistsStrict(containerId, true);
+        } else {
+            dockerClient.removeContainerCmd(containerId).withForce(true).exec();
+        }
         return createContainer(spec, resolvedImage, platform, hostConfig, spec.env());
     }
 
@@ -202,12 +269,55 @@ public class ContainerLifecycleManager {
                     .toArray(ExposedPort[]::new);
             createCmd.withExposedPorts(exposed);
         }
-        createCmd.withLabels(mergedLabels(spec.labels()));
+        // A fresh id per create() call, not per spec: two calls can carry identical image, name,
+        // and labels (a second, genuinely concurrent caller racing on the same fixed name), and
+        // matchesSpec must be able to tell that apart from a replay of THIS call's own create
+        // hitting a lost-response conflict, see createWithConflictRecovery.
+        String createAttemptId = UUID.randomUUID().toString();
+        Map<String, String> labels = mergedLabels(spec.labels());
+        labels.put(CREATE_ATTEMPT_LABEL, createAttemptId);
+        createCmd.withLabels(labels);
 
-        CreateContainerResponse response = createCmd.exec();
-        String containerId = response.getId();
+        String containerId = createWithConflictRecovery(createCmd, spec, createAttemptId);
         LOG.infov("Created container {0} (name={1}, not yet started)", containerId, spec.name());
         return containerId;
+    }
+
+    /**
+     * Executes the create, recovering the container when a replay of it lost the race with its own
+     * earlier attempt.
+     *
+     * <p>{@link RetryingDockerHttpClient} replays {@code POST /containers/create}, it has a
+     * {@code bodyBytes} body, no hijacked input, and no {@code /exec} in its path, so it is
+     * replayable by that decorator's rules. That replay is what makes this recovery necessary: a
+     * create is not idempotent, so if the daemon accepts a named create but the response is lost to
+     * a transient socket drop, the replay hits a 409 name conflict instead of the transient error
+     * the retry exists to absorb. {@code DockerRetry} correctly classifies that 409 as
+     * non-transient and rethrows it immediately, so without this it surfaces as a spurious build
+     * failure, and leaks the container the first attempt actually created, untracked.
+     *
+     * <p>Recovery only fires for a named spec, and only adopts a candidate whose image, labels, and
+     * this exact call's {@link #CREATE_ATTEMPT_LABEL} all match. Image and labels alone cannot tell
+     * this call's own lost-response replay apart from a second, genuinely concurrent
+     * {@code create()} racing on the same fixed name/image/labels, which would otherwise be adopted
+     * as if it were this invocation's container.
+     */
+    private String createWithConflictRecovery(CreateContainerCmd createCmd, ContainerSpec spec,
+                                              String createAttemptId) {
+        try {
+            return createCmd.exec().getId();
+        } catch (ConflictException e) {
+            if (spec.name() != null) {
+                Optional<Container> existing = findByName(spec.name());
+                if (existing.isPresent() && matchesSpec(existing.get(), spec, createAttemptId)) {
+                    LOG.infov("Create for {0} hit a name conflict; an earlier attempt's response "
+                            + "was lost but the container exists, adopting {1}",
+                            spec.name(), existing.get().getId());
+                    return existing.get().getId();
+                }
+            }
+            throw e;
+        }
     }
 
     /**
@@ -258,18 +368,9 @@ public class ContainerLifecycleManager {
     private boolean copyCaBundle(String containerId, Path bundle) {
         try {
             byte[] content = Files.readAllBytes(bundle);
-            ByteArrayOutputStream archive = new ByteArrayOutputStream(content.length + 1024);
-            try (TarArchiveOutputStream tar = new TarArchiveOutputStream(archive)) {
-                TarArchiveEntry entry = new TarArchiveEntry(ContainerCaBundle.FILE_NAME);
-                entry.setSize(content.length);
-                tar.putArchiveEntry(entry);
-                tar.write(content);
-                tar.closeArchiveEntry();
-            }
-            dockerClient.copyArchiveToContainerCmd(containerId)
-                    .withRemotePath(ContainerCaBundle.CONTAINER_DIR)
-                    .withTarInputStream(new ByteArrayInputStream(archive.toByteArray()))
-                    .exec();
+            RetryingTarCopier.copyBytes(dockerClient, containerId, ContainerCaBundle.CONTAINER_DIR,
+                    ContainerCaBundle.FILE_NAME, content, 0644,
+                    RetryingTarCopier.DEFAULT_MAX_ATTEMPTS, archiveRetryBackoffMillis);
             LOG.debugv("Copied the CA bundle into container {0} at {1}", containerId, ContainerCaBundle.CONTAINER_PATH);
             return true;
         } catch (Exception e) {
@@ -278,6 +379,27 @@ public class ContainerLifecycleManager {
                     containerId, e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * Confirms a name-conflicting container is the one THIS create() call produced, not a stale or
+     * differently-owned container, and not one from a genuinely concurrent create() sharing the same
+     * fixed name, image, and spec labels. It must carry every label this call would have applied,
+     * including a {@link #CREATE_ATTEMPT_LABEL} equal to this call's {@code createAttemptId}: the
+     * one part of the label set a different concurrent call could never coincidentally reproduce,
+     * and on its own sufficient proof of ownership.
+     *
+     * <p>Deliberately does NOT compare the image. The list API reports {@code getImage()} as an
+     * image ID/digest rather than the tag once that tag has been re-pulled, retagged, or removed, so
+     * a tag comparison would reject this call's own container and leak it untracked, the failure
+     * this recovery exists to prevent, arising precisely under the daemon churn that makes a lost
+     * create response likely. The attempt-id match already excludes every foreign container.
+     */
+    private boolean matchesSpec(Container existing, ContainerSpec spec, String createAttemptId) {
+        Map<String, String> expectedLabels = mergedLabels(spec.labels());
+        expectedLabels.put(CREATE_ATTEMPT_LABEL, createAttemptId);
+        Map<String, String> actualLabels = existing.getLabels();
+        return actualLabels != null && actualLabels.entrySet().containsAll(expectedLabels.entrySet());
     }
 
     /**
@@ -292,13 +414,20 @@ public class ContainerLifecycleManager {
         LOG.infov("Started container {0}", containerId);
 
         if (spec.networkMode() != null && !spec.networkMode().isBlank()
-                && spec.hasPortBindings() && !spec.hasNetworkConfiguration()) {
+                && spec.publishesPorts() && !spec.hasNetworkConfiguration()) {
             try {
                 dockerClient.connectToNetworkCmd()
                         .withContainerId(containerId)
                         .withNetworkId(spec.networkMode())
                         .exec();
                 LOG.debugv("Connected container {0} to network {1}", containerId, spec.networkMode());
+            } catch (NotFoundException e) {
+                // Docker answers 404 when the network does not exist, which fails a container that
+                // joins at creation, or when the container is already gone. Either way it cannot
+                // reach its network, so fail the start instead of leaving it on the default bridge.
+                // Docker's message says which of the two was missing.
+                throw new IllegalStateException("Could not connect container " + containerId
+                        + " to Docker network " + spec.networkMode() + ": " + e.getMessage(), e);
             } catch (Exception e) {
                 LOG.warnv("Could not connect container {0} to network {1}: {2}",
                         containerId, spec.networkMode(), e.getMessage());
@@ -310,7 +439,7 @@ public class ContainerLifecycleManager {
     }
 
     private ContainerInfo withPublishedHostPorts(ContainerInfo info, ContainerSpec spec) {
-        if (spec.portBindings() == null || spec.portBindings().isEmpty()) {
+        if (!spec.publishesPorts()) {
             return info;
         }
 
@@ -326,14 +455,29 @@ public class ContainerLifecycleManager {
     }
 
     /**
-     * Starts a container, translating crun/runc's kernel-keyring-quota error into a message that
-     * names the actual cause and a fix, instead of the misleading "Disk quota exceeded" the OCI
-     * runtime reports. Package-private so tests can verify a given call site routes through this
-     * translation rather than a raw {@code dockerClient.startContainerCmd(...)} call.
+     * Starts {@code containerId}, treating "already running" as success and translating
+     * crun/runc's kernel-keyring-quota error into a message that names the actual cause and a fix,
+     * instead of the misleading "Disk quota exceeded" the OCI runtime reports. Transient socket
+     * blips are retried below this call, at the transport seam
+     * ({@link RetryingDockerHttpClient}); no retry may live here, where it would compound backoff
+     * on the transport's already-exhausted budget.
+     *
+     * <p>The 304 handling is what makes the transport's replay safe: when the daemon honoured a
+     * start whose response was lost to a broken pipe, the replayed start meets HTTP 304, a
+     * successful response at transport level, which docker-java converts to
+     * {@link NotModifiedException} above it. That reports the outcome we wanted and is swallowed.
+     * Letting it escape would turn a recovered blip into a hard launch failure, the exact bug
+     * the retry exists to remove.
+     *
+     * <p>Package-private so tests can verify a given call site routes through this translation
+     * rather than a raw {@code dockerClient.startContainerCmd(...)} call.
      */
     void startContainer(String containerId) {
         try {
             dockerClient.startContainerCmd(containerId).exec();
+        } catch (NotModifiedException alreadyRunning) {
+            LOG.debugv("Container {0} was already running (304), treating start as done",
+                    containerId);
         } catch (DockerException e) {
             String message = e.getMessage();
             if (message != null && KEYRING_QUOTA_PATTERN.matcher(message).find()) {
@@ -368,6 +512,10 @@ public class ContainerLifecycleManager {
      *        SIGTERM before Docker sends SIGKILL. Must be a non-negative integer.
      */
     public void stopAndRemove(String containerId, Closeable logStream, int stopTimeoutSeconds) {
+        withTeardownSlot(() -> stopAndRemoveAdmitted(containerId, logStream, stopTimeoutSeconds));
+    }
+
+    private void stopAndRemoveAdmitted(String containerId, Closeable logStream, int stopTimeoutSeconds) {
         LOG.infov("Stopping container {0}", containerId);
 
         boolean stoppedOrMissing = false;
@@ -417,24 +565,26 @@ public class ContainerLifecycleManager {
      *
      * <p>Most emulator shutdown paths intentionally use best-effort cleanup through
      * {@link #stopAndRemove(String, Closeable)}. Resource-deletion paths that must retain their
-     * persisted record for a retry use this stricter variant instead.
+     * persisted record for a retry use this stricter variant instead. The log stream is closed
+     * only once the container is gone; when removal fails it is left open for the retry.
      */
     public void stopAndRemoveStrict(String containerId, Closeable logStream) {
-        LOG.infov("Stopping container {0}", containerId);
+        stopAndRemoveStrict(containerId, logStream, 5);
+    }
 
-        if (logStream != null) {
-            try {
-                logStream.close();
-            } catch (Exception e) {
-                LOG.debugv("Error closing log stream: {0}", e.getMessage());
-            }
-        }
+    public void stopAndRemoveStrict(String containerId, Closeable logStream, int stopTimeoutSeconds) {
+        withTeardownSlot(() -> stopAndRemoveStrictAdmitted(containerId, logStream, stopTimeoutSeconds));
+    }
+
+    private void stopAndRemoveStrictAdmitted(String containerId, Closeable logStream, int stopTimeoutSeconds) {
+        LOG.infov("Stopping container {0}", containerId);
 
         Exception stopFailure = null;
         try {
-            dockerClient.stopContainerCmd(containerId).withTimeout(5).exec();
+            dockerClient.stopContainerCmd(containerId).withTimeout(stopTimeoutSeconds).exec();
         } catch (NotFoundException e) {
             LOG.debugv("Container {0} not found (already removed)", containerId);
+            closeLogStreamIfPresent(logStream);
             return;
         } catch (Exception e) {
             stopFailure = e;
@@ -452,7 +602,27 @@ public class ContainerLifecycleManager {
             if (stopFailure != null) {
                 cleanupFailure.addSuppressed(stopFailure);
             }
+            // The container still exists and may still be logging, so the stream stays open for
+            // the caller's retry.
             throw cleanupFailure;
+        }
+        // Closed only once the container is stopped and gone, as in stopAndRemove, so the follower
+        // can drain the final tail.
+        closeLogStreamIfPresent(logStream);
+    }
+
+    private void withTeardownSlot(Runnable stopAndRemove) {
+        teardownSlots.acquireUninterruptibly();
+        try {
+            stopAndRemove.run();
+        } finally {
+            teardownSlots.release();
+        }
+    }
+
+    private void closeLogStreamIfPresent(Closeable logStream) {
+        if (logStream != null) {
+            closeLogStreamAfterContainerStop(logStream);
         }
     }
 
@@ -462,27 +632,66 @@ public class ContainerLifecycleManager {
      * {@code floci_emulator=floci-aws} (plus {@code floci_namespace} when configured) so both
      * {@code docker volume prune --filter label=floci=true} (all emulators) and
      * {@code --filter label=floci_emulator=floci-aws} (this emulator only) work.
+     *
+     * <p>Transient socket blips on both daemon calls here, the existence check and the create,
+     * are retried at the transport seam ({@link RetryingDockerHttpClient}). The existence guard
+     * is what keeps the transport's replay safe: {@code POST /volumes/create} with the same name
+     * is itself idempotent, and when the daemon created the volume but the response was lost to
+     * a broken pipe, the replayed create finds it already there while later calls see it exists
+     * and do nothing, the volume analogue of start treating an HTTP 304 as success.
      */
     public void ensureVolume(String volumeName) {
-        if (!volumeExists(volumeName)) {
-            dockerClient.createVolumeCmd()
-                    .withName(volumeName)
-                    .withLabels(ContainerStorageHelper.defaultLabels(config))
-                    .exec();
-            LOG.debugv("Created volume {0}", volumeName);
+        createVolumeIfAbsent(volumeName, ContainerStorageHelper.defaultLabels(config));
+    }
+
+    /**
+     * {@link #ensureVolume} for a volume an operator named, created when absent without any
+     * Floci label, the umbrella and extra ones alike. The operator named the volume, so its
+     * lifecycle is theirs: nothing that sweeps Floci-labelled volumes may collect it, neither
+     * a floci-scoped {@code docker volume prune} nor a testcontainers module reaping a run's
+     * labelled child resources through labels injected into {@code floci.docker.extra-labels}.
+     */
+    public void ensureUnmanagedVolume(String volumeName) {
+        if (volumeExists(volumeName)) {
+            return;
         }
+        dockerClient.createVolumeCmd()
+                .withName(volumeName)
+                // An explicit empty map, never mergedLabels: the operator-named volume
+                // carries no Floci label, so no label-based sweep collects it.
+                .withLabels(Map.of())
+                .exec();
+        LOG.debugv("Created unmanaged volume {0}", volumeName);
+    }
+
+    /** Creates a volume with resource ownership labels for recoverable cleanup. */
+    public void ensureVolume(String volumeName, Map<String, String> labels) {
+        createVolumeIfAbsent(volumeName, labels);
+    }
+    /** Creates the named volume when it is missing; returns whether it was created. */
+    private boolean createVolumeIfAbsent(String volumeName, Map<String, String> labels) {
+        if (volumeExists(volumeName)) {
+            return false;
+        }
+        dockerClient.createVolumeCmd()
+                .withName(volumeName)
+                .withLabels(mergedLabels(labels))
+                .exec();
+        LOG.debugv("Created volume {0}", volumeName);
+        return true;
     }
 
     /**
      * Default emulator labels overlaid with the spec's labels; a per-spec label
-     * wins on key conflicts.
+     * wins on key conflicts. Each new key with a legacy alias also gets that alias, with the
+     * same value (see {@link ContainerStorageHelper#CONTAINER_LABEL_ALIASES}).
      */
     private Map<String, String> mergedLabels(Map<String, String> specLabels) {
         Map<String, String> labels = ContainerStorageHelper.defaultLabels(config);
         if (specLabels != null) {
             labels.putAll(specLabels);
         }
-        return labels;
+        return ContainerStorageHelper.CONTAINER_LABEL_ALIASES.withLegacyAliases(labels);
     }
 
     /**
@@ -507,7 +716,31 @@ public class ContainerLifecycleManager {
      */
     public void ensureSharedVolume(String volumeName, OptionalInt ownerUid, OptionalInt ownerGid,
                                    Optional<String> rootPermissions, String initImage) {
-        ensureVolume(volumeName);
+        ensureSharedVolumeRoot(volumeName,
+                ownerUid.isPresent() ? OptionalLong.of(ownerUid.getAsInt()) : OptionalLong.empty(),
+                ownerGid.isPresent() ? OptionalLong.of(ownerGid.getAsInt()) : OptionalLong.empty(),
+                rootPermissions, initImage);
+    }
+
+    /** True when {@code permissions} is 3 to 4 octal digits (e.g. "0755", "755", "2775"). */
+    public static boolean isValidPermissions(String permissions) {
+        return permissions != null && PERMISSIONS_PATTERN.matcher(permissions).matches();
+    }
+
+    /** Initialises an access point's root without narrowing AWS's unsigned 32-bit POSIX ids. */
+    public void ensureSharedVolume(String volumeName, long ownerUid, long ownerGid,
+                                   String rootPermissions, String initImage) {
+        ensureSharedVolumeRoot(volumeName, OptionalLong.of(ownerUid), OptionalLong.of(ownerGid),
+                Optional.of(rootPermissions), initImage);
+    }
+
+    private void ensureSharedVolumeRoot(String volumeName, OptionalLong ownerUid, OptionalLong ownerGid,
+                                        Optional<String> rootPermissions, String initImage) {
+        // A volume created now is root:root 0755 again, so a memo left by a volume of the same name
+        // that was removed since (e.g. DeleteApplication, docker volume rm) is stale.
+        if (createVolumeIfAbsent(volumeName, ContainerStorageHelper.defaultLabels(config))) {
+            initializedSharedVolumes.remove(volumeName);
+        }
         if (rootPermissions.isEmpty() && ownerUid.isEmpty() && ownerGid.isEmpty()) {
             return;
         }
@@ -521,7 +754,7 @@ public class ContainerLifecycleManager {
         // Validate before splicing into the helper's `sh -c`, matching CreationInfo.Permissions
         // (^[0-7]{3,4}$), so a typo can't produce a mangled script that soft-fails.
         rootPermissions.ifPresent(p -> {
-            if (!p.matches("^[0-7]{3,4}$")) {
+            if (!isValidPermissions(p)) {
                 throw new IllegalArgumentException(
                         "floci.storage.efs root-permissions must be 3-4 octal digits (e.g. \"0777\","
                                 + " or \"2775\" for setgid): " + p);
@@ -541,7 +774,7 @@ public class ContainerLifecycleManager {
         });
     }
 
-    private void initSharedVolumeRoot(String volumeName, OptionalInt ownerUid, OptionalInt ownerGid,
+    private void initSharedVolumeRoot(String volumeName, OptionalLong ownerUid, OptionalLong ownerGid,
                                       Optional<String> rootPermissions, String initImage) {
         String mount = "/floci-shared-volume";
         StringBuilder script = new StringBuilder();
@@ -549,7 +782,7 @@ public class ContainerLifecycleManager {
         // always has both operands (no trailing colon). setgid is expressed via a 4-digit octal
         // rootPermissions (e.g. "2775"), matching CreationInfo.Permissions.
         if (ownerUid.isPresent() && ownerGid.isPresent()) {
-            script.append("chown ").append(ownerUid.getAsInt()).append(':').append(ownerGid.getAsInt())
+            script.append("chown ").append(ownerUid.getAsLong()).append(':').append(ownerGid.getAsLong())
                     .append(' ').append(mount).append(" && ");
         }
         rootPermissions.ifPresent(p -> script.append("chmod ").append(p).append(' ').append(mount).append(" && "));
@@ -560,11 +793,37 @@ public class ContainerLifecycleManager {
 
         HostConfig hostConfig = HostConfig.newHostConfig().withMounts(List.of(
                 new Mount().withType(MountType.VOLUME).withSource(volumeName).withTarget(mount)));
-        CreateContainerResponse created = dockerClient.createContainerCmd(image)
+        CreateContainerCmd command = dockerClient.createContainerCmd(image)
                 .withHostConfig(hostConfig)
-                .withCmd("sh", "-c", script.toString())
-                .withLabels(ContainerStorageHelper.defaultLabels(config))
-                .exec();
+                .withCmd("sh", "-c", script.toString());
+        runStorageInitHelper(command, "shared volume " + volumeName);
+        LOG.infov("Initialised shared volume {0} root (cmd: {1})", volumeName, script);
+    }
+
+    /**
+     * Makes a bind directory writable by the owner of the image's data directory. The
+     * helper runs on the Docker daemon's host, using the workload image so custom image
+     * ownership is respected. Only the mount root is changed; existing files are untouched.
+     * Unlike shared-volume initialisation, failure propagates and every launch checks the root.
+     */
+    public void ensureBindDirectory(String hostPath, String image, String imageDataPath) {
+        imageCacheService.ensureImageExists(image);
+        String mount = "/floci-bind-directory";
+        String script = "ownership=$(stat -c '%u:%g' \"$1\") && "
+                + "chown \"$ownership\" \"$2\" && chmod u+rwx \"$2\"";
+        HostConfig hostConfig = HostConfig.newHostConfig()
+                .withBinds(new Bind(hostPath, new Volume(mount)));
+        CreateContainerCmd command = dockerClient.createContainerCmd(image)
+                .withHostConfig(hostConfig)
+                .withUser("0")
+                .withEntrypoint("sh")
+                .withCmd("-c", script, "floci-bind-init", imageDataPath, mount);
+        runStorageInitHelper(command, "bind directory " + hostPath);
+        LOG.infov("Initialised bind directory {0} using ownership from {1}:{2}", hostPath, image, imageDataPath);
+    }
+
+    private void runStorageInitHelper(CreateContainerCmd command, String description) {
+        CreateContainerResponse created = command.withLabels(ContainerStorageHelper.defaultLabels(config)).exec();
         String helperId = created.getId();
         try {
             startContainer(helperId);
@@ -572,17 +831,14 @@ public class ContainerLifecycleManager {
                     .exec(new WaitContainerResultCallback())
                     .awaitStatusCode(60, TimeUnit.SECONDS);
             if (status == null || status != 0) {
-                // Throw so the caller leaves the volume unmemoised and retries on the next launch,
-                // rather than leaving it root:root 0755 with no further attempt.
-                throw new IllegalStateException("shared-volume init for " + volumeName
-                        + " exited with status " + status + " (cmd: " + script + ")");
+                throw new IllegalStateException("Storage init for " + description + " exited with status " + status);
             }
-            LOG.infov("Initialised shared volume {0} root (cmd: {1})", volumeName, script);
         } finally {
             try {
                 dockerClient.removeContainerCmd(helperId).withForce(true).exec();
-            } catch (Exception ignore) {
-                // best-effort cleanup of the one-off helper
+            } catch (Exception e) {
+                LOG.warnv("Failed to remove storage init helper {0} for {1}: {2}",
+                        helperId, description, e.getMessage());
             }
         }
     }
@@ -739,6 +995,15 @@ public class ContainerLifecycleManager {
      * @return information about the adopted container
      */
     public ContainerInfo adopt(String containerId, List<Integer> ports) {
+        return adopt(containerId, ports, Optional.empty());
+    }
+
+    /**
+     * Adopts a container and resolves its endpoints on {@code preferredNetwork} when it is attached
+     * there, as {@link #createAndStart} does with the spec's network. A container that is on the
+     * default bridge as well as that network is otherwise reached at whichever address comes first.
+     */
+    public ContainerInfo adopt(String containerId, List<Integer> ports, Optional<String> preferredNetwork) {
         LOG.infov("Adopting existing container {0}", containerId);
 
         InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
@@ -753,7 +1018,7 @@ public class ContainerLifecycleManager {
         Map<Integer, EndpointInfo> endpoints = new HashMap<>();
         Map<Integer, Integer> publishedHostPorts = new HashMap<>();
         for (int port : ports) {
-            endpoints.put(port, resolveEndpoint(inspect, port));
+            endpoints.put(port, resolveEndpoint(inspect, port, preferredNetwork.orElse(null)));
             OptionalInt published = readPublishedHostPort(inspect, port);
             if (published.isPresent()) {
                 publishedHostPorts.put(port, published.getAsInt());
@@ -809,8 +1074,17 @@ public class ContainerLifecycleManager {
      * @param name the container name to remove
      */
     public void removeIfExistsStrict(String name) {
+        removeIfExistsStrict(name, false);
+    }
+
+    /** Removes a container, optionally reclaiming anonymous volumes that are no longer in use. */
+    public void removeIfExistsStrict(String name, boolean removeAnonymousVolumes) {
         try {
-            dockerClient.removeContainerCmd(name).withForce(true).exec();
+            RemoveContainerCmd remove = dockerClient.removeContainerCmd(name).withForce(true);
+            if (removeAnonymousVolumes) {
+                remove.withRemoveVolumes(true);
+            }
+            remove.exec();
             LOG.infov("Removed stale container {0}", name);
         } catch (NotFoundException e) {
             // Not found means the fixed name is available.
@@ -822,27 +1096,36 @@ public class ContainerLifecycleManager {
     /**
      * Returns whether the container is currently running. A missing container is treated as
      * not-running; any other Docker error (e.g. an inspect timeout under daemon overload) is also
-     * treated as not-running, so a hung/dead container is not reused from the warm pool — a false
+     * treated as not-running, so a hung/dead container is not reused from the warm pool. A false
      * negative merely triggers a clean cold-start, which is far cheaper than blocking until the
-     * function timeout.
+     * function timeout. Callers that must not act on a failed probe use {@link #probeContainer}.
      *
      * @param containerId the container ID to inspect
      * @return true only if the container exists and is reported as running; false on any error
      */
     public boolean isContainerRunning(String containerId) {
+        return probeContainer(containerId) == ContainerLiveness.RUNNING;
+    }
+
+    /**
+     * Probes the container and tells a definite answer from a failed probe.
+     *
+     * @param containerId the container ID to inspect
+     * @return RUNNING or NOT_RUNNING when Docker answered (a missing container is NOT_RUNNING),
+     *         UNKNOWN when the inspect call itself failed
+     */
+    public ContainerLiveness probeContainer(String containerId) {
         try {
             InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
-            return Boolean.TRUE.equals(inspect.getState().getRunning());
+            return Boolean.TRUE.equals(inspect.getState().getRunning())
+                    ? ContainerLiveness.RUNNING
+                    : ContainerLiveness.NOT_RUNNING;
         } catch (NotFoundException e) {
-            return false;
+            return ContainerLiveness.NOT_RUNNING;
         } catch (Exception e) {
-            // Treat an inspect failure/timeout as NOT running. Under Docker-daemon overload,
-            // returning true here caused the warm pool to "reuse" dead/hung containers, so the
-            // invocation blocked until the function timeout (~20-30s) every time. A false
-            // negative merely triggers a clean cold-start, which is far cheaper than a hang.
-            LOG.warnv("Liveness check failed for container {0}; treating as not running: {1}",
+            LOG.warnv("Liveness check failed for container {0}; state unknown: {1}",
                     containerId, e.getMessage());
-            return false;
+            return ContainerLiveness.UNKNOWN;
         }
     }
 
@@ -855,7 +1138,19 @@ public class ContainerLifecycleManager {
      */
     public EndpointInfo resolveEndpoint(String containerId, int containerPort) {
         InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
-        return resolveEndpoint(inspect, containerPort);
+        return resolveEndpoint(inspect, containerPort, null, true);
+    }
+
+    /**
+     * Like {@link #resolveEndpoint(String, int)}, but prefers the container's address on
+     * {@code preferredNetwork}, as {@link #createAndStart} does with the spec's network. A
+     * container that publishes ports is created on the default bridge and connected to its
+     * service network after start, so without a preference the bridge address, which Floci
+     * usually cannot reach, can be returned instead.
+     */
+    public EndpointInfo resolveEndpoint(String containerId, int containerPort, String preferredNetwork) {
+        InspectContainerResponse inspect = dockerClient.inspectContainerCmd(containerId).exec();
+        return resolveEndpoint(inspect, containerPort, preferredNetwork, true);
     }
 
     /**
@@ -913,6 +1208,23 @@ public class ContainerLifecycleManager {
     }
 
     /**
+     * The labels on a named volume, or empty when it does not exist or the runtime cannot be
+     * queried, so a caller deciding whether a volume is its own can fail closed.
+     */
+    public Optional<Map<String, String>> tryVolumeLabels(String name) {
+        try {
+            Map<String, String> labels = dockerClient.inspectVolumeCmd(name).exec().getLabels();
+            return Optional.of(labels == null ? Map.of() : labels);
+        } catch (NotFoundException e) {
+            LOG.debugv("Volume ''{0}'' not found while reading its labels", name);
+            return Optional.empty();
+        } catch (DockerException e) {
+            LOG.warnv("Failed to read labels of volume ''{0}'': {1}", name, e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
      * Attempts to take an authoritative snapshot of all named volumes in the container runtime.
      * An empty optional means the runtime could not be queried; it is intentionally distinct from
      * a successful query that returned an empty set so cleanup callers fail closed.
@@ -940,6 +1252,30 @@ public class ContainerLifecycleManager {
         }
     }
 
+    /**
+     * Capability names as a task definition or a caller gives them, with or without the
+     * {@code CAP_} prefix and in any case. A name Docker does not know fails the create, as
+     * {@code docker run --cap-add} does.
+     */
+    private static List<Capability> capabilities(List<String> names) {
+        List<Capability> result = new ArrayList<>();
+        for (String name : names) {
+            String normalized = name.trim().toUpperCase(Locale.ROOT);
+            if (normalized.startsWith("CAP_")) {
+                normalized = normalized.substring("CAP_".length());
+            }
+            try {
+                Capability capability = Capability.valueOf(normalized);
+                if (!result.contains(capability)) {
+                    result.add(capability);
+                }
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("Unknown Linux capability: " + name, e);
+            }
+        }
+        return result;
+    }
+
     private HostConfig buildHostConfig(ContainerSpec spec) {
         HostConfig hostConfig = HostConfig.newHostConfig();
 
@@ -947,13 +1283,45 @@ public class ContainerLifecycleManager {
         if (spec.privileged()) {
             hostConfig.withPrivileged(true);
         }
-        if (spec.labels() != null && "true".equals(spec.labels().get("floci.security-group-workload"))) {
-            hostConfig.withCapDrop(Capability.NET_ADMIN, Capability.NET_RAW);
+        LinuxOptions linux = spec.linuxOptions();
+        List<Capability> capDrop = new ArrayList<>();
+        List<Capability> capAdd = capabilities(linux.capAdd());
+        if ("true".equals(ContainerStorageHelper.labelValue(
+                spec.labels(), ContainerStorageHelper.SECURITY_GROUP_WORKLOAD_LABEL))) {
+            // The security group is enforced inside the namespace the workload shares, so the
+            // workload must not be able to rewrite it, whatever capabilities it asks for. Docker
+            // applies a named add over a drop, so the two are taken out of the adds as well; ALL
+            // among the adds is every capability but the dropped ones, so it can stay.
+            capDrop.add(Capability.NET_ADMIN);
+            capDrop.add(Capability.NET_RAW);
+            capAdd.removeAll(capDrop);
+        }
+        for (Capability capability : capabilities(linux.capDrop())) {
+            if (!capDrop.contains(capability)) {
+                capDrop.add(capability);
+            }
         }
         // The firewall helper only has to program nftables in the namespace it already owns,
         // which needs CAP_NET_ADMIN and nothing else that privileged mode would also grant.
-        if (spec.labels() != null && "true".equals(spec.labels().get("floci.security-group-helper"))) {
-            hostConfig.withCapAdd(Capability.NET_ADMIN);
+        if ("true".equals(ContainerStorageHelper.labelValue(
+                spec.labels(), ContainerStorageHelper.SECURITY_GROUP_HELPER_LABEL))
+                && !capAdd.contains(Capability.NET_ADMIN)) {
+            capAdd.add(Capability.NET_ADMIN);
+        }
+        if (!capDrop.isEmpty()) {
+            hostConfig.withCapDrop(capDrop.toArray(new Capability[0]));
+        }
+        if (!capAdd.isEmpty()) {
+            hostConfig.withCapAdd(capAdd.toArray(new Capability[0]));
+        }
+        if (!linux.devices().isEmpty()) {
+            hostConfig.withDevices(linux.devices());
+        }
+        if (linux.shmSizeBytes() != null) {
+            hostConfig.withShmSize(linux.shmSizeBytes());
+        }
+        if (!linux.tmpfs().isEmpty()) {
+            hostConfig.withTmpFs(linux.tmpfs());
         }
 
         if (spec.cgroupnsMode() != null && !spec.cgroupnsMode().isBlank()) {
@@ -969,6 +1337,26 @@ public class ContainerLifecycleManager {
         // Memory limit
         if (spec.hasMemoryLimit()) {
             hostConfig.withMemory(spec.memoryBytes());
+        }
+        if (linux.memorySwapBytes() != null) {
+            hostConfig.withMemorySwap(linux.memorySwapBytes());
+        }
+        if (linux.memorySwappiness() != null) {
+            hostConfig.withMemorySwappiness(linux.memorySwappiness());
+        }
+
+        // CPU quota and weight
+        if (spec.nanoCpus() != null && spec.nanoCpus() > 0) {
+            hostConfig.withNanoCPUs(clampToHostCpus(spec.nanoCpus()));
+        }
+        if (spec.cpuShares() != null && spec.cpuShares() > 0) {
+            hostConfig.withCpuShares(spec.cpuShares());
+        }
+        if (spec.readonlyRootfs()) {
+            hostConfig.withReadonlyRootfs(true);
+        }
+        if (spec.init()) {
+            hostConfig.withInit(true);
         }
 
         // CPU quota and weight
@@ -988,31 +1376,27 @@ public class ContainerLifecycleManager {
         // binding. ECR's sibling registry is the exception: it always publishes
         // its port because host-side docker clients (and CDK in compat tests)
         // connect via localhost:<hostPort>.
-        if (spec.hasPortBindings()) {
+        if (spec.publishesPorts()) {
             Ports ports = new Ports();
             for (Map.Entry<Integer, Integer> entry : spec.portBindings().entrySet()) {
                 int containerPort = entry.getKey();
                 int hostPort = entry.getValue();
-
-                // 0 means dynamic allocation
-                if (hostPort == 0) {
-                    hostPort = portAllocator.allocateAny();
-                }
-
-                Ports.Binding binding = spec.loopbackPortBindings().contains(containerPort)
-                        ? Ports.Binding.bindIpAndPort("127.0.0.1", hostPort)
-                        : Ports.Binding.bindPort(hostPort);
-                ports.bind(ExposedPort.tcp(containerPort), binding);
-                LOG.debugv("Port binding: {0} -> {1}", String.valueOf(containerPort), String.valueOf(hostPort));
+                ports.bind(ExposedPort.tcp(containerPort), bindingFor(spec, containerPort, hostPort));
+                LOG.debugv("Port binding: {0} -> {1}", String.valueOf(containerPort),
+                        hostPort == 0 ? "dynamic" : String.valueOf(hostPort));
             }
             hostConfig.withPortBindings(ports);
+        } else if (spec.hasPortBindings()) {
+            LOG.infov("Container {0} joins network {1}, which publishes no host ports; it serves {2} directly there",
+                    spec.name(), spec.networkMode(), spec.portBindings().keySet());
         }
 
-        // Network mode: only set during creation when there are no host port bindings.
+        // Network mode: only set during creation when no host ports are published.
         // withNetworkMode() + port bindings suppresses port publishing on macOS Docker Desktop,
-        // so containers with port bindings (e.g. ECR registry) connect to the network
-        // after start via connectToNetworkCmd() instead.
-        if (spec.networkMode() != null && !spec.networkMode().isBlank() && !spec.hasPortBindings()) {
+        // so containers with published ports (e.g. ECR registry) connect to the network
+        // after start via connectToNetworkCmd() instead. host, none and container:<id> publish
+        // nothing and cannot be connected after creation, so they always go on the HostConfig.
+        if (spec.networkMode() != null && !spec.networkMode().isBlank() && !spec.publishesPorts()) {
             hostConfig.withNetworkMode(spec.networkMode());
         }
 
@@ -1043,8 +1427,10 @@ public class ContainerLifecycleManager {
         }
 
         // DNS servers — used to inject Floci's embedded DNS so spawned containers
-        // can resolve *.localhost.floci.io to Floci's Docker network IP.
-        if (spec.dnsServers() != null && !spec.dnsServers().isEmpty()) {
+        // can resolve *.localhost.floci.io to Floci's Docker network IP. Docker rejects them
+        // together with container:<id> network mode, where the resolver comes from that container.
+        if (spec.dnsServers() != null && !spec.dnsServers().isEmpty()
+                && !isContainerNetworkMode(spec.networkMode())) {
             hostConfig.withDns(spec.dnsServers().toArray(new String[0]));
         }
 
@@ -1056,6 +1442,30 @@ public class ContainerLifecycleManager {
         }
 
         return hostConfig;
+    }
+
+    /**
+     * The host interface a published port binds to.
+     *
+     * <p>An explicit address from {@code portBindingHostIps} wins, so a caller that reads the
+     * address from configuration keeps control of it. {@code loopbackPortBindings} is the fixed
+     * form of the same decision, for a port that is an implementation detail and must never leave
+     * the host. A port in neither binds every interface, which is Docker's own default and what
+     * every caller that does not ask has always got.
+     *
+     * <p>A host port of 0 leaves the port to the daemon, and the endpoint is read back from
+     * inspect after start. A port Floci picked itself would be probed where Floci runs, not where
+     * the daemon binds it: on Docker Desktop that is the VM, whose ephemeral range lies inside the
+     * Mac's, so a VM socket on the same number fails the start with "address already in use".
+     */
+    private static Ports.Binding bindingFor(ContainerSpec spec, int containerPort, int hostPort) {
+        String hostIp = spec.portBindingHostIps() == null
+                ? null
+                : spec.portBindingHostIps().get(containerPort);
+        if (hostIp == null || hostIp.isBlank()) {
+            hostIp = spec.loopbackPortBindings().contains(containerPort) ? LOOPBACK_HOST_IP : null;
+        }
+        return new Ports.Binding(hostIp, hostPort == 0 ? null : String.valueOf(hostPort));
     }
 
     /**
@@ -1099,7 +1509,20 @@ public class ContainerLifecycleManager {
     }
 
     private static boolean isContainerNetworkMode(String networkMode) {
-        return networkMode != null && networkMode.startsWith("container:");
+        return networkMode != null && networkMode.startsWith(CONTAINER_NETWORK_MODE_PREFIX);
+    }
+
+    private static boolean isHostNetworkMode(InspectContainerResponse inspect) {
+        HostConfig hostConfig = inspect.getHostConfig();
+        return hostConfig != null && "host".equals(hostConfig.getNetworkMode());
+    }
+
+    private static String networkNamespaceOwner(InspectContainerResponse inspect) {
+        HostConfig hostConfig = inspect.getHostConfig();
+        String networkMode = hostConfig == null ? null : hostConfig.getNetworkMode();
+        return isContainerNetworkMode(networkMode)
+                ? networkMode.substring(CONTAINER_NETWORK_MODE_PREFIX.length())
+                : null;
     }
 
     private Map<Integer, EndpointInfo> resolveEndpoints(String containerId, ContainerSpec spec) {
@@ -1121,30 +1544,50 @@ public class ContainerLifecycleManager {
         return resolveEndpoint(inspect, containerPort, null);
     }
 
-    private EndpointInfo resolveEndpoint(InspectContainerResponse inspect, int containerPort, String preferredNetwork) {
+    private EndpointInfo resolveEndpoint(InspectContainerResponse inspect, int containerPort,
+                                         String preferredNetwork) {
+        return resolveEndpoint(inspect, containerPort, preferredNetwork, false);
+    }
+
+    private EndpointInfo resolveEndpoint(InspectContainerResponse inspect, int containerPort,
+                                         String preferredNetwork, boolean requireReachable) {
         if (!containerDetector.isRunningInContainer()) {
             // Native mode: use localhost and the bound host port
-            var bindings = inspect.getNetworkSettings().getPorts().getBindings();
-            var binding = bindings.get(ExposedPort.tcp(containerPort));
+            Map<ExposedPort, Ports.Binding[]> bindings = inspect.getNetworkSettings().getPorts().getBindings();
+            Ports.Binding[] binding = bindings.get(ExposedPort.tcp(containerPort));
 
             if (binding != null && binding.length > 0) {
                 int hostPort = Integer.parseInt(binding[0].getHostPortSpec());
                 return new EndpointInfo("localhost", hostPort);
             }
-            // Fallback to container port
+            if (requireReachable) {
+                throw new IllegalStateException(
+                        "Container " + inspect.getId() + " has no published binding for port " + containerPort);
+            }
+            // Creation can still expose an internal-only port to another container.
             return new EndpointInfo("localhost", containerPort);
-        } else {
-            // Container mode: use container IP on the docker network.
-            // Prefer the configured network's IP — the container may be on multiple
-            // networks (bridge + the configured network) when connectToNetworkCmd()
-            // is used instead of withNetworkMode() during creation.
-            String containerIp = resolveContainerIp(inspect, preferredNetwork);
-            return new EndpointInfo(containerIp, containerPort);
         }
+        String host = resolveReachableHost(inspect, preferredNetwork);
+        if (requireReachable && (host == null || host.isBlank())) {
+            throw new IllegalStateException(
+                    "Container " + inspect.getId() + " has no reachable address for port " + containerPort);
+        }
+        return new EndpointInfo(host, containerPort);
+    }
+
+    private String resolveReachableHost(InspectContainerResponse inspect, String preferredNetwork) {
+        if (isHostNetworkMode(inspect)) {
+            return "localhost";
+        }
+        String owner = networkNamespaceOwner(inspect);
+        if (owner != null) {
+            return resolveReachableHost(dockerClient.inspectContainerCmd(owner).exec(), preferredNetwork);
+        }
+        return resolveContainerIp(inspect, preferredNetwork);
     }
 
     private String resolveContainerIp(InspectContainerResponse inspect, String preferredNetwork) {
-        var networks = inspect.getNetworkSettings().getNetworks();
+        Map<String, ContainerNetwork> networks = inspect.getNetworkSettings().getNetworks();
         if (networks != null) {
             // Prefer the configured network so that when the container is on both
             // bridge (default) and the service network, we return the right IP.

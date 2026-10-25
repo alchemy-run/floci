@@ -7,7 +7,7 @@ import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsService;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbService;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbFacade;
 import io.github.hectorvent.floci.services.firehose.FirehoseService;
 import io.github.hectorvent.floci.services.iam.IamPolicyEvaluator;
 import io.github.hectorvent.floci.services.iot.model.IotCertificate;
@@ -19,7 +19,6 @@ import io.github.hectorvent.floci.services.s3.S3Service;
 import io.github.hectorvent.floci.services.sns.SnsService;
 import io.github.hectorvent.floci.services.sqs.SqsService;
 
-import java.time.Clock;
 import java.util.Set;
 
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
@@ -48,11 +47,6 @@ final class IotServiceTestSupport {
     }
 
     IotServiceTestSupport(String region, FlociCertificateAuthority certificateAuthority, boolean accountAware) {
-        this(region, certificateAuthority, accountAware, Clock.systemUTC());
-    }
-
-    IotServiceTestSupport(String region, FlociCertificateAuthority certificateAuthority, boolean accountAware,
-                          Clock clock) {
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.defaultRegion()).thenReturn(region);
         when(config.services().iot().ruleSqlStrict()).thenReturn(false);
@@ -80,12 +74,11 @@ final class IotServiceTestSupport {
                 mock(SnsService.class),
                 mock(S3Service.class),
                 mock(KinesisService.class),
-                mock(DynamoDbService.class),
+                mock(DynamoDbFacade.class),
                 mock(LambdaService.class),
                 mock(FirehoseService.class),
                 mock(CloudWatchLogsService.class),
                 certificateAuthority,
-                new IamPolicyEvaluator(objectMapper),
-                clock);
+                new IamPolicyEvaluator(objectMapper));
     }
 }

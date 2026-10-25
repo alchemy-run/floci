@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.iot;
 
-import io.github.hectorvent.floci.services.acm.CertificateGenerator;
+import io.github.hectorvent.floci.core.common.Digests;
+import io.github.hectorvent.floci.core.common.Pem;
 import io.github.hectorvent.floci.services.iot.model.IotCertificate;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.path.json.JsonPath;
@@ -16,13 +17,11 @@ import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
-import java.security.MessageDigest;
 import java.security.PrivateKey;
 import java.security.Signature;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.Base64;
-import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 
@@ -77,13 +76,13 @@ class IotDeviceCertificateIntegrationTest {
                 "AWS IoT-issued certificates all expire at the end of 2049, never past the CA");
         assertTrue(!cert.getNotBefore().toInstant().isAfter(java.time.Instant.now()), "valid from issue time");
 
-        String expectedId = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(cert.getEncoded()));
+        String expectedId = Digests.sha256Hex(cert.getEncoded());
         assertEquals(expectedId, body.getString("certificateId"), "AWS certificateId is sha256(DER), lowercase hex");
         assertTrue(body.getString("certificateArn").endsWith(":cert/" + expectedId));
 
         String privateKeyPem = body.getString("keyPair.PrivateKey");
         assertTrue(privateKeyPem.startsWith("-----BEGIN RSA PRIVATE KEY-----"), "AWS returns a PKCS#1 RSA key");
-        PrivateKey privateKey = new CertificateGenerator().parsePrivateKey(privateKeyPem);
+        PrivateKey privateKey = Pem.parsePrivateKey(privateKeyPem);
         Signature signer = Signature.getInstance("SHA256withRSA");
         signer.initSign(privateKey);
         signer.update("floci".getBytes(StandardCharsets.UTF_8));
@@ -146,7 +145,7 @@ class IotDeviceCertificateIntegrationTest {
         assertEquals(List.of("1.3.6.1.5.5.7.3.2"), cert.getExtendedKeyUsage(), "clientAuth");
         assertEquals(-1, cert.getBasicConstraints());
         assertEquals(expectedNotAfter(ca), cert.getNotAfter().toInstant());
-        String expectedId = HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(cert.getEncoded()));
+        String expectedId = Digests.sha256Hex(cert.getEncoded());
         assertEquals(expectedId, body.getString("certificateId"));
         assertNull(body.get("keyPair"), "AWS never returns a private key for a CSR: the device holds it");
     }

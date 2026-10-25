@@ -6,13 +6,16 @@ import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestScopes;
+import io.github.hectorvent.floci.core.resource.ExplorerResource;
+import io.github.hectorvent.floci.core.resource.ResourceProvider;
+import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
-
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription;
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.KinesisStreamSource;
 import io.github.hectorvent.floci.services.firehose.model.DeliveryStreamDescription.S3Destination;
 import io.github.hectorvent.floci.services.firehose.model.Record;
+import io.github.hectorvent.floci.services.firehose.model.RedshiftDestination;
 import io.github.hectorvent.floci.services.kinesis.KinesisService;
 import io.github.hectorvent.floci.services.kinesis.model.KinesisRecord;
 import io.github.hectorvent.floci.services.kinesis.model.KinesisShard;
@@ -27,21 +30,26 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
-import io.github.hectorvent.floci.core.resource.ExplorerResource;
-import io.github.hectorvent.floci.core.resource.ResourceProvider;
-import io.github.hectorvent.floci.core.resource.SupportedResourceType;
-import java.util.LinkedHashMap;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Deque;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedDeque;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @ApplicationScoped
 public class FirehoseService implements ResourceProvider {
@@ -49,6 +57,9 @@ public class FirehoseService implements ResourceProvider {
     private static final Logger LOG = Logger.getLogger(FirehoseService.class);
     private static final String DEFAULT_BUCKET = "floci-firehose-results";
     private static final int DEFAULT_BUFFERING_INTERVAL_SECONDS = 300;
+    private static final int DEFAULT_REDSHIFT_RETRY_SECONDS = 3600;
+    // AWS retries a failed Redshift load every 5 minutes.
+    private static final long REDSHIFT_RETRY_INTERVAL_SECONDS = 300;
     private static final int DEFAULT_BUFFERING_SIZE_MBS = 5;
     /**
      * botocore's {@code AWSKMSKeyARNForSSE} shape: a KMS <em>key</em> ARN, not an alias and
@@ -85,8 +96,10 @@ public class FirehoseService implements ResourceProvider {
     // DeliveryStartTimestamp and re-deliver the source stream's whole retained history to
     // S3. A Kinesis shard iterator is a self-describing token
     // (streamName|shardId|type|sequenceNumber|index|timestamp, base64) with no
-    // JVM-lifetime component, and KinesisService never trims a shard's record list, so a
-    // checkpoint written before a restart still resolves to the same position after one.
+    // JVM-lifetime component, and KinesisService resolves it by sequence number, so a
+    // checkpoint written before a restart still resolves to the same position after one,
+    // even once retention has pruned older records. If the checkpointed record itself has
+    // expired, reading resumes at the oldest retained record.
     //
     // This store holds only COMMITTED positions: a shard is advanced here once the
     // records read up to that point have actually landed in S3. See
@@ -110,6 +123,15 @@ public class FirehoseService implements ResourceProvider {
     private final Map<String, Map<String, String>> pendingSourceIterators = new ConcurrentHashMap<>();
     private final FirehoseParquetConverter parquetConverter;
     private final FirehoseLambdaTransformer lambdaTransformer;
+    private final FirehoseRedshiftDelivery redshiftDelivery;
+    private final Executor redshiftDeliveryExecutor;
+    // Per stream, the batches staged in S3 whose COPY has not succeeded yet, oldest first. A failed COPY is
+    // retried against the object already staged instead of staging the batch again.
+    private final Map<String, Deque<PendingRedshiftCopy>> redshiftPending = new ConcurrentHashMap<>();
+    // Tracks streams that currently have a drain task queued or running on redshiftDeliveryExecutor.
+    private final Set<String> activeRedshiftDrains = ConcurrentHashMap.newKeySet();
+    // Serialises the read, version check, merge and write of a Redshift UpdateDestination per stream.
+    private final Map<String, Object> redshiftUpdateLocks = new ConcurrentHashMap<>();
     private final Clock clock;
     private final long tickIntervalSeconds;
     private final int flushRecordCount;
@@ -192,11 +214,39 @@ public class FirehoseService implements ResourceProvider {
         sourceIteratorStore.deleteForAccount(accountFromScopedKey(key), logicalKeyFromScopedKey(key));
     }
 
-    @Inject
+    /** Kept so callers that never deliver to Redshift need no delivery collaborator; null means unavailable. */
     public FirehoseService(StorageFactory storageFactory, S3Service s3Service, KinesisService kinesisService,
                            RegionResolver regionResolver, Clock clock, EmulatorConfig config,
                            FirehoseParquetConverter parquetConverter,
                            FirehoseLambdaTransformer lambdaTransformer) {
+        this(storageFactory, s3Service, kinesisService, regionResolver, clock, config, parquetConverter,
+                lambdaTransformer, null);
+    }
+
+    @Inject
+    public FirehoseService(StorageFactory storageFactory, S3Service s3Service, KinesisService kinesisService,
+                           RegionResolver regionResolver, Clock clock, EmulatorConfig config,
+                           FirehoseParquetConverter parquetConverter,
+                           FirehoseLambdaTransformer lambdaTransformer,
+                           FirehoseRedshiftDelivery redshiftDelivery) {
+        this(storageFactory, s3Service, kinesisService, regionResolver, clock, config, parquetConverter,
+                lambdaTransformer, redshiftDelivery, null);
+    }
+
+    public FirehoseService(StorageFactory storageFactory, S3Service s3Service, KinesisService kinesisService,
+                           RegionResolver regionResolver, Clock clock, EmulatorConfig config,
+                           FirehoseParquetConverter parquetConverter,
+                           FirehoseLambdaTransformer lambdaTransformer,
+                           FirehoseRedshiftDelivery redshiftDelivery,
+                           Executor redshiftDeliveryExecutor) {
+        this.redshiftDelivery = redshiftDelivery;
+        this.redshiftDeliveryExecutor = redshiftDeliveryExecutor != null
+                ? redshiftDeliveryExecutor
+                : Executors.newSingleThreadExecutor(r -> {
+                    Thread t = new Thread(r, "firehose-redshift-delivery");
+                    t.setDaemon(true);
+                    return t;
+                });
         this.streamStore = storageFactory.create("firehose", "streams.json",
                 new TypeReference<Map<String, DeliveryStreamDescription>>() {});
         this.sourceIteratorStore = storageFactory.create("firehose", "source-iterators.json",
@@ -231,10 +281,29 @@ public class FirehoseService implements ResourceProvider {
     // persist them to disk via storageFactory.flushAll(). Each flush also commits the
     // source checkpoint it just made durable, so a graceful shutdown neither loses
     // records nor re-delivers them; storageFactory.flushAll() then writes that
-    // checkpoint out with everything else.
+    // checkpoint out with everything else. Redshift COPY tasks are allowed a brief
+    // window to complete before the delivery executor is forced down.
     void onPreShutdown(@Observes ShutdownDelayInitiatedEvent ignored) {
         flushExecutor.shutdownNow();
         buffers.keySet().forEach(this::flushByKey);
+        if (redshiftDeliveryExecutor instanceof ExecutorService es) {
+            es.shutdown();
+            try {
+                if (!es.awaitTermination(5, TimeUnit.SECONDS)) {
+                    dropAndLogQueuedTasks(es);
+                }
+            } catch (InterruptedException e) {
+                dropAndLogQueuedTasks(es);
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private static void dropAndLogQueuedTasks(ExecutorService es) {
+        List<Runnable> dropped = es.shutdownNow();
+        if (!dropped.isEmpty()) {
+            LOG.warnv("Dropping {0} queued Redshift COPY task(s) on Firehose shutdown", dropped.size());
+        }
     }
 
     /**
@@ -248,6 +317,7 @@ public class FirehoseService implements ResourceProvider {
         try {
             pollKinesisSources();
             flushDueBuffers(clock.instant());
+            retryPendingRedshiftCopies();
         } catch (Throwable t) {
             LOG.warnv("Firehose buffer flush tick failed: {0}", t.getMessage());
         }
@@ -313,20 +383,36 @@ public class FirehoseService implements ResourceProvider {
     public String createDeliveryStream(String region, String accountId, String name, S3Destination s3Config,
                                        List<DeliveryStreamDescription.Tag> tags, String deliveryStreamType,
                                        KinesisStreamSource source) {
-        return createDeliveryStream(region, accountId, name, s3Config, tags, deliveryStreamType, source, null);
+        return createDeliveryStream(region, accountId, name, s3Config, null, tags, deliveryStreamType, source);
     }
 
     public String createDeliveryStream(String region, String name, S3Destination s3Config,
-                                       List<DeliveryStreamDescription.Tag> tags, String deliveryStreamType,
-                                       KinesisStreamSource source,
-                                       DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
-        return createDeliveryStream(region, regionResolver.getAccountId(), name, s3Config, tags,
-                deliveryStreamType, source, encryption);
+                                       RedshiftDestination redshift, List<DeliveryStreamDescription.Tag> tags,
+                                       String deliveryStreamType, KinesisStreamSource source) {
+        return createDeliveryStream(region, regionResolver.getAccountId(), name, s3Config, redshift, tags,
+                deliveryStreamType, source);
     }
 
     public String createDeliveryStream(String region, String accountId, String name, S3Destination s3Config,
-                                       List<DeliveryStreamDescription.Tag> tags, String deliveryStreamType,
-                                       KinesisStreamSource source,
+                                       RedshiftDestination redshift, List<DeliveryStreamDescription.Tag> tags,
+                                       String deliveryStreamType, KinesisStreamSource source) {
+        return createDeliveryStream(region, accountId, name, s3Config, redshift, tags, deliveryStreamType, source,
+                null);
+    }
+
+    /** CreateDeliveryStream in the request's account, with its DeliveryStreamEncryptionConfigurationInput. */
+    public String createDeliveryStream(String region, String name, S3Destination s3Config,
+                                       RedshiftDestination redshift, List<DeliveryStreamDescription.Tag> tags,
+                                       String deliveryStreamType, KinesisStreamSource source,
+                                       DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
+        return createDeliveryStream(region, regionResolver.getAccountId(), name, s3Config, redshift, tags,
+                deliveryStreamType, source, encryption);
+    }
+
+    /** CreateDeliveryStream with its DeliveryStreamEncryptionConfigurationInput, null when the request has none. */
+    public String createDeliveryStream(String region, String accountId, String name, S3Destination s3Config,
+                                       RedshiftDestination redshift, List<DeliveryStreamDescription.Tag> tags,
+                                       String deliveryStreamType, KinesisStreamSource source,
                                        DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
         String streamKey = scopedKey(accountId, region, name);
         if (name == null || name.isEmpty() || name.length() > 64 || !name.matches("[a-zA-Z0-9_.-]+")) {
@@ -339,7 +425,14 @@ public class FirehoseService implements ResourceProvider {
                     "Delivery stream " + name + " already exists.", 409);
         }
 
+        validateLogging(null, s3Config);
         validateBufferingHints(s3Config);
+        if (redshift != null) {
+            validateLogging(null, redshift.getS3());
+            validateLogging(null, redshift.getS3Backup());
+            validateBufferingHints(redshift.getS3());
+            validateBufferingHints(redshift.getS3Backup());
+        }
         boolean hasKinesisSource = source != null
                 && source.getKinesisStreamArn() != null
                 && !source.getKinesisStreamArn().isBlank();
@@ -355,15 +448,13 @@ public class FirehoseService implements ResourceProvider {
             throw new AwsException("InvalidArgumentException",
                     "KinesisStreamSourceConfiguration.RoleARN must not be null or empty.", 400);
         }
-
         String resolvedType = hasKinesisSource
                 ? "KinesisStreamAsSource"
-                : (deliveryStreamType != null && !deliveryStreamType.isBlank() ? deliveryStreamType : "DirectPut");
+                : (deliveryStreamType != null && !deliveryStreamType.isBlank() ? deliveryStreamType : null);
         if (encryption != null && "KinesisStreamAsSource".equals(resolvedType)) {
             throw new AwsException("InvalidArgumentException",
                     "Server-side encryption is not supported for delivery streams with a Kinesis stream as source.", 400);
         }
-
         DataFormatConversionValidator.validateEffective(s3Config);
         ProcessingConfigurationValidator.validateEffective(s3Config);
         if (s3Config != null) {
@@ -380,15 +471,14 @@ public class FirehoseService implements ResourceProvider {
         if (source != null && source.getDeliveryStartTimestamp() == null) {
             source.setDeliveryStartTimestamp(Instant.now());
         }
-        DeliveryStreamDescription description = new DeliveryStreamDescription(name, arn, s3Config, source);
+        DeliveryStreamDescription description = new DeliveryStreamDescription(name, arn, s3Config, redshift, source);
         description.setAccountId(accountId);
         description.setTags(tags);
-        description.setDeliveryStreamType(resolvedType);
+        if (resolvedType != null) {
+            description.setDeliveryStreamType(resolvedType);
+        }
         if (encryption != null) {
             applyEncryptionInput(description, encryption);
-        } else {
-            description.setDeliveryStreamEncryptionConfiguration(
-                    DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.disabled());
         }
         streamPut(streamKey, description);
         buffers.put(streamKey, Collections.synchronizedList(new ArrayList<>()));
@@ -405,7 +495,15 @@ public class FirehoseService implements ResourceProvider {
         updateDestination(scopedKey(accountId, region, name), name, currentVersionId, destinationId, update);
     }
 
-    private void updateDestination(String streamKey, String name, String currentVersionId, String destinationId, S3Destination update) {
+    /** The stream an UpdateDestination call targets, with the destination it addresses. */
+    private record UpdateTarget(DeliveryStreamDescription stream, DeliveryStreamDescription.Destination destination) {}
+
+    /**
+     * The checks every UpdateDestination variant starts with, in the order AWS applies them: the stream exists, the
+     * caller holds its current version, and the destination id is the stream's destination.
+     */
+    private UpdateTarget resolveUpdateTarget(String streamKey, String name, String currentVersionId,
+                                             String destinationId) {
         DeliveryStreamDescription stream = streamGet(streamKey)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Delivery stream not found: " + name, 400));
         if (!stream.getVersionId().equals(currentVersionId)) {
@@ -420,10 +518,22 @@ public class FirehoseService implements ResourceProvider {
             throw new AwsException("InvalidArgumentException",
                     "Destination Id " + destinationId + " not found", 400);
         }
+        return new UpdateTarget(stream, destination);
+    }
+
+    private void updateDestination(String streamKey, String name, String currentVersionId, String destinationId, S3Destination update) {
+        UpdateTarget target = resolveUpdateTarget(streamKey, name, currentVersionId, destinationId);
+        DeliveryStreamDescription stream = target.stream();
+        DeliveryStreamDescription.Destination destination = target.destination();
         if (update == null) {
             throw new AwsException("InvalidArgumentException",
                     "A destination update is required for UpdateDestination.", 400);
         }
+        if (destination.getRedshiftDestinationDescription() != null) {
+            throw new AwsException("InvalidArgumentException",
+                    "The delivery stream " + name + " has a Redshift destination; use RedshiftDestinationUpdate.", 400);
+        }
+        validateLogging(destination.getExtendedS3DestinationDescription(), update);
         validateBufferingHints(update);
         S3Destination current = destination.getExtendedS3DestinationDescription();
         if (current == null) {
@@ -453,45 +563,94 @@ public class FirehoseService implements ResourceProvider {
         LOG.infov("Updated destination {0} of Firehose delivery stream {1}", destinationId, name);
     }
 
+    public void updateRedshiftDestination(String name, String currentVersionId, String destinationId,
+                                          RedshiftDestination update) {
+        String streamKey = scopedKey(name);
+        synchronized (redshiftUpdateLocks.computeIfAbsent(streamKey, k -> new Object())) {
+            UpdateTarget target = resolveUpdateTarget(streamKey, name, currentVersionId, destinationId);
+            DeliveryStreamDescription stream = target.stream();
+            RedshiftDestination current = target.destination().getRedshiftDestinationDescription();
+            if (current == null) {
+                throw new AwsException("InvalidArgumentException",
+                        "The delivery stream " + name + " does not have a Redshift destination.", 400);
+            }
+            RedshiftDestinationValidator.validateBackupTransition(current.getS3BackupMode(), update.getS3BackupMode());
+            String effectiveBackupMode = update.getS3BackupMode() != null
+                    ? update.getS3BackupMode() : current.getS3BackupMode();
+            if ("Enabled".equals(effectiveBackupMode) && update.getS3Backup() == null && current.getS3Backup() == null) {
+                throw new AwsException("InvalidArgumentException",
+                        "S3BackupMode is Enabled but no S3 backup configuration is set.", 400);
+            }
+            validateLogging(current.getS3(), update.getS3());
+            validateLogging(current.getS3Backup(), update.getS3Backup());
+            validateBufferingHints(update.getS3());
+            validateBufferingHints(update.getS3Backup());
+            if (update.getS3Backup() != null && current.getS3Backup() == null) {
+                RedshiftDestinationValidator.validateNewBackup(update.getS3Backup(), "redshiftDestinationUpdate");
+            }
+            mergeRedshiftDestination(current, update);
+            stream.setVersionId(String.valueOf(parseVersionId(stream.getVersionId()) + 1));
+            stream.setLastUpdateTimestamp(Instant.now());
+            streamPut(streamKey, stream);
+            LOG.infov("Updated Redshift destination {0} of Firehose delivery stream {1}", destinationId, name);
+        }
+    }
+
+    /** Members present in the update replace the stored ones; absent members are kept. */
+    private static void mergeRedshiftDestination(RedshiftDestination current, RedshiftDestination update) {
+        if (update.getRoleArn() != null) {
+            current.setRoleArn(update.getRoleArn());
+        }
+        if (update.getClusterJdbcUrl() != null) {
+            current.setClusterJdbcUrl(update.getClusterJdbcUrl());
+        }
+        if (update.getUsername() != null) {
+            current.setUsername(update.getUsername());
+        }
+        if (update.getPassword() != null) {
+            current.setPassword(update.getPassword());
+        }
+        if (update.getCopyCommand() != null) {
+            current.setCopyCommand(update.getCopyCommand());
+        }
+        if (update.getRetryOptions() != null) {
+            current.setRetryOptions(update.getRetryOptions());
+        }
+        if (update.getS3BackupMode() != null) {
+            current.setS3BackupMode(update.getS3BackupMode());
+        }
+        if (update.getSecretsManagerConfiguration() != null) {
+            current.setSecretsManagerConfiguration(update.getSecretsManagerConfiguration());
+        }
+        if (update.getProcessingConfiguration() != null) {
+            current.setProcessingConfiguration(update.getProcessingConfiguration());
+        }
+        if (update.getCloudWatchLoggingOptions() != null) {
+            current.setCloudWatchLoggingOptions(update.getCloudWatchLoggingOptions());
+        }
+        if (update.getS3() != null) {
+            if (current.getS3() == null) {
+                update.getS3().applyDefaults();
+                current.setS3(update.getS3());
+            } else {
+                mergeDestination(current.getS3(), update.getS3());
+            }
+        }
+        if (update.getS3Backup() != null) {
+            if (current.getS3Backup() == null) {
+                update.getS3Backup().applyDefaults();
+                current.setS3Backup(update.getS3Backup());
+            } else {
+                mergeDestination(current.getS3Backup(), update.getS3Backup());
+            }
+        }
+    }
+
     public void startDeliveryStreamEncryption(String name, String keyType, String keyArn) {
         DeliveryStreamDescription stream = describeDeliveryStream(name);
         applyEncryption(stream, keyType, keyArn);
         stream.setLastUpdateTimestamp(clock.instant());
         streamPut(scopedKey(name), stream);
-    }
-
-    private static void applyEncryptionInput(DeliveryStreamDescription stream,
-                                             DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
-        if (encryption.getKeyType() == null || encryption.getKeyType().isBlank()) {
-            throw new AwsException("InvalidArgumentException", "KeyType is required.", 400);
-        }
-        applyEncryption(stream, encryption.getKeyType(), encryption.getKeyArn());
-    }
-
-    private static void applyEncryption(DeliveryStreamDescription stream, String keyType, String keyArn) {
-        if ("KinesisStreamAsSource".equals(stream.getDeliveryStreamType())) {
-            throw new AwsException("InvalidArgumentException",
-                    "Server-side encryption is not supported for delivery streams with a Kinesis stream as source.", 400);
-        }
-        String effectiveKeyType = keyType == null ? "AWS_OWNED_CMK" : keyType;
-        if (!effectiveKeyType.equals("AWS_OWNED_CMK") && !effectiveKeyType.equals("CUSTOMER_MANAGED_CMK")) {
-            throw new AwsException("InvalidArgumentException",
-                    "KeyType must be AWS_OWNED_CMK or CUSTOMER_MANAGED_CMK.", 400);
-        }
-        if (effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") && (keyArn == null || keyArn.isBlank())) {
-            throw new AwsException("InvalidArgumentException",
-                    "KeyARN is required for CUSTOMER_MANAGED_CMK.", 400);
-        }
-        if (keyArn != null && !keyArn.isBlank()
-                && (keyArn.length() > SSE_KEY_ARN_MAX_LENGTH || !SSE_KEY_ARN_PATTERN.matcher(keyArn).matches())) {
-            throw new AwsException("InvalidArgumentException",
-                    "KeyARN is not a valid KMS key ARN: " + keyArn, 400);
-        }
-        stream.setDeliveryStreamEncryptionConfiguration(
-                new DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration(
-                        effectiveKeyType,
-                        effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") ? keyArn : null,
-                        "ENABLED"));
     }
 
     public void stopDeliveryStreamEncryption(String name) {
@@ -540,6 +699,29 @@ public class FirehoseService implements ResourceProvider {
         }
     }
 
+    /**
+     * Once logging is on, both names are required, checked on the merged result for an update
+     * (probed 2026-10-23). An update without a logging block leaves the stored one as it was.
+     */
+    private static void validateLogging(S3Destination stored, S3Destination update) {
+        if (update == null || update.getCloudWatchLoggingOptions() == null) {
+            return;
+        }
+        DeliveryStreamDescription.CloudWatchLoggingOptions effective = mergeLogging(
+                stored == null ? null : stored.getCloudWatchLoggingOptions(), update.getCloudWatchLoggingOptions());
+        if (!Boolean.TRUE.equals(effective.getEnabled())) {
+            return;
+        }
+        if (effective.getLogGroupName() == null || effective.getLogGroupName().isEmpty()) {
+            throw new AwsException("InvalidArgumentException",
+                    "CloudWatch Log Group Name is required if CloudWatch Logging is enabled", 400);
+        }
+        if (effective.getLogStreamName() == null || effective.getLogStreamName().isEmpty()) {
+            throw new AwsException("InvalidArgumentException",
+                    "CloudWatch Log Stream Name is required if CloudWatch Logging is enabled", 400);
+        }
+    }
+
     private static void mergeDestination(S3Destination current, S3Destination update) {
         if (update.getRoleArn() != null) current.setRoleArn(update.getRoleArn());
         if (update.getBucketArn() != null) current.setBucketArn(update.getBucketArn());
@@ -551,6 +733,10 @@ public class FirehoseService implements ResourceProvider {
         if (update.getBufferingHints() != null) current.setBufferingHints(update.getBufferingHints());
         if (update.getEncryptionConfiguration() != null) current.setEncryptionConfiguration(update.getEncryptionConfiguration());
         if (update.getS3BackupMode() != null) current.setS3BackupMode(update.getS3BackupMode());
+        if (update.getCloudWatchLoggingOptions() != null) {
+            current.setCloudWatchLoggingOptions(mergeLogging(
+                    current.getCloudWatchLoggingOptions(), update.getCloudWatchLoggingOptions()));
+        }
         // Replaced whole, not merged member-wise: an update carrying only
         // {"Enabled": false} leaves Processors empty on real AWS, where the same shape
         // preserves the conversion block's members (probed 2026-09-10).
@@ -586,6 +772,23 @@ public class FirehoseService implements ResourceProvider {
                 ? update.getInputFormatConfiguration() : current.getInputFormatConfiguration());
         merged.setOutputFormatConfiguration(update.getOutputFormatConfiguration() != null
                 ? update.getOutputFormatConfiguration() : current.getOutputFormatConfiguration());
+        return merged;
+    }
+
+    /**
+     * Member-wise, like the conversion block: an update carrying only {"Enabled": false} keeps the
+     * stored group and stream, and one naming only a group keeps Enabled (probed 2026-10-22).
+     */
+    private static DeliveryStreamDescription.CloudWatchLoggingOptions mergeLogging(
+            DeliveryStreamDescription.CloudWatchLoggingOptions current,
+            DeliveryStreamDescription.CloudWatchLoggingOptions update) {
+        if (current == null) {
+            return update;
+        }
+        DeliveryStreamDescription.CloudWatchLoggingOptions merged = new DeliveryStreamDescription.CloudWatchLoggingOptions();
+        merged.setEnabled(update.getEnabled() != null ? update.getEnabled() : current.getEnabled());
+        merged.setLogGroupName(update.getLogGroupName() != null ? update.getLogGroupName() : current.getLogGroupName());
+        merged.setLogStreamName(update.getLogStreamName() != null ? update.getLogStreamName() : current.getLogStreamName());
         return merged;
     }
 
@@ -702,9 +905,7 @@ public class FirehoseService implements ResourceProvider {
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Delivery stream not found: " + streamName, 400));
         // Normalizes streams persisted before required output members existed.
-        if (stream.s3Destination() != null) {
-            stream.s3Destination().applyDefaults();
-        }
+        stream.applyDefaults();
         if (stream.getDeliveryStreamEncryptionConfiguration() == null) {
             stream.setDeliveryStreamEncryptionConfiguration(
                     DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.disabled());
@@ -718,47 +919,36 @@ public class FirehoseService implements ResourceProvider {
 
     public void deleteDeliveryStream(String accountId, String region, String name) {
         String streamKey = scopedKey(accountId, region, name);
-        describeDeliveryStream(streamKey, name);
-        streamDelete(streamKey);
+        // Under the lock a Redshift update holds across its read and write: an update that read the stream just before
+        // this delete would otherwise write it back afterwards. The lock entry is kept, because removing it while an
+        // update waits on it would let a later caller take a second lock for the same stream.
+        synchronized (redshiftUpdateLocks.computeIfAbsent(streamKey, k -> new Object())) {
+            describeDeliveryStream(streamKey, name);
+            streamDelete(streamKey);
+        }
         // Pending records are discarded, not flushed: verified against real AWS
         // (2026-07-13, eu-west-1) — 3 records buffered under a 300s/5MB hint never
         // reached the bucket after DeleteDeliveryStream completed.
         buffers.remove(streamKey);
         bufferSince.remove(streamKey);
+        redshiftPending.remove(streamKey);
+        activeRedshiftDrains.remove(streamKey);
         pendingSourceIterators.remove(streamKey);
         iteratorDelete(streamKey);
         LOG.infov("Deleted Firehose delivery stream: {0}", name);
     }
 
-    public List<String> listDeliveryStreams() {
-        return listDeliveryStreams(null, Integer.MAX_VALUE, null).names();
-    }
+    public record DeliveryStreamPage(List<String> names, boolean hasMore) {}
 
-    /**
-     * AWS-shaped list: names are alphabetical and {@code ExclusiveStartDeliveryStreamName}
-     * is exclusive. When {@code Limit} is set, the page is capped (AWS max 10000).
-     * When omitted, every matching name is returned — AWS defaults to 10, but
-     * callers that do not paginate (SDK compat + Alchemy bindings) expect a
-     * complete list on a shared emulator.
-     */
-    public DeliveryStreamList listDeliveryStreams(String exclusiveStart, Integer limit, String type) {
-        List<String> names = streamStore.scan(k -> k.startsWith(currentRegion() + "/")).stream()
-                .filter(s -> type == null || type.isBlank() || type.equals(s.getDeliveryStreamType()))
+    public DeliveryStreamPage listDeliveryStreams(int limit, String exclusiveStartName) {
+        String regionPrefix = currentRegion() + "/";
+        List<String> names = streamStore.scan(k -> k.startsWith(regionPrefix)).stream()
                 .map(DeliveryStreamDescription::getDeliveryStreamName)
                 .sorted()
+                .filter(name -> exclusiveStartName == null || name.compareTo(exclusiveStartName) > 0)
                 .toList();
-        int start = 0;
-        if (exclusiveStart != null && !exclusiveStart.isEmpty()) {
-            while (start < names.size() && names.get(start).compareTo(exclusiveStart) <= 0) {
-                start++;
-            }
-        }
-        int effectiveLimit = (limit == null || limit < 1) ? Integer.MAX_VALUE : Math.min(limit, 10_000);
-        int end = (int) Math.min((long) start + effectiveLimit, names.size());
-        return new DeliveryStreamList(new ArrayList<>(names.subList(start, end)), end < names.size());
+        return new DeliveryStreamPage(names.subList(0, Math.min(limit, names.size())), names.size() > limit);
     }
-
-    public record DeliveryStreamList(List<String> names, boolean hasMore) {}
 
     /**
      * Ingests records written to a delivery stream's Kinesis source.
@@ -988,7 +1178,7 @@ public class FirehoseService implements ResourceProvider {
             S3Destination s3 = stream.s3Destination();
             List<byte[]> records = toFlush;
             if (s3 != null && s3.isProcessingEnabled()) {
-                ensureBucket(bucket);
+                ensureBucket(bucket, stream);
                 FirehoseLambdaTransformer.Outcome transformed =
                         lambdaTransformer.transform(stream, bucket, records, clock.instant());
                 LOG.infov("Transformed {0} records from stream {1} ({2} dropped, {3} failed)",
@@ -1003,7 +1193,7 @@ public class FirehoseService implements ResourceProvider {
                 }
             }
             if (s3 != null && s3.isDataFormatConversionEnabled()) {
-                ensureBucket(bucket);
+                ensureBucket(bucket, stream);
                 FirehoseParquetConverter.Outcome outcome =
                         parquetConverter.deliver(stream, bucket, records, clock.instant());
                 LOG.infov("Converted {0} records ({1} failed) from stream {2} to s3://{3}/{4}",
@@ -1017,7 +1207,7 @@ public class FirehoseService implements ResourceProvider {
             String key = S3ObjectKeyResolver.resolveKey(s3, stream.getDeliveryStreamName(),
                     stream.getVersionId(), clock.instant(), compression);
 
-            ensureBucket(bucket);
+            ensureBucket(bucket, stream);
 
             // Records are arbitrary bytes, so they are concatenated as bytes: routing
             // them through a String would corrupt any payload that is not valid UTF-8.
@@ -1033,11 +1223,16 @@ public class FirehoseService implements ResourceProvider {
                 }
             }
 
-            byte[] body = compression.compress(payload.toByteArray());
+            byte[] rawPayload = payload.toByteArray();
+            byte[] body = compression.compress(rawPayload);
             s3Service.putObject(bucket, key, body, "application/octet-stream", Map.of(),
                     new PutObjectOptions().withContentEncoding(compression.contentEncoding()));
             LOG.infov("Flushed {0} records from stream {1} to s3://{2}/{3} ({4})",
                     records.size(), streamName, bucket, key, compression.wireValue());
+            if (isRedshiftStream(stream)) {
+                deliverRedshiftBatch(streamName, stream, bucket, key, rawPayload, checkpoint);
+                return;
+            }
             // Only now: the records these iterators were read past are durable.
             commitSourceIterators(streamName, checkpoint);
         } catch (Exception e) {
@@ -1045,6 +1240,203 @@ public class FirehoseService implements ResourceProvider {
                     streamName, toFlush.size(), e.getMessage());
             restoreFailedFlush(streamName, toFlush, since, checkpoint);
         }
+    }
+
+    /**
+     * Everything after a Redshift batch is staged and queued. The batch is durable from the moment it is queued, so
+     * no step here may hand its records back to the buffer: that would stage and load them a second time. A failing
+     * backup write or checkpoint write is logged instead, and the load itself retries from the queue.
+     */
+    private void deliverRedshiftBatch(String streamName, DeliveryStreamDescription stream,
+                                     String bucket, String key, byte[] rawPayload,
+                                     Map<String, String> checkpoint) {
+        RedshiftDestination redshift = stream.getDestinations().get(0).getRedshiftDestinationDescription();
+        try {
+            writeRedshiftBackup(stream, redshift, rawPayload);
+        } catch (IOException | RuntimeException e) {
+            LOG.errorv(e, "Backup write for stream {0} failed; the batch is staged in S3 and loads normally but "
+                    + "has no backup copy: {1}", streamName, describe(e));
+        }
+        try {
+            commitSourceIterators(streamName, checkpoint);
+        } catch (RuntimeException e) {
+            LOG.errorv(e, "Could not persist the source checkpoint of stream {0} after its batch was staged; the "
+                    + "source records may be read again: {1}", streamName, describe(e));
+        }
+        redshiftPending.compute(streamName, (k, existing) -> {
+            Deque<PendingRedshiftCopy> queue = existing != null ? existing : new ConcurrentLinkedDeque<>();
+            queue.addLast(new PendingRedshiftCopy(bucket, key));
+            return queue;
+        });
+        submitRedshiftDrain(streamName, stream);
+    }
+
+    /**
+     * A batch already staged in S3 and waiting for its COPY. {@code failingSince} marks when the initial attempt began
+     * and {@code nextAttempt} spaces the retries out by 5 minutes, so a failing load neither floods the log nor holds the
+     * shared tick thread for a connection attempt on every tick.
+     */
+    private static final class PendingRedshiftCopy {
+        private final String bucket;
+        private final String key;
+        private Instant failingSince;
+        private Instant nextAttempt;
+        private int failures;
+
+        private PendingRedshiftCopy(String bucket, String key) {
+            this.bucket = bucket;
+            this.key = key;
+        }
+    }
+
+    /** Retries the COPY of every stream that still has staged batches waiting and due. Called on each tick. */
+    void retryPendingRedshiftCopies() {
+        for (String streamKey : redshiftPending.keySet()) {
+            if (!isRedshiftDrainDue(streamKey)) {
+                continue;
+            }
+            Optional<DeliveryStreamDescription> stream = streamGet(streamKey);
+            if (stream.isEmpty() || !isRedshiftStream(stream.get())) {
+                redshiftPending.remove(streamKey);
+                continue;
+            }
+            submitRedshiftDrain(streamKey, stream.get());
+        }
+    }
+
+    private boolean isRedshiftDrainDue(String streamKey) {
+        Deque<PendingRedshiftCopy> queue = redshiftPending.get(streamKey);
+        if (queue == null || queue.isEmpty()) {
+            return false;
+        }
+        PendingRedshiftCopy head = queue.peekFirst();
+        return head != null && (head.nextAttempt == null || !clock.instant().isBefore(head.nextAttempt));
+    }
+
+    private void submitRedshiftDrain(String streamKey, DeliveryStreamDescription stream) {
+        if (!activeRedshiftDrains.add(streamKey)) {
+            return;
+        }
+        try {
+            redshiftDeliveryExecutor.execute(() -> {
+                try {
+                    RequestScopes.runAs(stream.getAccountId(), () -> drainRedshiftCopies(streamKey, stream));
+                } finally {
+                    activeRedshiftDrains.remove(streamKey);
+                    if (redshiftPending.containsKey(streamKey) && isRedshiftDrainDue(streamKey)) {
+                        submitRedshiftDrain(streamKey, stream);
+                    }
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            activeRedshiftDrains.remove(streamKey);
+            LOG.errorv("Redshift delivery executor rejected task for stream {0}: {1}", streamKey, describe(e));
+        }
+    }
+
+    /** Loads the stream's staged batches oldest first and stops at the first one that must be retried. */
+    private void drainRedshiftCopies(String streamKey, DeliveryStreamDescription stream) {
+        Deque<PendingRedshiftCopy> queue = redshiftPending.get(streamKey);
+        if (queue == null) {
+            return;
+        }
+        if (!isRedshiftStream(stream)) {
+            redshiftPending.remove(streamKey);
+            return;
+        }
+        RedshiftDestination redshift = stream.getDestinations().get(0).getRedshiftDestinationDescription();
+        PendingRedshiftCopy next;
+        while (redshiftPending.containsKey(streamKey) && (next = queue.peekFirst()) != null
+                && copyStaged(streamKey, stream, redshift, next)) {
+            queue.pollFirst();
+        }
+        redshiftPending.computeIfPresent(streamKey, (k, remaining) -> remaining.isEmpty() ? null : remaining);
+    }
+
+    /**
+     * Returns true when the batch is accounted for (loaded, or failed past the retry window) and
+     * false when it must be tried again.
+     */
+    private boolean copyStaged(String streamKey, DeliveryStreamDescription stream, RedshiftDestination redshift,
+                               PendingRedshiftCopy pending) {
+        String table = redshift.getCopyCommand().getDataTableName();
+        if (redshiftDelivery == null) {
+            LOG.warnv("Stream {0} has a Redshift destination but Redshift delivery is unavailable; "
+                    + "the batch stays in s3://{1}/{2}", streamKey, pending.bucket, pending.key);
+            return true;
+        }
+        Instant now = clock.instant();
+        if (pending.nextAttempt != null && now.isBefore(pending.nextAttempt)) {
+            return false;
+        }
+        int window = redshift.getRetryOptions() != null && redshift.getRetryOptions().getDurationInSeconds() != null
+                ? redshift.getRetryOptions().getDurationInSeconds() : DEFAULT_REDSHIFT_RETRY_SECONDS;
+        if (pending.failingSince != null && window > 0 && !now.isBefore(pending.failingSince.plusSeconds(window))) {
+            LOG.errorv("Redshift delivery into table {0} failed for stream {1} and the retry window of {2}s is over; "
+                    + "the batch stays in s3://{3}/{4}", table, streamKey, window, pending.bucket, pending.key);
+            return true;
+        }
+        Instant attemptStart = now;
+        try {
+            String region = AwsArnUtils.regionOrDefault(stream.getDeliveryStreamARN(),
+                    regionResolver.getDefaultRegion());
+            redshiftDelivery.copy(stream.getAccountId(), region, redshift, pending.bucket, pending.key);
+            return true;
+        } catch (RuntimeException e) {
+            Instant failedAt = clock.instant();
+            boolean expected = e instanceof AwsException || e instanceof IllegalStateException
+                    || e instanceof IllegalArgumentException;
+            if (pending.failingSince == null) {
+                pending.failingSince = attemptStart;
+            }
+            pending.failures++;
+            if (window > 0 && failedAt.isBefore(pending.failingSince.plusSeconds(window))) {
+                pending.nextAttempt = failedAt.plusSeconds(REDSHIFT_RETRY_INTERVAL_SECONDS);
+                String reason = describe(e);
+                if (!expected) {
+                    LOG.errorv(e, "Unexpected failure delivering s3://{0}/{1} into table {2} for stream {3}; "
+                            + "retrying in {4}s", pending.bucket, pending.key, table, streamKey, REDSHIFT_RETRY_INTERVAL_SECONDS);
+                } else if (pending.failures == 1) {
+                    LOG.warnv("Redshift delivery of s3://{0}/{1} into table {2} failed for stream {3}, "
+                            + "retrying in {4}s: {5}", pending.bucket, pending.key, table, streamKey, REDSHIFT_RETRY_INTERVAL_SECONDS,
+                            reason);
+                } else {
+                    LOG.debugv("Redshift delivery of s3://{0}/{1} into table {2} failed again for stream {3} "
+                            + "(attempt {4}), retrying in {5}s: {6}", pending.bucket, pending.key, table, streamKey,
+                            pending.failures, REDSHIFT_RETRY_INTERVAL_SECONDS, reason);
+                }
+                return false;
+            }
+            LOG.errorv("Redshift delivery into table {0} failed for stream {1} and the retry window of {2}s is over; "
+                    + "the batch stays in s3://{3}/{4}: {5}", table, streamKey, window, pending.bucket, pending.key,
+                    describe(e));
+            return true;
+        }
+    }
+
+    private static String describe(Exception e) {
+        return e.getMessage() != null ? e.getMessage() : e.toString();
+    }
+
+    /** Writes the raw batch to the backup location under that location's own prefix, compression and bucket. */
+    private void writeRedshiftBackup(DeliveryStreamDescription stream, RedshiftDestination redshift,
+                                     byte[] rawPayload) throws IOException {
+        S3Destination backup = redshift.getS3Backup();
+        if (!"Enabled".equals(redshift.getS3BackupMode()) || backup == null || backup.bucketName() == null) {
+            return;
+        }
+        FirehoseCompression compression = FirehoseCompression.forDelivery(backup.getCompressionFormat());
+        String backupKey = S3ObjectKeyResolver.resolveKey(backup, stream.getDeliveryStreamName(),
+                stream.getVersionId(), clock.instant(), compression);
+        ensureBucket(backup.bucketName(), stream);
+        s3Service.putObject(backup.bucketName(), backupKey, compression.compress(rawPayload),
+                "application/octet-stream", Map.of(),
+                new PutObjectOptions().withContentEncoding(compression.contentEncoding()));
+    }
+
+    private static boolean isRedshiftStream(DeliveryStreamDescription stream) {
+        return stream.getDestinations() != null && !stream.getDestinations().isEmpty()
+                && stream.getDestinations().get(0).getRedshiftDestinationDescription() != null;
     }
 
     private void restoreFailedFlush(String streamName, List<byte[]> toFlush, Instant since,
@@ -1080,10 +1472,26 @@ public class FirehoseService implements ResourceProvider {
         return DEFAULT_BUCKET;
     }
 
-    private void ensureBucket(String bucket) {
+    /**
+     * Creates a missing destination bucket. A stream's own destination goes in the stream's region,
+     * from its ARN; the shared default bucket, used by every stream without one, stays in the default
+     * region so the first stream to deliver does not decide it for all the others.
+     */
+    private void ensureBucket(String bucket, DeliveryStreamDescription stream) {
+        S3Destination s3 = stream.s3Destination();
+        boolean ownDestination = s3 != null && s3.bucketName() != null;
+        String region = ownDestination
+                ? AwsArnUtils.regionOrDefault(stream.getDeliveryStreamARN(), regionResolver.getDefaultRegion())
+                : regionResolver.getDefaultRegion();
         try {
-            s3Service.createBucket(bucket, regionResolver.getDefaultRegion());
-        } catch (Exception ignored) {}
+            if (ownDestination) {
+                s3Service.createBucket(bucket, region);
+            } else {
+                s3Service.createInternalBucket(bucket, region);
+            }
+        } catch (Exception ignored) {
+            // The bucket usually exists already; a real problem with it surfaces on the write that follows.
+        }
     }
 
     // ─── Resource Explorer 2 ───────────────────────────────────────────────────
@@ -1115,5 +1523,77 @@ public class FirehoseService implements ResourceProvider {
     @Override
     public Set<SupportedResourceType> getSupportedResourceTypes() {
         return Set.of(new SupportedResourceType("firehose:deliverystream", "firehose", true));
+    }
+
+
+
+    public List<String> listDeliveryStreams() {
+        return listDeliveryStreams(null, Integer.MAX_VALUE, null).names();
+    }
+
+    /**
+     * AWS-shaped list: names are alphabetical and {@code ExclusiveStartDeliveryStreamName}
+     * is exclusive. When {@code Limit} is set, the page is capped (AWS max 10000).
+     * When omitted, every matching name is returned — AWS defaults to 10, but
+     * callers that do not paginate (SDK compat + Alchemy bindings) expect a
+     * complete list on a shared emulator.
+     */
+    public DeliveryStreamList listDeliveryStreams(String exclusiveStart, Integer limit, String type) {
+        List<String> names = streamStore.scan(k -> k.startsWith(currentRegion() + "/")).stream()
+                .filter(s -> type == null || type.isBlank() || type.equals(s.getDeliveryStreamType()))
+                .map(DeliveryStreamDescription::getDeliveryStreamName)
+                .sorted()
+                .toList();
+        int start = 0;
+        if (exclusiveStart != null && !exclusiveStart.isEmpty()) {
+            while (start < names.size() && names.get(start).compareTo(exclusiveStart) <= 0) {
+                start++;
+            }
+        }
+        int effectiveLimit = (limit == null || limit < 1) ? Integer.MAX_VALUE : Math.min(limit, 10_000);
+        int end = (int) Math.min((long) start + effectiveLimit, names.size());
+        return new DeliveryStreamList(new ArrayList<>(names.subList(start, end)), end < names.size());
+    }
+
+    public record DeliveryStreamList(List<String> names, boolean hasMore) {}
+
+    private void ensureBucket(String bucket) {
+        try {
+            s3Service.createBucket(bucket, regionResolver.getDefaultRegion());
+        } catch (Exception ignored) {}
+    }
+
+    private static void applyEncryptionInput(DeliveryStreamDescription stream,
+                                             DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
+        if (encryption.getKeyType() == null || encryption.getKeyType().isBlank()) {
+            throw new AwsException("InvalidArgumentException", "KeyType is required.", 400);
+        }
+        applyEncryption(stream, encryption.getKeyType(), encryption.getKeyArn());
+    }
+
+    private static void applyEncryption(DeliveryStreamDescription stream, String keyType, String keyArn) {
+        if ("KinesisStreamAsSource".equals(stream.getDeliveryStreamType())) {
+            throw new AwsException("InvalidArgumentException",
+                    "Server-side encryption is not supported for delivery streams with a Kinesis stream as source.", 400);
+        }
+        String effectiveKeyType = keyType == null ? "AWS_OWNED_CMK" : keyType;
+        if (!effectiveKeyType.equals("AWS_OWNED_CMK") && !effectiveKeyType.equals("CUSTOMER_MANAGED_CMK")) {
+            throw new AwsException("InvalidArgumentException",
+                    "KeyType must be AWS_OWNED_CMK or CUSTOMER_MANAGED_CMK.", 400);
+        }
+        if (effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") && (keyArn == null || keyArn.isBlank())) {
+            throw new AwsException("InvalidArgumentException",
+                    "KeyARN is required for CUSTOMER_MANAGED_CMK.", 400);
+        }
+        if (keyArn != null && !keyArn.isBlank()
+                && (keyArn.length() > SSE_KEY_ARN_MAX_LENGTH || !SSE_KEY_ARN_PATTERN.matcher(keyArn).matches())) {
+            throw new AwsException("InvalidArgumentException",
+                    "KeyARN is not a valid KMS key ARN: " + keyArn, 400);
+        }
+        stream.setDeliveryStreamEncryptionConfiguration(
+                new DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration(
+                        effectiveKeyType,
+                        effectiveKeyType.equals("CUSTOMER_MANAGED_CMK") ? keyArn : null,
+                        "ENABLED"));
     }
 }

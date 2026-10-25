@@ -1,29 +1,37 @@
 package io.github.hectorvent.floci.services.ecr;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsPartitions;
+import io.github.hectorvent.floci.core.common.Digests;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
 import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
+import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ecr.model.AuthorizationData;
+import io.github.hectorvent.floci.services.ecr.model.Image;
 import io.github.hectorvent.floci.services.ecr.model.ImageDetail;
 import io.github.hectorvent.floci.services.ecr.model.ImageFailure;
 import io.github.hectorvent.floci.services.ecr.model.ImageIdentifier;
 import io.github.hectorvent.floci.services.ecr.model.ImageMetadata;
-import io.github.hectorvent.floci.services.ecr.model.Image;
+import io.github.hectorvent.floci.services.ecr.model.PullThroughCacheRule;
+import io.github.hectorvent.floci.services.ecr.model.RegistrySettings;
 import io.github.hectorvent.floci.services.ecr.model.Repository;
 import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
 import io.github.hectorvent.floci.services.ecr.registry.RegistryHttpClient;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -39,73 +47,232 @@ import java.util.HashMap;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 @ApplicationScoped
 public class EcrService implements ResourceProvider {
 
+    /**
+     * A private ECR registry host in any partition, {@code <account>.dkr.ecr.<region>.<dnsSuffix>},
+     * matched the same way {@code EcrRegistryManager} recognises an ECR image URI.
+     */
+    private static final Pattern ECR_UPSTREAM_HOST = Pattern.compile(
+            "[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\." + AwsPartitions.dnsSuffixRegex());
+
     private static final Logger LOG = Logger.getLogger(EcrService.class);
-    // AWS's LIVE validation (taken verbatim from a real CreateRepository
-    // InvalidParameterException) is looser than the documented pattern:
-    // separators between alnum runs are one '.', one '_', double '__', or
-    // ONE OR MORE '-' — so names like "a--b" are legal on real ECR.
     private static final Pattern REPO_NAME = Pattern.compile(
             "[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*(/[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*)*");
+    private static final Pattern PULL_THROUGH_CACHE_PREFIX = Pattern.compile(
+            "(?:[a-z0-9]+(?:(?:\\.|_|__|-+)[a-z0-9]+)*(?:/[a-z0-9]+"
+                    + "(?:(?:\\.|_|__|-+)[a-z0-9]+)*)*/?|ROOT)");
+    private static final Pattern REGISTRY_ID = Pattern.compile("[0-9]{12}");
+    private static final Pattern LAYER_DIGEST = Pattern.compile("[a-zA-Z0-9-_+.]+:[a-fA-F0-9]+");
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+    /** ECR's imageTag rule, which the service model bounds at 300 characters. */
+    private static final Pattern ECR_IMAGE_TAG = Pattern.compile("[a-zA-Z0-9_.-]+");
+    /** The OCI distribution spec's tag grammar, which the backing registry's manifest URL takes. */
+    private static final Pattern REGISTRY_IMAGE_TAG = Pattern.compile("[A-Za-z0-9_][A-Za-z0-9._-]{0,127}");
+    private static final Pattern CREDENTIAL_ARN = Pattern.compile(
+            "arn:" + AwsArnUtils.PARTITION_REGEX + ":secretsmanager:[a-zA-Z0-9-:]+:secret:ecr-pullthroughcache/"
+                    + "[a-zA-Z0-9/_+=.@-]+");
+    private static final Set<String> UPSTREAM_REGISTRIES = Set.of(
+            "ecr", "ecr-public", "quay", "k8s", "docker-hub",
+            "github-container-registry", "azure-container-registry",
+            "gitlab-container-registry", "chainguard");
     private static final int MAX_REPO_NAME_LENGTH = 256;
-    // AWS GetAuthorizationToken returns a long docker-login credential. Alchemy
-    // bindings assert length > 100; keep the "AWS:<password>" decode shape.
-    private static final String AUTH_PASSWORD = "floci-" + "0".repeat(96);
-    private static final long LAYER_PART_SIZE = 20 * 1024 * 1024L;
-    private static final ObjectMapper JSON = new ObjectMapper();
+    private static final int MAX_PULL_THROUGH_CACHE_PREFIX_LENGTH = 30;
 
     private final StorageBackend<String, Repository> repoStore;
     private final StorageBackend<String, ImageMetadata> imageMetaStore;
-    private final Map<String, String> registryPolicies = new ConcurrentHashMap<>();
-    private final Map<String, LayerUpload> uploads = new ConcurrentHashMap<>();
-    private final Map<String, byte[]> localLayers = new ConcurrentHashMap<>();
-    private final Map<String, LocalImage> localImages = new ConcurrentHashMap<>();
+    private final StorageBackend<String, PullThroughCacheRule> pullThroughCacheRuleStore;
+    private final StorageBackend<String, RegistrySettings> registrySettingsStore;
+    private final Map<String, Object> registrySettingsLocks = new ConcurrentHashMap<>();
     private final EcrRegistryManager registryManager;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
-    private final EventBridgeService eventBridgeService;
+    private final EcrLayerUploads layerUploads = new EcrLayerUploads(this::discardUpload);
+    private final Set<String> inFlightImmutableTags = ConcurrentHashMap.newKeySet();
 
     @Inject
     public EcrService(StorageFactory factory,
                       EcrRegistryManager registryManager,
                       EmulatorConfig config,
-                      RegionResolver regionResolver,
-                      EventBridgeService eventBridgeService) {
+                      RegionResolver regionResolver) {
         this(factory.create("ecr", "repositories.json",
                         new TypeReference<Map<String, Repository>>() {}),
                 factory.create("ecr", "image-metadata.json",
                         new TypeReference<Map<String, ImageMetadata>>() {}),
-                registryManager, config, regionResolver, eventBridgeService);
+                factory.create("ecr", "pull-through-cache-rules.json",
+                        new TypeReference<Map<String, PullThroughCacheRule>>() {}),
+                factory.create("ecr", "registry-settings.json",
+                        new TypeReference<Map<String, RegistrySettings>>() {}),
+                registryManager, config, regionResolver);
     }
 
     EcrService(StorageBackend<String, Repository> repoStore,
                StorageBackend<String, ImageMetadata> imageMetaStore,
+               StorageBackend<String, PullThroughCacheRule> pullThroughCacheRuleStore,
                EcrRegistryManager registryManager,
                EmulatorConfig config,
                RegionResolver regionResolver) {
-        this(repoStore, imageMetaStore, registryManager, config, regionResolver, null);
+        this(repoStore, imageMetaStore, pullThroughCacheRuleStore, new InMemoryStorage<>(),
+                registryManager, config, regionResolver);
     }
 
     EcrService(StorageBackend<String, Repository> repoStore,
                StorageBackend<String, ImageMetadata> imageMetaStore,
+               StorageBackend<String, PullThroughCacheRule> pullThroughCacheRuleStore,
+               StorageBackend<String, RegistrySettings> registrySettingsStore,
                EcrRegistryManager registryManager,
                EmulatorConfig config,
-               RegionResolver regionResolver,
-               EventBridgeService eventBridgeService) {
+               RegionResolver regionResolver) {
         this.repoStore = repoStore;
         this.imageMetaStore = imageMetaStore;
+        this.pullThroughCacheRuleStore = pullThroughCacheRuleStore;
+        this.registrySettingsStore = registrySettingsStore;
         this.registryManager = registryManager;
         this.config = config;
         this.regionResolver = regionResolver;
-        this.eventBridgeService = eventBridgeService;
         this.registryManager.setReconcileHook(this::reconcileFromCatalog);
+    }
+
+    public boolean isDisabled() {
+        return !config.services().ecr().enabled();
+    }
+
+    // ============================================================
+    // Pull through cache rules
+    // ============================================================
+
+    public PullThroughCacheRule createPullThroughCacheRule(String ecrRepositoryPrefix,
+                                                           String upstreamRegistryUrl,
+                                                           String registryId,
+                                                           String upstreamRegistry,
+                                                           String credentialArn,
+                                                           String customRoleArn,
+                                                           String upstreamRepositoryPrefix,
+                                                           String region) {
+        String prefix = normalizePullThroughCachePrefix(ecrRepositoryPrefix);
+        validatePullThroughCachePrefix(prefix, "ecrRepositoryPrefix");
+        validateUpstreamRegistryUrl(upstreamRegistryUrl);
+        validateCredentialArn(credentialArn);
+        validateCustomRoleArn(customRoleArn);
+        String upstreamPrefix = upstreamRepositoryPrefix == null || upstreamRepositoryPrefix.isBlank()
+                ? "ROOT"
+                : normalizePullThroughCachePrefix(upstreamRepositoryPrefix);
+        validatePullThroughCachePrefix(upstreamPrefix, "upstreamRepositoryPrefix");
+        if ("ROOT".equals(prefix) && !"ROOT".equals(upstreamPrefix)) {
+            throw new AwsException("InvalidParameterException",
+                    "upstreamRepositoryPrefix must be ROOT when ecrRepositoryPrefix is ROOT", 400);
+        }
+        String account = effectiveAccount(registryId);
+        validateRegistryId(account);
+        String resolvedUpstreamRegistry = resolveUpstreamRegistry(upstreamRegistry, upstreamRegistryUrl);
+        String key = pullThroughCacheRuleKey(region, account, prefix);
+        if (pullThroughCacheRuleStore.get(key).isPresent()) {
+            throw new AwsException("PullThroughCacheRuleAlreadyExistsException",
+                    "A pull through cache rule with repository prefix '" + prefix
+                            + "' already exists in registry '" + account + "'", 400);
+        }
+
+        Instant now = Instant.now();
+        PullThroughCacheRule rule = new PullThroughCacheRule();
+        rule.setRegistryId(account);
+        rule.setEcrRepositoryPrefix(prefix);
+        rule.setUpstreamRegistryUrl(upstreamRegistryUrl);
+        rule.setUpstreamRegistry(resolvedUpstreamRegistry);
+        rule.setCredentialArn(credentialArn);
+        rule.setCustomRoleArn(customRoleArn);
+        rule.setUpstreamRepositoryPrefix(upstreamPrefix);
+        rule.setCreatedAt(now);
+        rule.setUpdatedAt(now);
+        pullThroughCacheRuleStore.put(key, rule);
+        return rule;
+    }
+
+    public PaginatedResult<PullThroughCacheRule> describePullThroughCacheRules(
+            String registryId,
+            List<String> ecrRepositoryPrefixes,
+            Integer maxResults,
+            String nextToken,
+            String region) {
+        String account = effectiveAccount(registryId);
+        validateRegistryId(account);
+        List<PullThroughCacheRule> rules;
+        if (ecrRepositoryPrefixes == null) {
+            String keyPrefix = region + "::" + account + "::";
+            rules = pullThroughCacheRuleStore.scan(key -> key.startsWith(keyPrefix));
+        } else {
+            if (ecrRepositoryPrefixes.isEmpty() || ecrRepositoryPrefixes.size() > 100) {
+                throw new AwsException("InvalidParameterException",
+                        "ecrRepositoryPrefixes must contain between 1 and 100 items", 400);
+            }
+            rules = new ArrayList<>();
+            for (String requestedPrefix : ecrRepositoryPrefixes) {
+                String prefix = normalizePullThroughCachePrefix(requestedPrefix);
+                validatePullThroughCachePrefix(prefix, "ecrRepositoryPrefixes");
+                rules.add(pullThroughCacheRuleStore.get(pullThroughCacheRuleKey(region, account, prefix))
+                        .orElseThrow(() -> pullThroughCacheRuleNotFound(prefix, account)));
+            }
+        }
+        return Pagination.paginate(rules, PullThroughCacheRule::getEcrRepositoryPrefix,
+                maxResults, nextToken, 100, 1000, "InvalidParameterException");
+    }
+
+    public PullThroughCacheRule deletePullThroughCacheRule(String ecrRepositoryPrefix,
+                                                           String registryId,
+                                                           String region) {
+        String prefix = normalizePullThroughCachePrefix(ecrRepositoryPrefix);
+        validatePullThroughCachePrefix(prefix, "ecrRepositoryPrefix");
+        String account = effectiveAccount(registryId);
+        validateRegistryId(account);
+        String key = pullThroughCacheRuleKey(region, account, prefix);
+        PullThroughCacheRule rule = pullThroughCacheRuleStore.get(key)
+                .orElseThrow(() -> pullThroughCacheRuleNotFound(prefix, account));
+        pullThroughCacheRuleStore.delete(key);
+        return rule;
+    }
+
+    public PullThroughCacheRule updatePullThroughCacheRule(String ecrRepositoryPrefix,
+                                                           String registryId,
+                                                           String credentialArn,
+                                                           String customRoleArn,
+                                                           String region) {
+        String prefix = normalizePullThroughCachePrefix(ecrRepositoryPrefix);
+        validatePullThroughCachePrefix(prefix, "ecrRepositoryPrefix");
+        String account = effectiveAccount(registryId);
+        validateRegistryId(account);
+        validateCredentialArn(credentialArn);
+        validateCustomRoleArn(customRoleArn);
+
+        String key = pullThroughCacheRuleKey(region, account, prefix);
+        PullThroughCacheRule rule = pullThroughCacheRuleStore.get(key)
+                .orElseThrow(() -> pullThroughCacheRuleNotFound(prefix, account));
+        if (credentialArn != null) {
+            rule.setCredentialArn(credentialArn);
+        }
+        if (customRoleArn != null) {
+            rule.setCustomRoleArn(customRoleArn);
+        }
+        rule.setUpdatedAt(Instant.now());
+        pullThroughCacheRuleStore.put(key, rule);
+        return rule;
+    }
+
+    public PullThroughCacheRule validatePullThroughCacheRule(String ecrRepositoryPrefix,
+                                                             String registryId,
+                                                             String region) {
+        String prefix = normalizePullThroughCachePrefix(ecrRepositoryPrefix);
+        validatePullThroughCachePrefix(prefix, "ecrRepositoryPrefix");
+        String account = effectiveAccount(registryId);
+        validateRegistryId(account);
+        return pullThroughCacheRuleStore.get(pullThroughCacheRuleKey(region, account, prefix))
+                .orElseThrow(() -> pullThroughCacheRuleNotFound(prefix, account));
     }
 
     /**
@@ -122,7 +289,7 @@ public class EcrService implements ResourceProvider {
             String defaultAccount = regionResolver.getAccountId();
             String defaultRegion = regionResolver.getDefaultRegion();
             String legacyKey = key(defaultRegion, defaultAccount, registryRepositoryName);
-            var legacyRepository = repoStore.get(legacyKey);
+            Optional<Repository> legacyRepository = repoStore.get(legacyKey);
             if (legacyRepository.isPresent()) {
                 Repository repo = legacyRepository.get();
                 repo.setRepositoryUri(registryManager.getRepositoryUri(
@@ -138,7 +305,7 @@ public class EcrService implements ResourceProvider {
             String region = namespaced ? parts[1] : defaultRegion;
             String repoName = namespaced ? parts[2] : registryRepositoryName;
             String key = key(region, account, repoName);
-            var existing = repoStore.get(key);
+            Optional<Repository> existing = repoStore.get(key);
             if (existing.isPresent()) {
                 Repository repo = existing.get();
                 repo.setRepositoryUri(registryManager.getRepositoryUri(account, region, repoName));
@@ -314,6 +481,7 @@ public class EcrService implements ResourceProvider {
             registryManager.pruneStorage();
         }
         LOG.infov("Deleted ECR repository {0}/{1}/{2}", region, account, repositoryName);
+        repo.setRepositoryUri(registryManager.getRepositoryUri(account, region, repositoryName));
         return repo;
     }
 
@@ -322,7 +490,9 @@ public class EcrService implements ResourceProvider {
     // ============================================================
 
     public AuthorizationData getAuthorizationToken() {
-        requireRegistry();
+        // Deliberately not gated on the backing registry: AWS answers this call from the
+        // control plane, and both values here are computed without Docker. Gating it made
+        // every SDK client retry a 500 before its first repository call.
         String token = Base64.getEncoder()
                 .encodeToString(("AWS:" + AUTH_PASSWORD).getBytes(StandardCharsets.UTF_8));
         Instant expires = Instant.now().plusSeconds(12 * 60 * 60);
@@ -548,8 +718,492 @@ public class EcrService implements ResourceProvider {
     }
 
     // ============================================================
+    // Image push through the API (PutImage and the layer API)
+    // ============================================================
+
+    public record LayerAvailability(String layerDigest, String availability, Long layerSize) {}
+    public record LayerFailure(String layerDigest, String failureCode, String failureReason) {}
+    public record BatchCheckLayerAvailabilityResult(List<LayerAvailability> layers, List<LayerFailure> failures) {}
+    public record LayerUpload(String registryId, String repositoryName, String uploadId) {}
+
+    /**
+     * Writes a manifest to the registry under its tag, or under its digest when no tag is given, so
+     * {@code docker pull} and {@code BatchGetImage} see it as they see a pushed image.
+     */
+    public Image putImage(String repositoryName, String imageManifest, String imageManifestMediaType,
+                          String imageTag, String imageDigest, String registryId, String region) {
+        Repository repo = requireRepo(repositoryName, registryId, region);
+        if (imageManifest == null || imageManifest.isEmpty()) {
+            throw new AwsException("InvalidParameterException", "imageManifest must not be empty", 400);
+        }
+        if (imageTag != null) {
+            requireImageTag(imageTag);
+        }
+        String mediaType = manifestMediaType(imageManifest, imageManifestMediaType);
+        String digest = "sha256:" + Digests.sha256Hex(imageManifest.getBytes(StandardCharsets.UTF_8));
+        if (imageDigest != null && !imageDigest.isEmpty() && !imageDigest.equals(digest)) {
+            throw new AwsException("ImageDigestDoesNotMatchException",
+                    "Invalid parameter at 'imageDigest' failed to satisfy constraint: 'specified digest "
+                            + imageDigest + " does not match the calculated digest " + digest + "'", 400);
+        }
+        requireRegistry();
+        String storage = registryRepositoryName(repo, region);
+        RegistryHttpClient http = registryManager.httpClient();
+
+        String guarded = imageTag != null && "IMMUTABLE".equals(repo.getImageTagMutability())
+                ? immutableTagKey(repo.getRegistryId(), region, repositoryName, imageTag) : null;
+        if (guarded != null && !claimImmutableTag(guarded)) {
+            throw imageTagAlreadyExists(imageTag, repositoryName);
+        }
+        try {
+            return callRegistry(() -> writeManifest(repo, repositoryName, storage, http, imageManifest, mediaType,
+                    imageTag, digest, guarded, region), EcrService::putImageError);
+        } finally {
+            if (guarded != null) {
+                releaseImmutableTag(guarded);
+            }
+        }
+    }
+
+    private Image writeManifest(Repository repo, String repositoryName, String storage, RegistryHttpClient http,
+                                String imageManifest, String mediaType, String imageTag, String digest,
+                                String guarded, String region) throws Exception {
+        String existing = http.headManifestDigestStrict(storage, imageTag != null ? imageTag : digest, null);
+        if (digest.equals(existing)) {
+            throw new AwsException("ImageAlreadyExistsException",
+                    "Image with digest '" + digest + "'" + (imageTag != null ? " and tag '" + imageTag + "'" : "")
+                            + " already exists in the repository with name '" + repositoryName
+                            + "' in registry with id '" + repo.getRegistryId() + "'", 400);
+        }
+        if (existing != null && guarded != null) {
+            throw imageTagAlreadyExists(imageTag, repositoryName);
+        }
+        String stored = http.putManifest(storage, imageTag != null ? imageTag : digest, mediaType, imageManifest);
+        String finalDigest = stored != null ? stored : digest;
+        // A retag keeps the image's first push time, as DescribeImages records it.
+        String metaKey = imageMetaKey(region, repo.getRegistryId(), repositoryName, finalDigest);
+        if (imageMetaStore.get(metaKey).isEmpty()) {
+            imageMetaStore.put(metaKey, new ImageMetadata(finalDigest, Instant.now()));
+        }
+
+        Image image = new Image();
+        image.setRegistryId(repo.getRegistryId());
+        image.setRepositoryName(repositoryName);
+        image.setImageId(new ImageIdentifier(imageTag, finalDigest));
+        image.setImageManifest(imageManifest);
+        image.setImageManifestMediaType(mediaType);
+        publishImageAction("PUSH", repo, repositoryName, region, finalDigest, imageTag, mediaType);
+        return image;
+    }
+
+    /**
+     * Refuses a tag ECR refuses, with ECR's message, then a tag ECR takes but the backing registry
+     * cannot hold: one starting with '.' or '-', or longer than 128 characters.
+     */
+    private static void requireImageTag(String imageTag) {
+        if (imageTag.length() > 300) {
+            throw new AwsException("InvalidParameterException", "Invalid parameter at 'imageTag' failed to satisfy"
+                    + " constraint: 'Member must have length less than or equal to 300'", 400);
+        }
+        if (!ECR_IMAGE_TAG.matcher(imageTag).matches()) {
+            throw new AwsException("InvalidParameterException", "Invalid parameter at 'imageTag' failed to satisfy"
+                    + " constraint: 'must satisfy regular expression '[a-zA-Z0-9-_.]+''", 400);
+        }
+        if (!REGISTRY_IMAGE_TAG.matcher(imageTag).matches()) {
+            throw new AwsException("InvalidParameterException", "Floci's backing registry cannot hold the tag '"
+                    + imageTag + "': it must start with a letter, digit or underscore and be at most 128"
+                    + " characters", 400);
+        }
+    }
+
+    /** Reports which of the given layers the repository holds, with their sizes. */
+    public BatchCheckLayerAvailabilityResult batchCheckLayerAvailability(String repositoryName,
+                                                                         List<String> layerDigests,
+                                                                         String registryId,
+                                                                         String region) {
+        Repository repo = requireRepo(repositoryName, registryId, region);
+        if (layerDigests == null || layerDigests.isEmpty() || layerDigests.size() > 100) {
+            throw new AwsException("InvalidParameterException", "layerDigests must hold 1 to 100 digests", 400);
+        }
+        requireRegistry();
+        String storage = registryRepositoryName(repo, region);
+        RegistryHttpClient http = registryManager.httpClient();
+        List<LayerAvailability> layers = new ArrayList<>();
+        List<LayerFailure> failures = new ArrayList<>();
+        for (String digest : layerDigests) {
+            if (digest == null || !LAYER_DIGEST.matcher(digest).matches()) {
+                failures.add(new LayerFailure(digest, "InvalidLayerDigest", "Invalid layer digest"));
+                continue;
+            }
+            Long size = headBlob(http, storage, digest);
+            if (size == null) {
+                failures.add(new LayerFailure(digest, "MissingLayerDigest", "Could not find layer"));
+            } else {
+                layers.add(new LayerAvailability(digest, "AVAILABLE", size));
+            }
+        }
+        return new BatchCheckLayerAvailabilityResult(layers, failures);
+    }
+
+    /** The address a layer can be fetched from: Floci's registry endpoint, which needs no credentials. */
+    public String getDownloadUrlForLayer(String repositoryName, String layerDigest, String registryId, String region) {
+        Repository repo = requireRepo(repositoryName, registryId, region);
+        requireLayerDigest(layerDigest);
+        requireRegistry();
+        Long size = headBlob(registryManager.httpClient(), registryRepositoryName(repo, region), layerDigest);
+        if (size == null) {
+            throw layersNotFound(layerDigest, repositoryName, repo.getRegistryId());
+        }
+        // AWS always answers with a pre-signed https:// URL, and clients (Alchemy's bindings among
+        // them) check for it, so the address is reported over https even when Floci's registry
+        // endpoint serves plain HTTP.
+        String url = registryManager.blobUrl(repo.getRepositoryUri(), layerDigest);
+        return url.startsWith("http://") ? "https://" + url.substring("http://".length()) : url;
+    }
+
+    /** Cancels the registry upload session of a layer upload left idle for a day. */
+    private void discardUpload(String location) {
+        registryManager.httpClient().cancelUpload(location);
+    }
+
+    /** Opens a registry upload session for one layer. */
+    public LayerUpload initiateLayerUpload(String repositoryName, String registryId, String region) {
+        Repository repo = requireRepo(repositoryName, registryId, region);
+        requireRegistry();
+        String location = callRegistry(
+                () -> registryManager.httpClient().startUpload(registryRepositoryName(repo, region)),
+                EcrService::registryUnavailable);
+        String uploadId = layerUploads.open(key(region, repo.getRegistryId(), repositoryName), location);
+        return new LayerUpload(repo.getRegistryId(), repositoryName, uploadId);
+    }
+
+    /** Sends one part of a layer, returning the last byte received. */
+    public long uploadLayerPart(String repositoryName, String uploadId, Long partFirstByte, Long partLastByte,
+                                byte[] layerPartBlob, String registryId, String region) {
+        Repository repo = requireRepo(repositoryName, registryId, region);
+        if (partFirstByte == null || partLastByte == null || layerPartBlob == null
+                || partFirstByte < 0 || partLastByte < 0) {
+            throw new AwsException("InvalidParameterException",
+                    "partFirstByte, partLastByte and layerPartBlob are required and must not be negative", 400);
+        }
+        EcrLayerUploads.Session session = layerUploads.require(
+                key(region, repo.getRegistryId(), repositoryName), uploadId, repositoryName);
+        synchronized (session) {
+            EcrLayerUploads.checkPart(session, partFirstByte, partLastByte, layerPartBlob.length,
+                    repo.getRegistryId(), repositoryName, uploadId);
+            requireRegistry();
+            String next = callRegistry(
+                    () -> registryManager.httpClient().patchUpload(session.location(), layerPartBlob, partFirstByte),
+                    e -> uploadError(e, uploadId, repositoryName));
+            session.accept(layerPartBlob.length, next, layerUploads.now());
+            return partLastByte;
+        }
+    }
+
+    /** Closes an upload, storing its bytes under the digest given, and returns that digest. */
+    public String completeLayerUpload(String repositoryName, String uploadId, List<String> layerDigests,
+                                      String registryId, String region) {
+        Repository repo = requireRepo(repositoryName, registryId, region);
+        if (layerDigests == null || layerDigests.isEmpty() || layerDigests.size() > 100) {
+            throw new AwsException("InvalidParameterException", "layerDigests must hold 1 to 100 digests", 400);
+        }
+        // An upload holds one layer, so every digest given must name it.
+        String digest = layerDigests.get(0);
+        for (String d : layerDigests) {
+            requireLayerDigest(d);
+            if (!digest.equals(d)) {
+                throw new AwsException("InvalidParameterException",
+                        "layerDigests must all name the one layer the upload holds", 400);
+            }
+        }
+        EcrLayerUploads.Session session = layerUploads.require(
+                key(region, repo.getRegistryId(), repositoryName), uploadId, repositoryName);
+        synchronized (session) {
+            EcrLayerUploads.checkComplete(session);
+            requireRegistry();
+            RegistryHttpClient http = registryManager.httpClient();
+            String storage = registryRepositoryName(repo, region);
+            if (headBlob(http, storage, digest) != null) {
+                http.cancelUpload(session.location());
+                layerUploads.close(uploadId);
+                throw new AwsException("LayerAlreadyExistsException",
+                        "Layer " + digest + " already exists in the repository with name '" + repositoryName
+                                + "' in registry with id '" + repo.getRegistryId() + "'", 400);
+            }
+            callRegistry(() -> {
+                http.finishUpload(session.location(), digest);
+                return null;
+            }, e -> {
+                layerUploads.close(uploadId);
+                if ("DIGEST_INVALID".equals(e.code())) {
+                    return new AwsException("InvalidLayerException",
+                            "The layer digest calculated for the upload does not match " + digest, 400);
+                }
+                return uploadError(e, uploadId, repositoryName);
+            });
+            layerUploads.close(uploadId);
+            return digest;
+        }
+    }
+
+    /** The registry ID a request names, or the caller's account when it names none. */
+    public String registryIdFor(String registryId) {
+        return effectiveAccount(registryId);
+    }
+
+    /** The key both the registry data plane and {@code PutImage} hold while writing an immutable tag. */
+    public static String immutableTagKey(String account, String region, String repositoryName, String tag) {
+        return account + "/" + region + "/" + repositoryName + ":" + tag;
+    }
+
+    /** Claims an immutable tag for one write; false if another write holds it. */
+    public boolean claimImmutableTag(String key) {
+        return inFlightImmutableTags.add(key);
+    }
+
+    public void releaseImmutableTag(String key) {
+        inFlightImmutableTags.remove(key);
+    }
+
+    /** The media type sent, else the manifest's own {@code mediaType}; with neither, the request is refused. */
+    private static String manifestMediaType(String manifest, String given) {
+        JsonNode root;
+        try {
+            root = MAPPER.readTree(manifest);
+        } catch (Exception e) {
+            root = null;
+        }
+        if (root == null || !root.isObject()) {
+            throw new AwsException("InvalidParameterException", "imageManifest is not a valid JSON manifest", 400);
+        }
+        if (given != null && !given.isEmpty()) {
+            return given;
+        }
+        String own = root.path("mediaType").asText("");
+        if (own.isEmpty()) {
+            throw new AwsException("InvalidParameterException",
+                    "imageManifestMediaType is required when the manifest has no mediaType", 400);
+        }
+        return own;
+    }
+
+    private Long headBlob(RegistryHttpClient http, String storage, String digest) {
+        return callRegistry(() -> http.headBlob(storage, digest), EcrService::registryUnavailable);
+    }
+
+    /** One call to the backing registry. */
+    @FunctionalInterface
+    private interface RegistryCall<T> {
+        T call() throws Exception;
+    }
+
+    /**
+     * Runs a call to the backing registry, answering a refusal the registry gives with what
+     * {@code refused} maps it to and any other failure with {@code ServerException}.
+     */
+    private static <T> T callRegistry(RegistryCall<T> call,
+                                      Function<RegistryHttpClient.RegistryErrorException, AwsException> refused) {
+        try {
+            return call.call();
+        } catch (AwsException e) {
+            throw e;
+        } catch (RegistryHttpClient.RegistryErrorException e) {
+            throw refused.apply(e);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw registryUnavailable(e);
+        } catch (Exception e) {
+            throw registryUnavailable(e);
+        }
+    }
+
+    private static void requireLayerDigest(String digest) {
+        if (digest == null || !LAYER_DIGEST.matcher(digest).matches()) {
+            throw new AwsException("InvalidParameterException", "Invalid layer digest: " + digest, 400);
+        }
+    }
+
+    private static AwsException putImageError(RegistryHttpClient.RegistryErrorException e) {
+        String code = e.code() == null ? "" : e.code();
+        return switch (code) {
+            case "MANIFEST_BLOB_UNKNOWN", "BLOB_UNKNOWN" -> new AwsException("LayersNotFoundException",
+                    "The image references layers that are not in the repository: " + e.getMessage(), 400);
+            case "MANIFEST_INVALID", "MANIFEST_UNVERIFIED", "DIGEST_INVALID", "TAG_INVALID", "NAME_INVALID" ->
+                    new AwsException("InvalidParameterException", "The registry refused the manifest: " + e.getMessage(), 400);
+            default -> registryUnavailable(e);
+        };
+    }
+
+    private static AwsException uploadError(RegistryHttpClient.RegistryErrorException e, String uploadId,
+                                            String repositoryName) {
+        if ("BLOB_UPLOAD_UNKNOWN".equals(e.code()) || e.status() == 404) {
+            return new AwsException("UploadNotFoundException",
+                    "Upload with id '" + uploadId + "' is not found for repository '" + repositoryName + "'", 400);
+        }
+        if ("BLOB_UPLOAD_INVALID".equals(e.code()) || e.status() == 416) {
+            return new AwsException("InvalidLayerPartException", "The registry refused the part: " + e.getMessage(), 400);
+        }
+        return registryUnavailable(e);
+    }
+
+    private static AwsException imageTagAlreadyExists(String tag, String repositoryName) {
+        return new AwsException("ImageTagAlreadyExistsException",
+                "The image tag '" + tag + "' already exists in the '" + repositoryName
+                        + "' repository and cannot be overwritten because the repository is immutable.", 400);
+    }
+
+    private static AwsException layersNotFound(String digest, String repositoryName, String registryId) {
+        return new AwsException("LayersNotFoundException",
+                "The specified layer " + digest + " could not be found in the repository with name '"
+                        + repositoryName + "' in the registry with id '" + registryId + "'", 400);
+    }
+
+    private static AwsException registryUnavailable(Exception e) {
+        return new AwsException("ServerException", "The ECR backing registry failed: " + e.getMessage(), 500);
+    }
+
+    // ============================================================
+    // Registry settings (policy, replication, scanning)
+    // ============================================================
+
+    /**
+     * Stores the registry policy. Its length is checked against the model before this is reached;
+     * text that is not a JSON object is refused here, as the model cannot say so.
+     */
+    public String putRegistryPolicy(String policyText, String region) {
+        JsonNode parsed;
+        try {
+            parsed = policyText == null ? null : MAPPER.readTree(policyText);
+        } catch (Exception e) {
+            parsed = null;
+        }
+        if (parsed == null || !parsed.isObject()) {
+            throw new AwsException("InvalidParameterException", "Invalid parameter at 'PolicyText' failed to satisfy "
+                    + "constraint: 'Invalid registry policy provided'", 400);
+        }
+        updateRegistrySettings(region, settings -> {
+            settings.setPolicyText(policyText);
+            return null;
+        });
+        return policyText;
+    }
+
+    public String getRegistryPolicy(String region) {
+        String policy = registrySettings(region).getPolicyText();
+        if (policy == null) {
+            throw registryPolicyNotFound();
+        }
+        return policy;
+    }
+
+    /** Removes the registry policy and returns what it was. */
+    public String deleteRegistryPolicy(String region) {
+        return updateRegistrySettings(region, settings -> {
+            String policy = settings.getPolicyText();
+            if (policy == null) {
+                throw registryPolicyNotFound();
+            }
+            settings.setPolicyText(null);
+            return policy;
+        });
+    }
+
+    /**
+     * Stores the replication rules; an empty list clears them. The rules are checked against the
+     * model before this is reached. Floci does not replicate images.
+     */
+    public List<RegistrySettings.ReplicationRule> putReplicationConfiguration(
+            List<RegistrySettings.ReplicationRule> rules, String region) {
+        updateRegistrySettings(region, settings -> {
+            settings.setReplicationRules(rules.isEmpty() ? null : List.copyOf(rules));
+            return null;
+        });
+        return replicationRules(region);
+    }
+
+    /** The stored replication rules, empty when none are set. */
+    public List<RegistrySettings.ReplicationRule> replicationRules(String region) {
+        List<RegistrySettings.ReplicationRule> rules = registrySettings(region).getReplicationRules();
+        return rules == null ? List.of() : rules;
+    }
+
+    /**
+     * Stores the scanning configuration. The model's constraints are checked before this is
+     * reached; {@code CONTINUOUS_SCAN} is refused here with {@code BASIC}, as the API reference
+     * offers it only with enhanced scanning and the model cannot say so. Floci does not scan images.
+     */
+    public RegistrySettings putRegistryScanningConfiguration(String scanType, List<RegistrySettings.ScanningRule> rules,
+                                                             String region) {
+        String type = scanType == null ? "BASIC" : scanType;
+        List<RegistrySettings.ScanningRule> given = rules == null ? List.of() : rules;
+        for (RegistrySettings.ScanningRule rule : given) {
+            if ("BASIC".equals(type) && "CONTINUOUS_SCAN".equals(rule.scanFrequency())) {
+                throw new AwsException("InvalidParameterException",
+                        "CONTINUOUS_SCAN is supported only with the ENHANCED scan type", 400);
+            }
+        }
+        updateRegistrySettings(region, settings -> {
+            settings.setScanType(type);
+            settings.setScanningRules(List.copyOf(given));
+            return null;
+        });
+        return registryScanningConfiguration(region);
+    }
+
+    /** The scanning configuration, {@code BASIC} with no rules until one is put. */
+    public RegistrySettings registryScanningConfiguration(String region) {
+        RegistrySettings stored = registrySettings(region);
+        RegistrySettings view = new RegistrySettings();
+        view.setScanType(stored.getScanType() == null ? "BASIC" : stored.getScanType());
+        view.setScanningRules(stored.getScanningRules() == null ? List.of() : stored.getScanningRules());
+        return view;
+    }
+
+    /** The registry ID of the caller's account. */
+    public String registryId() {
+        return regionResolver.getAccountId();
+    }
+
+    private RegistrySettings registrySettings(String region) {
+        return registrySettingsStore.get(registrySettingsKey(region)).orElseGet(RegistrySettings::new);
+    }
+
+    /**
+     * Reads the registry's settings, changes them and writes them back under the registry's lock.
+     * The settings are one record, and Terraform puts the policy, replication and scanning
+     * configuration in parallel: unlocked, two writers could start from the same record and the
+     * later write would drop the other's field.
+     */
+    private <T> T updateRegistrySettings(String region, Function<RegistrySettings, T> change) {
+        String key = registrySettingsKey(region);
+        synchronized (registrySettingsLocks.computeIfAbsent(key, k -> new Object())) {
+            RegistrySettings settings = registrySettings(region);
+            T result = change.apply(settings);
+            registrySettingsStore.put(key, settings);
+            return result;
+        }
+    }
+
+    private String registrySettingsKey(String region) {
+        return region + "::" + regionResolver.getAccountId();
+    }
+
+    private AwsException registryPolicyNotFound() {
+        return new AwsException("RegistryPolicyNotFoundException",
+                "Registry policy does not exist in the registry with id '" + regionResolver.getAccountId() + "'", 400);
+    }
+
+    // ============================================================
     // Tag mutability + resource tags + policies (metadata round-trip)
     // ============================================================
+
+    public Repository putImageScanningConfiguration(String repositoryName, String registryId,
+                                                    boolean scanOnPush, String region) {
+        Repository repo = requireRepo(repositoryName, registryId, region);
+        repo.setScanOnPush(scanOnPush);
+        repoStore.put(key(region, repo.getRegistryId(), repositoryName), repo);
+        return repo;
+    }
 
     public Repository putImageTagMutability(String repositoryName, String registryId,
                                             String mutability, String region) {
@@ -674,248 +1328,12 @@ public class EcrService implements ResourceProvider {
     }
 
     // ============================================================
-    // Image scanning configuration + registry policy
-    // ============================================================
-
-    public Repository putImageScanningConfiguration(String repositoryName, String registryId,
-                                                    Boolean scanOnPush, String region) {
-        Repository repo = requireRepo(repositoryName, registryId, region);
-        repo.setScanOnPush(scanOnPush != null && scanOnPush);
-        repoStore.put(key(region, repo.getRegistryId(), repositoryName), repo);
-        return repo;
-    }
-
-    public RegistryPolicyResult putRegistryPolicy(String policyText, String region) {
-        if (policyText == null || policyText.isBlank()) {
-            throw new AwsException("InvalidParameterException", "policyText must not be empty", 400);
-        }
-        String account = regionResolver.getAccountId();
-        registryPolicies.put(registryPolicyKey(region, account), policyText);
-        return new RegistryPolicyResult(account, policyText);
-    }
-
-    public RegistryPolicyResult getRegistryPolicy(String region) {
-        String account = regionResolver.getAccountId();
-        String text = registryPolicies.get(registryPolicyKey(region, account));
-        if (text == null) {
-            throw new AwsException("RegistryPolicyNotFoundException",
-                    "Registry policy does not exist for the registry with id '" + account + "'", 400);
-        }
-        return new RegistryPolicyResult(account, text);
-    }
-
-    public RegistryPolicyResult deleteRegistryPolicy(String region) {
-        String account = regionResolver.getAccountId();
-        String text = registryPolicies.remove(registryPolicyKey(region, account));
-        if (text == null) {
-            throw new AwsException("RegistryPolicyNotFoundException",
-                    "Registry policy does not exist for the registry with id '" + account + "'", 400);
-        }
-        return new RegistryPolicyResult(account, text);
-    }
-
-    // ============================================================
-    // Layer upload / PutImage / download URL / availability / scan
-    // ============================================================
-
-    public InitiateLayerUploadResult initiateLayerUpload(String repositoryName, String registryId, String region) {
-        Repository repo = requireRepo(repositoryName, registryId, region);
-        String uploadId = UUID.randomUUID().toString();
-        uploads.put(uploadId, new LayerUpload(repositoryName, repo.getRegistryId(), region));
-        return new InitiateLayerUploadResult(uploadId, LAYER_PART_SIZE);
-    }
-
-    public UploadLayerPartResult uploadLayerPart(String repositoryName, String registryId, String region,
-                                                 String uploadId, long partFirstByte, long partLastByte,
-                                                 byte[] layerPartBlob) {
-        requireRepo(repositoryName, registryId, region);
-        LayerUpload upload = uploads.get(uploadId);
-        if (upload == null) {
-            throw new AwsException("UploadNotFoundException",
-                    "Upload id '" + uploadId + "' was not found", 400);
-        }
-        if (layerPartBlob == null || layerPartBlob.length == 0) {
-            throw new AwsException("LayerPartTooSmallException", "Layer part is empty", 400);
-        }
-        long expectedLast = partFirstByte + layerPartBlob.length - 1;
-        if (partLastByte != expectedLast) {
-            throw new AwsException("InvalidLayerPartException",
-                    "partLastByte does not match the uploaded blob length", 400);
-        }
-        upload.write((int) partFirstByte, layerPartBlob);
-        return new UploadLayerPartResult(upload.registryId, repositoryName, uploadId, partLastByte);
-    }
-
-    public CompleteLayerUploadResult completeLayerUpload(String repositoryName, String registryId, String region,
-                                                         String uploadId, List<String> layerDigests) {
-        Repository repo = requireRepo(repositoryName, registryId, region);
-        LayerUpload upload = uploads.remove(uploadId);
-        if (upload == null) {
-            throw new AwsException("UploadNotFoundException",
-                    "Upload id '" + uploadId + "' was not found", 400);
-        }
-        byte[] data = upload.toByteArray();
-        if (data.length == 0) {
-            throw new AwsException("EmptyUploadException", "Upload contained no layer data", 400);
-        }
-        String computed = sha256Digest(data);
-        String digest = (layerDigests != null && !layerDigests.isEmpty() && layerDigests.get(0) != null)
-                ? layerDigests.get(0) : computed;
-        if (!computed.equals(digest)) {
-            throw new AwsException("InvalidLayerException",
-                    "Layer digest " + digest + " does not match uploaded bytes " + computed, 400);
-        }
-        String layerKey = layerKey(region, repo.getRegistryId(), repositoryName, digest);
-        if (localLayers.containsKey(layerKey) || registryBlobExists(repo, region, repositoryName, digest)) {
-            throw new AwsException("LayerAlreadyExistsException",
-                    "Layer with digest '" + digest + "' already exists", 400);
-        }
-        localLayers.put(layerKey, data);
-        pushBlobBestEffort(repo, region, repositoryName, digest, data);
-        return new CompleteLayerUploadResult(repo.getRegistryId(), repositoryName, uploadId, digest);
-    }
-
-    public Image putImage(String repositoryName, String registryId, String region,
-                          String imageManifest, String imageManifestMediaType,
-                          String imageTag, String imageDigest) {
-        Repository repo = requireRepo(repositoryName, registryId, region);
-        if (imageManifest == null || imageManifest.isBlank()) {
-            throw new AwsException("InvalidParameterException", "imageManifest must not be empty", 400);
-        }
-        String digest = (imageDigest != null && !imageDigest.isBlank())
-                ? imageDigest
-                : sha256Digest(imageManifest.getBytes(StandardCharsets.UTF_8));
-        String mediaType = (imageManifestMediaType == null || imageManifestMediaType.isBlank())
-                ? "application/vnd.docker.distribution.manifest.v2+json"
-                : imageManifestMediaType;
-
-        LocalImage existing = findLocalImage(region, repo.getRegistryId(), repositoryName, imageTag, digest);
-        if (existing != null && digest.equals(existing.digest)
-                && (imageTag == null || imageTag.equals(existing.tag))) {
-            throw new AwsException("ImageAlreadyExistsException",
-                    "Image with imageId {" + (imageTag != null ? "imageTag:" + imageTag + ", " : "")
-                            + "imageDigest:" + digest + "} already exists", 400);
-        }
-
-        Instant now = Instant.now();
-        LocalImage stored = new LocalImage(digest, imageTag, imageManifest, mediaType, now);
-        localImages.put(localImageKey(region, repo.getRegistryId(), repositoryName, digest), stored);
-        imageMetaStore.put(imageMetaKey(region, repo.getRegistryId(), repositoryName, digest),
-                new ImageMetadata(digest, now));
-        String registryDigest = pushManifestBestEffort(repo, region, repositoryName,
-                imageTag != null ? imageTag : digest, imageManifest, mediaType);
-        if (registryDigest != null && !registryDigest.isBlank()) {
-            stored.digest = registryDigest;
-        }
-
-        Image img = new Image();
-        img.setRegistryId(repo.getRegistryId());
-        img.setRepositoryName(repositoryName);
-        img.setImageId(new ImageIdentifier(imageTag, stored.digest));
-        img.setImageManifest(imageManifest);
-        img.setImageManifestMediaType(mediaType);
-        publishImageAction("PUSH", repo, repositoryName, region, stored.digest, imageTag, mediaType);
-        return img;
-    }
-
-    public DownloadUrl getDownloadUrlForLayer(String repositoryName, String registryId,
-                                              String region, String layerDigest) {
-        Repository repo = requireRepo(repositoryName, registryId, region);
-        if (layerDigest == null || layerDigest.isBlank()) {
-            throw new AwsException("InvalidParameterException", "layerDigest must not be empty", 400);
-        }
-        String layerKey = layerKey(region, repo.getRegistryId(), repositoryName, layerDigest);
-        boolean local = localLayers.containsKey(layerKey);
-        boolean remote = registryBlobExists(repo, region, repositoryName, layerDigest);
-        if (!local && !remote) {
-            throw new AwsException("LayersNotFoundException",
-                    "Layer with digest '" + layerDigest + "' was not found", 400);
-        }
-        // Alchemy bindings assert the URL is HTTPS (AWS always returns a
-        // pre-signed https:// URL). The backing registry may be plain HTTP.
-        String repositoryUri = registryManager.getRepositoryUri(repo.getRegistryId(), region, repositoryName);
-        int repositoryPath = repositoryUri.indexOf('/');
-        String httpsBase = "https://" + repositoryUri.substring(0, repositoryPath);
-        String path = "/v2/" + repositoryUri.substring(repositoryPath + 1) + "/blobs/" + layerDigest;
-        return new DownloadUrl(httpsBase + path, layerDigest);
-    }
-
-    public LayerAvailabilityResult batchCheckLayerAvailability(String repositoryName, String registryId,
-                                                               String region, List<String> layerDigests) {
-        Repository repo = requireRepo(repositoryName, registryId, region);
-        List<LayerInfo> layers = new ArrayList<>();
-        List<LayerFailureInfo> failures = new ArrayList<>();
-        if (layerDigests == null) {
-            layerDigests = List.of();
-        }
-        for (String digest : layerDigests) {
-            if (digest == null || digest.isBlank()) {
-                failures.add(new LayerFailureInfo(digest, "MissingLayerDigest", "layerDigest is required"));
-                continue;
-            }
-            String layerKey = layerKey(region, repo.getRegistryId(), repositoryName, digest);
-            byte[] local = localLayers.get(layerKey);
-            Long remoteSize = registryBlobSize(repo, region, repositoryName, digest);
-            if (local != null || remoteSize != null) {
-                long size = local != null ? local.length : remoteSize;
-                layers.add(new LayerInfo(digest, "AVAILABLE", size, null));
-            } else {
-                layers.add(new LayerInfo(digest, "UNAVAILABLE", 0L, null));
-            }
-        }
-        return new LayerAvailabilityResult(layers, failures);
-    }
-
-    public void startImageScan(String repositoryName, String registryId, String region, ImageIdentifier imageId) {
-        requireRepo(repositoryName, registryId, region);
-        if (imageId == null || (imageId.getImageTag() == null && imageId.getImageDigest() == null)) {
-            throw new AwsException("InvalidParameterException", "imageId must include imageTag or imageDigest", 400);
-        }
-        String ref = imageId.getImageTag() != null ? imageId.getImageTag() : imageId.getImageDigest();
-        boolean exists = findLocalImage(region, effectiveAccount(registryId), repositoryName,
-                imageId.getImageTag(), imageId.getImageDigest()) != null;
-        if (!exists) {
-            try {
-                describeImages(repositoryName, List.of(imageId), registryId, region);
-                exists = true;
-            } catch (AwsException e) {
-                if ("ImageNotFoundException".equals(e.getErrorCode())) {
-                    throw e;
-                }
-                throw e;
-            }
-        }
-        if (!exists) {
-            throw new AwsException("ImageNotFoundException",
-                    "The image with imageId " + ref + " does not exist", 400);
-        }
-        // Scratch / synthetic images are not a supported OS — match live AWS.
-        throw new AwsException("UnsupportedImageTypeException",
-                "The operating system and/or package manager are not supported", 400);
-    }
-
-    public void describeImageScanFindings(String repositoryName, String registryId,
-                                          String region, ImageIdentifier imageId) {
-        requireRepo(repositoryName, registryId, region);
-        throw new AwsException("ScanNotFoundException",
-                "Image scan does not exist for the specified image", 400);
-    }
-
-    // ============================================================
     // Result records
     // ============================================================
 
     public record DescribeImagesResult(List<ImageDetail> imageDetails, List<ImageFailure> failures) {}
     public record BatchGetImageResult(List<Image> images, List<ImageFailure> failures) {}
     public record BatchDeleteImageResult(List<ImageIdentifier> imageIds, List<ImageFailure> failures) {}
-    public record InitiateLayerUploadResult(String uploadId, long partSize) {}
-    public record UploadLayerPartResult(String registryId, String repositoryName, String uploadId, long lastByteReceived) {}
-    public record CompleteLayerUploadResult(String registryId, String repositoryName, String uploadId, String layerDigest) {}
-    public record DownloadUrl(String downloadUrl, String layerDigest) {}
-    public record LayerInfo(String layerDigest, String layerAvailability, long layerSize, String mediaType) {}
-    public record LayerFailureInfo(String layerDigest, String failureCode, String failureReason) {}
-    public record LayerAvailabilityResult(List<LayerInfo> layers, List<LayerFailureInfo> failures) {}
-    public record RegistryPolicyResult(String registryId, String policyText) {}
 
     // ============================================================
     // Helpers
@@ -930,13 +1348,12 @@ public class EcrService implements ResourceProvider {
         return refreshRepositoryUri(repo, region);
     }
 
-    private Repository findByNameInRegion(String region, String name) {
-        List<Repository> matches = repoStore.scan(k -> k.startsWith(region + "::") && k.endsWith("::" + name));
-        return matches.isEmpty() ? null : matches.get(0);
-    }
-
     private static String imageMetaKey(String region, String account, String repoName, String digest) {
         return key(region, account, repoName) + "::" + digest;
+    }
+
+    private static String pullThroughCacheRuleKey(String region, String account, String prefix) {
+        return region + "::" + account + "::" + prefix;
     }
 
 
@@ -1102,6 +1519,110 @@ public class EcrService implements ResourceProvider {
         return regionResolver.getAccountId();
     }
 
+    private static String normalizePullThroughCachePrefix(String prefix) {
+        if (prefix == null || prefix.isBlank() || "ROOT".equals(prefix)) {
+            return prefix;
+        }
+        return prefix.endsWith("/") ? prefix.substring(0, prefix.length() - 1) : prefix;
+    }
+
+    private static void validatePullThroughCachePrefix(String prefix, String fieldName) {
+        if (prefix == null || prefix.length() < 2 || prefix.length() > MAX_PULL_THROUGH_CACHE_PREFIX_LENGTH
+                || !PULL_THROUGH_CACHE_PREFIX.matcher(prefix).matches()) {
+            throw new AwsException("InvalidParameterException",
+                    fieldName + " must match the ECR pull through cache repository prefix pattern", 400);
+        }
+    }
+
+    private static void validateRegistryId(String registryId) {
+        if (!REGISTRY_ID.matcher(registryId).matches()) {
+            throw new AwsException("InvalidParameterException",
+                    "registryId must be a 12 digit account ID", 400);
+        }
+    }
+
+    private static void validateUpstreamRegistryUrl(String upstreamRegistryUrl) {
+        if (upstreamRegistryUrl == null || upstreamRegistryUrl.isBlank()) {
+            throw new AwsException("InvalidParameterException",
+                    "upstreamRegistryUrl must not be empty", 400);
+        }
+    }
+
+    private static void validateCredentialArn(String credentialArn) {
+        if (credentialArn == null) {
+            return;
+        }
+        if (credentialArn.length() < 50 || credentialArn.length() > 612
+                || !CREDENTIAL_ARN.matcher(credentialArn).matches()) {
+            throw new AwsException("InvalidParameterException",
+                    "credentialArn does not match the ECR pull through cache secret ARN pattern", 400);
+        }
+    }
+
+    private static void validateCustomRoleArn(String customRoleArn) {
+        if (customRoleArn != null && customRoleArn.length() > 2048) {
+            throw new AwsException("InvalidParameterException",
+                    "customRoleArn exceeds 2048 characters", 400);
+        }
+    }
+
+    private static String resolveUpstreamRegistry(String upstreamRegistry, String upstreamRegistryUrl) {
+        if (upstreamRegistry != null && !upstreamRegistry.isBlank()) {
+            if (!UPSTREAM_REGISTRIES.contains(upstreamRegistry)) {
+                throw unsupportedUpstreamRegistry(upstreamRegistry);
+            }
+            return upstreamRegistry;
+        }
+        String host = upstreamRegistryUrl.toLowerCase();
+        if (host.startsWith("https://")) {
+            host = host.substring("https://".length());
+        } else if (host.startsWith("http://")) {
+            host = host.substring("http://".length());
+        }
+        while (host.endsWith("/")) {
+            host = host.substring(0, host.length() - 1);
+        }
+        if (host.equals("registry-1.docker.io")) {
+            return "docker-hub";
+        }
+        if (host.equals("public.ecr.aws")) { // partition-literal: ECR Public's fixed registry host; the service exists only in the commercial partition
+            return "ecr-public";
+        }
+        if (host.equals("quay.io")) {
+            return "quay";
+        }
+        if (host.equals("registry.k8s.io")) {
+            return "k8s";
+        }
+        if (host.equals("ghcr.io")) {
+            return "github-container-registry";
+        }
+        if (host.equals("registry.gitlab.com")) {
+            return "gitlab-container-registry";
+        }
+        if (host.endsWith(".azurecr.io")) {
+            return "azure-container-registry";
+        }
+        if (host.equals("cgr.dev")) {
+            return "chainguard";
+        }
+        if (ECR_UPSTREAM_HOST.matcher(host).matches()) {
+            return "ecr";
+        }
+        throw unsupportedUpstreamRegistry(upstreamRegistryUrl);
+    }
+
+    private static AwsException unsupportedUpstreamRegistry(String value) {
+        return new AwsException("UnsupportedUpstreamRegistryException",
+                "The upstream registry '" + value + "' is not supported", 400);
+    }
+
+    private static AwsException pullThroughCacheRuleNotFound(String prefix, String account) {
+        return new AwsException("PullThroughCacheRuleNotFoundException",
+                "The pull through cache rule with repository prefix '" + prefix
+                        + "' does not exist in registry '" + account + "'", 400);
+    }
+
     private static void validateRepoName(String name) {
         if (name == null || name.isBlank()) {
             throw new AwsException("InvalidParameterException",
@@ -1127,9 +1648,68 @@ public class EcrService implements ResourceProvider {
                         + account + "'", 400);
     }
 
-    private static String registryPolicyKey(String region, String account) {
-        return region + "::" + account;
+
+
+    private static final ObjectMapper JSON = new ObjectMapper();
+
+
+
+
+    private final Map<String, LocalImage> localImages = new ConcurrentHashMap<>();
+
+
+    public void startImageScan(String repositoryName, String registryId, String region, ImageIdentifier imageId) {
+        requireRepo(repositoryName, registryId, region);
+        if (imageId == null || (imageId.getImageTag() == null && imageId.getImageDigest() == null)) {
+            throw new AwsException("InvalidParameterException", "imageId must include imageTag or imageDigest", 400);
+        }
+        String ref = imageId.getImageTag() != null ? imageId.getImageTag() : imageId.getImageDigest();
+        boolean exists = findLocalImage(region, effectiveAccount(registryId), repositoryName,
+                imageId.getImageTag(), imageId.getImageDigest()) != null;
+        if (!exists) {
+            try {
+                describeImages(repositoryName, List.of(imageId), registryId, region);
+                exists = true;
+            } catch (AwsException e) {
+                if ("ImageNotFoundException".equals(e.getErrorCode())) {
+                    throw e;
+                }
+                throw e;
+            }
+        }
+        if (!exists) {
+            throw new AwsException("ImageNotFoundException",
+                    "The image with imageId " + ref + " does not exist", 400);
+        }
+        // Scratch / synthetic images are not a supported OS — match live AWS.
+        throw new AwsException("UnsupportedImageTypeException",
+                "The operating system and/or package manager are not supported", 400);
     }
+
+    public void describeImageScanFindings(String repositoryName, String registryId,
+                                          String region, ImageIdentifier imageId) {
+        requireRepo(repositoryName, registryId, region);
+        throw new AwsException("ScanNotFoundException",
+                "Image scan does not exist for the specified image", 400);
+    }
+
+    public record InitiateLayerUploadResult(String uploadId, long partSize) {}
+
+    public record UploadLayerPartResult(String registryId, String repositoryName, String uploadId, long lastByteReceived) {}
+
+    public record CompleteLayerUploadResult(String registryId, String repositoryName, String uploadId, String layerDigest) {}
+
+    public record DownloadUrl(String downloadUrl, String layerDigest) {}
+
+    public record LayerInfo(String layerDigest, String layerAvailability, long layerSize, String mediaType) {}
+
+    public record LayerFailureInfo(String layerDigest, String failureCode, String failureReason) {}
+
+    public record LayerAvailabilityResult(List<LayerInfo> layers, List<LayerFailureInfo> failures) {}
+
+    public record RegistryPolicyResult(String registryId, String policyText) {}
+
+
 
     private static String layerKey(String region, String account, String repoName, String digest) {
         return key(region, account, repoName) + "::" + digest;
@@ -1139,29 +1719,156 @@ public class EcrService implements ResourceProvider {
         return layerKey(region, account, repoName, digest);
     }
 
-    private static String sha256Digest(byte[] data) {
-        try {
-            byte[] hash = MessageDigest.getInstance("SHA-256").digest(data);
-            return "sha256:" + HexFormat.of().formatHex(hash);
-        } catch (Exception e) {
-            throw new AwsException("ServerException", "Unable to hash layer: " + e.getMessage(), 500);
+
+
+
+
+
+    private LocalImage findLocalImage(String region, String account, String repoName, String tag, String digest) {
+        if (digest != null && !digest.isBlank()) {
+            return localImages.get(localImageKey(region, account, repoName, digest));
+        }
+        if (tag != null && !tag.isBlank()) {
+            String prefix = key(region, account, repoName) + "::";
+            for (LocalImage img : localImages.values()) {
+                if (tag.equals(img.tag)) {
+                    // Only match images in this repo: keys are prefix+digest
+                    String k = localImageKey(region, account, repoName, img.digest);
+                    if (localImages.containsKey(k)) {
+                        return img;
+                    }
+                }
+            }
+            for (Map.Entry<String, LocalImage> e : localImages.entrySet()) {
+                if (e.getKey().startsWith(prefix) && tag.equals(e.getValue().tag)) {
+                    return e.getValue();
+                }
+            }
+        }
+        return null;
+    }
+
+
+
+
+
+
+
+
+    private String headManifestDigest(RegistryHttpClient http, List<String> names, String reference) {
+        for (String name : names) {
+            try {
+                String digest = http.headManifestDigest(name, reference, null);
+                if (digest != null) {
+                    return digest;
+                }
+            } catch (Exception e) {
+                LOG.debugv("Registry HEAD manifest {0}/{1} failed: {2}", name, reference, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+
+
+
+    private static final class LocalImage {
+        String digest;
+        final String tag;
+        final String manifest;
+        final String mediaType;
+        final Instant pushedAt;
+
+        LocalImage(String digest, String tag, String manifest, String mediaType, Instant pushedAt) {
+            this.digest = digest;
+            this.tag = tag;
+            this.manifest = manifest;
+            this.mediaType = mediaType;
+            this.pushedAt = pushedAt;
         }
     }
 
-    private void mergeLocalImageIds(List<ImageIdentifier> out, String region, String account, String repoName) {
-        String prefix = key(region, account, repoName) + "::";
-        for (Map.Entry<String, LocalImage> e : localImages.entrySet()) {
-            if (!e.getKey().startsWith(prefix)) {
-                continue;
-            }
-            LocalImage img = e.getValue();
-            boolean present = out.stream().anyMatch(id ->
-                    (img.tag != null && img.tag.equals(id.getImageTag()))
-                            || (img.digest != null && img.digest.equals(id.getImageDigest())));
-            if (!present) {
-                out.add(new ImageIdentifier(img.tag, img.digest));
+    private static final String AUTH_PASSWORD = "floci-" + "0".repeat(96);
+
+    private boolean deleteManifestFromRegistry(RegistryHttpClient http, List<String> names, String digest) {
+        boolean deleted = false;
+        for (String name : names) {
+            try {
+                if (http.deleteManifest(name, digest)) {
+                    deleted = true;
+                }
+            } catch (Exception e) {
+                LOG.debugv("Registry DELETE manifest {0}/{1} failed: {2}", name, digest, e.getMessage());
             }
         }
+        return deleted;
+    }
+
+    private void evictLocalImage(String region, String account, String repoName, String digest, String tag) {
+        if (digest != null) {
+            localImages.remove(localImageKey(region, account, repoName, digest));
+            localLayers.remove(layerKey(region, account, repoName, digest));
+        }
+        if (tag != null) {
+            LocalImage img = findLocalImage(region, account, repoName, tag, null);
+            if (img != null) {
+                localImages.remove(localImageKey(region, account, repoName, img.digest));
+            }
+        }
+    }
+
+    private Repository findByNameInRegion(String region, String name) {
+        List<Repository> matches = repoStore.scan(k -> k.startsWith(region + "::") && k.endsWith("::" + name));
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private RegistryHttpClient.ManifestResult getManifestFromRegistry(RegistryHttpClient http,
+                                                                      List<String> names,
+                                                                      String reference,
+                                                                      List<String> acceptedMediaTypes) {
+        for (String name : names) {
+            try {
+                RegistryHttpClient.ManifestResult manifest = http.getManifest(name, reference, acceptedMediaTypes);
+                if (manifest != null) {
+                    return manifest;
+                }
+            } catch (Exception e) {
+                LOG.debugv("Registry GET manifest {0}/{1} failed: {2}", name, reference, e.getMessage());
+            }
+        }
+        return null;
+    }
+
+    private List<String> listTagsFromRegistry(RegistryHttpClient http, List<String> names) {
+        List<String> tags = new ArrayList<>();
+        for (String name : names) {
+            try {
+                for (String tag : http.listTags(name)) {
+                    if (!tags.contains(tag)) {
+                        tags.add(tag);
+                    }
+                }
+            } catch (Exception e) {
+                LOG.debugv("Registry tags/list {0} failed: {1}", name, e.getMessage());
+            }
+        }
+        return tags;
+    }
+
+    private Image localImage(String region, Repository repo, String repositoryName, String ref, String tag) {
+        LocalImage img = findLocalImage(region, repo.getRegistryId(), repositoryName,
+                tag != null ? tag : (ref != null && !ref.startsWith("sha256:") ? ref : null),
+                ref != null && ref.startsWith("sha256:") ? ref : null);
+        if (img == null) {
+            return null;
+        }
+        Image out = new Image();
+        out.setRegistryId(repo.getRegistryId());
+        out.setRepositoryName(repositoryName);
+        out.setImageId(new ImageIdentifier(img.tag, img.digest));
+        out.setImageManifest(img.manifest);
+        out.setImageManifestMediaType(img.mediaType);
+        return out;
     }
 
     private ImageDetail localImageDetail(String region, Repository repo, String repositoryName, String ref) {
@@ -1199,170 +1906,20 @@ public class EcrService implements ResourceProvider {
         return out;
     }
 
-    private Image localImage(String region, Repository repo, String repositoryName, String ref, String tag) {
-        LocalImage img = findLocalImage(region, repo.getRegistryId(), repositoryName,
-                tag != null ? tag : (ref != null && !ref.startsWith("sha256:") ? ref : null),
-                ref != null && ref.startsWith("sha256:") ? ref : null);
-        if (img == null) {
-            return null;
-        }
-        Image out = new Image();
-        out.setRegistryId(repo.getRegistryId());
-        out.setRepositoryName(repositoryName);
-        out.setImageId(new ImageIdentifier(img.tag, img.digest));
-        out.setImageManifest(img.manifest);
-        out.setImageManifestMediaType(img.mediaType);
-        return out;
-    }
-
-    private LocalImage findLocalImage(String region, String account, String repoName, String tag, String digest) {
-        if (digest != null && !digest.isBlank()) {
-            return localImages.get(localImageKey(region, account, repoName, digest));
-        }
-        if (tag != null && !tag.isBlank()) {
-            String prefix = key(region, account, repoName) + "::";
-            for (LocalImage img : localImages.values()) {
-                if (tag.equals(img.tag)) {
-                    // Only match images in this repo: keys are prefix+digest
-                    String k = localImageKey(region, account, repoName, img.digest);
-                    if (localImages.containsKey(k)) {
-                        return img;
-                    }
-                }
+    private void mergeLocalImageIds(List<ImageIdentifier> out, String region, String account, String repoName) {
+        String prefix = key(region, account, repoName) + "::";
+        for (Map.Entry<String, LocalImage> e : localImages.entrySet()) {
+            if (!e.getKey().startsWith(prefix)) {
+                continue;
             }
-            for (Map.Entry<String, LocalImage> e : localImages.entrySet()) {
-                if (e.getKey().startsWith(prefix) && tag.equals(e.getValue().tag)) {
-                    return e.getValue();
-                }
+            LocalImage img = e.getValue();
+            boolean present = out.stream().anyMatch(id ->
+                    (img.tag != null && img.tag.equals(id.getImageTag()))
+                            || (img.digest != null && img.digest.equals(id.getImageDigest())));
+            if (!present) {
+                out.add(new ImageIdentifier(img.tag, img.digest));
             }
         }
-        return null;
-    }
-
-    private void evictLocalImage(String region, String account, String repoName, String digest, String tag) {
-        if (digest != null) {
-            localImages.remove(localImageKey(region, account, repoName, digest));
-            localLayers.remove(layerKey(region, account, repoName, digest));
-        }
-        if (tag != null) {
-            LocalImage img = findLocalImage(region, account, repoName, tag, null);
-            if (img != null) {
-                localImages.remove(localImageKey(region, account, repoName, img.digest));
-            }
-        }
-    }
-
-    private boolean registryBlobExists(Repository repo, String region, String repositoryName, String digest) {
-        return registryBlobSize(repo, region, repositoryName, digest) != null;
-    }
-
-    private Long registryBlobSize(Repository repo, String region, String repositoryName, String digest) {
-        try {
-            registryManager.ensureStarted();
-            RegistryHttpClient http = registryManager.httpClient();
-            for (String name : registryLookupNames(repo, region, repositoryName)) {
-                Long size = http.headBlob(name, digest);
-                if (size != null) {
-                    return size;
-                }
-            }
-            return null;
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private void pushBlobBestEffort(Repository repo, String region, String repositoryName,
-                                    String digest, byte[] data) {
-        try {
-            registryManager.ensureStarted();
-            String internal = registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName);
-            registryManager.httpClient().putBlob(internal, digest, data);
-        } catch (Exception e) {
-            LOG.debugv("Registry blob push skipped for {0}/{1}: {2}", repositoryName, digest, e.getMessage());
-        }
-    }
-
-    private String pushManifestBestEffort(Repository repo, String region, String repositoryName,
-                                          String reference, String manifest, String mediaType) {
-        try {
-            registryManager.ensureStarted();
-            String internal = registryManager.internalRepoName(repo.getRegistryId(), region, repositoryName);
-            return registryManager.httpClient().putManifest(internal, reference, manifest, mediaType);
-        } catch (Exception e) {
-            LOG.debugv("Registry manifest push skipped for {0}/{1}: {2}", repositoryName, reference, e.getMessage());
-            return null;
-        }
-    }
-
-    /**
-     * Hostname-style {@code docker push} lands at {@code /v2/<repoName>/...};
-     * path-style and PutImage best-effort writes use
-     * {@code /v2/<account>/<region>/<repoName>/...}. Control-plane reads try both.
-     */
-    private List<String> registryLookupNames(Repository repo, String region, String repositoryName) {
-        return List.of(resolveRegistryRepoName(repo.getRegistryId(), region, repositoryName));
-    }
-
-    private List<String> listTagsFromRegistry(RegistryHttpClient http, List<String> names) {
-        List<String> tags = new ArrayList<>();
-        for (String name : names) {
-            try {
-                for (String tag : http.listTags(name)) {
-                    if (!tags.contains(tag)) {
-                        tags.add(tag);
-                    }
-                }
-            } catch (Exception e) {
-                LOG.debugv("Registry tags/list {0} failed: {1}", name, e.getMessage());
-            }
-        }
-        return tags;
-    }
-
-    private String headManifestDigest(RegistryHttpClient http, List<String> names, String reference) {
-        for (String name : names) {
-            try {
-                String digest = http.headManifestDigest(name, reference, null);
-                if (digest != null) {
-                    return digest;
-                }
-            } catch (Exception e) {
-                LOG.debugv("Registry HEAD manifest {0}/{1} failed: {2}", name, reference, e.getMessage());
-            }
-        }
-        return null;
-    }
-
-    private RegistryHttpClient.ManifestResult getManifestFromRegistry(RegistryHttpClient http,
-                                                                      List<String> names,
-                                                                      String reference,
-                                                                      List<String> acceptedMediaTypes) {
-        for (String name : names) {
-            try {
-                RegistryHttpClient.ManifestResult manifest = http.getManifest(name, reference, acceptedMediaTypes);
-                if (manifest != null) {
-                    return manifest;
-                }
-            } catch (Exception e) {
-                LOG.debugv("Registry GET manifest {0}/{1} failed: {2}", name, reference, e.getMessage());
-            }
-        }
-        return null;
-    }
-
-    private boolean deleteManifestFromRegistry(RegistryHttpClient http, List<String> names, String digest) {
-        boolean deleted = false;
-        for (String name : names) {
-            try {
-                if (http.deleteManifest(name, digest)) {
-                    deleted = true;
-                }
-            } catch (Exception e) {
-                LOG.debugv("Registry DELETE manifest {0}/{1} failed: {2}", name, digest, e.getMessage());
-            }
-        }
-        return deleted;
     }
 
     private void publishImageAction(String actionType, Repository repo, String repositoryName,
@@ -1399,49 +1956,17 @@ public class EcrService implements ResourceProvider {
         }
     }
 
-    private static final class LayerUpload {
-        final String repositoryName;
-        final String registryId;
-        final String region;
-        private final ByteArrayOutputStream buffer = new ByteArrayOutputStream();
-
-        LayerUpload(String repositoryName, String registryId, String region) {
-            this.repositoryName = repositoryName;
-            this.registryId = registryId;
-            this.region = region;
-        }
-
-        synchronized void write(int offset, byte[] part) {
-            byte[] current = buffer.toByteArray();
-            if (offset == current.length) {
-                buffer.writeBytes(part);
-                return;
-            }
-            int end = Math.max(current.length, offset + part.length);
-            byte[] next = Arrays.copyOf(current, end);
-            System.arraycopy(part, 0, next, offset, part.length);
-            buffer.reset();
-            buffer.writeBytes(next);
-        }
-
-        synchronized byte[] toByteArray() {
-            return buffer.toByteArray();
-        }
+    /**
+     * Hostname-style {@code docker push} lands at {@code /v2/<repoName>/...};
+     * path-style and PutImage best-effort writes use
+     * {@code /v2/<account>/<region>/<repoName>/...}. Control-plane reads try both.
+     */
+    private List<String> registryLookupNames(Repository repo, String region, String repositoryName) {
+        return List.of(resolveRegistryRepoName(repo.getRegistryId(), region, repositoryName));
     }
 
-    private static final class LocalImage {
-        String digest;
-        final String tag;
-        final String manifest;
-        final String mediaType;
-        final Instant pushedAt;
+    @Inject
+    EventBridgeService eventBridgeService;
 
-        LocalImage(String digest, String tag, String manifest, String mediaType, Instant pushedAt) {
-            this.digest = digest;
-            this.tag = tag;
-            this.manifest = manifest;
-            this.mediaType = mediaType;
-            this.pushedAt = pushedAt;
-        }
-    }
+    private final Map<String, byte[]> localLayers = new ConcurrentHashMap<>();
 }

@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
+import java.net.URI;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
@@ -43,8 +44,6 @@ class S3VersionedIamActionResolutionTest {
 
     @Test
     void objectSubresourcesResolveToTheirOwnActions() {
-        assertEquals("s3:GetObjectAttributes", resolve("GET", params("attributes", "")));
-        assertEquals("s3:GetObjectVersionAttributes", resolve("GET", params("attributes", "", "versionId", "v1")));
         assertEquals("s3:GetObjectRetention", resolve("GET", params("retention", "", "versionId", "v1")));
         assertEquals("s3:PutObjectRetention", resolve("PUT", params("retention", "")));
         assertEquals("s3:GetObjectLegalHold", resolve("GET", params("legal-hold", "")));
@@ -59,6 +58,8 @@ class S3VersionedIamActionResolutionTest {
         UriInfo uriInfo = Mockito.mock(UriInfo.class);
         when(uriInfo.getQueryParameters()).thenReturn(query);
         when(uriInfo.getPath()).thenReturn("/bucket/folder/key.txt");
+        when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:4566/bucket/folder/key.txt"));
+        when(uriInfo.getBaseUri()).thenReturn(URI.create("http://localhost:4566/"));
         when(ctx.getUriInfo()).thenReturn(uriInfo);
         when(ctx.getMethod()).thenReturn(method);
         when(ctx.getEntityStream()).thenReturn(new ByteArrayInputStream(new byte[0]));

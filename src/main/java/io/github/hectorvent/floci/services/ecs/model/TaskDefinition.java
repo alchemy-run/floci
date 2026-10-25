@@ -22,9 +22,9 @@ public class TaskDefinition {
     private String executionRoleArn;
     private List<ContainerDefinition> containerDefinitions;
     private List<Volume> volumes;
+    private RuntimePlatform runtimePlatform;
     private List<String> requiresCompatibilities;
     private List<String> compatibilities;
-    private RuntimePlatform runtimePlatform;
     /** The container instance capabilities the definition needs, derived at registration. */
     private List<Attribute> requiresAttributes;
     private EphemeralStorage ephemeralStorage;
@@ -73,6 +73,9 @@ public class TaskDefinition {
     public List<Volume> getVolumes() { return volumes; }
     public void setVolumes(List<Volume> volumes) { this.volumes = volumes; }
 
+    public RuntimePlatform getRuntimePlatform() { return runtimePlatform; }
+    public void setRuntimePlatform(RuntimePlatform runtimePlatform) { this.runtimePlatform = runtimePlatform; }
+
     public List<String> getRequiresCompatibilities() { return requiresCompatibilities; }
     public void setRequiresCompatibilities(List<String> requiresCompatibilities) { this.requiresCompatibilities = requiresCompatibilities; }
 
@@ -81,9 +84,6 @@ public class TaskDefinition {
 
     public List<String> getCompatibilities() { return compatibilities; }
     public void setCompatibilities(List<String> compatibilities) { this.compatibilities = compatibilities; }
-
-    public RuntimePlatform getRuntimePlatform() { return runtimePlatform; }
-    public void setRuntimePlatform(RuntimePlatform runtimePlatform) { this.runtimePlatform = runtimePlatform; }
 
     public EphemeralStorage getEphemeralStorage() { return ephemeralStorage; }
     public void setEphemeralStorage(EphemeralStorage ephemeralStorage) { this.ephemeralStorage = ephemeralStorage; }

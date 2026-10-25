@@ -7,6 +7,7 @@ import io.github.hectorvent.floci.services.applicationautoscaling.model.Predefin
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTarget;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalableTargetAction;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.ScalingPolicy;
+import io.github.hectorvent.floci.services.applicationautoscaling.model.ScheduledAction;
 import io.github.hectorvent.floci.services.applicationautoscaling.model.TargetTrackingConfiguration;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsService;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
@@ -300,7 +301,7 @@ class ApplicationAutoScalingServiceTest {
     @Test
     void scheduledActionUpsertPreservesArnAndClearsUnspecifiedTimes() {
         register();
-        var created = service.putScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION,
+        ScheduledAction created = service.putScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION,
                 "at(2030-01-01T00:00:00)", "UTC", 1_893_456_000.0, null,
                 capacity(2, null), REGION);
 
@@ -308,7 +309,7 @@ class ApplicationAutoScalingServiceTest {
         assertEquals(2, created.getScalableTargetAction().getMinCapacity());
         assertEquals(1_893_456_000.0, created.getStartTime());
 
-        var updated = service.putScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION,
+        ScheduledAction updated = service.putScheduledAction("biz-hours", NAMESPACE, RESOURCE_ID, DIMENSION,
                 "at(2030-06-01T00:00:00)", "UTC", null, null,
                 capacity(3, null), REGION);
 
@@ -413,7 +414,7 @@ class ApplicationAutoScalingServiceTest {
         assertEquals(1, service.describeScalingPolicies("dynamodb", null, null,
                 List.of("read-util"), REGION).size());
 
-        var action = service.putScheduledAction("far-future", "dynamodb", resourceId,
+        ScheduledAction action = service.putScheduledAction("far-future", "dynamodb", resourceId,
                 "dynamodb:table:ReadCapacityUnits", "at(2030-01-01T00:00:00)", "UTC",
                 null, null, capacity(2, null), REGION);
         assertTrue(action.getScheduledActionArn().contains("scheduledAction"));

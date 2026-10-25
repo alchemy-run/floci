@@ -32,6 +32,8 @@ class LambdaVpcSnapStartLoggingIntegrationTest {
     private static final String BASE_PATH = "/2015-03-31";
     private static final String REGION = "us-east-1";
     private static final String SECURITY_GROUP_ID = "sg-0123456789abcdef0";
+    private static final String LOG_LEVEL_UNDER_TEXT = "LogLevel is not supported when LogFormat is set to \"Text\". "
+            + "Remove LogLevel from your request or change the LogFormat to \"JSON\" and try again.";
 
     @Inject
     Ec2Service ec2Service;
@@ -389,7 +391,7 @@ class LambdaVpcSnapStartLoggingIntegrationTest {
             .body("__type", equalTo("ValidationException"))
             .body("message", equalTo("1 validation error detected: Value 'VERBOSE' at "
                     + "'loggingConfig.applicationLogLevel' failed to satisfy constraint: Member must satisfy "
-                    + "enum value set: [TRACE, DEBUG, INFO, WARN, ERROR, FATAL]"));
+                    + "enum value set: [FATAL, TRACE, WARN, ERROR, INFO, DEBUG]"));
     }
 
     @Test
@@ -412,7 +414,60 @@ class LambdaVpcSnapStartLoggingIntegrationTest {
             .body("__type", equalTo("ValidationException"))
             .body("message", equalTo("1 validation error detected: Value 'TRACE' at "
                     + "'loggingConfig.systemLogLevel' failed to satisfy constraint: Member must satisfy "
-                    + "enum value set: [DEBUG, INFO, WARN]"));
+                    + "enum value set: [WARN, INFO, DEBUG]"));
+    }
+
+    /**
+     * Measured on Lambda (eu-west-1, 2026-10-18): a log level under Text, the format named or left
+     * to its default, is refused, whichever of the two levels it is.
+     */
+    @Test
+    void aLogLevelUnderTextIsRefusedOnCreate() {
+        for (String loggingConfig : List.of(
+                "{\"LogFormat\": \"Text\", \"ApplicationLogLevel\": \"WARN\"}",
+                "{\"LogFormat\": \"Text\", \"SystemLogLevel\": \"WARN\"}",
+                "{\"ApplicationLogLevel\": \"WARN\"}")) {
+            given()
+                .contentType("application/json")
+                .body("""
+                    {
+                        "FunctionName": "logging-text-level-fn",
+                        "Runtime": "nodejs20.x",
+                        "Role": "arn:aws:iam::000000000000:role/lambda-role",
+                        "Handler": "index.handler",
+                        "LoggingConfig": %s
+                    }
+                    """.formatted(loggingConfig))
+            .when()
+                .post(BASE_PATH + "/functions")
+            .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidParameterValueException"))
+                .body("message", equalTo(LOG_LEVEL_UNDER_TEXT));
+        }
+    }
+
+    @Test
+    void aLogLevelUnderTextIsRefusedOnUpdateAndTheFunctionKeepsItsLogging() {
+        createFunction("logging-text-level-update-fn", "");
+
+        given()
+            .contentType("application/json")
+            .body("{\"LoggingConfig\": {\"ApplicationLogLevel\": \"WARN\"}}")
+        .when()
+            .put(BASE_PATH + "/functions/logging-text-level-update-fn/configuration")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("InvalidParameterValueException"))
+            .body("message", equalTo(LOG_LEVEL_UNDER_TEXT));
+
+        given()
+        .when()
+            .get(BASE_PATH + "/functions/logging-text-level-update-fn/configuration")
+        .then()
+            .statusCode(200)
+            .body("LoggingConfig.LogFormat", equalTo("Text"))
+            .body("LoggingConfig.ApplicationLogLevel", nullValue());
     }
 
     @Test
@@ -494,26 +549,6 @@ class LambdaVpcSnapStartLoggingIntegrationTest {
         .then()
             .statusCode(400)
             .body("__type", equalTo("ValidationException"));
-    }
-
-    @Test
-    void textFormatLogLevelsAreAcceptedButNeverStoredOrReturned() {
-        createFunction("logging-text-levels-fn", """
-            ,
-                "LoggingConfig": {
-                    "LogFormat": "Text",
-                    "ApplicationLogLevel": "DEBUG",
-                    "SystemLogLevel": "WARN"
-                }""");
-
-        given()
-        .when()
-            .get(BASE_PATH + "/functions/logging-text-levels-fn/configuration")
-        .then()
-            .statusCode(200)
-            .body("LoggingConfig.LogFormat", equalTo("Text"))
-            .body("LoggingConfig.ApplicationLogLevel", nullValue())
-            .body("LoggingConfig.SystemLogLevel", nullValue());
     }
 
     @Test

@@ -1,14 +1,23 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
 import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.not;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * UpdateStack must leave an unchanged resource alone, whatever its type.
@@ -22,12 +31,17 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
  *
  * <p>Regression cover for "CloudFormation update recreates unchanged named resources"
  * (floci-io/floci#2134).
+ *
+ * <p>The other side of the same loop is covered too: a resource the update adds is created, not
+ * updated, so it reports CREATE_* events and status like AWS does.
  */
 @QuarkusTest
 class CfnUnchangedResourceUpdateIntegrationTest {
 
     private static final String CFN_AUTH =
             "AWS4-HMAC-SHA256 Credential=test/20260808/us-west-2/cloudformation/aws4_request";
+    private static final String SQS_AUTH =
+            "AWS4-HMAC-SHA256 Credential=test/20260808/us-west-2/sqs/aws4_request";
 
     private static String stackWith(String namedResourceJson, String queueName) {
         return """
@@ -63,6 +77,25 @@ class CfnUnchangedResourceUpdateIntegrationTest {
             .when().post("/").then().statusCode(200)
             .extract().body().asString();
         return physicalIdOf(body, "Named");
+    }
+
+    private String queueAttribute(String queueUrl, String attributeName) {
+        String body = given()
+                .header("Authorization", SQS_AUTH)
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "GetQueueAttributes")
+                .formParam("QueueUrl", queueUrl)
+                .formParam("AttributeName.1", attributeName)
+            .when().post("/").then().statusCode(200)
+                .extract().body().asString();
+        return XmlParser.extractPairs(body, "Attribute", "Name", "Value").get(attributeName);
+    }
+
+    private void deleteStack(String stackName) {
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "DeleteStack").formParam("StackName", stackName)
+        .when().post("/").then().statusCode(200);
+        CfnStackWaits.awaitStackDeleted(stackName);
     }
 
     /**
@@ -287,6 +320,189 @@ class CfnUnchangedResourceUpdateIntegrationTest {
     }
 
     @Test
+    void updatesAResourceWhenItsReferencedQueueIsReplaced() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String stackName = "probe-sqs-redrive-" + suffix;
+        String oldDeadLetterName = "probe-dlq-old-" + suffix;
+        String newDeadLetterName = "probe-dlq-new-" + suffix;
+        String mainQueueName = "probe-main-" + suffix;
+        String initialTemplate = redriveTemplate(oldDeadLetterName, mainQueueName);
+        String updatedTemplate = redriveTemplate(newDeadLetterName, mainQueueName);
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", initialTemplate)
+        .when().post("/").then().statusCode(200);
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "DescribeStacks").formParam("StackName", stackName)
+        .when().post("/").then().statusCode(200).body(containsString("<StackStatus>CREATE_COMPLETE</StackStatus>"));
+
+        String beforeXml = given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "DescribeStackResources").formParam("StackName", stackName)
+        .when().post("/").then().statusCode(200).extract().body().asString();
+        String oldDeadLetterUrl = physicalIdOf(beforeXml, "DeadLetterQueue");
+        String mainQueueUrl = physicalIdOf(beforeXml, "MainQueue");
+        String oldDeadLetterArn = queueAttribute(oldDeadLetterUrl, "QueueArn");
+        assertTrue(queueAttribute(mainQueueUrl, "RedrivePolicy").contains(oldDeadLetterArn));
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", updatedTemplate)
+        .when().post("/").then().statusCode(200);
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "DescribeStacks").formParam("StackName", stackName)
+        .when().post("/").then().statusCode(200).body(containsString("<StackStatus>UPDATE_COMPLETE</StackStatus>"));
+
+        String afterXml = given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "DescribeStackResources").formParam("StackName", stackName)
+        .when().post("/").then().statusCode(200).extract().body().asString();
+        String newDeadLetterUrl = physicalIdOf(afterXml, "DeadLetterQueue");
+        String newDeadLetterArn = queueAttribute(newDeadLetterUrl, "QueueArn");
+        assertNotEquals(oldDeadLetterArn, newDeadLetterArn);
+        assertTrue(queueAttribute(mainQueueUrl, "RedrivePolicy").contains(newDeadLetterArn));
+
+        deleteStack(stackName);
+    }
+
+    @Test
+    void changeSetIncludesDependentQueueWhenReferencedQueueIsReplaced() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String stackName = "probe-sqs-cs-" + suffix;
+        String changeSetName = "cs-" + suffix;
+        String oldDeadLetterName = "probe-dlq-old-" + suffix;
+        String newDeadLetterName = "probe-dlq-new-" + suffix;
+        String mainQueueName = "probe-main-" + suffix;
+        String initialTemplate = redriveTemplate(oldDeadLetterName, mainQueueName);
+        String updatedTemplate = redriveTemplate(newDeadLetterName, mainQueueName);
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", initialTemplate)
+        .when().post("/").then().statusCode(200);
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "DescribeStacks").formParam("StackName", stackName)
+        .when().post("/").then().statusCode(200).body(containsString("<StackStatus>CREATE_COMPLETE</StackStatus>"));
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "CreateChangeSet").formParam("StackName", stackName)
+            .formParam("ChangeSetName", changeSetName)
+            .formParam("ChangeSetType", "UPDATE")
+            .formParam("TemplateBody", updatedTemplate)
+        .when().post("/").then().statusCode(200);
+
+        String describeXml = given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "DescribeChangeSet").formParam("StackName", stackName)
+            .formParam("ChangeSetName", changeSetName)
+        .when().post("/").then().statusCode(200).extract().body().asString();
+
+        assertTrue(describeXml.contains("<LogicalResourceId>DeadLetterQueue</LogicalResourceId>"));
+        assertTrue(describeXml.contains("<LogicalResourceId>MainQueue</LogicalResourceId>"));
+        assertTrue(describeXml.contains("<Replacement>True</Replacement>"));
+
+        deleteStack(stackName);
+    }
+
+    @Test
+    void unchangedBucketRetainsCorsWhenReferencedLogGroupUpdatesInPlace() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String stackName = "probe-s3-cors-" + suffix;
+        String bucketName = "probe-bucket-cors-" + suffix;
+        String logGroupName = "/cfn/log-group-" + suffix;
+        String initialTemplate = """
+                {
+                  "Resources": {
+                    "LogGroup": {
+                      "Type": "AWS::Logs::LogGroup",
+                      "Properties": {"LogGroupName": "%s", "RetentionInDays": 7}
+                    },
+                    "Bucket": {
+                      "Type": "AWS::S3::Bucket",
+                      "Properties": {
+                        "BucketName": "%s",
+                        "Tags": [{"Key": "LogGroupRef", "Value": {"Ref": "LogGroup"}}]
+                      }
+                    }
+                  }
+                }
+                """.formatted(logGroupName, bucketName);
+        String updatedTemplate = """
+                {
+                  "Resources": {
+                    "LogGroup": {
+                      "Type": "AWS::Logs::LogGroup",
+                      "Properties": {"LogGroupName": "%s", "RetentionInDays": 14}
+                    },
+                    "Bucket": {
+                      "Type": "AWS::S3::Bucket",
+                      "Properties": {
+                        "BucketName": "%s",
+                        "Tags": [{"Key": "LogGroupRef", "Value": {"Ref": "LogGroup"}}]
+                      }
+                    }
+                  }
+                }
+                """.formatted(logGroupName, bucketName);
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", initialTemplate)
+        .when().post("/").then().statusCode(200);
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "DescribeStacks").formParam("StackName", stackName)
+        .when().post("/").then().statusCode(200).body(containsString("<StackStatus>CREATE_COMPLETE</StackStatus>"));
+
+        String corsXml = """
+                <CORSConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+                  <CORSRule>
+                    <AllowedOrigin>http://example.com</AllowedOrigin>
+                    <AllowedMethod>GET</AllowedMethod>
+                  </CORSRule>
+                </CORSConfiguration>
+                """;
+        given().contentType("application/xml").body(corsXml)
+        .when().put("/" + bucketName + "?cors")
+        .then().statusCode(200);
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", updatedTemplate)
+        .when().post("/").then().statusCode(200);
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "DescribeStacks").formParam("StackName", stackName)
+        .when().post("/").then().statusCode(200).body(containsString("<StackStatus>UPDATE_COMPLETE</StackStatus>"));
+
+        given()
+        .when().get("/" + bucketName + "?cors")
+        .then().statusCode(200)
+            .body(containsString("http://example.com"));
+
+        deleteStack(stackName);
+    }
+
+    private static String redriveTemplate(String deadLetterQueueName, String mainQueueName) {
+        return """
+                {
+                  "Resources": {
+                    "DeadLetterQueue": {
+                      "Type": "AWS::SQS::Queue",
+                      "Properties": {"QueueName": "%s"}
+                    },
+                    "MainQueue": {
+                      "Type": "AWS::SQS::Queue",
+                      "Properties": {
+                        "QueueName": "%s",
+                        "RedrivePolicy": {
+                          "deadLetterTargetArn": {"Fn::GetAtt": ["DeadLetterQueue", "Arn"]},
+                          "maxReceiveCount": 3
+                        }
+                      }
+                    }
+                  }
+                }
+                """.formatted(deadLetterQueueName, mainQueueName);
+    }
+
+    @Test
     void ecrRepository() {
         assertUnchangedResourceSurvivesUpdate("ecr", """
                 "Named": {
@@ -347,5 +563,291 @@ class CfnUnchangedResourceUpdateIntegrationTest {
                   "Type": "AWS::S3::Bucket",
                   "Properties": {"BucketName": "probe-bucket-SUFFIX"}
                 }""");
+    }
+
+    @Test
+    void outputsOnlyUpdate_skipsUnchangedResources() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String stackName = "probe-outputs-only-" + suffix;
+        String queueName = "probe-q-" + suffix;
+        String initialTemplate = """
+                {
+                  "Resources": {
+                    "Queue": {
+                      "Type": "AWS::SQS::Queue",
+                      "Properties": {"QueueName": "%s"}
+                    }
+                  }
+                }
+                """.formatted(queueName);
+        String updatedTemplate = """
+                {
+                  "Resources": {
+                    "Queue": {
+                      "Type": "AWS::SQS::Queue",
+                      "Properties": {"QueueName": "%s"}
+                    }
+                  },
+                  "Outputs": {
+                    "QueueArn": {"Value": "static-output"}
+                  }
+                }
+                """.formatted(queueName);
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                .formParam("Action", "CreateStack").formParam("StackName", stackName)
+                .formParam("TemplateBody", initialTemplate)
+                .when().post("/").then().statusCode(200);
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                .formParam("Action", "DescribeStacks").formParam("StackName", stackName)
+                .when().post("/").then().statusCode(200)
+                .body(containsString("<StackStatus>CREATE_COMPLETE</StackStatus>"));
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+                .formParam("TemplateBody", updatedTemplate)
+                .when().post("/").then().statusCode(200);
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                .formParam("Action", "DescribeStacks").formParam("StackName", stackName)
+                .when().post("/").then().statusCode(200)
+                .body(containsString("<StackStatus>UPDATE_COMPLETE</StackStatus>"))
+                .body(containsString("<OutputKey>QueueArn</OutputKey>"));
+
+        // Queue was unchanged, so it should have only CREATE_IN_PROGRESS / CREATE_COMPLETE events,
+        // never UPDATE_IN_PROGRESS or UPDATE_COMPLETE.
+        String events = given()
+                .contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                .formParam("Action", "DescribeStackEvents").formParam("StackName", stackName)
+                .when().post("/").then().statusCode(200)
+                .extract().body().asString();
+        List<String> queueStatuses = XmlParser.extractGroups(events, "member").stream()
+                .filter(member -> "Queue".equals(member.get("LogicalResourceId")))
+                .map(member -> member.get("ResourceStatus"))
+                .toList();
+        assertTrue(queueStatuses.contains("CREATE_COMPLETE"));
+        assertFalse(queueStatuses.contains("UPDATE_IN_PROGRESS"));
+        assertFalse(queueStatuses.contains("UPDATE_COMPLETE"));
+
+        deleteStack(stackName);
+    }
+
+    /**
+     * A resource an update adds is created, not updated: AWS reports only CREATE_IN_PROGRESS and
+     * CREATE_COMPLETE for it, and DescribeStackResource shows it CREATE_COMPLETE.
+     */
+    @Test
+    void anUpdateThatAddsAQueueReportsOnlyCreateEventsForIt() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String stackName = "probe-added-queue-" + suffix;
+        String added = """
+                "Added": {
+                  "Type": "AWS::SQS::Queue",
+                  "Properties": {"QueueName": "probe-added-%s"}
+                }""".formatted(suffix);
+
+        createStack(stackName, queueStackWith("probe-kept-" + suffix, null));
+        updateStack(stackName, queueStackWith("probe-kept-" + suffix, added));
+        assertEquals("UPDATE_COMPLETE", CfnStackWaits.awaitTerminal(stackName, CFN_AUTH).status());
+
+        assertEquals(List.of("CREATE_IN_PROGRESS", "CREATE_COMPLETE"),
+                resourceStatusesOldestFirst(stackName, "Added"));
+        assertEquals("CREATE_COMPLETE", describedResourceStatus(stackName, "Added"));
+
+        deleteStack(stackName);
+    }
+
+    /**
+     * An added resource that fails reports CREATE_FAILED, as AWS does, and the update still rolls
+     * back over the live stack. A nested stack with no TemplateURL is the resource that fails.
+     */
+    @Test
+    void anUpdateThatAddsAFailingResourceReportsCreateFailedAndRollsBack() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String stackName = "probe-added-broken-" + suffix;
+        String added = """
+                "Broken": {"Type": "AWS::CloudFormation::Stack", "Properties": {}}""";
+
+        createStack(stackName, queueStackWith("probe-kept-" + suffix, null));
+        updateStack(stackName, queueStackWith("probe-kept-" + suffix, added));
+        CfnStackWaits.StackState state = CfnStackWaits.awaitTerminal(stackName, CFN_AUTH);
+        assertEquals("UPDATE_ROLLBACK_COMPLETE", state.status(), state.reason());
+
+        List<String> statuses = resourceStatusesOldestFirst(stackName, "Broken");
+        assertEquals(List.of("CREATE_IN_PROGRESS", "CREATE_FAILED"), statuses.subList(0, 2), statuses.toString());
+        assertTrue(statuses.stream().noneMatch(status -> status.startsWith("UPDATE_")), statuses.toString());
+
+        deleteStack(stackName);
+    }
+
+    /** A nested stack an update adds is created too, so the parent reports CREATE_* for it. */
+    @Test
+    void anUpdateThatAddsANestedStackReportsCreateEventsForIt() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String stackName = "probe-added-nested-" + suffix;
+        String bucket = "probe-added-nested-" + suffix;
+        String childTemplate = """
+                {
+                  "Resources": {
+                    "ChildQueue": {
+                      "Type": "AWS::SQS::Queue",
+                      "Properties": {"QueueName": "probe-child-%s"}
+                    }
+                  }
+                }
+                """.formatted(suffix);
+        given().when().put("/" + bucket).then().statusCode(200);
+        given().contentType("application/json").body(childTemplate)
+            .when().put("/" + bucket + "/child.json").then().statusCode(200);
+        String added = """
+                "Child": {
+                  "Type": "AWS::CloudFormation::Stack",
+                  "Properties": {"TemplateURL": "http://localhost/%s/child.json"}
+                }""".formatted(bucket);
+
+        createStack(stackName, queueStackWith("probe-kept-" + suffix, null));
+        updateStack(stackName, queueStackWith("probe-kept-" + suffix, added));
+        CfnStackWaits.StackState state = CfnStackWaits.awaitTerminal(stackName, CFN_AUTH);
+        assertEquals("UPDATE_COMPLETE", state.status(), state.reason());
+
+        assertEquals(List.of("CREATE_IN_PROGRESS", "CREATE_COMPLETE"),
+                resourceStatusesOldestFirst(stackName, "Child"));
+        assertEquals("CREATE_COMPLETE", describedResourceStatus(stackName, "Child"));
+
+        deleteStack(stackName);
+    }
+
+    /** A stack of one queue, plus the resource an update adds when {@code addedResourceJson} is set. */
+    private static String queueStackWith(String queueName, String addedResourceJson) {
+        return """
+                {
+                  "Resources": {
+                    "Kept": {
+                      "Type": "AWS::SQS::Queue",
+                      "Properties": {"QueueName": "%s"}
+                    }%s
+                  }
+                }
+                """.formatted(queueName, addedResourceJson == null ? "" : ",\n" + addedResourceJson);
+    }
+
+    private void createStack(String stackName, String templateBody) {
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", templateBody)
+        .when().post("/").then().statusCode(200);
+        assertEquals("CREATE_COMPLETE", CfnStackWaits.awaitTerminal(stackName, CFN_AUTH).status());
+    }
+
+    private void updateStack(String stackName, String templateBody) {
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", templateBody)
+        .when().post("/").then().statusCode(200);
+    }
+
+    /** DescribeStackEvents lists the newest event first; this returns one resource's statuses oldest first. */
+    private List<String> resourceStatusesOldestFirst(String stackName, String logicalId) {
+        String body = given()
+                .contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                .formParam("Action", "DescribeStackEvents").formParam("StackName", stackName)
+            .when().post("/").then().statusCode(200)
+            .extract().body().asString();
+        List<String> statuses = new ArrayList<>(XmlParser.extractGroups(body, "member").stream()
+                .filter(member -> logicalId.equals(member.get("LogicalResourceId")))
+                .map(member -> member.get("ResourceStatus"))
+                .toList());
+        Collections.reverse(statuses);
+        return statuses;
+    }
+
+    private String describedResourceStatus(String stackName, String logicalId) {
+        String body = given()
+                .contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                .formParam("Action", "DescribeStackResource").formParam("StackName", stackName)
+                .formParam("LogicalResourceId", logicalId)
+            .when().post("/").then().statusCode(200)
+            .extract().body().asString();
+        return XmlParser.extractFirst(body, "ResourceStatus", null);
+    }
+
+    @Test
+    void createChangeSet_updateRestApiAndUserPoolRename_reportsReplacementFalse() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String stackName = "probe-cs-rename-" + suffix;
+        String changeSetName = "cs-rename-" + suffix;
+
+        String initialTemplate = """
+                {
+                  "Resources": {
+                    "Api": {
+                      "Type": "AWS::ApiGateway::RestApi",
+                      "Properties": {"Name": "api-initial-%s"}
+                    },
+                    "Pool": {
+                      "Type": "AWS::Cognito::UserPool",
+                      "Properties": {"UserPoolName": "pool-initial-%s"}
+                    }
+                  }
+                }
+                """.formatted(suffix, suffix);
+
+        String updatedTemplate = """
+                {
+                  "Resources": {
+                    "Api": {
+                      "Type": "AWS::ApiGateway::RestApi",
+                      "Properties": {"Name": "api-renamed-%s"}
+                    },
+                    "Pool": {
+                      "Type": "AWS::Cognito::UserPool",
+                      "Properties": {"UserPoolName": "pool-renamed-%s"}
+                    }
+                  }
+                }
+                """.formatted(suffix, suffix);
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                .formParam("Action", "CreateStack").formParam("StackName", stackName)
+                .formParam("TemplateBody", initialTemplate)
+                .when().post("/").then().statusCode(200);
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                .formParam("Action", "DescribeStacks").formParam("StackName", stackName)
+                .when().post("/").then().statusCode(200)
+                .body(containsString("<StackStatus>CREATE_COMPLETE</StackStatus>"));
+
+        given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                .formParam("Action", "CreateChangeSet")
+                .formParam("StackName", stackName)
+                .formParam("ChangeSetName", changeSetName)
+                .formParam("ChangeSetType", "UPDATE")
+                .formParam("TemplateBody", updatedTemplate)
+                .when().post("/").then().statusCode(200);
+
+        String desc = given().contentType("application/x-www-form-urlencoded").header("Authorization", CFN_AUTH)
+                .formParam("Action", "DescribeChangeSet")
+                .formParam("StackName", stackName)
+                .formParam("ChangeSetName", changeSetName)
+                .when().post("/").then().statusCode(200)
+                .extract().body().asString();
+
+        List<Map<String, String>> members = XmlParser.extractGroups(desc, "ResourceChange");
+        Map<String, String> apiChange = members.stream()
+                .filter(m -> "Api".equals(m.get("LogicalResourceId")))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("Modify", apiChange.get("Action"));
+        assertEquals("False", apiChange.get("Replacement"));
+
+        Map<String, String> poolChange = members.stream()
+                .filter(m -> "Pool".equals(m.get("LogicalResourceId")))
+                .findFirst()
+                .orElseThrow();
+        assertEquals("Modify", poolChange.get("Action"));
+        assertEquals("False", poolChange.get("Replacement"));
+
+        deleteStack(stackName);
     }
 }

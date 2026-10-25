@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.ses;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.ses.model.AccountDetails;
@@ -84,6 +85,24 @@ public class SesAccountService {
     public void putAccountVdmAttributes(String region, AccountVdmAttributes vdm) {
         accountVdmStore.put(accountVdmKey(region), vdm);
         LOG.infov("Updated account VDM attributes for region {0}: enabled={1}", region, vdm.vdmEnabled());
+    }
+
+    /** The probe-confirmed gate the VDM-only operations check before reading the request. */
+    public void requireVdmEnabled(String region) {
+        requireVdmEnabled(region, "NotFoundException", 404);
+    }
+
+    /**
+     * The same gate with the caller's error shape. Message insights and metric data answer
+     * {@code NotFoundException} 404, while export jobs answer {@code BadRequestException} 400 with
+     * the identical sentence, all probe-confirmed.
+     */
+    public void requireVdmEnabled(String region, String errorCode, int status) {
+        Optional<AccountVdmAttributes> vdm = findAccountVdmAttributes(region);
+        if (vdm.isEmpty() || !vdm.get().vdmEnabled()) {
+            throw new AwsException(errorCode,
+                    "To use this feature you must enable Virtual Deliverability Manager", status);
+        }
     }
 
     private static String accountVdmKey(String region) {
@@ -182,9 +201,7 @@ public class SesAccountService {
             }
         }
         if (!errors.isEmpty()) {
-            throw new AwsException("BadRequestException",
-                    errors.size() + " validation error" + (errors.size() > 1 ? "s" : "")
-                            + " detected: " + String.join("; ", errors), 400);
+            throw SmithyValidationErrors.badRequest(errors);
         }
         if (!isValidUrl(websiteUrl)) {
             throw new AwsException("BadRequestException", "Url contains invalid format", 400);

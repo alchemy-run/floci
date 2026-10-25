@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.glue;
 
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -313,7 +314,7 @@ class GlueJobCrawlerConnectionIntegrationTest {
         throw new AssertionError("Crawler " + name + " did not return to READY");
     }
 
-    private static io.restassured.response.ValidatableResponse glue(String action, String body) {
+    private static ValidatableResponse glue(String action, String body) {
         return given()
                 .header("X-Amz-Target", "AWSGlue." + action)
                 .contentType(CONTENT_TYPE)

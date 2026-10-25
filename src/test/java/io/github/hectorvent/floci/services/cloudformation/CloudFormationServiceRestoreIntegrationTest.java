@@ -1,12 +1,15 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.cloudformation.model.ChangeSet;
 import io.github.hectorvent.floci.services.cloudformation.model.Stack;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
+import io.github.hectorvent.floci.services.cloudformation.provisioners.CfnResourceDispatcher;
 import io.quarkus.arc.ClientProxy;
 import io.quarkus.test.junit.QuarkusMock;
 import io.quarkus.test.junit.QuarkusTest;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.AdditionalAnswers;
@@ -14,7 +17,6 @@ import org.mockito.Mockito;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
-import jakarta.inject.Inject;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -32,14 +34,13 @@ import static org.mockito.Mockito.withSettings;
 
 /**
  * Fills the bounded operation executor with change set executions that block inside resource
- * provisioning, then checks that the execution it rejects leaves its stack and change set as
- * they were.
+ * provisioning, then checks that the execution or stack delete it rejects leaves the stack (and
+ * change set) as they were, and can be retried once there is room.
  *
- * <p>The provisioner bean is swapped for a mock whose default answer blocks {@code provision}
- * for this test's stacks and forwards everything else to the real provisioner. The answer
- * recognises those calls by method name and stack name rather than by stubbing one overload,
- * because the service picks whichever {@code provision} overload the current main branch has,
- * and a stubbing tied to an older overload silently returns null once main adds a new one.
+ * <p>The dispatcher bean is swapped for a mock whose default answer blocks {@code provision}
+ * for this test's stacks and forwards everything else to the real dispatcher. The answer
+ * recognises those calls by method name and stack name rather than by stubbing one overload, so
+ * it does not depend on which {@code provision} overload the service calls.
  */
 @QuarkusTest
 class CloudFormationServiceRestoreIntegrationTest {
@@ -57,47 +58,32 @@ class CloudFormationServiceRestoreIntegrationTest {
     CloudFormationService service;
 
     @Inject
-    CloudFormationResourceProvisioner provisioner;
+    CfnResourceDispatcher provisioner;
+
+    @Inject
+    RegionResolver regionResolver;
 
     private final CountDownLatch activeOperations = new CountDownLatch(ACTIVE_OPERATIONS);
     private final CountDownLatch releaseOperations = new CountDownLatch(1);
-    private CloudFormationResourceProvisioner blockingProvisioner;
+    private CfnResourceDispatcher blockingProvisioner;
 
     @BeforeEach
     void blockProvisioningForTestStacks() {
         Answer<Object> realProvisioner = AdditionalAnswers.delegatesTo(ClientProxy.unwrap(provisioner));
-        blockingProvisioner = Mockito.mock(CloudFormationResourceProvisioner.class,
+        blockingProvisioner = Mockito.mock(CfnResourceDispatcher.class,
                 withSettings().defaultAnswer(invocation -> isTestStackProvision(invocation)
                         ? provisionAfterRelease(invocation)
                         : realProvisioner.answer(invocation)));
-        QuarkusMock.installMockForType(blockingProvisioner, CloudFormationResourceProvisioner.class);
+        QuarkusMock.installMockForType(blockingProvisioner, CfnResourceDispatcher.class);
     }
 
     @Test
     void rejectedExecutionRestoresStackAndChangeSetState() throws Exception {
         String targetStack = uniqueStackName("target");
-        List<String> fillerStacks = new ArrayList<>();
-        for (int i = 0; i < ACTIVE_OPERATIONS + QUEUED_OPERATIONS; i++) {
-            fillerStacks.add(uniqueStackName("filler"));
-        }
-        for (String fillerStack : fillerStacks) {
-            createChangeSet(fillerStack);
-        }
         createChangeSet(targetStack);
 
-        List<Future<?>> runningOperations = new ArrayList<>();
+        List<Future<?>> runningOperations = fillExecutor();
         try {
-            for (String fillerStack : fillerStacks.subList(0, ACTIVE_OPERATIONS)) {
-                runningOperations.add(service.executeChangeSet(fillerStack, "initial", REGION));
-            }
-
-            assertTrue(activeOperations.await(TIMEOUT_SECONDS, TimeUnit.SECONDS),
-                    this::describeProvisionerActivity);
-
-            for (String fillerStack : fillerStacks.subList(ACTIVE_OPERATIONS, fillerStacks.size())) {
-                runningOperations.add(service.executeChangeSet(fillerStack, "initial", REGION));
-            }
-
             AwsException rejected = assertThrows(AwsException.class,
                     () -> service.executeChangeSet(targetStack, "initial", REGION));
             assertEquals("LimitExceededException", rejected.getErrorCode());
@@ -108,10 +94,7 @@ class CloudFormationServiceRestoreIntegrationTest {
             assertEquals("CREATE_COMPLETE", restoredChangeSet.getStatus());
             assertEquals("AVAILABLE", restoredChangeSet.getExecutionStatus());
         } finally {
-            releaseOperations.countDown();
-            for (Future<?> operation : runningOperations) {
-                operation.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
-            }
+            release(runningOperations);
         }
 
         Future<?> retry = service.executeChangeSet(targetStack, "initial", REGION);
@@ -119,6 +102,58 @@ class CloudFormationServiceRestoreIntegrationTest {
         assertEquals("CREATE_COMPLETE", service.describeStacks(targetStack, REGION).getFirst().getStatus());
         assertEquals("EXECUTE_COMPLETE",
                 service.describeChangeSet(targetStack, "initial", REGION).getExecutionStatus());
+    }
+
+    @Test
+    void rejectedDeleteLeavesTheStackAsItWasAndCanBeRetried() throws Exception {
+        // Outside STACK_PREFIX, so its own create is not held by the blocking provisioner.
+        String targetStack = "restore-delete-target-" + System.nanoTime();
+        createChangeSet(targetStack);
+        service.executeChangeSet(targetStack, "initial", REGION).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        Stack stack = service.describeStacks(targetStack, REGION).getFirst();
+        assertEquals("CREATE_COMPLETE", stack.getStatus());
+
+        List<Future<?>> runningOperations = fillExecutor();
+        try {
+            AwsException rejected = assertThrows(AwsException.class,
+                    () -> service.deleteStack(targetStack, REGION));
+            assertEquals("LimitExceededException", rejected.getErrorCode());
+            assertEquals("CREATE_COMPLETE", service.describeStacks(targetStack, REGION).getFirst().getStatus());
+        } finally {
+            release(runningOperations);
+        }
+
+        service.deleteStack(targetStack, REGION, regionResolver.getAccountId()).get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        assertEquals("DELETE_COMPLETE", stack.getStatus());
+    }
+
+    /** Starts change set executions that block in provisioning until every thread and queue slot is taken. */
+    private List<Future<?>> fillExecutor() throws InterruptedException {
+        List<String> fillerStacks = new ArrayList<>();
+        for (int i = 0; i < ACTIVE_OPERATIONS + QUEUED_OPERATIONS; i++) {
+            fillerStacks.add(uniqueStackName("filler"));
+        }
+        for (String fillerStack : fillerStacks) {
+            createChangeSet(fillerStack);
+        }
+
+        List<Future<?>> runningOperations = new ArrayList<>();
+        for (String fillerStack : fillerStacks.subList(0, ACTIVE_OPERATIONS)) {
+            runningOperations.add(service.executeChangeSet(fillerStack, "initial", REGION));
+        }
+        assertTrue(activeOperations.await(TIMEOUT_SECONDS, TimeUnit.SECONDS),
+                this::describeProvisionerActivity);
+        for (String fillerStack : fillerStacks.subList(ACTIVE_OPERATIONS, fillerStacks.size())) {
+            runningOperations.add(service.executeChangeSet(fillerStack, "initial", REGION));
+        }
+        return runningOperations;
+    }
+
+    private void release(List<Future<?>> runningOperations) throws Exception {
+        releaseOperations.countDown();
+        for (Future<?> operation : runningOperations) {
+            operation.get(TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        }
     }
 
     private void createChangeSet(String stackName) {

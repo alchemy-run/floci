@@ -1,17 +1,17 @@
 package io.github.hectorvent.floci.services.stepfunctions;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
-import io.github.hectorvent.floci.services.dynamodb.DynamoDbService;
+import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.services.dynamodb.DynamoDbFacade;
+import io.github.hectorvent.floci.services.dynamodb.backend.RecordingDynamoDbBackend;
+import io.github.hectorvent.floci.services.dynamodb.backend.RecordingDynamoDbBackend.Invocation;
 import io.github.hectorvent.floci.services.lambda.LambdaExecutorService;
 import io.github.hectorvent.floci.services.lambda.LambdaFunctionStore;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
 import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
-import io.github.hectorvent.floci.services.s3.S3Service;
-import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
-import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.model.Execution;
 import io.github.hectorvent.floci.services.stepfunctions.model.HistoryEvent;
 import io.github.hectorvent.floci.services.stepfunctions.model.MockedResponseStep;
@@ -19,7 +19,6 @@ import io.github.hectorvent.floci.services.stepfunctions.model.MockedTestCase;
 import io.github.hectorvent.floci.services.stepfunctions.model.StateMachine;
 import io.quarkus.test.junit.QuarkusTest;
 import io.vertx.mutiny.core.Vertx;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -59,40 +58,67 @@ class AslExecutorTaskHistoryEventsTest {
     @Inject
     Vertx vertx;
 
+    @Inject
+    RegionResolver regionResolver;
+
     @BeforeEach
     void setUp() {
         lambdaExecutor = mock(LambdaExecutorService.class);
         functionStore = mock(LambdaFunctionStore.class);
+        executor = newExecutor(mock(DynamoDbFacade.class));
+    }
+
+    private AslExecutor newExecutor(DynamoDbFacade dynamoDb) {
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.services().stepfunctions().maxWaitSeconds()).thenReturn(30);
 
-        executor = new AslExecutor(
-                lambdaExecutor,
-                functionStore,
-                mock(DynamoDbService.class),
-                mock(DynamoDbJsonHandler.class),
-                mock(SqsJsonHandler.class), mock(SnsJsonHandler.class),
-                mock(io.github.hectorvent.floci.services.cloudformation.CloudFormationQueryHandler.class),
-                mock(io.github.hectorvent.floci.services.ec2.Ec2Service.class),
-                mock(S3Service.class),
-                mock(io.github.hectorvent.floci.services.ecs.EcsService.class),
-                mock(io.github.hectorvent.floci.services.ecs.EcsJsonHandler.class),
-                mock(io.github.hectorvent.floci.services.eventbridge.EventBridgeHandler.class),
-                mock(io.github.hectorvent.floci.services.scheduler.SchedulerService.class),
-                mock(io.github.hectorvent.floci.services.scheduler.SchedulerController.class),
-                objectMapper,
-                new JsonataEvaluator(objectMapper),
-                mock(Instance.class), config, vertx,
-                mock(io.github.hectorvent.floci.core.common.CustomResourceLiveness.class));
+        return AslExecutorFixture.builder()
+                .lambdaExecutor(lambdaExecutor)
+                .functionStore(functionStore)
+                .dynamoDb(dynamoDb)
+                .objectMapper(objectMapper)
+                .config(config)
+                .vertx(vertx)
+                .build();
+    }
+
+    /**
+     * The optimized DynamoDB integration scopes to the ambient account, which the executor sets to
+     * the one in the state machine ARN, and to the state machine's region.
+     */
+    @Test
+    void optimizedDynamoDbTaskRunsAsTheExecutionAccountInTheStateMachineRegion() {
+        RecordingDynamoDbBackend backend = new RecordingDynamoDbBackend();
+        AslExecutor recordingExecutor = newExecutor(new DynamoDbFacade(backend, backend, regionResolver));
+        StateMachine stateMachine = new StateMachine();
+        stateMachine.setName("ddb");
+        stateMachine.setStateMachineArn("arn:aws:states:eu-west-1:111122223333:stateMachine:ddb");
+        stateMachine.setRoleArn("arn:aws:iam::111122223333:role/test-role");
+        stateMachine.setDefinition("""
+                {"StartAt": "Put", "States": {"Put": {"Type": "Task",
+                  "Resource": "arn:aws:states:::dynamodb:putItem",
+                  "Parameters": {"TableName": "orders", "Item": {"id": {"S": "k1"}}}, "End": true}}}
+                """);
+        Execution execution = new Execution();
+        execution.setName("ddb-execution");
+        execution.setExecutionArn("arn:aws:states:eu-west-1:111122223333:execution:ddb:ddb-execution");
+        execution.setStateMachineArn(stateMachine.getStateMachineArn());
+        execution.setInput("{}");
+
+        recordingExecutor.executeSync(stateMachine, execution, new ArrayList<>(), (updated, events) -> {
+        });
+
+        assertEquals("SUCCEEDED", execution.getStatus(), execution.getCause());
+        assertEquals(List.of(new Invocation("putItem", "111122223333", "eu-west-1")), backend.invocations());
     }
 
     @Test
     void mockedTaskEmitsScheduledStartedSucceededInOrder() throws Exception {
-        var mocks = testCase(Map.of("Send", List.of(
+        MockedTestCase mocks = testCase(Map.of("Send", List.of(
                 returnStep(0, 0, "{\"MessageId\":\"abc\"}"))));
 
-        var history = new ArrayList<HistoryEvent>();
-        var execution = run("""
+        ArrayList<HistoryEvent> history = new ArrayList<>();
+        Execution execution = run("""
                 {
                   "StartAt": "Send",
                   "States": {
@@ -116,23 +142,23 @@ class AslExecutorTaskHistoryEventsTest {
                 typesOf(history));
         assertChain(history);
 
-        var scheduled = eventOfType(history, "TaskScheduled");
+        HistoryEvent scheduled = eventOfType(history, "TaskScheduled");
         assertEquals("aws-sdk:sqs", scheduled.getDetails().get("resourceType"));
         assertEquals("sendMessage", scheduled.getDetails().get("resource"));
         assertEquals(REGION, scheduled.getDetails().get("region"));
-        var parameters = objectMapper.readTree((String) scheduled.getDetails().get("parameters"));
+        JsonNode parameters = objectMapper.readTree((String) scheduled.getDetails().get("parameters"));
         assertEquals("https://sqs.us-east-2.amazonaws.com/000000000000/q", parameters.path("QueueUrl").asText());
         assertEquals("hello", parameters.path("MessageBody").asText());
     }
 
     @Test
     void retriedMockEmitsTaskEventsPerAttempt() throws Exception {
-        var mocks = testCase(Map.of("Send", List.of(
+        MockedTestCase mocks = testCase(Map.of("Send", List.of(
                 throwStep(0, 1, "ApiGateway.500", "boom"),
                 returnStep(2, 2, "{\"ok\":true}"))));
 
-        var history = new ArrayList<HistoryEvent>();
-        var execution = run("""
+        ArrayList<HistoryEvent> history = new ArrayList<>();
+        Execution execution = run("""
                 {
                   "StartAt": "Send",
                   "States": {
@@ -165,11 +191,11 @@ class AslExecutorTaskHistoryEventsTest {
 
     @Test
     void taskFailedToleratesNullCause() throws Exception {
-        var mocks = testCase(Map.of("Send", List.of(
+        MockedTestCase mocks = testCase(Map.of("Send", List.of(
                 throwStep(0, 0, "My.Error", null))));
 
-        var history = new ArrayList<HistoryEvent>();
-        var execution = run("""
+        ArrayList<HistoryEvent> history = new ArrayList<>();
+        Execution execution = run("""
                 {
                   "StartAt": "Send",
                   "States": {
@@ -184,17 +210,17 @@ class AslExecutorTaskHistoryEventsTest {
                 """, "{}", mocks, history);
 
         assertEquals("FAILED", execution.getStatus(), "history: " + typesOf(history));
-        var failed = eventOfType(history, "TaskFailed");
+        HistoryEvent failed = eventOfType(history, "TaskFailed");
         assertEquals("My.Error", failed.getDetails().get("error"));
         assertFalse(failed.getDetails().containsKey("cause"));
     }
 
     @Test
     void jsonataArgumentsAppearResolvedInTaskScheduledParameters() throws Exception {
-        var mocks = testCase(Map.of("Send", List.of(
+        MockedTestCase mocks = testCase(Map.of("Send", List.of(
                 returnStep(0, 0, "{\"ok\":true}"))));
 
-        var history = new ArrayList<HistoryEvent>();
+        ArrayList<HistoryEvent> history = new ArrayList<>();
         run("""
                 {
                   "QueryLanguage": "JSONata",
@@ -210,29 +236,29 @@ class AslExecutorTaskHistoryEventsTest {
                 }
                 """, "{\"msg\":\"hi\"}", mocks, history);
 
-        var scheduled = eventOfType(history, "TaskScheduled");
-        var parameters = objectMapper.readTree((String) scheduled.getDetails().get("parameters"));
+        HistoryEvent scheduled = eventOfType(history, "TaskScheduled");
+        JsonNode parameters = objectMapper.readTree((String) scheduled.getDetails().get("parameters"));
         assertEquals("hi", parameters.path("msg").asText());
     }
 
     @Test
     void directLambdaArnEmitsLambdaFunctionEvents() throws Exception {
-        var functionName = "echo-lambda";
-        var functionArn = "arn:aws:lambda:%s:%s:function:%s".formatted(REGION, ACCOUNT, functionName);
-        var function = new LambdaFunction();
+        String functionName = "echo-lambda";
+        String functionArn = "arn:aws:lambda:%s:%s:function:%s".formatted(REGION, ACCOUNT, functionName);
+        LambdaFunction function = new LambdaFunction();
         function.setFunctionName(functionName);
         function.setFunctionArn(functionArn);
 
         when(functionStore.get(REGION, functionName)).thenReturn(Optional.of(function));
         when(lambdaExecutor.invoke(eq(function), any(byte[].class), eq(InvocationType.RequestResponse)))
                 .thenAnswer(invocation -> {
-                    var event = objectMapper.readTree((byte[]) invocation.getArgument(1));
-                    var output = objectMapper.writeValueAsBytes(event);
+                    JsonNode event = objectMapper.readTree((byte[]) invocation.getArgument(1));
+                    byte[] output = objectMapper.writeValueAsBytes(event);
                     return new InvokeResult(200, null, output, null, "echo-request");
                 });
 
-        var history = new ArrayList<HistoryEvent>();
-        var execution = run("""
+        ArrayList<HistoryEvent> history = new ArrayList<>();
+        Execution execution = run("""
                 {
                   "StartAt": "Call",
                   "States": {
@@ -252,25 +278,25 @@ class AslExecutorTaskHistoryEventsTest {
                 typesOf(history));
         assertChain(history);
 
-        var scheduled = eventOfType(history, "LambdaFunctionScheduled");
+        HistoryEvent scheduled = eventOfType(history, "LambdaFunctionScheduled");
         assertEquals(functionArn, scheduled.getDetails().get("resource"));
         assertFalse(scheduled.getDetails().containsKey("resourceType"));
-        var input = objectMapper.readTree((String) scheduled.getDetails().get("input"));
+        JsonNode input = objectMapper.readTree((String) scheduled.getDetails().get("input"));
         assertEquals("hello", input.path("msg").asText());
 
-        var started = eventOfType(history, "LambdaFunctionStarted");
+        HistoryEvent started = eventOfType(history, "LambdaFunctionStarted");
         assertNull(started.getDetails());
     }
 
     @Test
     void directLambdaFailurePreservesFunctionErrorInHistory() {
-        var functionName = "failing-lambda";
-        var functionArn = lambdaArn(functionName);
-        var errorPayload = "{\"errorType\":\"ValidationError\",\"errorMessage\":\"invalid input\"}";
+        String functionName = "failing-lambda";
+        String functionArn = lambdaArn(functionName);
+        String errorPayload = "{\"errorType\":\"ValidationError\",\"errorMessage\":\"invalid input\"}";
         stubLambdaFailure(functionName, functionArn, errorPayload.getBytes(StandardCharsets.UTF_8));
 
-        var history = new ArrayList<HistoryEvent>();
-        var execution = run("""
+        ArrayList<HistoryEvent> history = new ArrayList<>();
+        Execution execution = run("""
                 {
                   "StartAt": "Call",
                   "States": {
@@ -290,7 +316,7 @@ class AslExecutorTaskHistoryEventsTest {
                 List.of("TaskStateEntered", "LambdaFunctionScheduled", "LambdaFunctionStarted",
                         "LambdaFunctionFailed", "ExecutionFailed"),
                 typesOf(history));
-        var failed = eventOfType(history, "LambdaFunctionFailed");
+        HistoryEvent failed = eventOfType(history, "LambdaFunctionFailed");
         assertEquals("ValidationError", failed.getDetails().get("error"));
         assertEquals(errorPayload, failed.getDetails().get("cause"));
         assertChain(history);
@@ -298,13 +324,13 @@ class AslExecutorTaskHistoryEventsTest {
 
     @Test
     void optimizedLambdaFailurePreservesFunctionErrorInHistory() {
-        var functionName = "failing-lambda";
-        var functionArn = lambdaArn(functionName);
-        var errorPayload = "{\"errorType\":\"ValidationError\",\"errorMessage\":\"invalid input\"}";
+        String functionName = "failing-lambda";
+        String functionArn = lambdaArn(functionName);
+        String errorPayload = "{\"errorType\":\"ValidationError\",\"errorMessage\":\"invalid input\"}";
         stubLambdaFailure(functionName, functionArn, errorPayload.getBytes(StandardCharsets.UTF_8));
 
-        var history = new ArrayList<HistoryEvent>();
-        var execution = run("""
+        ArrayList<HistoryEvent> history = new ArrayList<>();
+        Execution execution = run("""
                 {
                   "StartAt": "Call",
                   "States": {
@@ -327,7 +353,7 @@ class AslExecutorTaskHistoryEventsTest {
         assertEquals(
                 List.of("TaskStateEntered", "TaskScheduled", "TaskStarted", "TaskFailed", "ExecutionFailed"),
                 typesOf(history));
-        var failed = eventOfType(history, "TaskFailed");
+        HistoryEvent failed = eventOfType(history, "TaskFailed");
         assertEquals("lambda", failed.getDetails().get("resourceType"));
         assertEquals("invoke", failed.getDetails().get("resource"));
         assertEquals("ValidationError", failed.getDetails().get("error"));
@@ -337,12 +363,12 @@ class AslExecutorTaskHistoryEventsTest {
 
     @Test
     void malformedLambdaErrorPayloadFallsBackToException() {
-        var functionName = "failing-lambda";
-        var functionArn = lambdaArn(functionName);
-        var errorPayload = "not-json";
+        String functionName = "failing-lambda";
+        String functionArn = lambdaArn(functionName);
+        String errorPayload = "not-json";
         stubLambdaFailure(functionName, functionArn, errorPayload.getBytes(StandardCharsets.UTF_8));
 
-        var execution = run(directLambdaDefinition(functionArn), "{}", null, new ArrayList<>());
+        Execution execution = run(directLambdaDefinition(functionArn), "{}", null, new ArrayList<>());
 
         assertEquals("FAILED", execution.getStatus());
         assertEquals("Exception", execution.getError());
@@ -351,11 +377,11 @@ class AslExecutorTaskHistoryEventsTest {
 
     @Test
     void missingLambdaErrorPayloadFallsBackToException() {
-        var functionName = "failing-lambda";
-        var functionArn = lambdaArn(functionName);
+        String functionName = "failing-lambda";
+        String functionArn = lambdaArn(functionName);
         stubLambdaFailure(functionName, functionArn, null);
 
-        var execution = run(directLambdaDefinition(functionArn), "{}", null, new ArrayList<>());
+        Execution execution = run(directLambdaDefinition(functionArn), "{}", null, new ArrayList<>());
 
         assertEquals("FAILED", execution.getStatus());
         assertEquals("Exception", execution.getError());
@@ -369,8 +395,8 @@ class AslExecutorTaskHistoryEventsTest {
      */
     @Test
     void parallelAndMapPublishAnUnbrokenEventChain() throws Exception {
-        var history = new ArrayList<HistoryEvent>();
-        var execution = run("""
+        ArrayList<HistoryEvent> history = new ArrayList<>();
+        Execution execution = run("""
                 {
                   "StartAt": "Fan",
                   "States": {
@@ -413,7 +439,7 @@ class AslExecutorTaskHistoryEventsTest {
                 List.of(0L, 1L, 2L, 3L, 4L, 5L, 6L, 6L,
                         8L, 9L, 10L, 11L, 12L, 13L, 10L, 15L, 16L, 17L, 18L, 18L, 20L),
                 history.stream().map(HistoryEvent::getPreviousEventId).toList());
-        for (var i = 0; i < history.size(); i++) {
+        for (int i = 0; i < history.size(); i++) {
             assertEquals(i + 1L, history.get(i).getId(), "unexpected id at index " + i);
         }
     }
@@ -431,8 +457,8 @@ class AslExecutorTaskHistoryEventsTest {
     }
 
     private static void assertChain(List<HistoryEvent> history) {
-        for (var i = 0; i < history.size(); i++) {
-            var event = history.get(i);
+        for (int i = 0; i < history.size(); i++) {
+            HistoryEvent event = history.get(i);
             assertEquals(i + 1L, event.getId(), "unexpected id at index " + i);
             assertEquals((long) i, event.getPreviousEventId(), "unexpected previousEventId at index " + i);
         }
@@ -451,7 +477,7 @@ class AslExecutorTaskHistoryEventsTest {
     }
 
     private void stubLambdaFailure(String functionName, String functionArn, byte[] errorPayload) {
-        var function = new LambdaFunction();
+        LambdaFunction function = new LambdaFunction();
         function.setFunctionName(functionName);
         function.setFunctionArn(functionArn);
         when(functionStore.get(REGION, functionName)).thenReturn(Optional.of(function));
@@ -475,13 +501,13 @@ class AslExecutorTaskHistoryEventsTest {
     }
 
     private Execution run(String definition, String input, MockedTestCase mocks, List<HistoryEvent> history) {
-        var stateMachine = new StateMachine();
+        StateMachine stateMachine = new StateMachine();
         stateMachine.setName("history-events-test");
         stateMachine.setStateMachineArn("arn:aws:states:%s:%s:stateMachine:history-events-test".formatted(REGION, ACCOUNT));
         stateMachine.setRoleArn("arn:aws:iam::%s:role/test-role".formatted(ACCOUNT));
         stateMachine.setDefinition(definition);
 
-        var execution = new Execution();
+        Execution execution = new Execution();
         execution.setName("history-events-execution");
         execution.setExecutionArn(
                 "arn:aws:states:%s:%s:execution:history-events-test:history-events-execution".formatted(REGION, ACCOUNT));

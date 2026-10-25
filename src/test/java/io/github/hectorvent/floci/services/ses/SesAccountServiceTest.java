@@ -1,6 +1,5 @@
 package io.github.hectorvent.floci.services.ses;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.ses.model.AccountDetails;
@@ -18,25 +17,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Unit test for the extracted account domain: the account sending-enabled flag and
- * the VDM attributes. The service is constructed with just its own two stores, no 14-argument
+ * the VDM attributes. The service is constructed with just its own two stores — no 14-argument
  * SesService needed.
  */
 class SesAccountServiceTest {
 
     private static final String REGION = "us-east-1";
     private SesAccountService service;
-
-    @Test
-    void legacyVdmFlagsAndStorageKeyRemainReadable() throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
-        AccountVdmAttributes attributes = mapper.readValue(
-                "{\"VdmEnabled\":\"ENABLED\",\"EngagementMetrics\":\"ENABLED\"}", AccountVdmAttributes.class);
-        InMemoryStorage<String, AccountVdmAttributes> store = new InMemoryStorage<>();
-        store.put("accountVdm::" + REGION, attributes);
-        SesAccountService legacy = new SesAccountService(new InMemoryStorage<>(), store, new InMemoryStorage<>());
-        assertTrue(legacy.findAccountVdmAttributes(REGION).orElseThrow().vdmEnabled());
-        assertEquals(attributes, mapper.readValue(mapper.writeValueAsString(attributes), AccountVdmAttributes.class));
-    }
 
     @BeforeEach
     void setUp() {
@@ -90,7 +77,7 @@ class SesAccountServiceTest {
         assertEquals("https://example.com", d.websiteUrl());
         assertEquals("GRANTED", d.reviewStatus());
         // ProductionAccessEnabled is stored as given (the GetAccount top-level flag stays true
-        // regardless, asserted at the controller layer).
+        // regardless — asserted at the controller layer).
         assertTrue(d.productionAccessEnabled());
         assertTrue(service.findAccountDetails("eu-west-1").isEmpty());
     }
@@ -111,5 +98,20 @@ class SesAccountServiceTest {
         service.setDedicatedIpAutoWarmup(REGION, false);
         assertFalse(service.isDedicatedIpAutoWarmupEnabled(REGION));
         assertTrue(service.isDedicatedIpAutoWarmupEnabled("eu-west-1"));
+    }
+
+    @Test
+    void requireVdmEnabled_rejectsAnUnconfiguredRegionAndADisabledOne() {
+        AwsException unconfigured = assertThrows(AwsException.class,
+                () -> service.requireVdmEnabled("eu-north-1"));
+        assertEquals("NotFoundException", unconfigured.getErrorCode());
+        assertEquals("To use this feature you must enable Virtual Deliverability Manager",
+                unconfigured.getMessage());
+
+        service.putAccountVdmAttributes("eu-north-1", new AccountVdmAttributes(false, false, false));
+        assertThrows(AwsException.class, () -> service.requireVdmEnabled("eu-north-1"));
+
+        service.putAccountVdmAttributes("eu-north-1", new AccountVdmAttributes(true, false, false));
+        service.requireVdmEnabled("eu-north-1");
     }
 }

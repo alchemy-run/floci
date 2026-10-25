@@ -129,7 +129,7 @@ public class EfsService implements Resettable {
         fs.setKmsKeyId(request.getKmsKeyId());
         if (request.getAvailabilityZoneName() != null) {
             fs.setAvailabilityZoneName(request.getAvailabilityZoneName());
-            fs.setAvailabilityZoneId(ec2Service.describeAvailabilityZones(region).stream()
+            fs.setAvailabilityZoneId(ec2Service.describeAvailabilityZones(region, java.util.List.of(), java.util.List.of(), java.util.List.of()).stream()
                     .filter(zone -> request.getAvailabilityZoneName().equals(zone.get("zoneName")))
                     .map(zone -> zone.get("zoneId"))
                     .findFirst()
@@ -450,7 +450,7 @@ public class EfsService implements Resettable {
             throw EfsException.badRequest("SubnetId is required");
         }
         try {
-            return ec2Service.describeSubnets(region, List.of(subnetId), Map.of()).getFirst();
+            return ec2Service.requireSubnets(region, List.of(subnetId)).getFirst();
         } catch (AwsException error) {
             throw mountTargetNetworkError(error);
         }

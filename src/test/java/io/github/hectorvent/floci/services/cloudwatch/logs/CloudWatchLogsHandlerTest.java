@@ -16,12 +16,12 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.not;
-import static org.mockito.Mockito.mock;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 /**
  * Handler-level tests for ARN-based log group/stream resolution (issue #1164).
@@ -344,7 +344,7 @@ class CloudWatchLogsHandlerTest {
         Response response = handler.handle("PutLogEvents", request, REGION);
 
         assertEquals(200, response.getStatus());
-        var stored = service.getLogEvents(GROUP, STREAM, null, null, 100, true, null, REGION);
+        CloudWatchLogsService.LogEventsResult stored = service.getLogEvents(GROUP, STREAM, null, null, 100, true, null, REGION);
         assertEquals(1, stored.events().size());
         assertEquals("hello via ARN", stored.events().getFirst().getMessage());
     }

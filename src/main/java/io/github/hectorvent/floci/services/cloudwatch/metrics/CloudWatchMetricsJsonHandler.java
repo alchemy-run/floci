@@ -5,9 +5,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.CloudWatchDashboardsService;
 import io.github.hectorvent.floci.services.cloudwatch.dashboards.model.Dashboard;
+import io.github.hectorvent.floci.services.cloudwatch.metrics.model.AlarmMetricDataQuery;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.Dimension;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricAlarm;
 import io.github.hectorvent.floci.services.cloudwatch.metrics.model.MetricDatum;
@@ -38,12 +40,6 @@ public class CloudWatchMetricsJsonHandler {
     private final CloudWatchDashboardsService dashboardsService;
     private final CloudWatchMetricStreamsService metricStreamsService;
     private final ObjectMapper objectMapper;
-    @Inject
-    CloudWatchMetadataService metadataService;
-    @Inject
-    CloudWatchInsightsService insightsService;
-    @Inject
-    MetricWidgetRenderer widgetRenderer;
 
     @Inject
     public CloudWatchMetricsJsonHandler(CloudWatchMetricsService metricsService,
@@ -70,22 +66,13 @@ public class CloudWatchMetricsJsonHandler {
             case "TagResource" -> handleTagResource(request, region);
             case "UntagResource" -> handleUntagResource(request, region);
             case "GetMetricData" -> handleGetMetricData(request, region);
-            case "PutCompositeAlarm" -> Response.ok(metadataService.putCompositeAlarm(request, region)).build();
-            case "PutAnomalyDetector" -> Response.ok(metadataService.putDetector(request, region)).build();
-            case "DescribeAnomalyDetectors" -> Response.ok(metadataService.describeDetectors(request, region)).build();
-            case "DeleteAnomalyDetector" -> Response.ok(metadataService.deleteDetector(request, region)).build();
-            case "PutAlarmMuteRule" -> Response.ok(metadataService.putMuteRule(request, region)).build();
-            case "GetAlarmMuteRule" -> Response.ok(metadataService.getMuteRule(request, region)).build();
-            case "ListAlarmMuteRules" -> Response.ok(metadataService.listMuteRules(request, region)).build();
-            case "DeleteAlarmMuteRule" -> Response.ok(metadataService.deleteMuteRule(request, region)).build();
-            case "DescribeAlarmsForMetric" -> handleDescribeAlarmsForMetric(request, region);
-            case "DescribeAlarmHistory" -> Response.ok(metadataService.describeHistory(request, region)).build();
-            case "DescribeAlarmContributors" -> handleDescribeAlarmContributors(request, region);
-            case "EnableAlarmActions", "DisableAlarmActions" -> {
-                metadataService.setActions(parseNamesJson(request.path("AlarmNames")),
-                        normalizedAction.equals("EnableAlarmActions"), region);
-                yield Response.ok(objectMapper.createObjectNode()).build();
-            }
+            case "ListManagedInsightRules" -> throw new AwsException(
+                    "InvalidParameterValueException", "Managed Contributor Insights rules are not supported for this resource", 400);
+            case "GetInsightRuleReport" -> Response.ok(insightsService.report(request, region)).build();
+            case "DeleteInsightRules", "EnableInsightRules", "DisableInsightRules" ->
+                    Response.ok(insightsService.change(request, region, normalizedAction)).build();
+            case "DescribeInsightRules" -> Response.ok(insightsService.describe(request, region)).build();
+            case "PutInsightRule" -> Response.ok(insightsService.put(request, region)).build();
             case "GetMetricWidgetImage" -> {
                 if (!"png".equals(request.path("OutputFormat").asText("png"))) {
                     throw CloudWatchMetadataService.invalid("OutputFormat must be png");
@@ -93,13 +80,22 @@ public class CloudWatchMetricsJsonHandler {
                 yield Response.ok(objectMapper.createObjectNode().put("MetricWidgetImage", widgetRenderer.render(
                         CloudWatchMetadataService.required(request, "MetricWidget"), region))).build();
             }
-            case "PutInsightRule" -> Response.ok(insightsService.put(request, region)).build();
-            case "DescribeInsightRules" -> Response.ok(insightsService.describe(request, region)).build();
-            case "DeleteInsightRules", "EnableInsightRules", "DisableInsightRules" ->
-                    Response.ok(insightsService.change(request, region, normalizedAction)).build();
-            case "GetInsightRuleReport" -> Response.ok(insightsService.report(request, region)).build();
-            case "ListManagedInsightRules" -> throw new io.github.hectorvent.floci.core.common.AwsException(
-                    "InvalidParameterValueException", "Managed Contributor Insights rules are not supported for this resource", 400);
+            case "EnableAlarmActions", "DisableAlarmActions" -> {
+                metadataService.setActions(parseNamesJson(request.path("AlarmNames")),
+                        normalizedAction.equals("EnableAlarmActions"), region);
+                yield Response.ok(objectMapper.createObjectNode()).build();
+            }
+            case "DescribeAlarmContributors" -> handleDescribeAlarmContributors(request, region);
+            case "DescribeAlarmHistory" -> Response.ok(metadataService.describeHistory(request, region)).build();
+            case "DescribeAlarmsForMetric" -> handleDescribeAlarmsForMetric(request, region);
+            case "DeleteAlarmMuteRule" -> Response.ok(metadataService.deleteMuteRule(request, region)).build();
+            case "ListAlarmMuteRules" -> Response.ok(metadataService.listMuteRules(request, region)).build();
+            case "GetAlarmMuteRule" -> Response.ok(metadataService.getMuteRule(request, region)).build();
+            case "PutAlarmMuteRule" -> Response.ok(metadataService.putMuteRule(request, region)).build();
+            case "DeleteAnomalyDetector" -> Response.ok(metadataService.deleteDetector(request, region)).build();
+            case "DescribeAnomalyDetectors" -> Response.ok(metadataService.describeDetectors(request, region)).build();
+            case "PutAnomalyDetector" -> Response.ok(metadataService.putDetector(request, region)).build();
+            case "PutCompositeAlarm" -> Response.ok(metadataService.putCompositeAlarm(request, region)).build();
             case "PutDashboard" -> handlePutDashboard(request, region);
             case "GetDashboard" -> handleGetDashboard(request, region);
             case "ListDashboards" -> handleListDashboards(request, region);
@@ -118,10 +114,14 @@ public class CloudWatchMetricsJsonHandler {
 
     private Response handlePutMetricData(JsonNode request, String region) {
         String namespace = request.path("Namespace").asText();
-        LOG.infov("JSON PutMetricData raw: {0}", request);
-        List<MetricDatum> datums = parseMetricDataJson(request.path("MetricData"));
-        LOG.infov("JSON PutMetricData parsed {0} datums, sums={1}", datums.size(),
-                datums.stream().map(d -> d.getMetricName() + "=" + d.getSum()).toList());
+        List<MetricDatum> datums = parseMetricDataJson(request.path("MetricData"), "MetricData");
+        int entityIndex = 0;
+        for (JsonNode entityMetricData : request.path("EntityMetricData")) {
+            entityIndex++;
+            datums.addAll(parseMetricDataJson(entityMetricData.path("MetricData"),
+                    "EntityMetricData.member." + entityIndex + ".MetricData"));
+        }
+        LOG.debugv("JSON PutMetricData parsed {0} datums for namespace {1}", datums.size(), namespace);
         metricsService.putMetricData(namespace, datums, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
@@ -136,7 +136,7 @@ public class CloudWatchMetricsJsonHandler {
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode metricsArray = response.putArray("Metrics");
-        for (var m : metrics) {
+        for (CloudWatchMetricsService.MetricIdentity m : metrics) {
             ObjectNode mNode = metricsArray.addObject();
             mNode.put("Namespace", m.namespace());
             mNode.put("MetricName", m.metricName());
@@ -173,7 +173,7 @@ public class CloudWatchMetricsJsonHandler {
         ObjectNode response = objectMapper.createObjectNode();
         response.put("Label", metricName);
         ArrayNode dps = response.putArray("Datapoints");
-        for (var dp : datapoints) {
+        for (CloudWatchMetricsService.Datapoint dp : datapoints) {
             ObjectNode dpNode = dps.addObject();
             dpNode.put("Timestamp", dp.timestamp().getEpochSecond());
             if (statistics.contains("Average")) dpNode.put("Average", dp.average());
@@ -193,7 +193,13 @@ public class CloudWatchMetricsJsonHandler {
         alarm.setMetricName(request.path("MetricName").asText(null));
         alarm.setNamespace(request.path("Namespace").asText(null));
         alarm.setStatistic(request.path("Statistic").asText(null));
-        alarm.setPeriod(request.path("Period").asInt(60));
+        JsonNode metrics = request.path("Metrics");
+        if (metrics.isArray()) {
+            for (JsonNode query : metrics) {
+                alarm.getMetrics().add(objectMapper.convertValue(query, AlarmMetricDataQuery.class));
+            }
+        }
+        alarm.setPeriod(alarm.getMetrics().isEmpty() ? request.path("Period").asInt(60) : null);
         alarm.setUnit(request.path("Unit").asText(null));
         alarm.setEvaluationPeriods(request.path("EvaluationPeriods").asInt(1));
         alarm.setDatapointsToAlarm(request.hasNonNull("DatapointsToAlarm")
@@ -256,17 +262,31 @@ public class CloudWatchMetricsJsonHandler {
             a.getOkActions().forEach(okActions::add);
             ArrayNode insufficientDataActions = node.putArray("InsufficientDataActions");
             a.getInsufficientDataActions().forEach(insufficientDataActions::add);
-            if (a.getMetricName() != null) node.put("MetricName", a.getMetricName());
-            if (a.getNamespace() != null) node.put("Namespace", a.getNamespace());
-            if (a.getStatistic() != null) node.put("Statistic", a.getStatistic());
-            ArrayNode dimensions = node.putArray("Dimensions");
-            a.getDimensions().forEach(d -> {
-                ObjectNode dimNode = dimensions.addObject();
-                dimNode.put("Name", d.name());
-                dimNode.put("Value", d.value());
-            });
-            node.put("Period", a.getPeriod());
-            if (a.getUnit() != null) node.put("Unit", a.getUnit());
+            if (!a.getMetrics().isEmpty()) {
+                node.set("Metrics", objectMapper.valueToTree(a.getMetrics()));
+            } else {
+                if (a.getMetricName() != null) {
+                    node.put("MetricName", a.getMetricName());
+                }
+                if (a.getNamespace() != null) {
+                    node.put("Namespace", a.getNamespace());
+                }
+                if (a.getStatistic() != null) {
+                    node.put("Statistic", a.getStatistic());
+                }
+                ArrayNode dimensions = node.putArray("Dimensions");
+                a.getDimensions().forEach(d -> {
+                    ObjectNode dimNode = dimensions.addObject();
+                    dimNode.put("Name", d.name());
+                    dimNode.put("Value", d.value());
+                });
+                if (a.getPeriod() != null) {
+                    node.put("Period", a.getPeriod());
+                }
+                if (a.getUnit() != null) {
+                    node.put("Unit", a.getUnit());
+                }
+            }
             node.put("EvaluationPeriods", a.getEvaluationPeriods());
             if (a.getDatapointsToAlarm() != null) {
                 node.put("DatapointsToAlarm", a.getDatapointsToAlarm());
@@ -304,32 +324,13 @@ public class CloudWatchMetricsJsonHandler {
             }
             if (page.has("NextToken")) response.set("NextToken", page.get("NextToken"));
         }
-        return Response.ok(response).build();
-    }
-
-    private Response handleDescribeAlarmsForMetric(JsonNode request, String region) {
-        ObjectNode all = (ObjectNode) handleDescribeAlarms(objectMapper.createObjectNode(), region).getEntity();
-        ArrayNode alarms = (ArrayNode) all.get("MetricAlarms");
-        for (int i = alarms.size() - 1; i >= 0; i--) {
-            JsonNode alarm = alarms.get(i);
-            boolean matches = true;
-            for (String field : List.of("Namespace", "MetricName", "Statistic", "ExtendedStatistic", "Period", "Unit")) {
-                if (request.has(field) && !request.get(field).asText().equals(alarm.path(field).asText())) matches = false;
-            }
-            var expected = parseDimensionsJson(request.path("Dimensions"));
-            var actual = parseDimensionsJson(alarm.path("Dimensions"));
-            if (!CloudWatchMetricsService.buildDimKey(expected).equals(CloudWatchMetricsService.buildDimKey(actual))) matches = false;
-            if (!matches) alarms.remove(i);
+        if (!response.has("CompositeAlarms")) {
+            response.putArray("CompositeAlarms");
         }
-        return Response.ok(all).build();
-    }
-
-    private Response handleDescribeAlarmContributors(JsonNode request, String region) {
-        String name = CloudWatchMetadataService.required(request, "AlarmName");
-        if (metricsService.describeAlarms(List.of(name), null, region).isEmpty()
-                && !metadataService.isComposite(name, region)) throw CloudWatchMetadataService.notFound(name);
-        throw new io.github.hectorvent.floci.core.common.AwsException("ValidationException",
-                "Contributor data is available only for contributor-enabled Metrics Insights alarms", 400);
+        if (!response.has("LogAlarms")) {
+            response.putArray("LogAlarms");
+        }
+        return Response.ok(response).build();
     }
 
     private Response handleDeleteAlarms(JsonNode request, String region) {
@@ -473,7 +474,7 @@ public class CloudWatchMetricsJsonHandler {
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode resultsArray = response.putArray("MetricDataResults");
-        for (var r : results) {
+        for (CloudWatchMetricsService.MetricDataResult r : results) {
             ObjectNode rNode = resultsArray.addObject();
             rNode.put("Id", r.id());
             rNode.put("Label", r.label());
@@ -662,7 +663,7 @@ public class CloudWatchMetricsJsonHandler {
         for (MetricStreamStatisticsConfiguration configuration : configurations) {
             ObjectNode node = array.addObject();
             ArrayNode includeMetrics = node.putArray("IncludeMetrics");
-            for (var metric : configuration.getIncludeMetrics()) {
+            for (MetricStreamStatisticsConfiguration.IncludeMetric metric : configuration.getIncludeMetrics()) {
                 includeMetrics.addObject()
                         .put("Namespace", metric.namespace())
                         .put("MetricName", metric.metricName());
@@ -706,12 +707,18 @@ public class CloudWatchMetricsJsonHandler {
         return configurations;
     }
 
-    private List<MetricDatum> parseMetricDataJson(JsonNode node) {
+    private List<MetricDatum> parseMetricDataJson(JsonNode node, String listPath) {
         List<MetricDatum> datums = new ArrayList<>();
         if (!node.isArray()) return datums;
+        int index = 0;
         for (JsonNode item : node) {
+            index++;
+            JsonNode metricName = item.path("MetricName");
+            if (!metricName.isTextual() || metricName.asText().isEmpty()) {
+                throw CloudWatchMetricsException.missingParameter(listPath + ".member." + index + ".MetricName");
+            }
             MetricDatum datum = new MetricDatum();
-            datum.setMetricName(item.path("MetricName").asText());
+            datum.setMetricName(metricName.asText());
             datum.setValue(item.path("Value").asDouble(0));
             datum.setUnit(item.path("Unit").asText(null));
             JsonNode ts = item.path("Timestamp");
@@ -723,7 +730,9 @@ public class CloudWatchMetricsJsonHandler {
 
             JsonNode statsValues = item.path("StatisticValues");
             if (!statsValues.isMissingNode()) {
-                if (item.has("Values") || item.has("Value")) throw CloudWatchMetadataService.invalid("Specify one metric value representation");
+                if (item.has("Values") || item.has("Value")) {
+                    throw CloudWatchMetadataService.invalid("Specify one metric value representation");
+                }
                 datum.setSampleCount(statsValues.path("SampleCount").asDouble(0));
                 datum.setSum(statsValues.path("Sum").asDouble(0));
                 datum.setMinimum(statsValues.path("Minimum").asDouble(0));
@@ -732,33 +741,41 @@ public class CloudWatchMetricsJsonHandler {
                     throw CloudWatchMetadataService.invalid("Invalid StatisticValues");
                 }
             } else if (item.has("Values")) {
-                JsonNode values = item.get("Values"), counts = item.path("Counts");
-                if (item.has("Value") || !values.isArray() || values.isEmpty() || values.size() > 150
-                        || (!counts.isMissingNode() && counts.size() != values.size())) {
-                    throw CloudWatchMetadataService.invalid("Invalid Values/Counts");
-                }
-                double count = 0, sum = 0, min = Double.POSITIVE_INFINITY, max = Double.NEGATIVE_INFINITY;
-                for (int i = 0; i < values.size(); i++) {
-                    double value = values.get(i).asDouble(), weight = counts.isMissingNode() ? 1 : counts.get(i).asDouble();
-                    if (!Double.isFinite(value) || !Double.isFinite(weight) || weight <= 0) {
-                        throw CloudWatchMetadataService.invalid("Metric values must be finite and counts positive");
-                    }
-                    count += weight;
-                    sum += value * weight;
-                    min = Math.min(min, value);
-                    max = Math.max(max, value);
-                }
-                datum.setSampleCount(count);
-                datum.setSum(sum);
-                datum.setMinimum(min);
-                datum.setMaximum(max);
-            } else if (!item.has("Value")) {
-                throw CloudWatchMetadataService.invalid("A metric value is required");
+                applyValuesAndCounts(datum, item);
             }
 
             datums.add(datum);
         }
         return datums;
+    }
+
+    /** {@code Values} with optional {@code Counts}: each value weighted by its count, as one datum's statistics. */
+    private static void applyValuesAndCounts(MetricDatum datum, JsonNode item) {
+        JsonNode values = item.get("Values");
+        JsonNode counts = item.path("Counts");
+        if (item.has("Value") || !values.isArray() || values.isEmpty() || values.size() > 150
+                || (!counts.isMissingNode() && counts.size() != values.size())) {
+            throw CloudWatchMetadataService.invalid("Invalid Values/Counts");
+        }
+        double count = 0;
+        double sum = 0;
+        double min = Double.POSITIVE_INFINITY;
+        double max = Double.NEGATIVE_INFINITY;
+        for (int i = 0; i < values.size(); i++) {
+            double value = values.get(i).asDouble();
+            double weight = counts.isMissingNode() ? 1 : counts.get(i).asDouble();
+            if (!Double.isFinite(value) || !Double.isFinite(weight) || weight <= 0) {
+                throw CloudWatchMetadataService.invalid("Metric values must be finite and counts positive");
+            }
+            count += weight;
+            sum += value * weight;
+            min = Math.min(min, value);
+            max = Math.max(max, value);
+        }
+        datum.setSampleCount(count);
+        datum.setSum(sum);
+        datum.setMinimum(min);
+        datum.setMaximum(max);
     }
 
     private List<Dimension> parseDimensionsJson(JsonNode node) {
@@ -793,4 +810,39 @@ public class CloudWatchMetricsJsonHandler {
             }
         }
     }
+
+    @Inject
+    CloudWatchMetadataService metadataService;
+
+    @Inject
+    CloudWatchInsightsService insightsService;
+
+    @Inject
+    MetricWidgetRenderer widgetRenderer;
+
+    private Response handleDescribeAlarmsForMetric(JsonNode request, String region) {
+        ObjectNode all = (ObjectNode) handleDescribeAlarms(objectMapper.createObjectNode(), region).getEntity();
+        ArrayNode alarms = (ArrayNode) all.get("MetricAlarms");
+        for (int i = alarms.size() - 1; i >= 0; i--) {
+            JsonNode alarm = alarms.get(i);
+            boolean matches = true;
+            for (String field : List.of("Namespace", "MetricName", "Statistic", "ExtendedStatistic", "Period", "Unit")) {
+                if (request.has(field) && !request.get(field).asText().equals(alarm.path(field).asText())) matches = false;
+            }
+            List<Dimension> expected = parseDimensionsJson(request.path("Dimensions"));
+            List<Dimension> actual = parseDimensionsJson(alarm.path("Dimensions"));
+            if (!CloudWatchMetricsService.buildDimKey(expected).equals(CloudWatchMetricsService.buildDimKey(actual))) matches = false;
+            if (!matches) alarms.remove(i);
+        }
+        return Response.ok(all).build();
+    }
+
+    private Response handleDescribeAlarmContributors(JsonNode request, String region) {
+        String name = CloudWatchMetadataService.required(request, "AlarmName");
+        if (metricsService.describeAlarms(List.of(name), null, region).isEmpty()
+                && !metadataService.isComposite(name, region)) throw CloudWatchMetadataService.notFound(name);
+        throw new AwsException("ValidationException",
+                "Contributor data is available only for contributor-enabled Metrics Insights alarms", 400);
+    }
+
 }

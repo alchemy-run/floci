@@ -3,12 +3,15 @@ package io.github.hectorvent.floci.services.dynamodb;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.core.common.AwsException;
 
+import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
+import java.util.function.Function;
 
 /**
  * Calculates DynamoDB item size and enforces the 400KB limit.
@@ -19,12 +22,21 @@ final class DynamoDbItemSize {
 
     static final String UPDATE_EXCEEDED = "Item size to update has exceeded the maximum allowed size";
 
-    // UpdateItem measures what the statement writes, name and value, not the item it stores,
-    // and charges these on top. Every other surface measures the finished item.
+    // An UpdateExpression is also measured as a statement: these per action, the target paths
+    // with a shared prefix counted once, and every operand a SET reads or an ADD writes.
+    // Every other surface, AttributeUpdates included, measures only the finished item.
     private static final int UPDATE_COST = 3;
     private static final int SET_OR_ADD_COST = 19;
-    private static final int REMOVE_OR_DELETE_COST = 2;
-    private static final int LIST_INDEX_COST = 1;
+    private static final int REMOVE_OR_DELETE_COST = 1;
+    private static final int TARGET_CONTAINER_COST = 4;
+    private static final int OPERAND_PATH_COST = 1;
+    private static final int OPERAND_PATH_ELEMENT_COST = 14;
+    private static final int PLUS_COST = 34;
+    private static final int MINUS_COST = 37;
+    private static final int LIST_APPEND_COST = 37;
+    private static final int IF_NOT_EXISTS_COST = 39;
+    private static final int CONTAINER_COST = 3;
+    private static final int MAX_NUMBER_PAIRS = 20;
 
     private DynamoDbItemSize() {}
 
@@ -43,23 +55,13 @@ final class DynamoDbItemSize {
         return calculateItemSize(item) <= MAX_ITEM_SIZE;
     }
 
-    static boolean updateItemWithinLimit(JsonNode item, Set<String> writtenAttributes, int actionCost) {
-        int total = 0;
-        int written = 0;
-        Iterator<Map.Entry<String, JsonNode>> fields = item.fields();
-        while (fields.hasNext()) {
-            Map.Entry<String, JsonNode> entry = fields.next();
-            int size = utf8Length(entry.getKey()) + attributeValueSize(entry.getValue());
-            total += size;
-            if (writtenAttributes.contains(entry.getKey())) {
-                written += size;
-            }
-        }
-        return total <= MAX_ITEM_SIZE && written + actionCost <= MAX_ITEM_SIZE;
+    static boolean updateItemWithinLimit(JsonNode item, int statementSize) {
+        return calculateItemSize(item) <= MAX_ITEM_SIZE && statementSize <= MAX_ITEM_SIZE;
     }
 
-    static int updateExpressionCost(String expression) {
-        int cost = UPDATE_COST;
+    static int updateStatementSize(String expression, Function<String, List<Object>> paths, JsonNode values) {
+        int size = UPDATE_COST;
+        PathTree targets = new PathTree();
         String remaining = expression.trim().replaceAll("\\s+", " ");
         while (!remaining.isEmpty()) {
             String keyword = remaining.substring(0, Math.max(remaining.indexOf(' '), 0)).toUpperCase(Locale.ROOT);
@@ -69,45 +71,103 @@ final class DynamoDbItemSize {
             remaining = nextClause < 0 ? "" : body.substring(nextClause);
             while (!actions.isBlank()) {
                 int comma = DynamoDbService.findNextComma(actions);
-                cost += actionCost(keyword, comma < 0 ? actions : actions.substring(0, comma));
+                String action = (comma < 0 ? actions : actions.substring(0, comma)).trim();
+                size += actionSize(keyword, action, targets, paths, values);
                 actions = comma < 0 ? "" : actions.substring(comma + 1);
             }
         }
-        return cost;
+        return size + targets.size();
     }
 
-    static int attributeUpdatesCost(JsonNode attributeUpdates) {
-        int cost = UPDATE_COST;
-        if (attributeUpdates == null || !attributeUpdates.isObject()) {
-            return cost;
-        }
-        for (JsonNode update : attributeUpdates) {
-            cost += "DELETE".equals(update.path("Action").asText("PUT"))
-                    ? REMOVE_OR_DELETE_COST : SET_OR_ADD_COST;
-        }
-        return cost;
-    }
-
-    private static int actionCost(String clause, String action) {
+    private static int actionSize(String clause, String action, PathTree targets,
+                                  Function<String, List<Object>> paths, JsonNode values) {
         return switch (clause) {
-            case "SET" -> SET_OR_ADD_COST + (writesListElement(action) ? LIST_INDEX_COST : 0);
-            case "ADD" -> SET_OR_ADD_COST;
-            default -> REMOVE_OR_DELETE_COST;
+            case "SET" -> {
+                int assignment = action.indexOf('=');
+                targets.add(paths.apply(action.substring(0, assignment)));
+                yield SET_OR_ADD_COST + operandSize(action.substring(assignment + 1), paths, values);
+            }
+            case "ADD" -> {
+                String[] parts = action.split(" ", 2);
+                targets.add(paths.apply(parts[0]));
+                yield SET_OR_ADD_COST + operandSize(parts[1], paths, values);
+            }
+            default -> {
+                targets.add(paths.apply(action.split(" ", 2)[0]));
+                yield REMOVE_OR_DELETE_COST;
+            }
         };
     }
 
-    private static boolean writesListElement(String action) {
-        int bracket = action.indexOf('[');
-        int assignment = action.indexOf('=');
-        return bracket >= 0 && (assignment < 0 || bracket < assignment);
+    private static int operandSize(String operand, Function<String, List<Object>> paths, JsonNode values) {
+        String expr = DynamoDbService.stripOuterParens(operand);
+        int operator = DynamoDbService.findArithmeticOperator(expr);
+        if (operator >= 0) {
+            return (expr.charAt(operator) == '+' ? PLUS_COST : MINUS_COST)
+                    + operandSize(expr.substring(0, operator), paths, values)
+                    + operandSize(expr.substring(operator + 1), paths, values);
+        }
+        String lower = expr.toLowerCase(Locale.ROOT);
+        if (DynamoDbService.startsWithFunctionCall(lower, "list_append")) {
+            return LIST_APPEND_COST + argumentsSize(expr, paths, values);
+        }
+        if (DynamoDbService.startsWithFunctionCall(lower, "if_not_exists")) {
+            return IF_NOT_EXISTS_COST + argumentsSize(expr, paths, values);
+        }
+        if (expr.startsWith(":")) {
+            return values == null ? 0 : attributeValueSize(values.get(expr));
+        }
+        int size = OPERAND_PATH_COST;
+        for (Object element : paths.apply(expr)) {
+            size += OPERAND_PATH_ELEMENT_COST + pathElementSize(element);
+        }
+        return size;
+    }
+
+    private static int argumentsSize(String call, Function<String, List<Object>> paths, JsonNode values) {
+        String arguments = call.substring(call.indexOf('(') + 1, call.lastIndexOf(')'));
+        int size = 0;
+        while (!arguments.isBlank()) {
+            int comma = DynamoDbService.findNextComma(arguments);
+            size += operandSize(comma < 0 ? arguments : arguments.substring(0, comma), paths, values);
+            arguments = comma < 0 ? "" : arguments.substring(comma + 1);
+        }
+        return size;
+    }
+
+    // A list index counts its decimal digits.
+    private static int pathElementSize(Object element) {
+        return element instanceof Long index ? Long.toString(index).length() : utf8Length((String) element);
+    }
+
+    private static final class PathTree {
+
+        private final Map<Object, PathTree> children = new LinkedHashMap<>();
+
+        void add(List<Object> path) {
+            PathTree node = this;
+            for (Object element : path) {
+                node = node.children.computeIfAbsent(element, ignored -> new PathTree());
+            }
+        }
+
+        int size() {
+            int size = 0;
+            for (Map.Entry<Object, PathTree> child : children.entrySet()) {
+                PathTree nested = child.getValue();
+                size += pathElementSize(child.getKey())
+                        + (nested.children.isEmpty() ? 0 : TARGET_CONTAINER_COST + nested.size());
+            }
+            return size;
+        }
     }
 
     static int calculateItemSize(JsonNode item) {
         if (item == null || !item.isObject()) return 0;
         int total = 0;
-        var fields = item.fields();
+        Iterator<Map.Entry<String, JsonNode>> fields = item.fields();
         while (fields.hasNext()) {
-            var entry = fields.next();
+            Map.Entry<String, JsonNode> entry = fields.next();
             total += utf8Length(entry.getKey());
             total += attributeValueSize(entry.getValue());
         }
@@ -117,43 +177,66 @@ final class DynamoDbItemSize {
     static int attributeValueSize(JsonNode attr) {
         if (attr == null) return 0;
         if (attr.has("S")) return utf8Length(attr.get("S").asText());
-        if (attr.has("N")) return attr.get("N").asText().length();
+        if (attr.has("N")) {
+            return numberSize(attr.get("N").asText());
+        }
         if (attr.has("B")) return binarySize(attr.get("B").asText());
         if (attr.has("BOOL")) return 1;
         if (attr.has("NULL")) return 1;
         if (attr.has("SS")) {
             int size = 0;
-            for (JsonNode e : attr.get("SS")) size += utf8Length(e.asText()) + 1;
+            for (JsonNode e : attr.get("SS")) size += utf8Length(e.asText());
             return size;
         }
         if (attr.has("NS")) {
             int size = 0;
-            for (JsonNode e : attr.get("NS")) size += e.asText().length() + 1;
+            for (JsonNode e : attr.get("NS")) {
+                size += numberSize(e.asText());
+            }
             return size;
         }
         if (attr.has("BS")) {
             int size = 0;
-            for (JsonNode e : attr.get("BS")) size += binarySize(e.asText()) + 1;
+            for (JsonNode e : attr.get("BS")) size += binarySize(e.asText());
             return size;
         }
         if (attr.has("L")) {
-            int size = 0;
-            for (JsonNode e : attr.get("L")) size += attributeValueSize(e) + 3;
+            int size = CONTAINER_COST;
+            for (JsonNode e : attr.get("L")) size += 1 + attributeValueSize(e);
             return size;
         }
         if (attr.has("M")) {
-            int size = 0;
-            var fields = attr.get("M").fields();
+            int size = CONTAINER_COST;
+            Iterator<Map.Entry<String, JsonNode>> fields = attr.get("M").fields();
             while (fields.hasNext()) {
-                var entry = fields.next();
-                size += utf8Length(entry.getKey()) + 1 + attributeValueSize(entry.getValue()) + 3;
+                Map.Entry<String, JsonNode> entry = fields.next();
+                size += utf8Length(entry.getKey()) + 1 + attributeValueSize(entry.getValue());
             }
             return size;
         }
         return 0;
     }
 
-    private static int utf8Length(String s) {
+    // DynamoDB stores a number as base-100 digits paired from the decimal point, plus one byte,
+    // plus one more for a negative value below the 20-pair maximum.
+    static int numberSize(String number) {
+        BigDecimal value;
+        try {
+            value = new BigDecimal(number).stripTrailingZeros();
+        } catch (NumberFormatException | ArithmeticException ignored) {
+            // A number BigDecimal cannot hold is never stored, so its size never matters.
+            return number.length();
+        }
+        if (value.signum() == 0) {
+            return 1;
+        }
+        long lowestPower = -(long) value.scale();
+        long highestPower = value.precision() + lowestPower - 1;
+        long pairs = Math.floorDiv(highestPower, 2) - Math.floorDiv(lowestPower, 2) + 1;
+        return (int) (1 + pairs + (value.signum() < 0 && pairs < MAX_NUMBER_PAIRS ? 1 : 0));
+    }
+
+    static int utf8Length(String s) {
         if (s == null) return 0;
         return s.getBytes(StandardCharsets.UTF_8).length;
     }

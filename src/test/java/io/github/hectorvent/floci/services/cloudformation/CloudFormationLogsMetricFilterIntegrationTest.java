@@ -10,17 +10,18 @@ import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsMetricF
 import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsMetricFilterService.MutationOutcome;
 import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsMetricFilterService.MutationResult;
 import io.github.hectorvent.floci.services.cloudwatch.logs.model.MetricFilter;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.mockito.InjectSpy;
-import jakarta.inject.Inject;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
 import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -40,12 +41,12 @@ import static io.restassured.RestAssured.given;
 import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasSize;
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -200,12 +201,12 @@ class CloudFormationLogsMetricFilterIntegrationTest {
                 "Requested update requires the replacement of the existing resource; deleting existing resource, then creating a new one."));
 
         cloudFormation(stack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(stack);
+        CfnStackWaits.awaitStackDeleted(stack);
         describeFilters(group).then()
             .statusCode(200)
             .body("metricFilters", hasSize(0));
         cloudFormation(groupStack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(groupStack);
+        CfnStackWaits.awaitStackDeleted(groupStack);
     }
 
     @Test
@@ -232,9 +233,9 @@ class CloudFormationLogsMetricFilterIntegrationTest {
         describeFilters(group).then().body("metricFilters[0].filterPattern", equalTo("{ $.latency > 10 }"));
 
         cloudFormation(stack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(stack);
+        CfnStackWaits.awaitStackDeleted(stack);
         cloudFormation(groupStack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(groupStack);
+        CfnStackWaits.awaitStackDeleted(groupStack);
     }
 
     @Test
@@ -259,9 +260,9 @@ class CloudFormationLogsMetricFilterIntegrationTest {
         assertPublishedValue(group, "Stack/" + suffix, "ERROR", 1);
 
         cloudFormation(stack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(stack);
+        CfnStackWaits.awaitStackDeleted(stack);
         cloudFormation(groupStack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(groupStack);
+        CfnStackWaits.awaitStackDeleted(groupStack);
     }
 
     @Test
@@ -290,9 +291,9 @@ class CloudFormationLogsMetricFilterIntegrationTest {
                 "fatal:CREATE_IN_PROGRESS", "errors:CREATE_COMPLETE", "errors:UPDATE_COMPLETE"));
 
         cloudFormation(stack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(stack);
+        CfnStackWaits.awaitStackDeleted(stack);
         cloudFormation(groupStack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(groupStack);
+        CfnStackWaits.awaitStackDeleted(groupStack);
     }
 
     @Test
@@ -325,9 +326,9 @@ class CloudFormationLogsMetricFilterIntegrationTest {
         assertTrue(template.contains("MetricValue"), template);
         assertTrue(template.contains("&quot;2&quot;") || template.contains("\"2\""), template);
         cloudFormation(stack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(stack);
+        CfnStackWaits.awaitStackDeleted(stack);
         cloudFormation(groupStack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(groupStack);
+        CfnStackWaits.awaitStackDeleted(groupStack);
     }
 
     @Test
@@ -355,9 +356,9 @@ class CloudFormationLogsMetricFilterIntegrationTest {
         describeFilters(group).then().body("metricFilters[0].applyOnTransformedLogs", equalTo(false))
                 .body("metricFilters[0].emitSystemFieldDimensions", hasSize(2));
         cloudFormation(stack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(stack);
+        CfnStackWaits.awaitStackDeleted(stack);
         cloudFormation(groupStack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(groupStack);
+        CfnStackWaits.awaitStackDeleted(groupStack);
     }
 
     @ParameterizedTest
@@ -606,7 +607,7 @@ class CloudFormationLogsMetricFilterIntegrationTest {
                     && "UPDATE_COMPLETE".equals(e.get("ResourceStatus")) && mutation == -1) {
                 mutation = i;
             }
-            if ("BadSecret".equals(e.get("LogicalResourceId")) && "UPDATE_FAILED".equals(e.get("ResourceStatus"))) {
+            if ("BadSecret".equals(e.get("LogicalResourceId")) && "CREATE_FAILED".equals(e.get("ResourceStatus"))) {
                 failure = i;
             }
         }
@@ -649,9 +650,9 @@ class CloudFormationLogsMetricFilterIntegrationTest {
         String events = awaitStackStatus(stack, "ROLLBACK_COMPLETE");
         assertTrue(events.contains("Invalid filter pattern"), "the status reason carries the parse error: " + events);
         cloudFormation(stack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(stack);
+        CfnStackWaits.awaitStackDeleted(stack);
         cloudFormation(groupStack, "DeleteStack", null, Map.of());
-        awaitStackDeleted(groupStack);
+        CfnStackWaits.awaitStackDeleted(groupStack);
     }
 
     private static void createGroupStack(String stack, String group) {
@@ -731,25 +732,6 @@ class CloudFormationLogsMetricFilterIntegrationTest {
             Thread.sleep(50);
         }
         return fail("stack " + stack + " did not reach " + expectedStatus + " within the timeout");
-    }
-
-    private static void awaitStackDeleted(String stack) throws InterruptedException {
-        for (int i = 0; i < 100; i++) {
-            String body = given()
-                .contentType("application/x-www-form-urlencoded")
-                .header("Authorization", CFN_AUTH)
-                .formParam("Action", "DescribeStacks")
-                .formParam("StackName", stack)
-            .when().post("/").then().extract().asString();
-            if (body.contains("does not exist")) {
-                return;
-            }
-            if (body.contains("<StackStatus>DELETE_FAILED</StackStatus>")) {
-                fail("stack delete failed: " + body);
-            }
-            Thread.sleep(50);
-        }
-        fail("stack " + stack + " was not deleted within the timeout");
     }
 
     private static String outputValue(String xml, String key) {

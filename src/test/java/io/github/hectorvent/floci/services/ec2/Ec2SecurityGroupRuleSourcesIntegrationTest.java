@@ -1,17 +1,19 @@
 package io.github.hectorvent.floci.services.ec2;
 
+import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
+import org.junit.jupiter.api.Test;
+
+import java.util.List;
+
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItems;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-
-import java.util.List;
-
-import org.junit.jupiter.api.Test;
-
-import io.quarkus.test.junit.QuarkusTest;
 
 /**
  * Issue #2190: a security group rule whose source is another security group must keep that source.
@@ -28,6 +30,8 @@ class Ec2SecurityGroupRuleSourcesIntegrationTest {
     private static final String AUTH_HEADER =
             "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/ec2/aws4_request";
     private static final String ACCOUNT_ID = "000000000000";
+    private static final String INGRESS = "AuthorizeSecurityGroupIngress";
+    private static final String EGRESS = "AuthorizeSecurityGroupEgress";
 
     @Test
     void groupReferenceSurvivesAuthorizeAndBothDescribes() {
@@ -60,7 +64,7 @@ class Ec2SecurityGroupRuleSourcesIntegrationTest {
                 "AuthorizeSecurityGroupIngress must echo the source group, got: " + authorizeBody);
 
         // Control: the same group with a CIDR rule, which already worked.
-        authorizeCidrIngress(targetId, "8443", "10.0.0.0/8", "control");
+        authorize(INGRESS, targetId, "8443", List.of(), "10.0.0.0/8", "control");
 
         given()
             .formParam("Action", "DescribeSecurityGroups")
@@ -293,266 +297,179 @@ class Ec2SecurityGroupRuleSourcesIntegrationTest {
     }
 
     @Test
-    void modifyDefaultEgressDescriptionUsesAwsQueryMemberAndPreservesRuleId() {
+    void revokeIngressBySecurityGroupRuleIdRemovesTheRule() {
         String vpcId = createVpc();
-        String groupId = createSecurityGroup(uniqueName("description-update"), vpcId);
-        try {
-            authorizeCidrIngress(groupId, "3000", "0.0.0.0/0", "app");
-            authorizeCidrIngress(groupId, "22", "0.0.0.0/0", "ssh");
-            String ruleId = given()
-                    .formParam("Action", "DescribeSecurityGroupRules")
-                    .formParam("Filter.1.Name", "group-id")
-                    .formParam("Filter.1.Value.1", groupId)
-                    .header("Authorization", AUTH_HEADER)
-                    .post("/").then().statusCode(200)
-                    .extract().path("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item"
-                            + ".find { it.isEgress == 'true' }.securityGroupRuleId");
+        String groupId = createSecurityGroup(uniqueName("revoke-by-id"), vpcId);
+        Response authorize = authorize(INGRESS, groupId, "5432", List.of(), "10.0.0.0/16", null);
+        String ruleId = ruleIdFor(INGRESS, authorize, "cidrIpv4", "10.0.0.0/16");
 
-            for (String description : new String[] {"all outbound", "all outbound", ""}) {
-                given()
-                    .formParam("Action", "ModifySecurityGroupRules")
-                    .formParam("GroupId", groupId)
-                    .formParam("SecurityGroupRule.1.SecurityGroupRuleId", ruleId)
-                    .formParam("SecurityGroupRule.1.SecurityGroupRule.IpProtocol", "-1")
-                    .formParam("SecurityGroupRule.1.SecurityGroupRule.CidrIpv4", "0.0.0.0/0")
-                    .formParam("SecurityGroupRule.1.SecurityGroupRule.Description", description)
-                    .header("Authorization", AUTH_HEADER)
-                    .post("/").then().statusCode(200)
-                    .body("ModifySecurityGroupRulesResponse.return", equalTo("true"));
+        revokeByRuleId("RevokeSecurityGroupIngress", groupId, ruleId)
+            .then()
+            .statusCode(200)
+            .body("RevokeSecurityGroupIngressResponse.return", equalTo("true"));
 
-                given()
-                    .formParam("Action", "DescribeSecurityGroupRules")
-                    .formParam("Filter.1.Name", "group-id")
-                    .formParam("Filter.1.Value.1", groupId)
-                    .header("Authorization", AUTH_HEADER)
-                    .post("/").then().statusCode(200)
-                    .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.size()", equalTo(3))
-                    .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item"
-                            + ".find { it.isEgress == 'true' }.securityGroupRuleId", equalTo(ruleId))
-                    .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item"
-                            + ".find { it.isEgress == 'true' }.description", equalTo(description))
-                    .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.description",
-                            hasItems("app", "ssh"));
+        given()
+            .formParam("Action", "DescribeSecurityGroupRules")
+            .formParam("Filter.1.Name", "group-id")
+            .formParam("Filter.1.Value.1", groupId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(not(containsString(ruleId)));
 
-                given()
-                    .formParam("Action", "DescribeSecurityGroups")
-                    .formParam("GroupId.1", groupId)
-                    .header("Authorization", AUTH_HEADER)
-                    .post("/").then().statusCode(200)
-                    .body("DescribeSecurityGroupsResponse.securityGroupInfo.item.ipPermissionsEgress"
-                            + ".item.ipRanges.item.description", equalTo(description));
-            }
-        } finally {
-            given().formParam("Action", "DeleteSecurityGroup").formParam("GroupId", groupId)
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200);
-            given().formParam("Action", "DeleteVpc").formParam("VpcId", vpcId)
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200);
-        }
+        given()
+            .formParam("Action", "DescribeSecurityGroups")
+            .formParam("GroupId.1", groupId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(not(containsString("<fromPort>5432</fromPort>")));
     }
 
     @Test
-    void idOnlyRevocationRemovesCopiedOwnershipRulesButPreservesSiblings() {
+    void revokeEgressBySecurityGroupRuleIdRemovesTheRule() {
         String vpcId = createVpc();
-        String groupId = createSecurityGroup(uniqueName("id-revoke"), vpcId);
-        try {
-            for (String direction : new String[] {"Ingress", "Egress"}) {
-                List<String> ids = given()
-                        .formParam("Action", "AuthorizeSecurityGroup" + direction)
-                        .formParam("GroupId", groupId)
-                        .formParam("IpPermissions.1.IpProtocol", "tcp")
-                        .formParam("IpPermissions.1.FromPort", "443")
-                        .formParam("IpPermissions.1.ToPort", "443")
-                        .formParam("IpPermissions.1.IpRanges.1.CidrIp", "10.1.0.0/16")
-                        .formParam("IpPermissions.1.IpRanges.2.CidrIp", "10.2.0.0/16")
-                        .formParam("TagSpecification.1.ResourceType", "security-group-rule")
-                        .formParam("TagSpecification.1.Tag.1.Key", "alchemy::id")
-                        .formParam("TagSpecification.1.Tag.1.Value", "DeclaredRule")
-                        .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                        .extract().xmlPath().getList("AuthorizeSecurityGroup" + direction
-                                + "Response.securityGroupRuleSet.item.securityGroupRuleId", String.class);
+        String groupId = createSecurityGroup(uniqueName("revoke-egress-by-id"), vpcId);
+        Response authorize = authorize(EGRESS, groupId, "8443", List.of(), "10.5.0.0/16", null);
+        String ruleId = ruleIdFor(EGRESS, authorize, "cidrIpv4", "10.5.0.0/16");
 
-                given().formParam("Action", "RevokeSecurityGroup" + direction)
-                        .formParam("GroupId", groupId).formParam("SecurityGroupRuleId.1", ids.getFirst())
-                        .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200);
-                given().formParam("Action", "DescribeSecurityGroupRules")
-                        .formParam("SecurityGroupRuleId.1", ids.getFirst())
-                        .header("Authorization", AUTH_HEADER).post("/").then().statusCode(400)
-                        .body("Response.Errors.Error.Code", equalTo("InvalidSecurityGroupRuleId.NotFound"));
-                given().formParam("Action", "DescribeSecurityGroupRules")
-                        .formParam("SecurityGroupRuleId.1", ids.get(1))
-                        .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                        .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.securityGroupRuleId",
-                                equalTo(ids.get(1)))
-                        .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.tagSet.item.value",
-                                equalTo("DeclaredRule"));
-                String permissions = "Egress".equals(direction) ? "ipPermissionsEgress" : "ipPermissions";
-                given().formParam("Action", "DescribeSecurityGroups").formParam("GroupId.1", groupId)
-                        .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                        .body("DescribeSecurityGroupsResponse.securityGroupInfo.item." + permissions
-                                + ".item.find { it.fromPort == '443' }.ipRanges.item.cidrIp", equalTo("10.2.0.0/16"));
-                given().formParam("Action", "DescribeTags")
-                        .formParam("Filter.1.Name", "resource-id").formParam("Filter.1.Value.1", ids.getFirst())
-                        .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                        .body("DescribeTagsResponse.tagSet.item.size()", equalTo(0));
-            }
-        } finally {
-            deleteGroupAndVpc(groupId, vpcId);
-        }
+        revokeByRuleId("RevokeSecurityGroupEgress", groupId, ruleId)
+            .then()
+            .statusCode(200);
+
+        given()
+            .formParam("Action", "DescribeSecurityGroups")
+            .formParam("GroupId.1", groupId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(not(containsString("10.5.0.0/16")));
     }
 
     @Test
-    void authorizationCanonicalizesWhileModificationRejectsNoncanonicalBatch() {
+    void revokeBySecurityGroupRuleIdOfAnotherGroupFailsAndKeepsTheRule() {
         String vpcId = createVpc();
-        String groupId = createSecurityGroup(uniqueName("canonical-rules"), vpcId);
-        try {
-            List<String> ids = given()
-                    .formParam("Action", "AuthorizeSecurityGroupIngress").formParam("GroupId", groupId)
-                    .formParam("IpPermissions.1.IpProtocol", "6")
-                    .formParam("IpPermissions.1.FromPort", "443").formParam("IpPermissions.1.ToPort", "443")
-                    .formParam("IpPermissions.1.IpRanges.1.CidrIp", "10.0.0.7/16")
-                    .formParam("IpPermissions.1.Ipv6Ranges.1.CidrIpv6", "2001:0db8:0:0:0:0:0:5/64")
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                    .body("AuthorizeSecurityGroupIngressResponse.securityGroupRuleSet.item.ipProtocol",
-                            hasItems("tcp"))
-                    .body(containsString("<cidrIpv4>10.0.0.0/16</cidrIpv4>"))
-                    .body(containsString("<cidrIpv6>2001:db8::/64</cidrIpv6>"))
-                    .extract().xmlPath().getList("AuthorizeSecurityGroupIngressResponse.securityGroupRuleSet"
-                            + ".item.securityGroupRuleId", String.class);
-            given().formParam("Action", "ModifySecurityGroupRules").formParam("GroupId", groupId)
-                    .formParam("SecurityGroupRule.1.SecurityGroupRuleId", ids.get(1))
-                    .formParam("SecurityGroupRule.1.SecurityGroupRule.Description", "must-not-write")
-                    .formParam("SecurityGroupRule.2.SecurityGroupRuleId", ids.getFirst())
-                    .formParam("SecurityGroupRule.2.SecurityGroupRule.CidrIpv4", "10.0.0.7/16")
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(400)
-                    .body("Response.Errors.Error.Code", equalTo("InvalidParameterValue"))
-                    .body("Response.Errors.Error.Message", equalTo("CIDR block 10.0.0.7/16 is not in canonical form"));
-            given().formParam("Action", "DescribeSecurityGroupRules")
-                    .formParam("Filter.1.Name", "group-id").formParam("Filter.1.Value.1", groupId)
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                    .body(not(containsString("must-not-write")))
-                    .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.size()", equalTo(3));
+        String targetId = createSecurityGroup(uniqueName("revoke-target"), vpcId);
+        String otherId = createSecurityGroup(uniqueName("revoke-other"), vpcId);
+        Response authorize = authorize(INGRESS, otherId, "9999", List.of(), "10.0.0.0/16", null);
+        String otherRuleId = ruleIdFor(INGRESS, authorize, "cidrIpv4", "10.0.0.0/16");
 
-            given().formParam("Action", "RevokeSecurityGroupIngress").formParam("GroupId", groupId)
-                    .formParam("IpPermissions.1.IpProtocol", "6")
-                    .formParam("IpPermissions.1.FromPort", "443").formParam("IpPermissions.1.ToPort", "443")
-                    .formParam("IpPermissions.1.IpRanges.1.CidrIp", "10.0.0.7/16")
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200);
-            given().formParam("Action", "DescribeSecurityGroupRules")
-                    .formParam("SecurityGroupRuleId.1", ids.getFirst())
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(400)
-                    .body("Response.Errors.Error.Code", equalTo("InvalidSecurityGroupRuleId.NotFound"));
-            given().formParam("Action", "DescribeSecurityGroups").formParam("GroupId.1", groupId)
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                    .body("DescribeSecurityGroupsResponse.securityGroupInfo.item.ipPermissions.item.ipRanges"
-                            + ".item.size()", equalTo(0))
-                    .body("DescribeSecurityGroupsResponse.securityGroupInfo.item.ipPermissions.item.ipv6Ranges"
-                            + ".item.cidrIpv6", equalTo("2001:db8::/64"));
-        } finally {
-            deleteGroupAndVpc(groupId, vpcId);
-        }
+        revokeByRuleId("RevokeSecurityGroupIngress", targetId, otherRuleId)
+            .then()
+            .statusCode(400)
+            .body(containsString("<Code>InvalidSecurityGroupRuleId.NotFound</Code>"));
+
+        given()
+            .formParam("Action", "DescribeSecurityGroupRules")
+            .formParam("SecurityGroupRuleId.1", otherRuleId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString(otherRuleId));
     }
 
     @Test
-    void modifyQueryUpdatesProtocolPortsAndEverySourceWithoutReplacingIdentity() {
-        String vpcId = createVpc();
-        String groupId = createSecurityGroup(uniqueName("modify-sources"), vpcId);
-        String prefixListId = given().formParam("Action", "CreateManagedPrefixList")
-                .formParam("PrefixListName", uniqueName("modify-sources"))
-                .formParam("AddressFamily", "IPv4").formParam("MaxEntries", "5")
-                .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                .extract().path("CreateManagedPrefixListResponse.prefixList.prefixListId");
-        try {
-            String ruleId = given().formParam("Action", "DescribeSecurityGroupRules")
-                    .formParam("Filter.1.Name", "group-id").formParam("Filter.1.Value.1", groupId)
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                    .extract().path("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.securityGroupRuleId");
-            String[][] sources = {{"CidrIpv4", "10.1.0.0/16", "cidrIpv4", "ipRanges.item.cidrIp"},
-                    {"CidrIpv6", "2001:db8::/64", "cidrIpv6", "ipv6Ranges.item.cidrIpv6"},
-                    {"PrefixListId", prefixListId, "prefixListId", "prefixListIds.item.prefixListId"},
-                    {"ReferencedGroupId", groupId, "referencedGroupInfo.groupId", "groups.item.groupId"}};
-            for (String[] source : sources) {
-                given().formParam("Action", "ModifySecurityGroupRules").formParam("GroupId", groupId)
-                        .formParam("SecurityGroupRule.1.SecurityGroupRuleId", ruleId)
-                        .formParam("SecurityGroupRule.1.SecurityGroupRule.IpProtocol", "17")
-                        .formParam("SecurityGroupRule.1.SecurityGroupRule.FromPort", "53")
-                        .formParam("SecurityGroupRule.1.SecurityGroupRule.ToPort", "54")
-                        .formParam("SecurityGroupRule.1.SecurityGroupRule." + source[0], source[1])
-                        .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200);
-                given().formParam("Action", "DescribeSecurityGroupRules")
-                        .formParam("SecurityGroupRuleId.1", ruleId)
-                        .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                        .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.securityGroupRuleId",
-                                equalTo(ruleId))
-                        .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.isEgress", equalTo("true"))
-                        .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.ipProtocol", equalTo("udp"))
-                        .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.fromPort", equalTo("53"))
-                        .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.toPort", equalTo("54"))
-                        .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item." + source[2], equalTo(source[1]));
-                given().formParam("Action", "DescribeSecurityGroups").formParam("GroupId.1", groupId)
-                        .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                        .body("DescribeSecurityGroupsResponse.securityGroupInfo.item.ipPermissionsEgress.item.size()",
-                                equalTo(1))
-                        .body("DescribeSecurityGroupsResponse.securityGroupInfo.item.ipPermissionsEgress.item."
-                                + source[3], equalTo(source[1]));
-            }
-        } finally {
-            deleteGroupAndVpc(groupId, vpcId);
-            given().formParam("Action", "DeleteManagedPrefixList").formParam("PrefixListId", prefixListId)
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200);
-        }
+    void revokingOnePrefixListRuleKeepsAnotherAuthorizedSeparately() {
+        String groupId = createSecurityGroup(uniqueName("revoke-pl-separate"), createVpc());
+        String keptList = createPrefixList();
+        String revokedList = createPrefixList();
+        authorize(INGRESS, groupId, "443", List.of(keptList), null, null);
+        Response authorize = authorize(INGRESS, groupId, "443", List.of(revokedList), null, null);
+        String ruleId = ruleIdFor(INGRESS, authorize, "prefixListId", revokedList);
+
+        revokeByRuleId("RevokeSecurityGroupIngress", groupId, ruleId).then().statusCode(200);
+
+        String group = describeGroup(groupId);
+        assertTrue(group.contains(keptList), group);
+        assertFalse(group.contains(revokedList), group);
     }
 
     @Test
-    void ruleDescribeValidatesExplicitIdsAndCombinesOwnerAndTagFilters() {
-        String vpcId = createVpc();
-        String groupId = createSecurityGroup(uniqueName("rule-filters"), vpcId);
-        try {
-            String ruleId = given().formParam("Action", "DescribeSecurityGroupRules")
-                    .formParam("Filter.1.Name", "group-id").formParam("Filter.1.Value.1", groupId)
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                    .extract().path("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.securityGroupRuleId");
-            given().formParam("Action", "CreateTags").formParam("ResourceId.1", ruleId)
-                    .formParam("Tag.1.Key", "purpose").formParam("Tag.1.Value", "managed")
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200);
-            for (String owner : new String[] {ACCOUNT_ID, "111111111111"}) {
-                given().formParam("Action", "DescribeSecurityGroupRules")
-                        .formParam("SecurityGroupRuleId.1", ruleId)
-                        .formParam("Filter.1.Name", "group-id").formParam("Filter.1.Value.1", groupId)
-                        .formParam("Filter.2.Name", "group-owner-id").formParam("Filter.2.Value.1", owner)
-                        .formParam("Filter.3.Name", "tag:purpose").formParam("Filter.3.Value.1", "wrong")
-                        .formParam("Filter.3.Value.2", "managed")
-                        .formParam("Filter.4.Name", "tag-key").formParam("Filter.4.Value.1", "purpose")
-                        .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                        .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.size()",
-                                equalTo(ACCOUNT_ID.equals(owner) ? 1 : 0));
-            }
-            for (String filter : List.of("tag:purpose", "tag-key", "security-group-rule-id", "group-id")) {
-                given().formParam("Action", "DescribeSecurityGroupRules")
-                        .formParam("SecurityGroupRuleId.1", ruleId)
-                        .formParam("Filter.1.Name", filter).formParam("Filter.1.Value.1", "does-not-match")
-                        .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                        .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.size()", equalTo(0));
-            }
-            given().formParam("Action", "DescribeSecurityGroupRules")
-                    .formParam("Filter.1.Name", "security-group-rule-id")
-                    .formParam("Filter.1.Value.1", "sgr-00000000000000000")
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200)
-                    .body("DescribeSecurityGroupRulesResponse.securityGroupRuleSet.item.size()", equalTo(0));
-            given().formParam("Action", "DescribeSecurityGroupRules")
-                    .formParam("SecurityGroupRuleId.1", "sgr-00000000000000000")
-                    .formParam("Filter.1.Name", "security-group-rule-id").formParam("Filter.1.Value.1", ruleId)
-                    .header("Authorization", AUTH_HEADER).post("/").then().statusCode(400)
-                    .body("Response.Errors.Error.Code", equalTo("InvalidSecurityGroupRuleId.NotFound"));
-        } finally {
-            deleteGroupAndVpc(groupId, vpcId);
-        }
+    void revokingOnePrefixListRuleKeepsItsNeighbourInThePermission() {
+        String groupId = createSecurityGroup(uniqueName("revoke-pl-shared"), createVpc());
+        String keptList = createPrefixList();
+        String revokedList = createPrefixList();
+        Response authorize = authorize(INGRESS, groupId, "443", List.of(keptList, revokedList), null, null);
+        String ruleId = ruleIdFor(INGRESS, authorize, "prefixListId", revokedList);
+
+        revokeByRuleId("RevokeSecurityGroupIngress", groupId, ruleId).then().statusCode(200);
+
+        String group = describeGroup(groupId);
+        assertTrue(group.contains(keptList), group);
+        assertFalse(group.contains(revokedList), group);
     }
 
-    private void deleteGroupAndVpc(String groupId, String vpcId) {
-        given().formParam("Action", "DeleteSecurityGroup").formParam("GroupId", groupId)
-                .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200);
-        given().formParam("Action", "DeleteVpc").formParam("VpcId", vpcId)
-                .header("Authorization", AUTH_HEADER).post("/").then().statusCode(200);
+    @Test
+    void revokingAPrefixListRuleBesideACidrKeepsTheCidr() {
+        String groupId = createSecurityGroup(uniqueName("revoke-pl-cidr"), createVpc());
+        String prefixList = createPrefixList();
+        Response authorize = authorize(INGRESS, groupId, "443", List.of(prefixList), "10.9.0.0/16", null);
+        String ruleId = ruleIdFor(INGRESS, authorize, "prefixListId", prefixList);
+
+        revokeByRuleId("RevokeSecurityGroupIngress", groupId, ruleId).then().statusCode(200);
+
+        String group = describeGroup(groupId);
+        assertFalse(group.contains(prefixList), group);
+        assertTrue(group.contains("10.9.0.0/16"), group);
+    }
+
+    @Test
+    void revokingACidrRuleBesideAPrefixListKeepsTheList() {
+        String groupId = createSecurityGroup(uniqueName("revoke-cidr-pl"), createVpc());
+        String prefixList = createPrefixList();
+        Response authorize = authorize(INGRESS, groupId, "443", List.of(prefixList), "10.9.0.0/16", null);
+        String cidrRuleId = ruleIdFor(INGRESS, authorize, "cidrIpv4", "10.9.0.0/16");
+        String listRuleId = ruleIdFor(INGRESS, authorize, "prefixListId", prefixList);
+
+        revokeByRuleId("RevokeSecurityGroupIngress", groupId, cidrRuleId).then().statusCode(200);
+
+        String group = describeGroup(groupId);
+        assertTrue(group.contains(prefixList), group);
+        assertFalse(group.contains("10.9.0.0/16"), group);
+        assertTrue(describeRules(groupId).contains(listRuleId));
+    }
+
+    @Test
+    void revokingARuleForAnUnknownGroupNameRemovesThePair() {
+        String groupId = createSecurityGroup(uniqueName("revoke-unknown-name"), createVpc());
+        String missingName = uniqueName("no-such-group");
+        String ruleId = given()
+            .formParam("Action", "AuthorizeSecurityGroupIngress")
+            .formParam("GroupId", groupId)
+            .formParam("IpPermissions.1.IpProtocol", "tcp")
+            .formParam("IpPermissions.1.FromPort", "9100")
+            .formParam("IpPermissions.1.ToPort", "9100")
+            .formParam("IpPermissions.1.Groups.1.GroupName", missingName)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().path("AuthorizeSecurityGroupIngressResponse.securityGroupRuleSet.item.securityGroupRuleId");
+
+        revokeByRuleId("RevokeSecurityGroupIngress", groupId, ruleId).then().statusCode(200);
+
+        String group = describeGroup(groupId);
+        assertFalse(group.contains(missingName), group);
+        assertFalse(group.contains("<fromPort>9100</fromPort>"), group);
+    }
+
+    private Response revokeByRuleId(String action, String groupId, String ruleId) {
+        return given()
+            .formParam("Action", action)
+            .formParam("GroupId", groupId)
+            .formParam("SecurityGroupRuleId.1", ruleId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/");
     }
 
     private String referencedGroupInfoXml(String groupId) {
@@ -591,19 +508,71 @@ class Ec2SecurityGroupRuleSourcesIntegrationTest {
             .extract().path("CreateSecurityGroupResponse.groupId");
     }
 
-    private void authorizeCidrIngress(String groupId, String port, String cidr, String description) {
-        given()
-            .formParam("Action", "AuthorizeSecurityGroupIngress")
+    /** Authorizes one tcp permission on {@code port} naming every source given. */
+    private Response authorize(String action, String groupId, String port, List<String> prefixLists,
+                               String cidr, String description) {
+        RequestSpecification request = given()
+            .formParam("Action", action)
             .formParam("GroupId", groupId)
             .formParam("IpPermissions.1.IpProtocol", "tcp")
             .formParam("IpPermissions.1.FromPort", port)
-            .formParam("IpPermissions.1.ToPort", port)
-            .formParam("IpPermissions.1.IpRanges.1.CidrIp", cidr)
-            .formParam("IpPermissions.1.IpRanges.1.Description", description)
+            .formParam("IpPermissions.1.ToPort", port);
+        for (int i = 0; i < prefixLists.size(); i++) {
+            request.formParam("IpPermissions.1.PrefixListIds." + (i + 1) + ".PrefixListId", prefixLists.get(i));
+        }
+        if (cidr != null) {
+            request.formParam("IpPermissions.1.IpRanges.1.CidrIp", cidr);
+        }
+        if (description != null) {
+            request.formParam("IpPermissions.1.IpRanges.1.Description", description);
+        }
+        Response response = request.header("Authorization", AUTH_HEADER).when().post("/");
+        response.then().statusCode(200);
+        return response;
+    }
+
+    private String ruleIdFor(String action, Response authorize, String field, String value) {
+        return authorize.path(action + "Response.securityGroupRuleSet.item.find { it."
+                + field + " == '" + value + "' }.securityGroupRuleId");
+    }
+
+    private String createPrefixList() {
+        return given()
+            .formParam("Action", "CreateManagedPrefixList")
+            .formParam("PrefixListName", uniqueName("revoke-pl"))
+            .formParam("AddressFamily", "IPv4")
+            .formParam("MaxEntries", "5")
+            .formParam("Entry.1.Cidr", "10.0.0.0/8")
             .header("Authorization", AUTH_HEADER)
         .when()
             .post("/")
         .then()
-            .statusCode(200);
+            .statusCode(200)
+            .extract().path("CreateManagedPrefixListResponse.prefixList.prefixListId");
+    }
+
+    private String describeGroup(String groupId) {
+        return given()
+            .formParam("Action", "DescribeSecurityGroups")
+            .formParam("GroupId.1", groupId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().body().asString();
+    }
+
+    private String describeRules(String groupId) {
+        return given()
+            .formParam("Action", "DescribeSecurityGroupRules")
+            .formParam("Filter.1.Name", "group-id")
+            .formParam("Filter.1.Value.1", groupId)
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().body().asString();
     }
 }

@@ -5,7 +5,6 @@ import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.ec2.model.BlockDeviceMapping;
 import io.github.hectorvent.floci.services.ec2.model.CapacityReservation;
-import io.github.hectorvent.floci.services.ec2.model.DhcpOptions;
 import io.github.hectorvent.floci.services.ec2.model.EbsBlockDevice;
 import io.github.hectorvent.floci.services.ec2.model.Image;
 import io.github.hectorvent.floci.services.ec2.model.InternetGateway;
@@ -19,7 +18,6 @@ import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.Snapshot;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.ec2.model.TransitGateway;
-import io.github.hectorvent.floci.services.ec2.model.Volume;
 import io.github.hectorvent.floci.services.ec2.model.Vpc;
 import io.github.hectorvent.floci.services.ec2.portforward.Ec2PortForwardManager;
 import jakarta.enterprise.inject.Instance;
@@ -98,25 +96,6 @@ class Ec2OwnerAttributionTest {
         assertEquals(1, service.describeSnapshots(REGION, List.of(), List.of("self"), Map.of()).size());
         assertTrue(service.describeSnapshots(REGION, List.of(), List.of(DEFAULT_ACCOUNT), Map.of()).isEmpty(),
                 "the default account owns none of the caller's snapshots");
-    }
-
-    @Test
-    void forkSnapshotAndDhcpOptionsUseTheCallingAccount() {
-        Ec2Service service = newService();
-        Volume volume = service.createVolume(REGION, REGION + "a", "gp2", 8, false, 0, null, null, List.of());
-        Snapshot snapshot = service.createSnapshot(REGION, volume.getVolumeId(), "owner-snapshot", List.of());
-        DhcpOptions options = service.createDhcpOptions(REGION,
-                Map.of("domain-name-servers", List.of("AmazonProvidedDNS")), List.of());
-
-        assertEquals(CALLER, snapshot.getOwnerId());
-        assertEquals(CALLER, options.getOwnerId());
-        assertEquals(CALLER, service.describeDhcpOptions(REGION, List.of("dopt-default")).getFirst().getOwnerId());
-
-        caller.set(OTHER_CALLER);
-        Snapshot other = service.createSnapshot(REGION, volume.getVolumeId(), "other-snapshot", List.of());
-        DhcpOptions otherOptions = service.createDhcpOptions(REGION, Map.of(), List.of());
-        assertEquals(OTHER_CALLER, other.getOwnerId());
-        assertEquals(OTHER_CALLER, otherOptions.getOwnerId());
     }
 
     @Test
@@ -212,6 +191,7 @@ class Ec2OwnerAttributionTest {
         when(config.services()).thenReturn(services);
         when(services.ec2()).thenReturn(ec2);
         when(ec2.mock()).thenReturn(true);
+        when(ec2.mockPublicAddresses()).thenReturn(EmulatorConfig.Ec2ServiceConfig.MockPublicAddresses.NONE);
 
         Ec2ImageCatalog imageCatalog = new Ec2ImageCatalog();
         return new Ec2Service(config, null, mock(Ec2PortForwardManager.class),

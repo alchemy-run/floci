@@ -35,6 +35,7 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
@@ -346,7 +347,7 @@ public class Ec2ClientVpnService {
                         + " has associated target networks. Disassociate them before deleting the endpoint.", 400);
             }
             endpoints.delete(key(region, endpointId));
-            ec2.deleteResourceTags(endpointId);
+            ec2.deleteResourceTags(region, endpointId);
             String arn = endpointArn(endpoint);
             for (String certificate : certificateArns(endpoint.getServerCertificateArn(),
                     endpoint.getAuthenticationOptions())) {
@@ -366,7 +367,7 @@ public class Ec2ClientVpnService {
     }
 
     public List<Tag> tags(ClientVpnEndpoint endpoint) {
-        return ec2.resourceTags(endpoint.getClientVpnEndpointId());
+        return ec2.resourceTags(endpoint.getRegion(), endpoint.getClientVpnEndpointId());
     }
 
     public String endpointArn(ClientVpnEndpoint endpoint) {
@@ -752,7 +753,7 @@ public class Ec2ClientVpnService {
 
     private Subnet requireSubnet(String region, String subnetId) {
         try {
-            return ec2.describeSubnets(region, List.of(subnetId), Map.of()).getFirst();
+            return ec2.requireSubnets(region, List.of(subnetId)).getFirst();
         } catch (AwsException e) {
             if (!"InvalidSubnetID.NotFound".equals(e.getErrorCode())) {
                 throw e;
@@ -763,7 +764,10 @@ public class Ec2ClientVpnService {
     }
 
     private Vpc requireVpc(String region, String vpcId) {
-        return ec2.describeVpcs(region, List.of(vpcId), Map.of()).getFirst();
+        // DescribeVpcs' service lookup answers an unknown id with no VPCs rather than an error.
+        return ec2.describeVpcs(region, List.of(vpcId), Map.of()).stream().findFirst()
+                .orElseThrow(() -> new AwsException("InvalidVpcID.NotFound",
+                        "The vpc ID '" + vpcId + "' does not exist", 400));
     }
 
     private static List<String> vpcIpv4Cidrs(Vpc vpc) {
@@ -865,7 +869,7 @@ public class Ec2ClientVpnService {
     }
 
     private void requireCertificate(String region, String certificateArn) {
-        var match = CERTIFICATE_ARN.matcher(certificateArn);
+        Matcher match = CERTIFICATE_ARN.matcher(certificateArn);
         if (!match.matches()) {
             throw new AwsException("InvalidParameterValue", "Invalid certificate ARN " + certificateArn, 400);
         }

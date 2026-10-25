@@ -37,6 +37,7 @@ public class Ec2InstanceTypeCatalog {
             "t4g", "unlimited");
 
     private volatile Loaded loaded;
+    private volatile Map<String, Integer> defaultVcpus;
 
     public Ec2InstanceTypeCatalog() {
         // Load lazily so tests and mock-mode paths that do not need instance type
@@ -56,6 +57,32 @@ public class Ec2InstanceTypeCatalog {
             return Optional.empty();
         }
         return Optional.ofNullable(loaded().instanceTypesByName.get(instanceType));
+    }
+
+    /** Default hardware vCPUs for quota accounting, independently of the full network catalog. */
+    public Optional<Integer> defaultVcpus(String instanceType) {
+        Optional<CatalogInstanceType> full = find(instanceType);
+        if (full.isPresent()) {
+            return Optional.of(full.get().vcpu);
+        }
+        Map<String, Integer> values = defaultVcpus;
+        if (values == null) {
+            synchronized (this) {
+                values = defaultVcpus;
+                if (values == null) {
+                    VcpuCatalog catalog = readResource("ec2/instance-type-vcpus.yaml", VcpuCatalog.class);
+                    if (catalog.defaultVcpus == null || catalog.defaultVcpus.isEmpty()
+                            || catalog.defaultVcpus.entrySet().stream().anyMatch(entry ->
+                            entry.getKey() == null || entry.getKey().isBlank()
+                                    || entry.getValue() == null || entry.getValue() <= 0)) {
+                        throw new IllegalStateException("EC2 vCPU catalog must contain positive default vCPU counts");
+                    }
+                    values = Map.copyOf(catalog.defaultVcpus);
+                    defaultVcpus = values;
+                }
+            }
+        }
+        return instanceType == null ? Optional.empty() : Optional.ofNullable(values.get(instanceType));
     }
 
     /**
@@ -178,6 +205,12 @@ public class Ec2InstanceTypeCatalog {
             throw new IllegalStateException("EC2 instance type catalog entry is missing required field: " + field);
         }
         return value;
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @RegisterForReflection
+    public static final class VcpuCatalog {
+        public Map<String, Integer> defaultVcpus = Map.of();
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)

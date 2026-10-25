@@ -4,6 +4,8 @@ import io.github.hectorvent.floci.services.kms.model.KmsKey;
 import io.github.hectorvent.floci.services.kms.model.KmsKeySpec;
 import io.github.hectorvent.floci.services.kms.model.KmsMessageType;
 
+import javax.crypto.KeyAgreement;
+
 import java.security.GeneralSecurityException;
 import java.security.KeyFactory;
 import java.security.KeyPairGenerator;
@@ -11,7 +13,6 @@ import java.security.PrivateKey;
 import java.security.PublicKey;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.X509EncodedKeySpec;
-import javax.crypto.KeyAgreement;
 
 final class EccNistKeyType implements KmsKeyType {
 
@@ -20,6 +21,11 @@ final class EccNistKeyType implements KmsKeyType {
         KeyPairGenerator generator = KeyPairGenerator.getInstance("EC");
         generator.initialize(new ECGenParameterSpec(key.getKeySpec().curveName()));
         AsymmetricKeys.store(key, generator.generateKeyPair());
+    }
+
+    @Override
+    public void importKeyMaterial(KmsKey key, byte[] material) {
+        BcEcKeys.importPrivateKey(key, material, key.getKeySpec().curveName());
     }
 
     @Override
@@ -36,6 +42,13 @@ final class EccNistKeyType implements KmsKeyType {
         return AsymmetricKeys.verify(publicKey, jcaAlgorithm(algorithm, messageType), message, signature);
     }
 
+    private static String jcaAlgorithm(KmsKeySpec.Algorithm algorithm, KmsMessageType messageType) {
+        return switch (messageType) {
+            case DIGEST -> "NONEwithECDSA";
+            case RAW -> algorithm.getJavaName();
+        };
+    }
+
     @Override
     public byte[] deriveSharedSecret(KmsKey key, byte[] publicKeyDer) throws GeneralSecurityException {
         PrivateKey privateKey = AsymmetricKeys.privateKey(key, "EC");
@@ -44,12 +57,5 @@ final class EccNistKeyType implements KmsKeyType {
         agreement.init(privateKey);
         agreement.doPhase(peer, true);
         return agreement.generateSecret();
-    }
-
-    private static String jcaAlgorithm(KmsKeySpec.Algorithm algorithm, KmsMessageType messageType) {
-        return switch (messageType) {
-            case DIGEST -> "NONEwithECDSA";
-            case RAW -> algorithm.getJavaName();
-        };
     }
 }

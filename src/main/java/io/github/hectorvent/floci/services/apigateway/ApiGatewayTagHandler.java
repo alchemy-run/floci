@@ -6,20 +6,32 @@ import io.github.hectorvent.floci.core.common.TagHandler;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * {@link TagHandler} implementation for API Gateway.
  *
- * <p>Tags belong to the exact REST API, stage, or custom domain named by the ARN.
- * Stage ARNs use {@code /restapis/<apiId>/stages/<stageName>}; other REST API subresources
- * are not taggable.
+ * <p>ARN formats: {@code arn:aws:apigateway:<region>::/restapis/<apiId>} for a REST API,
+ * {@code arn:aws:apigateway:<region>::/domainnames/<domainName>} for a custom domain,
+ * {@code arn:aws:apigateway:<region>::/apikeys/<apiKeyId>} for an API key and
+ * {@code arn:aws:apigateway:<region>::/usageplans/<usagePlanId>} for a usage plan and
+ * {@code arn:aws:apigateway:<region>::/vpclinks/<vpcLinkId>} for a REST VPC link. The
+ * {@code apiId}, domain name, key id or plan id is the canonical identifier the underlying
+ * {@link ApiGatewayService} uses for its tag store.
  */
 @ApplicationScoped
 public class ApiGatewayTagHandler implements TagHandler {
 
-    private record TagTarget(String resourceType, String resourceId, String stageName) {}
+    private static final String API_KEYS = "/apikeys/";
+    private static final String DOMAIN_NAMES = "/domainnames/";
+    private static final String REST_APIS = "/restapis/";
+    private static final String USAGE_PLANS = "/usageplans/";
+    private static final String VPC_LINKS = "/vpclinks/";
+    private static final Pattern STAGE_RESOURCE = Pattern.compile("/restapis/[^/?#]+/stages/([^/?#]+)");
 
     private final ApiGatewayService service;
 
@@ -40,70 +52,150 @@ public class ApiGatewayTagHandler implements TagHandler {
 
     @Override
     public Map<String, String> listTags(String region, String arn) {
-        TagTarget target = targetFromArn(arn);
-        if ("domainnames".equals(target.resourceType())) {
-            return service.getDomainNameTags(region, target.resourceId());
+        rejectAccountOrOtherRegion(region, arn);
+        String domainName = topLevelIdFromArn(arn, DOMAIN_NAMES);
+        if (domainName != null) {
+            return service.getDomainNameTags(region, domainName);
         }
-        return target.stageName() != null
-                ? service.getStageTags(region, target.resourceId(), target.stageName())
-                : service.getTags(region, target.resourceId());
+        String apiKeyId = topLevelIdFromArn(arn, API_KEYS);
+        if (apiKeyId != null) {
+            return service.getApiKey(region, apiKeyId).getTags();
+        }
+        String usagePlanId = topLevelIdFromArn(arn, USAGE_PLANS);
+        if (usagePlanId != null) {
+            return service.getUsagePlan(region, usagePlanId).getTags();
+        }
+        String vpcLinkId = topLevelIdFromArn(arn, VPC_LINKS);
+        if (vpcLinkId != null) {
+            return service.getVpcLink(region, vpcLinkId).getTags();
+        }
+        String stageName = stageNameFromArn(arn);
+        // A copy: the caller may change the map it gets without changing the stored tags.
+        return new LinkedHashMap<>(stageName != null
+                ? service.getStageTags(region, apiIdFromArn(arn), stageName)
+                : service.getTags(region, restApiIdFromArn(arn)));
     }
 
     @Override
     public void tagResource(String region, String arn, Map<String, String> tags) {
-        TagTarget target = targetFromArn(arn);
-        if ("domainnames".equals(target.resourceType())) {
-            service.tagDomainName(region, target.resourceId(), tags);
-        } else if (target.stageName() != null) {
-            service.tagStage(region, target.resourceId(), target.stageName(), tags);
+        rejectAccountOrOtherRegion(region, arn);
+        String domainName = topLevelIdFromArn(arn, DOMAIN_NAMES);
+        String apiKeyId = topLevelIdFromArn(arn, API_KEYS);
+        String usagePlanId = topLevelIdFromArn(arn, USAGE_PLANS);
+        String vpcLinkId = topLevelIdFromArn(arn, VPC_LINKS);
+        String stageName = stageNameFromArn(arn);
+        if (domainName != null) {
+            service.tagDomainName(region, domainName, tags);
+        } else if (apiKeyId != null) {
+            service.tagApiKey(region, apiKeyId, tags);
+        } else if (usagePlanId != null) {
+            service.tagUsagePlan(region, usagePlanId, tags);
+        } else if (vpcLinkId != null) {
+            service.tagVpcLink(region, vpcLinkId, tags);
+        } else if (stageName != null) {
+            service.tagStage(region, apiIdFromArn(arn), stageName, tags);
         } else {
-            service.tagResource(region, target.resourceId(), tags);
+            service.tagResource(region, restApiIdFromArn(arn), tags);
         }
     }
 
     @Override
     public void untagResource(String region, String arn, List<String> tagKeys) {
-        TagTarget target = targetFromArn(arn);
-        if ("domainnames".equals(target.resourceType())) {
-            service.untagDomainName(region, target.resourceId(), tagKeys);
-        } else if (target.stageName() != null) {
-            service.untagStage(region, target.resourceId(), target.stageName(), tagKeys);
+        rejectAccountOrOtherRegion(region, arn);
+        String domainName = topLevelIdFromArn(arn, DOMAIN_NAMES);
+        String apiKeyId = topLevelIdFromArn(arn, API_KEYS);
+        String usagePlanId = topLevelIdFromArn(arn, USAGE_PLANS);
+        String vpcLinkId = topLevelIdFromArn(arn, VPC_LINKS);
+        String stageName = stageNameFromArn(arn);
+        if (domainName != null) {
+            service.untagDomainName(region, domainName, tagKeys);
+        } else if (apiKeyId != null) {
+            service.untagApiKey(region, apiKeyId, tagKeys);
+        } else if (usagePlanId != null) {
+            service.untagUsagePlan(region, usagePlanId, tagKeys);
+        } else if (vpcLinkId != null) {
+            service.untagVpcLink(region, vpcLinkId, tagKeys);
+        } else if (stageName != null) {
+            service.untagStage(region, apiIdFromArn(arn), stageName, tagKeys);
         } else {
-            service.untagResource(region, target.resourceId(), tagKeys);
+            service.untagResource(region, restApiIdFromArn(arn), tagKeys);
         }
     }
 
-    private static TagTarget targetFromArn(String arn) {
-        AwsArnUtils.Arn parsed;
-        try {
-            parsed = AwsArnUtils.parse(arn);
-        } catch (IllegalArgumentException e) {
-            throw invalidArn(arn);
+    /**
+     * API Gateway ARNs carry no account: AWS rejects one that does, even the caller's own, before
+     * resolving anything, and answers an ARN naming another region as a missing resource. A string
+     * that is not an ARN is left to the parse and its errors.
+     */
+    private static void rejectAccountOrOtherRegion(String region, String arn) {
+        if (!AwsArnUtils.isArn(arn)) {
+            return;
         }
-        if (!"apigateway".equals(parsed.service()) || parsed.partition().isBlank()
-                || parsed.region().isBlank() || !parsed.accountId().isEmpty()) {
-            throw invalidArn(arn);
+        AwsArnUtils.Arn parsed = AwsArnUtils.parse(arn);
+        if (!"apigateway".equals(parsed.service())) {
+            throw new AwsException("BadRequestException", "Invalid ARN specified in the request", 400);
         }
-        String[] parts = parsed.resource().split("/", -1);
-        if (parts.length < 3 || !parts[0].isEmpty() || !validSegment(parts[2])) {
-            throw invalidArn(arn);
+        // ponytail: AWS names the resource type in both messages ("on RestApi <id>", "Invalid API
+        // identifier specified <account>:<id>"); Floci uses one generic message per error.
+        if (!parsed.accountId().isEmpty()) {
+            AwsArnUtils.Arn canonical = new AwsArnUtils.Arn(
+                    parsed.partition(), parsed.service(), parsed.region(), "", parsed.resource());
+            throw new AwsException("BadRequestException", "Expected ARN " + canonical + ", not " + arn, 400);
         }
-        if (parts.length == 3 && ("restapis".equals(parts[1]) || "domainnames".equals(parts[1]))) {
-            return new TagTarget(parts[1], parts[2], null);
+        if (!parsed.region().isEmpty() && !parsed.region().equals(region)) {
+            throw new AwsException("NotFoundException", "Invalid resource identifier specified", 404);
         }
-        if (parts.length == 5 && "restapis".equals(parts[1]) && "stages".equals(parts[3])
-                && validSegment(parts[4])) {
-            return new TagTarget(parts[1], parts[2], parts[4]);
-        }
-        throw invalidArn(arn);
     }
 
-    private static boolean validSegment(String value) {
-        return !value.isBlank() && !value.contains("?") && !value.contains("#")
-                && value.chars().noneMatch(c -> Character.isWhitespace(c) || Character.isISOControl(c));
+    private static String apiIdFromArn(String arn) {
+        String[] parts = arn.split("/restapis/");
+        if (parts.length < 2) {
+            throw new AwsException("BadRequestException", "Invalid resource ARN: " + arn, 400);
+        }
+        return parts[1].split("/")[0];
     }
 
-    private static AwsException invalidArn(String arn) {
-        return new AwsException("BadRequestException", "Invalid resource ARN: " + arn, 400);
+    /**
+     * The id a {@code /restapis/<apiId>} ARN names. Any other ARN, such as a deployment or resource
+     * nested under a REST API, is rejected as AWS rejects it rather than tagging the REST API.
+     */
+    private static String restApiIdFromArn(String arn) {
+        String apiId = topLevelIdFromArn(arn, REST_APIS);
+        if (apiId == null) {
+            throw new AwsException("BadRequestException", "Invalid ARN specified in the request", 400);
+        }
+        return apiId;
+    }
+
+    /**
+     * The stage an ARN whose resource part is exactly {@code /restapis/<apiId>/stages/<stageName>}
+     * names, or null for any other ARN. Stages carry their own tags; without this they would land on
+     * the REST API.
+     */
+    private static String stageNameFromArn(String arn) {
+        if (!AwsArnUtils.isArn(arn)) {
+            return null;
+        }
+        Matcher matcher = STAGE_RESOURCE.matcher(AwsArnUtils.parse(arn).resource());
+        return matcher.matches() ? matcher.group(1) : null;
+    }
+
+    /**
+     * The id an ARN whose resource part is exactly {@code <prefix><id>} names, such as
+     * {@code /apikeys/<apiKeyId>} or {@code /domainnames/<domainName>}, or null for any other ARN,
+     * including one that nests the prefix under another resource. A base path mapping ARN continues
+     * past the domain, so it falls through to the REST API parse and its "invalid ARN" answer.
+     */
+    private static String topLevelIdFromArn(String arn, String prefix) {
+        if (!AwsArnUtils.isArn(arn)) {
+            return null;
+        }
+        String resource = AwsArnUtils.parse(arn).resource();
+        if (!resource.startsWith(prefix)) {
+            return null;
+        }
+        String id = resource.substring(prefix.length());
+        // A query or fragment is not part of any resource id, so such an ARN names nothing.
+        return id.isEmpty() || id.contains("/") || id.contains("?") || id.contains("#") ? null : id;
     }
 }

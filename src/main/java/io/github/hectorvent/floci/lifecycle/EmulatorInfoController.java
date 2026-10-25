@@ -3,22 +3,23 @@ package io.github.hectorvent.floci.lifecycle;
 import io.github.hectorvent.floci.config.ContainerCaBundle;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.config.FlociCertificateAuthority;
+import io.github.hectorvent.floci.config.FlociVersion;
 import io.github.hectorvent.floci.core.common.ContainerTeardown;
 import io.github.hectorvent.floci.core.common.ContainerTeardowns;
+import io.github.hectorvent.floci.core.common.Resettable;
 import io.github.hectorvent.floci.core.common.ServiceRegistry;
+import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.lifecycle.inithook.InitializationHook;
+import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbBackendSelector;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.GET;
+import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
-
-import io.github.hectorvent.floci.core.storage.StorageFactory;
-import io.github.hectorvent.floci.core.common.Resettable;
-import jakarta.enterprise.inject.Instance;
-import jakarta.ws.rs.POST;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -44,6 +45,7 @@ public class EmulatorInfoController {
     private final Instance<ContainerTeardown> containerTeardowns;
     private final FlociCertificateAuthority certificateAuthority;
     private final EmulatorConfig config;
+    private final DynamoDbBackendSelector dynamoDbBackendSelector;
 
     @Inject
     public EmulatorInfoController(ServiceRegistry serviceRegistry,
@@ -52,7 +54,8 @@ public class EmulatorInfoController {
                                   Instance<Resettable> resettables,
                                   Instance<ContainerTeardown> containerTeardowns,
                                   FlociCertificateAuthority certificateAuthority,
-                                  EmulatorConfig config) {
+                                  EmulatorConfig config,
+                                  DynamoDbBackendSelector dynamoDbBackendSelector) {
         this.serviceRegistry = serviceRegistry;
         this.initLifecycleState = initLifecycleState;
         this.storageFactory = storageFactory;
@@ -60,7 +63,8 @@ public class EmulatorInfoController {
         this.containerTeardowns = containerTeardowns;
         this.certificateAuthority = certificateAuthority;
         this.config = config;
-        this.version = resolveVersion();
+        this.dynamoDbBackendSelector = dynamoDbBackendSelector;
+        this.version = FlociVersion.current();
     }
 
     @GET
@@ -98,7 +102,8 @@ public class EmulatorInfoController {
     @GET
     @Path("/info")
     public Response info() {
-        return Response.ok(Map.of("version", version, "edition", "community", "original_edition", "floci-always-free")).build();
+        return Response.ok(Map.of("version", version, "edition", "community", "original_edition", "floci-always-free",
+                "dynamodb_backend", dynamoDbBackendSelector.selected())).build();
     }
 
     @GET
@@ -156,17 +161,21 @@ public class EmulatorInfoController {
     }
 
     private synchronized void performReset() {
-        // Containers first: they are tracked independently of StorageBackend, so this can run
-        // in any order relative to the storage wipe below, but stopping them here means a
-        // client's reset actually reflects a clean slate instead of leaving Batch, CodeBuild,
-        // or SageMaker containers running with no record of them left in the store.
-        ContainerTeardowns.stopAll(containerTeardowns, LOG);
         // Resolve live instances before taking any storage locks. Serialize resets so one reset
         // cannot resume a publisher while another is still wiping its storage.
         List<Resettable> services = new ArrayList<>();
         for (Resettable service : resettables) {
             services.add(service);
         }
+        // Every service may refuse before the first destructive step, so a refusal changes nothing.
+        for (Resettable service : services) {
+            service.checkReset();
+        }
+        // Containers next: they are tracked independently of StorageBackend, so this can run
+        // in any order relative to the storage wipe below, but stopping them here means a
+        // client's reset actually reflects a clean slate instead of leaving Batch, CodeBuild,
+        // or SageMaker containers running with no record of them left in the store.
+        ContainerTeardowns.stopAll(containerTeardowns, LOG);
         RuntimeException failure = null;
         try {
             for (Resettable service : services) {
@@ -198,13 +207,5 @@ public class EmulatorInfoController {
         if (failure != null) {
             throw failure;
         }
-    }
-
-    static String resolveVersion() {
-        String env = System.getenv("FLOCI_VERSION");
-        if (env != null && !env.isBlank()) {
-            return env;
-        }
-        return "dev";
     }
 }

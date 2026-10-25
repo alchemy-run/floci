@@ -245,7 +245,7 @@ class SesEmailIdentityConfigurationSetV2IntegrationTest {
 
     @Test
     @Order(9)
-    void putConfigurationSet_whitespaceOnlyBody_returnsSerializationExceptionAndKeepsAssociation() {
+    void putConfigurationSet_whitespaceOnlyOrArrayBody_returnsSerializationExceptionAndKeepsAssociation() {
         // Re-associate so we can confirm a whitespace-only body does NOT clear.
         given().contentType("application/json").header("Authorization", SES_AUTH)
                 .body("{\"ConfigurationSetName\":\"" + CS + "\"}")
@@ -258,8 +258,14 @@ class SesEmailIdentityConfigurationSetV2IntegrationTest {
         .when().put("/v2/email/identities/" + IDENTITY + "/configuration-set")
         .then().statusCode(400)
                 .body("__type", equalTo("SerializationException"));
+        given().contentType("application/json").header("Authorization", SES_AUTH)
+                .body("[]")
+        .when().put("/v2/email/identities/" + IDENTITY + "/configuration-set")
+        .then().statusCode(400)
+                .body("__type", equalTo("SerializationException"))
+                .body("message", equalTo("Start of list found where not expected"));
 
-        // The association is unchanged (the invalid body neither cleared nor updated it).
+        // The association is unchanged (the invalid bodies neither cleared nor updated it).
         given().header("Authorization", SES_AUTH)
         .when().get("/v2/email/identities/" + IDENTITY)
         .then().statusCode(200)
@@ -388,7 +394,7 @@ class SesEmailIdentityConfigurationSetV2IntegrationTest {
                 .body("{\"EmailIdentity\":\"" + id + "\",\"ConfigurationSetName\":\"   \"}")
         .when().post("/v2/email/identities").then().statusCode(400)
                 .body("__type", equalTo("BadRequestException"))
-                .body("message", equalTo("ConfigurationSetName is required."));
+                .body("message", equalTo("Invalid configuration set name <   >: only alphanumeric ASCII characters, '_', and '-' are allowed."));
         given().header("Authorization", SES_AUTH)
         .when().get("/v2/email/identities/" + id).then().statusCode(404);
     }

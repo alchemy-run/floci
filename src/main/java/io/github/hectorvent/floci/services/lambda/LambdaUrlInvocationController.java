@@ -2,9 +2,11 @@ package io.github.hectorvent.floci.services.lambda;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.CookieHeaders;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.common.RequestHost;
@@ -15,6 +17,7 @@ import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
 import io.github.hectorvent.floci.services.lambda.model.LambdaUrlConfig;
 import io.github.hectorvent.floci.services.lambda.model.StreamingPayload;
 import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
+import io.vertx.core.http.HttpServerRequest;
 import io.vertx.ext.web.RoutingContext;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -34,6 +37,7 @@ import jakarta.ws.rs.core.StreamingOutput;
 import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -67,39 +71,18 @@ public class LambdaUrlInvocationController {
     private static final Logger LOG = Logger.getLogger(LambdaUrlInvocationController.class);
     private static final int FUNCTION_ERROR_STATUS = 502;
 
-    /**
-     * Function URL waits for the container off the JAX-RS worker pool so a
-     * nested emulator call (the Lambda talking back to Floci) can still be
-     * served. Holding the request thread across {@code invoke()} deadlocks
-     * under parallel Function URL traffic — Alchemy bindings suites burst
-     * ~8 routes at the default 3s timeout and get 502s.
-     */
-    private static final ExecutorService INVOKE_POOL = Executors.newCachedThreadPool(r -> {
-        Thread t = new Thread(r, "lambda-url-invoke");
-        t.setDaemon(true);
-        return t;
-    });
-
     private final LambdaService lambdaService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
     private final RequestContext requestContext;
-    private final CurrentVertxRequest currentVertxRequest;
 
     @Inject
     public LambdaUrlInvocationController(LambdaService lambdaService, RegionResolver regionResolver,
-                                         ObjectMapper objectMapper, RequestContext requestContext,
-                                         CurrentVertxRequest currentVertxRequest) {
+                                         ObjectMapper objectMapper, RequestContext requestContext) {
         this.lambdaService = lambdaService;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
         this.requestContext = requestContext;
-        this.currentVertxRequest = currentVertxRequest;
-    }
-
-    LambdaUrlInvocationController(LambdaService lambdaService, RegionResolver regionResolver,
-                                  ObjectMapper objectMapper, RequestContext requestContext) {
-        this(lambdaService, regionResolver, objectMapper, requestContext, null);
     }
 
     @GET
@@ -200,109 +183,6 @@ public class LambdaUrlInvocationController {
         }, INVOKE_POOL);
     }
 
-    /** Visible for tests: AWS SigV4 via Authorization header or query-string signing. */
-    static boolean hasSigV4(HttpHeaders headers, UriInfo uriInfo) {
-        String authorization = headers != null ? headers.getHeaderString("Authorization") : null;
-        String algorithm = uriInfo != null ? uriInfo.getQueryParameters().getFirst("X-Amz-Algorithm") : null;
-        return hasSigV4(authorization, algorithm);
-    }
-
-    static boolean hasSigV4(String authorization, String amzAlgorithmQuery) {
-        if (authorization != null && authorization.contains("AWS4-HMAC-SHA256")) {
-            return true;
-        }
-        return "AWS4-HMAC-SHA256".equals(amzAlgorithmQuery);
-    }
-
-    /** The request path and query exactly as the client sent them, relative to the function URL. */
-    record RawTarget(String path, String query) {}
-
-    /**
-     * Reads the path and query from the request line. A pre-matching filter that rewrites the
-     * request URI (host-style routing) leaves JAX-RS holding a decoded copy that re-encodes
-     * differently, so a literal {@code +} sent as {@code %2B} would reach the function as a
-     * space. The Vert.x request is never rewritten, so it is the authoritative source.
-     */
-    private RawTarget rawTarget(String urlId, HttpHeaders headers, UriInfo uriInfo) {
-        io.vertx.core.http.HttpServerRequest vertxRequest = currentRequest();
-        String rawPath;
-        String rawQuery;
-        String host;
-        if (vertxRequest != null) {
-            rawPath = vertxRequest.path();
-            rawQuery = vertxRequest.query();
-            host = RequestHost.of(vertxRequest);
-        } else {
-            URI requestUri = uriInfo.getRequestUri();
-            rawPath = requestUri.getRawPath();
-            rawQuery = requestUri.getRawQuery();
-            host = RequestHost.of(headers != null ? headers.getHeaderString("Host") : null, requestUri);
-        }
-        return new RawTarget(functionPath(urlId, rawPath, LambdaUrlRoutingFilter.isFunctionUrlHost(host)),
-                rawQuery != null ? rawQuery : "");
-    }
-
-    private io.vertx.core.http.HttpServerRequest currentRequest() {
-        if (currentVertxRequest == null) {
-            return null;
-        }
-        try {
-            RoutingContext current = currentVertxRequest.getCurrent();
-            return current != null ? current.request() : null;
-        } catch (RuntimeException e) {
-            return null;
-        }
-    }
-
-    /**
-     * The path the function sees. Host-style URLs ({@code <url-id>.lambda-url.<region>.<host>})
-     * carry it verbatim; path-style URLs ({@code /lambda-url/<url-id>/...}) carry it after the
-     * routing prefix.
-     */
-    static String functionPath(String urlId, String rawPath, boolean hostRouted) {
-        if (rawPath == null || rawPath.isEmpty()) {
-            return "/";
-        }
-        if (hostRouted) {
-            return rawPath;
-        }
-        String prefix = "/lambda-url/" + urlId;
-        if (rawPath.equals(prefix)) {
-            return "/";
-        }
-        if (rawPath.startsWith(prefix + "/")) {
-            return rawPath.substring(prefix.length());
-        }
-        return rawPath;
-    }
-
-    /** Decodes each query parameter exactly once, keeping repeated names in request order. */
-    static Map<String, List<String>> decodeQueryParameters(String rawQuery) {
-        Map<String, List<String>> params = new LinkedHashMap<>();
-        if (rawQuery == null || rawQuery.isEmpty()) {
-            return params;
-        }
-        for (String pair : rawQuery.split("&")) {
-            if (pair.isEmpty()) {
-                continue;
-            }
-            int eq = pair.indexOf('=');
-            String name = decodeQueryComponent(eq >= 0 ? pair.substring(0, eq) : pair);
-            String value = eq >= 0 ? decodeQueryComponent(pair.substring(eq + 1)) : "";
-            params.computeIfAbsent(name, k -> new ArrayList<>()).add(value);
-        }
-        return params;
-    }
-
-    private static String decodeQueryComponent(String component) {
-        try {
-            return URLDecoder.decode(component, StandardCharsets.UTF_8);
-        } catch (IllegalArgumentException e) {
-            // A malformed escape is passed through rather than rejected.
-            return component;
-        }
-    }
-
     private String buildEvent(String method, String urlId, String proxy, HttpHeaders headers, UriInfo uriInfo, byte[] body, String requestId, String region) {
         ObjectNode root = objectMapper.createObjectNode();
         root.put("version", "2.0");
@@ -311,6 +191,12 @@ public class LambdaUrlInvocationController {
         String rawPath = target.path();
         root.put("rawPath", rawPath);
         root.put("rawQueryString", target.query());
+
+        List<String> cookies = CookieHeaders.cookiePairs(headers.getRequestHeaders());
+        if (!cookies.isEmpty()) {
+            ArrayNode cookiesNode = root.putArray("cookies");
+            cookies.forEach(cookiesNode::add);
+        }
 
         ObjectNode headersNode = root.putObject("headers");
         headers.getRequestHeaders().forEach((k, v) -> headersNode.put(k.toLowerCase(), String.join(",", v)));
@@ -326,7 +212,8 @@ public class LambdaUrlInvocationController {
         ctx.put("requestId", requestId);
         ctx.put("routeKey", "$default");
         ctx.put("stage", "$default");
-        ctx.put("time", DateTimeFormatter.ofPattern("dd/MMM/yyyy:HH:mm:ss Z").withZone(ZoneOffset.UTC).format(Instant.now()));
+        ctx.put("time", DateTimeFormatter.ofPattern("dd/MMM/yyyy:HH:mm:ss Z", Locale.ENGLISH)
+                .withZone(ZoneOffset.UTC).format(Instant.now()));
         ctx.put("timeEpoch", System.currentTimeMillis());
 
         ObjectNode httpNode = ctx.putObject("http");
@@ -403,6 +290,147 @@ public class LambdaUrlInvocationController {
             return Response.status(status).entity(result.getPayload()).build();
         }
     }
+
+    /**
+     * Real Function URLs never surface the raw invocation error payload (stack traces,
+     * error types, internal fields) to the caller. A raw error payload has no "body"
+     * field, so, matching ApiGatewayController's Lambda proxy integration, the response
+     * carries the 502 status with no entity at all.
+     */
+    private Response buildFunctionErrorResponse(InvokeResult result) {
+        return Response.status(FUNCTION_ERROR_STATUS).build();
+    }
+
+    private String jsonMessage(String message) {
+        return objectMapper.createObjectNode().put("message", message).toString();
+    }
+
+
+
+
+    /** Visible for tests: AWS SigV4 via Authorization header or query-string signing. */
+    static boolean hasSigV4(HttpHeaders headers, UriInfo uriInfo) {
+        String authorization = headers != null ? headers.getHeaderString("Authorization") : null;
+        String algorithm = uriInfo != null ? uriInfo.getQueryParameters().getFirst("X-Amz-Algorithm") : null;
+        return hasSigV4(authorization, algorithm);
+    }
+
+    static boolean hasSigV4(String authorization, String amzAlgorithmQuery) {
+        if (authorization != null && authorization.contains("AWS4-HMAC-SHA256")) {
+            return true;
+        }
+        return "AWS4-HMAC-SHA256".equals(amzAlgorithmQuery);
+    }
+
+    /** The request path and query exactly as the client sent them, relative to the function URL. */
+    record RawTarget(String path, String query) {}
+
+
+
+    /**
+     * The path the function sees. Host-style URLs ({@code <url-id>.lambda-url.<region>.<host>})
+     * carry it verbatim; path-style URLs ({@code /lambda-url/<url-id>/...}) carry it after the
+     * routing prefix.
+     */
+    static String functionPath(String urlId, String rawPath, boolean hostRouted) {
+        if (rawPath == null || rawPath.isEmpty()) {
+            return "/";
+        }
+        if (hostRouted) {
+            return rawPath;
+        }
+        String prefix = "/lambda-url/" + urlId;
+        if (rawPath.equals(prefix)) {
+            return "/";
+        }
+        if (rawPath.startsWith(prefix + "/")) {
+            return rawPath.substring(prefix.length());
+        }
+        return rawPath;
+    }
+
+    /** Decodes each query parameter exactly once, keeping repeated names in request order. */
+    static Map<String, List<String>> decodeQueryParameters(String rawQuery) {
+        Map<String, List<String>> params = new LinkedHashMap<>();
+        if (rawQuery == null || rawQuery.isEmpty()) {
+            return params;
+        }
+        for (String pair : rawQuery.split("&")) {
+            if (pair.isEmpty()) {
+                continue;
+            }
+            int eq = pair.indexOf('=');
+            String name = decodeQueryComponent(eq >= 0 ? pair.substring(0, eq) : pair);
+            String value = eq >= 0 ? decodeQueryComponent(pair.substring(eq + 1)) : "";
+            params.computeIfAbsent(name, k -> new ArrayList<>()).add(value);
+        }
+        return params;
+    }
+
+    private static String decodeQueryComponent(String component) {
+        try {
+            return URLDecoder.decode(component, StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException e) {
+            // A malformed escape is passed through rather than rejected.
+            return component;
+        }
+    }
+
+
+    record Prelude(ObjectNode metadata, byte[] remainder) {}
+
+    /**
+     * Reads chunks until the 8-NUL prelude delimiter is found (it may span chunk
+     * boundaries), parses the JSON metadata before it, and returns any body bytes
+     * already received after it.
+     */
+    Prelude readPrelude(StreamingPayload stream) throws Exception {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        while (true) {
+            byte[] accumulated = buffer.toByteArray();
+            int delimiter = indexOfDelimiter(accumulated);
+            if (delimiter >= 0) {
+                JsonNode metadata = objectMapper.readTree(accumulated, 0, delimiter);
+                if (!(metadata instanceof ObjectNode metadataObject)) {
+                    throw new IllegalStateException("Prelude metadata is not a JSON object");
+                }
+                byte[] remainder = java.util.Arrays.copyOfRange(
+                        accumulated, delimiter + PRELUDE_DELIMITER_LENGTH, accumulated.length);
+                return new Prelude(metadataObject, remainder);
+            }
+            byte[] chunk = stream.next();
+            if (chunk == null) {
+                throw new IllegalStateException("Stream ended before prelude delimiter");
+            }
+            buffer.write(chunk);
+        }
+    }
+
+    private static final int PRELUDE_DELIMITER_LENGTH = 8;
+
+    static int indexOfDelimiter(byte[] data) {
+        int run = 0;
+        for (int i = 0; i < data.length; i++) {
+            run = data[i] == 0 ? run + 1 : 0;
+            if (run == PRELUDE_DELIMITER_LENGTH) {
+                return i - PRELUDE_DELIMITER_LENGTH + 1;
+            }
+        }
+        return -1;
+    }
+
+    /**
+     * Function URL waits for the container off the JAX-RS worker pool so a
+     * nested emulator call (the Lambda talking back to Floci) can still be
+     * served. Holding the request thread across {@code invoke()} deadlocks
+     * under parallel Function URL traffic — Alchemy bindings suites burst
+     * ~8 routes at the default 3s timeout and get 502s.
+     */
+    private static final ExecutorService INVOKE_POOL = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "lambda-url-invoke");
+        t.setDaemon(true);
+        return t;
+    });
 
     /**
      * Builds the HTTP response for a streaming invocation result
@@ -484,59 +512,43 @@ public class LambdaUrlInvocationController {
         }
     }
 
-    record Prelude(ObjectNode metadata, byte[] remainder) {}
-
     /**
-     * Reads chunks until the 8-NUL prelude delimiter is found (it may span chunk
-     * boundaries), parses the JSON metadata before it, and returns any body bytes
-     * already received after it.
+     * Reads the path and query from the request line. A pre-matching filter that rewrites the
+     * request URI (host-style routing) leaves JAX-RS holding a decoded copy that re-encodes
+     * differently, so a literal {@code +} sent as {@code %2B} would reach the function as a
+     * space. The Vert.x request is never rewritten, so it is the authoritative source.
      */
-    Prelude readPrelude(StreamingPayload stream) throws Exception {
-        java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
-        while (true) {
-            byte[] accumulated = buffer.toByteArray();
-            int delimiter = indexOfDelimiter(accumulated);
-            if (delimiter >= 0) {
-                JsonNode metadata = objectMapper.readTree(accumulated, 0, delimiter);
-                if (!(metadata instanceof ObjectNode metadataObject)) {
-                    throw new IllegalStateException("Prelude metadata is not a JSON object");
-                }
-                byte[] remainder = java.util.Arrays.copyOfRange(
-                        accumulated, delimiter + PRELUDE_DELIMITER_LENGTH, accumulated.length);
-                return new Prelude(metadataObject, remainder);
-            }
-            byte[] chunk = stream.next();
-            if (chunk == null) {
-                throw new IllegalStateException("Stream ended before prelude delimiter");
-            }
-            buffer.write(chunk);
+    private RawTarget rawTarget(String urlId, HttpHeaders headers, UriInfo uriInfo) {
+        HttpServerRequest vertxRequest = currentRequest();
+        String rawPath;
+        String rawQuery;
+        String host;
+        if (vertxRequest != null) {
+            rawPath = vertxRequest.path();
+            rawQuery = vertxRequest.query();
+            host = RequestHost.of(vertxRequest);
+        } else {
+            URI requestUri = uriInfo.getRequestUri();
+            rawPath = requestUri.getRawPath();
+            rawQuery = requestUri.getRawQuery();
+            host = RequestHost.of(headers != null ? headers.getHeaderString("Host") : null, requestUri);
+        }
+        return new RawTarget(functionPath(urlId, rawPath, LambdaUrlRoutingFilter.isFunctionUrlHost(host)),
+                rawQuery != null ? rawQuery : "");
+    }
+
+    private HttpServerRequest currentRequest() {
+        if (currentVertxRequest == null) {
+            return null;
+        }
+        try {
+            RoutingContext current = currentVertxRequest.getCurrent();
+            return current != null ? current.request() : null;
+        } catch (RuntimeException e) {
+            return null;
         }
     }
 
-    private static final int PRELUDE_DELIMITER_LENGTH = 8;
-
-    static int indexOfDelimiter(byte[] data) {
-        int run = 0;
-        for (int i = 0; i < data.length; i++) {
-            run = data[i] == 0 ? run + 1 : 0;
-            if (run == PRELUDE_DELIMITER_LENGTH) {
-                return i - PRELUDE_DELIMITER_LENGTH + 1;
-            }
-        }
-        return -1;
-    }
-
-    /**
-     * Real Function URLs never surface the raw invocation error payload (stack traces,
-     * error types, internal fields) to the caller. A raw error payload has no "body"
-     * field, so, matching ApiGatewayController's Lambda proxy integration, the response
-     * carries the 502 status with no entity at all.
-     */
-    private Response buildFunctionErrorResponse(InvokeResult result) {
-        return Response.status(FUNCTION_ERROR_STATUS).build();
-    }
-
-    private String jsonMessage(String message) {
-        return objectMapper.createObjectNode().put("message", message).toString();
-    }
+    @Inject
+    CurrentVertxRequest currentVertxRequest;
 }

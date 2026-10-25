@@ -1,6 +1,8 @@
 package io.github.hectorvent.floci.config;
 
 import io.github.hectorvent.floci.services.iot.IotMqttWebSocketIntegrationTest;
+import io.github.hectorvent.floci.testing.IotMqttTlsProfile;
+import io.github.hectorvent.floci.testutil.FreePorts;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.vertx.core.Vertx;
@@ -19,13 +21,13 @@ import javax.net.ssl.SNIHostName;
 import javax.net.ssl.SSLHandshakeException;
 import javax.net.ssl.SSLParameters;
 import javax.net.ssl.SSLSocket;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
-import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -48,7 +50,7 @@ import static org.mockito.Mockito.when;
  * dial the Quarkus test ports directly.
  */
 @QuarkusTest
-@TestProfile(IotMqttWebSocketIntegrationTest.Profile.class)
+@TestProfile(IotMqttTlsProfile.class)
 class IotMqttWebSocketProxyIntegrationTest {
 
     static final String LEARNED_HOST = "iot.example.localhost.floci.io";
@@ -95,17 +97,18 @@ class IotMqttWebSocketProxyIntegrationTest {
         assertThrows(SSLHandshakeException.class, () -> upgradeAs(LEARNED_HOST),
                 "precondition: the boot leaf covers one label under localhost.floci.io, not two");
 
-        certificateManager.ensureHost(LEARNED_HOST);
+        try {
+            certificateManager.ensureHost(LEARNED_HOST);
 
-        assertArrayEquals(CONNACK_ACCEPTED, upgradeAs(LEARNED_HOST),
-                "after ensureHost a client verifying the learned name gets an MQTT session on /mqtt");
+            assertArrayEquals(CONNACK_ACCEPTED, upgradeAs(LEARNED_HOST),
+                    "after ensureHost a client verifying the learned name gets an MQTT session on /mqtt");
+        } finally {
+            certificateManager.clear();
+        }
     }
 
     private int startProxy() throws Exception {
-        int publicPort;
-        try (ServerSocket probe = new ServerSocket(0)) {
-            publicPort = probe.getLocalPort();
-        }
+        int publicPort = FreePorts.anyInterfacePort();
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.TlsConfig tls = mock(EmulatorConfig.TlsConfig.class);
         when(config.port()).thenReturn(publicPort);

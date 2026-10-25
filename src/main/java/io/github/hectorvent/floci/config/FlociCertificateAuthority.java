@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.config;
 
+import io.github.hectorvent.floci.core.common.Digests;
+import io.github.hectorvent.floci.core.common.Pem;
 import io.github.hectorvent.floci.services.acm.CertificateGenerator;
 import io.github.hectorvent.floci.services.acm.model.KeyAlgorithm;
 import org.bouncycastle.asn1.ASN1ObjectIdentifier;
@@ -7,6 +9,7 @@ import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
 import org.bouncycastle.asn1.pkcs.RSAPublicKey;
 import org.bouncycastle.asn1.sec.SECObjectIdentifiers;
 import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x509.Extension;
 import org.bouncycastle.asn1.x509.SubjectPublicKeyInfo;
 import org.bouncycastle.asn1.x9.X962Parameters;
 import org.bouncycastle.asn1.x9.X9ObjectIdentifiers;
@@ -16,16 +19,23 @@ import org.bouncycastle.pkcs.PKCS10CertificationRequest;
 import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequest;
 import org.jboss.logging.Logger;
 
+import javax.net.ssl.KeyManagerFactory;
+import javax.net.ssl.SSLContext;
+
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.PosixFileAttributeView;
 import java.nio.file.attribute.PosixFilePermissions;
+import java.security.GeneralSecurityException;
 import java.security.KeyPair;
+import java.security.KeyStore;
 import java.security.PrivateKey;
-import java.security.MessageDigest;
 import java.security.PublicKey;
+import java.security.SecureRandom;
+import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.HexFormat;
@@ -81,27 +91,31 @@ public final class FlociCertificateAuthority {
         Path keyFile = tlsDir.resolve(CA_KEY_NAME);
         try {
             if (Files.exists(certFile) && Files.exists(keyFile)) {
+                FlociCertificateAuthority existing = null;
                 try {
                     String pem = Files.readString(certFile);
-                    X509Certificate cert = generator.parseCertificate(pem);
-                    PrivateKey key = generator.parsePrivateKey(Files.readString(keyFile));
+                    X509Certificate cert = Pem.parseCertificate(pem);
+                    PrivateKey key = Pem.parsePrivateKey(Files.readString(keyFile));
                     if (cert.getBasicConstraints() < 0) {
                         throw new IllegalStateException("not a CA certificate (BasicConstraints cA=false)");
                     }
                     cert.verify(cert.getPublicKey());
                     cert.checkValidity();
-                    if (!CertificateGenerator.isPair(key, cert.getPublicKey())) {
+                    if (!Pem.isPair(key, cert.getPublicKey())) {
                         throw new IllegalStateException("private key does not match the certificate");
                     }
                     restrictToOwnerOnly(tlsDir, "rwx------");
                     restrictToOwnerOnly(keyFile, "rw-------");
-                    FlociCertificateAuthority ca = new FlociCertificateAuthority(certFile, cert, key, pem, generator);
-                    LOG.infov("TLS: using local CA {0} ({1}), SHA256 fingerprint {2}", certFile,
-                            cert.getSubjectX500Principal().getName(), ca.fingerprint());
-                    return ca;
+                    existing = new FlociCertificateAuthority(certFile, cert, key, pem, generator);
                 } catch (Exception e) {
                     LOG.warnv(e, "TLS: local CA at {0} is unusable ({1}); generating a new one. Clients that trusted "
                             + "the old CA must re-import {2}", tlsDir, e.getMessage(), CA_CERT_NAME);
+                }
+                if (existing != null) {
+                    FlociCertificateAuthority ca = upgradeLegacyCa(existing);
+                    LOG.infov("TLS: using local CA {0} ({1}), SHA256 fingerprint {2}", certFile,
+                            ca.certificate().getSubjectX500Principal().getName(), ca.fingerprint());
+                    return ca;
                 }
             }
             Files.createDirectories(tlsDir);
@@ -110,8 +124,8 @@ public final class FlociCertificateAuthority {
             Files.writeString(certFile, generated.certificatePem());
             writePrivateKey(keyFile, generated.privateKeyPem());
             FlociCertificateAuthority ca = new FlociCertificateAuthority(certFile,
-                    generator.parseCertificate(generated.certificatePem()),
-                    generator.parsePrivateKey(generated.privateKeyPem()),
+                    Pem.parseCertificate(generated.certificatePem()),
+                    Pem.parsePrivateKey(generated.privateKeyPem()),
                     generated.certificatePem(), generator);
             LOG.infov("TLS: generated local CA {0}, SHA256 fingerprint {1}. Trust it once: GET /_floci/ca.pem",
                     certFile, ca.fingerprint());
@@ -145,7 +159,7 @@ public final class FlociCertificateAuthority {
     public String fingerprint() {
         try {
             return HexFormat.ofDelimiter(":").withUpperCase()
-                    .formatHex(MessageDigest.getInstance("SHA-256").digest(certificate.getEncoded()));
+                    .formatHex(Digests.sha256(certificate.getEncoded()));
         } catch (Exception e) {
             throw new IllegalStateException("Cannot fingerprint the CA certificate", e);
         }
@@ -153,6 +167,43 @@ public final class FlociCertificateAuthority {
 
     public CertificateGenerator.Issuer issuer() {
         return new CertificateGenerator.Issuer(certificate, key);
+    }
+
+    private static FlociCertificateAuthority upgradeLegacyCa(FlociCertificateAuthority existing) {
+        X509Certificate cert = existing.certificate();
+        if (cert.getExtensionValue(Extension.subjectKeyIdentifier.getId()) != null
+                && cert.getExtensionValue(Extension.authorityKeyIdentifier.getId()) != null) {
+            return existing;
+        }
+        Path certFile = existing.certificatePath();
+        Path temporary = null;
+        try {
+            X500Name dn = X500Name.getInstance(cert.getSubjectX500Principal().getEncoded());
+            X509Certificate upgraded = existing.generator.signCertificate(dn, cert.getPublicKey(), dn,
+                    existing.key(), List.of(), true, null, cert.getNotBefore().toInstant(),
+                    cert.getNotAfter().toInstant());
+            upgraded.verify(cert.getPublicKey());
+            String pem = existing.generator.toPem(upgraded);
+            temporary = Files.createTempFile(certFile.getParent(), "floci-root-ca-", ".tmp");
+            Files.writeString(temporary, pem);
+            Files.move(temporary, certFile, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+            FlociCertificateAuthority replacement = new FlociCertificateAuthority(certFile, upgraded,
+                    existing.key(), pem, existing.generator);
+            LOG.warnv("TLS: reissued local CA with key identifiers using the existing key. Its SHA256 fingerprint changed from {0} to {1}; clients using the old CA file must re-import {2}",
+                    existing.fingerprint(), replacement.fingerprint(), CA_CERT_NAME);
+            return replacement;
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to upgrade local CA at " + certFile
+                    + "; the existing CA key was not replaced", e);
+        } finally {
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException e) {
+                    LOG.warnv("TLS: could not remove temporary CA file {0}: {1}", temporary, e.getMessage());
+                }
+            }
+        }
     }
 
     /**
@@ -164,6 +215,23 @@ public final class FlociCertificateAuthority {
                                                                             KeyAlgorithm keyAlgorithm, KeyPair keyPair) {
         return generator.generateIssuedCertificate(commonName, sans, keyAlgorithm, keyPair, issuer(),
                 CertificateGenerator.LeafUsage.SERVER);
+    }
+
+    /**
+     * A TLS server context presenting {@code certificate}, issued by this CA, with its
+     * {@code key}, the chain ending at this CA, so a client that trusts Floci's CA verifies it.
+     */
+    public SSLContext serverSslContext(X509Certificate certificate, PrivateKey key)
+            throws GeneralSecurityException, IOException {
+        char[] password = new char[0];
+        KeyStore keyStore = KeyStore.getInstance("PKCS12");
+        keyStore.load(null, password);
+        keyStore.setKeyEntry("floci-server", key, password, new Certificate[]{certificate, certificate()});
+        KeyManagerFactory keyManagers = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        keyManagers.init(keyStore, password);
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(keyManagers.getKeyManagers(), null, new SecureRandom());
+        return context;
     }
 
     /**
@@ -216,7 +284,8 @@ public final class FlociCertificateAuthority {
             }
             X500Name issuerDn = X500Name.getInstance(certificate.getSubjectX500Principal().getEncoded());
             return generator.signCertificate(csr.getSubject(), subjectKey, issuerDn, key, List.of(), false,
-                    CertificateGenerator.LeafUsage.CLIENT, Instant.now(), deviceCertificateNotAfter());
+                    CertificateGenerator.LeafUsage.CLIENT, Instant.now(), deviceCertificateNotAfter(),
+                    certificate.getPublicKey());
         } catch (IllegalArgumentException e) {
             throw e;
         } catch (Exception e) {

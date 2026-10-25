@@ -11,12 +11,7 @@ import io.quarkus.runtime.annotations.RegisterForReflection;
  * is left.
  */
 @RegisterForReflection
-public record CapacityProviderStrategyItem(String capacityProvider, Integer weight, Integer base) {
-
-    public CapacityProviderStrategyItem {
-        weight = weight != null ? weight : 0;
-        base = base != null ? base : 0;
-    }
+public record CapacityProviderStrategyItem(String capacityProvider, int weight, int base) {
 
     public CapacityProviderStrategyItem(String capacityProvider) {
         this(capacityProvider, 0, 0);

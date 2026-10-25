@@ -57,6 +57,7 @@ class PublicationTestSupport {
         metricStore = new AccountAwareStorageBackend<>(sink, contexts, ACCOUNT);
         filters = new AccountAwareStorageBackend<>(new InMemoryStorage<>(), contexts, ACCOUNT);
         doReturn(metricStore).when(factory).create(eq("cloudwatchmetrics"), eq("cwmetrics.json"), any());
+        doReturn(metricStore).when(factory).create(eq("cloudwatchmetrics"), eq("cwmetrics.json"), any(), any());
         doReturn(AccountAwareStorageBackend.inMemory(ACCOUNT)).when(factory)
                 .create(eq("cloudwatchmetrics"), eq("cwalarms.json"), any());
         metrics = new CloudWatchMetricsService(factory, resolver);

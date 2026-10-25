@@ -5,6 +5,7 @@ import io.vertx.core.Vertx;
 import io.vertx.core.http.ServerWebSocket;
 import io.vertx.core.net.NetClient;
 import io.vertx.core.net.NetSocket;
+import io.vertx.core.net.SocketAddress;
 import io.vertx.ext.web.Router;
 import io.vertx.ext.web.RoutingContext;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -12,13 +13,20 @@ import jakarta.enterprise.event.Observes;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.LinkedHashMap;
+import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+
 /**
  * Serves MQTT over WebSocket at {@code /mqtt} on the HTTP and HTTPS ports, the path and port AWS
  * IoT uses for browser clients, the Device SDK's WebSocket transport and secure tunnelling. Frames
  * are piped byte for byte to the broker's plaintext listener, so every broker feature and every
  * authorization rule applies without a second code path. No client certificate is involved: on
- * AWS this path authenticates by SigV4 or a custom authorizer, and the broker stays permissive
- * for it.
+ * AWS this path authenticates by SigV4 or a custom authorizer. The broker enforces a custom
+ * authorizer named in the MQTT username, the URL query or an upgrade header, and stays permissive
+ * otherwise; the upgrade's headers, query, server name and client address reach it through
+ * {@link IotMqttBrokerService#webSocketUpgrades()}.
  *
  * <p>Everything for one session runs on the event loop of the WebSocket's connection, the
  * broker socket included, so the handlers below never race each other.
@@ -90,8 +98,12 @@ public class IotMqttWebSocketBridge {
                         socket.close();
                         return;
                     }
-                    wire(ws, socket);
-                    ws.resume();
+                    // Registered before start() lets the first frame through, so it is there when the CONNECT
+                    // reaches the broker; removed only if still this very instance, as the address can be reused.
+                    SocketAddress bridgeAddress = socket.localAddress();
+                    IotCustomAuthorizer.WebSocketUpgrade upgrade = upgradeOf(ws);
+                    broker.webSocketUpgrades().put(bridgeAddress, upgrade);
+                    new BridgeSession(ws, socket, forgetting(broker.webSocketUpgrades(), bridgeAddress, upgrade)).start();
                 })
                 .onFailure(error -> {
                     LOG.warnv("MQTT WebSocket bridge could not reach the broker on {0}:{1}: {2}",
@@ -100,39 +112,124 @@ public class IotMqttWebSocketBridge {
                 });
     }
 
-    private static void wire(ServerWebSocket ws, NetSocket socket) {
-        ws.frameHandler(frame -> {
-            if (ws.isClosed()) {
-                return;
-            }
-            if (frame.isText()) {
-                ws.close(CLOSE_UNSUPPORTED_DATA, "MQTT over WebSocket is binary");
-                return;
-            }
-            if (!frame.isBinary() && !frame.isContinuation()) {
-                return;
-            }
-            socket.write(frame.binaryData());
-            if (socket.writeQueueFull()) {
-                ws.pause();
-                socket.drainHandler(ignored -> ws.resume());
-            }
-        });
-        ws.closeHandler(ignored -> socket.close());
-        ws.exceptionHandler(error -> socket.close());
+    /** Drops the session's upgrade unless the address already carries a newer session's. */
+    static Runnable forgetting(Map<SocketAddress, IotCustomAuthorizer.WebSocketUpgrade> upgrades, SocketAddress address,
+                               IotCustomAuthorizer.WebSocketUpgrade upgrade) {
+        return () -> upgrades.computeIfPresent(address, (key, current) -> current == upgrade ? null : current);
+    }
 
-        socket.handler(bytes -> {
-            if (ws.isClosed()) {
-                return;
+    /**
+     * The upgrade as AWS hands it to a custom authorizer; the server name only over TLS, from SNI or
+     * else the Host header. The client's address and port ride along for the broker's policy
+     * evaluation and GetConnection.
+     */
+    private static IotCustomAuthorizer.WebSocketUpgrade upgradeOf(ServerWebSocket ws) {
+        Map<String, String> headers = new LinkedHashMap<>();
+        // ponytail: a repeated header keeps its last value.
+        ws.headers().forEach(header -> headers.put(header.getKey().toLowerCase(Locale.ROOT), header.getValue()));
+        String serverName = null;
+        if (ws.isSsl()) {
+            serverName = IotMqttBrokerService.requestedServerName(ws.sslSession());
+            if (serverName == null && ws.authority() != null && !IotMqttBrokerService.isAddressLiteral(ws.authority().host())) {
+                serverName = ws.authority().host();
             }
-            ws.writeBinaryMessage(bytes);
-            if (ws.writeQueueFull()) {
-                socket.pause();
-                ws.drainHandler(ignored -> socket.resume());
+        }
+        SocketAddress client = ws.remoteAddress();
+        return new IotCustomAuthorizer.WebSocketUpgrade(headers, ws.query() == null ? "" : ws.query(), serverName,
+                client == null ? null : client.host(), client == null ? -1 : client.port());
+    }
+
+    static final class BridgeSession {
+
+        private final ServerWebSocket webSocket;
+        private final NetSocket socket;
+        private final Runnable onClose;
+        private final AtomicBoolean closed = new AtomicBoolean();
+
+        BridgeSession(ServerWebSocket webSocket, NetSocket socket, Runnable onClose) {
+            this.webSocket = webSocket;
+            this.socket = socket;
+            this.onClose = onClose;
+        }
+
+        void start() {
+            webSocket.frameHandler(frame -> {
+                if (closed.get() || webSocket.isClosed()) {
+                    return;
+                }
+                if (frame.isText()) {
+                    close(CLOSE_UNSUPPORTED_DATA, "MQTT over WebSocket is binary");
+                    return;
+                }
+                if (!frame.isBinary() && !frame.isContinuation()) {
+                    return;
+                }
+                socket.write(frame.binaryData());
+                if (socket.writeQueueFull()) {
+                    webSocket.pause();
+                    socket.drainHandler(ignored -> {
+                        if (!closed.get()) {
+                            webSocket.resume();
+                        }
+                    });
+                }
+            });
+            webSocket.closeHandler(ignored -> closeSocket());
+            webSocket.exceptionHandler(error -> close(CLOSE_INTERNAL_ERROR, "MQTT WebSocket failed"));
+
+            socket.handler(bytes -> {
+                if (closed.get() || webSocket.isClosed()) {
+                    return;
+                }
+                webSocket.writeBinaryMessage(bytes);
+                if (webSocket.writeQueueFull()) {
+                    socket.pause();
+                    webSocket.drainHandler(ignored -> {
+                        if (!closed.get()) {
+                            socket.resume();
+                        }
+                    });
+                }
+            });
+            socket.closeHandler(ignored -> closeWebSocket());
+            socket.exceptionHandler(error -> close(CLOSE_INTERNAL_ERROR, "MQTT broker connection failed"));
+
+            if (webSocket.isClosed()) {
+                closeSocket();
+            } else {
+                webSocket.resume();
             }
-        });
-        socket.closeHandler(ignored -> ws.close());
-        socket.exceptionHandler(error -> ws.close(CLOSE_INTERNAL_ERROR, "MQTT broker connection failed"));
+        }
+
+        private void close(short code, String reason) {
+            if (markClosed()) {
+                socket.close();
+                if (!webSocket.isClosed()) {
+                    webSocket.close(code, reason);
+                }
+            }
+        }
+
+        private void closeSocket() {
+            if (markClosed()) {
+                socket.close();
+            }
+        }
+
+        private void closeWebSocket() {
+            if (markClosed() && !webSocket.isClosed()) {
+                // ponytail: on a custom-auth refusal AWS sends an empty close frame (MQTT 3.1.1) or no close frame (MQTT 5); Vert.x has no public API for either, so this sends status 1000.
+                webSocket.close();
+            }
+        }
+
+        private boolean markClosed() {
+            if (!closed.compareAndSet(false, true)) {
+                return false;
+            }
+            onClose.run();
+            return true;
+        }
     }
 
     /** The broker binds {@code 0.0.0.0} by default, which is not a connect target; loopback is. */

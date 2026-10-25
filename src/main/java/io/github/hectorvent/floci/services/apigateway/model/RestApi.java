@@ -23,6 +23,15 @@ public class RestApi {
     private List<String> binaryMediaTypes = new ArrayList<>();
     /** Resource policy document, stored exactly as the caller sent it. */
     private String policy;
+    private List<String> warnings = new ArrayList<>();
+
+    public List<String> getWarnings() {
+        return warnings;
+    }
+
+    public void setWarnings(List<String> warnings) {
+        this.warnings = warnings != null ? new ArrayList<>(warnings) : new ArrayList<>();
+    }
 
     public String getPolicy() {
         return policy;
@@ -30,6 +39,14 @@ public class RestApi {
 
     public void setPolicy(String policy) {
         this.policy = policy;
+    }
+
+    public List<String> getBinaryMediaTypes() {
+        return binaryMediaTypes;
+    }
+
+    public void setBinaryMediaTypes(List<String> binaryMediaTypes) {
+        this.binaryMediaTypes = binaryMediaTypes != null ? binaryMediaTypes : new ArrayList<>();
     }
 
 
@@ -87,13 +104,5 @@ public class RestApi {
 
     public void setEndpointConfiguration(EndpointConfiguration endpointConfiguration) {
         this.endpointConfiguration = endpointConfiguration;
-    }
-
-    public List<String> getBinaryMediaTypes() {
-        return binaryMediaTypes;
-    }
-
-    public void setBinaryMediaTypes(List<String> binaryMediaTypes) {
-        this.binaryMediaTypes = binaryMediaTypes != null ? binaryMediaTypes : new ArrayList<>();
     }
 }

@@ -1,12 +1,13 @@
 package io.github.hectorvent.floci.services.mwaa;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.PortAllocator;
+import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
-import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.mwaa.model.CreateEnvironmentRequest;
 import io.github.hectorvent.floci.services.mwaa.model.Environment;
@@ -15,7 +16,6 @@ import io.github.hectorvent.floci.services.mwaa.model.NetworkConfiguration;
 import io.github.hectorvent.floci.services.mwaa.model.UpdateEnvironmentRequest;
 import io.github.hectorvent.floci.services.mwaa.proxy.MwaaProxyManager;
 import io.github.hectorvent.floci.services.s3.S3Service;
-import com.fasterxml.jackson.core.type.TypeReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -30,8 +30,8 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -120,10 +120,10 @@ class MwaaServiceTest {
                 createRequest("arn:aws:s3:::west-bucket", "dags"));
         String westToken = (String) mwaaService.createCliToken("shared-name").get("CliToken");
 
-        assertTrue(mwaaService.isValidCliToken(MwaaService.environmentIdentity(westEnvironment), westToken));
-        assertFalse(mwaaService.isValidCliToken(MwaaService.environmentIdentity(westEnvironment), eastToken));
-        assertTrue(mwaaService.isValidCliToken(MwaaService.environmentIdentity(eastEnvironment), eastToken));
-        assertFalse(mwaaService.isValidCliToken(MwaaService.environmentIdentity(eastEnvironment), westToken));
+        assertTrue(mwaaService.isValidCliToken(mwaaService.environmentIdentity(westEnvironment), westToken));
+        assertFalse(mwaaService.isValidCliToken(mwaaService.environmentIdentity(westEnvironment), eastToken));
+        assertTrue(mwaaService.isValidCliToken(mwaaService.environmentIdentity(eastEnvironment), eastToken));
+        assertFalse(mwaaService.isValidCliToken(mwaaService.environmentIdentity(eastEnvironment), westToken));
     }
 
     @Test
@@ -535,9 +535,9 @@ class MwaaServiceTest {
         Map<String, Object> response = mwaaService.createCliToken("cli-token-env");
         String token = (String) response.get("CliToken");
         assertNotNull(token);
-        assertTrue(mwaaService.isValidCliToken(MwaaService.environmentIdentity(
+        assertTrue(mwaaService.isValidCliToken(mwaaService.environmentIdentity(
                 mwaaService.getEnvironment("cli-token-env")), token));
-        assertFalse(mwaaService.isValidCliToken(MwaaService.environmentIdentity(
+        assertFalse(mwaaService.isValidCliToken(mwaaService.environmentIdentity(
                 mwaaService.getEnvironment("cli-token-env")), "not-a-real-token"));
         assertFalse(mwaaService.isValidCliToken("other-env", token));
     }
@@ -551,6 +551,7 @@ class MwaaServiceTest {
         private MwaaEnvironmentManager environmentManager;
         private MwaaProxyManager proxyManager;
         private MwaaService realModeService;
+        private boolean keepRunningOnShutdown;
 
         @BeforeEach
         void setUpRealMode() {
@@ -571,6 +572,7 @@ class MwaaServiceTest {
                         case "proxyBasePort" -> 8700;
                         case "proxyMaxPort" -> 8799;
                         case "dagSyncIntervalSeconds" -> 30;
+                        case "keepRunningOnShutdown" -> keepRunningOnShutdown;
                         default -> defaultValue(method);
                     });
             EmulatorConfig.ServicesConfig servicesConfig = proxy(EmulatorConfig.ServicesConfig.class,
@@ -612,6 +614,16 @@ class MwaaServiceTest {
         }
 
         @Test
+        void shutdownLeavesEnvironmentContainersRunningWhenRetentionIsEnabled() {
+            keepRunningOnShutdown = true;
+            realModeService.createEnvironment("kept-env", createRequest("arn:aws:s3:::my-bucket", "dags"));
+
+            realModeService.shutdown();
+
+            verify(environmentManager, Mockito.never()).stopEnvironment(any());
+        }
+
+        @Test
         void proxyStartupFailureRollsBackTheAllocatedPortAndAnyStartedContainers() {
             // Containers start fine; only the proxy bind fails (e.g. the port got taken out from
             // under us between allocate() and bind()). The port must not leak, and whatever
@@ -625,7 +637,7 @@ class MwaaServiceTest {
             assertEquals(EnvironmentStatus.CREATE_FAILED, environment.getStatus());
             verify(portAllocator).release(8701);
             verify(environmentManager).stopEnvironment(environment);
-            verify(proxyManager).stopProxy(MwaaService.environmentIdentity(environment));
+            verify(proxyManager).stopProxy(mwaaService.environmentIdentity(environment));
         }
 
         @Test

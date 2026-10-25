@@ -14,7 +14,6 @@ public class CachePolicy {
     private String etag;
     private Instant lastModifiedTime;
     private Map<String, Object> config;
-    private String configXml;
 
     public CachePolicy() {}
 
@@ -36,6 +35,9 @@ public class CachePolicy {
     public Map<String, Object> getConfig() { return config; }
     public void setConfig(Map<String, Object> config) { this.config = config; }
 
+    private String configXml;
+
     public String getConfigXml() { return configXml; }
+
     public void setConfigXml(String configXml) { this.configXml = configXml; }
 }

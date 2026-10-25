@@ -13,10 +13,10 @@ import io.github.hectorvent.floci.services.cloudwatch.metrics.CloudWatchMetricsJ
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbJsonHandler;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbStreamsJsonHandler;
 import io.github.hectorvent.floci.services.kinesis.KinesisJsonHandler;
+import io.github.hectorvent.floci.services.marketplace.MarketplaceEntitlementController;
 import io.github.hectorvent.floci.services.sns.SnsJsonHandler;
 import io.github.hectorvent.floci.services.sqs.SqsJsonHandler;
 import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsJsonHandler;
-import io.github.hectorvent.floci.services.marketplace.MarketplaceEntitlementController;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -47,6 +47,10 @@ public class AwsJsonCborController {
     private static final ObjectMapper CBOR_MAPPER = new ObjectMapper(new CBORFactory());
     private static final String GENERIC_CBOR_MEDIA_TYPE = "application/cbor";
     private static final String AWS_CBOR_1_1_MEDIA_TYPE = "application/x-amz-cbor-1.1";
+
+    /** The RPC v2 path parameters {@link IamEnforcementFilter} authorizes, as this endpoint dispatches them. */
+    static final String RPC_V2_SERVICE_PARAMETER = "serviceId";
+    static final String RPC_V2_OPERATION_PARAMETER = "operation";
 
     private final ObjectMapper objectMapper;
     private final ResolvedServiceCatalog catalog;
@@ -289,8 +293,8 @@ public class AwsJsonCborController {
     @Consumes({GENERIC_CBOR_MEDIA_TYPE, AWS_CBOR_1_1_MEDIA_TYPE})
     @Produces({GENERIC_CBOR_MEDIA_TYPE, AWS_CBOR_1_1_MEDIA_TYPE})
     public Response handleSmithyRpcV2Cbor(
-            @PathParam("serviceId") String serviceId,
-            @PathParam("operation") String operation,
+            @PathParam(RPC_V2_SERVICE_PARAMETER) String serviceId,
+            @PathParam(RPC_V2_OPERATION_PARAMETER) String operation,
             @Context HttpHeaders httpHeaders,
             byte[] body) {
 
@@ -351,7 +355,8 @@ public class AwsJsonCborController {
         return request;
     }
 
-    private boolean isGZipped(List<String> contentEncodingHeaders) {
+    // Package-private: PassedRoles reads the same body before this controller runs.
+    static boolean isGZipped(List<String> contentEncodingHeaders) {
         if (contentEncodingHeaders == null) {
             return false;
         }
@@ -389,10 +394,10 @@ public class AwsJsonCborController {
         }
 
         // Symmetric with the JSON 1.0/1.1 controllers: a target this controller cannot
-        // resolve is an unknown operation, not an empty 204. The 204 fallback now applies
+        // dispatch is an unknown operation, not an empty 204. The 204 fallback now applies
         // only to a resolved service whose action this handler does not dispatch.
         ServiceCatalog.TargetMatch targetMatch = catalog.matchTarget(target).orElse(null);
-        if (targetMatch == null) {
+        if (targetMatch == null || targetMatch.jsonOnly()) {
             return cborUnknownOperationError("Unknown operation: " + target, httpHeaders);
         }
 
@@ -416,7 +421,7 @@ public class AwsJsonCborController {
                 case "kinesis" -> kinesisJsonHandler.handle(action, request, region);
                 case "states" -> sfnJsonHandler.handle(action, request, region);
                 case "monitoring" -> cloudWatchMetricsJsonHandler.handle(action, request, region);
-                default -> null;
+                default -> throw new AwsException("UnknownOperationException", "Unknown operation: " + target, 404);
             };
             if (delegated == null) {
                 return null;
@@ -443,7 +448,7 @@ public class AwsJsonCborController {
         }
     }
 
-    private byte[] decodeBody(byte[] compressed) {
+    static byte[] decodeBody(byte[] compressed) {
         int buffSize = 64 * 1024;
         byte[] buffer = new byte[buffSize]; // 10 MB limit max over all aws services, to avoid OOM. AWS services should not send more than 10 MB in a single request.
         int totalRead = 0;
@@ -497,19 +502,7 @@ public class AwsJsonCborController {
     }
 
     private Response cborErrorResponse(AwsException e, String protocolHeader, String mediaType) {
-        try {
-            byte[] errBytes = CBOR_MAPPER.writeValueAsBytes(
-                    new AwsErrorResponse(e.jsonType(), e.getMessage()));
-            String queryErrorFault = (e.getHttpStatus() < 500) ? "Sender" : "Receiver";
-            return Response.status(e.getHttpStatus())
-                    .header(protocolHeader, "rpc-v2-cbor")
-                    .header("x-amzn-query-error", e.getErrorCode() + ";" + queryErrorFault)
-                    .type(mediaType)
-                    .entity(errBytes)
-                    .build();
-        } catch (Exception ex) {
-            return Response.status(e.getHttpStatus()).build();
-        }
+        return CborErrorResponses.of(e, mediaType);
     }
 
     private String responseContentType(HttpHeaders httpHeaders) {
