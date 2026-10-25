@@ -1905,6 +1905,11 @@ public class CognitoService implements ResourceProvider {
      * https://docs.aws.eu/esc/latest/userguide/cognito.html). Prefix domains are. No source shows
      * AWS's message for the refusal, so the wording is Floci's own.
      */
+    /** {@link #requireCustomDomainsAvailable(String)} for the request's Region. */
+    void requireCustomDomainsAvailableInRequestRegion() {
+        requireCustomDomainsAvailable(regionResolver.getRegion());
+    }
+
     private static void requireCustomDomainsAvailable(String region) {
         AwsPartition partition = AwsPartitions.forRegionOrCommercial(region);
         if (CUSTOM_DOMAIN_UNAVAILABLE_PARTITIONS.contains(partition.id())) {

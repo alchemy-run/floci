@@ -515,8 +515,12 @@ public class CognitoJsonHandler {
     }
 
     private Response handleCreateUserPoolDomain(JsonNode request) {
-        // An unusable certificate is reported before the pool's existing domains are considered.
+        // A partition without custom domains, then an unusable certificate, are reported before the
+        // pool's existing domains are considered.
         Map<String, Object> customDomain = customDomainConfig(request);
+        if (customDomain != null) {
+            service.requireCustomDomainsAvailableInRequestRegion();
+        }
         if (customDomain != null && customDomain.get("CertificateArn") instanceof String certificateArn
                 && !certificateArn.isBlank()) {
             service.requireUsableCertificate(certificateArn);
