@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -30,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -49,8 +51,10 @@ class IotDomainConfigurationServiceTest {
             mock(TlsCertificateManager.class));
 
     private static EmulatorConfig endpointConfig(AtomicReference<String> endpointAddress) {
-        EmulatorConfig config = mock(EmulatorConfig.class);
+        EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.iotEndpointAddress()).thenAnswer(invocation -> endpointAddress.get());
+        when(config.services().iot().endpointAddress())
+                .thenAnswer(invocation -> Optional.ofNullable(endpointAddress.get()));
         return config;
     }
 

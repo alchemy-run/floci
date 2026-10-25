@@ -706,7 +706,7 @@ public class CloudWatchLogsHandler {
     private static final Pattern LOG_GROUP_NAME = Pattern.compile("[._/#A-Za-z0-9-]+");
 
     private static void requireLogGroupName(String group) {
-        if (group.isEmpty() || group.length() > 512 || !LOG_GROUP_NAME.matcher(group).matches()) {
+        if (group == null || group.isEmpty() || group.length() > 512 || !LOG_GROUP_NAME.matcher(group).matches()) {
             throw new AwsException("InvalidParameterException", "Invalid logGroupName.", 400);
         }
     }

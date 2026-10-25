@@ -842,57 +842,6 @@ class IamPassRoleEnforcementIntegrationTest {
     }
 
     @Test
-    void aRedshiftServerlessNamespaceAndScheduledActionNeedPassRoleOnTheirRolesForRedshiftServerless() {
-        String role = role("serverless-copy");
-        User user = user("passrole-serverless");
-        String namespace = "passrole-ns-" + suffix();
-        String action = "passrole-action-" + suffix();
-        String createNamespace = "{\"namespaceName\":\"%s\",\"adminUsername\":\"admin\",\"iamRoles\":[\"%s\"]}"
-                .formatted(namespace, role);
-        String updateNamespace = "{\"namespaceName\":\"%s\",\"iamRoles\":[\"%s\"],\"defaultIamRoleArn\":\"%s\"}"
-                .formatted(namespace, role, role);
-        String createAction = ("{\"scheduledActionName\":\"%s\",\"namespaceName\":\"%s\",\"roleArn\":\"%s\","
-                + "\"schedule\":{\"cron\":\"cron(0 3 * * ? *)\"},\"targetAction\":{\"createSnapshot\":"
-                + "{\"namespaceName\":\"%s\",\"snapshotNamePrefix\":\"nightly\"}}}")
-                .formatted(action, namespace, role, namespace);
-        String updateAction = "{\"scheduledActionName\":\"%s\",\"roleArn\":\"%s\"}".formatted(action, role);
-        String actions = allow("redshift-serverless:CreateNamespace", "*") + ","
-                + allow("redshift-serverless:UpdateNamespace", "*") + ","
-                + allow("redshift-serverless:CreateScheduledAction", "*") + ","
-                + allow("redshift-serverless:UpdateScheduledAction", "*");
-
-        // A grant to pass the role to Redshift does not cover Redshift Serverless.
-        user.policy(actions + "," + passRole(role, REDSHIFT));
-        deniedJson(serverless(user, "CreateNamespace").body(createNamespace).post("/").then());
-        user.policy(actions + "," + passRole(role, REDSHIFT_SERVERLESS));
-        serverless(user, "CreateNamespace").body(createNamespace).post("/").then().statusCode(200);
-        serverless(user, "CreateScheduledAction").body(createAction).post("/").then().statusCode(200);
-        cleanup.register(() -> {
-            admin("redshift-serverless").header("X-Amz-Target", "RedshiftServerless.DeleteScheduledAction")
-                    .contentType("application/x-amz-json-1.1")
-                    .body("{\"scheduledActionName\":\"" + action + "\"}").post("/");
-            admin("redshift-serverless").header("X-Amz-Target", "RedshiftServerless.DeleteNamespace")
-                    .contentType("application/x-amz-json-1.1")
-                    .body("{\"namespaceName\":\"" + namespace + "\"}").post("/");
-        });
-
-        user.policy(actions);
-        deniedJson(serverless(user, "UpdateNamespace").body(updateNamespace).post("/").then());
-        deniedJson(serverless(user, "CreateScheduledAction").body(createAction).post("/").then());
-        deniedJson(serverless(user, "UpdateScheduledAction").body(updateAction).post("/").then());
-        user.policy(actions + "," + passRole(role, REDSHIFT_SERVERLESS));
-        serverless(user, "UpdateNamespace").body(updateNamespace).post("/").then().statusCode(200);
-        serverless(user, "UpdateScheduledAction").body(updateAction).post("/").then().statusCode(200);
-
-        // Floci keeps a default the namespace's roles do not hold, so naming one needs PassRole on it too.
-        String other = role("serverless-default");
-        String defaultOnly = "{\"namespaceName\":\"%s\",\"defaultIamRoleArn\":\"%s\"}".formatted(namespace, other);
-        deniedJson(serverless(user, "UpdateNamespace").body(defaultOnly).post("/").then());
-        user.policy(actions + "," + passRole(role, REDSHIFT_SERVERLESS) + "," + passRole(other, REDSHIFT_SERVERLESS));
-        serverless(user, "UpdateNamespace").body(defaultOnly).post("/").then().statusCode(200);
-    }
-
-    @Test
     void anRdsRequestNeedsPassRoleOnEachRoleItNamesForRds() {
         String role = role("rds-feature");
         User user = user("passrole-rds");

@@ -4,6 +4,7 @@ import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
@@ -216,7 +217,7 @@ class IotDomainConfigurationIntegrationTest {
             .body("domainConfigurationName", equalTo("iot:Data-ATS"))
             .body("domainConfigurationArn",
                     startsWith("arn:aws:iot:us-east-1:000000000000:domainconfiguration/iot:Data-ATS/"))
-            .body("domainName", equalTo("localhost:4566"))
+            .body("domainName", endsWith("-ats.iot.us-east-1.amazonaws.com"))
             .body("domainType", equalTo("AWS_MANAGED"))
             .body("serviceType", equalTo("DATA"))
             .body("domainConfigurationStatus", equalTo("ENABLED"))
@@ -346,6 +347,6 @@ class IotDomainConfigurationIntegrationTest {
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", equalTo("localhost:4566"));
+            .body("endpointAddress", endsWith(".credentials.iot.us-east-1.amazonaws.com"));
     }
 }

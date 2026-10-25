@@ -543,8 +543,8 @@ class IotTopicRuleIntegrationTest {
         .when()
             .delete("/rules/mvp1Rule")
         .then()
-            .statusCode(404)
-            .body("__type", equalTo("ResourceNotFoundException"));
+            .statusCode(401)
+            .body("__type", equalTo("UnauthorizedException"));
     }
 
     private static String auth(String region, String service) {

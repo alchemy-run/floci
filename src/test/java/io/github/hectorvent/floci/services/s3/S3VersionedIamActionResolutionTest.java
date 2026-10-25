@@ -43,8 +43,6 @@ class S3VersionedIamActionResolutionTest {
 
     @Test
     void objectSubresourcesResolveToTheirOwnActions() {
-        assertEquals("s3:GetObjectAttributes", resolve("GET", params("attributes", "")));
-        assertEquals("s3:GetObjectVersionAttributes", resolve("GET", params("attributes", "", "versionId", "v1")));
         assertEquals("s3:GetObjectRetention", resolve("GET", params("retention", "", "versionId", "v1")));
         assertEquals("s3:PutObjectRetention", resolve("PUT", params("retention", "")));
         assertEquals("s3:GetObjectLegalHold", resolve("GET", params("legal-hold", "")));

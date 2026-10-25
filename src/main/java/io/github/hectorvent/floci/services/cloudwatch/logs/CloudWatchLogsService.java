@@ -930,7 +930,9 @@ public class CloudWatchLogsService implements ResourceProvider {
                 maxEventsPerQuery);
 
         String eventPrefix = eventKeyPrefix(region, groupName, streamName);
-        List<LogEvent> all = eventStore.scan(k -> k.startsWith(eventPrefix));
+        String groupPrefix = streamKeyPrefix(region, groupName);
+        List<LogEvent> all = eventStore.scan(k -> k.startsWith(eventPrefix)
+                && streamName.equals(streamNameFromEventKey(k, groupPrefix)));
 
         // Filter before sorting so a narrow time window only pays the comparison cost for
         // the events it keeps, instead of sorting the whole stream and discarding most of it.
@@ -1766,8 +1768,10 @@ public class CloudWatchLogsService implements ResourceProvider {
 
     private void deleteEventsForStream(String region, String groupName, String streamName) {
         String eventPrefix = eventKeyPrefix(region, groupName, streamName);
+        String groupPrefix = streamKeyPrefix(region, groupName);
         List<String> keys = eventStore.keys().stream()
-                .filter(k -> k.startsWith(eventPrefix))
+                .filter(k -> k.startsWith(eventPrefix)
+                        && streamName.equals(streamNameFromEventKey(k, groupPrefix)))
                 .toList();
         keys.forEach(eventStore::delete);
     }

@@ -108,7 +108,8 @@ class IotThingOrganizationIntegrationTest {
         .when()
             .delete("/thing-types/mvp2-sensor")
         .then()
-            .statusCode(200);
+            // AWS keeps a thing type for five minutes after it is deprecated.
+            .statusCode(400);
     }
 
     @Test

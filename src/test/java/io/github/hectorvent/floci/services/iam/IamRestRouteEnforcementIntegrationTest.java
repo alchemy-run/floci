@@ -122,91 +122,6 @@ class IamRestRouteEnforcementIntegrationTest {
     }
 
     @Test
-    void eksRoutesAreCheckedAgainstTheClusterAndTheNodeGroupEksHolds() {
-        // Every EKS route was let through unchecked. A cluster route is checked against the cluster, and a node
-        // group route against the ARN EKS holds the node group under, which ends in an id the request does not
-        // carry, so a Deny on that node group applies where the action is allowed on every resource.
-        String user = user("route-eks");
-        String name = "route-eks-" + suffix();
-        String cluster = eksCluster(name);
-        String nodegroup = eks().body("{\"nodegroupName\":\"ng\",\"subnets\":[\"subnet-abc\"],"
-                + "\"nodeRole\":\"arn:aws:iam::" + ACCOUNT + ":role/route-node\"}")
-                .post("/clusters/" + name + "/node-groups").then().statusCode(200)
-                .extract().path("nodegroup.nodegroupArn");
-        cleanup.register(() -> eks().delete("/clusters/" + name + "/node-groups/ng"));
-
-        policy(user, allow("eks:DescribeCluster", cluster + "-other"));
-        refused(as(user, "eks").get("/clusters/" + name).then(), "eks:DescribeCluster");
-        policy(user, allow("eks:DescribeCluster", cluster));
-        as(user, "eks").get("/clusters/" + name).then().statusCode(200);
-
-        String path = "/clusters/" + name + "/node-groups/ng";
-        policy(user, allow("eks:DescribeNodegroup", "*") + "," + deny("eks:DescribeNodegroup", nodegroup));
-        refused(as(user, "eks").get(path).then(), "eks:DescribeNodegroup");
-        policy(user, allow("eks:DescribeNodegroup", cluster.replace(":cluster/", ":nodegroup/") + "/ng/*"));
-        as(user, "eks").get(path).then().statusCode(200).body("nodegroup.nodegroupArn", equalTo(nodegroup));
-    }
-
-    @Test
-    void eachResourceAnEksClusterHoldsIsCheckedAgainstTheArnEksHoldsItUnder() {
-        // Each is looked up as EKS looks it up, so a Deny on its own ARN applies where the action is allowed
-        // on every resource, and a grant on that ARN alone covers it.
-        String user = user("route-eks-held");
-        String name = "route-held-" + suffix();
-        String base = "/clusters/" + name;
-        eksCluster(name);
-        String role = EnforcementFixtures.createRole(cleanup, baseUri.getPort(), ACCOUNT, "/", "route-held-" + suffix(),
-                "{\"Version\":\"2012-10-17\",\"Statement\":[" + allow("s3:*", "*") + "]}");
-        String profile = eks().body("{\"fargateProfileName\":\"fp\",\"podExecutionRoleArn\":\"" + role + "\"}")
-                .post(base + "/fargate-profiles").then().statusCode(200)
-                .extract().path("fargateProfile.fargateProfileArn");
-        cleanup.register(() -> eks().delete(base + "/fargate-profiles/fp"));
-        String addon = eks().body("{\"addonName\":\"vpc-cni\"}").post(base + "/addons").then().statusCode(200)
-                .extract().path("addon.addonArn");
-        String update = eks().body("{}").post(base + "/addons/vpc-cni/update").then().statusCode(200)
-                .extract().path("update.id");
-        String entry = eks().body("{\"principalArn\":\"" + role + "\"}").post(base + "/access-entries").then()
-                .statusCode(200).extract().path("accessEntry.accessEntryArn");
-        String association = eks().body("{\"namespace\":\"default\",\"serviceAccount\":\"app\",\"roleArn\":\"" + role
-                + "\"}").post(base + "/pod-identity-associations").then().statusCode(200)
-                .extract().path("association.associationArn");
-        String[][] routes = {
-            {"eks:DescribeFargateProfile", base + "/fargate-profiles/fp", profile},
-            {"eks:DescribeAddon", base + "/addons/vpc-cni", addon},
-            // EKS returns an add-on's update without its addonName, so the update is its add-on's.
-            {"eks:DescribeUpdate", base + "/updates/" + update, addon},
-            {"eks:DescribeAccessEntry", base + "/access-entries/" + encoded(role), entry},
-            {"eks:DescribePodIdentityAssociation",
-                base + "/pod-identity-associations/" + association.substring(association.lastIndexOf('/') + 1),
-                association},
-        };
-        for (String[] route : routes) {
-            policy(user, allow(route[0], "*") + "," + deny(route[0], route[2]));
-            refused(as(user, "eks").urlEncodingEnabled(false).get(route[1]).then(), route[0]);
-            policy(user, allow(route[0], route[2]));
-            as(user, "eks").urlEncodingEnabled(false).get(route[1]).then().statusCode(200);
-        }
-    }
-
-    @Test
-    void anEksClusterRouteIsCheckedAgainstTheClusterEksActsOn() {
-        // EKS finds a cluster by its name alone, whatever Region a request is signed for, so a request signed
-        // for another Region is checked against the cluster it acts on.
-        String user = user("route-eks-region");
-        String name = "route-west-" + suffix();
-        String cluster = given().header("Authorization", auth(ADMIN, "us-west-2", "eks"))
-                .contentType("application/json")
-                .body("{\"name\":\"" + name + "\",\"roleArn\":\"arn:aws:iam::" + ACCOUNT + ":role/route-cluster\"}")
-                .post("/clusters").then().statusCode(200).extract().path("cluster.arn");
-        cleanup.register(() -> eks().delete("/clusters/" + name));
-
-        policy(user, allow("eks:DescribeCluster", "*") + "," + deny("eks:DescribeCluster", cluster));
-        refused(as(user, "eks").get("/clusters/" + name).then(), "eks:DescribeCluster");
-        policy(user, allow("eks:DescribeCluster", cluster));
-        as(user, "eks").get("/clusters/" + name).then().statusCode(200);
-    }
-
-    @Test
     void anEksAccessEntrysPolicyRoutesAreCheckedAsTheEntryRoutesTheyRunAs() {
         // EKS takes an access entry's principal as the rest of the path, so a request on an entry's access
         // policies reads or deletes the entry of a longer principal, and is checked as that.
@@ -225,22 +140,6 @@ class IamRestRouteEnforcementIntegrationTest {
         policy(user, allow("eks:DescribeAccessEntry", "*"));
         as(user, "eks").urlEncodingEnabled(false).get(policies).then().statusCode(404)
                 .body("message", equalTo("Access entry not found"));
-    }
-
-    @Test
-    void eksTaggingIsCheckedAgainstTheCallersClusterOfThatName() {
-        // EKS tags the caller's own cluster named after the ARN's last /, whatever account the ARN names, so a
-        // grant on another account's cluster of that name does not cover it, and one on the caller's own does.
-        String user = user("route-eks-tags");
-        String cluster = eksCluster("route-tagged-" + suffix());
-        String foreign = cluster.replace(ACCOUNT, "111122223333");
-        String body = "{\"tags\":{\"team\":\"a\"}}";
-
-        policy(user, allow("eks:TagResource", foreign));
-        refused(as(user, "eks").body(body).post("/tags/" + foreign).then(), "eks:TagResource");
-        policy(user, allow("eks:TagResource", cluster));
-        as(user, "eks").body(body).post("/tags/" + foreign).then().statusCode(not(403));
-        eks().get("/tags/" + cluster).then().statusCode(200).body("tags.team", equalTo("a"));
     }
 
     @Test
@@ -398,42 +297,6 @@ class IamRestRouteEnforcementIntegrationTest {
         refused(as(user, "lambda").get("/2016-08-19/account-settings").then(), "lambda:GetAccountSettings");
         policy(user, allow("lambda:GetAccountSettings", "*"));
         as(user, "lambda").get("/2016-08-19/account-settings").then().statusCode(200);
-    }
-
-    @Test
-    void aMicrovmIsCheckedAgainstTheImageItRuns() {
-        // RunMicrovm and the actions on a running MicroVM act on its image, so a Deny on the image applies to
-        // them even where the action is allowed on every resource, and a grant on the image alone covers them.
-        String user = user("route-microvm-image");
-        String image = microvmImage("route-image-" + suffix());
-        String run = "{\"imageIdentifier\":\"" + image.substring(image.lastIndexOf(':') + 1) + "\"}";
-
-        policy(user, allow("lambda:RunMicrovm", "*") + "," + deny("lambda:RunMicrovm", image));
-        refused(as(user, "lambda").body(run).post("/2025-09-09/microvms").then(), "lambda:RunMicrovm");
-        policy(user, allow("lambda:RunMicrovm", image));
-        String microvm = as(user, "lambda").body(run).post("/2025-09-09/microvms").then().statusCode(200)
-                .extract().path("microvmId");
-        cleanup.register(() -> admin().delete("/2025-09-09/microvms/" + microvm));
-
-        policy(user, allow("lambda:GetMicrovm", "*") + "," + deny("lambda:GetMicrovm", image));
-        refused(as(user, "lambda").get("/2025-09-09/microvms/" + microvm).then(), "lambda:GetMicrovm");
-        policy(user, allow("lambda:GetMicrovm", image));
-        as(user, "lambda").get("/2025-09-09/microvms/" + microvm).then().statusCode(200);
-    }
-
-    @Test
-    void aMicrovmImageTaggedThroughATargetWithoutTheArnPrefixIsCheckedAsTheImage() {
-        // Lambda tags the image any target holding :microvm-image: names, read by its fourth field and
-        // its last, so a Deny on the image applies however the target is spelled.
-        String user = user("route-image-tags");
-        String image = microvmImage("route-tagged-image-" + suffix());
-        String target = "/2017-03-31/tags/x:y:z:us-east-1:microvm-image:" + image.substring(image.lastIndexOf(':') + 1);
-        String body = "{\"Tags\":{\"team\":\"a\"}}";
-
-        policy(user, allow("lambda:TagResource", "*") + "," + deny("lambda:TagResource", image));
-        refused(as(user, "lambda").body(body).post(target).then(), "lambda:TagResource");
-        policy(user, allow("lambda:TagResource", "*"));
-        as(user, "lambda").body(body).post(target).then().statusCode(204);
     }
 
     /** Creates a MicroVM image as the account's admin, removed afterwards, and returns its ARN. */

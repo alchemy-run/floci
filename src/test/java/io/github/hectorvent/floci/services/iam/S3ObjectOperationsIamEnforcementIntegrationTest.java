@@ -134,7 +134,8 @@ class S3ObjectOperationsIamEnforcementIntegrationTest {
     @Test
     void restoringAnObjectNeedsRestoreObject() {
         Fixture f = new Fixture("restore", false);
-        f.seed("a/archived");
+        f.admin().header("x-amz-storage-class", "GLACIER").body("archived")
+                .when().put(f.path("a/archived")).then().statusCode(200);
 
         f.policy(f.allow("s3:GetObject", "s3:PutObject"));
         denied(f.restore("a/archived"), "s3:RestoreObject");

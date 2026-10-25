@@ -917,9 +917,6 @@ public class IamActionRegistry {
                 if (params.containsKey("acl")) {
                     yield S3ObjectActions.forVersion("s3:GetObjectAcl", versionId);
                 }
-                if (params.containsKey("attributes")) {
-                    yield S3ObjectActions.forVersion("s3:GetObjectAttributes", versionId);
-                }
                 yield versionId != null ? "s3:GetObjectVersion" : null;
             }
             case "HEAD" -> {

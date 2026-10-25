@@ -17,6 +17,7 @@ import java.util.Map;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.empty;
+import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.matchesPattern;
@@ -42,13 +43,13 @@ class IotIntegrationTest {
 
     @Test
     @Order(2)
-    void defaultDescribeEndpointReturnsBaseUrlAuthority() {
+    void defaultDescribeEndpointReturnsTheAwsShapedAddress() {
         given()
         .when()
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", equalTo("localhost:4566"));
+            .body("endpointAddress", endsWith("-ats.iot.us-east-1.amazonaws.com"));
     }
 
     @Test
@@ -60,7 +61,7 @@ class IotIntegrationTest {
             .get("/endpoint")
         .then()
             .statusCode(200)
-            .body("endpointAddress", equalTo("localhost:4566"));
+            .body("endpointAddress", endsWith("-ats.iot.us-east-1.amazonaws.com"));
     }
 
     @Test

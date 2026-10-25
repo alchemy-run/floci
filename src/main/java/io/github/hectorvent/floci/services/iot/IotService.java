@@ -2160,6 +2160,11 @@ public class IotService {
 
     private TaggableResource taggableForArn(String resourceArn) {
         AwsArnUtils.Arn arn = parseIotArn(resourceArn);
+        // Text in the Region or account field that is no Region or account makes the ARN invalid
+        // rather than one naming a resource elsewhere.
+        if (!arn.region().matches("[a-z]{2}(-[a-z]+)+-\\d+") || !arn.accountId().matches("\\d{12}")) {
+            throw new AwsException("InvalidRequestException", "Invalid resource ARN: " + resourceArn, 400);
+        }
         if (!regionResolver.getAccountId().equals(arn.accountId())
                 || !regionResolver.getRegion().equals(arn.region())) {
             throw new AwsException("ResourceNotFoundException", "Resource not found: " + resourceArn, 404);
