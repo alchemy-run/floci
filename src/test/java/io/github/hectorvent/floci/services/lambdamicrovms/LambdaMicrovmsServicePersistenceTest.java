@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.lambdamicrovms;
 
+import io.github.hectorvent.floci.testing.InlineMocks;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -77,9 +79,9 @@ class LambdaMicrovmsServicePersistenceTest {
         when(containers.createAndStart(any())).thenAnswer(call ->
                 new ContainerLifecycleManager.ContainerInfo("container-" + UUID.randomUUID(), Map.of()));
         ContainerBuilder builder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder spec = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        ContainerBuilder.Builder spec = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(builder.newContainer(anyString())).thenReturn(spec);
-        when(spec.build()).thenReturn(mock(ContainerSpec.class));
+        when(spec.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.services().lambda().dockerNetwork()).thenReturn(Optional.empty());
         LaunchedContainerAwsEnv env = mock(LaunchedContainerAwsEnv.class);

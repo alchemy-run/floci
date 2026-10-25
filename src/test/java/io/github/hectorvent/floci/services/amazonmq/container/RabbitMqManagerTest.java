@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.amazonmq.container;
 
+import io.github.hectorvent.floci.testing.InlineMocks;
+
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -68,9 +70,9 @@ class RabbitMqManagerTest {
     }
 
     private static ContainerBuilder.Builder selfReturningBuilder(ContainerBuilder containerBuilder) {
-        ContainerBuilder.Builder builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(Mockito.mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
         return builder;
     }
 

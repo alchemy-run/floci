@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.kinesisanalytics.container;
 
+import io.github.hectorvent.floci.testing.InlineMocks;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.dockerjava.api.DockerClient;
@@ -159,9 +161,9 @@ class FlinkContainerManagerTest {
                         new ContainerLifecycleManager.EndpointInfo("localhost", 8081))));
 
         ContainerBuilder containerBuilder = Mockito.mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = Mockito.mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(Mockito.mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
         RegionResolver regionResolver = Mockito.mock(RegionResolver.class);
         when(regionResolver.getAccountId()).thenReturn("000000000000");

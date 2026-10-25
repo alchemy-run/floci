@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.testing;
 
 import org.mockito.MockMakers;
 import org.mockito.Mockito;
+import org.mockito.stubbing.Answer;
 
 /**
  * Mocks and spies for the types the suite's default subclass mock maker cannot extend: final classes,
@@ -15,6 +16,11 @@ public final class InlineMocks {
 
     public static <T> T inlineMock(Class<T> type) {
         return Mockito.mock(type, Mockito.withSettings().mockMaker(MockMakers.INLINE));
+    }
+
+    /** {@link #inlineMock(Class)} with a default answer, e.g. {@code RETURNS_SELF} for a builder. */
+    public static <T> T inlineMock(Class<T> type, Answer<?> defaultAnswer) {
+        return Mockito.mock(type, Mockito.withSettings().mockMaker(MockMakers.INLINE).defaultAnswer(defaultAnswer));
     }
 
     /** {@link Mockito#spy(Object)} for an instance of a final class. */

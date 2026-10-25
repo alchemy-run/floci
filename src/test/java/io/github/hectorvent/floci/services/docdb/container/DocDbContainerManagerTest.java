@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.docdb.container;
 
+import io.github.hectorvent.floci.testing.InlineMocks;
+
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -104,9 +106,9 @@ class DocDbContainerManagerTest {
                             new ContainerLifecycleManager.EndpointInfo("127.0.0.1", mongod.port()))));
 
             ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-            ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
+            ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(mock(ContainerSpec.class));
+            when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
             DocDbContainerManager manager = new DocDbContainerManager(containerBuilder, lifecycleManager,
                     logStreamer(), mock(ContainerDetector.class), docdbConfig(),
@@ -155,9 +157,9 @@ class DocDbContainerManagerTest {
 
     private DocDbContainerManager newManager(ContainerLifecycleManager lifecycleManager) {
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
         return new DocDbContainerManager(containerBuilder, lifecycleManager, logStreamer(),
                 mock(ContainerDetector.class), docdbConfig(), new RegionResolver("us-east-1", "000000000000"));

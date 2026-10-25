@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.elasticache.container;
 
+import io.github.hectorvent.floci.testing.InlineMocks;
+
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -52,9 +54,9 @@ class ElastiCacheMemcachedContainerManagerTest {
                                     "127.0.0.1", serverSocket.getLocalPort()))));
 
             ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-            ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+            ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
             when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-            when(builder.build()).thenReturn(mock(ContainerSpec.class));
+            when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
             EmulatorConfig config = mock(EmulatorConfig.class);
             EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);
@@ -94,9 +96,9 @@ class ElastiCacheMemcachedContainerManagerTest {
                 .thenThrow(new IllegalStateException("log attach failed after daemon went away"));
 
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
 
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.ServicesConfig services = mock(EmulatorConfig.ServicesConfig.class);

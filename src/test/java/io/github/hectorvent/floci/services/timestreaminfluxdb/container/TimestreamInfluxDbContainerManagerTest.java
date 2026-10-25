@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.timestreaminfluxdb.container;
 
+import io.github.hectorvent.floci.testing.InlineMocks;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -38,9 +40,9 @@ class TimestreamInfluxDbContainerManagerTest {
     void setUp() {
         lifecycleManager = mock(ContainerLifecycleManager.class);
         ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        builder = mock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
+        builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, Mockito.RETURNS_SELF);
         when(containerBuilder.newContainer(anyString())).thenReturn(builder);
-        when(builder.build()).thenReturn(mock(ContainerSpec.class));
+        when(builder.build()).thenReturn(InlineMocks.inlineMock(ContainerSpec.class));
         portAllocator = mock(PortAllocator.class);
         when(portAllocator.allocate(8086, 8185)).thenReturn(8090);
 

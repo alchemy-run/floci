@@ -1,5 +1,7 @@
 package io.github.hectorvent.floci.services.codebuild;
 
+import io.github.hectorvent.floci.testing.InlineMocks;
+
 import com.github.dockerjava.api.DockerClient;
 import com.github.dockerjava.api.async.ResultCallback;
 import com.github.dockerjava.api.command.CopyArchiveFromContainerCmd;
@@ -200,8 +202,8 @@ class CodeBuildRunnerTest {
     private static final class Harness {
         final DockerClient docker = mock(DockerClient.class);
         final ContainerBuilder containerBuilder = mock(ContainerBuilder.class);
-        final ContainerBuilder.Builder builder = mock(ContainerBuilder.Builder.class, RETURNS_SELF);
-        final ContainerSpec spec = mock(ContainerSpec.class);
+        final ContainerBuilder.Builder builder = InlineMocks.inlineMock(ContainerBuilder.Builder.class, RETURNS_SELF);
+        final ContainerSpec spec = InlineMocks.inlineMock(ContainerSpec.class);
         final ContainerLifecycleManager lifecycle = mock(ContainerLifecycleManager.class);
         final ContainerLogStreamer logStreamer = mock(ContainerLogStreamer.class);
         final ExecCreateCmd execCreate = mock(ExecCreateCmd.class, RETURNS_SELF);
