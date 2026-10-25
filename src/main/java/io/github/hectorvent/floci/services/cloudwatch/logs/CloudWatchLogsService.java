@@ -27,6 +27,7 @@ import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.kinesis.KinesisService;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
+import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Event;
 import jakarta.enterprise.inject.Instance;
@@ -49,6 +50,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.LongSupplier;
 import java.util.zip.GZIPOutputStream;
@@ -106,6 +108,7 @@ public class CloudWatchLogsService implements ResourceProvider {
      */
     private final AtomicLong ingestionSequence;
     private final long queryCompletionDelayMs;
+    private final List<LiveTailSession> liveTailSessions = new CopyOnWriteArrayList<>();
 
     // Wall-clock source of "now" for the query lifecycle, injected so tests can drive it deterministically.
     // Non-monotonic: a backward NTP step could briefly flip a Complete query back to Running — a rare,
@@ -807,6 +810,12 @@ public class CloudWatchLogsService implements ResourceProvider {
         putForAccount(streamStore, accountId, streamKey, stream);
 
         if (!ingested.isEmpty()) {
+            String account = accountId != null ? accountId : regionResolver.getAccountId();
+            for (LiveTailSession session : liveTailSessions) {
+                if (session.region.equals(region) && session.account.equals(account)) {
+                    session.accept(groupName, streamName, ingested);
+                }
+            }
             deliverSubscriptionMatches(accountId, groupName, streamName, ingested, region);
         }
 
@@ -919,6 +928,72 @@ public class CloudWatchLogsService implements ResourceProvider {
             return;
         }
         store.delete(key);
+    }
+
+    LiveTailSession prepareLiveTail(List<String> identifiers, List<String> names,
+                                    List<String> prefixes, String filter, String region) {
+        if (identifiers.isEmpty() || identifiers.size() > 10) {
+            throw new AwsException("InvalidParameterException", "Specify between 1 and 10 log group ARNs.", 400);
+        }
+        if ((!names.isEmpty() && !prefixes.isEmpty())
+                || (identifiers.size() != 1 && (!names.isEmpty() || !prefixes.isEmpty()))
+                || names.size() > 100 || prefixes.size() > 100) {
+            throw new AwsException("InvalidParameterException",
+                    "Specify at most 100 stream names or prefixes, for a single log group only.", 400);
+        }
+        for (String stream : java.util.stream.Stream.concat(names.stream(), prefixes.stream()).toList()) {
+            if (stream.isEmpty() || stream.length() > 512 || stream.contains(":") || stream.contains("*")) {
+                throw new AwsException("InvalidParameterException", "Invalid log stream name or prefix.", 400);
+            }
+        }
+        if (filter != null && filter.length() > 1024) {
+            throw new AwsException("InvalidParameterException", "The filter pattern exceeds 1024 characters.", 400);
+        }
+        String account = regionResolver.getAccountId();
+        Map<String, String> groups = new LinkedHashMap<>();
+        for (String identifier : identifiers) {
+            AwsArnUtils.Arn arn;
+            try {
+                arn = AwsArnUtils.parse(identifier);
+            } catch (IllegalArgumentException e) {
+                throw new AwsException("InvalidParameterException", "Invalid log group ARN: " + identifier, 400);
+            }
+            if (!arn.service().equals("logs") || !arn.region().equals(region)
+                    || !arn.accountId().equals(account) || !arn.resource().startsWith("log-group:")
+                    || !arn.resource().substring("log-group:".length()).matches("[.\\-_/#A-Za-z0-9]{1,512}")) {
+                throw new AwsException("InvalidParameterException",
+                        "Specify log group ARNs in the current account and region, without a trailing wildcard.", 400);
+            }
+            String groupName = arn.resource().substring("log-group:".length());
+            LogGroup group = groupStore.get(groupKey(region, groupName))
+                    .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                            "The specified log group does not exist: " + groupName, 400));
+            if (!DEFAULT_LOG_GROUP_CLASS.equals(normalizeLogGroupClass(group.getLogGroupClass()))) {
+                throw new AwsException("InvalidOperationException", "Live tail requires STANDARD log groups.", 400);
+            }
+            groups.put(groupName, identifier);
+        }
+        return new LiveTailSession(account, region, groups, names, prefixes, filter);
+    }
+
+    synchronized void registerLiveTail(LiveTailSession session) {
+        long count = liveTailSessions.stream()
+                .filter(s -> s.account.equals(session.account) && s.region.equals(session.region)).count();
+        if (count >= 15) {
+            throw new AwsException("LimitExceededException", "The limit of 15 live tail sessions has been reached.", 400);
+        }
+        liveTailSessions.add(session);
+    }
+
+    void closeLiveTail(LiveTailSession session) {
+        session.close();
+        liveTailSessions.remove(session);
+    }
+
+    @PreDestroy
+    void closeLiveTailSessions() {
+        liveTailSessions.forEach(LiveTailSession::close);
+        liveTailSessions.clear();
     }
 
     public record LogEventsResult(List<LogEvent> events, String nextForwardToken, String nextBackwardToken) {}
