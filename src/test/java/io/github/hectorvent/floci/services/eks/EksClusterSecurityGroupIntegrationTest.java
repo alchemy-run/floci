@@ -195,10 +195,10 @@ class EksClusterSecurityGroupIntegrationTest {
             assertEquals(nonDefaultAccount, nonDefaultSg.getOwnerId(), "Security group ownerId should match non-default account");
 
             // Verify it does NOT exist under the default account in EC2
-            AwsException notInDefaultAccount = assertThrows(AwsException.class, () -> RequestScopes.callAs("000000000000", () ->
-                    ec2Service.describeSecurityGroups("us-east-1", List.of(backfilledSgId), List.of(), Map.of())),
-                    "Security group should not exist in EC2 under default account");
-            assertEquals("InvalidGroup.NotFound", notInDefaultAccount.getErrorCode());
+            // The service lookup is lenient; DescribeSecurityGroups itself refuses the unknown id.
+            assertTrue(RequestScopes.callAs("000000000000", () ->
+                    ec2Service.describeSecurityGroups("us-east-1", List.of(backfilledSgId), List.of(), Map.of()))
+                    .isEmpty(), "Security group should not exist in EC2 under default account");
 
             // Clean up security group
             RequestScopes.runAs(nonDefaultAccount, () -> ec2Service.deleteSecurityGroup("us-east-1", backfilledSgId));

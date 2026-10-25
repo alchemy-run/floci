@@ -60,7 +60,10 @@ public class CloudTrailEventService {
         ObjectNode identity = record.putObject("userIdentity");
         identity.put("accountId", regions.getAccountId());
         if (accessKey != null) identity.put("accessKeyId", accessKey);
-        String arn = accessKey == null ? null : iam.resolveCallerArn(accessKey).orElse(null);
+        // Resolving an expired session deletes it, which would turn the caller's next request from
+        // ExpiredToken into an unknown key; recording the event must not change what IAM answers.
+        String arn = accessKey == null || iam.isExpiredSession(accessKey, Instant.now())
+                ? null : iam.resolveCallerArn(accessKey).orElse(null);
         if (arn != null) {
             identity.put("arn", arn).put("type", arn.contains(":assumed-role/") ? "AssumedRole" : "IAMUser");
             if (arn.contains(":user/")) identity.put("userName", arn.substring(arn.lastIndexOf('/') + 1));

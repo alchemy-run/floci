@@ -13653,8 +13653,12 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
 
         synchronized (privateIpAllocationLock) {
             String eniId = "eni-" + randomHex(17);
-            String primaryIp = (privateIpAddress != null && !privateIpAddress.isBlank())
-                    ? privateIpAddress : assignPrivateIp(region, subnetId);
+            boolean requested = privateIpAddress != null && !privateIpAddress.isBlank();
+            // An address something in the subnet already holds is refused, as on AWS.
+            if (requested && privateIpsTaken(region, subnetId).contains(privateIpAddress)) {
+                throw new AwsException("InvalidIPAddress.InUse", "Address " + privateIpAddress + " is in use.", 400);
+            }
+            String primaryIp = requested ? privateIpAddress : assignPrivateIp(region, subnetId);
             String primaryDns = AwsRegions.ec2PrivateIpDnsName(primaryIp, region);
 
             NetworkInterface ni = new NetworkInterface();

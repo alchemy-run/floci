@@ -132,6 +132,9 @@ public class ApiGatewayTagHandler implements TagHandler {
             return;
         }
         AwsArnUtils.Arn parsed = AwsArnUtils.parse(arn);
+        if (!"apigateway".equals(parsed.service())) {
+            throw new AwsException("BadRequestException", "Invalid ARN specified in the request", 400);
+        }
         // ponytail: AWS names the resource type in both messages ("on RestApi <id>", "Invalid API
         // identifier specified <account>:<id>"); Floci uses one generic message per error.
         if (!parsed.accountId().isEmpty()) {

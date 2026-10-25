@@ -163,7 +163,8 @@ class S3ObjectTagConditionEnforcementIntegrationTest {
         assertEquals(403, f.getVersion("a/tagged-b", "null"), "the null version carries the denied tag");
         assertEquals(200, f.getVersion("a/tagged-a", "null"), "the null version carries an allowed tag");
         assertEquals(403, f.get("a/secret"), "the current version carries the denied tag");
-        assertEquals(404, f.getVersion("a/secret", "null"), "a key without a null version serves none");
+        // Without s3:ListBucket the caller is not told the version is missing: S3 answers 403.
+        assertEquals(403, f.getVersion("a/secret", "null"), "a key without a null version serves none");
     }
 
     private static String allow(String actions, String resource, String condition) {
