@@ -396,6 +396,24 @@ public class FirehoseService implements ResourceProvider {
     public String createDeliveryStream(String region, String accountId, String name, S3Destination s3Config,
                                        RedshiftDestination redshift, List<DeliveryStreamDescription.Tag> tags,
                                        String deliveryStreamType, KinesisStreamSource source) {
+        return createDeliveryStream(region, accountId, name, s3Config, redshift, tags, deliveryStreamType, source,
+                null);
+    }
+
+    /** CreateDeliveryStream in the request's account, with its DeliveryStreamEncryptionConfigurationInput. */
+    public String createDeliveryStream(String region, String name, S3Destination s3Config,
+                                       RedshiftDestination redshift, List<DeliveryStreamDescription.Tag> tags,
+                                       String deliveryStreamType, KinesisStreamSource source,
+                                       DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
+        return createDeliveryStream(region, regionResolver.getAccountId(), name, s3Config, redshift, tags,
+                deliveryStreamType, source, encryption);
+    }
+
+    /** CreateDeliveryStream with its DeliveryStreamEncryptionConfigurationInput, null when the request has none. */
+    public String createDeliveryStream(String region, String accountId, String name, S3Destination s3Config,
+                                       RedshiftDestination redshift, List<DeliveryStreamDescription.Tag> tags,
+                                       String deliveryStreamType, KinesisStreamSource source,
+                                       DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
         String streamKey = scopedKey(accountId, region, name);
         if (name == null || name.isEmpty() || name.length() > 64 || !name.matches("[a-zA-Z0-9_.-]+")) {
             throw new AwsException("InvalidArgumentException",
@@ -414,6 +432,28 @@ public class FirehoseService implements ResourceProvider {
             validateLogging(null, redshift.getS3Backup());
             validateBufferingHints(redshift.getS3());
             validateBufferingHints(redshift.getS3Backup());
+        }
+        boolean hasKinesisSource = source != null
+                && source.getKinesisStreamArn() != null
+                && !source.getKinesisStreamArn().isBlank();
+        if ("KinesisStreamAsSource".equals(deliveryStreamType) && !hasKinesisSource) {
+            throw new AwsException("InvalidArgumentException",
+                    "KinesisStreamSourceConfiguration is required when DeliveryStreamType is KinesisStreamAsSource.", 400);
+        }
+        if (hasKinesisSource && "DirectPut".equals(deliveryStreamType)) {
+            throw new AwsException("InvalidArgumentException",
+                    "KinesisStreamSourceConfiguration cannot be set when DeliveryStreamType is DirectPut.", 400);
+        }
+        if (hasKinesisSource && (source.getRoleArn() == null || source.getRoleArn().isBlank())) {
+            throw new AwsException("InvalidArgumentException",
+                    "KinesisStreamSourceConfiguration.RoleARN must not be null or empty.", 400);
+        }
+        String resolvedType = hasKinesisSource
+                ? "KinesisStreamAsSource"
+                : (deliveryStreamType != null && !deliveryStreamType.isBlank() ? deliveryStreamType : null);
+        if (encryption != null && "KinesisStreamAsSource".equals(resolvedType)) {
+            throw new AwsException("InvalidArgumentException",
+                    "Server-side encryption is not supported for delivery streams with a Kinesis stream as source.", 400);
         }
         DataFormatConversionValidator.validateEffective(s3Config);
         ProcessingConfigurationValidator.validateEffective(s3Config);
@@ -434,8 +474,11 @@ public class FirehoseService implements ResourceProvider {
         DeliveryStreamDescription description = new DeliveryStreamDescription(name, arn, s3Config, redshift, source);
         description.setAccountId(accountId);
         description.setTags(tags);
-        if (deliveryStreamType != null && !deliveryStreamType.isBlank()) {
-            description.setDeliveryStreamType(deliveryStreamType);
+        if (resolvedType != null) {
+            description.setDeliveryStreamType(resolvedType);
+        }
+        if (encryption != null) {
+            applyEncryptionInput(description, encryption);
         }
         streamPut(streamKey, description);
         buffers.put(streamKey, Collections.synchronizedList(new ArrayList<>()));
@@ -1518,6 +1561,14 @@ public class FirehoseService implements ResourceProvider {
         try {
             s3Service.createBucket(bucket, regionResolver.getDefaultRegion());
         } catch (Exception ignored) {}
+    }
+
+    private static void applyEncryptionInput(DeliveryStreamDescription stream,
+                                             DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption) {
+        if (encryption.getKeyType() == null || encryption.getKeyType().isBlank()) {
+            throw new AwsException("InvalidArgumentException", "KeyType is required.", 400);
+        }
+        applyEncryption(stream, encryption.getKeyType(), encryption.getKeyArn());
     }
 
     private static void applyEncryption(DeliveryStreamDescription stream, String keyType, String keyArn) {

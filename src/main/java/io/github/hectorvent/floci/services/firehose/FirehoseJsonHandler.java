@@ -82,8 +82,13 @@ public class FirehoseJsonHandler {
                 KinesisStreamSource source = request.has("KinesisStreamSourceConfiguration")
                         ? mapper.treeToValue(request.get("KinesisStreamSourceConfiguration"), KinesisStreamSource.class)
                         : null;
-                String arn = firehoseService.createDeliveryStream(
-                        region, name, s3, redshift, tags, deliveryStreamType, source);
+                DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration encryption = null;
+                if (request.hasNonNull("DeliveryStreamEncryptionConfigurationInput")) {
+                    encryption = mapper.treeToValue(request.get("DeliveryStreamEncryptionConfigurationInput"),
+                            DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.class);
+                }
+                String arn = firehoseService.createDeliveryStream(region, name, s3, redshift, tags,
+                        deliveryStreamType, source, encryption);
                 yield Response.ok(Map.of("DeliveryStreamARN", arn)).build();
             }
             case "UpdateDestination" -> {
