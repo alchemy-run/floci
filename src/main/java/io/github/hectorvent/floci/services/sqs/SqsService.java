@@ -2393,6 +2393,11 @@ public class SqsService implements Resettable, ResourceProvider {
         if (storedUrl == null || incomingQueueUrl == null) {
             return storedUrl;
         }
+        String storedOrigin = originOf(storedUrl);
+        // The AWS URL strategy hands out sqs.<region>.amazonaws.com URLs whatever host was called.
+        if (storedOrigin != null && storedOrigin.endsWith(".amazonaws.com")) {
+            return storedUrl;
+        }
         String incomingOrigin = originOf(incomingQueueUrl);
         String storedPath = extractQueuePath(storedUrl);
         if (incomingOrigin == null || storedPath.isEmpty() || !storedPath.startsWith("/")) {

@@ -85,12 +85,13 @@ class OrganizationsServiceTest {
     void managementPolicyTypesSupportTheExistingLifecycle(String type) {
         Organization organization = service.createOrganization(MANAGEMENT_ACCOUNT, "ALL");
         String rootId = organization.getRoot().getId();
-        AwsException disabled = assertThrows(AwsException.class, () -> service.createPolicy(
-                MANAGEMENT_ACCOUNT, "{}", "description", "Policy", type, null));
+        // The policy can be created before its type is enabled; attaching it cannot.
+        OrganizationPolicy policy = service.createPolicy(MANAGEMENT_ACCOUNT, "{}", "description", "Policy", type, null);
+        AwsException disabled = assertThrows(AwsException.class,
+                () -> service.attachPolicy(MANAGEMENT_ACCOUNT, policy.getId(), rootId));
         assertEquals("PolicyTypeNotEnabledException", disabled.getErrorCode());
 
         service.enablePolicyType(MANAGEMENT_ACCOUNT, rootId, type);
-        OrganizationPolicy policy = service.createPolicy(MANAGEMENT_ACCOUNT, "{}", "description", "Policy", type, null);
         assertEquals(type, policy.getType());
         assertEquals(List.of(policy), service.listPolicies(MANAGEMENT_ACCOUNT, type));
         service.attachPolicy(MANAGEMENT_ACCOUNT, policy.getId(), rootId);

@@ -562,14 +562,21 @@ class OrganizationsIntegrationTest {
 
     @Test
     @Order(40)
-    void tagPolicyRequiresItsPolicyTypeEnabled() {
-        organizations("CreatePolicy",
-                "{\"Name\":\"CostCenter\",\"Type\":\"TAG_POLICY\",\"Content\":" + quote(TAG_POLICY_CONTENT) + "}")
+    void tagPolicyCanBeCreatedBeforeItsPolicyTypeIsEnabled() {
+        // AWS creates a policy of a type the root has not enabled; only attaching it needs the type.
+        String policyId = organizations("CreatePolicy",
+                "{\"Name\":\"CostCenterDraft\",\"Type\":\"TAG_POLICY\",\"Content\":"
+                        + quote(TAG_POLICY_CONTENT) + "}")
         .when()
             .post("/")
         .then()
-            .statusCode(400)
-            .body("__type", equalTo("PolicyTypeNotEnabledException"));
+            .statusCode(200)
+            .extract().path("Policy.PolicySummary.Id");
+        organizations("DeletePolicy", "{\"PolicyId\":\"" + policyId + "\"}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
     }
 
     @Test
