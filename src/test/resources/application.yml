@@ -304,6 +304,9 @@ floci:
     acm:
       enabled: true
       validation-wait-seconds: 0
+      # Issue DNS-validated certificates after the wait, as email validation is; the suites that
+      # pin Route 53 record validation override it with their own profile.
+      dns-validation-requires-record: false
     athena:
       enabled: true
       mock: true

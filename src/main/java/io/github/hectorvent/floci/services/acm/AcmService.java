@@ -103,6 +103,7 @@ public class AcmService implements ResourceProvider {
      * @see <a href="https://github.com/getmoto/moto/blob/main/moto/acm/models.py">moto ACM</a>
      */
     private final ConcurrentHashMap<String, IdempotencyTokenEntry> idempotencyTokenIndex = new ConcurrentHashMap<>();
+    private final boolean dnsValidationRequiresRecord;
 
     @Inject
     public AcmService(StorageFactory factory, CertificateGenerator certificateGenerator,
@@ -113,17 +114,34 @@ public class AcmService implements ResourceProvider {
             certificateGenerator,
             certificateAuthority,
             regionResolver,
-            config.services().acm().validationWaitSeconds());
+            config.services().acm().validationWaitSeconds(),
+            null,
+            config.services().acm().dnsValidationRequiresRecord());
     }
 
     AcmService(StorageBackend<String, Certificate> store, CertificateGenerator certificateGenerator,
                FlociCertificateAuthority certificateAuthority, RegionResolver regionResolver,
                int validationWaitSeconds) {
+        this(store, certificateGenerator, certificateAuthority, regionResolver, validationWaitSeconds, null);
+    }
+
+    AcmService(StorageBackend<String, Certificate> store, CertificateGenerator certificateGenerator,
+               FlociCertificateAuthority certificateAuthority, RegionResolver regionResolver,
+               int validationWaitSeconds, Route53Service route53Service) {
+        this(store, certificateGenerator, certificateAuthority, regionResolver, validationWaitSeconds,
+                route53Service, true);
+    }
+
+    AcmService(StorageBackend<String, Certificate> store, CertificateGenerator certificateGenerator,
+               FlociCertificateAuthority certificateAuthority, RegionResolver regionResolver,
+               int validationWaitSeconds, Route53Service route53Service, boolean dnsValidationRequiresRecord) {
+        this.route53Service = route53Service;
         this.store = store;
         this.certificateGenerator = certificateGenerator;
         this.certificateAuthority = certificateAuthority;
         this.regionResolver = regionResolver;
         this.validationWaitSeconds = validationWaitSeconds;
+        this.dnsValidationRequiresRecord = dnsValidationRequiresRecord;
     }
 
     /**
@@ -647,16 +665,23 @@ public class AcmService implements ResourceProvider {
 
     public synchronized Certificate revokeCertificate(String certificateArn, RevocationReason reason, String region) {
         Certificate cert = getCertificateByArn(certificateArn, region);
-        boolean exportEnabled = cert.getCertOptions() != null && "ENABLED".equals(cert.getCertOptions().export());
-        if (!exportEnabled) {
+        if (cert.getType() == CertificateType.IMPORTED
+                && (cert.getCertOptions() == null || !"ENABLED".equals(cert.getCertOptions().export()))) {
             throw new AwsException("ValidationException",
                 "Certificate " + certificateArn + " cannot be revoked because it is not export-enabled.", 400);
+        }
+        if (!cert.isExported()) {
+            throw new AwsException("ConflictException", "Only exported certificates can be revoked.", 409);
+        }
+        if (cert.getStatus() == CertificateStatus.REVOKED) {
+            throw new AwsException("ConflictException", "Certificate is already revoked.", 409);
         }
         if (!certificateInUseBy(cert).isEmpty()) {
             throw new AwsException("ResourceInUseException",
                     "Certificate " + certificateArn + " is in use by another service.", 400);
         }
         cert.setStatus(CertificateStatus.REVOKED);
+        cert.setRevokedAt(Instant.now());
         store.put(regionKey(region, cert.extractCertificateId()), cert);
         return cert;
     }
@@ -732,7 +757,7 @@ public class AcmService implements ResourceProvider {
         boolean changed = false;
         if (cert.getStatus() == CertificateStatus.PENDING_VALIDATION) {
             boolean validated;
-            if (cert.getValidationMethod() == ValidationMethod.DNS) {
+            if (cert.getValidationMethod() == ValidationMethod.DNS && dnsValidationRequiresRecord) {
                 List<HostedZone> zones = route53Service != null
                     ? route53Service.listHostedZones(null, 0) : List.of();
                 List<DomainValidation> validations = cert.getDomainValidationOptions().stream()
@@ -747,7 +772,7 @@ public class AcmService implements ResourceProvider {
                 validated = !validations.isEmpty()
                     && validations.stream().allMatch(validation -> "SUCCESS".equals(validation.validationStatus()));
             } else {
-                validated = cert.getValidationMethod() == ValidationMethod.EMAIL && validationWaitSeconds >= 0
+                validated = validationWaitSeconds >= 0
                     && cert.getCreatedAt() != null
                     && !Instant.now().isBefore(cert.getCreatedAt().plusSeconds(validationWaitSeconds));
             }

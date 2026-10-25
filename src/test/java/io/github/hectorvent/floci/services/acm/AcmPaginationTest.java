@@ -1,5 +1,8 @@
 package io.github.hectorvent.floci.services.acm;
 
+import io.github.hectorvent.floci.testing.AcmDnsRecordValidationProfile;
+import io.quarkus.test.junit.TestProfile;
+
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
@@ -23,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * Tests for ListCertificates pagination functionality.
  */
 @QuarkusTest
+@TestProfile(AcmDnsRecordValidationProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AcmPaginationTest {
@@ -142,17 +146,14 @@ class AcmPaginationTest {
     @Test
     @Order(5)
     void emptyListReturnsNoNextToken() {
-        // Filter by a status none of this class's own certificates ever have. Can't assert the
-        // whole result is empty -- other test classes in the shared full-suite JVM (e.g.
-        // AcmIntegrationTest) revoke certificates of their own, and that state persists across
-        // classes. What this test actually verifies -- filtering excludes non-matching
-        // certificates and a small result page carries no NextToken -- holds regardless.
+        // The unused key type excludes revoked certificates left by other test classes.
         Response response = given()
             .header("X-Amz-Target", "CertificateManager.ListCertificates")
             .contentType(ACM_CONTENT_TYPE)
             .body("""
                 {
-                    "CertificateStatuses": ["REVOKED"]
+                    "CertificateStatuses": ["REVOKED"],
+                    "Includes": { "keyTypes": ["EC-secp521r1"] }
                 }
                 """)
         .when()
@@ -164,6 +165,7 @@ class AcmPaginationTest {
         List<String> revokedArns = response.jsonPath().getList("CertificateSummaryList.CertificateArn");
         assertTrue(createdArns.stream().noneMatch(revokedArns::contains),
                 "none of this class's own (always-ISSUED) certificates should appear under a REVOKED filter");
+        assertTrue(revokedArns.isEmpty());
         assertNull(response.jsonPath().get("NextToken"));
     }
 

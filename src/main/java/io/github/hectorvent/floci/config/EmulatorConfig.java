@@ -2260,6 +2260,14 @@ public interface EmulatorConfig {
         /** Simulated email-validation delay (0 = immediate, negative = pending); DNS requires public Route 53 records. */
         @WithDefault("0")
         int validationWaitSeconds();
+
+        /**
+         * Whether a DNS-validated certificate is issued only once its validation CNAME is published
+         * in a public Route 53 hosted zone, as on AWS. When false it is issued after
+         * {@link #validationWaitSeconds()}, as email validation is.
+         */
+        @WithDefault("true")
+        boolean dnsValidationRequiresRecord();
     }
 
     interface CloudHsmV2ServiceConfig {

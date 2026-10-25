@@ -1,7 +1,9 @@
 package io.github.hectorvent.floci.services.acm;
 
+import io.github.hectorvent.floci.testing.AcmDnsRecordValidationProfile;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.quarkus.test.junit.TestProfile;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -15,6 +17,7 @@ import static org.hamcrest.Matchers.*;
  * {@code UnknownOperationException}: search, options sync, renew, resend, revoke.
  */
 @QuarkusTest
+@TestProfile(AcmDnsRecordValidationProfile.class)
 class AcmAlchemyParityTest {
 
     private static final String ACM_CONTENT_TYPE = "application/x-amz-json-1.1";

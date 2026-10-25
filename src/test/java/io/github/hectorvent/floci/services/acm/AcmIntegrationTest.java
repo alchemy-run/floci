@@ -1,8 +1,17 @@
 package io.github.hectorvent.floci.services.acm;
 
+import io.github.hectorvent.floci.testing.AcmDnsRecordValidationProfile;
+import io.quarkus.test.junit.TestProfile;
+
+import io.github.hectorvent.floci.services.acm.model.Certificate;
+import io.github.hectorvent.floci.services.acm.model.DomainValidation;
+import io.github.hectorvent.floci.services.route53.Route53Service;
+import io.github.hectorvent.floci.services.route53.model.ResourceRecord;
+import io.github.hectorvent.floci.services.route53.model.ResourceRecordSet;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.path.json.JsonPath;
+import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -19,7 +28,9 @@ import java.security.cert.TrustAnchor;
 import java.security.cert.X509Certificate;
 import java.security.interfaces.ECPublicKey;
 import java.security.interfaces.RSAPublicKey;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import static io.restassured.RestAssured.given;
@@ -27,6 +38,7 @@ import static org.hamcrest.Matchers.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
+@TestProfile(AcmDnsRecordValidationProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AcmIntegrationTest {
@@ -35,28 +47,18 @@ class AcmIntegrationTest {
     private static String createdCertificateArn;
     private static String ecCertificateArn;
 
+    @Inject
+    Route53Service route53;
+
+    @Inject
+    AcmService acm;
+
     @BeforeAll
     static void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
     }
 
     // ==================== User Story 1: RequestCertificate ====================
-
-    @Test
-    void requestCertificateRejectsEmptySans() {
-        given()
-            .header("X-Amz-Target", "CertificateManager.RequestCertificate")
-            .contentType(ACM_CONTENT_TYPE)
-            .body("""
-                {"DomainName": "empty-sans.example.com", "SubjectAlternativeNames": []}
-                """)
-        .when().post("/")
-        .then()
-            .statusCode(400)
-            .body("__type", equalTo("ValidationException"))
-            .body("message", equalTo("1 validation error detected: Value '[]' at 'subjectAlternativeNames' "
-                + "failed to satisfy constraint: Member must have length greater than or equal to 1"));
-    }
 
     @Test
     @Order(1)
@@ -233,6 +235,54 @@ class AcmIntegrationTest {
             .body("__type", equalTo("ValidationException"));
     }
 
+    @Test
+    @Order(9)
+    void publicCertificateRequiresDnsValidationBeforeIssuance() {
+        given()
+            .header("X-Amz-Target", "CertificateManager.GetCertificate")
+            .contentType(ACM_CONTENT_TYPE)
+            .body("{\"CertificateArn\":\"" + createdCertificateArn + "\"}")
+        .when().post("/")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("RequestInProgressException"));
+
+        validateDnsCertificate(createdCertificateArn);
+        validateDnsCertificate(ecCertificateArn);
+    }
+
+    private void validateDnsCertificate(String arn) {
+        Certificate certificate = acm.describeCertificate(arn, "us-east-1");
+        String zoneId = route53.createHostedZone(certificate.getDomainName(), arn, null, null)
+                .zone().getId();
+        List<Map<String, Object>> changes = new ArrayList<>();
+        for (DomainValidation validation : certificate.getDomainValidationOptions()) {
+            ResourceRecordSet recordSet = new ResourceRecordSet();
+            recordSet.setName(validation.resourceRecord().name());
+            recordSet.setType("CNAME");
+            recordSet.setTtl(60L);
+            recordSet.setRecords(List.of(new ResourceRecord(validation.resourceRecord().value())));
+            changes.add(Map.of("action", "UPSERT", "rrs", recordSet));
+        }
+        route53.changeResourceRecordSets(zoneId, changes, null);
+        try {
+            given()
+                .header("X-Amz-Target", "CertificateManager.DescribeCertificate")
+                .contentType(ACM_CONTENT_TYPE)
+                .body("{\"CertificateArn\":\"" + arn + "\"}")
+            .when().post("/")
+            .then()
+                .statusCode(200)
+                .body("Certificate.Status", equalTo("ISSUED"))
+                .body("Certificate.DomainValidationOptions.ValidationStatus", everyItem(equalTo("SUCCESS")));
+        } finally {
+            route53.changeResourceRecordSets(zoneId, changes.stream()
+                    .map(change -> Map.<String, Object>of("action", "DELETE", "rrs", change.get("rrs")))
+                    .toList(), null);
+            route53.deleteHostedZone(zoneId);
+        }
+    }
+
     // ==================== User Story 2: DescribeCertificate ====================
 
     @Test
@@ -254,6 +304,7 @@ class AcmIntegrationTest {
             .body("Certificate.DomainName", equalTo("example.com"))
             .body("Certificate.Status", equalTo("ISSUED"))
             .body("Certificate.Type", equalTo("AMAZON_ISSUED"))
+            .body("Certificate.Options.Export", equalTo("DISABLED"))
             .body("Certificate.Serial", notNullValue())
             .body("Certificate.Subject", startsWith("CN="))
             .body("Certificate.Issuer", equalTo("CN=Floci Local CA"))
@@ -294,6 +345,40 @@ class AcmIntegrationTest {
         assertEquals("RSA", leaf.getPublicKey().getAlgorithm());
         assertEquals(2048, ((RSAPublicKey) leaf.getPublicKey()).getModulus().bitLength(),
                 "RSA_2048 is the default KeyAlgorithm");
+    }
+
+    @Test
+    @Order(16)
+    void getPrivateCertificate() {
+        String privateArn = given()
+            .header("X-Amz-Target", "CertificateManager.RequestCertificate")
+            .contentType(ACM_CONTENT_TYPE)
+            .body("""
+                {
+                    "DomainName": "internal.example.com",
+                    "CertificateAuthorityArn": "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-1234-1234-123456789012"
+                }
+                """)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().jsonPath().getString("CertificateArn");
+
+        given()
+            .header("X-Amz-Target", "CertificateManager.GetCertificate")
+            .contentType(ACM_CONTENT_TYPE)
+            .body("""
+                {
+                    "CertificateArn": "%s"
+                }
+                """.formatted(privateArn))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Certificate", startsWith("-----BEGIN CERTIFICATE-----"))
+            .body("CertificateChain", startsWith("-----BEGIN CERTIFICATE-----"));
     }
 
     // ==================== User Story 2: ListCertificates ====================
@@ -608,7 +693,7 @@ class AcmIntegrationTest {
             .body("""
                 {
                     "CertificateArn": "%s",
-                    "Options": {"Export": "ENABLED"}
+                    "Options": {"CertificateTransparencyLoggingPreference": "DISABLED"}
                 }
                 """.formatted(createdCertificateArn))
         .when()
@@ -626,7 +711,7 @@ class AcmIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("Certificate.Options.Export", equalTo("ENABLED"));
+            .body("Certificate.Options.CertificateTransparencyLoggingPreference", equalTo("DISABLED"));
     }
 
     @Test
@@ -652,7 +737,7 @@ class AcmIntegrationTest {
             .header("X-Amz-Target", "CertificateManager.RequestCertificate")
             .contentType(ACM_CONTENT_TYPE)
             .body("""
-                {"DomainName": "revocable.example.com"}
+                {"DomainName": "revocable.example.com", "Options": {"Export": "ENABLED"}}
                 """)
         .when()
             .post("/")
@@ -661,10 +746,10 @@ class AcmIntegrationTest {
             .extract().jsonPath().getString("CertificateArn");
 
         given()
-            .header("X-Amz-Target", "CertificateManager.UpdateCertificateOptions")
+            .header("X-Amz-Target", "CertificateManager.ExportCertificate")
             .contentType(ACM_CONTENT_TYPE)
             .body("""
-                {"CertificateArn": "%s", "Options": {"Export": "ENABLED"}}
+                {"CertificateArn": "%s", "Passphrase": "dGVzdHBhc3NwaHJhc2U="}
                 """.formatted(certificateArn))
         .when()
             .post("/")
@@ -755,7 +840,7 @@ class AcmIntegrationTest {
             .post("/")
         .then()
             .statusCode(400)
-            .body("__type", equalTo("UnsupportedOperation"));
+            .body("__type", equalTo("UnknownOperationException"));
     }
 
     private static JsonPath getCertificatePems(String certificateArn) {

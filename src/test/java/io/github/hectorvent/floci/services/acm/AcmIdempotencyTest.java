@@ -1,5 +1,8 @@
 package io.github.hectorvent.floci.services.acm;
 
+import io.github.hectorvent.floci.testing.AcmDnsRecordValidationProfile;
+import io.quarkus.test.junit.TestProfile;
+
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeAll;
@@ -20,6 +23,7 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
  * Tests for idempotency token functionality with 1-hour TTL.
  */
 @QuarkusTest
+@TestProfile(AcmDnsRecordValidationProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class AcmIdempotencyTest {

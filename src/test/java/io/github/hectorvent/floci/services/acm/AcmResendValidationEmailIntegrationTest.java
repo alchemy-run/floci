@@ -1,5 +1,8 @@
 package io.github.hectorvent.floci.services.acm;
 
+import io.github.hectorvent.floci.testing.AcmDnsRecordValidationProfile;
+import io.quarkus.test.junit.TestProfile;
+
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeAll;
@@ -9,6 +12,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 
 @QuarkusTest
+@TestProfile(AcmDnsRecordValidationProfile.class)
 class AcmResendValidationEmailIntegrationTest {
 
     private static final String ACM_CONTENT_TYPE = "application/x-amz-json-1.1";
@@ -37,7 +41,7 @@ class AcmResendValidationEmailIntegrationTest {
         String certificateArn = given()
                 .header("X-Amz-Target", "CertificateManager.RequestCertificate")
                 .contentType(ACM_CONTENT_TYPE)
-                .body("{\"DomainName\":\"resend-validation.example.com\"}")
+                .body("{\"ValidationMethod\":\"EMAIL\",\"DomainName\":\"resend-validation.example.com\"}")
                 .when()
                 .post("/")
                 .then()
@@ -63,7 +67,7 @@ class AcmResendValidationEmailIntegrationTest {
         String certificateArn = given()
                 .header("X-Amz-Target", "CertificateManager.RequestCertificate")
                 .contentType(ACM_CONTENT_TYPE)
-                .body("{\"DomainName\":\"site.subdomain.resend-superdomain.example.com\"}")
+                .body("{\"ValidationMethod\":\"EMAIL\",\"DomainName\":\"site.subdomain.resend-superdomain.example.com\"}")
                 .when()
                 .post("/")
                 .then()
@@ -89,7 +93,7 @@ class AcmResendValidationEmailIntegrationTest {
         String certificateArn = given()
                 .header("X-Amz-Target", "CertificateManager.RequestCertificate")
                 .contentType(ACM_CONTENT_TYPE)
-                .body("{\"DomainName\":\"site.subdomain.resend-ok.example.com\"}")
+                .body("{\"ValidationMethod\":\"EMAIL\",\"DomainName\":\"site.subdomain.resend-ok.example.com\"}")
                 .when()
                 .post("/")
                 .then()

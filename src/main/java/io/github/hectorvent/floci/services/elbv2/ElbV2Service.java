@@ -1483,6 +1483,7 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
     }
 
     private Map<String, Subnet> resolveSubnetsById(String region, List<String> subnetIds) {
+        Map<String, Subnet> described = describeSubnetsQuietly(region, subnetIds);
         Map<String, Subnet> subnetsById = new LinkedHashMap<>();
         int index = 0;
         for (String subnetId : subnetIds) {
@@ -1490,7 +1491,7 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
                 throw new AwsException("SubnetNotFound",
                         "The subnet ID '" + subnetId + "' does not exist", 400);
             }
-            Subnet subnet = lookupEc2Subnet(region, subnetId);
+            Subnet subnet = described.containsKey(subnetId) ? described.get(subnetId) : lookupEc2Subnet(region, subnetId);
             if (subnet == null) {
                 // Accept well-formed IDs the EC2 store cannot see under this
                 // RequestContext (wrong account/region key, or a caller that
@@ -2060,6 +2061,26 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
 
     /** Classic (8 hex) or current (17 hex) subnet IDs. Anything else is SubnetNotFound. */
     private static final Pattern AWS_SUBNET_ID = Pattern.compile("subnet-[0-9a-f]{8}(?:[0-9a-f]{9})?");
+
+    /** The subnets EC2 describes for these ids in one call; empty when it refuses one of them. */
+    private Map<String, Subnet> describeSubnetsQuietly(String region, List<String> subnetIds) {
+        if (ec2Service == null || subnetIds == null || subnetIds.isEmpty()) {
+            return Map.of();
+        }
+        try {
+            List<Subnet> subnets = ec2Service.describeSubnets(region, subnetIds, Map.of());
+            if (subnets == null) {
+                return Map.of();
+            }
+            return subnets.stream()
+                    .collect(Collectors.toMap(Subnet::getSubnetId, subnet -> subnet, (left, right) -> left));
+        } catch (AwsException e) {
+            if ("InvalidSubnetID.NotFound".equals(e.getErrorCode())) {
+                return Map.of();
+            }
+            throw e;
+        }
+    }
 
     private Subnet lookupEc2Subnet(String region, String subnetId) {
         if (ec2Service == null) {

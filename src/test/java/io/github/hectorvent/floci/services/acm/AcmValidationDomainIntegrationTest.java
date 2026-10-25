@@ -1,5 +1,8 @@
 package io.github.hectorvent.floci.services.acm;
 
+import io.github.hectorvent.floci.testing.AcmDnsRecordValidationProfile;
+import io.quarkus.test.junit.TestProfile;
+
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.ValidatableResponse;
@@ -15,6 +18,7 @@ import static io.restassured.RestAssured.given;
  * be able to tell whether the request was taken as sent.
  */
 @QuarkusTest
+@TestProfile(AcmDnsRecordValidationProfile.class)
 class AcmValidationDomainIntegrationTest {
 
     private static final String ACM_CONTENT_TYPE = "application/x-amz-json-1.1";
