@@ -102,7 +102,11 @@ public class EmrServerlessController {
                                                      UpdateApplicationRequest request) {
         Application app = service.updateApplication(applicationId, request);
         UpdateApplicationResponse response = new UpdateApplicationResponse();
+        // AWS answers with the application; the flat fields are kept for older floci callers.
         response.setApplication(app);
+        response.setApplicationId(app.getApplicationId());
+        response.setArn(app.getArn());
+        response.setName(app.getName());
         return response;
     }
 

@@ -374,7 +374,7 @@ class EmrServerlessJobRunIntegrationTest {
                 .body("jobRuns.id", contains(newer, older))
                 .body("jobRuns[0].applicationId", equalTo(applicationId))
                 .body("jobRuns[0].state", equalTo("SUCCESS"))
-                .body("jobRuns[0].type", equalTo("SPARK"))
+                .body("jobRuns[0].type", equalTo("Spark"))
                 .body("jobRuns[0].releaseLabel", equalTo("emr-7.5.0"))
                 .body("jobRuns[0].createdBy", equalTo("arn:aws:iam::000000000000:root"))
                 .body("jobRuns[0].attempt", equalTo(1))
@@ -588,7 +588,8 @@ class EmrServerlessJobRunIntegrationTest {
         assertEquals(ROLE, attempts.getString("jobRunAttempts[0].executionRole"));
         assertEquals("SUCCESS", attempts.getString("jobRunAttempts[0].state"));
         assertEquals("emr-7.5.0", attempts.getString("jobRunAttempts[0].releaseLabel"));
-        assertEquals("SPARK", attempts.getString("jobRunAttempts[0].type"));
+        // The application normalizes its type to "Spark", as AWS reports it.
+        assertEquals("Spark", attempts.getString("jobRunAttempts[0].type"));
         assertEquals(1, attempts.getInt("jobRunAttempts[0].attempt"));
     }
 
