@@ -733,11 +733,10 @@ public class BackupService {
         job.setResourceArn(resourceArn);
         job.setResourceType(inferResourceType(resourceArn));
         job.setIamRoleArn(iamRoleArn);
-        job.setState("FAILED");
-        job.setStatusMessage("Backup execution is not supported by this emulator; no resource data was copied.");
-        job.setCompletionDate(now);
+        job.setState("CREATED");
         job.setPercentDone("0.0");
         job.setCreationDate(now);
+        job.setExpectedCompletionDate(now + jobCompletionDelaySeconds);
         job.setStartBy(now + 3600L);
         String accountId = regionResolver.getAccountId();
         job.setAccountId(accountId);
