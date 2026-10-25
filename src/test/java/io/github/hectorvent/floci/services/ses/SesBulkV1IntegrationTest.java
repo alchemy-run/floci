@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.ses;
 
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.specification.RequestSpecification;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -28,6 +29,11 @@ import static org.junit.jupiter.api.Assertions.assertNotEquals;
 @QuarkusTest
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class SesBulkV1IntegrationTest {
+
+    @BeforeAll
+    static void verifySenders() {
+        SesVerifiedSenders.verify("bulk@example.com");
+    }
 
     private static final String AUTH =
             "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/email/aws4_request";

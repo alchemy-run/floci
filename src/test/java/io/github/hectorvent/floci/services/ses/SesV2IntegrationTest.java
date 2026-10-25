@@ -35,7 +35,7 @@ class SesV2IntegrationTest {
         .then()
             .statusCode(200)
             .body("IdentityType", equalTo("EMAIL_ADDRESS"))
-            .body("VerifiedForSendingStatus", equalTo(true));
+            .body("VerifiedForSendingStatus", equalTo(false));
     }
 
     @Test
@@ -102,12 +102,12 @@ class SesV2IntegrationTest {
             // VerificationStatus must be populated per identity (never null), matching AWS.
             .body("EmailIdentities.VerificationStatus", everyItem(notNullValue()))
             .body("EmailIdentities.find { it.IdentityName == 'v2sender@example.com' }.VerificationStatus",
-                    equalTo("SUCCESS"))
+                    equalTo("PENDING"))
             .body("EmailIdentities.find { it.IdentityName == 'v2example.com' }.VerificationStatus",
                     equalTo("PENDING"))
-            // SendingEnabled tracks verification: SUCCESS -> true, PENDING -> false (matches AWS).
+            // SendingEnabled tracks verification: PENDING -> false (matches AWS): a created address stays pending until verified.
             .body("EmailIdentities.find { it.IdentityName == 'v2sender@example.com' }.SendingEnabled",
-                    equalTo(true))
+                    equalTo(false))
             .body("EmailIdentities.find { it.IdentityName == 'v2example.com' }.SendingEnabled",
                     equalTo(false));
     }
@@ -123,7 +123,7 @@ class SesV2IntegrationTest {
         .then()
             .statusCode(200)
             .body("IdentityType", equalTo("EMAIL_ADDRESS"))
-            .body("VerifiedForSendingStatus", equalTo(true))
+            .body("VerifiedForSendingStatus", equalTo(false))
             .body("DkimAttributes", notNullValue());
     }
 
@@ -1313,8 +1313,8 @@ class SesV2IntegrationTest {
         .then()
             .statusCode(200)
             .body("IdentityType", equalTo("EMAIL_ADDRESS"))
-            .body("VerifiedForSendingStatus", equalTo(true))
-            .body("VerificationStatus", equalTo("SUCCESS"))
+            .body("VerifiedForSendingStatus", equalTo(false))
+            .body("VerificationStatus", equalTo("PENDING"))
             .body("FeedbackForwardingStatus", notNullValue())
             .body("DkimAttributes", notNullValue())
             .body("DkimAttributes.SigningEnabled", notNullValue())

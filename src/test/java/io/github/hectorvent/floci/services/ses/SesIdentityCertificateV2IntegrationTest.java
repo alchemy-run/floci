@@ -36,6 +36,7 @@ class SesIdentityCertificateV2IntegrationTest {
     void matchingCertificateOnAVerifiedIdentityIsActive() {
         String identity = "smime-active@floci.test";
         createIdentity(identity);
+        SesVerifiedSenders.verify(identity);
         String certificateArn = importCertificate(identity);
         associate(identity, null, certificateArn).then().statusCode(200).body(equalTo("{}"));
 

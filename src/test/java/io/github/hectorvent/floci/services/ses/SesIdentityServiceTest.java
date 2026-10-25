@@ -325,7 +325,8 @@ class SesIdentityServiceTest {
 
         // Verify returned the creator's record instead of replacing it; nothing was lost.
         assertEquals("my-cs", verifyResult.get().getConfigurationSetName());
-        assertEquals(1, store.puts.get());
+        // The create, then the verify marking the pending identity verified.
+        assertEquals(2, store.puts.get());
         assertEquals("my-cs",
                 counted.find("alice@example.com", REGION).orElseThrow().getConfigurationSetName());
     }
