@@ -123,7 +123,7 @@ public class CloudHsmV2Service {
         if (ec2Service != null) {
             List<Subnet> subnets;
             try {
-                subnets = ec2Service.describeSubnets(region, SubnetIds, Collections.emptyMap());
+                subnets = ec2Service.requireSubnets(region, SubnetIds);
             } catch (AwsException e) {
                 if (e.getErrorCode() != null && e.getErrorCode().startsWith("InvalidSubnetID.")) {
                     throw new AwsException("CloudHsmInvalidRequestException", e.getMessage(), 400);

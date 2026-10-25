@@ -450,7 +450,7 @@ public class EfsService implements Resettable {
             throw EfsException.badRequest("SubnetId is required");
         }
         try {
-            return ec2Service.describeSubnets(region, List.of(subnetId), Map.of()).getFirst();
+            return ec2Service.requireSubnets(region, List.of(subnetId)).getFirst();
         } catch (AwsException error) {
             throw mountTargetNetworkError(error);
         }

@@ -7220,6 +7220,26 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         return describeSubnets(region, subnetIds, filterList(filters));
     }
 
+    /**
+     * The subnets these ids name, in the order given. Unlike {@link #describeSubnets}, which answers an
+     * unknown id with nothing, an id that names no subnet is {@code InvalidSubnetID.NotFound}, as the
+     * EC2 API answers it.
+     */
+    public List<Subnet> requireSubnets(String region, List<String> subnetIds) {
+        Map<String, Subnet> found = new HashMap<>();
+        describeSubnets(region, subnetIds, Map.of()).forEach(subnet -> found.put(subnet.getSubnetId(), subnet));
+        List<Subnet> ordered = new ArrayList<>();
+        for (String subnetId : subnetIds) {
+            Subnet subnet = found.get(subnetId);
+            if (subnet == null) {
+                throw new AwsException("InvalidSubnetID.NotFound",
+                        "The subnet ID '" + subnetId + "' does not exist", 400);
+            }
+            ordered.add(subnet);
+        }
+        return ordered;
+    }
+
     List<Subnet> describeSubnets(String region, List<String> subnetIds, List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
         List<Subnet> result = subnets.scan(k -> true).stream()

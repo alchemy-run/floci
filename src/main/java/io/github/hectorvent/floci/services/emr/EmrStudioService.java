@@ -187,7 +187,7 @@ public class EmrStudioService {
         String engineId = requireText(studio, "EngineSecurityGroupId");
         try {
             ec2.describeVpcs(region, List.of(vpcId), Map.of());
-            for (Subnet subnet : ec2.describeSubnets(region, ids, Map.of())) {
+            for (Subnet subnet : ec2.requireSubnets(region, ids)) {
                 if (!vpcId.equals(subnet.getVpcId())) {
                     throw invalid("All subnets must belong to the Studio VPC.");
                 }

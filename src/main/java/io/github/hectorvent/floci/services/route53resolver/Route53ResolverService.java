@@ -311,7 +311,7 @@ public class Route53ResolverService {
         }
         ArrayNode addresses = objectMapper.createArrayNode();
         try {
-            List<Subnet> subnets = ec2.describeSubnets(region, subnetIds, Map.of());
+            List<Subnet> subnets = ec2.requireSubnets(region, subnetIds);
             String vpcId = subnets.getFirst().getVpcId();
             if (subnets.stream().anyMatch(subnet -> !vpcId.equals(subnet.getVpcId()))) {
                 throw new AwsException(INVALID_PARAMETER, "All endpoint subnets must belong to the same VPC", 400);

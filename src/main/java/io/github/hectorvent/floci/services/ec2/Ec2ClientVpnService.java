@@ -753,7 +753,7 @@ public class Ec2ClientVpnService {
 
     private Subnet requireSubnet(String region, String subnetId) {
         try {
-            return ec2.describeSubnets(region, List.of(subnetId), Map.of()).getFirst();
+            return ec2.requireSubnets(region, List.of(subnetId)).getFirst();
         } catch (AwsException e) {
             if (!"InvalidSubnetID.NotFound".equals(e.getErrorCode())) {
                 throw e;
