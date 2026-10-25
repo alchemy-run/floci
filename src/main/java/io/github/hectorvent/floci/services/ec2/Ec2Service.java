@@ -1508,11 +1508,6 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     List<NetworkAcl> describeNetworkAcls(String region, List<String> ids,
                                          List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
-        if (ids != null && !ids.isEmpty()) {
-            for (String networkAclId : ids) {
-                getRequiredNetworkAcl(region, networkAclId);
-            }
-        }
         return networkAcls.scan(k -> true).stream()
                 .filter(a -> region.equals(a.getRegion()))
                 .filter(a -> ids.isEmpty() || ids.contains(a.getNetworkAclId()))
@@ -4324,6 +4319,30 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         return subnet;
     }
 
+    /**
+     * Each id an explicit Describe* request names must exist, as AWS answers an unknown one with its
+     * NotFound error; the shared describe methods leave missing-resource behavior to their callers.
+     */
+    public void requireNetworkAcls(String region, List<String> ids) {
+        ids.forEach(id -> getRequiredNetworkAcl(region, id));
+    }
+
+    public void requireSecurityGroups(String region, List<String> ids) {
+        ids.forEach(id -> getRequiredSecurityGroup(region, id));
+    }
+
+    public void requireInternetGateways(String region, List<String> ids) {
+        ids.forEach(id -> getRequiredInternetGateway(region, id));
+    }
+
+    public void requireRouteTables(String region, List<String> ids) {
+        ids.forEach(id -> getRequiredRouteTable(region, id));
+    }
+
+    public void requireAddresses(String region, List<String> ids) {
+        ids.forEach(id -> getRequiredAddress(region, id));
+    }
+
     public Vpc requireVpc(String region, String vpcId) {
         ensureDefaultResources(region);
         return getRequiredVpc(region, vpcId);
@@ -5838,11 +5857,6 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         // unsupported filter matches every VPC instead of narrowing anything. Real EC2 rejects the
         // name outright, which is the difference between a wrong result and an error.
         requireSupportedFilters(filterNames(filters), VPC_FILTERS);
-        if (vpcIds != null && !vpcIds.isEmpty()) {
-            for (String vpcId : vpcIds) {
-                getRequiredVpc(region, vpcId);
-            }
-        }
         return vpcs.scan(k -> true).stream()
                 .filter(v -> v.getRegion().equals(region))
                 .filter(v -> vpcIds.isEmpty() || vpcIds.contains(v.getVpcId()))
@@ -7104,8 +7118,9 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         // The topology lock, outermost, keeps DeleteVpc from removing the VPC in between.
         // Lock against the resolved VPC: a substituted foreign id has no store row.
         synchronized (attachmentTopologyLock(region)) {
-            getRequiredVpc(region, vpc.getVpcId());
+            Vpc currentVpc = getRequiredVpc(region, vpc.getVpcId());
             synchronized (lockFor(key(region, vpc.getVpcId()))) {
+                rejectSubnetCidrOutsideVpc(currentVpc, cidrBlock);
                 rejectConflictingSubnetCidr(region, vpcId, cidrBlock);
                 subnets.put(key(region, subnetId), subnet);
             }
@@ -7207,11 +7222,6 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
 
     List<Subnet> describeSubnets(String region, List<String> subnetIds, List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
-        if (subnetIds != null && !subnetIds.isEmpty()) {
-            for (String subnetId : subnetIds) {
-                requireSubnet(region, subnetId);
-            }
-        }
         List<Subnet> result = subnets.scan(k -> true).stream()
                 .filter(s -> s.getRegion().equals(region))
                 .filter(s -> subnetIds.isEmpty() || subnetIds.contains(s.getSubnetId()))
@@ -7374,11 +7384,6 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     List<SecurityGroup> describeSecurityGroups(String region, List<String> groupIds, List<String> groupNames,
                                                List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
-        if (groupIds != null && !groupIds.isEmpty()) {
-            for (String groupId : groupIds) {
-                getRequiredSecurityGroup(region, groupId);
-            }
-        }
         return securityGroups.scan(k -> true).stream()
                 .filter(sg -> sg.getRegion().equals(region))
                 .filter(sg -> groupIds.isEmpty() || groupIds.contains(sg.getGroupId()))
@@ -10128,6 +10133,8 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         if (resourceId.startsWith("acl-")) return "network-acl";
         if (resourceId.startsWith("fl-")) return "vpc-flow-log";
         if (resourceId.startsWith("cvpn-endpoint-")) return "client-vpn-endpoint";
+        if (resourceId.startsWith("ami-")) return "image";
+        if (resourceId.startsWith("sir-")) return "spot-instances-request";
         return "unknown";
     }
 
@@ -10151,11 +10158,6 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     List<InternetGateway> describeInternetGateways(String region, List<String> igwIds,
                                                    List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
-        if (igwIds != null && !igwIds.isEmpty()) {
-            for (String igwId : igwIds) {
-                getRequiredInternetGateway(region, igwId);
-            }
-        }
         return internetGateways.scan(k -> true).stream()
                 .filter(igw -> igw.getRegion().equals(region))
                 .filter(igw -> igwIds.isEmpty() || igwIds.contains(igw.getInternetGatewayId()))
@@ -10733,11 +10735,6 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     List<RouteTable> describeRouteTables(String accountId, String region, List<String> routeTableIds,
                                          List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
-        if (routeTableIds != null && !routeTableIds.isEmpty()) {
-            for (String routeTableId : routeTableIds) {
-                getRequiredRouteTable(region, routeTableId);
-            }
-        }
         String safeAccount = accountId != null ? accountId : callerAccountId();
         List<RouteTable> accountRouteTables = routeTables instanceof AccountAwareStorageBackend<RouteTable> aware
                 ? aware.scanForAccount(safeAccount, k -> true)
@@ -12136,11 +12133,6 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     List<Address> describeAddresses(String region, List<String> allocationIds,
                                     List<Map.Entry<String, List<String>>> filters) {
         ensureDefaultResources(region);
-        if (allocationIds != null) {
-            for (String allocationId : allocationIds) {
-                getRequiredAddress(region, allocationId);
-            }
-        }
         List<Address> candidates = addresses.scan(k -> true).stream()
                 .filter(a -> a.getRegion().equals(region))
                 .filter(a -> allocationIds.isEmpty() || allocationIds.contains(a.getAllocationId()))
@@ -13936,12 +13928,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      * read covers every such path at once, rather than chasing each terminal transition.
      */
     private synchronized NetworkInterface releaseIfHostIsGone(String region, NetworkInterface ni) {
-        // Judged on the stored record, not the caller's copy, which may predate a detach.
-        NetworkInterface current = networkInterfaces.get(key(region, ni.getNetworkInterfaceId())).orElse(null);
-        if (current == null) {
-            return ni;
-        }
-        return releaseIfHostIsGone(callerAccountId(), region, current);
+        return releaseIfHostIsGone(callerAccountId(), region, ni);
     }
 
     private NetworkInterface releaseIfHostIsGone(String accountId, String region, NetworkInterface ni) {

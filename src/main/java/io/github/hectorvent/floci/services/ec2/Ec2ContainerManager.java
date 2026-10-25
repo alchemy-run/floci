@@ -202,7 +202,7 @@ public class Ec2ContainerManager {
                 || !ALIASES.matches(labels, ContainerStorageHelper.SECURITY_GROUP_HELPER_LABEL, "true")
                 || !"ec2".equals(labels.get(LABEL_SERVICE))
                 || !instance.getInstanceId().equals(labels.get(LABEL_RESOURCE_ID))
-                || !ownerIdentity().equals(labels.get("floci_owner_port"))
+                || !ALIASES.matches(labels, LABEL_OWNER, ownerIdentity())
                 || !Objects.equals(instance.getRegion(), labels.get(LABEL_REGION))
                 || !Objects.equals(Ec2MetadataServer.instanceAccountId(instance, regionResolver.getAccountId()),
                         labels.get("io.floci.account"))) {
@@ -993,7 +993,9 @@ public class Ec2ContainerManager {
         if (containerId == null) {
             return;
         }
-        executor.submit(() -> {
+        // Serialized with the container's other lifecycle operations, so a start queued behind this
+        // stop runs only once the container has physically stopped.
+        submitLifecycleOperation(containerId, () -> {
             // Sidecars forward to the container's current IP, which Docker reassigns on the
             // next start; tear them down so no forward is left pointing at a stale address.
             portForwardManager.unpublishAll(instance);
@@ -1650,11 +1652,53 @@ public class Ec2ContainerManager {
         return new String[]{USER_DATA_SCRIPT_PATH};
     }
 
-    /** Missing scp does not prevent a supplied sshd from serving the guest. */
+    /**
+     * The install-and-verify probe {@link #startSshd} execs in the guest. Extracted so tests can
+     * assert against the string production actually issues rather than against a copy of it.
+     *
+     * <p>Installs openssh-server if absent. The trailing "command -v" checks make the script's own
+     * exit code the source of truth for whether sshd is actually available afterward - without
+     * them, a shell if/elif chain with no matching branch (no dnf/yum/apt-get/apk found) or whose
+     * install command itself failed (e.g. no network yet, apt lock held) still exits 0 by bash
+     * convention, so every later step in startSshd would silently no-op against a daemon that was
+     * never installed while still logging success.
+     *
+     * <p>The client package is installed alongside the server because provisioning tools need scp
+     * <em>on the instance</em>: Packer's default file transfer for a shell provisioner uploads the
+     * script with scp, and real AMIs carry it. Installing only openssh-server leaves sftp-server
+     * present but /usr/bin/scp absent, so the upload fails with "SCP failed to start. This usually
+     * means that SCP is not properly installed on the remote system." The guard tests for scp too:
+     * keying it on sshd alone would skip the install entirely on an image that already has the
+     * server but no client. Package names differ - openssh-clients on rpm distributions,
+     * openssh-client on Debian; apk's openssh already contains both.
+     *
+     * <p>The two failures are not equally fatal, so the script separates them: exit 1 means no sshd
+     * and there is nothing to start, while exit 2 means sshd is there but the client package did
+     * not land. A guest that can serve SSH but cannot scp is still worth starting - it just cannot
+     * run a Packer shell provisioner - so that case warns and continues rather than leaving the
+     * instance unreachable. Checking only sshd at the end would report that state as outright
+     * success, which is the silent failure this probe exists to prevent.
+     */
     static String[] sshdInstallProbeCommand() {
         return new String[]{"sh", "-c",
-                "command -v sshd >/dev/null 2>&1 || exit 1;"
-                        + "command -v scp >/dev/null 2>&1 || exit 2"};
+            // dnf and yum are Python programs: an image's PYTHONHOME or LD_LIBRARY_PATH made them
+            // fail to start, so sshd was never installed.
+            Ec2MetadataProxy.CLEAR_APPLICATION_PATHS + ";" +
+            "if ! command -v sshd >/dev/null 2>&1 || ! command -v scp >/dev/null 2>&1; then" +
+                    "  if command -v dnf >/dev/null 2>&1; then dnf install -y openssh-server openssh-clients >/dev/null 2>&1;" +
+                    // yum is probed after dnf, and the order is load-bearing: Amazon Linux
+                    // 2023 and modern Fedora/RHEL ship both, and there dnf is the supported
+                    // front end while yum is only a compatibility shim over it. Amazon Linux
+                    // 2 -- reached by explicitly requesting ami-amazonlinux2, not the default
+                    // image -- ships only yum, so without this branch the chain falls through
+                    // and sshd is never installed.
+                    "  elif command -v yum >/dev/null 2>&1; then yum install -y openssh-server openssh-clients >/dev/null 2>&1;" +
+                    "  elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server openssh-client >/dev/null 2>&1;" +
+                    "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssh >/dev/null 2>&1;" +
+                    "  fi;" +
+                    "fi;" +
+                    "command -v sshd >/dev/null 2>&1 || exit 1;" +
+                    "command -v scp >/dev/null 2>&1 || exit 2"};
     }
 
     static String[] metadataProxyInstallCommand() {
@@ -1826,9 +1870,9 @@ public class Ec2ContainerManager {
             try {
                 InspectContainerResponse helper = dockerClient.inspectContainerCmd(name).exec();
                 Map<String, String> labels = helper.getConfig().getLabels();
-                if (!ownerIdentity().equals(labels.get(LABEL_OWNER_PORT))
+                if (!ALIASES.matches(labels, LABEL_OWNER, ownerIdentity())
                         || !instance.getInstanceId().equals(labels.get(LABEL_RESOURCE_ID))
-                        || !"true".equals(labels.get("floci.security-group-helper"))) {
+                        || !ALIASES.matches(labels, ContainerStorageHelper.SECURITY_GROUP_HELPER_LABEL, "true")) {
                     throw new IllegalStateException("Cannot clean an EC2 namespace owned by another instance");
                 }
                 restored.helperId = helper.getId();
@@ -1879,9 +1923,9 @@ public class Ec2ContainerManager {
         try {
             InspectContainerResponse helper = dockerClient.inspectContainerCmd(helperId).exec();
             Map<String, String> labels = helper.getConfig().getLabels();
-            if (!"true".equals(labels.get("floci.security-group-helper"))
+            if (!ALIASES.matches(labels, ContainerStorageHelper.SECURITY_GROUP_HELPER_LABEL, "true")
                     || !SERVICE_VALUE.equals(labels.get(LABEL_SERVICE))
-                    || !ownerIdentity().equals(labels.get(LABEL_OWNER_PORT))
+                    || !ALIASES.matches(labels, LABEL_OWNER, ownerIdentity())
                     || !instance.getInstanceId().equals(labels.get(LABEL_RESOURCE_ID))
                     || !Objects.equals(instance.getRegion(), labels.get(LABEL_REGION))
                     || !Objects.equals(Ec2MetadataServer.instanceAccountId(instance, regionResolver.getAccountId()),

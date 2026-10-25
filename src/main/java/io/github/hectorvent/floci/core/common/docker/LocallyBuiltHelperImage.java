@@ -52,8 +52,12 @@ public final class LocallyBuiltHelperImage {
         }
         String image = containerBuilder.resolveImage(configuredImage);
         try {
-            var current = dockerClient.inspectImageCmd(image).exec().getConfig();
-            if (versionLabel == null || current != null && current.getLabels() != null
+            var inspected = dockerClient.inspectImageCmd(image).exec();
+            if (versionLabel == null || inspected == null) {
+                return;
+            }
+            var current = inspected == null ? null : inspected.getConfig();
+            if (current != null && current.getLabels() != null
                     && version.equals(current.getLabels().get(versionLabel))) {
                 return;
             }

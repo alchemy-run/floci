@@ -1,5 +1,8 @@
 package io.github.hectorvent.floci.services.ec2;
 
+import io.github.hectorvent.floci.testing.DocumentationPublicAddressesProfile;
+import io.quarkus.test.junit.TestProfile;
+
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.MethodOrderer;
@@ -17,6 +20,7 @@ import static org.hamcrest.Matchers.startsWith;
  * egress-only IGWs, ENIs, and VPC endpoint modify.
  */
 @QuarkusTest
+@TestProfile(DocumentationPublicAddressesProfile.class)
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
 class Ec2AlchemyParityIntegrationTest {
 
@@ -328,7 +332,7 @@ class Ec2AlchemyParityIntegrationTest {
         .then()
             .statusCode(200)
             .body("RunInstancesResponse.instancesSet.item.subnetId", equalTo(subnetId))
-            .body("RunInstancesResponse.instancesSet.item.ipAddress", startsWith("i-"))
+            // A launch answers pending, before the instance has its public address.
             .extract().path("RunInstancesResponse.instancesSet.item.instanceId");
 
         given()
@@ -340,7 +344,7 @@ class Ec2AlchemyParityIntegrationTest {
         .then()
             .statusCode(200)
             .body("DescribeInstancesResponse.reservationSet.item.instancesSet.item.ipAddress",
-                    startsWith(launched));
+                    startsWith("203.0.113."));
     }
 
     @Test

@@ -1905,9 +1905,6 @@ public class Ec2QueryHandler {
             if (fl.getDeliverLogsPermissionArn() != null) {
                 xml.elem("deliverLogsPermissionArn", fl.getDeliverLogsPermissionArn());
             }
-            if (fl.getLogFormat() != null) {
-                xml.elem("logFormat", fl.getLogFormat());
-            }
             List<Tag> tags = service.getResourceTags(fl.getFlowLogId());
             if (tags.isEmpty() && fl.getTags() != null) {
                 tags = fl.getTags();
@@ -3343,6 +3340,7 @@ public class Ec2QueryHandler {
         List<String> groupNames = getList(p, "GroupName");
         List<Map.Entry<String, List<String>>> filters = getFiltersList(p);
         List<SecurityGroup> sgs = service.describeSecurityGroups(region, groupIds, groupNames, filters);
+        service.requireSecurityGroups(region, groupIds);
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeSecurityGroupsResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -3558,9 +3556,11 @@ public class Ec2QueryHandler {
                     .elem("keyType", Ec2Service.keyTypeOf(kp))
                     .elem("createTime", kp.getCreateTime() != null ? ISO_FMT.format(kp.getCreateTime()) : null)
                     .elem("keyName", kp.getKeyName())
-                    .elem("keyFingerprint", kp.getKeyFingerprint())
-                    .raw(tagSetXml(kp.getTags()))
-                    .end("item");
+                    .elem("keyFingerprint", kp.getKeyFingerprint());
+            if (includePublicKey) {
+                xml.elem("publicKey", openSshPublicKeyNamedFor(kp));
+            }
+            xml.raw(tagSetXml(kp.getTags())).end("item");
         }
         xml.end("keySet").end("DescribeKeyPairsResponse");
         return xmlResponse(xml.build());
@@ -3988,6 +3988,7 @@ public class Ec2QueryHandler {
         List<String> ids = getList(p, "InternetGatewayId");
         List<Map.Entry<String, List<String>>> filters = getFiltersList(p);
         List<InternetGateway> igws = service.describeInternetGateways(region, ids, filters);
+        service.requireInternetGateways(region, ids);
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeInternetGatewaysResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -4038,6 +4039,7 @@ public class Ec2QueryHandler {
         List<String> ids = getList(p, "RouteTableId");
         List<Map.Entry<String, List<String>>> filters = getFiltersList(p);
         List<RouteTable> rts = service.describeRouteTables(region, ids, filters);
+        service.requireRouteTables(region, ids);
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeRouteTablesResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -4261,6 +4263,7 @@ public class Ec2QueryHandler {
         List<String> ids = getList(p, "NetworkAclId");
         List<Map.Entry<String, List<String>>> filters = getFiltersList(p);
         List<NetworkAcl> acls = service.describeNetworkAcls(region, ids, filters);
+        service.requireNetworkAcls(region, ids);
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeNetworkAclsResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -4623,6 +4626,7 @@ public class Ec2QueryHandler {
         List<String> allocationIds = getList(p, "AllocationId");
         List<Map.Entry<String, List<String>>> filters = getFiltersList(p);
         List<Address> addrs = service.describeAddresses(region, allocationIds, filters);
+        service.requireAddresses(region, allocationIds);
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeAddressesResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -6196,8 +6200,18 @@ public class Ec2QueryHandler {
             xml.start("item").elem("groupId", securityGroupId).end("item");
         }
         xml.end("groupSet");
-        if (endpoint.getIpAddressType() != null) {
-            xml.elem("ipAddressType", endpoint.getIpAddressType());
+        // AWS reports an interface endpoint's ENIs here, and the Terraform provider
+        // surfaces them as aws_vpc_endpoint.network_interface_ids. Floci already
+        // synthesizes those interfaces deterministically for flow-log attribution; until
+        // now nothing said so on the wire, so the attribute came back empty and
+        // propagated into every module that feeds it downstream.
+        List<String> endpointEniIds = service.endpointNetworkInterfaceIds(endpoint);
+        if (!endpointEniIds.isEmpty()) {
+            xml.start("networkInterfaceIdSet");
+            for (String eniId : endpointEniIds) {
+                xml.elem("item", eniId);
+            }
+            xml.end("networkInterfaceIdSet");
         }
         if (endpoint.getDnsRecordIpType() != null
                 || endpoint.getPrivateDnsOnlyForInboundResolverEndpoint() != null) {

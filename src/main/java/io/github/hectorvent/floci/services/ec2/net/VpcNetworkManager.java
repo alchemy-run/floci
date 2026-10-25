@@ -751,9 +751,15 @@ public class VpcNetworkManager {
         }
         String containerId = currentContainerId.get();
         Map<String, Network.ContainerNetworkConfig> containers = network == null ? null : network.getContainers();
-        if (containers != null && containers.containsKey(containerId)) {
-            vpc.flociContainerId = containerId;
-            return;
+        if (containers != null) {
+            // The network lists full container ids; the resolver may report a short one.
+            Optional<String> endpoint = containers.keySet().stream()
+                    .filter(id -> id.equals(containerId) || id.startsWith(containerId) || containerId.startsWith(id))
+                    .findFirst();
+            if (endpoint.isPresent()) {
+                vpc.flociContainerId = endpoint.get();
+                return;
+            }
         }
         try {
             dockerClient.connectToNetworkCmd()
