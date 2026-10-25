@@ -463,12 +463,9 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         lifecycleManager.startCreated(containerId, spec);
         watchForUnexpectedExit(dockerClient, containerId, runtimeApiServer);
 
-        // Extensions can log as soon as they start, which is before the container's own log stream
-        // is attached below. Create the group/stream up front so those early lines are not dropped
-        // by CloudWatch; the call is idempotent, so attach() repeating it is harmless.
+        // The group and stream already exist (created before the container started), so the
+        // extensions' early lines are not dropped.
         LogDestination logDestination = new LogDestination(
-                lambdaAccountId, cwLogGroup, cwLogStream, lambdaRegion);
-        logStreamer.ensureLogGroupAndStreamForAccount(
                 lambdaAccountId, cwLogGroup, cwLogStream, lambdaRegion);
 
         // Real AWS's runtime interface client discovers and launches every binary under

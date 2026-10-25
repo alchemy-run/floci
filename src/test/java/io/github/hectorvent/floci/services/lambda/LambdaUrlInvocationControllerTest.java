@@ -212,7 +212,7 @@ class LambdaUrlInvocationControllerTest {
         byte[] body = "{\"a\":1}".getBytes(StandardCharsets.UTF_8);
 
         controller.handlePost("url-id", "", headersWith("Application/JSON"),
-                uriInfoFor("http://localhost/lambda-url/url-id/"), body);
+                uriInfoFor("http://localhost/lambda-url/url-id/"), body).toCompletableFuture().join();
 
         ArgumentCaptor<byte[]> event = ArgumentCaptor.forClass(byte[].class);
         verify(lambdaService).invokeArn(eq(FUNCTION_ARN), event.capture(), eq(InvocationType.RequestResponse));

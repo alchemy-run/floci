@@ -28,6 +28,8 @@ import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
@@ -1263,7 +1265,8 @@ class LambdaServiceTest {
         assertNull(unchanged.getCodeLocalPath());
         assertEquals(revision, unchanged.getRevisionId());
         assertEquals(modified, unchanged.getLastModified());
-        assertEquals("", unchanged.getCodeSha256());
+        // A bind-mounted function is hashed by its host path, which version publication compares.
+        assertEquals(hostPathSha256("/tmp/host-code"), unchanged.getCodeSha256());
     }
 
     @Test
@@ -1287,7 +1290,8 @@ class LambdaServiceTest {
         assertTrue(unchanged.isHotReload());
         assertEquals("/tmp/host-code", unchanged.getHotReloadHostPath());
         assertNull(unchanged.getCodeLocalPath());
-        assertEquals("", unchanged.getCodeSha256());
+        // A bind-mounted function is hashed by its host path, which version publication compares.
+        assertEquals(hostPathSha256("/tmp/host-code"), unchanged.getCodeSha256());
         assertEquals(0L, unchanged.getCodeSizeBytes());
         assertEquals(originalRevision, unchanged.getRevisionId());
         assertEquals(originalModified, unchanged.getLastModified());
@@ -3148,5 +3152,14 @@ class LambdaServiceTest {
 
         assertEquals(new LambdaService.LoggingSettings("Text", null, null, "/shared/app"),
                 LambdaService.loggingSettings(fn));
+    }
+
+    private static String hostPathSha256(String hostPath) {
+        try {
+            return Base64.getEncoder().encodeToString(MessageDigest.getInstance("SHA-256")
+                    .digest(hostPath.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }
