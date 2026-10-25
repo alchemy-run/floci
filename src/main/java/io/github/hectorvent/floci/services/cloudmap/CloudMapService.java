@@ -355,6 +355,10 @@ public class CloudMapService {
             ObjectNode stored = storedConfig.deepCopy();
             ObjectNode updated = stored.deepCopy();
             updated.set("DnsRecords", change.path("DnsRecords").deepCopy());
+            // A change naming a RoutingPolicy cannot move the service to another one.
+            if (change.hasNonNull("RoutingPolicy")) {
+                updated.set("RoutingPolicy", change.get("RoutingPolicy").deepCopy());
+            }
             if (!withoutTtls(updated).equals(withoutTtls(stored))) {
                 throw new AwsException("InvalidInput",
                         "Only the TTLs of a service's DNS records can be updated.", 400);

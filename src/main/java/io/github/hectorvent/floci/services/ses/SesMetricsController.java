@@ -21,8 +21,6 @@ import jakarta.ws.rs.core.Response;
 import java.time.DateTimeException;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalTime;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.Iterator;
@@ -384,6 +382,7 @@ public class SesMetricsController {
     }
 
     private static boolean isMidnightUtc(Instant instant) {
-        return instant.atZone(ZoneOffset.UTC).toLocalTime().equals(LocalTime.MIDNIGHT);
+        // Epoch arithmetic: an instant past LocalDate's range still has a time of day.
+        return Math.floorMod(instant.getEpochSecond(), 86_400L) == 0 && instant.getNano() == 0;
     }
 }

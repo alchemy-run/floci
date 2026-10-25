@@ -549,7 +549,8 @@ class SesIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body(not(containsString("example.com")));
+            // The deleted domain itself, not every address under it some other test verified.
+            .body(not(containsString("<member>example.com</member>")));
     }
 
     @Test

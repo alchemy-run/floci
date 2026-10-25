@@ -193,6 +193,8 @@ class SesTemplateV2IntegrationTest {
             .post("/v2/email/identities")
         .then()
             .statusCode(200);
+        // A created address stays pending until verified, and SES sends only from a verified one.
+        SesVerifiedSenders.verify("sender@example.com");
 
         String messageId = given()
             .contentType("application/json")
@@ -337,6 +339,8 @@ class SesTemplateV2IntegrationTest {
             .post("/v2/email/identities")
         .then()
             .statusCode(200);
+        // A created address stays pending until verified, and SES sends only from a verified one.
+        SesVerifiedSenders.verify("inline-sender@example.com");
 
         String messageId = given()
             .contentType("application/json")

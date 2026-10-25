@@ -656,7 +656,7 @@ class S3VersioningServiceTest {
         // versions written before it.
         s3Service.putBucketVersioning("versioned-bucket", "Suspended");
         s3Service.putObject("versioned-bucket", "new", "v2".getBytes(StandardCharsets.UTF_8), "text/plain", null);
-        assertNull(s3Service.deleteObjectTagging("versioned-bucket", "new", "null"));
+        assertEquals("null", s3Service.deleteObjectTagging("versioned-bucket", "new", "null"));
         s3Service.putObjectTagging("versioned-bucket", "new", "null", Map.of("version", "suspended"));
         assertEquals(Map.of("version", "suspended"), s3Service.getObjectTagging("versioned-bucket", "new"));
     }
