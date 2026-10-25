@@ -5728,8 +5728,8 @@ public class CognitoService implements ResourceProvider {
             throw new IllegalArgumentException("unsupported JWT algorithm");
         }
         String issuer = textClaim(claims, "iss");
-        String poolId = issuer != null && issuer.startsWith(baseUrl + "/")
-                ? issuer.substring((baseUrl + "/").length()) : null;
+        // The issuer is AWS-shaped (see getIssuer), so the pool is its last path segment.
+        String poolId = issuer == null ? null : issuer.substring(issuer.lastIndexOf('/') + 1);
         UserPool pool = poolId == null ? null : poolStore.get(poolId).orElse(null);
         if (pool == null || !getIssuer(poolId).equals(issuer)
                 || !getSigningKeyId(pool).equals(textClaim(header, "kid"))) {

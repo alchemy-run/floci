@@ -1875,13 +1875,13 @@ class CognitoServiceTest {
     }
 
     @Test
-    void issuerUrlForPinnedPoolResolvesAsBaseUrlSlashPoolId() {
+    void issuerUrlForPinnedPoolIsTheAwsShapedIssuer() {
         UserPool pool = service.createUserPool(
                 Map.of("PoolName", "PinnedPool", "UserPoolTags", Map.of(ReservedTags.OVERRIDE_ID_KEY, "custompool")),
                 "us-east-1"
         );
 
-        assertEquals("http://localhost:4566/custompool", service.getIssuer(pool.getId()));
+        assertEquals("https://cognito-idp.us-east-1.amazonaws.com/custompool", service.getIssuer(pool.getId()));
     }
 
     // =========================================================================

@@ -152,7 +152,8 @@ class CognitoCustomDomainOAuthContractIntegrationTest {
                 .header("Pragma", equalTo("no-cache"));
 
         JsonNode claims = jwtPayload(response.path("access_token"));
-        assertEquals(FLOCI_URL + "/" + poolA, claims.path("iss").asText());
+        assertEquals("https://cognito-idp." + poolA.substring(0, poolA.indexOf('_')) + ".amazonaws.com/" + poolA,
+                claims.path("iss").asText());
         assertEquals(clientA, claims.path("client_id").asText());
         assertEquals("access", claims.path("token_use").asText());
         assertEquals("aws.cognito.signin.user.admin", claims.path("scope").asText());
@@ -362,7 +363,8 @@ class CognitoCustomDomainOAuthContractIntegrationTest {
                 .body("token_type", equalTo("Bearer"))
                 .body("$", not(hasKey("refresh_token")));
         JsonNode claims = jwtPayload(response.path("access_token"));
-        assertEquals(FLOCI_URL + "/" + poolA, claims.path("iss").asText());
+        assertEquals("https://cognito-idp." + poolA.substring(0, poolA.indexOf('_')) + ".amazonaws.com/" + poolA,
+                claims.path("iss").asText());
         assertEquals(user.clientId(), claims.path("client_id").asText());
     }
 
