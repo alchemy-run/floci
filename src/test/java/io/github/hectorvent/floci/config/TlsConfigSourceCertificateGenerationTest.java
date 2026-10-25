@@ -381,8 +381,10 @@ class TlsConfigSourceCertificateGenerationTest {
         List<String> sans = extractSansFromCertificate(tempDir.resolve("tls/floci-server.crt"));
         assertFalse(sans.contains("*.amazonaws.com"),
             "Certificate SANs should not include '*.amazonaws.com' when spoofing is disabled");
-        assertFalse(sans.contains("*.us-east-1.amazonaws.com"),
-            "Certificate SANs should not include '*.us-east-1.amazonaws.com' when spoofing is disabled");
+        // The us-east-1 names Floci's own containers reach (IoT, AppSync, API Gateway, Step Functions
+        // sync) are always covered; the per-region spoof set is not.
+        assertFalse(sans.contains("*.eu-west-1.amazonaws.com"),
+            "Certificate SANs should not include '*.eu-west-1.amazonaws.com' when spoofing is disabled");
     }
 
     /**
