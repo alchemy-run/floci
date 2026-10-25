@@ -357,8 +357,10 @@ public class CognitoCfnProvisioner implements CfnResourceProvisioner {
         r.setPhysicalId(domain);
         // Recorded so delete can name the owning pool: DeleteUserPoolDomain needs both.
         r.getAttributes().put("UserPoolId", userPoolId);
+        // Only a custom domain has a distribution of its own to alias; a prefix domain resolves empty.
         r.getAttributes().put("CloudFrontDistribution",
-                provisioned.getCloudFrontDistribution() == null ? "" : provisioned.getCloudFrontDistribution());
+                !provisioned.isCustomDomain() || provisioned.getCloudFrontDistribution() == null
+                        ? "" : provisioned.getCloudFrontDistribution());
     }
 
     /**

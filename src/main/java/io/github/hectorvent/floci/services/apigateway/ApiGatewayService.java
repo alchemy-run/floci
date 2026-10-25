@@ -83,7 +83,6 @@ import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import io.github.hectorvent.floci.services.apigateway.model.QuotaSettings;
 import io.github.hectorvent.floci.services.apigateway.model.ThrottleSettings;
-import io.github.hectorvent.floci.services.apigateway.model.V2DomainName;
 import java.util.function.BiConsumer;
 
 @ApplicationScoped
@@ -2442,7 +2441,6 @@ public class ApiGatewayService implements ResourceProvider {
         domain.setRegionalCertificateArn(newRegionalCertificateArn);
         domain.setSecurityPolicy(newSecurityPolicy);
         applyEndpointType(domain, newEndpointConfigurationType, region);
-        domain.synchronizePrimaryConfiguration();
         domainStore.put(domainKey, domain);
         return domain;
     }
@@ -4853,53 +4851,6 @@ public class ApiGatewayService implements ResourceProvider {
         return new UsageSnapshot(plan.getId(), null, null, Map.of(keyId, List.of(List.of(0, 0))));
     }
 
-    private CustomDomain createDomainName(String region, Map<String, Object> request, Map<String, Object> v2Request) {
-        String domainName = (String) request.get("domainName");
-        if (domainName == null) throw new AwsException("BadRequestException", "domainName is required", 400);
-        String endpointType = endpointTypeOf(request);
-        if (!"REGIONAL".equals(endpointType) && !"EDGE".equals(endpointType)) {
-            // Private custom domains are not emulated; anything else would be a domain that is
-            // neither regional nor edge-optimized, which nothing here could route or describe.
-            throw new AwsException("BadRequestException", "Invalid value for endpoint type: " + endpointType, 400);
-        }
-
-        CustomDomain domain = new CustomDomain();
-        domain.setDomainName(domainName);
-        domain.setCertificateName((String) request.get("certificateName"));
-        domain.setCertificateArn((String) request.get("certificateArn"));
-        domain.setRegionalCertificateName((String) request.get("regionalCertificateName"));
-        domain.setRegionalCertificateArn((String) request.get("regionalCertificateArn"));
-        domain.setRegionalDomainName(domainName + ".regional.local");
-        domain.setRegionalHostedZoneId("Z2FDTNDATAQYL2");
-        applyEndpointType(domain, endpointType);
-        domain.setSecurityPolicy((String) request.getOrDefault("securityPolicy", "TLS_1_2"));
-        // Nothing is provisioned behind the domain, so it is usable as soon as it exists.
-        domain.setDomainNameStatus("AVAILABLE");
-        if (request.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
-            Map<String, String> copied = new java.util.LinkedHashMap<>();
-            tags.forEach((key, value) -> copied.put(String.valueOf(key), String.valueOf(value)));
-            domain.setTags(copied);
-        }
-
-        if (v2Request != null) {
-            applyV2DomainSettings(domain, v2Request);
-        }
-
-        // AWS enforces global uniqueness of custom domain names across all regions. The check and
-        // the store are one step, so two concurrent creates of one name cannot both succeed.
-        synchronized (domainNameLock) {
-            boolean exists = !domainStore.scan(k -> k.endsWith("::" + domainName)).isEmpty();
-            if (exists) {
-                throw new AwsException("BadRequestException",
-                        "The domain name you provided already exists.", 400);
-            }
-            domainStore.put(domainKey(region, domainName), domain);
-        }
-        // Outside the lock: the reissue blocks until the HTTPS listener has switched certificates.
-        certificateManager.ensureHost(domainName);
-        LOG.infov("Created custom domain {0} in {1}", domainName, region);
-        return domain;
-    }
 
     /**
      * An edge-optimized domain fronts a CloudFront distribution, and a DNS alias points at the
@@ -5085,149 +5036,13 @@ public class ApiGatewayService implements ResourceProvider {
         }
     }
 
-    public V2DomainName getV2DomainName(String region, String domainName) {
-        synchronized (domainNameLock) {
-            return toV2DomainName(region, getDomainName(region, domainName));
-        }
-    }
-
-    public List<V2DomainName> getV2DomainNames(String region) {
-        synchronized (domainNameLock) {
-            return getDomainNames(region).stream().map(domain -> toV2DomainName(region, domain)).toList();
-        }
-    }
-
-    public void deleteV2DomainName(String region, String domainName) {
-        deleteDomainName(region, domainName);
-    }
 
 
-    private static List<Map<String, Object>> domainConfigurations(Map<String, Object> request, boolean required) {
-        Object value = request.get("domainNameConfigurations");
-        if (value == null && !required) {
-            return new ArrayList<>();
-        }
-        if (!(value instanceof List<?> configurations) || (required && configurations.isEmpty())) {
-            throw new AwsException("BadRequestException", "Expected one or more domain name configurations", 400);
-        }
-        List<Map<String, Object>> copies = new ArrayList<>();
-        for (Object item : configurations) {
-            if (!(item instanceof Map<?, ?> configuration)) {
-                throw new AwsException("BadRequestException", "Each domain name configuration must be an object", 400);
-            }
-            for (String field : List.of("certificateArn", "certificateName", "endpointType", "securityPolicy",
-                    "apiGatewayDomainName", "hostedZoneId", "domainNameStatus", "ipAddressType",
-                    "ownershipVerificationCertificateArn")) {
-                validateDomainString(configuration, field);
-            }
-            if (configuration.get("endpointType") != null
-                    && !List.of("REGIONAL", "EDGE").contains(configuration.get("endpointType"))) {
-                throw new AwsException("BadRequestException", "Invalid value for endpoint type", 400);
-            }
-            if (configuration.get("ipAddressType") != null
-                    && !List.of("ipv4", "dualstack").contains(configuration.get("ipAddressType"))) {
-                throw new AwsException("BadRequestException", "Invalid ipAddressType", 400);
-            }
-            Map<String, Object> copy = new LinkedHashMap<>();
-            configuration.forEach((key, entry) -> copy.put(String.valueOf(key), entry));
-            copies.add(copy);
-        }
-        return copies;
-    }
 
-    private static void validateDomainString(Map<?, ?> values, String field) {
-        Object value = values.get(field);
-        if (value != null && (!(value instanceof String text) || text.isBlank())) {
-            throw new AwsException("BadRequestException", field + " must be a non-empty string", 400);
-        }
-    }
 
-    /** These v2 settings are control-plane metadata; routing remains shared with v1. */
-    private static void applyV2DomainSettings(CustomDomain domain, Map<String, Object> request) {
-        if (request.containsKey("routingMode") || domain.getRoutingMode() == null) {
-            domain.setRoutingMode(request.get("routingMode") == null
-                    ? "API_MAPPING_ONLY" : (String) request.get("routingMode"));
-        }
-        if (request.containsKey("apiMappingSelectionExpression") || domain.getApiMappingSelectionExpression() == null) {
-            domain.setApiMappingSelectionExpression(request.get("apiMappingSelectionExpression") == null
-                    ? "$request.basepath" : (String) request.get("apiMappingSelectionExpression"));
-        }
-        if (request.containsKey("mutualTlsAuthentication")) {
-            Map<String, Object> settings = null;
-            if (request.get("mutualTlsAuthentication") instanceof Map<?, ?> values) {
-                settings = new LinkedHashMap<>();
-                for (Map.Entry<?, ?> entry : values.entrySet()) {
-                    settings.put(String.valueOf(entry.getKey()), entry.getValue());
-                }
-            }
-            domain.setMutualTlsAuthentication(settings);
-        }
-        if (request.containsKey("domainNameConfigurations")) {
-            List<Map<String, Object>> configurations = domainConfigurations(request, false);
-            if (!configurations.isEmpty()) {
-                Map<String, Object> primary = configurations.getFirst();
-                if (primary.containsKey("certificateArn")) {
-                    domain.setCertificateArn((String) primary.get("certificateArn"));
-                }
-                if (primary.containsKey("certificateName")) {
-                    domain.setCertificateName((String) primary.get("certificateName"));
-                }
-                if (primary.get("securityPolicy") != null) {
-                    domain.setSecurityPolicy((String) primary.get("securityPolicy"));
-                }
-                if (primary.get("apiGatewayDomainName") != null) {
-                    domain.setRegionalDomainName((String) primary.get("apiGatewayDomainName"));
-                }
-                if (primary.get("hostedZoneId") != null) {
-                    domain.setRegionalHostedZoneId((String) primary.get("hostedZoneId"));
-                }
-                if (primary.get("domainNameStatus") != null) {
-                    domain.setDomainNameStatus((String) primary.get("domainNameStatus"));
-                }
-                if (primary.get("endpointType") != null) {
-                    applyEndpointType(domain, (String) primary.get("endpointType"));
-                }
-                if ("REGIONAL".equals(domain.getEndpointConfigurationType())) {
-                    domain.setRegionalCertificateArn(domain.getCertificateArn());
-                    domain.setRegionalCertificateName(domain.getCertificateName());
-                }
-            }
-            for (Map<String, Object> configuration : configurations) {
-                configuration.putIfAbsent("endpointType", "REGIONAL");
-                configuration.putIfAbsent("securityPolicy", "TLS_1_2");
-                configuration.putIfAbsent("domainNameStatus", "AVAILABLE");
-                configuration.putIfAbsent("ipAddressType", "ipv4");
-                configuration.putIfAbsent("apiGatewayDomainName", domain.getRegionalDomainName());
-                configuration.putIfAbsent("hostedZoneId", domain.getRegionalHostedZoneId());
-            }
-            domain.setDomainNameConfigurations(configurations);
-        }
-        domain.synchronizePrimaryConfiguration();
-    }
 
-    private static V2DomainName toV2DomainName(String region, CustomDomain source) {
-        V2DomainName domain = new V2DomainName();
-        domain.setDomainName(source.getDomainName());
-        domain.setDomainNameArn("arn:aws:apigateway:" + region + "::/domainnames/" + source.getDomainName());
-        domain.setRoutingMode(source.getRoutingMode() == null ? "API_MAPPING_ONLY" : source.getRoutingMode());
-        domain.setApiMappingSelectionExpression(source.getApiMappingSelectionExpression() == null
-                ? "$request.basepath" : source.getApiMappingSelectionExpression());
-        domain.setMutualTlsAuthentication(source.getMutualTlsAuthentication() == null
-                ? null : new LinkedHashMap<>(source.getMutualTlsAuthentication()));
-        List<Map<String, Object>> configurations = new ArrayList<>();
-        if (source.getDomainNameConfigurations() == null) {
-            configurations.add(source.primaryConfiguration());
-        } else {
-            source.getDomainNameConfigurations().forEach(configuration ->
-                    configurations.add(new LinkedHashMap<>(configuration)));
-            if (!configurations.isEmpty()) {
-                configurations.set(0, source.primaryConfiguration());
-            }
-        }
-        domain.setDomainNameConfigurations(configurations);
-        domain.setTags(source.getTags() == null ? Map.of() : new LinkedHashMap<>(source.getTags()));
-        return domain;
-    }
+
+
 
     public void flushStageCache(String region, String apiId, String stageName) {
         getStage(region, apiId, stageName);

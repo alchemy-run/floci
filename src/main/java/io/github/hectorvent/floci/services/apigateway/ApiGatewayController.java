@@ -60,7 +60,6 @@ import java.util.Map;
 import java.util.Set;
 import io.github.hectorvent.floci.services.apigateway.model.QuotaSettings;
 import io.github.hectorvent.floci.services.apigateway.model.ThrottleSettings;
-import io.github.hectorvent.floci.services.apigateway.model.V2DomainName;
 
 /**
  * Unified AWS API Gateway management endpoints (v1 REST and v2 HTTP).
@@ -1656,7 +1655,7 @@ public class ApiGatewayController {
         String region = regionResolver.resolveRegion(headers);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("items");
-        service.getV2DomainNames(region).forEach(d -> items.add(toV2DomainNode(d)));
+        service.getDomainNames(region).forEach(d -> items.add(toV2DomainNode(region, d)));
         return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
@@ -1664,8 +1663,8 @@ public class ApiGatewayController {
     @Path("/v2/domainnames/{domainName}")
     public Response getV2DomainName(@Context HttpHeaders headers, @PathParam("domainName") String domainName) {
         String region = regionResolver.resolveRegion(headers);
-        return Response.ok(toV2DomainNode(service.getV2DomainName(region, domainName)).toString())
-                .type(MediaType.APPLICATION_JSON).build();
+        CustomDomain domain = service.getDomainName(region, domainName);
+        return Response.ok(toV2DomainNode(region, domain).toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
     /**
@@ -3092,27 +3091,6 @@ public class ApiGatewayController {
         return ApiGatewayService.legacyApiMappingId(storedPath);
     }
 
-    private ObjectNode toV2DomainNode(V2DomainName domain) {
-        ObjectNode node = objectMapper.createObjectNode();
-        node.put("domainName", domain.getDomainName());
-        if (domain.getDomainNameArn() != null) node.put("domainNameArn", domain.getDomainNameArn());
-        if (domain.getRoutingMode() != null) node.put("routingMode", domain.getRoutingMode());
-        if (domain.getApiMappingSelectionExpression() != null) {
-            node.put("apiMappingSelectionExpression", domain.getApiMappingSelectionExpression());
-        }
-        ArrayNode configs = node.putArray("domainNameConfigurations");
-        for (Map<String, Object> config : domain.getDomainNameConfigurations()) {
-            configs.add(objectMapper.valueToTree(config));
-        }
-        if (domain.getMutualTlsAuthentication() != null) {
-            node.set("mutualTlsAuthentication", objectMapper.valueToTree(domain.getMutualTlsAuthentication()));
-        }
-        if (domain.getTags() != null && !domain.getTags().isEmpty()) {
-            ObjectNode tags = node.putObject("tags");
-            domain.getTags().forEach(tags::put);
-        }
-        return node;
-    }
 
     private ObjectNode exportOpenApi(String region, String apiId, String specification) {
         if (specification != null && !specification.isBlank()

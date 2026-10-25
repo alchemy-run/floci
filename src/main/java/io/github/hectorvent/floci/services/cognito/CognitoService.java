@@ -6792,6 +6792,17 @@ public class CognitoService implements ResourceProvider {
     }
 
     /** Records the candidate identity before mutation, including a create whose TLS setup fails. */
+    /**
+     * A user pool has at most one prefix domain and one custom domain, as CreateUserPoolDomain
+     * enforces. CloudFormation replaces a renamed domain by creating the new one before deleting
+     * the old, so only the API call checks this.
+     */
+    public void requireNoDomainOfType(String userPoolId, boolean custom) {
+        if (listUserPoolDomains(userPoolId).stream().anyMatch(existing -> existing.isCustomDomain() == custom)) {
+            throw new AwsException("InvalidParameterException", "User pool already has a domain of this type", 400);
+        }
+    }
+
     public UserPoolDomain createUserPoolDomain(String domain, String userPoolId,
             Map<String, Object> customDomainConfig, Integer managedLoginVersion, Consumer<UserPoolDomain> beforeCreate) {
         describeUserPool(userPoolId);
@@ -6834,11 +6845,6 @@ public class CognitoService implements ResourceProvider {
             if (!findDomains(domain).isEmpty()) {
                 throw new AwsException("InvalidParameterException",
                         "Domain " + domain + " already associated with another user pool", 400);
-            }
-            if (listUserPoolDomains(userPoolId).stream()
-                    .anyMatch(existing -> existing.isCustomDomain() == userPoolDomain.isCustomDomain())) {
-                throw new AwsException("InvalidParameterException",
-                        "User pool already has a domain of this type", 400);
             }
             beforeCreate.accept(userPoolDomain);
             if (userPoolDomain.isCustomDomain()) {

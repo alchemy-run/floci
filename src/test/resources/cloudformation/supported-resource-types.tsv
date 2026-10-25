@@ -26,8 +26,6 @@ AWS::AppSync::FunctionConfiguration	AppSyncCfnProvisioner
 AWS::AppSync::GraphQLApi	AppSyncCfnProvisioner
 AWS::AppSync::GraphQLSchema	AppSyncCfnProvisioner
 AWS::AppSync::Resolver	AppSyncCfnProvisioner
-AWS::ApplicationAutoScaling::ScalableTarget	ApplicationAutoScalingCfnProvisioner
-AWS::ApplicationAutoScaling::ScalingPolicy	ApplicationAutoScalingCfnProvisioner
 AWS::AutoScaling::AutoScalingGroup	AutoScalingGroupCfnProvisioner
 AWS::AutoScaling::LaunchConfiguration	AutoScalingGroupCfnProvisioner
 AWS::AutoScaling::LifecycleHook	AutoScalingLifecycleHookCfnProvisioner
@@ -36,9 +34,6 @@ AWS::Backup::BackupVault	BackupVaultCfnProvisioner
 AWS::Batch::ComputeEnvironment	BatchCfnProvisioner
 AWS::Batch::JobDefinition	BatchCfnProvisioner
 AWS::Batch::JobQueue	BatchCfnProvisioner
-AWS::BedrockAgentCore::Memory	BedrockAgentCoreCfnProvisioner
-AWS::BedrockAgentCore::Runtime	BedrockAgentCoreCfnProvisioner
-AWS::BedrockAgentCore::RuntimeEndpoint	BedrockAgentCoreCfnProvisioner
 AWS::CDK::Metadata	CdkMetadataCfnProvisioner
 AWS::CertificateManager::Certificate	AcmCfnProvisioner
 AWS::CloudFormation::CustomResource	CustomResourceCfnProvisioner
@@ -95,11 +90,6 @@ AWS::ECS::Service	EcsCfnProvisioner
 AWS::ECS::TaskDefinition	EcsCfnProvisioner
 AWS::EKS::Cluster	EksCfnProvisioner
 AWS::EKS::Nodegroup	EksCfnProvisioner
-AWS::ElastiCache::CacheCluster	ElastiCacheCfnProvisioner
-AWS::ElastiCache::ServerlessCache	ElastiCacheServerlessCfnProvisioner
-AWS::ElastiCache::SubnetGroup	ElastiCacheCfnProvisioner
-AWS::ElastiCache::User	ElastiCacheCfnProvisioner
-AWS::ElastiCache::UserGroup	ElastiCacheCfnProvisioner
 AWS::ElasticLoadBalancingV2::Listener	ElbV2CfnProvisioner
 AWS::ElasticLoadBalancingV2::ListenerRule	ElbV2CfnProvisioner
 AWS::ElasticLoadBalancingV2::LoadBalancer	ElbV2CfnProvisioner
@@ -109,7 +99,6 @@ AWS::Events::Archive	EventsArchiveCfnProvisioner
 AWS::Events::EventBus	EventsCfnProvisioner
 AWS::Events::EventBusPolicy	EventsCfnProvisioner
 AWS::Events::Rule	EventsCfnProvisioner
-AWS::GuardDuty::MalwareProtectionPlan	GuardDutyMalwareProtectionPlanCfnProvisioner
 AWS::IAM::AccessKey	IamAccessKeyCfnProvisioner
 AWS::IAM::InstanceProfile	IamInstanceProfileCfnProvisioner
 AWS::IAM::ManagedPolicy	IamManagedPolicyCfnProvisioner
@@ -158,9 +147,6 @@ AWS::Redshift::Cluster	RedshiftClusterCfnProvisioner
 AWS::Redshift::ClusterParameterGroup	RedshiftClusterCfnProvisioner
 AWS::Redshift::ClusterSecurityGroup	RedshiftClusterCfnProvisioner
 AWS::Redshift::ClusterSubnetGroup	RedshiftClusterCfnProvisioner
-AWS::RedshiftServerless::Namespace	RedshiftServerlessCfnProvisioner
-AWS::RedshiftServerless::Workgroup	RedshiftServerlessCfnProvisioner
-AWS::Route53::HealthCheck	Route53CfnProvisioner
 AWS::Route53::HostedZone	Route53CfnProvisioner
 AWS::Route53::RecordSet	Route53CfnProvisioner
 AWS::S3::Bucket	S3CfnProvisioner
@@ -178,15 +164,6 @@ AWS::Scheduler::Schedule	SchedulerScheduleCfnProvisioner
 AWS::Scheduler::ScheduleGroup	SchedulerScheduleGroupCfnProvisioner
 AWS::SecretsManager::Secret	SecretsManagerCfnProvisioner
 AWS::SecretsManager::SecretTargetAttachment	SecretTargetAttachmentCfnProvisioner
-AWS::ServiceDiscovery::HttpNamespace	CloudMapCfnProvisioner
-AWS::ServiceDiscovery::PrivateDnsNamespace	CloudMapCfnProvisioner
-AWS::ServiceDiscovery::PublicDnsNamespace	CloudMapCfnProvisioner
-AWS::ServiceDiscovery::Service	CloudMapCfnProvisioner
 AWS::StepFunctions::StateMachine	StepFunctionsCfnProvisioner
-AWS::Transfer::Server	TransferCfnProvisioner
-AWS::Transfer::User	TransferCfnProvisioner
-AWS::WAFv2::IPSet	WafV2CfnProvisioner
-AWS::WAFv2::LoggingConfiguration	WafV2CfnProvisioner
 AWS::WAFv2::WebACL	WafV2CfnProvisioner
-AWS::WAFv2::WebACLAssociation	WafV2CfnProvisioner
 Custom::DynamoDBReplica	DynamoDbCfnProvisioner

@@ -541,7 +541,16 @@ public class StackSetService implements PassedRoleLookup {
         }
         LinkedHashMap<String, TargetAccount> targets = new LinkedHashMap<>();
         for (String ou : organizationalUnits) {
-            collectOrganizationTargets(caller, organization, ou, ou, targets);
+            try {
+                collectOrganizationTargets(caller, organization, ou, ou, targets);
+            } catch (AwsException e) {
+                // Organizations reports an unknown parent; a stack set names it as the OU it targets.
+                if ("ParentNotFoundException".equals(e.getErrorCode())) {
+                    throw new AwsException("OrganizationalUnitNotFoundException",
+                            "Organizational unit " + ou + " was not found.", 400);
+                }
+                throw e;
+            }
             if (persistTargets) {
                 autoDeploymentTargets.put(stackSetName + "::" + ou,
                         new StackSetAutoDeploymentTarget(stackSetName, ou, regions));

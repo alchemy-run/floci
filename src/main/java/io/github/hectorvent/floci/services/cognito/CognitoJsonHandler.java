@@ -515,6 +515,7 @@ public class CognitoJsonHandler {
     }
 
     private Response handleCreateUserPoolDomain(JsonNode request) {
+        service.requireNoDomainOfType(request.path("UserPoolId").asText(), customDomainConfig(request) != null);
         UserPoolDomain domain = service.createUserPoolDomain(
                 request.path("Domain").asText(),
                 request.path("UserPoolId").asText(),

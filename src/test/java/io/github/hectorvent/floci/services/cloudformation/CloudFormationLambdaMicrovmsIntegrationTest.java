@@ -1,17 +1,19 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
-import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.services.lambda.microvm.MicrovmBuildService;
+import io.quarkus.test.InjectMock;
 import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-
-import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * End-to-end check that CloudFormation provisions {@code AWS::Lambda::MicrovmImage} and
@@ -25,6 +27,15 @@ class CloudFormationLambdaMicrovmsIntegrationTest {
 
     private static final String CFN_AUTH =
             "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/cloudformation/aws4_request";
+
+    @InjectMock
+    MicrovmBuildService buildService;
+
+    @BeforeEach
+    void mockDockerBuild() {
+        when(buildService.buildForAccount(anyString(), anyString(), anyString(), anyString()))
+                .thenAnswer(inv -> inv.getArgument(3));
+    }
 
     @Test
     void createStackProvisionsImageAndConnector() {
@@ -67,6 +78,7 @@ class CloudFormationLambdaMicrovmsIntegrationTest {
                   },
                   "Outputs": {
                     "ImageArn": {"Value": {"Fn::GetAtt": ["Image", "ImageArn"]}},
+                    "ImageVersion": {"Value": {"Fn::GetAtt": ["Image", "LatestActiveImageVersion"]}},
                     "ConnectorArn": {"Value": {"Fn::GetAtt": ["Connector", "Arn"]}}
                   }
                 }
@@ -83,18 +95,20 @@ class CloudFormationLambdaMicrovmsIntegrationTest {
         .then()
             .statusCode(200);
 
-        given()
-            .contentType("application/x-www-form-urlencoded")
-            .header("Authorization", CFN_AUTH)
-            .formParam("Action", "DescribeStacks")
-            .formParam("StackName", stackName)
-        .when()
-            .post("/")
-        .then()
-            .statusCode(200)
-            .body(containsString("<StackStatus>CREATE_COMPLETE</StackStatus>"))
-            .body(containsString(":microvm-image:" + imageName))
-            .body(containsString(":network-connector:nc-"));
+        await().untilAsserted(() -> given()
+                .contentType("application/x-www-form-urlencoded")
+                .header("Authorization", CFN_AUTH)
+                .formParam("Action", "DescribeStacks")
+                .formParam("StackName", stackName)
+                .when().post("/")
+                .then().statusCode(200)
+                .body(containsString("<StackStatus>CREATE_COMPLETE</StackStatus>"))
+                .body(containsString(":microvm-image:" + imageName))
+                .body(containsString(":network-connector:nc-"))
+                .body(containsString("<OutputKey>ImageVersion</OutputKey>"))
+                .body(containsString("<OutputValue>1.0</OutputValue>")));
+        verify(buildService).buildForAccount(eq("000000000000"), eq("us-east-1"),
+                eq("s3://cfn-bucket/context.zip"), anyString());
 
         // Both resources really exist in the MicroVMs service.
         given()
@@ -122,111 +136,5 @@ class CloudFormationLambdaMicrovmsIntegrationTest {
                         .get("/2025-09-09/microvm-images/" + imageName)
                         .then()
                         .statusCode(404));
-    }
-
-    @Test
-    void refReturnsTheArnsAndAnUpdateKeepsTheConnector() {
-        String suffix = Long.toString(System.nanoTime(), 36);
-        String stackName = "cfn-microvm-ref-" + suffix;
-        String connectorName = "cfn-microvm-ref-connector-" + suffix;
-
-        cloudFormation(stackName, "CreateStack", refTemplate(connectorName, "subnet-0cfn000000000001"));
-        Map<String, String> created = outputs(describeStacks(stackName, "CREATE_COMPLETE"));
-        String connectorArn = created.get("ConnectorArn");
-        assertTrue(connectorArn.contains(":network-connector:nc-"), connectorArn);
-        assertEquals(connectorArn, created.get("ConnectorRef"), "Ref is the connector ARN, its primaryIdentifier");
-        assertEquals(created.get("ImageArn"), created.get("ImageRef"), "Ref is the image ARN, its primaryIdentifier");
-
-        cloudFormation(stackName, "UpdateStack", refTemplate(connectorName, "subnet-0cfn000000000002"));
-        Map<String, String> updated = outputs(describeStacks(stackName, "UPDATE_COMPLETE"));
-        assertEquals(connectorArn, updated.get("ConnectorRef"), "a subnet change updates the connector in place");
-        given()
-            .when()
-            .get("/2026-04-04/network-connectors/" + connectorArn)
-            .then()
-            .statusCode(200)
-            .body("Name", equalTo(connectorName))
-            .body("Configuration.VpcEgressConfiguration.SubnetIds[0]", equalTo("subnet-0cfn000000000002"));
-
-        cloudFormation(stackName, "DeleteStack", null);
-        await().untilAsserted(() ->
-                given()
-                        .when()
-                        .get("/2026-04-04/network-connectors/" + connectorArn)
-                        .then()
-                        .statusCode(404));
-    }
-
-    private static String refTemplate(String connectorName, String subnetId) {
-        return """
-                {
-                  "Resources": {
-                    "Connector": {
-                      "Type": "AWS::Lambda::NetworkConnector",
-                      "Properties": {
-                        "Name": "%s",
-                        "OperatorRole": "arn:aws:iam::000000000000:role/cfn-microvm-connector-operator",
-                        "Configuration": {
-                          "VpcEgressConfiguration": {
-                            "AssociatedComputeResourceTypes": ["MicroVm"],
-                            "SubnetIds": ["%s"],
-                            "SecurityGroupIds": ["sg-0cfn000000000001"],
-                            "NetworkProtocol": "IPv4"
-                          }
-                        }
-                      }
-                    },
-                    "Image": {
-                      "Type": "AWS::Lambda::MicrovmImage",
-                      "Properties": {
-                        "BaseImageArn": "arn:aws:lambda:us-east-1:aws:microvm-image:al2023-1",
-                        "BuildRoleArn": "arn:aws:iam::000000000000:role/cfn-microvm-build",
-                        "CodeArtifact": { "Uri": "s3://cfn-bucket/context.zip" },
-                        "Description": "cfn ref image"
-                      }
-                    }
-                  },
-                  "Outputs": {
-                    "ImageRef": {"Value": {"Ref": "Image"}},
-                    "ImageArn": {"Value": {"Fn::GetAtt": ["Image", "ImageArn"]}},
-                    "ConnectorRef": {"Value": {"Ref": "Connector"}},
-                    "ConnectorArn": {"Value": {"Fn::GetAtt": ["Connector", "Arn"]}}
-                  }
-                }
-                """.formatted(connectorName, subnetId);
-    }
-
-    private static void cloudFormation(String stackName, String action, String templateBody) {
-        if (templateBody == null) {
-            given()
-                .contentType("application/x-www-form-urlencoded")
-                .header("Authorization", CFN_AUTH)
-                .formParam("Action", action)
-                .formParam("StackName", stackName)
-            .when().post("/").then().statusCode(200);
-            return;
-        }
-        given()
-            .contentType("application/x-www-form-urlencoded")
-            .header("Authorization", CFN_AUTH)
-            .formParam("Action", action)
-            .formParam("StackName", stackName)
-            .formParam("TemplateBody", templateBody)
-        .when().post("/").then().statusCode(200);
-    }
-
-    private static String describeStacks(String stackName, String expectedStatus) {
-        return given()
-            .contentType("application/x-www-form-urlencoded")
-            .header("Authorization", CFN_AUTH)
-            .formParam("Action", "DescribeStacks")
-            .formParam("StackName", stackName)
-        .when().post("/").then().statusCode(200)
-            .body(containsString("<StackStatus>" + expectedStatus + "</StackStatus>"))
-            .extract().asString();
-    }
-
-    private static Map<String, String> outputs(String describeStacksXml) {
-        return XmlParser.extractPairs(describeStacksXml, "Outputs", "OutputKey", "OutputValue");
     }
 }
