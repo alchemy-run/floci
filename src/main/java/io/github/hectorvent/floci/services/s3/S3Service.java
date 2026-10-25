@@ -8132,8 +8132,8 @@ public class S3Service implements Resettable, ResourceProvider {
 
     /**
      * Tags as stored, including the empty set. S3 Control {@code ListTagsForResource}
-     * returns an empty list for an untagged bucket; {@link #getBucketTagging} matches
-     * real S3 and raises {@code NoSuchTagSet} instead.
+     * returns an empty list for an untagged bucket; S3's GetBucketTagging raises
+     * {@code NoSuchTagSet} instead.
      */
     public Map<String, String> listBucketTags(String bucketName) {
         Bucket bucket = bucketStore.get(bucketName)

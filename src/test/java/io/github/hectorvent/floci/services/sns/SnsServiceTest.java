@@ -79,10 +79,11 @@ class SnsServiceTest {
 
         service.setSmsAttributes(Map.of("DefaultSMSType", "Transactional", "MonthlySpendLimit", "10"), REGION);
 
-        assertTrue(service.getSmsAttributes(List.of(), REGION).isEmpty());
+        // An account or Region that set nothing reports only the default message type.
+        assertEquals(Map.of("DefaultSMSType", "Promotional"), service.getSmsAttributes(List.of(), REGION));
         assertEquals(Map.of("DefaultSMSType", "Transactional", "MonthlySpendLimit", "10"),
                 service.getSmsAttributes(List.of(), REGION));
-        assertTrue(service.getSmsAttributes(List.of(), "us-west-2").isEmpty());
+        assertEquals(Map.of("DefaultSMSType", "Promotional"), service.getSmsAttributes(List.of(), "us-west-2"));
         assertEquals(Map.of("DefaultSMSType", "Transactional"),
                 service.getSmsAttributes(List.of("DefaultSMSType"), REGION));
     }
@@ -116,7 +117,8 @@ class SnsServiceTest {
 
         snsService.setSmsAttributes(Map.of("DefaultSMSType", ""), REGION);
 
-        assertEquals(Map.of("MonthlySpendLimit", "10"),
+        // The reset type falls back to the default.
+        assertEquals(Map.of("DefaultSMSType", "Promotional", "MonthlySpendLimit", "10"),
                 snsService.getSmsAttributes(List.of(), REGION));
     }
 

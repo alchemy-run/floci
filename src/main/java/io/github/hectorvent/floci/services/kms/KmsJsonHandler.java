@@ -635,7 +635,7 @@ public class KmsJsonHandler {
         Integer period = rotationPeriod.isMissingNode() || rotationPeriod.isNull()
                 ? null : rotationPeriod.asInt();
         service.enableKeyRotation(request.path("KeyId").asText(), period, region);
-        return Response.ok(objectMapper.createObjectNode()).build();
+        return Response.ok().build();
     }
 
     private Response handleDisableKeyRotation(JsonNode request, String region) {

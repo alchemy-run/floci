@@ -858,7 +858,7 @@ class KmsServiceTest {
         kmsService.cancelKeyDeletion(key.getKeyId(), REGION);
 
         KmsKey updated = kmsService.describeKey(key.getKeyId(), REGION);
-        assertEquals("Enabled", updated.getKeyState());
+        assertEquals("Disabled", updated.getKeyState());
         assertEquals(0, updated.getDeletionDate());
     }
 
@@ -2950,8 +2950,10 @@ class KmsServiceTest {
             kmsService.cancelKeyDeletion(key.getKeyId(), REGION);
 
             KmsKey restored = kmsService.describeKey(key.getKeyId(), REGION);
-            assertEquals("Enabled", restored.getKeyState());
-            assertTrue(restored.isEnabled());
+            // CancelKeyDeletion leaves the key Disabled, as on AWS; enabled again it still encrypts.
+            assertEquals("Disabled", restored.getKeyState());
+            assertFalse(restored.isEnabled());
+            kmsService.enableKey(key.getKeyId(), REGION);
             assertNotNull(kmsService.encrypt(key.getKeyId(), "hello".getBytes(StandardCharsets.UTF_8), REGION));
         }
 

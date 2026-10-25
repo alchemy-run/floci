@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
+import java.net.URI;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.when;
@@ -57,6 +58,7 @@ class S3VersionedIamActionResolutionTest {
         UriInfo uriInfo = Mockito.mock(UriInfo.class);
         when(uriInfo.getQueryParameters()).thenReturn(query);
         when(uriInfo.getPath()).thenReturn("/bucket/folder/key.txt");
+        when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:4566/bucket/folder/key.txt"));
         when(ctx.getUriInfo()).thenReturn(uriInfo);
         when(ctx.getMethod()).thenReturn(method);
         when(ctx.getEntityStream()).thenReturn(new ByteArrayInputStream(new byte[0]));

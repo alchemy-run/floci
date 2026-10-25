@@ -48,7 +48,8 @@ class S3VersionedNotificationServiceTest {
         config.getLambdaFunctionConfigurations().add(new LambdaNotification("all",
                 "arn:aws:lambda:us-east-1:000000000000:function:events",
                 List.of("s3:ObjectCreated:*", "s3:ObjectRemoved:*"), List.of()));
-        s3Service.putBucketNotificationConfiguration(BUCKET, config);
+        // The function is not deployed; the invoker records what would reach it.
+        s3Service.putBucketNotificationConfiguration(BUCKET, config, true);
     }
 
     @Test
