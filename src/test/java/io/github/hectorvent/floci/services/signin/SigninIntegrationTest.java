@@ -67,8 +67,10 @@ class SigninIntegrationTest {
                 .header("Cache-Control", equalTo("no-store"))
                 .header("Referrer-Policy", equalTo("no-referrer"))
                 .header("X-Content-Type-Options", equalTo("nosniff"))
+                // The consent form's redirect target is allowed: browsers apply form-action to redirects.
                 .header("Content-Security-Policy", equalTo("default-src 'none'; img-src 'self'; "
-                        + "style-src 'self'; form-action 'self'; base-uri 'none'; frame-ancestors 'none'"))
+                        + "style-src 'self'; form-action 'self' " + REDIRECT_URI + "; base-uri 'none'; "
+                        + "frame-ancestors 'none'"))
                 .extract()
                 .asString();
         assertTrue(page.contains("Sign in to Floci"));

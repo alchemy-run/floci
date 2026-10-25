@@ -259,7 +259,8 @@ class NeptuneServiceTest {
         NeptuneCluster created = service.createDbCluster("no-docker-cluster", "1.3.2.1", false);
 
         assertEquals("available", created.getStatus());
-        assertEquals("localhost", created.getEndpoint());
+        // The endpoint is the cluster's own name, which Floci's embedded DNS answers.
+        assertTrue(created.getEndpoint().startsWith("no-docker-cluster.cluster-"), created.getEndpoint());
         assertEquals(18182, created.getProxyPort());
         verify(proxyManager, never()).startProxy(anyString(), anyInt(), anyString(), anyInt());
 

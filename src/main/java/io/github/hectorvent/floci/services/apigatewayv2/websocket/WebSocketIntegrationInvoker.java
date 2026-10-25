@@ -270,7 +270,6 @@ public class WebSocketIntegrationInvoker {
 
         try {
             URI target = URI.create(uri);
-            SsrfProtection.rejectMetadataAddresses(InetAddress.getAllByName(target.getHost()), target.getHost());
             HttpBackendResponse response = postToHttpEndpoint(target, eventJson);
             return new IntegrationResult(response.statusCode(), response.body(), null);
         } catch (Exception e) {
@@ -313,7 +312,6 @@ public class WebSocketIntegrationInvoker {
 
         try {
             URI target = URI.create(uri);
-            SsrfProtection.rejectMetadataAddresses(InetAddress.getAllByName(target.getHost()), target.getHost());
             HttpBackendResponse response = postToHttpEndpoint(target, transformedPayload);
             int statusCode = response.statusCode();
             String body = response.body();
