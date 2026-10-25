@@ -1,10 +1,12 @@
 package io.github.hectorvent.floci.services.appsync.graphql.auth;
 
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsRegions;
-import io.github.hectorvent.floci.core.common.AccountResolver;
-import io.github.hectorvent.floci.core.common.auth.CredentialScope;
+import io.github.hectorvent.floci.core.common.Digests;
+import io.github.hectorvent.floci.core.common.auth.SessionTokenCheck;
 import io.github.hectorvent.floci.core.common.auth.SigV4AuthorizationHeader;
 import io.github.hectorvent.floci.core.common.auth.SigV4RequestValidator;
+import io.github.hectorvent.floci.core.common.auth.SigV4SignedRequest;
 import io.github.hectorvent.floci.services.appsync.graphql.AppSyncTransportException;
 import io.github.hectorvent.floci.services.iam.IamPolicyEvaluator;
 import io.github.hectorvent.floci.services.iam.IamService;
@@ -15,9 +17,14 @@ import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Clock;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.Base64;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -27,7 +34,8 @@ import java.util.Map;
  *
  * <p>Scoped narrowly to this one endpoint: header-signed only (AppSync's SDKs never presign this
  * call), signing service {@code "appsync"} (not {@code execute-api}), and the original HTTP path
- * before virtual-host routing rewrites {@code /graphql} to {@code /v1/apis/{apiId}/graphql}.
+ * before virtual-host routing rewrites {@code /graphql} to {@code /v1/apis/{apiId}/graphql}, with no
+ * query string.
  * Modeled on {@code ExecuteApiSigV4Authorizer} and {@code SigV4Validator}, which cannot be reused
  * directly: both hardcode a different signing service name.
  *
@@ -46,30 +54,34 @@ public class IamAuthValidator {
     private static final String SIGNING_SERVICE = "appsync";
     private static final DateTimeFormatter AMZ_DATE =
             DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
-    private static final long MAX_CLOCK_SKEW_SECONDS = 300;
+    private static final String TERMINATOR = "aws4_request";
+    private static final String SIGNATURE_MISMATCH = "The request signature we calculated does not match the signature"
+            + " you provided. Check your AWS Secret Access Key and signing method. Consult the service documentation"
+            + " for details.";
     private static final String LEGACY_ACCESS_KEY_ID = "test";
     private static final String LEGACY_SECRET_KEY = "test";
     private static final String SECURITY_TOKEN = "X-Amz-Security-Token";
 
-    private final AccountResolver accountResolver;
     private final IamService iamService;
     private final IamPolicyEvaluator iamPolicyEvaluator;
+    private final Clock clock;
 
     @Inject
-    public IamAuthValidator(AccountResolver accountResolver,
-                            IamService iamService,
-                            IamPolicyEvaluator iamPolicyEvaluator) {
-        this.accountResolver = accountResolver;
+    public IamAuthValidator(IamService iamService, IamPolicyEvaluator iamPolicyEvaluator) {
+        this(iamService, iamPolicyEvaluator, Clock.systemUTC());
+    }
+
+    IamAuthValidator(IamService iamService, IamPolicyEvaluator iamPolicyEvaluator, Clock clock) {
         this.iamService = iamService;
         this.iamPolicyEvaluator = iamPolicyEvaluator;
+        this.clock = clock;
     }
 
     public Map<String, Object> validateRequest(String authorization, String apiId, AuthRequestInfo info) {
-        String accessKeyId = accountResolver.extractAccessKeyId(authorization);
-        if (accessKeyId == null || accessKeyId.isBlank()) {
+        if (authorization == null || !authorization.trim().startsWith(ALGORITHM)) {
             throw AppSyncAuth.unauthorized();
         }
-        verifySignature(authorization, apiId, info, accessKeyId);
+        String accessKeyId = verifySignature(authorization.trim(), apiId, info);
         if (!isEmulatorAllow(accessKeyId)) {
             CallerContext caller = iamService.resolveCallerContext(accessKeyId);
             if (caller != null) {
@@ -78,12 +90,13 @@ public class IamAuthValidator {
                 IamPolicyEvaluator.SimulationDecision decision = iamPolicyEvaluator.simulatePrincipalPolicy(
                         caller, "appsync:GraphQL", resource, null);
                 if (decision == IamPolicyEvaluator.SimulationDecision.EXPLICIT_DENY) {
-                    throw AppSyncAuth.unauthorized();
+                    throw AppSyncAuth.permissionDenied();
                 }
             }
         }
         String userArn = iamService.resolveCallerArn(accessKeyId).orElseGet(
-                () -> isEmulatorAllow(accessKeyId) ? "arn:aws:iam::" + nullToEmpty(info.accountId()) + ":root"
+                () -> isEmulatorAllow(accessKeyId)
+                        ? AwsArnUtils.Arn.global(AwsRegions.partitionFor(info.region()), "iam", nullToEmpty(info.accountId()), "root").toString()
                         : null);
         if (userArn == null) {
             // resolveSecretKey already proved the key is registered, so this is unreachable for any
@@ -95,59 +108,141 @@ public class IamAuthValidator {
     }
 
     /**
-     * Fails closed: a missing/unparsable {@code Authorization} header, a credential not scoped to
-     * {@code appsync}, a signing timestamp outside the accepted clock skew, an access key this
-     * emulator has never registered, or a signature that does not match are all rejected. There is
-     * no default secret and no path that authenticates an unregistered key.
+     * Returns the access key that signed the request. The checks run in AppSync's order with its
+     * wording. AppSync names the scope region it refuses, but Floci takes the request's region from
+     * that scope, so it is not checked. There is no default secret and no path that authenticates
+     * an unregistered key.
      */
-    private void verifySignature(String authorization, String apiId, AuthRequestInfo info, String accessKeyId) {
-        SignedRequest signed = headerSignedRequest(authorization, info.requestHeaders());
-        if (signed == null) {
-            throw AppSyncAuth.unauthorized();
+    private String verifySignature(String authorization, String apiId, AuthRequestInfo info) {
+        Map<String, String> headers = info.requestHeaders();
+        SigV4AuthorizationHeader parsed = SigV4AuthorizationHeader.parse(authorization);
+        if (parsed.missingEqualSign()) {
+            throw AppSyncAuth.incompleteSignature("Invalid key=value pair (missing equal-sign) in Authorization"
+                    + " header (hashed with SHA-256 and encoded with Base64): '" + hashed(authorization) + "'.");
         }
-        CredentialScope scope = CredentialScope.parse(signed.credential());
-        if (scope == null || !SIGNING_SERVICE.equals(scope.service()) || !accessKeyId.equals(scope.accessKeyId())) {
-            throw AppSyncAuth.unauthorized();
+        String credential = parsed.credential();
+        String signedHeaders = parsed.signedHeaders();
+        String signature = parsed.signature();
+        String date = hasHeader(headers, "X-Amz-Date") ? header(headers, "X-Amz-Date")
+                : hasHeader(headers, "Date") ? header(headers, "Date") : null;
+        List<String> missing = new ArrayList<>();
+        if (isBlank(credential)) {
+            missing.add("Authorization header requires 'Credential' parameter.");
         }
-        Instant signedAt;
-        try {
-            signedAt = Instant.from(AMZ_DATE.parse(signed.amzDate()));
-        } catch (Exception e) {
-            throw AppSyncAuth.unauthorized();
+        if (isBlank(signature)) {
+            missing.add("Authorization header requires 'Signature' parameter.");
         }
-        if (Math.abs(Instant.now().getEpochSecond() - signedAt.getEpochSecond()) > MAX_CLOCK_SKEW_SECONDS) {
-            throw AppSyncAuth.unauthorized();
+        if (isBlank(signedHeaders)) {
+            missing.add("Authorization header requires 'SignedHeaders' parameter.");
         }
+        if (date == null) {
+            missing.add("Authorization header requires existence of either a 'X-Amz-Date' or a 'Date' header.");
+        }
+        if (!missing.isEmpty()) {
+            throw AppSyncAuth.incompleteSignature(String.join(" ", missing)
+                    + " (Hashed with SHA-256 and encoded with Base64) Authorization=" + hashed(authorization));
+        }
+        Instant signedAt = signedAt(date);
+        if (signedAt == null) {
+            throw AppSyncAuth.incompleteSignature("Date must be in ISO-8601 'basic format'. Got '" + date
+                    + "'. See http://en.wikipedia.org/wiki/ISO_8601");
+        }
+        checkSigningTime(signedAt);
+        for (String name : signedHeaders.split(";")) {
+            if (!hasHeader(headers, name)) {
+                throw AppSyncAuth.incompleteSignature("'" + name
+                        + "' is named as a SignedHeader, but it does not exist in the HTTP request.");
+            }
+        }
+        String names = signedHeaders.toLowerCase(Locale.ROOT);
+        if (!SigV4RequestValidator.containsHeader(names, "host")
+                && !SigV4RequestValidator.containsHeader(names, ":authority")) {
+            throw AppSyncAuth.badRequest("'Host' or ':authority' must be a 'SignedHeader' in the AWS Authorization.");
+        }
+        String[] scope = credential.split("/", -1);
+        if (scope.length != 5) {
+            throw AppSyncAuth.incompleteSignature("Credential must have exactly 5 slash-delimited elements,"
+                    + " e.g. keyid/date/region/service/term, got '" + credential + "'");
+        }
+        String amzDate = AMZ_DATE.format(signedAt);
+        checkScope(scope, amzDate);
+        String accessKeyId = scope[0];
         String secretKey = resolveSecretKey(accessKeyId);
         if (secretKey == null) {
             LOG.debugv("AppSync SigV4 request references unregistered access key={0}",
                     SigV4RequestValidator.sanitizeForLog(accessKeyId));
-            throw AppSyncAuth.unauthorized();
+            throw AppSyncAuth.unrecognizedClient();
         }
-        checkSessionToken(accessKeyId, info.requestHeaders());
+        // The path the client signed, before virtual-host routing rewrites /graphql to /v1/apis/{apiId}/graphql.
+        String canonicalUri = info.requestPath() == null ? "/v1/apis/" + apiId + "/graphql" : info.requestPath();
+        String canonicalRequest = "POST\n" + canonicalUri + "\n\n" + canonicalHeaders(names, headers)
+                + "\n" + names + "\n" + Digests.sha256Hex(info.rawBody().getBytes(StandardCharsets.UTF_8));
+        String stringToSign = ALGORITHM + "\n" + amzDate + "\n" + String.join("/", scope[1], scope[2], scope[3], scope[4])
+                + "\n" + Digests.sha256Hex(canonicalRequest.getBytes(StandardCharsets.UTF_8));
+        String expected;
         try {
-            String canonicalUri = info.requestPath() == null ? "/v1/apis/" + apiId + "/graphql" : info.requestPath();
-            String payloadHash = SigV4RequestValidator.sha256Hex(info.rawBody().getBytes(StandardCharsets.UTF_8));
-            String canonicalHeaders = canonicalHeaders(signed.signedHeaders(), info.requestHeaders());
-            String canonicalRequest = "POST\n" + canonicalUri + "\n\n"
-                    + canonicalHeaders + "\n" + signed.signedHeaders() + "\n" + payloadHash;
-            String stringToSign = ALGORITHM + "\n" + signed.amzDate() + "\n" + scope.credentialScope() + "\n"
-                    + SigV4RequestValidator.sha256Hex(canonicalRequest.getBytes(StandardCharsets.UTF_8));
-            byte[] signingKey = SigV4RequestValidator.deriveSigningKey(
-                    secretKey, scope.date(), scope.region(), scope.service());
-            String expected = SigV4RequestValidator.hexEncode(
-                    SigV4RequestValidator.hmacSha256(signingKey, stringToSign));
-            if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8),
-                    signed.signature().getBytes(StandardCharsets.UTF_8))) {
-                LOG.debugv("AppSync SigV4 signature mismatch for accessKey={0}",
-                        SigV4RequestValidator.sanitizeForLog(accessKeyId));
-                throw AppSyncAuth.unauthorized();
-            }
-        } catch (AppSyncTransportException e) {
-            throw e;
+            byte[] signingKey = SigV4RequestValidator.deriveSigningKey(secretKey, scope[1], scope[2], scope[3]);
+            expected = SigV4RequestValidator.hexEncode(SigV4RequestValidator.hmacSha256(signingKey, stringToSign));
         } catch (Exception e) {
             LOG.debugv(e, "AppSync SigV4 verification failed to complete: {0}", e.getMessage());
             throw AppSyncAuth.unauthorized();
+        }
+        if (!MessageDigest.isEqual(expected.getBytes(StandardCharsets.UTF_8), signature.getBytes(StandardCharsets.UTF_8))) {
+            LOG.debugv("AppSync SigV4 signature mismatch for accessKey={0}",
+                    SigV4RequestValidator.sanitizeForLog(accessKeyId));
+            throw AppSyncAuth.badRequest(SIGNATURE_MISMATCH + "\n\nThe Canonical String for this request should have been\n'"
+                    + canonicalRequest + "'\n\nThe String-to-Sign should have been\n'" + stringToSign + "'\n");
+        }
+        checkSessionToken(accessKeyId, headers);
+        return accessKeyId;
+    }
+
+    private static String hashed(String authorization) {
+        return Base64.getEncoder().encodeToString(Digests.sha256(authorization.getBytes(StandardCharsets.UTF_8)));
+    }
+
+    /** AppSync reads the basic format, and the extended one too. */
+    private static Instant signedAt(String date) {
+        try {
+            return Instant.from(AMZ_DATE.parse(date));
+        } catch (DateTimeException notBasic) {
+            try {
+                return Instant.parse(date);
+            } catch (DateTimeException expected) {
+                // Refused with the basic format message.
+                return null;
+            }
+        }
+    }
+
+    private void checkSigningTime(Instant signedAt) {
+        Instant now = clock.instant();
+        Instant earliest = now.minusSeconds(SigV4SignedRequest.MAX_CLOCK_SKEW_SECONDS);
+        Instant latest = now.plusSeconds(SigV4SignedRequest.MAX_CLOCK_SKEW_SECONDS);
+        if (signedAt.isBefore(earliest)) {
+            throw AppSyncAuth.badRequest("Signature expired: " + AMZ_DATE.format(signedAt) + " is now earlier than "
+                    + AMZ_DATE.format(earliest) + " (" + AMZ_DATE.format(now) + " - 5 min.)");
+        }
+        if (signedAt.isAfter(latest)) {
+            throw AppSyncAuth.badRequest("Signature not yet current: " + AMZ_DATE.format(signedAt)
+                    + " is still later than " + AMZ_DATE.format(latest) + " (" + AMZ_DATE.format(now) + " + 5 min.)");
+        }
+    }
+
+    /** {@code scope} is key, date, region, service and terminator. AppSync reports every fault at once. */
+    private static void checkScope(String[] scope, String amzDate) {
+        List<String> faults = new ArrayList<>();
+        if (!SIGNING_SERVICE.equals(scope[3])) {
+            faults.add("Credential should be scoped to correct service: '" + SIGNING_SERVICE + "'.");
+        }
+        if (!TERMINATOR.equals(scope[4])) {
+            faults.add("Credential should be scoped with a valid terminator: '" + TERMINATOR + "'.");
+        }
+        if (!amzDate.substring(0, 8).equals(scope[1])) {
+            faults.add("Date in Credential scope does not match YYYYMMDD from ISO-8601 version of date from HTTP.");
+        }
+        if (!faults.isEmpty()) {
+            throw AppSyncAuth.badRequest(String.join(" ", faults) + " ");
         }
     }
 
@@ -164,66 +259,20 @@ public class IamAuthValidator {
         return iamService.findSecretKey(accessKeyId).orElse(null);
     }
 
-    /**
-     * Rejects a temporary ({@code ASIA...}) credential that does not present the session token
-     * Floci issued with it. Mirrors {@code ExecuteApiSigV4Authorizer.checkSessionToken}: a matching
-     * secret alone is not the whole credential, since AWS requires the session token on every
-     * request made with temporary credentials to confirm it is live and genuinely STS-issued.
-     *
-     * <p>The token is compared against the value recorded at mint time, not merely required to be
-     * present, so a fabricated token is rejected along with a missing one. A session recorded
-     * before Floci tracked tokens has no issued value to compare against ({@code findSessionToken}
-     * is empty there), so presence is all that can be demanded of it: rejecting that case would
-     * lock out an otherwise valid credential.
-     *
-     * <p>The token does not need to ride in {@code SignedHeaders}: comparing it against the issued
-     * value binds it regardless of where it rode, the same way the execute-api authorizer does.
-     */
+    /** Rejects a session token that does not fit the access key. The local {@code test} key takes any token. */
     private void checkSessionToken(String accessKeyId, Map<String, String> requestHeaders) {
-        if (!IamService.isTemporaryAccessKey(accessKeyId)) {
+        if (LEGACY_ACCESS_KEY_ID.equals(accessKeyId)) {
             return;
         }
-        String presented = header(requestHeaders, SECURITY_TOKEN);
-        if (isBlank(presented)) {
-            LOG.debugv("AppSync SigV4 request uses temporary credential accessKey={0} with no {1}",
-                    SigV4RequestValidator.sanitizeForLog(accessKeyId), SECURITY_TOKEN);
-            throw AppSyncAuth.unauthorized();
+        String presented = hasHeader(requestHeaders, SECURITY_TOKEN) ? header(requestHeaders, SECURITY_TOKEN) : null;
+        AppSyncTransportException refusal = switch (SessionTokenCheck.of(iamService, accessKeyId, presented)) {
+            case VALID -> null;
+            case MISSING -> AppSyncAuth.unrecognizedClient();
+            case INVALID -> AppSyncAuth.invalidSessionToken();
+        };
+        if (refusal != null) {
+            throw refusal;
         }
-        String issued = iamService.findSessionToken(accessKeyId).orElse(null);
-        if (issued == null) {
-            return;
-        }
-        if (!MessageDigest.isEqual(issued.getBytes(StandardCharsets.UTF_8),
-                presented.getBytes(StandardCharsets.UTF_8))) {
-            LOG.debugv("AppSync SigV4 request presents a session token that does not match the one"
-                    + " issued for accessKey={0}", SigV4RequestValidator.sanitizeForLog(accessKeyId));
-            throw AppSyncAuth.unauthorized();
-        }
-    }
-
-    private record SignedRequest(String credential, String signedHeaders, String signature, String amzDate) {}
-
-    /**
-     * {@code X-Amz-Date} is a real HTTP header on a header-signed request, never a field inside the
-     * {@code Authorization} value itself (that only ever carries {@code Credential}/
-     * {@code SignedHeaders}/{@code Signature}), so it is read from {@code requestHeaders} - the same
-     * source {@code ExecuteApiSigV4Authorizer} reads it from. There is no fallback to the plain
-     * {@code Date} header: unlike {@code X-Amz-Date}, it is RFC 1123-formatted, which {@link
-     * #AMZ_DATE} can never parse, so a request that only sets {@code Date} is rejected below
-     * regardless.
-     */
-    private static SignedRequest headerSignedRequest(String authorization, Map<String, String> requestHeaders) {
-        SigV4AuthorizationHeader parsed = SigV4AuthorizationHeader.parse(authorization);
-        if (parsed == null) {
-            return null;
-        }
-        String amzDate = header(requestHeaders, "X-Amz-Date");
-        if (isBlank(parsed.credential()) || isBlank(parsed.signedHeaders())
-                || isBlank(parsed.signature()) || isBlank(amzDate)) {
-            return null;
-        }
-        return new SignedRequest(parsed.credential(), parsed.signedHeaders().toLowerCase(Locale.ROOT),
-                parsed.signature(), amzDate);
     }
 
     private static String canonicalHeaders(String signedHeaders, Map<String, String> requestHeaders) {
@@ -249,6 +298,10 @@ public class IamAuthValidator {
             }
         }
         return "";
+    }
+
+    private static boolean hasHeader(Map<String, String> headers, String name) {
+        return headers != null && headers.keySet().stream().anyMatch(name::equalsIgnoreCase);
     }
 
     private static boolean isBlank(String value) {
