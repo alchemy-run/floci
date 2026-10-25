@@ -34,89 +34,7 @@ public final class SecurityGroupNftCompiler {
 
     public static String compile(Endpoint target, Collection<Endpoint> peers,
                                  Map<String, List<String>> prefixLists) {
-        if (target == null || target.groups() == null || target.groups().isEmpty()) {
-            throw new IllegalArgumentException("Protected endpoint needs at least one security group");
-        }
-        StringBuilder rules = new StringBuilder(privateAddressTranslation(target, peers))
-                .append("flush chain inet floci_sg ingress\n")
-                .append("flush chain inet floci_sg egress\n")
-                .append("add rule inet floci_sg ingress iifname lo accept\n")
-                .append("add rule inet floci_sg egress oifname lo accept\n")
-                .append("add rule inet floci_sg ingress ct state established,related accept\n")
-                .append("add rule inet floci_sg egress ct state established,related accept\n");
-
-        // Docker's embedded DNS is loopback and covered above. DHCP and the
-        // link-local metadata endpoint are the other local infrastructure exceptions.
-        rules.append("add rule inet floci_sg egress udp sport 68 udp dport 67 accept\n")
-                .append("add rule inet floci_sg ingress udp sport 67 udp dport 68 accept\n")
-                .append("add rule inet floci_sg egress ip daddr 169.254.169.254 accept\n")
-                .append("add rule inet floci_sg ingress ip saddr 169.254.169.254 accept\n");
-
-        List<Endpoint> managed = peers == null ? List.of() : peers.stream()
-                .filter(peer -> !target.eniId().equals(peer.eniId()))
-                .filter(peer -> peer.transportAddress() != null && literal(peer.transportAddress()))
-                .toList();
-
-        for (boolean egress : new boolean[]{false, true}) {
-            String chain = egress ? "egress" : "ingress";
-            String addressField = egress ? "daddr" : "saddr";
-            for (SecurityGroup group : target.groups()) {
-                List<IpPermission> permissions = egress
-                        ? group.getIpPermissionsEgress() : group.getIpPermissions();
-                if (permissions == null) {
-                    continue;
-                }
-                for (IpPermission permission : permissions) {
-                    String protocol = protocolExpression(permission);
-                    if (protocol == null) {
-                        continue;
-                    }
-                    for (Endpoint peer : managed) {
-                        if (target.accountId().equals(peer.accountId())
-                                && target.region().equals(peer.region())
-                                && target.vpcId().equals(peer.vpcId())
-                                && SecurityGroupPolicy.matchesPeer(group, permission, peer.peer(), prefixLists)) {
-                            appendRule(rules, chain, addressField, peer.transportAddress(), protocol);
-                        }
-                    }
-                }
-            }
-            // A managed peer must never fall through to a broad external CIDR rule
-            // evaluated against its Docker bridge IP instead of its logical ENI address.
-            for (Endpoint peer : managed) {
-                appendRule(rules, chain, addressField, peer.transportAddress(), "drop");
-            }
-            for (SecurityGroup group : target.groups()) {
-                List<IpPermission> permissions = egress
-                        ? group.getIpPermissionsEgress() : group.getIpPermissions();
-                if (permissions == null) {
-                    continue;
-                }
-                for (IpPermission permission : permissions) {
-                    String protocol = protocolExpression(permission);
-                    if (protocol == null) {
-                        continue;
-                    }
-                    Set<String> cidrs = new LinkedHashSet<>();
-                    if (permission.getIpRanges() != null) {
-                        permission.getIpRanges().forEach(range -> cidrs.add(range.getCidrIp()));
-                    }
-                    if (permission.getIpv6Ranges() != null) {
-                        permission.getIpv6Ranges().forEach(range -> cidrs.add(range.getCidrIpv6()));
-                    }
-                    if (permission.getPrefixListIds() != null && prefixLists != null) {
-                        permission.getPrefixListIds().forEach(ref ->
-                                cidrs.addAll(prefixLists.getOrDefault(ref.getPrefixListId(), List.of())));
-                    }
-                    for (String cidr : cidrs) {
-                        if (SecurityGroupPolicy.validCidr(cidr)) {
-                            appendRule(rules, chain, addressField, cidr, protocol);
-                        }
-                    }
-                }
-            }
-        }
-        return rules.toString();
+        return compile(target, peers, prefixLists, List.of());
     }
 
     public static String compile(Endpoint target, Collection<Endpoint> peers,
@@ -124,7 +42,8 @@ public final class SecurityGroupNftCompiler {
         if (target == null || target.groups() == null || target.groups().isEmpty()) {
             throw new IllegalArgumentException("Protected endpoint needs at least one security group");
         }
-        StringBuilder rules = new StringBuilder("flush chain inet floci_sg ingress\n")
+        StringBuilder rules = new StringBuilder(privateAddressTranslation(target, peers))
+                .append("flush chain inet floci_sg ingress\n")
                 .append("flush chain inet floci_sg egress\n")
                 .append("add rule inet floci_sg ingress iifname lo accept\n")
                 .append("add rule inet floci_sg egress oifname lo accept\n")

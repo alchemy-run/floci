@@ -235,9 +235,11 @@ public class EcrRegistryManager {
      * no embedded DNS, so {@code floci-ecr-registry} does not resolve.
      */
     public String internalEndpoint() {
+        // In-network clients reach the registry by container name, so this must be the name the
+        // container actually has: a legacy-named survivor keeps resolving through its own name.
         String host = (registryInternalHost != null && !registryInternalHost.isBlank())
                 ? registryInternalHost
-                : registryContainerName();
+                : activeContainerName != null ? activeContainerName : registryContainerName();
         return "http://" + host + ":" + CONTAINER_INTERNAL_PORT;
     }
 

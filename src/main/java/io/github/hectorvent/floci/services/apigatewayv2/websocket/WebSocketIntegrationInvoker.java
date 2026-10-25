@@ -271,14 +271,7 @@ public class WebSocketIntegrationInvoker {
         try {
             URI target = URI.create(uri);
             SsrfProtection.rejectMetadataAddresses(InetAddress.getAllByName(target.getHost()), target.getHost());
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(target)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(eventJson, StandardCharsets.UTF_8))
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
+            HttpBackendResponse response = postToHttpEndpoint(target, eventJson);
             return new IntegrationResult(response.statusCode(), response.body(), null);
         } catch (Exception e) {
             LOG.warnv("HTTP_PROXY integration call failed: {0}", e.getMessage());
@@ -321,14 +314,7 @@ public class WebSocketIntegrationInvoker {
         try {
             URI target = URI.create(uri);
             SsrfProtection.rejectMetadataAddresses(InetAddress.getAllByName(target.getHost()), target.getHost());
-            HttpRequest request = HttpRequest.newBuilder()
-                    .uri(target)
-                    .header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(transformedPayload, StandardCharsets.UTF_8))
-                    .build();
-
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
+            HttpBackendResponse response = postToHttpEndpoint(target, transformedPayload);
             int statusCode = response.statusCode();
             String body = response.body();
 

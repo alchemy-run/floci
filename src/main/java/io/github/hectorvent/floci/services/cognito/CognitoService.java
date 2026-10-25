@@ -1047,8 +1047,11 @@ public class CognitoService implements ResourceProvider {
     }
 
     public void deleteUserPool(String id) {
-        UserPool pool = describeUserPool(id);
-        if ("ACTIVE".equalsIgnoreCase(pool.getDeletionProtection())) {
+        // Deletion protection is the pool's own guard against this call: with it ACTIVE, AWS
+        // refuses until an UpdateUserPool switches it to INACTIVE (developer guide, "User pool
+        // deletion protection"), and a CloudFormation delete of the pool reports DELETE_FAILED.
+        String deletionProtection = poolStore.get(id).map(UserPool::getDeletionProtection).orElse(null);
+        if ("ACTIVE".equalsIgnoreCase(deletionProtection)) {
             throw new AwsException("InvalidParameterException",
                     "The user pool cannot be deleted because deletion protection is activated. "
                             + "Deletion protection must be inactivated first.", 400);
@@ -1868,12 +1871,12 @@ public class CognitoService implements ResourceProvider {
         synchronized (domainLock) {
             UserPoolDomain userPoolDomain = describeUserPoolDomain(domain);
             if (!userPoolDomain.getUserPoolId().equals(userPoolId)) {
-                throw new AwsException("ResourceNotFoundException", "Domain does not exist", 404);
+                throw new AwsException("ResourceNotFoundException", "Domain does not exist", 400);
             }
             domainStore.delete(domain);
             if (userPoolDomain.isCustomDomain()) {
                 acmService.removeInUseBy(userPoolDomain.getCertificateArn(),
-                        cloudFrontDistributionArn(userPoolDomain), CERTIFICATE_REGION);
+                        cloudFrontDistributionArn(regionResolver.getPartition(), userPoolDomain), CERTIFICATE_REGION);
             }
         }
         LOG.infov("Deleted User Pool Domain: {0} for pool {1}", domain, userPoolId);
@@ -6836,6 +6839,7 @@ public class CognitoService implements ResourceProvider {
         userPoolDomain.setS3Bucket("aws-cognito-prod-" + regionResolver.getRegion() + "-assets");
 
         if (customDomainConfig != null) {
+            requireCustomDomainsAvailable(regionResolver.getRegion());
             String certificateArn = (String) customDomainConfig.get("CertificateArn");
             if (certificateArn == null || certificateArn.isBlank()) {
                 throw new AwsException("InvalidParameterException",
@@ -7220,6 +7224,7 @@ public class CognitoService implements ResourceProvider {
         String previousCertificateArn = userPoolDomain.getCertificateArn();
         String certificateArn = previousCertificateArn;
         if (customDomainConfig != null) {
+            requireCustomDomainsAvailable(regionResolver.getRegion());
             if (!userPoolDomain.isCustomDomain()) {
                 throw new AwsException("InvalidParameterException",
                         "CustomDomainConfig cannot be set on an Amazon Cognito prefix domain", 400);

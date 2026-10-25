@@ -2824,21 +2824,15 @@ public class CloudFrontController {
                         case "ConnectionAttempts" -> {
                             if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
                                     && !inVpcOriginConfig && current != null) {
-                                try {
-                                    current.setConnectionAttempts(Integer.parseInt(r.getElementText()));
-                                } catch (NumberFormatException e) {
-                                    LOG.debugv("Ignoring malformed ConnectionAttempts during parse: {0}", e.getMessage());
-                                }
+                                current.setConnectionAttempts(parseNonNegativeTimeout(
+                                        "ConnectionAttempts", r.getElementText()));
                             }
                         }
                         case "ConnectionTimeout" -> {
                             if (inOrigin && !inS3OriginConfig && !inCustomOriginConfig
                                     && !inVpcOriginConfig && current != null) {
-                                try {
-                                    current.setConnectionTimeout(Integer.parseInt(r.getElementText()));
-                                } catch (NumberFormatException e) {
-                                    LOG.debugv("Ignoring malformed ConnectionTimeout during parse: {0}", e.getMessage());
-                                }
+                                current.setConnectionTimeout(parseNonNegativeTimeout(
+                                        "ConnectionTimeout", r.getElementText()));
                             }
                         }
                         case "VpcOriginId" -> {
@@ -2878,10 +2872,9 @@ public class CloudFrontController {
                                 continue;
                             }
                             if (inCustomOriginConfig && customConfig != null) {
-                                customConfig.put("OriginKeepaliveTimeout", parseBoundedTimeout(
+                                customConfig.put("OriginKeepaliveTimeout", parseNonNegativeTimeout(
                                         "InvalidOriginKeepaliveTimeout", "OriginKeepaliveTimeout",
-                                        r.getElementText(), MIN_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS,
-                                        MAX_ORIGIN_KEEPALIVE_TIMEOUT_SECONDS));
+                                        r.getElementText()));
                             }
                         }
                         case "OriginReadTimeout" -> {
@@ -2890,10 +2883,9 @@ public class CloudFrontController {
                                 continue;
                             }
                             if (inCustomOriginConfig && customConfig != null) {
-                                originReadTimeoutSeconds = parseBoundedTimeout(
+                                originReadTimeoutSeconds = parseNonNegativeTimeout(
                                         "InvalidOriginReadTimeout", "OriginReadTimeout",
-                                        r.getElementText(), MIN_ORIGIN_READ_TIMEOUT_SECONDS,
-                                        MAX_ORIGIN_READ_TIMEOUT_SECONDS);
+                                        r.getElementText());
                                 customConfig.put("OriginReadTimeout", originReadTimeoutSeconds);
                             }
                         }
@@ -3015,7 +3007,7 @@ public class CloudFrontController {
                                 Integer completionTimeout = current.getResponseCompletionTimeout();
                                 int effectiveReadTimeout = originReadTimeoutSeconds != null
                                         ? originReadTimeoutSeconds
-                                        : DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS;
+                                        : CloudFrontOriginTimeouts.DEFAULT_ORIGIN_READ_TIMEOUT_SECONDS;
                                 if (completionTimeout != null && completionTimeout > 0
                                         && completionTimeout < effectiveReadTimeout) {
                                     throw new AwsException(

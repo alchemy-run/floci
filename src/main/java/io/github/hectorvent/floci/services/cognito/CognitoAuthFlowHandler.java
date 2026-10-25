@@ -1797,8 +1797,7 @@ final class CognitoAuthFlowHandler {
         TriggerResult result = invokeTrigger(pool, client, user,
                 "PreAuthentication", "PreAuthentication_Authentication", req);
         if (result.errored()) {
-            throw new AwsException("NotAuthorizedException",
-                    "PreAuthentication failed with error " + result.errorMessage() + ".", 400);
+            throw blockingTriggerFailure(result, "PreAuthentication");
         }
     }
 

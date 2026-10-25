@@ -312,6 +312,9 @@ public class ApiGatewayService implements ResourceProvider {
         if (request.get("policy") instanceof String policy && !policy.isEmpty()) {
             api.setPolicy(policy);
         }
+        if (request.get("policy") instanceof String policy && !policy.isEmpty()) {
+            api.setPolicy(policy);
+        }
 
         EndpointConfiguration endpointConfiguration = new EndpointConfiguration();
         if (request.get(EPC_KEY) instanceof Map<?, ?> epMap) {
@@ -321,15 +324,7 @@ public class ApiGatewayService implements ResourceProvider {
                         List<EndpointType> types = list.stream()
                                 .filter(String.class::isInstance)
                                 .map(String.class::cast)
-                                .map(String::toUpperCase)
-                                .map(typeStr -> {
-                                    try {
-                                        return EndpointType.valueOf(typeStr);
-                                    } catch (IllegalArgumentException e) {
-                                        throw new AwsException("BadRequestException",
-                                                "Endpoint configuration type must be REGIONAL, EDGE, or PRIVATE.", 400);
-                                    }
-                                })
+                                .map(ApiGatewayService::endpointType)
                                 .toList();
                         endpointConfiguration.setTypes(types);
                     } else if (EPC_VPC_IDS_KEY.equals(ks)) {
@@ -353,19 +348,10 @@ public class ApiGatewayService implements ResourceProvider {
             throw new AwsException("BadRequestException",
                     "Endpoint configuration types must contain exactly one value.", 400);
         }
+        requireEndpointTypeAvailable(endpointConfiguration.getTypes().getFirst().name(), region);
 
-        EndpointType type = endpointConfiguration.getTypes().getFirst();
-        if (EndpointType.PRIVATE.equals(type)) {
-            if (endpointConfiguration.getVpcEndpointIds().isEmpty()) {
-                throw new AwsException("BadRequestException",
-                        "At least one vpcEndpointId is required for PRIVATE APIs.", 400);
-            }
-        } else {
-            // Reject/ignore vpcEndpointIds for REGIONAL and EDGE
-            endpointConfiguration.setVpcEndpointIds(new ArrayList<>());
-        }
-
-        api.setEndpointConfiguration(endpointConfiguration);
+        api.setEndpointConfiguration(endpointConfigurationOf(endpointConfiguration.getTypes().getFirst(),
+                endpointConfiguration.getVpcEndpointIds()));
         api.setBinaryMediaTypes(readStringList(request.get("binaryMediaTypes")));
 
         // Create root resource "/"
@@ -1180,29 +1166,7 @@ public class ApiGatewayService implements ResourceProvider {
 
     public Authorizer createAuthorizer(String region, String apiId, Map<String, Object> request) {
         getRestApi(region, apiId);
-        Authorizer authorizer = new Authorizer();
-        authorizer.setId(shortId(6));
-        authorizer.setName((String) request.get("name"));
-        authorizer.setType((String) request.get("type"));
-        authorizer.setAuthorizerUri((String) request.get("authorizerUri"));
-        authorizer.setAuthType((String) request.get("authType"));
-        authorizer.setAuthorizerCredentials((String) request.get("authorizerCredentials"));
-        authorizer.setIdentityValidationExpression((String) request.get("identityValidationExpression"));
-        authorizer.setIdentitySource((String) request.get("identitySource"));
-        Object ttl = request.get("authorizerResultTtlInSeconds");
-        authorizer.setAuthorizerResultTtlInSeconds(validateAuthorizerTtl(ttl == null ? "300" : ttl.toString()));
-        // COGNITO_USER_POOLS authorizers carry the pool ARNs; keep them so get-authorizer reflects them.
-        if (request.get("providerARNs") instanceof List<?> arns) {
-            List<String> providerArns = new ArrayList<>();
-            for (Object arn : arns) {
-                if (arn != null) {
-                    providerArns.add(arn.toString());
-                }
-            }
-            authorizer.setProviderARNs(providerArns);
-        }
-
-        authorizerStore.put(authorizerKey(region, apiId, authorizer.getId()), authorizer);
+        Authorizer authorizer = saveAuthorizer(region, apiId, shortId(6), request);
         LOG.infov("Created authorizer {0} for API {1}", authorizer.getId(), apiId);
         return authorizer;
     }
@@ -1214,8 +1178,12 @@ public class ApiGatewayService implements ResourceProvider {
         authorizer.setName((String) request.get("name"));
         authorizer.setType((String) request.get("type"));
         authorizer.setAuthorizerUri((String) request.get("authorizerUri"));
+        authorizer.setAuthType((String) request.get("authType"));
+        authorizer.setAuthorizerCredentials((String) request.get("authorizerCredentials"));
+        authorizer.setIdentityValidationExpression((String) request.get("identityValidationExpression"));
         authorizer.setIdentitySource((String) request.get("identitySource"));
-        authorizer.setAuthorizerResultTtlInSeconds(String.valueOf(request.getOrDefault("authorizerResultTtlInSeconds", "300")));
+        Object ttl = request.get("authorizerResultTtlInSeconds");
+        authorizer.setAuthorizerResultTtlInSeconds(validateAuthorizerTtl(ttl == null ? "300" : ttl.toString()));
         validateRequestAuthorizerIdentitySource(authorizer.getType(), authorizer.getIdentitySource(),
                 authorizer.getAuthorizerResultTtlInSeconds());
         // COGNITO_USER_POOLS authorizers carry the pool ARNs; keep them so get-authorizer reflects them.
@@ -1292,6 +1260,7 @@ public class ApiGatewayService implements ResourceProvider {
                 }
             }
         }
+        validateRequestAuthorizerIdentitySource(newType, newIdentitySource, newTtl);
         authorizer.setType(newType);
         authorizer.setAuthType(newAuthType);
         authorizer.setName(newName);
@@ -2271,7 +2240,49 @@ public class ApiGatewayService implements ResourceProvider {
     }
 
     public CustomDomain createDomainName(String region, Map<String, Object> request) {
-        return createDomainName(region, request, null);
+        String domainName = (String) request.get("domainName");
+        if (domainName == null) throw new AwsException("BadRequestException", "domainName is required", 400);
+        String endpointType = endpointTypeOf(request);
+        if (!"REGIONAL".equals(endpointType) && !"EDGE".equals(endpointType)) {
+            // Private custom domains are not emulated; anything else would be a domain that is
+            // neither regional nor edge-optimized, which nothing here could route or describe.
+            throw new AwsException("BadRequestException", "Invalid value for endpoint type: " + endpointType, 400);
+        }
+        requireEndpointTypeAvailable(endpointType, region);
+
+        CustomDomain domain = new CustomDomain();
+        domain.setDomainName(domainName);
+        domain.setCertificateName((String) request.get("certificateName"));
+        domain.setCertificateArn((String) request.get("certificateArn"));
+        domain.setRegionalCertificateName((String) request.get("regionalCertificateName"));
+        domain.setRegionalCertificateArn((String) request.get("regionalCertificateArn"));
+        domain.setRegionalDomainName(domainName + ".regional.local");
+        domain.setRegionalHostedZoneId(AwsRegionFacts.apiGatewayRegionalHostedZoneId(region)
+                .orElse(UNSOURCED_REGIONAL_HOSTED_ZONE_ID));
+        applyEndpointType(domain, endpointType, region);
+        domain.setSecurityPolicy((String) request.getOrDefault("securityPolicy", "TLS_1_2"));
+        // Nothing is provisioned behind the domain, so it is usable as soon as it exists.
+        domain.setDomainNameStatus("AVAILABLE");
+        if (request.get("tags") instanceof Map<?, ?> tags && !tags.isEmpty()) {
+            Map<String, String> copied = new java.util.LinkedHashMap<>();
+            tags.forEach((key, value) -> copied.put(String.valueOf(key), String.valueOf(value)));
+            domain.setTags(copied);
+        }
+
+        // AWS enforces global uniqueness of custom domain names across all regions. The check and
+        // the store are one step, so two concurrent creates of one name cannot both succeed.
+        synchronized (domainNameLock) {
+            boolean exists = !domainStore.scan(k -> k.endsWith("::" + domainName)).isEmpty();
+            if (exists) {
+                throw new AwsException("BadRequestException",
+                        "The domain name you provided already exists.", 400);
+            }
+            domainStore.put(domainKey(region, domainName), domain);
+        }
+        // Outside the lock: the reissue blocks until the HTTPS listener has switched certificates.
+        certificateManager.ensureHost(domainName);
+        LOG.infov("Created custom domain {0} in {1}", domainName, region);
+        return domain;
     }
 
     /**
@@ -3165,6 +3176,9 @@ public class ApiGatewayService implements ResourceProvider {
     public RestApi updateRestApi(String region, String apiId, List<Map<String, String>> patchOperations) {
         RestApi api = getRestApi(region, apiId);
         if (patchOperations != null) {
+            // Worked out before anything is set: the store hands back the live API, and a rejected
+            // endpoint change must leave it as it was.
+            EndpointConfiguration endpointConfiguration = patchEndpointConfiguration(api, patchOperations, region);
             for (Map<String, String> op : patchOperations) {
                 String opType = op.get("op");
                 String path = op.getOrDefault("path", "");
@@ -3183,6 +3197,9 @@ public class ApiGatewayService implements ResourceProvider {
                         api.getBinaryMediaTypes().add(mediaType);
                     }
                 }
+            }
+            if (endpointConfiguration != null) {
+                api.setEndpointConfiguration(endpointConfiguration);
             }
         }
         apiStore.put(apiKey(region, apiId), api);

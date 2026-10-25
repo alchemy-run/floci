@@ -932,6 +932,12 @@ public class SnsService implements Resettable, ResourceProvider {
             throw new AwsException("InvalidParameter",
                     "Invalid parameter: Endpoint scheme does not match protocol '" + protocol + "'.", 400);
         }
+        if ("http".equals(protocol) || "https".equals(protocol)) {
+            requireDeliverableEndpoint(endpoint);
+        }
+        if ("firehose".equals(protocol)) {
+            requireFirehoseRoleArn(attributes == null ? null : attributes.get(SUBSCRIPTION_ROLE_ARN));
+        }
         if (topicMaxMessageSize(topicArn, region) > DEFAULT_MAX_MESSAGE_SIZE) {
             requireLargePayloadProtocol(protocol);
         }

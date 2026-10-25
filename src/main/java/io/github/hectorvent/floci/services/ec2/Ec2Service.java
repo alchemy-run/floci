@@ -6009,11 +6009,13 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             requireNoTransitGatewayAttachment(region,
                     attachment -> vpcId.equals(attachment.getVpcId()),
                     "The vpc '" + vpcId + "' has dependencies and cannot be deleted.");
+            requireNoProviderDependency(provider -> provider.hasVpcDependency(region, vpcId),
+                    "The vpc '" + vpcId + "' has dependencies and cannot be deleted.");
             requireNoVpcDependents(region, vpcId);
             deleteVpcDefaultResources(region, vpcId);
             vpcs.delete(key(region, vpcId));
             deletedVpcKeys.add(key(region, vpcId));
-            tags.delete(vpcId);
+            removeTags(region, vpcId);
         }
         if (vpcNetworkManager != null) {
             vpcNetworkManager.deleteVpcNetwork(region, vpcId);
@@ -7257,6 +7259,10 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             requireNoTransitGatewayAttachment(region,
                     attachment -> attachment.getSubnetIds().contains(subnetId),
                     "The subnet '" + subnetId + "' has dependencies and cannot be deleted.");
+            requireNoSubnetResidents(region, Set.of(subnetId),
+                    "The subnet '" + subnetId + "' has dependencies and cannot be deleted.");
+            requireNoProviderDependency(provider -> provider.hasSubnetDependency(region, subnetId),
+                    "The subnet '" + subnetId + "' has dependencies and cannot be deleted.");
             // AWS DeleteSubnet drops the subnet's NACL association so DescribeNetworkAcls
             // never returns an association whose subnetId points at a gone subnet.
             for (NetworkAcl acl : new ArrayList<>(networkAcls.scan(k -> true))) {
@@ -7755,7 +7761,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         return false;
     }
 
-    private static void dropIfEmpty(List<IpPermission> perms, IpPermission perm) {
+    private void dropIfEmpty(List<IpPermission> perms, IpPermission perm) {
         if (!hasSources(perm)) {
             perms.remove(perm);
         }
@@ -9167,13 +9173,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             return null;
         }
         LaunchTemplateData.IamInstanceProfile profile = data.getIamInstanceProfile();
-        if (profile.getArn() != null && !profile.getArn().isBlank()) {
-            return profile.getArn();
-        }
-        if (profile.getName() == null || profile.getName().isBlank()) {
-            return null;
-        }
-        return resolveIamInstanceProfileName(profile.getName());
+        return resolveLaunchIamInstanceProfileArn(profile.getName(), profile.getArn());
     }
 
     public String resolveIamInstanceProfileName(String name) {
@@ -11744,16 +11744,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     // ─── Elastic IPs ───────────────────────────────────────────────────────────
 
     public Address allocateAddress(String region) {
-        ensureDefaultResources(region);
-        String allocId = "eipalloc-" + randomHex(17);
-        String ip = "54." + (new Random().nextInt(256)) + "." + (new Random().nextInt(256)) + "." + (new Random().nextInt(256));
-        Address addr = new Address();
-        addr.setAllocationId(allocId);
-        addr.setPublicIp(ip);
-        addr.setRegion(region);
-        addr.setNetworkBorderGroup(region);
-        addresses.put(key(region, allocId), addr);
-        return addr;
+        return allocateAddress(region, null, region);
     }
 
     /**
@@ -11794,6 +11785,15 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      *        any other address is refused before anything changes
      */
     public Address associateAddress(String region, String allocationId, String instanceId, String privateIpAddress) {
+        return associateAddress(region, allocationId, instanceId, privateIpAddress, null);
+    }
+
+    /**
+     * As {@link #associateAddress(String, String, String, String)}, with the network interface the
+     * association names, when it names one.
+     */
+    public Address associateAddress(String region, String allocationId, String instanceId, String privateIpAddress,
+                                    String networkInterfaceId) {
         ensureDefaultResources(region);
         // Under the lock createNatGateway and deleteNatGateway take, so the gateway check and the
         // write cannot interleave with a gateway claiming or releasing the same allocation.
@@ -11840,6 +11840,9 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             addr.setInstanceId(instanceId);
             addr.setAssociationId("eipassoc-" + randomHex(17));
             pointAddressAtInstance(addr, region, instanceId);
+            if (isSet(networkInterfaceId)) {
+                addr.setNetworkInterfaceId(networkInterfaceId);
+            }
             addresses.put(key(region, allocationId), addr);
             return addr;
         }
@@ -13933,30 +13936,12 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      * read covers every such path at once, rather than chasing each terminal transition.
      */
     private synchronized NetworkInterface releaseIfHostIsGone(String region, NetworkInterface ni) {
+        // Judged on the stored record, not the caller's copy, which may predate a detach.
         NetworkInterface current = networkInterfaces.get(key(region, ni.getNetworkInterfaceId())).orElse(null);
         if (current == null) {
             return ni;
         }
-        ni = current;
-        NetworkInterfaceAttachment attachment = ni.getAttachment();
-        if (attachment == null || attachment.getInstanceId() == null) {
-            return ni;
-        }
-        Instance host = instances.get(key(region, attachment.getInstanceId())).orElse(null);
-        boolean hostIsGone = host == null || host.getState() == null
-                || "terminated".equals(host.getState().getName());
-        if (!hostIsGone) {
-            return ni;
-        }
-        ni.setAttachment(null);
-        ni.setStatus("available");
-        networkInterfaces.put(key(region, ni.getNetworkInterfaceId()), ni);
-        // The dead instance has to let go of its copy as well. Releasing only the standalone
-        // record would leave the terminated instance still reporting the interface, so once it is
-        // reused two instance records would claim it, and a real one is not the winner by any
-        // rule DescribeInstances applies.
-        detachFromInstance(region, attachment.getInstanceId(), ni.getNetworkInterfaceId());
-        return ni;
+        return releaseIfHostIsGone(callerAccountId(), region, current);
     }
 
     private NetworkInterface releaseIfHostIsGone(String accountId, String region, NetworkInterface ni) {

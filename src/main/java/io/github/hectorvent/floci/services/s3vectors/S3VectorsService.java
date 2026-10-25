@@ -93,7 +93,8 @@ public class S3VectorsService {
     }
 
     public VectorBucket getVectorBucket(String bucketName, String region) {
-        return getVectorBucket(bucketName, null, region);
+        return findVectorBucket(bucketName, region).orElseThrow(() ->
+                new AwsException("NotFoundException", "The vector bucket " + bucketName + " does not exist.", 404));
     }
 
     public List<VectorBucket> listVectorBuckets(String region) {
@@ -141,7 +142,17 @@ public class S3VectorsService {
     }
 
     public void deleteVectorBucket(String bucketName, String region) {
-        deleteVectorBucket(bucketName, null, region);
+        synchronized (lockFor(bucketName, region)) {
+            String key = buildStorageKey(region, bucketName);
+            VectorBucket bucket = store.get(key).orElseThrow(() ->
+                    new AwsException("NotFoundException", "The vector bucket " + bucketName + " does not exist.", 404));
+
+            if (!bucket.getIndexes().isEmpty()) {
+                throw new AwsException("ConflictException", "The vector bucket " + bucketName + " is not empty.", 409);
+            }
+            store.delete(key);
+            LOG.infov("Deleted Vector Bucket: {0}", bucketName);
+        }
     }
 
     public VectorIndex createIndex(String bucketName, String indexName, int dimension, String dataType,
@@ -190,7 +201,7 @@ public class S3VectorsService {
     }
 
     public VectorIndex getIndex(String bucketName, String indexName, String region) {
-        return getIndex(bucketName, indexName, null, region);
+        return getIndex(getVectorBucket(bucketName, region), indexName);
     }
 
     private VectorIndex getIndex(VectorBucket bucket, String indexName) {
@@ -207,7 +218,15 @@ public class S3VectorsService {
     }
 
     public void deleteIndex(String bucketName, String indexName, String region) {
-        deleteIndex(bucketName, indexName, null, region);
+        synchronized (lockFor(bucketName, region)) {
+            VectorBucket bucket = getVectorBucket(bucketName, region);
+            if (!bucket.getIndexes().containsKey(indexName)) {
+                throw new AwsException("NotFoundException", "The index " + indexName + " does not exist.", 404);
+            }
+            bucket.getIndexes().remove(indexName);
+            store.put(buildStorageKey(region, bucketName), bucket);
+            LOG.infov("Deleted Index: {0}", indexName);
+        }
     }
 
     public void replaceBucketTags(String bucketName, Map<String, String> tags, String region) {
@@ -463,19 +482,11 @@ public class S3VectorsService {
     }
 
     public VectorBucket getVectorBucket(String bucketName, String vectorBucketArn, String region) {
-        String name = resolveBucketName(bucketName, vectorBucketArn);
-        String key = buildStorageKey(region, name);
-        return store.get(key).orElseThrow(() ->
-                new AwsException("NotFoundException", "The vector bucket " + name + " does not exist.", 404));
+        return getVectorBucket(resolveBucketName(bucketName, vectorBucketArn), region);
     }
 
     public void deleteVectorBucket(String bucketName, String vectorBucketArn, String region) {
-        VectorBucket bucket = getVectorBucket(bucketName, vectorBucketArn, region);
-        if (!bucket.getIndexes().isEmpty()) {
-            throw new AwsException("ConflictException", "The vector bucket " + bucket.getVectorBucketName() + " is not empty.", 409);
-        }
-        store.delete(buildStorageKey(region, bucket.getVectorBucketName()));
-        LOG.infov("Deleted Vector Bucket: {0}", bucket.getVectorBucketName());
+        deleteVectorBucket(resolveBucketName(bucketName, vectorBucketArn), region);
     }
 
     public void putVectorBucketPolicy(String bucketName, String vectorBucketArn, String policy, String region) {
@@ -505,12 +516,7 @@ public class S3VectorsService {
 
     public VectorIndex getIndex(String bucketName, String indexName, String indexArn, String region) {
         String[] ids = resolveBucketAndIndex(bucketName, indexName, indexArn);
-        VectorBucket bucket = getVectorBucket(ids[0], region);
-        VectorIndex index = bucket.getIndexes().get(ids[1]);
-        if (index == null) {
-            throw new AwsException("NotFoundException", "The index " + ids[1] + " does not exist in bucket " + ids[0] + ".", 404);
-        }
-        return index;
+        return getIndex(ids[0], ids[1], region);
     }
 
     public List<VectorIndex> listIndexes(String bucketName, String vectorBucketArn, String region) {
@@ -522,13 +528,7 @@ public class S3VectorsService {
 
     public void deleteIndex(String bucketName, String indexName, String indexArn, String region) {
         String[] ids = resolveBucketAndIndex(bucketName, indexName, indexArn);
-        VectorBucket bucket = getVectorBucket(ids[0], region);
-        if (!bucket.getIndexes().containsKey(ids[1])) {
-            throw new AwsException("NotFoundException", "The index " + ids[1] + " does not exist.", 404);
-        }
-        bucket.getIndexes().remove(ids[1]);
-        store.put(buildStorageKey(region, ids[0]), bucket);
-        LOG.infov("Deleted Index: {0}", ids[1]);
+        deleteIndex(ids[0], ids[1], region);
     }
 
     public void putVectors(String bucketName, String indexName, String indexArn, List<VectorData> vectors, String region) {

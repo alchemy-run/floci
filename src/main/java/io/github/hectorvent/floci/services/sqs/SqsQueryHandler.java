@@ -511,6 +511,8 @@ public class SqsQueryHandler {
 
     private Response handleChangeMessageVisibilityBatch(MultivaluedMap<String, String> params, String region) {
         String queueUrl = getParam(params, "QueueUrl");
+        sqsService.validateBatchEntryCount("ChangeMessageVisibilityBatchRequestEntry",
+                countBatchEntries(params, "ChangeMessageVisibilityBatchRequestEntry"));
         List<SqsService.ChangeVisibilityBatchEntry> entries = new ArrayList<>();
         for (int i = 1; ; i++) {
             String id = getParam(params, "ChangeMessageVisibilityBatchRequestEntry." + i + ".Id");

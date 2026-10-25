@@ -152,11 +152,16 @@ public class SqsJsonHandler {
 
     private Response handleListQueues(JsonNode request, String region) {
         String prefix = request.path("QueueNamePrefix").asText(null);
-        List<Queue> queues = sqsService.listQueues(prefix, region);
+        Integer maxResults = getOptionalIntField(request, "MaxResults");
+        String nextToken = request.path("NextToken").asText(null);
+        PaginatedResult<Queue> page = sqsService.listQueues(prefix, maxResults, nextToken, region);
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode queueUrls = response.putArray("QueueUrls");
-        for (Queue q : queues) {
+        for (Queue q : page.items()) {
             queueUrls.add(q.getQueueUrl());
+        }
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
         }
         return Response.ok(response).build();
     }

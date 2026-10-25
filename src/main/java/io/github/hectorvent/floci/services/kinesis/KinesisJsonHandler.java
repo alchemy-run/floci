@@ -241,11 +241,34 @@ public class KinesisJsonHandler {
     }
 
     private Response handleListStreams(JsonNode request, String region) {
-        List<KinesisStream> streams = service.listStreamObjects(region);
+        int limit = 100;
+        if (request.hasNonNull("Limit")) {
+            JsonNode value = request.get("Limit");
+            if (!value.isIntegralNumber() || !value.canConvertToInt() || value.intValue() < 1 || value.intValue() > 10000) {
+                throw new AwsException("InvalidArgumentException", "Limit must be an integer between 1 and 10000", 400);
+            }
+            limit = Math.min(value.intValue(), 100);
+        }
+        JsonNode start = request.path("ExclusiveStartStreamName");
+        String startName = start.asText(null);
+        if (!start.isMissingNode() && !start.isNull()
+                && (!start.isTextual() || !startName.matches("[a-zA-Z0-9_.-]{1,128}"))) {
+            throw new AwsException("InvalidArgumentException", "ExclusiveStartStreamName must be a valid stream name", 400);
+        }
+        JsonNode token = request.path("NextToken");
+        if (!token.isMissingNode() && !token.isNull() && !token.isTextual()) {
+            throw invalidNextToken();
+        }
+        String after = token.isTextual() ? streamCursorFromToken(decodeNextToken(token.textValue()), region) : startName;
+        List<KinesisStream> streams = service.listStreamObjects(region).stream()
+                .filter(stream -> after == null || stream.getStreamName().compareTo(after) > 0)
+                .sorted(java.util.Comparator.comparing(KinesisStream::getStreamName))
+                .toList();
+        List<KinesisStream> page = streams.stream().limit(limit).toList();
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode names = response.putArray("StreamNames");
         ArrayNode summaries = response.putArray("StreamSummaries");
-        for (KinesisStream stream : streams) {
+        for (KinesisStream stream : page) {
             names.add(stream.getStreamName());
             ObjectNode summary = summaries.addObject();
             summary.put("StreamName", stream.getStreamName());
@@ -257,7 +280,11 @@ public class KinesisJsonHandler {
                         epochSeconds(stream.getStreamCreationTimestamp()));
             }
         }
-        response.put("HasMoreStreams", false);
+        response.put("HasMoreStreams", streams.size() > limit);
+        if (streams.size() > limit) {
+            response.put("NextToken", encodeNextToken("ListStreams|" + region,
+                    Base64Url.encode(page.getLast().getStreamName()), System.currentTimeMillis()));
+        }
         return Response.ok(response).build();
     }
 

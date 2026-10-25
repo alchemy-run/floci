@@ -1009,7 +1009,7 @@ public class BackupService {
             planStore.put(plan.getBackupPlanId(), plan);
             return;
         }
-        throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 404);
+        throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 400);
     }
 
     private void removeTags(String arn, List<String> tagKeys) {
@@ -1030,7 +1030,7 @@ public class BackupService {
             planStore.put(plan.getBackupPlanId(), plan);
             return;
         }
-        throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 404);
+        throw new AwsException("ResourceNotFoundException", "Resource not found: " + arn, 400);
     }
 
     private static void assignRuleIds(List<BackupRule> rules) {

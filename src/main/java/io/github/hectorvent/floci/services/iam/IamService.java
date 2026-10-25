@@ -4926,13 +4926,7 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
      * lookup spans all accounts; the access key's global uniqueness keeps the result unambiguous.
      */
     private Optional<SessionCredential> findSessionAnyAccount(String accessKeyId) {
-        if (!isTemporaryAccessKey(accessKeyId)) {
-            return Optional.empty();
-        }
-        if (sessions instanceof AccountAwareStorageBackend<SessionCredential> aware) {
-            return aware.findAnyAccount(accessKeyId);
-        }
-        return sessions.get(accessKeyId);
+        return storedSessionAnyAccount(accessKeyId).filter(session -> !isOrphanedIssuedSession(session));
     }
 
     /** The stored session with this key in any account, including an orphaned issued session. */
@@ -6375,20 +6369,23 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
 
     public InstanceProfile createInstanceProfile(String instanceProfileName, String path,
                                                  Map<String, String> tags) {
-        if (instanceProfiles.get(instanceProfileName).isPresent()) {
-            throw new AwsException("EntityAlreadyExists",
-                    "Instance profile " + instanceProfileName + " already exists.", 409);
+        synchronized (resourceNameLock) {
+            if (containsNameIgnoreCase(
+                    instanceProfiles, InstanceProfile::getInstanceProfileName, instanceProfileName)) {
+                throw new AwsException("EntityAlreadyExists",
+                        "Instance profile " + instanceProfileName + " already exists.", 409);
+            }
+            String profileId = "AIPA" + randomId(16);
+            String normalizedPath = normalizePath(path);
+            String arn = iamArn("instance-profile", normalizedPath, instanceProfileName);
+            InstanceProfile profile = new InstanceProfile(profileId, instanceProfileName, normalizedPath, arn);
+            if (tags != null) {
+                profile.getTags().putAll(tags);
+            }
+            instanceProfiles.put(instanceProfileName, profile);
+            LOG.infov("Created instance profile: {0}", instanceProfileName);
+            return profile;
         }
-        String profileId = "AIPA" + randomId(16);
-        String normalizedPath = normalizePath(path);
-        String arn = iamArn("instance-profile", normalizedPath, instanceProfileName);
-        InstanceProfile profile = new InstanceProfile(profileId, instanceProfileName, normalizedPath, arn);
-        if (tags != null) {
-            profile.getTags().putAll(tags);
-        }
-        instanceProfiles.put(instanceProfileName, profile);
-        LOG.infov("Created instance profile: {0}", instanceProfileName);
-        return profile;
     }
 
     boolean hasLoginProfile(String userName) {

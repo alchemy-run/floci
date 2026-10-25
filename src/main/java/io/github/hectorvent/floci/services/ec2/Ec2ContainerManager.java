@@ -920,9 +920,10 @@ public class Ec2ContainerManager {
      * reboot already handle a null container id, so the rest of the lifecycle keeps working.
      */
     private void markContainerlessRunning(Instance instance) {
-        LOG.infov("EC2 instance {0} is running without a backing container (no Docker daemon reachable)",
-                instance.getInstanceId());
-        markRunning(instance);
+        if (markRunning(instance)) {
+            LOG.infov("EC2 instance {0} is running without a backing container (no Docker daemon reachable)",
+                    instance.getInstanceId());
+        }
     }
 
     /**

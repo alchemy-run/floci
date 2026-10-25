@@ -524,14 +524,15 @@ public class ElbV2DataPlane {
 
     private void clearPortBindings(int port) {
         sharedAddressAffinity.remove(port);
-        Map<String, String> listenersByHost = listenersByHostAndPort.remove(port);
-        if (listenersByHost == null) {
-            return;
-        }
-        for (String listenerArn : listenersByHost.values()) {
-            listenerBindings.remove(listenerArn);
-            ruleChains.remove(listenerArn);
-            listenerRegions.remove(listenerArn);
+        listenersByHostAndPort.remove(port);
+        for (Map.Entry<String, ListenerBinding> entry : listenerBindings.entrySet()) {
+            if (entry.getValue().port() == port) {
+                // Retain the old binding claim until its metadata is gone. A publisher on
+                // another port cannot install the same listener's new metadata in between.
+                ruleChains.remove(entry.getKey());
+                listenerRegions.remove(entry.getKey());
+                listenerBindings.remove(entry.getKey(), entry.getValue());
+            }
         }
     }
 

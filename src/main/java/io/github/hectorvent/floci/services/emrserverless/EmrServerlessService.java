@@ -144,8 +144,8 @@ public class EmrServerlessService {
     }
 
     public Application getApplication(String applicationId) {
-        return storage.getForAccountMigratingLegacyKeys(accountId(), storageKey(applicationId),
-                        List.of(applicationId), app -> buildArn(applicationId).equals(app.getArn()))
+        return storage.get(applicationId)
+                .filter(app -> inRegion(app, regionResolver.getRegion()))
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException", "Application " + applicationId + " not found", 404));
     }
 
@@ -248,7 +248,9 @@ public class EmrServerlessService {
             throw new AwsException("ValidationException", "Application must be in a stopped or created state in order to be deleted.", 400);
         }
         jobs.deleteApplicationJobs(accountId(), region(), applicationId);
-        storage.deleteForAccount(accountId(), storageKey(applicationId));
+        app.setState("TERMINATED");
+        app.setUpdatedAt(now());
+        storage.put(applicationId, app);
     }
 
     public synchronized void startApplication(String applicationId) {
@@ -460,8 +462,9 @@ public class EmrServerlessService {
     }
 
     private String buildArn(String id) {
-        return String.format("arn:aws:emr-serverless:%s:%s:/applications/%s",
-                region(), accountId(), id);
+        String region = regionResolver.getRegion();
+        String accountId = requestContext != null && requestContext.getAccountId() != null ? requestContext.getAccountId() : config.defaultAccountId();
+        return AwsArnUtils.Arn.of("emr-serverless", region, accountId, "/applications/" + id).toString();
     }
 
     private static boolean inRegion(Application app, String region) {
@@ -526,7 +529,7 @@ public class EmrServerlessService {
                 result.path("jobRunId").asText(), null)) && !"STARTED".equals(app.getState())) {
             app.setState("STARTED");
             app.setUpdatedAt(java.time.Instant.now());
-            storage.putForAccount(accountId(), storageKey(applicationId), app);
+            storage.put(applicationId, app);
         }
         return result;
     }
@@ -603,12 +606,4 @@ public class EmrServerlessService {
                 ? requestContext.getAccountId() : config.defaultAccountId();
     }
 
-    private List<Application> applicationsInRegion() {
-        storage.migrateLegacyEntries(accountId(), key -> !key.contains("/"),
-                app -> storageKey(app.getApplicationId()),
-                app -> buildArn(app.getApplicationId()).equals(app.getArn()));
-        return storage.scanForAccount(accountId(), key -> key.startsWith(region() + "/")).stream()
-                .filter(app -> buildArn(app.getApplicationId()).equals(app.getArn()))
-                .toList();
-    }
 }

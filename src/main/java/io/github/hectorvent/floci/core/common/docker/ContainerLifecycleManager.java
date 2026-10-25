@@ -128,17 +128,7 @@ public class ContainerLifecycleManager {
      * @return information about the created container including resolved endpoints and published ports
      */
     public ContainerInfo createAndStart(ContainerSpec spec) {
-        String containerId = create(spec);
-        try {
-            ContainerInfo info = startCreated(containerId, spec);
-            return withPublishedHostPorts(info, spec);
-        } catch (Exception e) {
-            // A failed start (e.g. host-port conflict) must not leak the created
-            // container: retrying callers would accumulate Created containers and
-            // fixed-name callers would hit name conflicts on the next attempt.
-            removeIfExists(containerId);
-            throw e;
-        }
+        return createAndStart(spec, false);
     }
 
     /** Starts a disposable container, reclaiming its anonymous volumes if startup fails. */

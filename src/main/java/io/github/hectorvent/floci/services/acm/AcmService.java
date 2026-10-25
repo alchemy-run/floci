@@ -682,7 +682,7 @@ public class AcmService implements ResourceProvider {
      * Syncs mutable certificate options. Export is fixed at request time —
      * AWS rejects changing it ("Export option for certificates cannot be updated").
      */
-    public Certificate updateCertificateOptions(String certificateArn, CertificateOptions options, String region) {
+    public synchronized Certificate updateCertificateOptions(String certificateArn, CertificateOptions options, String region) {
         Certificate cert = getCertificateByArn(certificateArn, region);
         CertificateOptions current = cert.getCertOptions() != null
             ? cert.getCertOptions()

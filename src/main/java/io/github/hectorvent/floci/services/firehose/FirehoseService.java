@@ -862,9 +862,7 @@ public class FirehoseService implements ResourceProvider {
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Delivery stream not found: " + streamName, 400));
         // Normalizes streams persisted before required output members existed.
-        if (stream.s3Destination() != null) {
-            stream.s3Destination().applyDefaults();
-        }
+        stream.applyDefaults();
         if (stream.getDeliveryStreamEncryptionConfiguration() == null) {
             stream.setDeliveryStreamEncryptionConfiguration(
                     DeliveryStreamDescription.DeliveryStreamEncryptionConfiguration.disabled());

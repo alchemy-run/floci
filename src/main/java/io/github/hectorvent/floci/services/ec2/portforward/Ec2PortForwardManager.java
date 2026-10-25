@@ -243,8 +243,8 @@ public class Ec2PortForwardManager {
         if (muxed) {
             httpPortMux.unregister(appPort, publicHost(instance));
         } else {
-            String name = forwardContainerName(instance.getInstanceId(), appPort);
-            lifecycleManager.removeIfExists(name);
+            String name = forwardContainerName(config, instance.getInstanceId(), appPort);
+            ContainerStorageHelper.removeStaleContainer(config, lifecycleManager, name);
             if (hostPort != null) {
                 portAllocator.release(hostPort);
             }

@@ -281,8 +281,8 @@ public class S3VectorsController {
     @Path("/CreateVectorBucket")
     public Response createVectorBucket(@Context HttpHeaders headers, CreateVectorBucketRequest request) {
         String region = regionResolver.resolveRegion(headers);
-        VectorBucket bucket = service.createVectorBucket(
-                request.vectorBucketName(), request.encryptionConfiguration(), request.tags(), region);
+        VectorBucket bucket = service.createVectorBucket(request.vectorBucketName(), request.encryptionConfiguration(),
+                request.tags() != null ? request.tags() : Map.of(), region);
         return Response.ok(new CreateVectorBucketResponse(bucket.getVectorBucketArn())).build();
     }
 

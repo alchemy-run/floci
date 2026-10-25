@@ -1515,9 +1515,10 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     // ── CloudFront Functions ──────────────────────────────────────────────────
 
     public synchronized CloudFrontFunction createFunction(CloudFrontFunction fn) {
+        validateFunctionRuntime(fn.getRuntime());
         if (fn.getName() != null && findFunction(fn.getName(), null).isPresent()) {
             throw new AwsException("FunctionAlreadyExists",
-                    "A function with the specified name already exists.", 409);
+                    "A function with the same name already exists in this AWS account.", 409);
         }
         fn.setStage(FUNCTION_STAGE_DEVELOPMENT);
         fn.setStatus("UNPUBLISHED");
@@ -1536,6 +1537,7 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
 
     public synchronized CloudFrontFunction updateFunction(String name, String ifMatch,
                                                           CloudFrontFunction updated) {
+        validateFunctionRuntime(updated.getRuntime());
         CloudFrontFunction existing = describeFunction(name, FUNCTION_STAGE_DEVELOPMENT);
         if (!existing.getEtag().equals(ifMatch)) {
             throw new AwsException("InvalidIfMatchVersion",
@@ -2095,7 +2097,7 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
     public synchronized StreamingDistribution createStreamingDistribution(StreamingDistribution sd) {
         String id = generateDistributionId();
         sd.setId(id);
-        sd.setArn(AwsArnUtils.Arn.of("cloudfront", "", accountId, "streaming-distribution/" + id).toString());
+        sd.setArn(arn("streaming-distribution/" + id));
         sd.setDomainName(domainNameFor(id));
         sd.setStatus("Deployed");
         sd.setLastModifiedTime(Instant.now());

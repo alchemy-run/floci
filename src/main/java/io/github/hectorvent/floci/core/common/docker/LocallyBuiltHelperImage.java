@@ -35,13 +35,28 @@ public final class LocallyBuiltHelperImage {
     public static synchronized void ensureBuilt(DockerClient dockerClient, ContainerBuilder containerBuilder,
                                                 String configuredImage, String defaultImage,
                                                 String dockerfileResourcePath) {
+        ensureBuilt(dockerClient, containerBuilder, configuredImage, defaultImage, dockerfileResourcePath, null, null);
+    }
+
+    /**
+     * As {@link #ensureBuilt(DockerClient, ContainerBuilder, String, String, String)}, rebuilding an
+     * existing image whose {@code versionLabel} is not {@code version}: an image built from an older
+     * recipe is otherwise reused forever.
+     */
+    public static synchronized void ensureBuilt(DockerClient dockerClient, ContainerBuilder containerBuilder,
+                                                String configuredImage, String defaultImage,
+                                                String dockerfileResourcePath, String versionLabel,
+                                                String version) {
         if (!defaultImage.equals(configuredImage)) {
             return;
         }
         String image = containerBuilder.resolveImage(configuredImage);
         try {
-            dockerClient.inspectImageCmd(image).exec();
-            return;
+            var current = dockerClient.inspectImageCmd(image).exec().getConfig();
+            if (versionLabel == null || current != null && current.getLabels() != null
+                    && version.equals(current.getLabels().get(versionLabel))) {
+                return;
+            }
         } catch (NotFoundException missing) {
             // Build the versioned Floci recipe in the daemon used for workloads.
         }

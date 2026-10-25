@@ -528,9 +528,13 @@ public class SsmService implements ResourceProvider {
         if (found.isPresent()) {
             return found;
         }
+        Optional<Parameter> selected = findSelectedVersion(name, region);
+        if (selected.isPresent()) {
+            return selected;
+        }
         String aliased = name.startsWith("/") ? name.substring(1) : "/" + name;
         if (aliased.isBlank() || aliased.equals(name)) {
-            return Optional.empty();
+            return publicParameter(name, region);
         }
         return parameterStore.get(regionKey(region, aliased))
                 .or(() -> publicParameter(name.startsWith("/") ? name : aliased, region));
@@ -756,9 +760,8 @@ public class SsmService implements ResourceProvider {
             case "Name" -> parameter.getName();
             case "Type" -> parameter.getType();
             case "DataType" -> parameter.getDataType();
-            case "Tier" -> parameter.getTier() != null ? parameter.getTier() : "Standard";
-            case "KeyId" -> "SecureString".equals(parameter.getType())
-                    ? (parameter.getKeyId() != null ? parameter.getKeyId() : DEFAULT_SSM_KEY_ID) : null;
+            case "Tier" -> tierOf(parameter);
+            case "KeyId" -> keyIdOf(parameter);
             default -> null;
         };
         return actual != null && matchesAny(actual, filter);

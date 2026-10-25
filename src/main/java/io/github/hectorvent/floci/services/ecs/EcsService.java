@@ -457,7 +457,10 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
 
     @Override
     public void clear() {
-        // Nothing to wipe: the stores hold the ECS state and afterReset() restarts the reconciler.
+        // The stores hold the ECS state and afterReset() restarts the reconciler. The reset also
+        // wipes CloudWatch, so the Container Insights samples it held must be written again.
+        launchFailures.clear();
+        publishedInsights.clear();
     }
 
     /**

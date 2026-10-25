@@ -1012,129 +1012,8 @@ public class SqsService implements Resettable, ResourceProvider {
                                Map<String, MessageAttributeValue> messageAttributes,
                                String awsTraceHeader,
                                String region) {
-        String storageKey = regionKey(region, queueUrl);
-        Queue queue = getQueueByUrl(storageKey, queueUrl)
-                .orElseThrow(() -> new AwsException("AWS.SimpleQueueService.NonExistentQueue",
-                        "The specified queue does not exist.", 400));
-
-        int queueMaxMessageSize = parseMaxMessageSize(queue.getAttributes().get("MaximumMessageSize"));
-        int totalSize = computeMessageSize(body, messageAttributes);
-        if (totalSize > queueMaxMessageSize) {
-            throw new AwsException("InvalidParameterValue",
-                    "One or more parameters are invalid. " +
-                            "Reason: Message must be shorter than " + queueMaxMessageSize + " bytes.", 400);
-        }
-
-        int queueDelaySeconds = parseNonNegativeSecondsAttribute(queue.getAttributes().get("DelaySeconds"));
-
-        // Resolve the effective delay:
-        //   - FIFO queues only support queue-level DelaySeconds per AWS SQS,
-        //     so any per-message value is ignored and we always use the
-        //     queue attribute.
-        //   - Standard queues honor per-message DelaySeconds when explicitly
-        //     provided (non-null). When omitted (null), the queue-level
-        //     default applies.
-        int effectiveDelaySeconds;
-        if (queue.isFifo()) {
-            effectiveDelaySeconds = queueDelaySeconds;
-        } else {
-            effectiveDelaySeconds = (delaySeconds != null) ? delaySeconds : queueDelaySeconds;
-        }
-
-        // FIFO queue validation
-        if (queue.isFifo()) {
-            if (messageGroupId == null || messageGroupId.isEmpty()) {
-                throw new AwsException("MissingParameter",
-                        "The request must contain the parameter MessageGroupId.", 400);
-            }
-            // Resolve deduplication ID
-            String dedupId = messageDeduplicationId;
-            if (dedupId == null || dedupId.isEmpty()) {
-                if ("true".equalsIgnoreCase(queue.getAttributes().get("ContentBasedDeduplication"))) {
-                    dedupId = computeMd5(body);
-                } else {
-                    throw new AwsException("InvalidParameterValue",
-                            "The queue should either have ContentBasedDeduplication enabled or " +
-                                    "MessageDeduplicationId provided.", 400);
-                }
-            }
-
-            // Check deduplication window — atomic putIfAbsent to avoid race condition.
-            // When DeduplicationScope=messageGroup, dedup is scoped per MessageGroupId,
-            // so two messages with the same MessageDeduplicationId in different groups
-            // are not duplicates and must both be accepted.
-            boolean groupScoped = "messageGroup".equalsIgnoreCase(
-                    queue.getAttributes().get("DeduplicationScope"));
-            // Use NUL as the delimiter — it is outside the SQS-allowed character set for
-            // MessageGroupId/MessageDeduplicationId, so the composite key is unambiguous.
-            String dedupCacheKey = groupScoped ? messageGroupId + "\0" + dedupId : dedupId;
-            cleanupDeduplicationCache(storageKey);
-            ConcurrentHashMap<String, Instant> dedupMap = deduplicationCache.computeIfAbsent(storageKey, k -> new ConcurrentHashMap<>());
-            Instant expiry = Instant.now().plusSeconds(DEDUP_WINDOW_SECONDS);
-            Instant previous = dedupMap.putIfAbsent(dedupCacheKey, expiry);
-            persistDedup(storageKey);
-            if (previous != null && Instant.now().isBefore(previous)) {
-                // Duplicate within window — keep the original messageId and
-                // sequenceNumber but compute response MD5s from this request's
-                // body and attributes, otherwise SDK clients (which validate
-                // MD5 against what they sent) reject the response.
-                Message existing = getOrCreateQueue(storageKey).findByDeduplicationId(
-                        dedupId, groupScoped ? messageGroupId : null);
-                if (existing != null) {
-                    Message response = new Message(body);
-                    response.setMessageId(existing.getMessageId());
-                    response.setMessageGroupId(messageGroupId);
-                    response.setMessageDeduplicationId(dedupId);
-                    response.setSequenceNumber(existing.getSequenceNumber());
-                    if (messageAttributes != null && !messageAttributes.isEmpty()) {
-                        response.getMessageAttributes().putAll(messageAttributes);
-                        response.updateMd5OfMessageAttributes();
-                    }
-                    return response;
-                }
-            }
-
-            Message message = new Message(body);
-            message.setMessageGroupId(messageGroupId);
-            message.setMessageDeduplicationId(dedupId);
-            message.setSequenceNumber(sequenceCounter.incrementAndGet());
-            message.setAwsTraceHeader(awsTraceHeader);
-            if (effectiveDelaySeconds > 0) {
-                message.setVisibleAt(Instant.now().plusSeconds(effectiveDelaySeconds));
-            }
-            if (messageAttributes != null && !messageAttributes.isEmpty()) {
-                message.getMessageAttributes().putAll(messageAttributes);
-                message.updateMd5OfMessageAttributes();
-            }
-
-            getOrCreateQueue(storageKey).addMessage(message);
-            notifyReceivers(storageKey);
-            LOG.debugv("Sent FIFO message {0} to queue {1}, group={2}, seq={3}",
-                    message.getMessageId(), queueUrl, messageGroupId, message.getSequenceNumber());
-            LOG.tracev("Sent message {0} to queue {1} body={2} attributes={3}",
-                    message.getMessageId(), queueUrl, body, message.getMessageAttributes());
-            return message;
-        }
-
-        // Standard queue. MessageGroupId is retained for ReceiveMessage to
-        // return (fair queues); it has no effect on standard-queue delivery.
-        Message message = new Message(body);
-        message.setMessageGroupId(messageGroupId);
-        message.setAwsTraceHeader(awsTraceHeader);
-        if (effectiveDelaySeconds > 0) {
-            message.setVisibleAt(Instant.now().plusSeconds(effectiveDelaySeconds));
-        }
-        if (messageAttributes != null && !messageAttributes.isEmpty()) {
-            message.getMessageAttributes().putAll(messageAttributes);
-            message.updateMd5OfMessageAttributes();
-        }
-
-        getOrCreateQueue(storageKey).addMessage(message);
-        notifyReceivers(storageKey);
-        LOG.debugv("Sent message {0} to queue {1}", message.getMessageId(), queueUrl);
-        LOG.tracev("Sent message {0} to queue {1} body={2} attributes={3}",
-                message.getMessageId(), queueUrl, body, message.getMessageAttributes());
-        return message;
+        return sendMessage(queueUrl, body, delaySeconds, messageGroupId, messageDeduplicationId,
+                messageAttributes, awsTraceHeader, null, region);
     }
 
     public Message sendMessage(String queueUrl, String body, Integer delaySeconds,
@@ -1819,7 +1698,7 @@ public class SqsService implements Resettable, ResourceProvider {
                 // https://host.docker.internal:4566/... — sibling URLs must
                 // match that form or ListDeadLetterSourceQueues disagrees
                 // with the CreateQueue/GetQueueUrl value the caller already has.
-                sourceQueues.add(presentQueueUrl(q.getQueueUrl(), queueUrl));
+                sourceQueues.add(presentQueueUrl(withCurrentQueueUrl(q, region).getQueueUrl(), queueUrl));
             }
         }
         return sourceQueues;

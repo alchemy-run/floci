@@ -125,8 +125,9 @@ class CloudFormationVpcGatewayAttachmentIntegrationTest {
         String xml = "";
         long deadline = System.currentTimeMillis() + 10_000;
         while (System.currentTimeMillis() < deadline) {
-            xml = describeIgw(igwId).then().statusCode(200).extract().asString();
-            if (!xml.contains(vpcId)) {
+            // A deleted gateway asked for by id is InvalidInternetGatewayID.NotFound, as on AWS.
+            xml = describeIgw(igwId).then().extract().asString();
+            if (xml.contains("InvalidInternetGatewayID.NotFound") || !xml.contains(vpcId)) {
                 return xml;
             }
             sleepBriefly();

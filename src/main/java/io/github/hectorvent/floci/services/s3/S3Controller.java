@@ -3174,6 +3174,7 @@ public class S3Controller {
             resp.header("x-amz-restore", "ongoing-request=\"false\", expiry-date=\""
                     + RFC_822.format(obj.getRestoreExpiryDate()) + "\"");
         }
+        appendExpirationHeader(resp, obj);
     }
 
     private void appendExpirationHeader(Response.ResponseBuilder resp, S3Object obj) {
@@ -4442,30 +4443,17 @@ public class S3Controller {
 
     private String extractObjectKey(UriInfo uriInfo, String bucket, String fallbackKey) {
         validateRawUri();
-        String rawUri = currentVertxRequest.getCurrent().request().uri();
-        int qIdx = rawUri.indexOf('?');
-        String rawPath = qIdx >= 0 ? rawUri.substring(0, qIdx) : rawUri;
-        String bucketPrefix = "/" + bucket + "/";
-        String rawKey;
-        if (isVirtualHostedRawPath(uriInfo, bucket, rawPath)) {
-            // Virtual-hosted style: S3VirtualHostFilter rewrote the JAX-RS URI to "/<bucket>" +
-            // path, but the RAW path is still the key alone. Searching it for "/<bucket>/" finds
-            // that string only when the KEY happens to contain the bucket's name as a segment,
-            // and everything up to that segment was then dropped from the key.
-            rawKey = rawPath.substring(1);
-        } else {
-            int prefixIndex = rawPath.indexOf(bucketPrefix);
-            if (prefixIndex < 0) {
-                // Should not happen on standard /{bucket}/{key:.+} routes, but can happen when
-                // requests are rerouted from a single-segment route (e.g. createBucket / handleBucketPost)
-                String pathKey = uriInfo.getPathParameters().getFirst("key");
-                String resolvedKey = pathKey != null ? pathKey : fallbackKey;
-                validateKeyNoTraversal(resolvedKey);
-                return resolvedKey;
-            }
-            rawKey = rawPath.substring(prefixIndex + bucketPrefix.length());
+        String rawPath = currentVertxRequest.getCurrent().request().path();
+        // A virtual-hosted raw path is the key alone (see S3ObjectKeys.isVirtualHostedRawPath):
+        // searching it for "/<bucket>/" finds that string only when the KEY happens to contain the
+        // bucket's name as a segment, and everything up to that segment was then dropped from the key.
+        String key = S3ObjectKeys.fromRawPath(rawPath, uriInfo.getRequestUri().getPath(), bucket);
+        if (key == null) {
+            // Should not happen on standard /{bucket}/{key:.+} routes, but can happen when
+            // requests are rerouted from a single-segment route (e.g. createBucket / handleBucketPost)
+            String pathKey = uriInfo.getPathParameters().getFirst("key");
+            key = pathKey != null ? pathKey : fallbackKey;
         }
-        String key = URLDecoder.decode(rawKey.replace("+", "%2B"), StandardCharsets.UTF_8);
         validateKeyNoTraversal(key);
         return key;
     }

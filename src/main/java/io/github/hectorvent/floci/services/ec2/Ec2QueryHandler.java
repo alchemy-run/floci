@@ -40,8 +40,9 @@ public class Ec2QueryHandler {
 
     /** ReplaceRoute targets AWS accepts that a stored {@code Route} cannot represent here. */
     private static final List<String> UNSUPPORTED_ROUTE_TARGETS = List.of(
-            "CarrierGatewayId", "CoreNetworkArn", "LocalGatewayId", "OdbNetworkArn",
-            "TransitGatewayId");
+            "CarrierGatewayId", "CoreNetworkArn", "EgressOnlyInternetGatewayId",
+            "LocalGatewayId", "OdbNetworkArn",
+            "TransitGatewayId", "VpcEndpointId");
 
     /** The gateway id a route table's built-in route carries (see Ec2Service#createRouteTable). */
     private static final String LOCAL_GATEWAY_ID = "local";
@@ -583,22 +584,7 @@ public class Ec2QueryHandler {
      * spellings are read, because an action that used the plural silently lost every tag.
      */
     private List<Tag> parseTagsForResource(MultivaluedMap<String, String> p, String resourceType) {
-        List<Tag> tags = new ArrayList<>();
-        for (String prefix : new String[] {"TagSpecification", "TagSpecifications"}) {
-            for (int i = 1; ; i++) {
-                String resType = p.getFirst(prefix + "." + i + ".ResourceType");
-                if (resType == null) break;
-                if (resourceType.equals(resType)) {
-                    for (int j = 1; ; j++) {
-                        String key = p.getFirst(prefix + "." + i + ".Tag." + j + ".Key");
-                        if (key == null) break;
-                        String value = p.getFirst(prefix + "." + i + ".Tag." + j + ".Value");
-                        tags.add(creationTag(key, value));
-                    }
-                }
-            }
-        }
-        return tags;
+        return parseTagsForResource(p, resourceType, false);
     }
 
     private List<Tag> parseTagsForResource(MultivaluedMap<String, String> p, String resourceType,
@@ -1690,23 +1676,9 @@ public class Ec2QueryHandler {
     private Response handleCreateVpc(MultivaluedMap<String, String> p, String region) {
         String cidrBlock = p.getFirst("CidrBlock");
         boolean amazonProvidedIpv6 = "true".equalsIgnoreCase(p.getFirst("AmazonProvidedIpv6CidrBlock"));
-        Vpc vpc = service.createVpc(region, cidrBlock, false, amazonProvidedIpv6);
-        List<Tag> vpcTags = new ArrayList<>();
-        for (int i = 1; ; i++) {
-            String resType = p.getFirst("TagSpecification." + i + ".ResourceType");
-            if (resType == null) break;
-            if ("vpc".equals(resType)) {
-                for (int j = 1; ; j++) {
-                    String k = p.getFirst("TagSpecification." + i + ".Tag." + j + ".Key");
-                    if (k == null) break;
-                    String v = p.getFirst("TagSpecification." + i + ".Tag." + j + ".Value");
-                    vpcTags.add(creationTag(k, v));
-                }
-            }
-        }
-        if (!vpcTags.isEmpty()) {
-            service.createTags(region, List.of(vpc.getVpcId()), vpcTags);
-        }
+        List<Tag> vpcTags = parseTagsForResource(p, "vpc");
+        Vpc vpc = service.createVpc(region, cidrBlock, false, amazonProvidedIpv6, p.getFirst("InstanceTenancy"));
+        applyResourceTags(vpcTags, region, vpc.getVpcId());
         XmlBuilder xml = new XmlBuilder()
                 .start("CreateVpcResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -2830,7 +2802,7 @@ public class Ec2QueryHandler {
             MultivaluedMap<String, String> p, String region) {
         String routeTableId = p.getFirst("TransitGatewayRouteTableId");
         List<TransitGatewayVpcAttachment> associated =
-                service.associationsOf(region, routeTableId, getFilters(p));
+                service.associationsOf(region, routeTableId, getFiltersList(p));
         XmlBuilder xml = new XmlBuilder()
                 .start("GetTransitGatewayRouteTableAssociationsResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -2869,7 +2841,7 @@ public class Ec2QueryHandler {
     private Response handleGetTransitGatewayRouteTablePropagations(
             MultivaluedMap<String, String> p, String region) {
         List<TransitGatewayRouteTablePropagation> propagations =
-                service.propagationsOf(region, p.getFirst("TransitGatewayRouteTableId"), getFilters(p));
+                service.propagationsOf(region, p.getFirst("TransitGatewayRouteTableId"), getFiltersList(p));
         XmlBuilder xml = new XmlBuilder()
                 .start("GetTransitGatewayRouteTablePropagationsResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -3475,9 +3447,19 @@ public class Ec2QueryHandler {
     }
 
     private Response handleDescribeSecurityGroupRules(MultivaluedMap<String, String> p, String region) {
-        Map<String, List<String>> filters = getFilters(p);
-        List<SecurityGroupRule> rules = service.describeSecurityGroupRules(
-                region, getList(p, "SecurityGroupRuleId"), filters);
+        List<Map.Entry<String, List<String>>> filters = getFiltersList(p);
+        // The AWS SDK sends the security group id as a filter with name "group-id". Rule ids can
+        // arrive as the SecurityGroupRuleId.N parameter or the "security-group-rule-id" filter;
+        // filters are conjunctive with parameters and with each other, so each one narrows the
+        // rules the parameter names. A filter without values narrows nothing.
+        List<List<String>> ruleIdFilters = Ec2Service.filterValues(filters, "security-group-rule-id");
+        List<List<String>> groupIdFilters = Ec2Service.filterValues(filters, "group-id");
+        List<SecurityGroupRule> named = service.describeSecurityGroupRules(
+                region, List.of(), getList(p, "SecurityGroupRuleId"));
+        List<SecurityGroupRule> rules = named.stream()
+                .filter(rule -> Ec2Service.everyFilterContains(ruleIdFilters, rule.getSecurityGroupRuleId()))
+                .filter(rule -> Ec2Service.everyFilterContains(groupIdFilters, rule.getGroupId()))
+                .toList();
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeSecurityGroupRulesResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -4617,8 +4599,8 @@ public class Ec2QueryHandler {
     private Response handleAssociateAddress(MultivaluedMap<String, String> p, String region) {
         String allocationId = p.getFirst("AllocationId");
         String instanceId = p.getFirst("InstanceId");
-        String networkInterfaceId = p.getFirst("NetworkInterfaceId");
-        Address addr = service.associateAddress(region, allocationId, instanceId, networkInterfaceId);
+        Address addr = service.associateAddress(region, allocationId, instanceId, p.getFirst("PrivateIpAddress"),
+                p.getFirst("NetworkInterfaceId"));
         XmlBuilder xml = new XmlBuilder()
                 .start("AssociateAddressResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())
@@ -5228,15 +5210,7 @@ public class Ec2QueryHandler {
     }
 
     private String resolveIamInstanceProfileArn(MultivaluedMap<String, String> p, String prefix) {
-        String arn = p.getFirst(prefix + ".Arn");
-        if (arn != null && !arn.isBlank()) {
-            return arn;
-        }
-        String name = p.getFirst(prefix + ".Name");
-        if (name == null || name.isBlank()) {
-            return null;
-        }
-        return service.resolveIamInstanceProfileName(name);
+        return service.resolveIamInstanceProfileArn(p.getFirst(prefix + ".Name"), p.getFirst(prefix + ".Arn"));
     }
 
     private String vpcXml(Vpc vpc) {
@@ -6134,6 +6108,11 @@ public class Ec2QueryHandler {
                 if (key == null) {
                     break;
                 }
+                if (key.startsWith("aws:")) {
+                    throw new AwsException("InvalidTagKey.Malformed",
+                            "The tag key ‘" + key + "’ is not valid. "
+                                    + "Tag keys starting with 'aws:' are reserved for internal use.", 400);
+                }
                 tagList.add(creationTag(key, p.getFirst(base + ".Tag." + j + ".Value")));
             }
             specs.add(new LaunchTemplateData.TagSpecification(resourceType, tagList));
@@ -6522,6 +6501,9 @@ public class Ec2QueryHandler {
                 .elem("encrypted", String.valueOf(vol.isEncrypted()));
         if (vol.getKmsKeyId() != null) {
             xml.elem("kmsKeyId", vol.getKmsKeyId());
+        }
+        if (vol.getMultiAttachEnabled() != null) {
+            xml.elem("multiAttachEnabled", String.valueOf(vol.getMultiAttachEnabled()));
         }
         if (vol.getIops() > 0) {
             xml.elem("iops", String.valueOf(vol.getIops()));

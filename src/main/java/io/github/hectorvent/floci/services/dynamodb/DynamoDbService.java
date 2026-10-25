@@ -2438,7 +2438,8 @@ public class DynamoDbService {
     public TableDefinition updateTable(String tableName, Long readCapacity, Long writeCapacity,
                                         List<GlobalSecondaryIndex> gsiCreates, List<String> gsiDeletes,
                                         List<AttributeDefinition> newAttrDefs, String region) {
-        return updateTable(tableName, readCapacity, writeCapacity, gsiCreates, gsiDeletes, newAttrDefs, region, false);
+        return updateTable(tableName, readCapacity, writeCapacity, gsiCreates, gsiDeletes,
+                           newAttrDefs, List.of(), List.of(), null, region);
     }
 
     public TableDefinition updateTable(String tableName, Long readCapacity, Long writeCapacity,

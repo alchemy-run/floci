@@ -2389,6 +2389,10 @@ public class ApiGatewayController {
                 logs.put("format", s.getAccessLogSettings().format());
             }
         }
+        if (!s.getTags().isEmpty()) {
+            ObjectNode tags = node.putObject("tags");
+            s.getTags().forEach(tags::put);
+        }
         if (!s.getVariables().isEmpty()) {
             ObjectNode vars = node.putObject("variables");
             s.getVariables().forEach(vars::put);
