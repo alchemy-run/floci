@@ -5680,35 +5680,9 @@ public class CognitoService implements ResourceProvider {
      */
     VerifiedAccessToken verifyAccessToken(String token) {
         try {
-            if (token == null || token.isBlank()) {
-                throw new IllegalArgumentException("missing token");
-            }
-            String[] parts = token.split("\\.", -1);
-            if (parts.length != 3 || parts[0].isEmpty() || parts[1].isEmpty() || parts[2].isEmpty()) {
-                throw new IllegalArgumentException("malformed JWT");
-            }
-
-            JsonNode header = MAPPER.readTree(Base64.getUrlDecoder().decode(parts[0]));
-            JsonNode claims = MAPPER.readTree(Base64.getUrlDecoder().decode(parts[1]));
-            if (!"RS256".equals(header.path("alg").asText())
-                    || !"JWT".equalsIgnoreCase(header.path("typ").asText())) {
-                throw new IllegalArgumentException("unsupported JWT algorithm");
-            }
-
-            String issuer = textClaim(claims, "iss");
-            String poolId = issuer == null ? null : issuer.substring(issuer.lastIndexOf('/') + 1);
-            UserPool pool = poolId == null ? null : poolStore.get(poolId).orElse(null);
-            if (pool == null || !getIssuer(poolId).equals(issuer)
-                    || !getSigningKeyId(pool).equals(textClaim(header, "kid"))) {
-                throw new IllegalArgumentException("invalid issuer or key");
-            }
-
-            Signature verifier = Signature.getInstance("SHA256withRSA");
-            verifier.initVerify(getSigningPublicKey(pool));
-            verifier.update((parts[0] + "." + parts[1]).getBytes(StandardCharsets.UTF_8));
-            if (!verifier.verify(Base64.getUrlDecoder().decode(parts[2]))) {
-                throw new IllegalArgumentException("invalid signature");
-            }
+            VerifiedJwt verified = verifyJwtSignatureAndIssuer(token);
+            JsonNode claims = verified.claims();
+            String poolId = verified.poolId();
 
             String verifiedPoolId = poolId;
             String username = textClaim(claims, "username");

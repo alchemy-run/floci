@@ -687,11 +687,11 @@ public class S3Controller {
             }
             if (hasQueryParam(uriInfo, "accelerate")) {
                 s3Service.authorizeBucketRead(bucket, "s3:GetAccelerateConfiguration", authorization);
-                return Response.ok(s3Service.getBucketAccelerateConfiguration(bucket)).build();
+                return Response.ok(s3Service.getBucketAccelerateConfiguration(bucket)).type(MediaType.APPLICATION_XML).build();
             }
             if (hasQueryParam(uriInfo, "replication")) {
                 s3Service.authorizeBucketRead(bucket, "s3:GetReplicationConfiguration", authorization);
-                return Response.ok(s3Service.getBucketReplication(bucket)).build();
+                return Response.ok(s3Service.getBucketReplication(bucket)).type(MediaType.APPLICATION_XML).build();
             }
             // GetBucketMetricsConfiguration and ListBucketMetricsConfigurations share ?metrics and
             // are told apart by the id, which only the single-configuration read carries.
@@ -1638,8 +1638,7 @@ public class S3Controller {
                                          byte[] body) {
         try {
             key = extractObjectKey(uriInfo, bucket, key);
-            S3Service.RequestAuthorization authorization = S3RequestAuthorizationParser.parseIfRequired(
-                    s3Service.isAuthEnforced(), httpHeaders, uriInfo);
+            S3Service.RequestAuthorization authorization = bucketAuthorization(bucket, httpHeaders, uriInfo);
 
             if (hasQueryParam(uriInfo, "uploads")) {
                 ObjectLockHeaders lock = objectLockHeaders(httpHeaders);
@@ -1691,6 +1690,8 @@ public class S3Controller {
             if (hasQueryParam(uriInfo, "restore")) {
                 s3Service.authorizeObjectWrite(bucket, key, "s3:RestoreObject", authorization);
                 String objectKey = key;
+                // RestoreObject reports a selected delete marker as 405 even to a caller that
+                // cannot list the bucket; only a missing key or version is concealed.
                 return concealingMisses(bucket, httpHeaders, authorization, false, () -> {
                     boolean alreadyRestored = s3Service.restoreObject(bucket, objectKey, versionId,
                             new String(body, StandardCharsets.UTF_8));

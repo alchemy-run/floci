@@ -233,7 +233,7 @@ public class CodePipelineService {
             case "ListPipelineExecutions" -> listPipelineExecutions(request, region, account);
             case "ListActionExecutions" -> listActionExecutions(request, region, account);
             case "ListRuleExecutions" -> listRuleExecutions(request, region, account);
-            case "ListDeployActionExecutionTargets" -> emptyPage("targets");
+            case "ListDeployActionExecutionTargets" -> listDeployActionExecutionTargets(request, region, account);
             case "DisableStageTransition" -> setStageTransition(request, region, account, false);
             case "EnableStageTransition" -> setStageTransition(request, region, account, true);
             case "PutApprovalResult" -> putApprovalResult(request, region, account);
