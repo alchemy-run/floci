@@ -223,7 +223,34 @@ public class SesService {
                 "contact-list", contactService,
                 "custom-verification-email-template", cvetService,
                 "dedicated-ip-pool", dedicatedIpService,
-                "tenant", tenantService);
+                "tenant", tenantService,
+                "multi-region-endpoint", multiRegionEndpointTags());
+    }
+
+    /** Multi-region endpoints are SesService's own resource, so their tags are kept here. */
+    private SesTaggable multiRegionEndpointTags() {
+        return new SesTaggable() {
+            @Override
+            public List<Tag> listTags(String name, String region) {
+                return new ArrayList<>(getMultiRegionEndpoint(name, region).getTags());
+            }
+
+            @Override
+            public void tag(String name, String region, List<Tag> newTags) {
+                MultiRegionEndpoint endpoint = getMultiRegionEndpoint(name, region);
+                endpoint.setTags(SesTags.merge(endpoint.getTags(), newTags));
+                multiRegionEndpointStore.put(multiRegionEndpointKey(region, name), endpoint);
+            }
+
+            @Override
+            public void untag(String name, String region, List<String> tagKeys) {
+                MultiRegionEndpoint endpoint = getMultiRegionEndpoint(name, region);
+                List<Tag> remaining = new ArrayList<>(endpoint.getTags());
+                remaining.removeIf(tag -> tagKeys.contains(tag.key()));
+                endpoint.setTags(remaining);
+                multiRegionEndpointStore.put(multiRegionEndpointKey(region, name), endpoint);
+            }
+        };
     }
 
     private String callerAccountId() {
@@ -1324,18 +1351,8 @@ public class SesService {
         }
         ResourceRef ref = parseSesArn(arn);
         requireCallerAccount(ref);
-        List<Tag> tags = switch (ref.type()) {
-            case "configuration-set" -> configSetService.listTags(ref.name(), region);
-            case "template" -> templateService.listTags(ref.name(), region);
-            case "identity" -> identityService.listTags(ref.name(), region);
-            case "contact-list" -> contactService.listTags(ref.name(), region);
-            case "custom-verification-email-template" -> cvetService.listTags(ref.name(), region);
-            case "dedicated-ip-pool" -> dedicatedIpService.listTags(ref.name(), region);
-            case "tenant" -> tenantService.listTags(ref.name(), region);
-            case "multi-region-endpoint" -> new ArrayList<>(getMultiRegionEndpoint(ref.name(), region).getTags());
-            default -> throw new AwsException("NotFoundException",
-                    "Resource " + arn + " was not found.", 404);
-        };
+        requireValidResourceName(ref);
+        List<Tag> tags = taggableDomains.get(ref.type()).listTags(ref.name(), region);
         // AWS checks existence against the signing region but keys the tag store by the literal
         // ARN: a mismatched ARN region passes the existence check above yet addresses an ARN
         // nothing was ever tagged under, so the result is empty (probe-confirmed across all six
@@ -1353,9 +1370,7 @@ public class SesService {
         // Existence in the signing region is checked before the ARN's region is compared: a missing
         // resource is a 404 even when the regions also differ (probe-confirmed).
         SesTaggable domain = taggableDomains.get(ref.type());
-        if (domain != null) {
-            domain.listTags(ref.name(), region);
-        }
+        domain.listTags(ref.name(), region);
         if (!ref.region().equals(region)) {
             throw new AwsException("BadRequestException", "Failed to tag resource", 400);
         }
@@ -1363,22 +1378,7 @@ public class SesService {
         // checks and then applies the empty merge as a no-op (probe-confirmed).
         List<Tag> tags = newTags == null ? List.of() : newTags;
         SesTags.validate(tags);
-        switch (ref.type()) {
-            case "configuration-set" -> configSetService.tag(ref.name(), region, tags);
-            case "template" -> templateService.tag(ref.name(), region, tags);
-            case "identity" -> identityService.tag(ref.name(), region, tags);
-            case "contact-list" -> contactService.tag(ref.name(), region, tags);
-            case "custom-verification-email-template" -> cvetService.tag(ref.name(), region, tags);
-            case "dedicated-ip-pool" -> dedicatedIpService.tag(ref.name(), region, tags);
-            case "tenant" -> tenantService.tag(ref.name(), region, tags);
-            case "multi-region-endpoint" -> {
-                MultiRegionEndpoint endpoint = getMultiRegionEndpoint(ref.name(), region);
-                endpoint.setTags(SesTags.merge(endpoint.getTags(), tags));
-                multiRegionEndpointStore.put(multiRegionEndpointKey(region, ref.name()), endpoint);
-            }
-            default -> throw new AwsException("NotFoundException",
-                    "Resource " + arn + " was not found.", 404);
-        }
+        domain.tag(ref.name(), region, tags);
     }
 
     public void untagResource(String arn, String region, List<String> tagKeys) {
@@ -1394,30 +1394,11 @@ public class SesService {
         }
         requireValidResourceName(ref);
         SesTaggable domain = taggableDomains.get(ref.type());
-        if (domain != null) {
-            domain.listTags(ref.name(), region);
-        }
+        domain.listTags(ref.name(), region);
         if (!ref.region().equals(region)) {
             throw new AwsException("BadRequestException", "Failed to untag resource", 400);
         }
-        switch (ref.type()) {
-            case "configuration-set" -> configSetService.untag(ref.name(), region, tagKeys);
-            case "template" -> templateService.untag(ref.name(), region, tagKeys);
-            case "identity" -> identityService.untag(ref.name(), region, tagKeys);
-            case "contact-list" -> contactService.untag(ref.name(), region, tagKeys);
-            case "custom-verification-email-template" -> cvetService.untag(ref.name(), region, tagKeys);
-            case "dedicated-ip-pool" -> dedicatedIpService.untag(ref.name(), region, tagKeys);
-            case "tenant" -> tenantService.untag(ref.name(), region, tagKeys);
-            case "multi-region-endpoint" -> {
-                MultiRegionEndpoint endpoint = getMultiRegionEndpoint(ref.name(), region);
-                List<Tag> remaining = new ArrayList<>(endpoint.getTags());
-                remaining.removeIf(tag -> tagKeys.contains(tag.key()));
-                endpoint.setTags(remaining);
-                multiRegionEndpointStore.put(multiRegionEndpointKey(region, ref.name()), endpoint);
-            }
-            default -> throw new AwsException("NotFoundException",
-                    "Resource " + arn + " was not found.", 404);
-        }
+        domain.untag(ref.name(), region, tagKeys);
     }
 
     // name is everything after the type's first slash and may itself contain one: a tenant ARN's
@@ -1476,8 +1457,7 @@ public class SesService {
         }
         String type = resource.substring(0, slash);
         String name = resource.substring(slash + 1);
-        // Multi-region endpoints are SesService's own resource, not a domain service's.
-        if ((!taggableDomains.containsKey(type) && !"multi-region-endpoint".equals(type)) || name.isBlank()) {
+        if (!taggableDomains.containsKey(type) || name.isBlank()) {
             throw invalidResourceArn();
         }
         // Identity names keep their pass-through: an email local part may legally hold either character.

@@ -2441,7 +2441,7 @@ public class ApiGatewayService implements ResourceProvider {
         domain.setRegionalCertificateName(newRegionalCertificateName);
         domain.setRegionalCertificateArn(newRegionalCertificateArn);
         domain.setSecurityPolicy(newSecurityPolicy);
-        applyEndpointType(domain, newEndpointConfigurationType);
+        applyEndpointType(domain, newEndpointConfigurationType, region);
         domain.synchronizePrimaryConfiguration();
         domainStore.put(domainKey, domain);
         return domain;

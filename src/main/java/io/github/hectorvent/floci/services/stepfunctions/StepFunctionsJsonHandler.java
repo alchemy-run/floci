@@ -472,9 +472,9 @@ public class StepFunctionsJsonHandler {
     }
 
     private Response handleGetExecutionHistory(JsonNode request) {
-        var arn = request.path("executionArn").asText();
-        var includeExecutionData = request.path("includeExecutionData").asBoolean(true);
-        var reverseOrder = request.path("reverseOrder").asBoolean(false);
+        String arn = request.path("executionArn").asText();
+        boolean includeExecutionData = request.path("includeExecutionData").asBoolean(true);
+        boolean reverseOrder = request.path("reverseOrder").asBoolean(false);
         Integer maxResults = parseOptionalInt(request, "maxResults");
 
         List<HistoryEvent> live = service.getExecutionHistory(arn);

@@ -720,6 +720,7 @@ public class BackupService {
         if (resourceArn == null || resourceArn.isBlank() || iamRoleArn == null || iamRoleArn.isBlank()) {
             throw new AwsException("MissingParameterValueException", "ResourceArn and IamRoleArn are required", 400);
         }
+        requireLifecycleWithinLock(vault, lifecycle);
 
         String jobId = UUID.randomUUID().toString();
         long now = Instant.now().getEpochSecond();
@@ -741,6 +742,7 @@ public class BackupService {
         String accountId = regionResolver.getAccountId();
         job.setAccountId(accountId);
         jobStore.put(jobId, job);
+        scheduleJob(jobId, job, accountId, region);
 
         return job;
     }
@@ -816,9 +818,22 @@ public class BackupService {
      * passes would be describing AWS behaviour that needs a specific permission to reproduce.
      */
     public void deleteRecoveryPoint(String vaultName, String recoveryPointArn, String region) {
-        describeRecoveryPoint(vaultName, recoveryPointArn, region);
-        recoveryStore.delete(recoveryPointArn);
-        decrementVaultCount(vaultName, region);
+        synchronized (lockFor(vaultKey(region, vaultName))) {
+            BackupVault vault = describeBackupVault(vaultName, region);
+            RecoveryPoint rp = describeRecoveryPoint(vaultName, recoveryPointArn, region);
+            if (vault.isLocked() && vault.getMinRetentionDays() != null) {
+                long ageDays = ChronoUnit.DAYS.between(
+                        Instant.ofEpochSecond(rp.getCreationDate()), Instant.now());
+                if (ageDays < vault.getMinRetentionDays()) {
+                    throw new AwsException("InvalidRequestException",
+                            "Recovery point is protected by a vault lock until its minimum retention of "
+                                    + vault.getMinRetentionDays() + " day(s) has elapsed: " + recoveryPointArn,
+                            400);
+                }
+            }
+            recoveryStore.delete(recoveryPointArn);
+            decrementVaultCount(vaultName, region);
+        }
     }
 
     // ── Tags ───────────────────────────────────────────────────────────────────

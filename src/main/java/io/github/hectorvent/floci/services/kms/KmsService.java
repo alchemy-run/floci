@@ -521,6 +521,9 @@ public class KmsService implements ResourceProvider {
         validateGrantConstraints(constraints);
 
         KmsKey key = resolveKey(keyId, region);
+        // An AWS managed key's policy allows kms:CreateGrant only through the service that owns
+        // it (a kms:ViaService condition), never to the account directly.
+        requireCustomerManaged(key, "kms:CreateGrant");
         requireNotPendingDeletion(key);
         String grantId = UUID.randomUUID().toString();
         byte[] tokenBytes = new byte[32];
@@ -901,7 +904,12 @@ public class KmsService implements ResourceProvider {
     public String rotateKeyOnDemand(String keyId, String region) {
         synchronized (backingKeyMaterialLock) {
             KmsKey key = resolveKey(keyId, region);
+            requireCustomerManaged(key, "kms:RotateKeyOnDemand");
             validateKeyIsUsableForCryptoOperations(key);
+            if (MULTI_REGION_REPLICA.equals(key.getMultiRegionKeyType())) {
+                throw new AwsException("UnsupportedOperationException",
+                        "On-demand rotation is only supported for the multi-Region primary key.", 400);
+            }
             validateRotationKeySpec(key);
             if (EXTERNAL_ORIGIN.equals(key.getOrigin())) {
                 throw new AwsException("KMSInvalidStateException",
@@ -2165,6 +2173,9 @@ public class KmsService implements ResourceProvider {
     // ──────────────────────────── Helpers ────────────────────────────
 
     private KmsKey resolveKey(String keyIdOrArn, String region) {
+        if (referencesReservedAlias(keyIdOrArn)) {
+            ensureAwsManagedKeys(region);
+        }
         if (AwsArnUtils.isArnFor(keyIdOrArn, "kms")) {
             String arnRegion = AwsArnUtils.parse(keyIdOrArn).region();
             if (!region.equals(arnRegion)) {

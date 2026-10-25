@@ -3728,7 +3728,7 @@ public class LambdaService implements ResourceProvider {
             statement.put("Principal", permissionPrincipal(principal, region));
             statement.put("Action", action);
             statement.put("Resource", resourceArn);
-            Map<String, Object> condition = buildPermissionCondition(request);
+            Map<String, Object> condition = permissionCondition(request);
             if (!condition.isEmpty()) {
                 statement.put("Condition", condition);
             }

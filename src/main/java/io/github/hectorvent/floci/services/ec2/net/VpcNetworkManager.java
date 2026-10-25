@@ -865,7 +865,11 @@ public class VpcNetworkManager {
         if (!vpc.created) {
             return;
         }
-        removeNetworkWithRetry(vpc.networkName, vpc.flociContainerId, 1);
+        String flociContainerId = vpc.flociContainerId;
+        if (flociContainerId == null && currentContainerNetworkResolver != null) {
+            flociContainerId = currentContainerNetworkResolver.resolveContainerId().orElse(null);
+        }
+        removeNetworkWithRetry(vpc.networkName, flociContainerId, 1);
     }
 
     private void removeNetworkWithRetry(String networkName, String flociContainerId, int attempt) {

@@ -725,17 +725,22 @@ public class EcrRegistryManager {
      * (which asserts the endpoint contains {@code .ecr.}).
      */
     public String getProxyEndpoint(String accountId, String region) {
-        String scheme = config.services().ecr().tlsEnabled() ? "https" : "http";
-        int port = config.port();
-        String style = config.services().ecr().uriStyle();
-        if ("path".equalsIgnoreCase(style)) {
-            return scheme + "://localhost:" + port;
-        }
         String account = accountId == null || accountId.isBlank()
                 ? regionResolver.getAccountId() : accountId;
         String resolvedRegion = region == null || region.isBlank()
                 ? regionResolver.getDefaultRegion() : region;
-        return scheme + "://" + account + ".dkr.ecr." + resolvedRegion + ".localhost:" + port;
+        boolean pathStyle = "path".equalsIgnoreCase(config.services().ecr().uriStyle());
+        if (tlsUriEnabled()) {
+            String host = pathStyle
+                    ? "localhost.floci.io"
+                    : account + ".dkr.ecr." + resolvedRegion + ".localhost.floci.io";
+            return "https://" + host + ":" + advertisedPort();
+        }
+        String scheme = config.services().ecr().tlsEnabled() ? "https" : "http";
+        if (pathStyle) {
+            return scheme + "://localhost:" + advertisedPort();
+        }
+        return scheme + "://" + account + ".dkr.ecr." + resolvedRegion + ".localhost:" + advertisedPort();
     }
 
     private void rememberInternalHost(ContainerInfo info) {

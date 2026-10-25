@@ -319,7 +319,7 @@ public class S3Controller {
             if (hasQueryParam(uriInfo, "notification")) {
                 s3Service.authorizeBucketWrite(bucket, "s3:PutBucketNotification", authorization);
                 return handlePutBucketNotification(bucket, body,
-                        "true".equalsIgnoreCase(httpHeaders.getHeaderString("x-amz-skip-destination-validation")));
+                        Boolean.parseBoolean(httpHeaders.getHeaderString("x-amz-skip-destination-validation")));
             }
             if (hasQueryParam(uriInfo, "versioning")) {
                 s3Service.authorizeBucketWrite(bucket, "s3:PutBucketVersioning", authorization);
@@ -3856,6 +3856,9 @@ public class S3Controller {
                     response.header("Last-Modified", RFC_822.format(marker.lastModified()));
                 }
             }
+        } else if (e.getExtendedData() != null && "DeleteMarker".equals(e.getExtendedData().get("ResourceType"))) {
+            // A request refused because it reached a delete marker says so in x-amz-delete-marker.
+            response.header("x-amz-delete-marker", "true");
         }
         return response.build();
     }

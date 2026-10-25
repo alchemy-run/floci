@@ -217,20 +217,24 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
         validateOriginCustomHeaders(dist.getConfig());
         validateResponseHeadersPolicyReferences(dist.getConfig(), null);
         validateTrustedKeyGroups(dist.getConfig());
-        String id = generateDistributionId();
-        dist.setId(id);
-        dist.setArn(AwsArnUtils.Arn.of("cloudfront", "", accountId, "distribution/" + id).toString());
-        dist.setDomainName(domainNameFor(id));
-        dist.setStatus("Deployed");
-        dist.setLastModifiedTime(Instant.now());
-        dist.setEtag(UUID.randomUUID().toString());
-        if (tags != null && !tags.isEmpty()) {
-            dist.setTags(tags);
-            tagStore.put("distribution/" + id, tags);
-        }
-        distStore.put(id, dist);
-        bindEdgePort(id);
-        return dist;
+        validateOriginAccessControls(dist.getConfig());
+        return whileCertificatesHeld(dist.getConfig(), () -> {
+            validateViewerCertificate(dist.getConfig());
+            String id = generateDistributionId();
+            dist.setId(id);
+            dist.setArn(arn("distribution/" + id));
+            dist.setDomainName(domainNameFor(id));
+            dist.setStatus("Deployed");
+            dist.setLastModifiedTime(Instant.now());
+            dist.setEtag(UUID.randomUUID().toString());
+            if (tags != null && !tags.isEmpty()) {
+                dist.setTags(tags);
+                tagStore.put("distribution/" + id, tags);
+            }
+            distStore.put(id, dist);
+            bindEdgePort(id);
+            return dist;
+        });
     }
 
     public Distribution getDistribution(String id) {

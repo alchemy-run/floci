@@ -7646,6 +7646,10 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             return false;
         }
         String groupId = rule.getGroupId();
+        if (groupId == null) {
+            securityGroupRules.delete(key(region, securityGroupRuleId));
+            return true;
+        }
         synchronized (lockFor(key(region, groupId))) {
             rule = securityGroupRules.get(key(region, securityGroupRuleId)).orElse(null);
             if (rule == null) {

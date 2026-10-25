@@ -301,8 +301,8 @@ public class SqsQueryHandler {
             xml.elem("Body", msg.getBody());
             String senderId = msg.getSenderId() != null ? msg.getSenderId() : defaultSenderId;
             writeSystemAttributesXml(xml, msg, requestedAttrs, senderId);
-            if (msg.getMessageAttributes() != null && !msg.getMessageAttributes().isEmpty()) {
-                for (Map.Entry<String, MessageAttributeValue> entry : msg.getMessageAttributes().entrySet()) {
+            if (!selectedMessageAttrs.isEmpty()) {
+                for (Map.Entry<String, MessageAttributeValue> entry : selectedMessageAttrs.entrySet()) {
                     xml.start("MessageAttribute")
                        .elem("Name", entry.getKey())
                        .start("Value")
@@ -338,6 +338,8 @@ public class SqsQueryHandler {
 
     private Response handleDeleteMessageBatch(MultivaluedMap<String, String> params, String region) {
         String queueUrl = getParam(params, "QueueUrl");
+        sqsService.validateBatchEntryCount("DeleteMessageBatchRequestEntry",
+                countBatchEntries(params, "DeleteMessageBatchRequestEntry"));
         XmlBuilder xml = new XmlBuilder();
 
         for (int i = 1; ; i++) {
@@ -362,6 +364,8 @@ public class SqsQueryHandler {
 
     private Response handleSendMessageBatch(MultivaluedMap<String, String> params, String region) {
         String queueUrl = getParam(params, "QueueUrl");
+        sqsService.validateBatchEntryCount("SendMessageBatchRequestEntry",
+                countBatchEntries(params, "SendMessageBatchRequestEntry"));
         XmlBuilder xml = new XmlBuilder();
 
         record ParsedEntry(String id, String body, Integer delay, String groupId, String dedupId,

@@ -2837,12 +2837,12 @@ public class AslExecutor {
             if (stateDef.has("Seconds")) {
                 waitNanos = secondsToNanos(stateDef.get("Seconds").asLong());
             } else if (stateDef.has("SecondsPath")) {
-                JsonNode val = resolvePath(stateDef.get("SecondsPath").asText(), effectiveInput);
+                JsonNode val = resolvePath(stateDef.get("SecondsPath").asText(), effectiveInput, context);
                 waitNanos = secondsToNanos(val.asLong());
             } else if (stateDef.has("Timestamp")) {
                 waitNanos = nanosUntil(stateDef.get("Timestamp").asText());
             } else if (stateDef.has("TimestampPath")) {
-                JsonNode val = resolvePath(stateDef.get("TimestampPath").asText(), effectiveInput);
+                JsonNode val = resolvePath(stateDef.get("TimestampPath").asText(), effectiveInput, context);
                 waitNanos = nanosUntil(val.asText());
             }
         }

@@ -917,43 +917,90 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
      * name-based lookup.
      */
     public void updateUser(String userName, String newUserName, String newPath, String expectedUserId) {
-        IamUser user = getUser(userName);
-        if (expectedUserId != null && !expectedUserId.equals(user.getUserId())) {
-            throw new AwsException("EntityAlreadyExists",
-                    "User " + userName + " was replaced by a different user of the same name; "
-                            + "refusing to apply an update meant for the original user.", 409);
-        }
-        if (newUserName != null && !newUserName.equals(userName)) {
-            if (users.get(newUserName).isPresent()) {
-                throw new AwsException("EntityAlreadyExists",
-                        "User with name " + newUserName + " already exists.", 409);
-            }
-            List<AccessKey> keysToMove = userAccessKeys(userName);
-            users.delete(userName);
-            user.setUserName(newUserName);
-            if (newPath != null) user.setPath(normalizePath(newPath));
-            user.setArn(iamArn("user", user.getPath(), newUserName));
-            users.put(newUserName, user);
-            loginProfiles.get(userName).ifPresent(profile -> {
-                loginProfiles.delete(userName);
-                profile.setUserName(newUserName);
-                loginProfiles.put(newUserName, profile);
-            });
-            for (AccessKey key : keysToMove) {
-                key.setUserName(newUserName);
-                accessKeys.put(key.getAccessKeyId(), key);
-            }
-            for (String groupName : user.getGroupNames()) {
-                groups.get(groupName).ifPresent(group -> {
-                    group.getUserNames().remove(userName);
-                    group.getUserNames().add(newUserName);
-                    groups.put(groupName, group);
-                });
-            }
-        } else {
-            if (newPath != null) {
-                user.setPath(normalizePath(newPath));
-                user.setArn(iamArn("user", user.getPath(), userName));
+        synchronized (resourceNameLock) {
+            IamUser user = getUser(userName);
+            requireSameUser(user, userName, expectedUserId);
+            if (newUserName != null && !newUserName.equals(userName)) {
+                boolean nameTaken = resourcesInCurrentAccount(users)
+                        .filter(existing -> !existing.getUserId().equals(user.getUserId()))
+                        .anyMatch(existing -> existing.getUserName().equalsIgnoreCase(newUserName));
+                if (nameTaken) {
+                    throw new AwsException("EntityAlreadyExists",
+                            "User with name " + newUserName + " already exists.", 409);
+                }
+                // The rename publishes the user under its new name and moves the credentials that
+                // DeleteUser refuses to delete a user over: its MFA devices, its signing
+                // certificates and its SSH public keys. Each moves under the lock DeleteUser checks it with, because split
+                // across that lock a DeleteUser for the new name could land after the user is
+                // published but before the credential follows, see none, and delete a user whose
+                // credential is about to be reassigned to it. The two locks are taken in the same
+                // order DeleteUser takes them, so the nesting cannot deadlock.
+                synchronized (serviceCredentialLock) {
+                    List<ServiceSpecificCredential> credentialsToMove =
+                            userServiceCredentials(userName);
+                    synchronized (sshPublicKeyLock) {
+                        List<SshPublicKey> sshKeysToMove = userSshPublicKeys(userName);
+                        synchronized (signingCertificateLock) {
+                            List<SigningCertificate> certificatesToMove = userSigningCertificates(userName);
+                            synchronized (mfaDeviceLock) {
+                                users.delete(userName);
+                                user.setUserName(newUserName);
+                                if (newPath != null) {
+                                    user.setPath(normalizePath(newPath));
+                                }
+                                user.setArn(iamArnBeside(user.getArn(), "user", user.getPath(), newUserName));
+                                users.put(newUserName, user);
+                                for (VirtualMfaDevice device : mfaDevicesForUser(userName)) {
+                                    device.setUserName(newUserName);
+                                    virtualMfaDevices.put(device.getSerialNumber(), device);
+                                }
+                            }
+                            for (SigningCertificate certificate : certificatesToMove) {
+                                certificate.setUserName(newUserName);
+                                signingCertificates.put(certificate.getCertificateId(), certificate);
+                            }
+                        }
+                        for (SshPublicKey key : sshKeysToMove) {
+                            key.setUserName(newUserName);
+                            sshPublicKeys.put(key.getSshPublicKeyId(), key);
+                        }
+                    }
+                    for (ServiceSpecificCredential credential : credentialsToMove) {
+                        credential.setUserName(newUserName);
+                        serviceCredentials.put(
+                                credential.getServiceSpecificCredentialId(), credential);
+                    }
+                }
+                synchronized (loginProfileLock) {
+                    loginProfiles.get(userName).ifPresent(profile -> {
+                        loginProfiles.delete(userName);
+                        profile.setUserName(newUserName);
+                        loginProfiles.put(newUserName, profile);
+                    });
+                }
+                synchronized (accessKeyLock) {
+                    // Read inside the lock that rewrites them, the way each credential above is
+                    // read inside its own: a DeleteAccessKey landing between a read taken earlier
+                    // and this loop would be undone, the deleted key coming back under the new
+                    // name and still authenticating.
+                    for (AccessKey key : userAccessKeys(userName)) {
+                        key.setUserName(newUserName);
+                        accessKeys.put(key.getAccessKeyId(), key);
+                    }
+                }
+                for (String groupName : user.getGroupNames()) {
+                    groups.get(groupName).ifPresent(group -> {
+                        group.getUserNames().remove(userName);
+                        group.getUserNames().add(newUserName);
+                        groups.put(groupName, group);
+                    });
+                }
+            } else {
+                if (newPath != null) {
+                    user.setPath(normalizePath(newPath));
+                    user.setArn(iamArnBeside(user.getArn(), "user", user.getPath(), userName));
+                }
+                users.put(userName, user);
             }
         }
     }
@@ -1417,14 +1464,15 @@ public class IamService implements SessionAccountLookup, ResourceProvider {
         validateRoleName(roleName);
         validateRoleDescription(description);
         IamRole role = getRole(roleName);
-        // AWS lets UpdateRole change a service-linked role's description (the
-        // only SLR field IAM itself will edit). MaxSessionDuration on an SLR
-        // is service-owned — reject that the same way DeleteRole is rejected.
-        if (role.isServiceLinkedRole() && maxSessionDuration > 0) {
+        if (maxSessionDuration > 0) {
             requireNotServiceLinked(role, roleName);
         }
-        if (description != null) role.setDescription(description);
-        if (maxSessionDuration > 0) role.setMaxSessionDuration(maxSessionDuration);
+        if (description != null) {
+            role.setDescription(description);
+        }
+        if (maxSessionDuration > 0) {
+            role.setMaxSessionDuration(maxSessionDuration);
+        }
         roles.put(roleName, role);
         return role;
     }

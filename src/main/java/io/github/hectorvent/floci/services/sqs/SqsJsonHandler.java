@@ -296,9 +296,9 @@ public class SqsJsonHandler {
             String senderId = msg.getSenderId() != null ? msg.getSenderId() : defaultSenderId;
             writeSystemAttributesJson(msgNode, msg, requestedAttrs, senderId);
 
-            if (msg.getMessageAttributes() != null && !msg.getMessageAttributes().isEmpty()) {
-                ObjectNode msgAttrs = msgNode.putObject("MessageAttributes");
-                for (Map.Entry<String, MessageAttributeValue> entry : msg.getMessageAttributes().entrySet()) {
+            if (!selectedMessageAttrs.isEmpty()) {
+                ObjectNode msgAttrs = objectMapper.createObjectNode();
+                for (Map.Entry<String, MessageAttributeValue> entry : selectedMessageAttrs.entrySet()) {
                     ObjectNode valNode = msgAttrs.putObject(entry.getKey());
                     valNode.put("DataType", entry.getValue().getDataType());
                     if (entry.getValue().getBinaryValue() != null) {

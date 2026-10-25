@@ -2852,8 +2852,11 @@ public class CodePipelineService {
             node = mapper.valueToTree(execution);
         }
         node.remove(List.of("accountId", "region", "startTime", "lastUpdateTime",
-                "sourceRevisions", "actionExecutions", "currentStage", "stopRequested", "abandon",
-                "rollbackTargetPipelineExecutionId", "resumeStageName", "retryFailedActionsOnly"));
+                "sourceRevisions", "sourceRevisionOverrides", "actionExecutions", "currentStage", "waitingStage",
+                "admissionOrdinal",
+                "stopRequested", "abandon", "rollbackTargetPipelineExecutionId", "rollbackStageName",
+                "stageExecutionStatuses", "artifactsReleased", "ruleExecutions", "conditionOverrides",
+                "resumeStageName", "retryFailedActionsOnly"));
         if (execution.getRollbackTargetPipelineExecutionId() != null) {
             node.putObject("rollbackMetadata").put(
                     "rollbackTargetPipelineExecutionId", execution.getRollbackTargetPipelineExecutionId());

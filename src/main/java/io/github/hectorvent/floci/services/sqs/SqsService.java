@@ -641,11 +641,7 @@ public class SqsService implements Resettable, ResourceProvider {
             return;
         }
         ConcurrentHashMap<String, Instant> dedupMap = deduplicationCache.get(storageKey);
-        if (dedupMap != null && !dedupMap.isEmpty()) {
-            Map<String, Long> serializable = new HashMap<>();
-            dedupMap.forEach((id, expiry) -> serializable.put(id, expiry.toEpochMilli()));
-            dedupStore.put(storageKey, serializable);
-        } else {
+        if (dedupMap == null) {
             dedupStore.delete(storageKey);
             return;
         }
@@ -830,6 +826,8 @@ public class SqsService implements Resettable, ResourceProvider {
         }
         deduplicationCache.remove(storageKey);
         redrivePolicyCache.remove(storageKey);
+        deduplicationIdentityCache.remove(storageKey);
+        deduplicationLocks.remove(storageKey);
         if (messageStore != null) {
             messageStore.delete(storageKey);
         }
@@ -915,7 +913,10 @@ public class SqsService implements Resettable, ResourceProvider {
         attrs.put("CreatedTimestamp", String.valueOf(queue.getCreatedTimestamp().getEpochSecond()));
         attrs.put("LastModifiedTimestamp", String.valueOf(queue.getLastModifiedTimestamp().getEpochSecond()));
 
-        GuardedMessageQueue.MessageCounts counts = getOrCreateQueue(storageKey).messageCounts();
+        GuardedMessageQueue messages = unexpiredMessages(storageKey, queue);
+        // AWS: a GetQueueAttributes call activates the queue, so CloudWatch reports it again.
+        messages.activity().accessed();
+        GuardedMessageQueue.MessageCounts counts = messages.messageCounts();
         attrs.put("ApproximateNumberOfMessages", String.valueOf(counts.visible()));
         attrs.put("ApproximateNumberOfMessagesNotVisible", String.valueOf(counts.inFlight()));
         attrs.put("ApproximateNumberOfMessagesDelayed", String.valueOf(counts.delayed()));
@@ -1492,7 +1493,7 @@ public class SqsService implements Resettable, ResourceProvider {
         int maxReceiveCount = rp != null ? rp.maxReceiveCount() : -1;
         String deadLetterTargetArn = rp != null ? rp.deadLetterTargetArn() : null;
 
-        GuardedMessageQueue guardedQueue = getOrCreateQueue(storageKey);
+        GuardedMessageQueue guardedQueue = unexpiredMessages(storageKey, queue);
         GuardedMessageQueue.ClaimResult claimResult = guardedQueue.claimVisibleMessages(
                 maxMessages, effectiveTimeout, queue.isFifo(), maxReceiveCount, deadLetterTargetArn);
 
@@ -1761,7 +1762,7 @@ public class SqsService implements Resettable, ResourceProvider {
             }
         }
 
-        GuardedMessageQueue srcQueueInitial = getOrCreateQueue(srcKey);
+        GuardedMessageQueue srcQueueInitial = unexpiredMessages(srcKey, srcQueue.get());
         GuardedMessageQueue.MessageCounts srcCounts = srcQueueInitial.messageCounts();
         long toMove = srcCounts.visible() + srcCounts.inFlight() + srcCounts.delayed();
 
