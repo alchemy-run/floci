@@ -68,12 +68,7 @@ class RdsControlPlaneTest {
         proxyName = TestFixtures.uniqueName("rds-proxy");
         serverlessClusterName = TestFixtures.uniqueName("rds-serverless");
         try (Ec2Client ec2 = TestFixtures.ec2Client()) {
-            DescribeSubnetsResponse response = ec2.describeSubnets();
-            subnetIds = response.subnets().stream()
-                    .map(subnet -> subnet.subnetId())
-                    .sorted()
-                    .limit(2)
-                    .toList();
+            subnetIds = defaultVpcSubnetIds(ec2);
         }
         assertThat(subnetIds).hasSizeGreaterThanOrEqualTo(2);
     }
@@ -717,12 +712,23 @@ class RdsControlPlaneTest {
 
     private static List<String> subnetIdsFor(Region region) {
         try (Ec2Client ec2 = ec2Client(region)) {
-            return ec2.describeSubnets().subnets().stream()
-                    .map(subnet -> subnet.subnetId())
-                    .sorted()
-                    .limit(2)
-                    .toList();
+            return defaultVpcSubnetIds(ec2);
         }
+    }
+
+    /**
+     * Two subnets of the default VPC. A DB proxy's subnets must share one VPC, and other suites
+     * (e.g. CloudHsmV2Test) leave VPCs with subnets behind in the same emulator, so an unfiltered
+     * DescribeSubnets can return subnets from different VPCs.
+     */
+    private static List<String> defaultVpcSubnetIds(Ec2Client ec2) {
+        DescribeSubnetsResponse response = ec2.describeSubnets(b -> b
+                .filters(f -> f.name("default-for-az").values("true")));
+        return response.subnets().stream()
+                .map(subnet -> subnet.subnetId())
+                .sorted()
+                .limit(2)
+                .toList();
     }
 
     private static Ec2Client ec2Client(Region region) {
