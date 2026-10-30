@@ -106,6 +106,7 @@ public class CognitoJsonHandler {
             case "ForgotPassword" -> handleForgotPassword(request);
             case "ConfirmForgotPassword" -> handleConfirmForgotPassword(request);
             case "GetUser" -> handleGetUser(request);
+            case "GetUserAuthFactors" -> handleGetUserAuthFactors(request);
             case "GetUserAttributeVerificationCode" -> handleGetUserAttributeVerificationCode(request);
             case "VerifyUserAttribute" -> handleVerifyUserAttribute(request);
             case "UpdateUserAttributes" -> handleUpdateUserAttributes(request);
@@ -1027,6 +1028,11 @@ public class CognitoJsonHandler {
 
     private Response handleGetUser(JsonNode request) {
         Map<String, Object> result = service.getUser(request.path("AccessToken").asText());
+        return Response.ok(objectMapper.valueToTree(result)).build();
+    }
+
+    private Response handleGetUserAuthFactors(JsonNode request) {
+        Map<String, Object> result = service.getUserAuthFactors(request.path("AccessToken").asText());
         return Response.ok(objectMapper.valueToTree(result)).build();
     }
 
