@@ -2,6 +2,7 @@ package io.github.hectorvent.floci.services.cloudfront.edge;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -285,9 +286,17 @@ public class CloudFrontEdgeController {
         responseNode.put("statusCode", response.getStatus());
         responseNode.put("statusDescription", response.getStatusInfo().getReasonPhrase());
         ObjectNode responseHeaders = responseNode.putObject("headers");
+        ObjectNode responseCookies = responseNode.putObject("cookies");
         response.getStringHeaders().forEach((name, values) -> {
-            if (!values.isEmpty()) {
-                responseHeaders.putObject(name.toLowerCase(Locale.ROOT)).put("value", values.get(0));
+            String lower = name.toLowerCase(Locale.ROOT);
+            for (String value : values) {
+                // CloudFront hands a viewer-response function its Set-Cookie
+                // headers as `response.cookies`, not as a header.
+                if ("set-cookie".equals(lower)) {
+                    addResponseCookie(responseCookies, value);
+                } else {
+                    addMultiValue(responseHeaders, lower, value);
+                }
             }
         });
         CloudFrontFunctionRuntime.Execution execution = runtime.execute(function, event);
@@ -297,8 +306,7 @@ public class CloudFrontEdgeController {
         }
         JsonNode output = execution.output();
         Response.ResponseBuilder builder = Response.status(output.path("statusCode").asInt(response.getStatus()));
-        output.path("headers").fields().forEachRemaining(entry ->
-                builder.header(entry.getKey(), entry.getValue().path("value").asText("")));
+        writeResponseHeaders(builder, output);
         return builder.entity(response.getEntity()).build();
     }
 
@@ -661,10 +669,7 @@ public class CloudFrontEdgeController {
 
     private Response fromFunctionResponse(JsonNode output) {
         Response.ResponseBuilder builder = Response.status(output.path("statusCode").asInt(200));
-        output.path("headers").fields().forEachRemaining(entry ->
-                builder.header(entry.getKey(), entry.getValue().path("value").asText("")));
-        output.path("cookies").fields().forEachRemaining(entry ->
-                builder.header("set-cookie", entry.getKey() + "=" + entry.getValue().path("value").asText("")));
+        writeResponseHeaders(builder, output);
         JsonNode body = output.get("body");
         if (body != null && body.hasNonNull("data")) {
             String data = body.path("data").asText("");
@@ -673,6 +678,70 @@ public class CloudFrontEdgeController {
                     : data.getBytes(StandardCharsets.UTF_8));
         }
         return builder.build();
+    }
+
+    /**
+     * Write a function's response {@code headers} and {@code cookies} onto the
+     * viewer response. Each {@code multiValue} entry is its own header line,
+     * and each cookie its own {@code Set-Cookie} with its attributes.
+     */
+    private static void writeResponseHeaders(Response.ResponseBuilder builder, JsonNode output) {
+        output.path("headers").fields().forEachRemaining(entry -> {
+            for (JsonNode value : valuesOf(entry.getValue())) {
+                builder.header(entry.getKey(), value.path("value").asText(""));
+            }
+        });
+        output.path("cookies").fields().forEachRemaining(entry -> {
+            for (JsonNode value : valuesOf(entry.getValue())) {
+                String cookie = entry.getKey() + "=" + value.path("value").asText("");
+                String attributes = value.path("attributes").asText("");
+                builder.header("set-cookie", attributes.isEmpty() ? cookie : cookie + "; " + attributes);
+            }
+        });
+    }
+
+    /** A header or cookie's values: its {@code multiValue} list, or itself. */
+    private static List<JsonNode> valuesOf(JsonNode node) {
+        List<JsonNode> values = new ArrayList<>();
+        JsonNode multiValue = node.path("multiValue");
+        if (multiValue.isArray() && !multiValue.isEmpty()) {
+            multiValue.forEach(values::add);
+        } else {
+            values.add(node);
+        }
+        return values;
+    }
+
+    /** Parse one {@code Set-Cookie} line into a viewer-response cookie entry. */
+    private static void addResponseCookie(ObjectNode cookies, String header) {
+        int semicolon = header.indexOf(';');
+        String pair = semicolon < 0 ? header : header.substring(0, semicolon);
+        String attributes = semicolon < 0 ? "" : header.substring(semicolon + 1).trim();
+        int eq = pair.indexOf('=');
+        if (eq <= 0) {
+            return;
+        }
+        ObjectNode value = JsonNodeFactory.instance.objectNode()
+                .put("value", pair.substring(eq + 1).trim());
+        if (!attributes.isEmpty()) {
+            value.put("attributes", attributes);
+        }
+        String name = pair.substring(0, eq).trim();
+        ObjectNode existing = (ObjectNode) cookies.get(name);
+        if (existing == null) {
+            cookies.set(name, value);
+            return;
+        }
+        var multiValue = existing.has("multiValue")
+                ? (com.fasterxml.jackson.databind.node.ArrayNode) existing.get("multiValue")
+                : existing.putArray("multiValue");
+        if (multiValue.isEmpty()) {
+            ObjectNode first = multiValue.addObject().put("value", existing.path("value").asText(""));
+            if (existing.has("attributes")) {
+                first.put("attributes", existing.path("attributes").asText(""));
+            }
+        }
+        multiValue.add(value);
     }
 
     private Response edgeError(int status, String message) {

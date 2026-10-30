@@ -119,6 +119,16 @@ class CloudFrontEdgeIntegrationTest {
     }
 
     private String createDistribution(String callerReference, String functionArn) {
+        return createDistribution(callerReference, functionArn, null);
+    }
+
+    private String createDistribution(String callerReference, String functionArn, String viewerResponseArn) {
+        String viewerResponse = viewerResponseArn == null ? "" : """
+                <FunctionAssociation>
+                  <FunctionARN>%s</FunctionARN>
+                  <EventType>viewer-response</EventType>
+                </FunctionAssociation>
+                """.formatted(viewerResponseArn);
         String body = given()
                 .contentType("application/xml")
                 .body("""
@@ -144,17 +154,19 @@ class CloudFrontEdgeIntegrationTest {
                             <TargetOriginId>default</TargetOriginId>
                             <ViewerProtocolPolicy>allow-all</ViewerProtocolPolicy>
                             <FunctionAssociations>
-                              <Quantity>1</Quantity>
+                              <Quantity>%d</Quantity>
                               <Items>
                                 <FunctionAssociation>
                                   <FunctionARN>%s</FunctionARN>
                                   <EventType>viewer-request</EventType>
                                 </FunctionAssociation>
+                                %s
                               </Items>
                             </FunctionAssociations>
                           </DefaultCacheBehavior>
                         </DistributionConfig>
-                        """.formatted(NS, callerReference, functionArn))
+                        """.formatted(NS, callerReference, viewerResponseArn == null ? 1 : 2, functionArn,
+                        viewerResponse))
                 .when()
                 .post("/2020-05-31/distribution")
                 .then()
@@ -207,6 +219,13 @@ class CloudFrontEdgeIntegrationTest {
                   return {
                     statusCode: 200,
                     headers: { "content-type": { value: "text/plain" } },
+                    cookies: {
+                      first: { value: "1", attributes: "Path=/" },
+                      second: { value: "2", multiValue: [
+                        { value: "2", attributes: "Path=/a" },
+                        { value: "3", attributes: "Path=/b" }
+                      ] }
+                    },
                     body: { encoding: "text", data: greeting + " " + event.request.headers.host.value }
                   };
                 }
@@ -413,6 +432,8 @@ class CloudFrontEdgeIntegrationTest {
             };
             byte[] body = content.getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "text/plain; charset=utf-8");
+            exchange.getResponseHeaders().add("Set-Cookie", "first=1; Path=/");
+            exchange.getResponseHeaders().add("Set-Cookie", "second=2; Path=/; HttpOnly");
             for (String header : List.of("Host", "X-Forwarded-Host", "Cookie", "X-Viewer-Test", "X-Distribution")) {
                 String value = exchange.getRequestHeaders().getFirst(header);
                 if (value != null) {
@@ -469,6 +490,9 @@ class CloudFrontEdgeIntegrationTest {
                     assertEquals("session=viewer-cookie", page.headers().firstValue("x-origin-cookie").orElseThrow());
                     assertEquals("viewer-value", page.headers().firstValue("x-origin-x-viewer-test").orElseThrow());
                     assertEquals(id, page.headers().firstValue("x-origin-x-distribution").orElseThrow());
+                    // Each Set-Cookie the origin sends reaches the viewer as its own header.
+                    assertEquals(List.of("first=1; Path=/", "second=2; Path=/; HttpOnly"),
+                            page.headers().allValues("set-cookie"));
                     for (String value : List.of("router-one", "router-two")) {
                         HttpResponse<String> api = requestEdge(port, "/api/hello?echo=" + value);
                         assertEquals(200, api.statusCode(), api.body());
@@ -490,6 +514,85 @@ class CloudFrontEdgeIntegrationTest {
             try {
                 if (function != null) {
                     deleteFunction(function);
+                }
+            } finally {
+                if (kvsArn != null) {
+                    deleteKeyValueStore(kvsName);
+                }
+            }
+        }
+    }
+
+    /**
+     * A viewer-response function sees the origin's Set-Cookie headers as
+     * {@code response.cookies}, one {@code multiValue} entry per header when a
+     * name repeats, and every cookie it returns reaches the viewer.
+     */
+    @Test
+    @Timeout(90)
+    void viewerResponseFunctionKeepsEveryCookie() throws Exception {
+        HttpServer origin = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        origin.createContext("/", exchange -> {
+            exchange.getResponseHeaders().add("Set-Cookie", "first=1; Path=/");
+            exchange.getResponseHeaders().add("Set-Cookie", "second=2; Path=/a");
+            exchange.getResponseHeaders().add("Set-Cookie", "second=3; Path=/b");
+            exchange.getResponseHeaders().add("Vary", "Accept");
+            exchange.getResponseHeaders().add("Vary", "Cookie");
+            exchange.sendResponseHeaders(200, -1);
+            exchange.close();
+        });
+        origin.start();
+        String kvsName = "edge-viewer-response-kvs";
+        String kvsArn = null;
+        Function request = null;
+        Function response = null;
+        try {
+            kvsArn = createKeyValueStore(kvsName, "origin", "localhost:" + origin.getAddress().getPort());
+            request = createFunction("edge-viewer-response-req", """
+                    import cf from "cloudfront";
+                    async function handler(event) {
+                      cf.updateRequestOrigin({ domainName: await cf.kvs().get("origin") });
+                      return event.request;
+                    }
+                    """, kvsArn);
+            response = createFunction("edge-viewer-response-res", """
+                    async function handler(event) {
+                      var response = event.response;
+                      var seen = [];
+                      for (var name in response.cookies) {
+                        var cookie = response.cookies[name];
+                        var values = cookie.multiValue || [cookie];
+                        for (var i = 0; i < values.length; i++) {
+                          seen.push(name + "=" + values[i].value + "|" + values[i].attributes);
+                        }
+                      }
+                      response.headers["x-seen-cookies"] = { value: seen.join(",") };
+                      response.headers["x-seen-set-cookie-header"] = { value: String(!!response.headers["set-cookie"]) };
+                      response.cookies.third = { value: "3", attributes: "Path=/" };
+                      return response;
+                    }
+                    """, kvsArn);
+            String id = createDistribution("edge-viewer-response", request.arn(), response.arn());
+            try {
+                HttpResponse<String> served = requestEdge(assignedPort(id), "/");
+                assertEquals(200, served.statusCode(), served.body());
+                assertEquals("first=1|Path=/,second=2|Path=/a,second=3|Path=/b",
+                        served.headers().firstValue("x-seen-cookies").orElseThrow());
+                assertEquals("false", served.headers().firstValue("x-seen-set-cookie-header").orElseThrow());
+                assertEquals(List.of("first=1; Path=/", "second=2; Path=/a", "second=3; Path=/b", "third=3; Path=/"),
+                        served.headers().allValues("set-cookie"));
+                assertEquals(List.of("Accept", "Cookie"), served.headers().allValues("vary"));
+            } finally {
+                deleteDistribution(id);
+            }
+        } finally {
+            origin.stop(0);
+            try {
+                if (request != null) {
+                    deleteFunction(request);
+                }
+                if (response != null) {
+                    deleteFunction(response);
                 }
             } finally {
                 if (kvsArn != null) {
@@ -619,6 +722,13 @@ class CloudFrontEdgeIntegrationTest {
                   return {
                     statusCode: 200,
                     headers: { "content-type": { value: "text/plain" } },
+                    cookies: {
+                      first: { value: "1", attributes: "Path=/" },
+                      second: { value: "2", multiValue: [
+                        { value: "2", attributes: "Path=/a" },
+                        { value: "3", attributes: "Path=/b" }
+                      ] }
+                    },
                     body: { encoding: "text", data: greeting + " " + event.request.headers.host.value }
                   };
                 }
@@ -636,7 +746,7 @@ class CloudFrontEdgeIntegrationTest {
         assertEquals("http://localhost:" + port, assigned.path("Url"));
 
         // Plain HTTP, no Host header games, no TLS: what a browser does.
-        given()
+        ExtractableResponse<Response> served = given()
                 .baseUri("http://localhost")
                 .port(port)
                 .when()
@@ -645,7 +755,11 @@ class CloudFrontEdgeIntegrationTest {
                 .statusCode(200)
                 // The viewer's own Host reaches the function untouched, so edge
                 // code that reads it sees the address the request arrived on.
-                .body(equalTo("by-port localhost:" + port));
+                .body(equalTo("by-port localhost:" + port))
+                .extract();
+        // Every cookie the function returns is its own Set-Cookie, attributes included.
+        assertEquals(List.of("first=1; Path=/", "second=2; Path=/a", "second=3; Path=/b"),
+                served.headers().getValues("Set-Cookie"));
 
         // The listing reports the same assignment.
         given()
