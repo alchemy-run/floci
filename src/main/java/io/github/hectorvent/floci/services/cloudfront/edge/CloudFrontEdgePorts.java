@@ -248,7 +248,10 @@ public class CloudFrontEdgePorts {
                 .compose(edgeRequest -> {
                     req.headers().forEach(header -> {
                         if (!HOP_BY_HOP.contains(header.getKey().toLowerCase(Locale.ROOT))) {
-                            edgeRequest.putHeader(header.getKey(), header.getValue());
+                            // `add`, not `putHeader`: a repeated header arrives
+                            // as one entry per value, and `putHeader` keeps
+                            // only the last of them.
+                            edgeRequest.headers().add(header.getKey(), header.getValue());
                         }
                     });
                     // Keep the hostname the viewer actually used: the edge builds
@@ -264,7 +267,9 @@ public class CloudFrontEdgePorts {
                     req.response().setStatusCode(edgeResponse.statusCode());
                     edgeResponse.headers().forEach(header -> {
                         if (!HOP_BY_HOP.contains(header.getKey().toLowerCase(Locale.ROOT))) {
-                            req.response().putHeader(header.getKey(), header.getValue());
+                            // Every `Set-Cookie` is its own header line, so
+                            // keep each value rather than the last one.
+                            req.response().headers().add(header.getKey(), header.getValue());
                         }
                     });
                     return edgeResponse.body();
