@@ -22,14 +22,16 @@
 | `UpdateStateMachineAlias` | - |
 | `DeleteStateMachineAlias` | - |
 | `ValidateStateMachineDefinition` | Validate an ASL definition without creating a state machine |
-| `TestState` | Execute a single ASL state without creating a machine |
 | `RedriveExecution` | Restart a failed, aborted, or timed-out execution |
+| `TestState` | Execute a single ASL state without creating a machine |
 | `StartExecution` | Start a new execution |
 | `StartSyncExecution` | Synchronous EXPRESS execution (HTTP 200 even when the run FAILED) |
 | `DescribeExecution` | Get execution status and output |
 | `ListExecutions` | List executions for a state machine |
 | `StopExecution` | Stop a running execution |
 | `GetExecutionHistory` | Get the full event history of an execution |
+| `DescribeMapRun` | Get the item and execution counters of a distributed Map run |
+| `UpdateMapRun` | Update maxConcurrency on a running Map Run |
 | `SendTaskSuccess` | Report task success (for `.waitForTaskToken` tasks) |
 | `SendTaskFailure` | Report task failure |
 | `SendTaskHeartbeat` | Send a heartbeat for long-running tasks |
@@ -39,8 +41,6 @@
 | `ListActivities` | - |
 | `GetActivityTask` | - |
 | `ListMapRuns` | List Distributed Map Runs for an execution |
-| `DescribeMapRun` | Get the item and execution counters of a distributed Map run |
-| `UpdateMapRun` | Update maxConcurrency on a running Map Run |
 | `ListTagsForResource` | - |
 | `TagResource` | - |
 | `UntagResource` | - |

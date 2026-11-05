@@ -90,12 +90,6 @@ runtimes reach `READY` immediately and hold metadata only. See
 | `GetResourcePolicy` | Returns the policy attached to an AgentCore resource |
 | `PutResourcePolicy` | Creates or replaces a policy on an AgentCore resource |
 | `DeleteResourcePolicy` | Deletes the policy attached to an AgentCore resource |
-| `CreateHarness` | Creates a harness at version 1, filling in AWS's defaults; see [Harnesses](#harnesses) |
-| `ListHarnesses` | Lists harnesses (paginated) |
-| `GetHarness` | Returns a harness, optionally at a specific `harnessVersion` |
-| `UpdateHarness` | Updates a harness; appends a new immutable version |
-| `DeleteHarness` | Deletes a harness |
-| `ListHarnessVersions` | Lists a harness's versions, newest first (paginated) |
 <!-- floci:actions:end -->
 
 A `DEFAULT` endpoint is created automatically with each runtime, and each runtime

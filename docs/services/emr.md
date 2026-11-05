@@ -29,22 +29,22 @@ Floci emulates the Amazon EMR (Elastic MapReduce) management API. Clusters (job 
 | `AddInstanceFleet` | Adds an instance fleet to a cluster |
 | `ListInstanceFleets` | Lists the instance fleets of a cluster |
 | `ListInstances` | Lists the EC2 instances of a cluster |
-| `ModifyInstanceGroups` | Resizes instance groups of a cluster |
-| `ModifyInstanceFleet` | Changes the target capacity of an instance fleet |
-| `ListBootstrapActions` | Lists the bootstrap actions a cluster ran at launch |
-| `PutAutoTerminationPolicy` | Attaches or updates a cluster's auto-termination policy |
-| `GetAutoTerminationPolicy` | Returns a cluster's auto-termination policy |
-| `RemoveAutoTerminationPolicy` | Detaches a cluster's auto-termination policy |
-| `PutManagedScalingPolicy` | Attaches or updates a cluster's managed scaling policy |
+| `ModifyInstanceGroups` | Resizes or reconfigures instance groups |
+| `ModifyInstanceFleet` | Changes an instance fleet's target capacities |
+| `ListBootstrapActions` | Lists the bootstrap actions given to `RunJobFlow` |
+| `PutAutoTerminationPolicy` | Sets a cluster's idle timeout auto termination policy |
+| `GetAutoTerminationPolicy` | Returns a cluster's auto termination policy |
+| `RemoveAutoTerminationPolicy` | Removes a cluster's auto termination policy |
+| `PutManagedScalingPolicy` | Sets a cluster's managed scaling policy |
 | `GetManagedScalingPolicy` | Returns a cluster's managed scaling policy |
-| `RemoveManagedScalingPolicy` | Detaches a cluster's managed scaling policy |
+| `RemoveManagedScalingPolicy` | Removes a cluster's managed scaling policy |
 | `CreateSecurityConfiguration` | Creates a named security configuration |
 | `DescribeSecurityConfiguration` | Returns a security configuration |
 | `DeleteSecurityConfiguration` | Deletes a security configuration |
 | `ListSecurityConfigurations` | Lists all security configurations |
-| `ListReleaseLabels` | - |
-| `DescribeReleaseLabel` | - |
-| `ListSupportedInstanceTypes` | - |
+| `ListReleaseLabels` | List release labels, newest first, by prefix or application; see [Release catalogue](#release-catalogue) |
+| `DescribeReleaseLabel` | A release's applications and Amazon Linux releases (the latest release without a label) |
+| `ListSupportedInstanceTypes` | The instance types a release supports, with vCPU, memory, storage and architecture |
 | `CreateStudio` | - |
 | `DescribeStudio` | - |
 | `ListStudios` | - |
@@ -52,22 +52,6 @@ Floci emulates the Amazon EMR (Elastic MapReduce) management API. Clusters (job 
 | `DeleteStudio` | - |
 | `AddTags` | Adds tags to a cluster |
 | `RemoveTags` | Removes tags from a cluster |
-| `ModifyInstanceGroups` | Resizes or reconfigures instance groups |
-| `ModifyInstanceFleet` | Changes an instance fleet's target capacities |
-| `ListBootstrapActions` | Lists the bootstrap actions given to `RunJobFlow` |
-| `PutManagedScalingPolicy` | Sets a cluster's managed scaling policy |
-| `GetManagedScalingPolicy` | Returns a cluster's managed scaling policy |
-| `RemoveManagedScalingPolicy` | Removes a cluster's managed scaling policy |
-| `PutAutoTerminationPolicy` | Sets a cluster's idle timeout auto termination policy |
-| `GetAutoTerminationPolicy` | Returns a cluster's auto termination policy |
-| `RemoveAutoTerminationPolicy` | Removes a cluster's auto termination policy |
-| `PutAutoScalingPolicy` | Attaches an automatic scaling policy to a core or task instance group |
-| `RemoveAutoScalingPolicy` | Removes an instance group's automatic scaling policy |
-| `ListReleaseLabels` | List release labels, newest first, by prefix or application; see [Release catalogue](#release-catalogue) |
-| `DescribeReleaseLabel` | A release's applications and Amazon Linux releases (the latest release without a label) |
-| `ListSupportedInstanceTypes` | The instance types a release supports, with vCPU, memory, storage and architecture |
-| `GetBlockPublicAccessConfiguration` | Returns the account's block public access configuration for the Region |
-| `PutBlockPublicAccessConfiguration` | Sets the account's block public access configuration for the Region |
 <!-- floci:actions:end -->
 
 ## Cluster lifecycle

@@ -7,10 +7,6 @@ Route53 emulation supporting hosted zones, reusable delegation sets, resource re
 <!-- floci:actions:start -->
 | Action | Description |
 | --- | --- |
-| `CreateReusableDelegationSet` | `POST /2013-04-01/delegationset`. Optionally promotes an existing public zone with `HostedZoneId`. |
-| `GetReusableDelegationSet` | `GET /2013-04-01/delegationset/{Id}` |
-| `DeleteReusableDelegationSet` | `DELETE /2013-04-01/delegationset/{Id}`. Refuses to delete a set in use by a zone. |
-| `ListReusableDelegationSets` | `GET /2013-04-01/delegationset`. Paginates with `marker` / `maxitems`. |
 | `CreateHostedZone` | `POST /2013-04-01/hostedzone`. A `<VPC>` element in the request creates a private zone and records the first VPC association. |
 | `GetHostedZone` | `GET /2013-04-01/hostedzone/{Id}`. Private zones include their `<VPCs>` list. |
 | `UpdateHostedZoneComment` | `POST /2013-04-01/hostedzone/{Id}` |

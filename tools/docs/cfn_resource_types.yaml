@@ -98,7 +98,7 @@ type_order:
   AWS::ElastiCache:
     [CacheCluster, SubnetGroup, User, UserGroup, ServerlessCache]
   AWS::Redshift:
-    [Cluster, ClusterParameterGroup, ClusterSubnetGroup, ClusterSecurityGroup, EventSubscription]
+    [Cluster, ClusterParameterGroup, ClusterSubnetGroup, ClusterSecurityGroup]
   AWS::RedshiftServerless:
     [Namespace, Workgroup]
   AWS::EC2:
@@ -109,7 +109,7 @@ type_order:
   AWS::ElasticLoadBalancingV2: [LoadBalancer, TargetGroup, Listener, ListenerRule]
   AWS::ApplicationAutoScaling: [ScalableTarget, ScalingPolicy]
   AWS::AutoScaling: [LaunchConfiguration, AutoScalingGroup, LifecycleHook]
-  AWS::Route53: [HostedZone, RecordSet, RecordSetGroup, HealthCheck]
+  AWS::Route53: [HostedZone, RecordSet]
   AWS::ApiGateway: [RestApi, Resource, Authorizer, Method, Deployment, Stage, Account, DomainName, BasePathMapping, GatewayResponse]
   AWS::ApiGatewayV2: [Api, Authorizer, Route, Integration, Stage, Deployment, DomainName, ApiMapping]
   AWS::AppSync: [GraphQLApi, GraphQLSchema, DataSource, FunctionConfiguration, Resolver, ApiKey]

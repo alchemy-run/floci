@@ -53,7 +53,7 @@ RDS endpoints return the us-east-1 hosted zone ID `Z2R2ITUGPM61AM` in all region
 | --- | --- |
 | `CreateDBInstance` | Start a new database instance |
 | `DescribeDBInstances` | List instances and their connection info : the list form includes DocumentDB and Neptune instances and takes an `engine` filter |
-| `DescribeDBEngineVersions` | - |
+| `DescribeDBEngineVersions` | List the engine catalogue's versions with their parameter group family, default flag and upgrade targets |
 | `DeleteDBInstance` | Stop and remove an instance |
 | `ModifyDBInstance` | Update instance settings; `NewDBInstanceIdentifier` renames the instance (identifier, ARN and endpoint host) at once, whatever `ApplyImmediately` says |
 | `RebootDBInstance` | Restart a database instance |
@@ -66,32 +66,8 @@ RDS endpoints return the us-east-1 hosted zone ID `Z2R2ITUGPM61AM` in all region
 | `PromoteReadReplica` | Detach a read replica into a standalone instance and turn automated backups on |
 | `SwitchoverReadReplica` | Refused with `InvalidDBInstanceState`: AWS supports switchover only for Oracle and SQL Server replicas, neither of which is emulated |
 | `PromoteReadReplicaDBCluster` | Refused with `InvalidDBClusterStateFault`: no cluster is created as a replica of an instance |
-| `DescribeDBEngineVersions` | List the engine catalogue's versions with their parameter group family, default flag and upgrade targets |
-| `DescribeEngineDefaultParameters` | Return a known family's default parameters (an empty list, as Floci's default groups hold none) |
-| `DescribeEngineDefaultClusterParameters` | Return a known family's default cluster parameters (an empty list, as for instances) |
-| `DescribeValidDBInstanceModifications` | Return the storage an instance can move to: its type and the sizes a modify stores as asked |
 | `DescribeOrderableDBInstanceOptions` | List the orderable engine, version and instance class combinations from the engine catalogue; see [Engine catalogue](#engine-catalogue) |
 | `DescribeEvents` | - |
-| `DescribeCertificates` | List the Region's RDS certificate authorities and the one new instances get; see [Certificate authorities](#certificate-authorities) |
-| `ModifyCertificates` | Set or remove the account's default certificate authority for new instances |
-| `CreateEventSubscription` | Create an event notification subscription (stored, nothing is published) |
-| `DescribeEventSubscriptions` | List subscriptions, or the one the request names |
-| `ModifyEventSubscription` | Update the members the request names |
-| `DeleteEventSubscription` | Delete a subscription |
-| `CreateDBClusterEndpoint` | Create an Aurora custom endpoint (`READER` or `ANY`) with a static or exclusion member list; see [Cluster endpoints](#cluster-endpoints) |
-| `DescribeDBClusterEndpoints` | List a cluster's built-in writer and reader endpoints and its custom endpoints, with the four documented filters |
-| `ModifyDBClusterEndpoint` | Change a custom endpoint's type or member list |
-| `DeleteDBClusterEndpoint` | Delete a custom endpoint |
-| `EnableHttpEndpoint` | Turn on an Aurora cluster's Data API endpoint by ARN; see [Data API endpoint](#data-api-endpoint) |
-| `DisableHttpEndpoint` | Turn off a cluster's Data API endpoint by ARN |
-| `DescribeDBLogFiles` | List an instance's log files, read from its database container; see [Log files](#log-files) |
-| `DownloadDBLogFilePortion` | Read a block of a log file, from the start or the most recent lines |
-| `AddRoleToDBCluster` | Associate an IAM role with a cluster, optionally for a feature; see [IAM role associations](#iam-role-associations) |
-| `RemoveRoleFromDBCluster` | Remove a role from a cluster |
-| `AddRoleToDBInstance` | Associate an IAM role with an instance for a feature |
-| `RemoveRoleFromDBInstance` | Remove a role from an instance |
-| `AddSourceIdentifierToSubscription` | Add a source id to a subscription |
-| `RemoveSourceIdentifierFromSubscription` | Remove a source id from a subscription |
 | `CreateDBSubnetGroup` | Create a DB subnet group; tags given here are readable through `ListTagsForResource` |
 | `DescribeDBSubnetGroups` | List DB subnet groups |
 | `ModifyDBSubnetGroup` | Update DB subnet group description and subnet list |
@@ -125,10 +101,6 @@ RDS endpoints return the us-east-1 hosted zone ID `Z2R2ITUGPM61AM` in all region
 | `ModifyDBSnapshot` | Change the engine version or option group of an available manual DB snapshot |
 | `RestoreDBInstanceFromDBSnapshot` | Create a new DB instance from a snapshot |
 | `RestoreDBInstanceToPointInTime` | Create a new DB instance from a source instance at a time in its restorable window; see [Point in time restore](#point-in-time-restore) |
-| `DescribeDBInstanceAutomatedBackups` | List the Region's instance automated backups: `active` for live instances, `retained` and `replicating` ones; see [Automated backups](#automated-backups) |
-| `DeleteDBInstanceAutomatedBackup` | Delete a retained instance automated backup by `DbiResourceId` or `DBInstanceAutomatedBackupsArn` |
-| `StartDBInstanceAutomatedBackupsReplication` | Replicate a source instance's automated backups from its Region to this one (metadata only) |
-| `StopDBInstanceAutomatedBackupsReplication` | Stop replicating to this Region; the replica is kept as `retained` |
 | `DescribeDBSnapshots` | List DB instance snapshots |
 | `DescribeDBSnapshotAttributes` | Return a snapshot's `restore` attribute (accounts authorized to copy/restore it) |
 | `ModifyDBSnapshotAttribute` | Add or remove accounts authorized to copy/restore a snapshot |
@@ -150,14 +122,8 @@ RDS endpoints return the us-east-1 hosted zone ID `Z2R2ITUGPM61AM` in all region
 | `DeleteDBClusterSnapshot` | Delete an available cluster snapshot and its data; the response carries `Status` `deleted` |
 | `CopyDBClusterSnapshot` | Copy an available cluster snapshot (by identifier or same-region ARN) to a new manual one with its data; `CopyTags` and `Tags`; the copy reports `SourceDBClusterSnapshotArn` |
 | `RestoreDBClusterFromSnapshot` | Create a cluster from a cluster snapshot's settings and data; `Engine` must match the snapshot's |
-| `RestoreDBClusterToPointInTime` | Create a cluster from a source cluster at a time in its restorable window; see [Point in time restore](#point-in-time-restore) |
-| `DescribeDBClusterAutomatedBackups` | List the Region's retained cluster automated backups; see [Automated backups](#automated-backups) |
-| `DeleteDBClusterAutomatedBackup` | Delete a retained cluster automated backup by `DbClusterResourceId` |
 | `DescribeDBClusterSnapshotAttributes` | Return the `restore` attribute of a cluster snapshot |
 | `ModifyDBClusterSnapshotAttribute` | Add or remove `restore` values (account ids or `all`) on a cluster snapshot |
-| `StartExportTask` | Export a DB snapshot or DB cluster snapshot to S3 as Parquet; see [Exporting snapshots to Amazon S3](#exporting-snapshots-to-amazon-s3) |
-| `DescribeExportTasks` | List export tasks, by `ExportTaskIdentifier`, `SourceArn`, `SourceType` and the `export-task-identifier`, `s3-bucket`, `source-arn` and `status` filters |
-| `CancelExportTask` | Cancel a running export task; what it already wrote stays in the bucket |
 | `DescribeGlobalClusters` | List the account's global clusters with their primary and secondary members; see [Global clusters](#global-clusters) |
 | `CreateGlobalCluster` | Create an Aurora global database, empty or with an existing Aurora cluster as its primary |
 | `ModifyGlobalCluster` | Rename a global cluster, set deletion protection, or upgrade its engine version (members follow) |

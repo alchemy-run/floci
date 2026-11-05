@@ -13,7 +13,6 @@
 | `DeleteResolverEndpoint` | Deletes a resolver endpoint and returns its final description. |
 | `GetResolverEndpoint` | Returns a resolver endpoint by id. |
 | `ListResolverEndpoints` | Lists all resolver endpoints. |
-| `ListResolverEndpointIpAddresses` | - |
 | `ListResolverEndpointIpAddresses` | Lists a resolver endpoint's IP addresses from those it was created with, each `ATTACHED`; an address left for AWS to choose has no `Ip`. Not paginated. |
 | `UpdateResolverEndpoint` | Updates a resolver endpoint's `Name` and `ResolverEndpointType`; `IpAddresses` changes are not modelled. |
 | `CreateResolverRule` | Creates a resolver rule, returned immediately as `COMPLETE`; `ResolverEndpointId` is not validated against an existing endpoint. |
@@ -25,12 +24,9 @@
 | `DisassociateResolverRule` | Removes the association between a resolver rule and a VPC. |
 | `GetResolverRuleAssociation` | Returns a resolver rule association by id. |
 | `ListResolverRuleAssociations` | Lists all resolver rule associations. |
-| `ListTagsForResource` | - |
-| `TagResource` | - |
-| `UntagResource` | - |
+| `ListTagsForResource` | Lists a resource's tags, paginated by `MaxResults` (default and maximum 100) and `NextToken`. |
 | `TagResource` | Adds or overwrites tags on a resolver endpoint, resolver rule or custom firewall domain list, by ARN. |
 | `UntagResource` | Removes tag keys from a resolver endpoint, resolver rule or custom firewall domain list; absent keys are ignored. |
-| `ListTagsForResource` | Lists a resource's tags, paginated by `MaxResults` (default and maximum 100) and `NextToken`. |
 <!-- floci:actions:end -->
 
 ## Design notes

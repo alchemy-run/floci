@@ -51,7 +51,6 @@ services:
       - { path: services/bedrockagentcorecontrol/BedrockAgentCoreToolsController.java, mode: rest }
       - { path: services/bedrockagentcorecontrol/BedrockAgentCoreGatewayRuleController.java, mode: rest }
       - { path: services/bedrockagentcorecontrol/BedrockAgentCoreResourcePolicyController.java, mode: rest }
-      - { path: services/bedrockagentcorecontrol/BedrockAgentCoreHarnessController.java, mode: rest }
     rename_actions:
       CreateEndpoint: CreateAgentRuntimeEndpoint
       GetEndpoint: GetAgentRuntimeEndpoint
@@ -339,11 +338,6 @@ services:
     # ExecuteSql / BatchExecuteSql are the deprecated pre-2020 operations: the handler
     # recognizes them only to return a ValidationException, they are not supported actions.
     exclude_actions: [ExecuteSql, BatchExecuteSql]
-  - service: redshiftserverless
-    doc: docs/services/redshift-serverless.md
-    sources:
-      - { path: services/redshiftserverless/RedshiftServerlessJsonHandler.java, mode: switch }
-      - { path: services/redshiftserverless/RedshiftServerlessAdminJsonHandler.java, mode: switch }
   - service: cognitoidentity
     doc: docs/services/cognitoidentity.md
     sources:

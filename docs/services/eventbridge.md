@@ -35,20 +35,6 @@
 | `UpdateArchive` | - |
 | `DeleteArchive` | - |
 | `ListArchives` | - |
-| `CreateConnection` | Create a connection for API destinations (credential values are stored but never returned) |
-| `DescribeConnection` | Get connection details with credential values stripped |
-| `UpdateConnection` | Update connection description, auth type, or auth parameters |
-| `DeleteConnection` | Delete a connection |
-| `ListConnections` | List connections, optionally filtered by name prefix or state |
-| `CreateApiDestination` | Create an HTTP or HTTPS API destination for EventBridge targets |
-| `DescribeApiDestination` | Get API destination details including endpoint, HTTP method, and rate limit |
-| `UpdateApiDestination` | Update API destination endpoint, HTTP method, connection, or rate limit |
-| `DeleteApiDestination` | Delete an API destination |
-| `ListApiDestinations` | List API destinations, optionally filtered by name prefix or connection ARN |
-| `StartReplay` | - |
-| `DescribeReplay` | - |
-| `CancelReplay` | - |
-| `ListReplays` | - |
 | `CreateConnection` | Create an API connection (API key / basic / OAuth). Secrets stay in-memory and are never returned |
 | `DescribeConnection` | Get connection details (secret values omitted; `SecretArn` is a synthetic Secrets Manager ARN) |
 | `UpdateConnection` | Update description, authorization, or KMS key |
@@ -59,6 +45,10 @@
 | `UpdateApiDestination` | Update endpoint, method, connection, or rate limit |
 | `DeleteApiDestination` | Delete an API destination |
 | `ListApiDestinations` | List API destinations |
+| `StartReplay` | - |
+| `DescribeReplay` | - |
+| `CancelReplay` | - |
+| `ListReplays` | - |
 <!-- floci:actions:end -->
 
 `ListRules` and `ListConnections` accept `NextToken` values of 1 to 2048

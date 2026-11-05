@@ -34,16 +34,15 @@ Limitations.
 <!-- floci:actions:start -->
 | Action | Description |
 | --- | --- |
-| `ListServices` | - |
+| `ListServices` | Lists the available services with their codes and names, supports pagination via MaxResults and NextToken |
 | `ListServiceQuotas` | Lists the quotas for a service code; generated quotas for unknown codes |
-| `ListAWSDefaultServiceQuotas` | Same as ListServiceQuotas; defaults equal applied values |
+| `ListAWSDefaultServiceQuotas` | Lists catalog defaults, independent of the configured applied EC2 value |
 | `GetServiceQuota` | Returns one quota by service and quota code, else `NoSuchResourceException` |
 | `GetAWSDefaultServiceQuota` | Returns the catalog default, independent of the configured applied EC2 value |
-| `ListAWSDefaultServiceQuotas` | Lists catalog defaults, independent of the configured applied EC2 value |
 | `RequestServiceQuotaIncrease` | Validates and stores an increase request as `PENDING`; a second open request for the same quota is refused with `ResourceAlreadyExistsException` |
 | `GetRequestedServiceQuotaChange` | Returns a stored request by id, else `NoSuchResourceException` |
+| `ListRequestedServiceQuotaChangeHistory` | - |
 | `ListRequestedServiceQuotaChangeHistoryByQuota` | Lists the stored requests for a service/quota pair, newest first |
-| `ListServices` | Lists the available services with their codes and names, supports pagination via MaxResults and NextToken |
 <!-- floci:actions:end -->
 
 ## Limitations

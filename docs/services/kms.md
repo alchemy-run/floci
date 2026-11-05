@@ -24,10 +24,10 @@
 | `ReEncrypt` | Re-encrypt under a different key |
 | `GenerateDataKey` | Generate a data key (plaintext + encrypted) |
 | `GenerateDataKeyWithoutPlaintext` | Generate only the encrypted data key |
-| `GenerateDataKeyPair` | Generate an asymmetric data key pair (plaintext + encrypted private key, public key) |
 | `GenerateDataKeyPairWithoutPlaintext` | Generate an asymmetric data key pair (encrypted private key, public key) |
-| `DeriveSharedSecret` | Derive a shared secret via ECDH with a KEY_AGREEMENT key |
+| `GenerateDataKeyPair` | Generate an asymmetric data key pair (plaintext + encrypted private key, public key) |
 | `Sign` | Sign a message with an asymmetric key |
+| `DeriveSharedSecret` | Derive a shared secret via ECDH with a KEY_AGREEMENT key |
 | `Verify` | Verify a signature |
 | `GenerateMac` | Generate a MAC with an HMAC key |
 | `VerifyMac` | Verify a MAC with an HMAC key |

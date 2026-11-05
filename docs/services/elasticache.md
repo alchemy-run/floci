@@ -84,31 +84,39 @@ without user associations retain their existing behavior.
 | `DescribeUsers` | List ElastiCache users |
 | `ModifyUser` | Change a user's passwords and authentication mode, replace its access string with `AccessString` or add to it with `AppendAccessString` |
 | `DeleteUser` | Remove an ElastiCache user |
-| `CreateUserGroup` | Create a user group; a `redis` group must contain a user named `default`, a `valkey` group need not |
-| `DescribeUserGroups` | List user groups with their users and the replication groups and serverless caches using them |
-| `ModifyUserGroup` | Add or remove users, or change the engine; membership changes apply to authentication at once |
-| `DeleteUserGroup` | Remove a user group that no replication group or serverless cache uses |
 | `CreateCacheCluster` | Start a Memcached cluster, or a single-node Redis/Valkey one (`NumCacheNodes` must be 1) |
-| `CreateServerlessCache` | Create a local Valkey, Redis or Memcached runtime with serverless metadata |
-| `DescribeServerlessCaches` | List serverless caches, settings and endpoints |
-| `ModifyServerlessCache` | Update metadata and user-group association while retaining cache data |
-| `DeleteServerlessCache` | Delete serverless metadata and its backing runtime |
 | `DescribeCacheClusters` | List cache clusters: Memcached, single-node Redis/Valkey, and replication group members |
+| `DescribeCacheEngineVersions` | - |
+| `ModifyCacheCluster` | - |
 | `DeleteCacheCluster` | Stop and remove a cache cluster |
 | `CreateCacheSubnetGroup` | Create a cache subnet group |
 | `DescribeCacheSubnetGroups` | List cache subnet groups |
 | `ModifyCacheSubnetGroup` | Replace a group's description or subnets |
 | `DeleteCacheSubnetGroup` | Delete a cache subnet group |
-| `CreateCacheParameterGroup` | Create a cache parameter group |
+| `IncreaseReplicaCount` | - |
+| `DecreaseReplicaCount` | - |
+| `ModifyReplicationGroupShardConfiguration` | - |
+| `TestFailover` | - |
+| `DescribeSnapshots` | - |
+| `DeleteSnapshot` | - |
+| `ListTagsForResource` | Read stored tags for supported ElastiCache resource ARNs |
+| `AddTagsToResource` | - |
+| `RemoveTagsFromResource` | - |
 | `DescribeCacheParameterGroups` | List parameter groups, including the AWS defaults |
 | `DescribeEvents` | Empty list (events are not recorded) |
 | `CreateCacheParameterGroup` | Create a cache parameter group |
 | `ModifyCacheParameterGroup` | Set parameters on a group |
 | `DescribeCacheParameters` | List the parameters set on a group |
 | `DeleteCacheParameterGroup` | Delete a cache parameter group |
-| `AddTagsToResource` | - |
-| `RemoveTagsFromResource` | - |
-| `ListTagsForResource` | Read stored tags for supported ElastiCache resource ARNs |
+| `CreateServerlessCache` | Create a local Valkey, Redis or Memcached runtime with serverless metadata |
+| `DescribeServerlessCaches` | List serverless caches, settings and endpoints |
+| `ModifyServerlessCache` | Update metadata and user-group association while retaining cache data |
+| `DeleteServerlessCache` | Delete serverless metadata and its backing runtime |
+| `CreateServerlessCacheSnapshot` | - |
+| `DescribeServerlessCacheSnapshots` | - |
+| `DeleteServerlessCacheSnapshot` | - |
+| `CopyServerlessCacheSnapshot` | - |
+| `ExportServerlessCacheSnapshot` | - |
 <!-- floci:actions:end -->
 
 ### Serverless caches and user groups

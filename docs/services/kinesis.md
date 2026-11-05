@@ -21,12 +21,12 @@
 | `AddTagsToStream` | Tag a stream |
 | `RemoveTagsFromStream` | Remove tags |
 | `ListTagsForStream` | List tags |
-| `ListTagsForResource` | List tags by stream ARN |
-| `TagResource` | Tag a stream by ARN |
-| `UntagResource` | Remove tags by stream ARN |
-| `GetResourcePolicy` | Get a stream resource policy |
-| `PutResourcePolicy` | Attach a resource policy to a stream |
 | `DeleteResourcePolicy` | Remove a stream resource policy |
+| `PutResourcePolicy` | Attach a resource policy to a stream |
+| `GetResourcePolicy` | Get a stream resource policy |
+| `UntagResource` | Remove tags by stream ARN |
+| `TagResource` | Tag a stream by ARN |
+| `ListTagsForResource` | List tags by stream ARN |
 | `StartStreamEncryption` | Enable KMS encryption |
 | `StopStreamEncryption` | Disable encryption |
 | `SplitShard` | Split a shard into two |
@@ -41,11 +41,11 @@
 | `EnableEnhancedMonitoring` | - |
 | `DisableEnhancedMonitoring` | - |
 | `UpdateStreamMode` | - |
-| `UpdateShardCount` | Uniform-scaling split/merge to a target open-shard count |
 | `UpdateMaxRecordSize` | Persist `MaxRecordSizeInKiB` (1024–10240) |
-| `UpdateStreamWarmThroughput` | Persist on-demand warm throughput |
-| `DescribeAccountSettings` | Returns `MinimumThroughputBillingCommitment.Status=ENABLED` |
 | `DescribeLimits` | Account shard / on-demand stream limits |
+| `DescribeAccountSettings` | Returns `MinimumThroughputBillingCommitment.Status=ENABLED` |
+| `UpdateStreamWarmThroughput` | Persist on-demand warm throughput |
+| `UpdateShardCount` | Uniform-scaling split/merge to a target open-shard count |
 <!-- floci:actions:end -->
 
 ## Stream Listing

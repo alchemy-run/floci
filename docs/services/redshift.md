@@ -24,6 +24,15 @@ For running SQL without a PostgreSQL wire connection (the way Lambda and Step Fu
 | `CreateCluster` | Create a cluster and start a PostgreSQL container for it |
 | `DescribeClusters` | List clusters and their connection details |
 | `DeleteCluster` | Create the requested final snapshot, then remove the cluster; accepts `SkipFinalClusterSnapshot` to delete without a backup |
+| `DescribeClusterDbRevisions` | - |
+| `DescribeResize` | - |
+| `GetReservedNodeExchangeOfferings` | - |
+| `CreateEventSubscription` | - |
+| `ModifyEventSubscription` | - |
+| `DeleteEventSubscription` | - |
+| `DescribeEventSubscriptions` | - |
+| `DescribeEvents` | - |
+| `CopyClusterSnapshot` | - |
 | `CreateClusterSnapshot` | Back up a cluster to a SQL dump via `pg_dump` |
 | `DescribeClusterSnapshots` | List snapshots, optionally filtered by snapshot or cluster identifier |
 | `DeleteClusterSnapshot` | Remove a snapshot and its stored dump |
@@ -32,7 +41,6 @@ For running SQL without a PostgreSQL wire connection (the way Lambda and Step Fu
 | `DescribeClusterParameterGroups` | List parameter groups, optionally filtered by name |
 | `DescribeClusterParameters` | Return the parameters of a group, with any values set by `ModifyClusterParameterGroup` |
 | `ModifyClusterParameterGroup` | Update parameter values on a group |
-| `ResetClusterParameterGroup` | - |
 | `ResetClusterParameterGroup` | Reset selected parameters or all parameters to the emulated defaults |
 | `DeleteClusterParameterGroup` | Remove a parameter group |
 | `CreateTags` | Add or overwrite tags on a cluster, snapshot, subnet group, parameter group, snapshot copy grant or snapshot schedule |
@@ -48,27 +56,13 @@ For running SQL without a PostgreSQL wire connection (the way Lambda and Step Fu
 | `CreateSnapshotCopyGrant` | Register a snapshot copy grant, defaulting `KmsKeyId` to the AWS-managed Redshift key. `SnapshotCopyGrantName` must be 1-63 characters, start with a lowercase letter, and contain only lowercase letters, digits and non-consecutive hyphens |
 | `DescribeSnapshotCopyGrants` | List snapshot copy grants, optionally filtered by name, paged with `MaxRecords` and `Marker` |
 | `DeleteSnapshotCopyGrant` | Remove a snapshot copy grant |
-| `EnableSnapshotCopy` | Record cross-region snapshot copy on a cluster (`RetentionPeriod` defaults to 7, `ManualSnapshotRetentionPeriod` to -1); `DescribeClusters` then reports `ClusterSnapshotCopyStatus`. A `DestinationRegion` that is not an AWS region is refused with `UnknownSnapshotCopyRegionFault`. No snapshot is copied |
-| `DisableSnapshotCopy` | Clear a cluster's snapshot copy configuration |
-| `ModifySnapshotCopyRetentionPeriod` | Change the automated (or, with `Manual`, the manual) snapshot copy retention period |
-| `CreateSnapshotSchedule` | Store a snapshot schedule of `rate(...)` / `cron(...)` definitions with optional tags; a `ScheduleIdentifier` other than letters, digits and hyphens is refused with `InvalidParameterValue`. No snapshots are taken on it |
-| `ModifySnapshotSchedule` | Replace a schedule's definitions |
-| `DescribeSnapshotSchedules` | List schedules filtered by `ScheduleIdentifier`, `ClusterIdentifier`, `TagKeys` and `TagValues`, paged with `MaxRecords` and `Marker`, with their associated clusters |
-| `DeleteSnapshotSchedule` | Remove a schedule; refused with `InvalidClusterSnapshotScheduleState` while a cluster uses it |
-| `ModifyClusterSnapshotSchedule` | Associate a cluster with a schedule, or disassociate it with `DisassociateSchedule` |
 | `ModifyCluster` | Update node type, parameter group, security groups, Multi-AZ flag, or the master password |
 | `DescribeClusterVersions` | Return the single emulated engine version and its parameter group family |
 | `DescribeOrderableClusterOptions` | Return the static node types and cluster types, optionally filtered by `NodeType` or `ClusterVersion` |
 | `ModifyClusterIamRoles` | Add or remove associated IAM roles and set `DefaultIamRoleArn`; COPY and UNLOAD see the change on new connections |
-| `DescribeLoggingStatus` | Return a cluster's stored audit-logging configuration |
-| `EnableLogging` | Store audit-logging configuration (S3 bucket, CloudWatch, or S3 table via `LogDestinationType`); no logs are delivered |
-| `DisableLogging` | Clear a cluster's audit-logging configuration |
 | `RebootCluster` | Restart a cluster's container |
 | `GetClusterCredentials` | Issue a short-lived DbUser / DbPassword pair the auth proxy and Data API accept for a non-master user |
 | `GetClusterCredentialsWithIAM` | Issue short-lived credentials with the DbUser derived from the caller's IAM identity |
-| `TagValues` | - |
-| `SourceIds` | - |
-| `EventCategories` | - |
 <!-- floci:actions:end -->
 
 ### Snapshot copy grants

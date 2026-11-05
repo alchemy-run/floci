@@ -11,7 +11,6 @@ Floci supports the analyzer lifecycle and basic policy validation used by local 
 <!-- floci:actions:start -->
 | Action | Description |
 | --- | --- |
-| `ValidatePolicy` | Checks basic policy syntax and grammar and returns paginated findings with source locations. |
 | `ListAnalyzers` | - |
 | `CreateAnalyzer` | - |
 | `DeleteAnalyzer` | - |
