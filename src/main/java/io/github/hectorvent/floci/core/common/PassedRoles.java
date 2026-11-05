@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.core.common;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.cbor.CBORFactory;
@@ -10,6 +11,7 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -21,7 +23,14 @@ import java.util.regex.Pattern;
  * The IAM user guide: "To pass a role (and its permissions) to an AWS service, a user must have
  * permissions to pass the role to the service." AWS's Service Reference names, for each operation
  * that passes one, the service the role goes to, which the check offers as {@code iam:PassedToService};
- * where the request carries the role differs per operation and is listed here.
+ * where the request carries the role differs per operation.
+ *
+ * <p>Most operations name their roles in plain request members, which {@link PassedRoleMembers} reads
+ * from a table generated from the Service Reference and botocore's models. A member that takes a role
+ * by name is read as the role IAM holds under that name, or else the one the name gives in the
+ * request's account, and a role the Service Reference passes to no named service is checked with no
+ * {@code iam:PassedToService}. The operations below are read here instead, since their roles are not
+ * such a member.
  *
  * <p>An EC2 request names an instance profile rather than a role, and passes the roles the profile
  * holds. Launching from a launch template passes nothing here: the EC2 user guide warns that a user
@@ -89,6 +98,20 @@ import java.util.regex.Pattern;
  * {@code IAM_ROLE_ARN} setting, as SQL Server's backup and audit options do. A DMS endpoint passes to
  * {@code dms.amazonaws.com} its service access role and the roles its settings name for each engine, and
  * a replication instance the role its Kerberos settings name.
+ *
+ * <p>An SNS topic's delivery status roles are attributes, which "are used to give Amazon SNS write access
+ * to use CloudWatch Logs on your behalf": {@code <ENDPOINT>SuccessFeedbackRoleArn} and
+ * {@code <ENDPOINT>FailureFeedbackRoleArn} for each kind of endpoint. So are a platform application's
+ * {@code SuccessFeedbackRoleArn} and {@code FailureFeedbackRoleArn}, a Firehose subscription's
+ * {@code SubscriptionRoleArn} and the SMS {@code DeliveryStatusIAMRole}; all go to {@code sns.amazonaws.com}.
+ * A CloudWatch Logs subscription filter policy names its role in its document: "To perform a
+ * PutAccountPolicy subscription filter operation for any destination except a Lambda function, you must
+ * also have the iam:PassRole permission."
+ *
+ * <p>A Service Catalog launch constraint names its launch role in its parameters document, by
+ * {@code RoleArn} or by {@code LocalRoleName}, which names the role without its path, so it is checked on
+ * the ARN IAM holds the role under. An SWF decision that starts a workflow execution names its Lambda role
+ * in the attributes its {@code decisionType} names.
  */
 final class PassedRoles {
 
@@ -118,6 +141,27 @@ final class PassedRoles {
     private static final String REDSHIFT_SERVERLESS = ServicePrincipals.of("redshift-serverless");
     private static final String RDS = ServicePrincipals.of("rds");
     private static final String DMS = ServicePrincipals.of("dms");
+    private static final String SNS = ServicePrincipals.of("sns");
+    private static final String LOGS = ServicePrincipals.of("logs");
+    private static final String SERVICE_CATALOG = ServicePrincipals.of("servicecatalog");
+    private static final String SWF = ServicePrincipals.of("swf");
+
+    /** The topic attributes that name a delivery status role, a success and a failure one per kind of endpoint. */
+    private static final Set<String> SNS_TOPIC_ROLES = Set.of(
+            "ApplicationSuccessFeedbackRoleArn", "ApplicationFailureFeedbackRoleArn",
+            "FirehoseSuccessFeedbackRoleArn", "FirehoseFailureFeedbackRoleArn",
+            "HTTPSuccessFeedbackRoleArn", "HTTPFailureFeedbackRoleArn",
+            "LambdaSuccessFeedbackRoleArn", "LambdaFailureFeedbackRoleArn",
+            "SQSSuccessFeedbackRoleArn", "SQSFailureFeedbackRoleArn");
+    private static final Set<String> SNS_SUBSCRIPTION_ROLES = Set.of("SubscriptionRoleArn");
+    private static final Set<String> SNS_PLATFORM_ROLES = Set.of("SuccessFeedbackRoleArn", "FailureFeedbackRoleArn");
+    private static final Set<String> SNS_SMS_ROLES = Set.of("DeliveryStatusIAMRole");
+    private static final String SUBSCRIPTION_FILTER_POLICY = "SUBSCRIPTION_FILTER_POLICY";
+    private static final String LAUNCH_CONSTRAINT = "LAUNCH";
+    /** The SWF decisions that start a workflow execution, and the member each carries its attributes in. */
+    private static final Map<String, String> SWF_EXECUTION_DECISIONS = Map.of(
+            "ContinueAsNewWorkflowExecution", "continueAsNewWorkflowExecutionDecisionAttributes",
+            "StartChildWorkflowExecution", "startChildWorkflowExecutionDecisionAttributes");
 
     /** The RDS operations whose request takes a {@code MonitoringRoleArn}. */
     private static final Set<String> RDS_MONITORING_ROLE = Set.of("rds:CreateDBCluster", "rds:CreateDBInstance",
@@ -162,7 +206,7 @@ final class PassedRoles {
     private static final String DEFAULT_AUTOSCALING_ROLE =
             ":role/aws-service-role/" + AUTOSCALING + "/AWSServiceRoleForAutoScaling";
 
-    /** A role a request passes, and the service principal it is passed to. */
+    /** A role a request passes, and the service principal it is passed to; null when AWS names none. */
     record PassedRole(String roleArn, String passedToService) {
     }
 
@@ -199,6 +243,9 @@ final class PassedRoles {
 
         /** The ARN, path included, of the role IAM holds under {@code roleName}; empty when it holds none. */
         Optional<String> heldRoleArn(String roleName);
+
+        /** The type of the Service Catalog constraint {@code constraintId}; empty when there is none. */
+        Optional<String> serviceCatalogConstraintType(String constraintId);
     }
 
     private PassedRoles() {
@@ -206,6 +253,15 @@ final class PassedRoles {
 
     /** The roles a request for {@code action} passes; empty when the operation passes none or the request names none. */
     static List<PassedRole> of(String action, ContainerRequestContext ctx, Lookups lookups) {
+        List<PassedRole> byHand = byHand(action, ctx, lookups);
+        return byHand != null ? byHand : fromTable(PassedRoleMembers.of(action), ctx, lookups);
+    }
+
+    /**
+     * The roles a request for {@code action} passes, for an operation read here rather than from the table;
+     * null for any other.
+     */
+    static List<PassedRole> byHand(String action, ContainerRequestContext ctx, Lookups lookups) {
         return switch (action) {
             case "lambda:CreateFunction", "lambda:UpdateFunctionConfiguration" -> fromJson(ctx, LAMBDA, "Role");
             case "lambda:CreateWebFunction" ->
@@ -268,8 +324,209 @@ final class PassedRoles {
             case "dms:CreateEndpoint", "dms:ModifyEndpoint" -> dmsEndpointRoles(jsonBody(ctx));
             case "dms:CreateReplicationInstance", "dms:ModifyReplicationInstance" ->
                     fromJson(ctx, DMS, "KerberosAuthenticationSettings", "KeyCacheSecretIamArn");
-            default -> List.of();
+            case "sns:CreateTopic" -> snsAttributeRoles(ctx, "Attributes", SNS_TOPIC_ROLES);
+            case "sns:SetTopicAttributes" -> snsAttributeRole(ctx, SNS_TOPIC_ROLES);
+            case "sns:Subscribe" -> snsAttributeRoles(ctx, "Attributes", SNS_SUBSCRIPTION_ROLES);
+            case "sns:SetSubscriptionAttributes" -> snsAttributeRole(ctx, SNS_SUBSCRIPTION_ROLES);
+            case "sns:CreatePlatformApplication", "sns:SetPlatformApplicationAttributes" ->
+                    snsAttributeRoles(ctx, "Attributes", SNS_PLATFORM_ROLES);
+            case "sns:SetSMSAttributes" -> snsAttributeRoles(ctx, "attributes", SNS_SMS_ROLES);
+            case "logs:PutAccountPolicy" -> subscriptionFilterPolicyRole(jsonBody(ctx));
+            case "servicecatalog:CreateConstraint" -> launchConstraintRoles(jsonBody(ctx), lookups, false);
+            case "servicecatalog:UpdateConstraint" -> launchConstraintRoles(jsonBody(ctx), lookups, true);
+            case "swf:RespondDecisionTaskCompleted" -> swfDecisionRoles(jsonBody(ctx));
+            default -> null;
         };
+    }
+
+    /**
+     * The roles a request names in the members the table gives for its operation: from its form parameters
+     * when it comes in the Query protocol, and from its JSON or CBOR body otherwise.
+     */
+    private static List<PassedRole> fromTable(List<PassedRoleMembers.Member> members, ContainerRequestContext ctx,
+                                              Lookups lookups) {
+        if (members == null) {
+            return List.of();
+        }
+        Map<String, String> form = IamConditionContextResolver.formParameters(ctx);
+        JsonNode body = form.isEmpty() ? jsonBody(ctx) : null;
+        List<PassedRole> passed = new ArrayList<>();
+        for (PassedRoleMembers.Member member : members) {
+            List<String> roles = new ArrayList<>();
+            if (!form.isEmpty()) {
+                if (member.queryKeys() != null) {
+                    form.forEach((key, value) -> {
+                        if (member.queryKeys().matcher(key).matches()) {
+                            roles.add(value);
+                        }
+                    });
+                }
+            } else {
+                collect(body, member.steps(), 0, roles);
+            }
+            passed.addAll(passed(member.byName() ? heldOrNamedRoles(roles, lookups) : roles,
+                    member.passedTo() == null ? null : ServicePrincipals.of(member.passedTo())));
+        }
+        return passed;
+    }
+
+    static void collect(JsonNode node, List<PassedRoleMembers.Step> steps, int index, List<String> found) {
+        if (node == null) {
+            return;
+        }
+        if (index == steps.size()) {
+            if (node.isTextual()) {
+                found.add(node.asText());
+            }
+            return;
+        }
+        PassedRoleMembers.Step step = steps.get(index);
+        JsonNode value = node.get(step.name());
+        switch (step.into()) {
+            case NONE -> collect(value, steps, index + 1, found);
+            case KEY -> collect(value == null ? null : value.get(step.key()), steps, index + 1, found);
+            case LIST, MAP -> {
+                if (value != null && (step.into() == PassedRoleMembers.Into.LIST ? value.isArray() : value.isObject())) {
+                    for (JsonNode element : value) {
+                        collect(element, steps, index + 1, found);
+                    }
+                }
+            }
+        }
+    }
+
+    /** Roles given by ARN or by name: a name is the role IAM holds under it, or else the one it gives. */
+    private static List<String> heldOrNamedRoles(List<String> roles, Lookups lookups) {
+        List<String> arns = new ArrayList<>();
+        for (String role : roles) {
+            if (!role.isBlank()) {
+                arns.add(AwsArnUtils.looksLikeArn(role) ? role
+                        : lookups.heldRoleArn(role).orElseGet(() -> lookups.roleArn(role)));
+            }
+        }
+        return arns;
+    }
+
+    /**
+     * The roles among an SNS request's attributes {@code map}, read as the SNS handlers read the map: from a
+     * form, each {@code map.entry.N} from 1 up to the first with no key, the last value of a key named twice;
+     * from a JSON body, the {@code map} object.
+     */
+    private static List<PassedRole> snsAttributeRoles(ContainerRequestContext ctx, String map, Set<String> roleAttributes) {
+        Map<String, String> form = IamConditionContextResolver.formParameters(ctx);
+        Map<String, String> attributes = new LinkedHashMap<>();
+        if (!form.isEmpty()) {
+            for (int i = 1; form.get(map + ".entry." + i + ".key") != null; i++) {
+                attributes.put(form.get(map + ".entry." + i + ".key"), form.get(map + ".entry." + i + ".value"));
+            }
+        } else {
+            JsonNode body = jsonBody(ctx);
+            JsonNode values = body == null ? null : body.get(map);
+            if (values != null && values.isObject()) {
+                values.properties().forEach(entry -> attributes.put(entry.getKey(), entry.getValue().asText(null)));
+            }
+        }
+        List<String> roles = new ArrayList<>();
+        attributes.forEach((name, value) -> {
+            if (roleAttributes.contains(name)) {
+                roles.add(value);
+            }
+        });
+        return passed(roles, SNS);
+    }
+
+    /**
+     * The role an SNS {@code AttributeValue} names, when its {@code AttributeName} is one that names a role; a
+     * request with no value names none, and is left to SNS to answer.
+     */
+    private static List<PassedRole> snsAttributeRole(ContainerRequestContext ctx, Set<String> roleAttributes) {
+        Map<String, String> form = IamConditionContextResolver.formParameters(ctx);
+        String name;
+        String value;
+        if (!form.isEmpty()) {
+            name = form.get("AttributeName");
+            value = form.get("AttributeValue");
+        } else {
+            JsonNode body = jsonBody(ctx);
+            name = body == null ? null : body.path("AttributeName").asText(null);
+            value = body == null ? null : body.path("AttributeValue").asText(null);
+        }
+        if (name == null || value == null || !roleAttributes.contains(name)) {
+            return List.of();
+        }
+        return passed(List.of(value), SNS);
+    }
+
+    /** The role a CloudWatch Logs subscription filter policy's document names; another policy names none. */
+    private static List<PassedRole> subscriptionFilterPolicyRole(JsonNode body) {
+        if (body == null || !SUBSCRIPTION_FILTER_POLICY.equals(body.path("policyType").asText(null))) {
+            return List.of();
+        }
+        return passed(values(embeddedJson(body.get("policyDocument")), "RoleArn"), LOGS);
+    }
+
+    /**
+     * The launch role a Service Catalog launch constraint names in its {@code Parameters}, a JSON document,
+     * by {@code RoleArn} or by {@code LocalRoleName}, which names the role of that name in the caller's
+     * account without its path. A constraint of another type names no launch role. An update is read by
+     * the type Floci keeps for the constraint, since its request names none. The type is matched in any
+     * case, since Floci keeps it as given.
+     */
+    private static List<PassedRole> launchConstraintRoles(JsonNode body, Lookups lookups, boolean update) {
+        JsonNode parameters = body == null ? null : embeddedJson(body.get("Parameters"));
+        if (parameters == null) {
+            return List.of();
+        }
+        String type;
+        if (update) {
+            String id = blankToNull(body.path("Id").asText(null));
+            type = id == null ? null : lookups.serviceCatalogConstraintType(id).orElse(null);
+        } else {
+            type = body.path("Type").asText(null);
+        }
+        if (!LAUNCH_CONSTRAINT.equalsIgnoreCase(type)) {
+            return List.of();
+        }
+        List<String> roles = new ArrayList<>(values(parameters, "RoleArn"));
+        for (String name : values(parameters, "LocalRoleName")) {
+            if (!name.isBlank()) {
+                roles.add(lookups.heldRoleArn(name).orElseGet(() -> lookups.roleArn(name)));
+            }
+        }
+        return passed(roles, SERVICE_CATALOG);
+    }
+
+    /**
+     * The roles of the decisions that start a workflow execution, each read from the attributes its
+     * {@code decisionType} names, as the SWF handler reads a decision.
+     */
+    private static List<PassedRole> swfDecisionRoles(JsonNode body) {
+        JsonNode decisions = body == null ? null : body.get("decisions");
+        if (decisions == null || !decisions.isArray()) {
+            return List.of();
+        }
+        List<String> roles = new ArrayList<>();
+        for (JsonNode decision : decisions) {
+            String attributes = SWF_EXECUTION_DECISIONS.get(decision.path("decisionType").asText(""));
+            if (attributes != null) {
+                roles.addAll(values(decision, attributes, "lambdaRole"));
+            }
+        }
+        return passed(roles, SWF);
+    }
+
+    /** The JSON document a string member holds; null when the member holds no JSON. */
+    private static JsonNode embeddedJson(JsonNode member) {
+        if (member == null || !member.isTextual()) {
+            return null;
+        }
+        try {
+            return MAPPER.readTree(member.asText());
+        } catch (JsonProcessingException e) {
+            // A document that is not JSON has no member to name a role in.
+            LOG.debugv(e, "Embedded document is not JSON, so it passes no role");
+            return null;
+        }
     }
 
     /**
@@ -330,7 +587,7 @@ final class PassedRoles {
         List<String> arns = new ArrayList<>();
         for (String role : roles) {
             if (!role.isBlank()) {
-                arns.add(role.startsWith("arn:") ? role : lookups.roleArn(role));
+                arns.add(AwsArnUtils.looksLikeArn(role) ? role : lookups.roleArn(role));
             }
         }
         return passed(arns, service);
@@ -563,7 +820,7 @@ final class PassedRoles {
     }
 
     /** The strings at {@code path} in {@code node}, where a {@code []} step takes each element of an array. */
-    private static List<String> values(JsonNode node, String... path) {
+    static List<String> values(JsonNode node, String... path) {
         List<String> found = new ArrayList<>();
         collect(node, path, 0, found);
         return found;
@@ -631,7 +888,7 @@ final class PassedRoles {
      * A gzip-encoded body is decompressed first, as {@code AwsJsonCborController} decompresses it before
      * running the request.
      */
-    private static JsonNode jsonBody(ContainerRequestContext ctx) {
+    static JsonNode jsonBody(ContainerRequestContext ctx) {
         if (ctx.getProperty(IamConditionContextResolver.BUFFERED_JSON_BODY) instanceof JsonNode cached) {
             return cached;
         }

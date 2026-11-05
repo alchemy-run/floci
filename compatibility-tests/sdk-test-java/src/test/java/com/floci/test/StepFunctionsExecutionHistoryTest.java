@@ -8,6 +8,7 @@ import software.amazon.awssdk.services.sfn.model.*;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.DeleteQueueRequest;
 
+import java.time.Duration;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.*;
@@ -80,7 +81,8 @@ class StepFunctionsExecutionHistoryTest {
                     .stateMachineArn(smArn)
                     .input("{}")).executionArn();
 
-            DescribeExecutionResponse execution = pollUntilDone(execArn);
+            DescribeExecutionResponse execution =
+                    TestFixtures.awaitExecutionTerminal(sfn, execArn, Duration.ofSeconds(60));
             assertThat(execution.status()).isEqualTo(ExecutionStatus.SUCCEEDED);
 
             GetExecutionHistoryResponse history = sfn.getExecutionHistory(b -> b
@@ -171,7 +173,8 @@ class StepFunctionsExecutionHistoryTest {
                     .stateMachineArn(smArn)
                     .input("{\"items\": [1, 2]}")).executionArn();
 
-            DescribeExecutionResponse execution = pollUntilDone(execArn);
+            DescribeExecutionResponse execution =
+                    TestFixtures.awaitExecutionTerminal(sfn, execArn, Duration.ofSeconds(60));
             assertThat(execution.status()).isEqualTo(ExecutionStatus.SUCCEEDED);
 
             List<HistoryEvent> events = sfn.getExecutionHistory(b -> b
@@ -249,7 +252,8 @@ class StepFunctionsExecutionHistoryTest {
                     .stateMachineArn(smArn)
                     .input("{\"x\":\"a\"}")).executionArn();
 
-            DescribeExecutionResponse execution = pollUntilDone(execArn);
+            DescribeExecutionResponse execution =
+                    TestFixtures.awaitExecutionTerminal(sfn, execArn, Duration.ofSeconds(60));
             assertThat(execution.status()).isEqualTo(ExecutionStatus.FAILED);
             assertThat(execution.error()).isEqualTo("States.Runtime");
             assertThat(execution.cause()).isEqualTo(
@@ -270,14 +274,57 @@ class StepFunctionsExecutionHistoryTest {
         }
     }
 
-    private DescribeExecutionResponse pollUntilDone(String execArn) throws InterruptedException {
-        for (int i = 0; i < 120; i++) {
-            DescribeExecutionResponse resp = sfn.describeExecution(b -> b.executionArn(execArn));
-            if (resp.status() != ExecutionStatus.RUNNING) {
-                return resp;
-            }
-            Thread.sleep(500);
+    /**
+     * GetExecutionHistory pages by 100 events unless maxResults says otherwise, and reverseOrder
+     * starts from the newest event. The SDK paginator follows nextToken to the last page in either
+     * order.
+     */
+    @Test
+    void historyPagesThroughTheSdkPaginatorInBothOrders() throws Exception {
+        StringBuilder states = new StringBuilder();
+        for (int index = 0; index < 60; index++) {
+            states.append(index == 0 ? "" : ",").append("\"S%02d\": {\"Type\": \"Pass\", %s}".formatted(
+                    index, index < 59 ? "\"Next\": \"S%02d\"".formatted(index + 1) : "\"End\": true"));
         }
-        throw new AssertionError("Execution did not complete within 60s: " + execArn);
+        String smArn = sfn.createStateMachine(b -> b
+                .name(TestFixtures.uniqueName("sfn-history-pages-sm"))
+                .definition("{\"StartAt\": \"S00\", \"States\": {" + states + "}}")
+                .roleArn(ROLE_ARN)).stateMachineArn();
+
+        try {
+            String execArn = sfn.startExecution(b -> b.stateMachineArn(smArn).input("{}")).executionArn();
+            assertThat(TestFixtures.awaitExecutionTerminal(sfn, execArn, Duration.ofSeconds(60)).status())
+                    .isEqualTo(ExecutionStatus.SUCCEEDED);
+
+            GetExecutionHistoryResponse firstPage = sfn.getExecutionHistory(b -> b.executionArn(execArn));
+            assertThat(firstPage.events()).hasSize(100);
+            assertThat(firstPage.nextToken()).isNotNull();
+
+            List<Long> ids = sfn.getExecutionHistoryPaginator(b -> b.executionArn(execArn).maxResults(25))
+                    .events().stream().map(HistoryEvent::id).toList();
+            List<Long> reversed = sfn.getExecutionHistoryPaginator(b -> b
+                    .executionArn(execArn).reverseOrder(true).maxResults(25))
+                    .events().stream().map(HistoryEvent::id).toList();
+            assertThat(ids).hasSize(122);
+            assertThat(reversed).hasSize(122);
+            for (int i = 0; i < ids.size(); i++) {
+                assertThat(ids.get(i)).isEqualTo(i + 1L);
+                assertThat(reversed.get(i)).isEqualTo(122L - i);
+            }
+
+            GetExecutionHistoryResponse newest = sfn.getExecutionHistory(b -> b
+                    .executionArn(execArn).reverseOrder(true).maxResults(1));
+            assertThat(newest.events()).extracting(HistoryEvent::type)
+                    .containsExactly(HistoryEventType.EXECUTION_SUCCEEDED);
+            assertThat(newest.events().get(0).id()).isEqualTo(122L);
+            assertThat(newest.nextToken()).isNotNull();
+        } finally {
+            try {
+                sfn.deleteStateMachine(b -> b.stateMachineArn(smArn));
+            } catch (Exception ignored) {
+                // Cleanup only: the state machine has a unique name, so one left behind cannot
+                // affect another test, and a failure here must not hide the test's own result.
+            }
+        }
     }
 }

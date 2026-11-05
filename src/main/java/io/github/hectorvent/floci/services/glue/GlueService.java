@@ -5,9 +5,13 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.Base64Url;
+import io.github.hectorvent.floci.core.common.Digests;
+import io.github.hectorvent.floci.core.common.EpochSeconds;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -19,6 +23,7 @@ import io.github.hectorvent.floci.services.glue.model.ConnectionPasswordEncrypti
 import io.github.hectorvent.floci.services.glue.model.Crawler;
 import io.github.hectorvent.floci.services.glue.model.CrawlerTargets;
 import io.github.hectorvent.floci.services.glue.model.DataCatalogEncryptionSettings;
+import io.github.hectorvent.floci.services.glue.model.DataQualityRuleset;
 import io.github.hectorvent.floci.services.glue.model.Database;
 import io.github.hectorvent.floci.services.glue.model.EncryptionAtRest;
 import io.github.hectorvent.floci.services.glue.model.GluePolicy;
@@ -54,9 +59,9 @@ import org.jboss.logging.Logger;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
@@ -68,6 +73,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.regex.PatternSyntaxException;
@@ -79,6 +85,10 @@ public class GlueService {
     private static final int MAX_FUNCTION_PATTERN_LENGTH = 255;
     private static final int MAX_FUNCTION_RESULTS = 100;
     private static final int MAX_SECURITY_CONFIGURATION_NAME_LENGTH = 255;
+    private static final int MAX_DATA_QUALITY_NAME_LENGTH = 255;
+    private static final int MAX_DATA_QUALITY_DESCRIPTION_LENGTH = 2048;
+    private static final int MAX_DATA_QUALITY_RULESET_LENGTH = 65536;
+    private static final int MAX_TAGS = 50;
     private static final Set<String> CSV_HEADER_VALUES = Set.of("UNKNOWN", "PRESENT", "ABSENT");
     private static final Set<String> CSV_SERDE_VALUES = Set.of("OpenCSVSerDe", "LazySimpleSerDe", "None");
     private static final Set<String> CSV_CUSTOM_DATATYPES = Set.of(
@@ -92,7 +102,12 @@ public class GlueService {
             "StringColumnStatisticsData",
             List.of("MaximumLength", "AverageLength", "NumberOfNulls", "NumberOfDistinctValues"),
             "BinaryColumnStatisticsData",
-            List.of("MaximumLength", "AverageLength", "NumberOfNulls"));
+            List.of("MaximumLength", "AverageLength", "NumberOfNulls"),
+            "LongColumnStatisticsData", List.of("NumberOfNulls", "NumberOfDistinctValues"),
+            "DoubleColumnStatisticsData", List.of("NumberOfNulls", "NumberOfDistinctValues"),
+            "DecimalColumnStatisticsData", List.of("NumberOfNulls", "NumberOfDistinctValues"),
+            "DateColumnStatisticsData", List.of("NumberOfNulls", "NumberOfDistinctValues"),
+            "BooleanColumnStatisticsData", List.of("NumberOfTrues", "NumberOfFalses", "NumberOfNulls"));
     private static final Pattern COMPARISON_EXPRESSION = Pattern.compile(
             "\\s*([A-Za-z_][A-Za-z0-9_]*)\\s*(=|<>|<=|>=|<|>)\\s*('?[^']*'?|[^\\s]+)\\s*",
             Pattern.CASE_INSENSITIVE);
@@ -194,6 +209,7 @@ public class GlueService {
     private final StorageBackend<String, GluePolicy> resourcePolicyStore;
     private final StorageBackend<String, DataCatalogEncryptionSettings> encryptionSettingsStore;
     private final StorageBackend<String, SecurityConfiguration> securityConfigurationStore;
+    private final StorageBackend<String, DataQualityRuleset> dataQualityRulesetStore;
     private final StorageBackend<String, Trigger> triggerStore;
     private final StorageBackend<String, Workflow> workflowStore;
     private final GlueSchemaRegistryService schemaRegistryService;
@@ -234,6 +250,8 @@ public class GlueService {
                 "glue", "catalog_encryption_settings.json", new TypeReference<>() {}), regionResolver);
         this.securityConfigurationStore = storageFactory.create(
             "glue", "security_configurations.json", new TypeReference<>() {});
+        this.dataQualityRulesetStore = storageFactory.create(
+                "glue", "data_quality_rulesets.json", new TypeReference<>() {});
         this.triggerStore = storageFactory.create("glue", "triggers.json", new TypeReference<>() {});
         this.workflowStore = storageFactory.create("glue", "workflows.json", new TypeReference<>() {});
         this.schemaRegistryService = schemaRegistryService;
@@ -259,6 +277,7 @@ public class GlueService {
                 StorageBackend<String, GluePolicy> resourcePolicyStore,
                 StorageBackend<String, DataCatalogEncryptionSettings> encryptionSettingsStore,
                 StorageBackend<String, SecurityConfiguration> securityConfigurationStore,
+                StorageBackend<String, DataQualityRuleset> dataQualityRulesetStore,
                 StorageBackend<String, Trigger> triggerStore,
                 StorageBackend<String, Workflow> workflowStore,
                 GlueSchemaRegistryService schemaRegistryService,
@@ -280,6 +299,7 @@ public class GlueService {
         this.resourcePolicyStore = resourcePolicyStore;
         this.encryptionSettingsStore = encryptionSettingsStore;
         this.securityConfigurationStore = securityConfigurationStore;
+        this.dataQualityRulesetStore = dataQualityRulesetStore;
         this.triggerStore = triggerStore;
         this.workflowStore = workflowStore;
         this.schemaRegistryService = schemaRegistryService;
@@ -329,6 +349,14 @@ public class GlueService {
     public List<SecurityConfiguration> getSecurityConfigurations(String region) {
         String prefix = region + ":";
         return securityConfigurationStore.scan(key -> key.startsWith(prefix));
+    }
+
+    public Page<SecurityConfiguration> getSecurityConfigurations(String region, Integer maxResults, String nextToken) {
+        return paginate(() -> {
+            List<SecurityConfiguration> configurations = new ArrayList<>(getSecurityConfigurations(region));
+            configurations.sort(Comparator.comparing(SecurityConfiguration::getName));
+            return configurations;
+        }, maxResults, nextToken, 200);
     }
 
     private static String securityConfigurationKey(String region, String name) {
@@ -424,6 +452,7 @@ public class GlueService {
     }
 
     public void createTable(String databaseName, Table table) {
+        requireValidSortColumns(sortColumnViolations("tableInput", table.getStorageDescriptor()));
         Database database = getDatabase(databaseName);
         String key = tableKey(databaseName, table.getName());
         if (tableStore.get(key).isPresent()) {
@@ -609,7 +638,7 @@ public class GlueService {
         }
         try {
             return Instant.parse(value.trim());
-        } catch (java.time.format.DateTimeParseException e) {
+        } catch (DateTimeParseException e) {
             throw new AwsException("InvalidInputException", "Invalid time value: " + value, 400);
         }
     }
@@ -649,6 +678,7 @@ public class GlueService {
     }
 
     public synchronized void updateTable(String databaseName, Table table, String versionId, boolean skipArchive) {
+        requireValidSortColumns(sortColumnViolations("tableInput", table.getStorageDescriptor()));
         Database database = getDatabase(databaseName);
         String key = tableKey(databaseName, table.getName());
         Table existing = tableStore.get(key)
@@ -682,7 +712,7 @@ public class GlueService {
                 .toList());
         return versions.stream()
                 .map(table -> Map.<String, Object>of(
-                        "Table", withResolvedSchemaReference(table),
+                        "Table", withReadDefaults(withResolvedSchemaReference(table)),
                         "VersionId", table.getVersionId()))
                 .toList();
     }
@@ -699,7 +729,7 @@ public class GlueService {
                     .map(this::withResolvedSchemaReference)
                     .orElseThrow(() -> new AwsException("EntityNotFoundException", "Version not found.", 400));
         }
-        return Map.of("Table", version, "VersionId", version.getVersionId());
+        return Map.of("Table", withReadDefaults(version), "VersionId", version.getVersionId());
     }
 
     /**
@@ -835,6 +865,7 @@ public class GlueService {
     }
 
     public void createPartition(String databaseName, String tableName, Partition partition) {
+        requireValidSortColumns(sortColumnViolations("partitionInput", partition.getStorageDescriptor()));
         Table table = getTable(databaseName, tableName);
         String key = partitionKey(databaseName, tableName, partition.getValues());
         if (partitionStore.get(key).isPresent()) {
@@ -852,6 +883,12 @@ public class GlueService {
             String databaseName,
             String tableName,
             List<Partition> partitions) {
+        List<String> violations = new ArrayList<>();
+        for (int index = 0; index < partitions.size(); index++) {
+            violations.addAll(sortColumnViolations("partitionInputList." + (index + 1) + ".member",
+                    descriptorOf(partitions.get(index))));
+        }
+        requireValidSortColumns(violations);
         getTable(databaseName, tableName);
         List<BatchCreatePartitionError> errors = new ArrayList<>();
         for (Partition partition : partitions) {
@@ -890,6 +927,13 @@ public class GlueService {
             String databaseName,
             String tableName,
             List<BatchUpdatePartitionEntry> entries) {
+        List<String> violations = new ArrayList<>();
+        for (int index = 0; index < entries.size(); index++) {
+            BatchUpdatePartitionEntry entry = entries.get(index);
+            violations.addAll(sortColumnViolations("entries." + (index + 1) + ".member.partitionInput",
+                    entry == null ? null : descriptorOf(entry.partitionInput())));
+        }
+        requireValidSortColumns(violations);
         Table table = getTable(databaseName, tableName);
         List<BatchUpdatePartitionError> errors = new ArrayList<>();
         for (BatchUpdatePartitionEntry entry : entries) {
@@ -910,13 +954,56 @@ public class GlueService {
     }
 
     public List<Partition> getPartitions(String databaseName, String tableName, String expression) {
+        return getPartitions(databaseName, tableName, expression, null);
+    }
+
+    /**
+     * A segment is "a non-overlapping region of a table's partitions, allowing multiple requests to be run in
+     * parallel", so each partition falls in the one segment its values hash to, which stays the same while other
+     * partitions come and go between those requests, and a SegmentNumber past the last segment holds none. The
+     * Glue Data Catalog client for Hive and Spark asks for five.
+     */
+    public List<Partition> getPartitions(String databaseName, String tableName, String expression, Segment segment) {
+        validateSegment(segment);
         Table table = getTable(databaseName, tableName);
         String prefix = tableKey(databaseName, tableName) + ":";
         return partitionStore.scan(k -> k.startsWith(prefix)).stream()
+                .filter(partition -> segment == null || Math.floorMod(Objects.hashCode(partition.getValues()),
+                        segment.totalSegments()) == segment.segmentNumber())
                 .filter(partition -> matchesPartitionExpression(table, partition, expression))
                 .sorted(GlueService::comparePartitionValues)
                 .toList();
     }
+
+    private static void validateSegment(Segment segment) {
+        if (segment == null) {
+            return;
+        }
+        List<String> violations = new ArrayList<>();
+        if (segment.segmentNumber() == null) {
+            violations.add(SmithyValidationErrors.notNull("segment.segmentNumber"));
+        } else if (segment.segmentNumber() < 0) {
+            violations.add(SmithyValidationErrors.valueTooSmall(
+                    "segment.segmentNumber", segment.segmentNumber().toString(), 0));
+        }
+        if (segment.totalSegments() == null) {
+            violations.add(SmithyValidationErrors.notNull("segment.totalSegments"));
+        } else {
+            String violation = SmithyValidationErrors.outOfRange(
+                    "segment.totalSegments", segment.totalSegments(), 1, 10);
+            if (violation != null) {
+                violations.add(violation);
+            }
+        }
+        if (!violations.isEmpty()) {
+            throw SmithyValidationErrors.validationException(violations);
+        }
+    }
+
+    @RegisterForReflection
+    public record Segment(
+            @JsonProperty("SegmentNumber") Integer segmentNumber,
+            @JsonProperty("TotalSegments") Integer totalSegments) {}
 
     /**
      * Registers a partition index on a table.
@@ -1116,6 +1203,7 @@ public class GlueService {
     }
 
     public void updatePartition(String databaseName, String tableName, List<String> partitionValues, Partition partition) {
+        requireValidSortColumns(sortColumnViolations("partitionInput", partition.getStorageDescriptor()));
         Table table = getTable(databaseName, tableName);
         String key = partitionKey(databaseName, tableName, partitionValues);
         Partition existing = partitionStore.get(key)
@@ -1333,7 +1421,7 @@ public class GlueService {
     }
 
     /**
-     * Glue reads back the numeric string and binary statistics a writer left out as 0, and clients such as Trino
+     * Glue reads back the required numeric statistics a writer left out as 0, and clients such as Trino
      * unbox them without a null check, so every statistic read back carries all of them, whatever the stored
      * record holds.
      */
@@ -1669,6 +1757,7 @@ public class GlueService {
         copy.setCreateTime(source.getCreateTime());
         copy.setUpdateTime(source.getUpdateTime());
         copy.setLastAccessTime(source.getLastAccessTime());
+        copy.setRetention(source.getRetention());
         copy.setPartitionKeys(copyColumns(source.getPartitionKeys()));
         copy.setStorageDescriptor(copyStorageDescriptor(source.getStorageDescriptor()));
         copy.setTableType(source.getTableType());
@@ -1677,6 +1766,98 @@ public class GlueService {
         copy.setVersionId(source.getVersionId());
         copy.setParameters(copyMap(source.getParameters()));
         return copy;
+    }
+
+    /**
+     * Glue reads back a table's Retention, and a storage descriptor's Compressed, NumberOfBuckets, SortColumns
+     * and StoredAsSubDirectories, as 0, false, 0, an empty list and false when the writer left them out, and the
+     * Glue Data Catalog client for Hive and Spark unboxes them without a null check, as it does
+     * IsRegisteredWithLakeFormation, which is false: Floci ties no table to a location registered with Lake
+     * Formation. So every table and partition a catalog action returns carries them, while the stored record keeps
+     * its nulls, which Spectrum reads as a partition taking its table's value.
+     */
+    static Table withReadDefaults(Table table) {
+        Table copy = copyTable(table);
+        if (copy.getRetention() == null) {
+            copy.setRetention(0);
+        }
+        copy.setRegisteredWithLakeFormation(false);
+        fillReadDefaults(copy.getStorageDescriptor());
+        return copy;
+    }
+
+    static Partition withReadDefaults(Partition partition) {
+        Partition copy = new Partition();
+        copy.setValues(copyStrings(partition.getValues()));
+        copy.setDatabaseName(partition.getDatabaseName());
+        copy.setTableName(partition.getTableName());
+        copy.setCreationTime(partition.getCreationTime());
+        copy.setLastAccessTime(partition.getLastAccessTime());
+        copy.setStorageDescriptor(copyStorageDescriptor(partition.getStorageDescriptor()));
+        copy.setParameters(copyMap(partition.getParameters()));
+        fillReadDefaults(copy.getStorageDescriptor());
+        return copy;
+    }
+
+    /**
+     * An Order's Column and SortOrder are required, and SortOrder is 0 or 1 (the model's IntegerFlag); the Glue Data
+     * Catalog client unboxes SortOrder on read. So a sort column breaking them fails the whole request, a batch's
+     * included, before anything is stored.
+     */
+    private static List<String> sortColumnViolations(String path, StorageDescriptor descriptor) {
+        List<String> violations = new ArrayList<>();
+        if (descriptor == null || descriptor.getSortColumns() == null) {
+            return violations;
+        }
+        List<StorageDescriptor.Order> orders = descriptor.getSortColumns();
+        for (int index = 0; index < orders.size(); index++) {
+            String member = path + ".storageDescriptor.sortColumns." + (index + 1) + ".member";
+            StorageDescriptor.Order order = orders.get(index);
+            if (order == null) {
+                violations.add(SmithyValidationErrors.notNull(member));
+                continue;
+            }
+            if (order.getColumn() == null) {
+                violations.add(SmithyValidationErrors.notNull(member + ".column"));
+            }
+            if (order.getSortOrder() == null) {
+                violations.add(SmithyValidationErrors.notNull(member + ".sortOrder"));
+            } else {
+                String violation = SmithyValidationErrors.outOfRange(member + ".sortOrder", order.getSortOrder(), 0, 1);
+                if (violation != null) {
+                    violations.add(violation);
+                }
+            }
+        }
+        return violations;
+    }
+
+    private static StorageDescriptor descriptorOf(Partition partition) {
+        return partition == null ? null : partition.getStorageDescriptor();
+    }
+
+    private static void requireValidSortColumns(List<String> violations) {
+        if (!violations.isEmpty()) {
+            throw SmithyValidationErrors.validationException(violations);
+        }
+    }
+
+    private static void fillReadDefaults(StorageDescriptor descriptor) {
+        if (descriptor == null) {
+            return;
+        }
+        if (descriptor.getCompressed() == null) {
+            descriptor.setCompressed(false);
+        }
+        if (descriptor.getNumberOfBuckets() == null) {
+            descriptor.setNumberOfBuckets(0);
+        }
+        if (descriptor.getSortColumns() == null) {
+            descriptor.setSortColumns(new ArrayList<>());
+        }
+        if (descriptor.getStoredAsSubDirectories() == null) {
+            descriptor.setStoredAsSubDirectories(false);
+        }
     }
 
     private static String nextVersionId(String versionId) {
@@ -1702,13 +1883,43 @@ public class GlueService {
         StorageDescriptor copy = new StorageDescriptor();
         copy.setColumns(copyColumns(source.getColumns()));
         copy.setLocation(source.getLocation());
+        copy.setAdditionalLocations(copyStrings(source.getAdditionalLocations()));
         copy.setInputFormat(source.getInputFormat());
         copy.setOutputFormat(source.getOutputFormat());
         copy.setCompressed(source.getCompressed());
         copy.setNumberOfBuckets(source.getNumberOfBuckets());
         copy.setSerdeInfo(copySerDeInfo(source.getSerdeInfo()));
+        copy.setBucketColumns(copyStrings(source.getBucketColumns()));
+        copy.setSortColumns(copySortColumns(source.getSortColumns()));
         copy.setParameters(copyMap(source.getParameters()));
+        copy.setSkewedInfo(copySkewedInfo(source.getSkewedInfo()));
+        copy.setStoredAsSubDirectories(source.getStoredAsSubDirectories());
         copy.setSchemaReference(copySchemaReference(source.getSchemaReference()));
+        return copy;
+    }
+
+    private static List<StorageDescriptor.Order> copySortColumns(List<StorageDescriptor.Order> source) {
+        if (source == null) {
+            return null;
+        }
+        List<StorageDescriptor.Order> copy = new ArrayList<>(source.size());
+        for (StorageDescriptor.Order order : source) {
+            StorageDescriptor.Order orderCopy = new StorageDescriptor.Order();
+            orderCopy.setColumn(order.getColumn());
+            orderCopy.setSortOrder(order.getSortOrder());
+            copy.add(orderCopy);
+        }
+        return copy;
+    }
+
+    private static StorageDescriptor.SkewedInfo copySkewedInfo(StorageDescriptor.SkewedInfo source) {
+        if (source == null) {
+            return null;
+        }
+        StorageDescriptor.SkewedInfo copy = new StorageDescriptor.SkewedInfo();
+        copy.setSkewedColumnNames(copyStrings(source.getSkewedColumnNames()));
+        copy.setSkewedColumnValues(copyStrings(source.getSkewedColumnValues()));
+        copy.setSkewedColumnValueLocationMaps(copyMap(source.getSkewedColumnValueLocationMaps()));
         return copy;
     }
 
@@ -1756,6 +1967,10 @@ public class GlueService {
 
     private static Map<String, String> copyMap(Map<String, String> source) {
         return source != null ? new LinkedHashMap<>(source) : null;
+    }
+
+    private static List<String> copyStrings(List<String> source) {
+        return source != null ? new ArrayList<>(source) : null;
     }
 
     private void validateRequired(String value, String fieldName) {
@@ -1927,7 +2142,7 @@ public class GlueService {
 
         Map<String, Object> details = new LinkedHashMap<>(classifier.selectedDetails());
         validateClassifierDetails(classifier.selectedKind(), details);
-        double now = Instant.now().toEpochMilli() / 1000.0d;
+        double now = EpochSeconds.fromInstant(Instant.now());
         details.put("CreationTime", now);
         details.put("LastUpdated", now);
         details.put("Version", 1L);
@@ -1966,7 +2181,7 @@ public class GlueService {
         validateClassifierDetails(existing.selectedKind(), details);
         Number version = (Number) existing.selectedDetails().get("Version");
         details.put("CreationTime", existing.selectedDetails().get("CreationTime"));
-        details.put("LastUpdated", Instant.now().toEpochMilli() / 1000.0d);
+        details.put("LastUpdated", EpochSeconds.fromInstant(Instant.now()));
         details.put("Version", (version == null ? 1L : version.longValue()) + 1L);
         classifierStore.put(name, existing.copyWithDetails(details));
         LOG.infov("Updated Glue Classifier: {0}", name);
@@ -2262,16 +2477,14 @@ public class GlueService {
     }
 
     public Page<String> listWorkflows(Integer maxResults, String nextToken) {
-        if (maxResults != null && (maxResults < 1 || maxResults > MAX_WORKFLOWS_PAGE_SIZE)) {
-            throw new AwsException("InvalidInputException",
-                    "MaxResults must be between 1 and " + MAX_WORKFLOWS_PAGE_SIZE, 400);
-        }
-        List<String> names = new ArrayList<>();
-        for (Workflow workflow : workflowStore.scan(k -> true)) {
-            names.add(workflow.getName());
-        }
-        names.sort(Comparator.naturalOrder());
-        return paginate(names, maxResults, nextToken);
+        return paginate(() -> {
+            List<String> names = new ArrayList<>();
+            for (Workflow workflow : workflowStore.scan(k -> true)) {
+                names.add(workflow.getName());
+            }
+            names.sort(Comparator.naturalOrder());
+            return names;
+        }, maxResults, nextToken, MAX_WORKFLOWS_PAGE_SIZE);
     }
 
     public BatchGetWorkflowsResult batchGetWorkflows(List<String> names) {
@@ -2384,11 +2597,7 @@ public class GlueService {
      * all triggers are returned when none can.
      */
     public Page<Trigger> getTriggers(String dependentJobName, Integer maxResults, String nextToken) {
-        if (maxResults != null && (maxResults < 1 || maxResults > MAX_TRIGGERS_PAGE_SIZE)) {
-            throw new AwsException("InvalidInputException",
-                    "MaxResults must be between 1 and " + MAX_TRIGGERS_PAGE_SIZE, 400);
-        }
-        return paginate(triggersStarting(dependentJobName), maxResults, nextToken);
+        return paginate(() -> triggersStarting(dependentJobName), maxResults, nextToken, MAX_TRIGGERS_PAGE_SIZE);
     }
 
     public Page<String> listTriggers(String dependentJobName, Integer maxResults, String nextToken,
@@ -2945,12 +3154,7 @@ public class GlueService {
      * derives it from the document so the same policy always yields the same hash.
      */
     private static String policyHash(String policyInJson) {
-        try {
-            byte[] digest = MessageDigest.getInstance("MD5").digest(policyInJson.getBytes(StandardCharsets.UTF_8));
-            return Base64.getEncoder().encodeToString(digest);
-        } catch (NoSuchAlgorithmException e) {
-            throw new IllegalStateException("MD5 is a required JDK algorithm", e);
-        }
+        return Base64.getEncoder().encodeToString(Digests.md5(policyInJson.getBytes(StandardCharsets.UTF_8)));
     }
 
     public void tagResource(String arn, Map<String, String> tags, String region) {
@@ -2996,16 +3200,15 @@ public class GlueService {
     }
 
     private void validateArn(String arn) {
-        if (arn == null || !arn.startsWith("arn:")) {
+        if (!AwsArnUtils.looksLikeArn(arn)) {
             throw new AwsException("InvalidInputException", "Invalid ARN", 400);
         }
     }
 
     private void validateResourceExists(String arn) {
         // At most six parts: a job, table or other name may itself contain ':'.
-        String[] parts = arn.split(":", 6);
-        if (parts.length >= 6) {
-            String resource = parts[5];
+        if (AwsArnUtils.isArn(arn)) {
+            String resource = AwsArnUtils.parse(arn).resource();
             if (resource.startsWith("job/")) {
                 getJob(resource.substring(4));
                 return;
@@ -3020,6 +3223,10 @@ public class GlueService {
                 return;
             } else if (resource.startsWith("connection/")) {
                 getConnection(resource.substring(11), false);
+                return;
+            } else if (resource.startsWith("dataQualityRuleset/")) {
+                getDataQualityRuleset(resource.substring("dataQualityRuleset/".length()),
+                        AwsArnUtils.parse(arn).region());
                 return;
             } else if (resource.startsWith("database/")) {
                 getDatabase(resource.substring(9));
@@ -3041,12 +3248,231 @@ public class GlueService {
         throw new AwsException("EntityNotFoundException", "Resource " + arn + " not found or not supported.", 400);
     }
 
+    // ── Data quality rulesets ─────────────────────────────────────────────────
+
+    /** The filters ListDataQualityRulesets takes; each one left null matches every ruleset. */
+    public record DataQualityRulesetFilter(String name, String description, Instant createdBefore,
+                                           Instant createdAfter, Instant lastModifiedBefore,
+                                           Instant lastModifiedAfter, DataQualityRuleset.TargetTable targetTable) {}
+
+    public DataQualityRuleset createDataQualityRuleset(String name, String description, String ruleset,
+                                                       DataQualityRuleset.TargetTable targetTable,
+                                                       String securityConfiguration, Map<String, String> tags,
+                                                       String region) {
+        validateDataQualityName(name, "Name");
+        validateDataQualityRulesetText(ruleset);
+        validateDataQualityDescription(description);
+        if (targetTable != null) {
+            validateDataQualityName(targetTable.tableName(), "TargetTable.TableName");
+            validateDataQualityName(targetTable.databaseName(), "TargetTable.DatabaseName");
+        }
+        if (securityConfiguration != null) {
+            validateDataQualityName(securityConfiguration, "DataQualitySecurityConfiguration");
+        }
+        if (tags != null && tags.size() > MAX_TAGS) {
+            throw new AwsException("InvalidInputException", "Tags must have at most " + MAX_TAGS + " entries.", 400);
+        }
+        String key = dataQualityRulesetKey(region, name);
+        synchronized (dataQualityRulesetStore) {
+            if (dataQualityRulesetStore.get(key).isPresent()) {
+                throw new AwsException("AlreadyExistsException", "Data quality ruleset already exists: " + name, 400);
+            }
+            Instant now = Instant.now().truncatedTo(ChronoUnit.MILLIS);
+            DataQualityRuleset created = new DataQualityRuleset();
+            created.setName(name);
+            created.setDescription(description);
+            created.setRuleset(ruleset);
+            created.setTargetTable(targetTable);
+            created.setDataQualitySecurityConfiguration(securityConfiguration);
+            created.setCreatedOn(now);
+            created.setLastModifiedOn(now);
+            dataQualityRulesetStore.put(key, created);
+            if (tags != null && !tags.isEmpty()) {
+                resourceGroupsTaggingService.tagResources(List.of(dataQualityRulesetArn(region, name)), tags, region);
+            }
+            LOG.infov("Created Glue data quality ruleset: {0}", name);
+            return created;
+        }
+    }
+
+    public DataQualityRuleset getDataQualityRuleset(String name, String region) {
+        validateDataQualityName(name, "Name");
+        return dataQualityRulesetStore.get(dataQualityRulesetKey(region, name))
+                .orElseThrow(() -> dataQualityRulesetNotFound(name));
+    }
+
+    /** Replaces the description and ruleset the request sets; a member left out keeps its value. */
+    public DataQualityRuleset updateDataQualityRuleset(String name, String description, String ruleset, String region) {
+        validateDataQualityName(name, "Name");
+        if (ruleset != null) {
+            validateDataQualityRulesetText(ruleset);
+        }
+        validateDataQualityDescription(description);
+        String key = dataQualityRulesetKey(region, name);
+        synchronized (dataQualityRulesetStore) {
+            DataQualityRuleset existing = dataQualityRulesetStore.get(key)
+                    .orElseThrow(() -> dataQualityRulesetNotFound(name));
+            if (description != null) {
+                existing.setDescription(description);
+            }
+            if (ruleset != null) {
+                existing.setRuleset(ruleset);
+            }
+            existing.setLastModifiedOn(Instant.now().truncatedTo(ChronoUnit.MILLIS));
+            dataQualityRulesetStore.put(key, existing);
+            return existing;
+        }
+    }
+
+    public void deleteDataQualityRuleset(String name, String region) {
+        validateDataQualityName(name, "Name");
+        String key = dataQualityRulesetKey(region, name);
+        synchronized (dataQualityRulesetStore) {
+            if (dataQualityRulesetStore.get(key).isEmpty()) {
+                throw dataQualityRulesetNotFound(name);
+            }
+            dataQualityRulesetStore.delete(key);
+            resourceGroupsTaggingService.deleteResources(List.of(dataQualityRulesetArn(region, name)), region);
+        }
+        LOG.infov("Deleted Glue data quality ruleset: {0}", name);
+    }
+
+    /** The Region's rulesets in name order, narrowed by the filter and by tags they all carry. */
+    public Page<DataQualityRuleset> listDataQualityRulesets(DataQualityRulesetFilter filter, Map<String, String> tags,
+                                                            Integer maxResults, String nextToken, String region) {
+        return paginate(() -> {
+            String prefix = region + ":";
+            String accountId = regionResolver.getAccountId();
+            List<DataQualityRuleset> matching = new ArrayList<>();
+            for (DataQualityRuleset candidate : dataQualityRulesetStore.scan(key -> key.startsWith(prefix))) {
+                if (matchesDataQualityFilter(candidate, filter, accountId) && (tags == null || tags.isEmpty()
+                        || hasTags(dataQualityRulesetArn(region, candidate.getName()), tags, region))) {
+                    matching.add(candidate);
+                }
+            }
+            matching.sort(Comparator.comparing(DataQualityRuleset::getName));
+            return matching;
+        }, maxResults, nextToken, 1000);
+    }
+
+    /**
+     * The number of rules in a DQDL ruleset: the entries of its top-level {@code Rules = [ ... ]}
+     * list, where a composite rule in parentheses counts as one. Null when the text has no such list.
+     */
+    public static Integer dataQualityRuleCount(String ruleset) {
+        if (ruleset == null) {
+            return null;
+        }
+        int start = ruleset.indexOf('[', Math.max(ruleset.indexOf("Rules"), 0));
+        if (start < 0) {
+            return null;
+        }
+        int depth = 0;
+        int count = 0;
+        boolean inEntry = false;
+        boolean quoted = false;
+        for (int i = start; i < ruleset.length(); i++) {
+            char c = ruleset.charAt(i);
+            if (quoted) {
+                if (c == '\\') {
+                    i++;
+                } else if (c == '"') {
+                    quoted = false;
+                }
+                continue;
+            }
+            switch (c) {
+                case '"' -> quoted = true;
+                case '[', '(' -> depth++;
+                case ']', ')' -> depth--;
+                default -> { }
+            }
+            if (depth == 0) {
+                return inEntry ? count + 1 : count;
+            }
+            if (depth == 1 && c == ',') {
+                count++;
+                inEntry = false;
+            } else if (!Character.isWhitespace(c) && !(depth == 1 && c == '[' && i == start)) {
+                inEntry = true;
+            }
+        }
+        return null;
+    }
+
+    /** A target table without a CatalogId is in the caller's own catalog, the account. */
+    private static boolean matchesDataQualityFilter(DataQualityRuleset ruleset, DataQualityRulesetFilter filter,
+                                                    String accountId) {
+        if (filter == null) {
+            return true;
+        }
+        DataQualityRuleset.TargetTable table = ruleset.getTargetTable();
+        return (filter.name() == null || filter.name().equals(ruleset.getName()))
+                && (filter.description() == null || filter.description().equals(ruleset.getDescription()))
+                && (filter.createdBefore() == null || ruleset.getCreatedOn().isBefore(filter.createdBefore()))
+                && (filter.createdAfter() == null || ruleset.getCreatedOn().isAfter(filter.createdAfter()))
+                && (filter.lastModifiedBefore() == null
+                        || ruleset.getLastModifiedOn().isBefore(filter.lastModifiedBefore()))
+                && (filter.lastModifiedAfter() == null
+                        || ruleset.getLastModifiedOn().isAfter(filter.lastModifiedAfter()))
+                && (filter.targetTable() == null || (table != null
+                        && Objects.equals(filter.targetTable().tableName(), table.tableName())
+                        && Objects.equals(filter.targetTable().databaseName(), table.databaseName())
+                        && (filter.targetTable().catalogId() == null
+                                || filter.targetTable().catalogId().equals(
+                                        table.catalogId() != null ? table.catalogId() : accountId))));
+    }
+
+    private String dataQualityRulesetArn(String region, String name) {
+        return regionResolver.buildArn("glue", region, "dataQualityRuleset/" + name);
+    }
+
+    private static String dataQualityRulesetKey(String region, String name) {
+        return region + ":" + name;
+    }
+
+    private static AwsException dataQualityRulesetNotFound(String name) {
+        return new AwsException("EntityNotFoundException", "Data quality ruleset not found: " + name, 400);
+    }
+
+    private static void validateDataQualityName(String value, String field) {
+        if (value == null || value.isBlank()) {
+            throw new AwsException("InvalidInputException", field + " is required.", 400);
+        }
+        if (value.length() > MAX_DATA_QUALITY_NAME_LENGTH) {
+            throw new AwsException("InvalidInputException",
+                    field + " must be between 1 and " + MAX_DATA_QUALITY_NAME_LENGTH + " characters.", 400);
+        }
+    }
+
+    private static void validateDataQualityRulesetText(String ruleset) {
+        if (ruleset == null || ruleset.isEmpty()) {
+            throw new AwsException("InvalidInputException", "Ruleset is required.", 400);
+        }
+        if (ruleset.length() > MAX_DATA_QUALITY_RULESET_LENGTH) {
+            throw new AwsException("InvalidInputException",
+                    "Ruleset must be at most " + MAX_DATA_QUALITY_RULESET_LENGTH + " characters.", 400);
+        }
+    }
+
+    private static void validateDataQualityDescription(String description) {
+        if (description != null && description.length() > MAX_DATA_QUALITY_DESCRIPTION_LENGTH) {
+            throw new AwsException("InvalidInputException",
+                    "Description must be at most " + MAX_DATA_QUALITY_DESCRIPTION_LENGTH + " characters.", 400);
+        }
+    }
+
     public record Page<T>(List<T> items, String nextToken) {}
 
     <T> Page<T> paginate(List<T> all, Integer maxResults, String nextToken) {
-        if (maxResults != null && (maxResults < 1 || maxResults > 1000)) {
-            throw new AwsException("InvalidInputException", "MaxResults must be between 1 and 1000", 400);
+        return paginate(() -> all, maxResults, nextToken, 1000);
+    }
+
+    private <T> Page<T> paginate(Supplier<List<T>> items, Integer maxResults, String nextToken, int maximum) {
+        if (maxResults != null && (maxResults < 1 || maxResults > maximum)) {
+            throw new AwsException("InvalidInputException", "MaxResults must be between 1 and " + maximum, 400);
         }
+        List<T> all = items.get();
         int limit = maxResults == null ? 100 : maxResults;
         int start = 0;
         if (nextToken != null && !nextToken.isBlank()) {

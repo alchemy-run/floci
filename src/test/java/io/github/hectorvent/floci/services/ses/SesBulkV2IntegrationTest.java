@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.ses;
 
 import io.quarkus.test.junit.QuarkusTest;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -10,10 +11,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import java.util.List;
 import java.util.stream.Stream;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
+import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.notNullValue;
 
@@ -36,10 +39,27 @@ class SesBulkV2IntegrationTest {
 
     private static final String AUTH_HEADER =
             "AWS4-HMAC-SHA256 Credential=AKID/20260101/us-east-1/ses/aws4_request";
+    // Senders of their own: an identity under example.com would outlive this class and reach the
+    // other SES classes that share the application.
+    private static final List<String> SENDERS =
+            List.of("bulk-v2@floci.test", "bulk-v2-second@floci.test", "bulk-v2-inline@floci.test");
+
+    private static final String DESTINATION_COUNT_MESSAGE =
+            "You must specify at least 1 destination, and no more than 50 destinations";
 
     @Test
     @Order(1)
     void createTemplate() {
+        for (String sender : SENDERS) {
+            given()
+                .contentType("application/json")
+                .header("Authorization", AUTH_HEADER)
+                .body("{\"EmailIdentity\": \"" + sender + "\"}")
+            .when()
+                .post("/v2/email/identities")
+            .then()
+                .statusCode(200);
+        }
         given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
@@ -67,7 +87,7 @@ class SesBulkV2IntegrationTest {
             .header("Authorization", AUTH_HEADER)
             .body("""
                 {
-                  "FromEmailAddress": "bulk@example.com",
+                  "FromEmailAddress": "bulk-v2@floci.test",
                   "DefaultContent": {
                     "Template": {
                       "TemplateName": "v2-bulk-welcome",
@@ -110,7 +130,7 @@ class SesBulkV2IntegrationTest {
             .header("Authorization", AUTH_HEADER)
             .body("""
                 {
-                  "FromEmailAddress": "bulk2@example.com",
+                  "FromEmailAddress": "bulk-v2-second@floci.test",
                   "DefaultContent": {
                     "Template": {
                       "TemplateName": "v2-bulk-welcome",
@@ -163,7 +183,7 @@ class SesBulkV2IntegrationTest {
             .header("Authorization", AUTH_HEADER)
             .body("""
                 {
-                  "FromEmailAddress": "inline@example.com",
+                  "FromEmailAddress": "bulk-v2-inline@floci.test",
                   "DefaultContent": {
                     "Template": {
                       "TemplateContent": {
@@ -210,7 +230,7 @@ class SesBulkV2IntegrationTest {
             .header("Authorization", AUTH_HEADER)
             .body("""
                 {
-                  "FromEmailAddress": "bulk@example.com",
+                  "FromEmailAddress": "bulk-v2@floci.test",
                   "DefaultContent": {
                     "Template": {"TemplateName": "ghost"}
                   },
@@ -234,7 +254,7 @@ class SesBulkV2IntegrationTest {
             .header("Authorization", AUTH_HEADER)
             .body("""
                 {
-                  "FromEmailAddress": "bulk@example.com",
+                  "FromEmailAddress": "bulk-v2@floci.test",
                   "DefaultContent": {
                     "Template": {"TemplateName": "v2-bulk-welcome"}
                   },
@@ -245,7 +265,8 @@ class SesBulkV2IntegrationTest {
             .post("/v2/email/outbound-bulk-emails")
         .then()
             .statusCode(400)
-            .body("__type", equalTo("BadRequestException"));
+            .body("__type", equalTo("BadRequestException"))
+            .body("message", equalTo(DESTINATION_COUNT_MESSAGE));
     }
 
     @Test
@@ -256,7 +277,7 @@ class SesBulkV2IntegrationTest {
             .header("Authorization", AUTH_HEADER)
             .body("""
                 {
-                  "FromEmailAddress": "bulk@example.com",
+                  "FromEmailAddress": "bulk-v2@floci.test",
                   "DefaultContent": {},
                   "BulkEmailEntries": [
                     {"Destination": {"ToAddresses": ["alice@example.com"]}}
@@ -272,30 +293,25 @@ class SesBulkV2IntegrationTest {
 
     @Test
     @Order(7)
-    void sendBulkEmail_entriesExceeds50_returnsMessageRejected() {
-        StringBuilder entries = new StringBuilder();
-        for (int i = 1; i <= 51; i++) {
-            if (i > 1) entries.append(",");
-            entries.append("{\"Destination\":{\"ToAddresses\":[\"user")
-                    .append(i).append("@example.com\"]}}");
-        }
+    void sendBulkEmail_entriesExceeds50_returnsBadRequest() {
         given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
             .body("""
                 {
-                  "FromEmailAddress": "bulk@example.com",
+                  "FromEmailAddress": "bulk-v2@floci.test",
                   "DefaultContent": {
                     "Template": {"TemplateName": "v2-bulk-welcome"}
                   },
                   "BulkEmailEntries": [%s]
                 }
-                """.formatted(entries))
+                """.formatted(entries(51)))
         .when()
             .post("/v2/email/outbound-bulk-emails")
         .then()
             .statusCode(400)
-            .body("__type", equalTo("MessageRejected"));
+            .body("__type", equalTo("BadRequestException"))
+            .body("message", equalTo(DESTINATION_COUNT_MESSAGE));
     }
 
     @Test
@@ -306,7 +322,7 @@ class SesBulkV2IntegrationTest {
             .header("Authorization", AUTH_HEADER)
             .body("""
                 {
-                  "FromEmailAddress": "bulk@example.com",
+                  "FromEmailAddress": "bulk-v2@floci.test",
                   "DefaultContent": {
                     "Template": {"TemplateName": "v2-bulk-welcome", "TemplateData": "{\\"team\\":\\"floci\\"}"}
                   },
@@ -325,7 +341,7 @@ class SesBulkV2IntegrationTest {
         .then()
             .statusCode(200)
             .body("BulkEmailEntryResults[0].Status", equalTo("INVALID_PARAMETER"))
-            .body("BulkEmailEntryResults[0].Error", org.hamcrest.Matchers.containsString("name"));
+            .body("BulkEmailEntryResults[0].Error", Matchers.containsString("name"));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -379,14 +395,14 @@ class SesBulkV2IntegrationTest {
         return Stream.of(
                 Arguments.of("BulkEmailEntries element is null", """
                     {
-                      "FromEmailAddress": "bulk@example.com",
+                      "FromEmailAddress": "bulk-v2@floci.test",
                       %s,
                       "BulkEmailEntries": [null]
                     }
                     """.formatted(validDefaultTemplate)),
                 Arguments.of("DefaultTemplateData as invalid JSON string", """
                     {
-                      "FromEmailAddress": "bulk@example.com",
+                      "FromEmailAddress": "bulk-v2@floci.test",
                       "DefaultContent": {
                         "Template": {"TemplateName": "v2-bulk-welcome", "TemplateData": "{not json"}
                       },
@@ -401,21 +417,21 @@ class SesBulkV2IntegrationTest {
         return Stream.of(
                 Arguments.of("BulkEmailEntries element is string", """
                     {
-                      "FromEmailAddress": "bulk@example.com",
+                      "FromEmailAddress": "bulk-v2@floci.test",
                       %s,
                       "BulkEmailEntries": ["bad"]
                     }
                     """.formatted(validDefaultTemplate)),
                 Arguments.of("Destination as string", """
                     {
-                      "FromEmailAddress": "bulk@example.com",
+                      "FromEmailAddress": "bulk-v2@floci.test",
                       %s,
                       "BulkEmailEntries": [{"Destination": "bad"}]
                     }
                     """.formatted(validDefaultTemplate)),
                 Arguments.of("DefaultTemplateData as object", """
                     {
-                      "FromEmailAddress": "bulk@example.com",
+                      "FromEmailAddress": "bulk-v2@floci.test",
                       "DefaultContent": {
                         "Template": {"TemplateName": "v2-bulk-welcome", "TemplateData": {"team": "floci"}}
                       },
@@ -424,7 +440,7 @@ class SesBulkV2IntegrationTest {
                     """),
                 Arguments.of("per-entry ReplacementTemplateData as object", """
                     {
-                      "FromEmailAddress": "bulk@example.com",
+                      "FromEmailAddress": "bulk-v2@floci.test",
                       %s,
                       "BulkEmailEntries": [
                         {
@@ -438,7 +454,7 @@ class SesBulkV2IntegrationTest {
                     """.formatted(validDefaultTemplate)),
                 Arguments.of("ReplacementEmailContent as string", """
                     {
-                      "FromEmailAddress": "bulk@example.com",
+                      "FromEmailAddress": "bulk-v2@floci.test",
                       %s,
                       "BulkEmailEntries": [
                         {
@@ -450,7 +466,7 @@ class SesBulkV2IntegrationTest {
                     """.formatted(validDefaultTemplate)),
                 Arguments.of("ReplacementEmailContent as array", """
                     {
-                      "FromEmailAddress": "bulk@example.com",
+                      "FromEmailAddress": "bulk-v2@floci.test",
                       %s,
                       "BulkEmailEntries": [
                         {
@@ -462,7 +478,7 @@ class SesBulkV2IntegrationTest {
                     """.formatted(validDefaultTemplate)),
                 Arguments.of("ReplacementTemplate as array", """
                     {
-                      "FromEmailAddress": "bulk@example.com",
+                      "FromEmailAddress": "bulk-v2@floci.test",
                       "DefaultContent": {
                         "Template": {"TemplateName": "v2-bulk-welcome", "TemplateData": "{\\"team\\":\\"floci\\"}"}
                       },
@@ -490,7 +506,7 @@ class SesBulkV2IntegrationTest {
             .header("Authorization", AUTH_HEADER)
             .body("""
                 {
-                  "FromEmailAddress": "bulk@example.com",
+                  "FromEmailAddress": "bulk-v2@floci.test",
                   "DefaultContent": {
                     "Template": {"TemplateName": "v2-bulk-welcome"}
                   },
@@ -504,5 +520,176 @@ class SesBulkV2IntegrationTest {
         .then()
             .statusCode(400)
             .body("__type", equalTo("MessageRejected"));
+    }
+
+    @Test
+    @Order(14)
+    void sendBulkEmail_fiftyEntries_sendsEachEntry() {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {
+                  "FromEmailAddress": "bulk-v2@floci.test",
+                  "DefaultContent": {
+                    "Template": {
+                      "TemplateName": "v2-bulk-welcome",
+                      "TemplateData": "{\\"name\\":\\"X\\",\\"team\\":\\"floci\\"}"
+                    }
+                  },
+                  "BulkEmailEntries": [%s]
+                }
+                """.formatted(entries(50)))
+        .when()
+            .post("/v2/email/outbound-bulk-emails")
+        .then()
+            .statusCode(200)
+            .body("BulkEmailEntryResults", hasSize(50))
+            .body("BulkEmailEntryResults.Status", everyItem(equalTo("SUCCESS")));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("missingEntriesMembers")
+    @Order(15)
+    void sendBulkEmail_missingEntries_isAModelViolation(String label, String entriesMember) {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {
+                  "FromEmailAddress": "bulk@example.com",
+                  "DefaultContent": {
+                    "Template": {"TemplateName": "v2-bulk-welcome"}
+                  }%s
+                }
+                """.formatted(entriesMember))
+        .when()
+            .post("/v2/email/outbound-bulk-emails")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("BadRequestException"))
+            .body("message", equalTo("1 validation error detected: Value at 'bulkEmailEntries' "
+                    + "failed to satisfy constraint: Member must not be null"));
+    }
+
+    static Stream<Arguments> missingEntriesMembers() {
+        return Stream.of(
+                Arguments.of("absent", ""),
+                Arguments.of("null", ", \"BulkEmailEntries\": null"));
+    }
+
+    // AWS counts the entries before it resolves the stored template, the configuration set and the
+    // tenant, each of which would otherwise answer 404 (probed 2026-10-24).
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("countBeforeLookupBodies")
+    @Order(16)
+    void sendBulkEmail_entryCountIsCheckedBeforeLookups(String label, String body) {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body(body)
+        .when()
+            .post("/v2/email/outbound-bulk-emails")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("BadRequestException"))
+            .body("message", equalTo(DESTINATION_COUNT_MESSAGE));
+    }
+
+    static Stream<Arguments> countBeforeLookupBodies() {
+        String inline = "\"DefaultContent\": {\"Template\": {\"TemplateContent\": {\"Subject\": \"s\", \"Text\": \"t\"}}}";
+        return Stream.of(
+                Arguments.of("ghost stored template", """
+                    {"FromEmailAddress": "bulk@example.com",
+                     "DefaultContent": {"Template": {"TemplateName": "ghost-template"}},
+                     "BulkEmailEntries": [%s]}
+                    """.formatted(entries(51))),
+                Arguments.of("ghost stored template by ARN", """
+                    {"FromEmailAddress": "bulk@example.com",
+                     "DefaultContent": {"Template": {
+                       "TemplateArn": "arn:aws:ses:us-east-1:000000000000:template/ghost-template"}},
+                     "BulkEmailEntries": [%s]}
+                    """.formatted(entries(51))),
+                Arguments.of("ghost configuration set", """
+                    {"FromEmailAddress": "bulk@example.com", "ConfigurationSetName": "ghost-cs", %s,
+                     "BulkEmailEntries": [%s]}
+                    """.formatted(inline, entries(51))),
+                Arguments.of("ghost tenant", """
+                    {"FromEmailAddress": "bulk@example.com", "TenantName": "ghost-tenant", %s,
+                     "BulkEmailEntries": [%s]}
+                    """.formatted(inline, entries(51))),
+                Arguments.of("empty entries with a ghost tenant", """
+                    {"FromEmailAddress": "bulk@example.com", "TenantName": "ghost-tenant", %s,
+                     "BulkEmailEntries": []}
+                    """.formatted(inline)));
+    }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("checkedBeforeCountBodies")
+    @Order(17)
+    void sendBulkEmail_earlierChecksWinOverEntryCount(String label, String body, String message) {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body(body)
+        .when()
+            .post("/v2/email/outbound-bulk-emails")
+        .then()
+            .statusCode(400)
+            .body("__type", equalTo("BadRequestException"))
+            .body("message", equalTo(message));
+    }
+
+    static Stream<Arguments> checkedBeforeCountBodies() {
+        return Stream.of(
+                Arguments.of("malformed From", """
+                    {"FromEmailAddress": "not an address",
+                     "DefaultContent": {"Template": {"TemplateContent": {"Subject": "s", "Text": "t"}}},
+                     "BulkEmailEntries": [%s]}
+                    """.formatted(entries(51)), "Invalid email address<not an address>."),
+                Arguments.of("empty inline content", """
+                    {"FromEmailAddress": "bulk@example.com",
+                     "DefaultContent": {"Template": {"TemplateContent": {}}},
+                     "BulkEmailEntries": [%s]}
+                    """.formatted(entries(51)), "Template must have at least a subject, text, or html part."));
+    }
+
+    // An entry with no recipient beside one with a recipient fails on its own (probed 2026-10-25).
+    @Test
+    @Order(18)
+    void sendBulkEmail_emptyEntryBesideRecipients_failsOnlyThatEntry() {
+        given()
+            .contentType("application/json")
+            .header("Authorization", AUTH_HEADER)
+            .body("""
+                {
+                  "FromEmailAddress": "bulk-v2-inline@floci.test",
+                  "DefaultContent": {"Template": {"TemplateContent": {"Subject": "s", "Text": "t"}}},
+                  "BulkEmailEntries": [
+                    {"Destination": {"ToAddresses": ["alice@example.com"]}},
+                    {"Destination": {"ToAddresses": []}}
+                  ]
+                }
+                """)
+        .when()
+            .post("/v2/email/outbound-bulk-emails")
+        .then()
+            .statusCode(200)
+            .body("BulkEmailEntryResults", hasSize(2))
+            .body("BulkEmailEntryResults[0].Status", equalTo("SUCCESS"))
+            .body("BulkEmailEntryResults[1].Status", equalTo("INVALID_PARAMETER"))
+            .body("BulkEmailEntryResults[1].Error", equalTo("Missing required header 'To'."));
+    }
+
+    private static String entries(int count) {
+        StringBuilder entries = new StringBuilder();
+        for (int i = 1; i <= count; i++) {
+            if (i > 1) {
+                entries.append(",");
+            }
+            entries.append("{\"Destination\":{\"ToAddresses\":[\"user")
+                    .append(i).append("@example.com\"]}}");
+        }
+        return entries.toString();
     }
 }

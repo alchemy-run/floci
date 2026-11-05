@@ -11,6 +11,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
@@ -119,6 +120,37 @@ class ServiceCallAuthorizerTest {
 
         assertEquals(Decision.DENY,
                 authorizer.authorize("s3", "sns:Publish", TOPIC, "arn:aws:s3:::bucket", OWNER));
+    }
+
+    @Test
+    void theKeysTheTargetAddsReachThePolicy() {
+        String object = "arn:aws:s3:::code/app.zip";
+        String policy = """
+                {"Version":"2012-10-17","Statement":[{"Effect":"Allow",
+                  "Principal":{"Service":"lambda.amazonaws.com"},"Action":"s3:GetObjectVersion","Resource":"%s",
+                  "Condition":{"StringEquals":{"s3:VersionId":"v2","s3:ResourceAccount":"%s"}}}]}""".formatted(object, OWNER);
+        providers.add((scope, arn) -> object.equals(arn)
+                ? List.of(new ResourcePolicyProvider.ResourcePolicy(policy, OWNER)) : List.of());
+
+        assertEquals(Decision.ALLOW, authorizer.authorize("lambda", "s3:GetObjectVersion", object, null, OWNER,
+                Map.of(IamConditionContextResolver.VERSION_ID, List.of("v2"))));
+        assertEquals(Decision.DENY, authorizer.authorize("lambda", "s3:GetObjectVersion", object, null, OWNER,
+                Map.of(IamConditionContextResolver.VERSION_ID, List.of("v1"))));
+        assertEquals(Decision.DENY, authorizer.authorize("lambda", "s3:GetObjectVersion", object, null, OWNER));
+    }
+
+    @Test
+    void aServiceCallOmitsResourceAccountWhenItsActionDoesNotListTheKey() {
+        String resource = "arn:aws:s3:us-east-1:" + OWNER + ":accesspoint/reports";
+        String policy = """
+                {"Version":"2012-10-17","Statement":[{"Effect":"Allow",
+                  "Principal":{"Service":"lambda.amazonaws.com"},"Action":"s3:*","Resource":"*",
+                  "Condition":{"Null":{"s3:ResourceAccount":"true"}}}]}""";
+        providers.add((scope, arn) -> List.of(new ResourcePolicyProvider.ResourcePolicy(policy, OWNER)));
+
+        assertEquals(Decision.ALLOW,
+                authorizer.authorize("lambda", "s3:PutAccessPointPublicAccessBlock", resource, null, OWNER));
+        assertEquals(Decision.DENY, authorizer.authorize("lambda", "s3:GetObject", resource, null, OWNER));
     }
 
     @Test

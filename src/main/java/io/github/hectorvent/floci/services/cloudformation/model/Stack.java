@@ -79,6 +79,7 @@ public class Stack {
     public void setDriftDetections(Map<String, StackDriftDetection> value) { driftDetections = value; }
     public Map<String, Map<String, String>> getResourceSignals() { return resourceSignals; }
     public void setResourceSignals(Map<String, Map<String, String>> value) { resourceSignals = value; }
+    private volatile String stackPolicyBody;
     /**
      * Set when an update rollback fails, and kept until a rollback completes or the stack is
      * deleted: the state from before the failed update, and the logical ids whose rollback has not
@@ -87,6 +88,11 @@ public class Stack {
      */
     private StackUpdateSnapshot updateRollbackSnapshot;
     private List<String> updateRollbackResourceIds;
+    /**
+     * The {@code RetainResources} of the last DeleteStack that started a delete. A DeleteStack
+     * repeated while that delete runs must name the same list, in the same order.
+     */
+    private List<String> retainResources = List.of();
 
     public String getStackId() { return stackId; }
     public void setStackId(String stackId) { this.stackId = stackId; }
@@ -229,8 +235,12 @@ public class Stack {
     }
     public boolean isEnableTerminationProtection() { return enableTerminationProtection; }
     public void setEnableTerminationProtection(boolean enableTerminationProtection) { this.enableTerminationProtection = enableTerminationProtection; }
+    public String getStackPolicyBody() { return stackPolicyBody; }
+    public void setStackPolicyBody(String stackPolicyBody) { this.stackPolicyBody = stackPolicyBody; }
     public StackUpdateSnapshot getUpdateRollbackSnapshot() { return updateRollbackSnapshot; }
     public void setUpdateRollbackSnapshot(StackUpdateSnapshot updateRollbackSnapshot) { this.updateRollbackSnapshot = updateRollbackSnapshot; }
     public List<String> getUpdateRollbackResourceIds() { return updateRollbackResourceIds; }
     public void setUpdateRollbackResourceIds(List<String> updateRollbackResourceIds) { this.updateRollbackResourceIds = updateRollbackResourceIds; }
+    public List<String> getRetainResources() { return retainResources; }
+    public void setRetainResources(List<String> retainResources) { this.retainResources = retainResources; }
 }

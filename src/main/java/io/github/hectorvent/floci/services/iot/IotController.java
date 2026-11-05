@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.EpochSeconds;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.iot.model.IotCertificate;
 import io.github.hectorvent.floci.services.iot.model.IotJob;
@@ -112,21 +113,31 @@ public class IotController {
     public Response updateThing(@PathParam("thingName") String thingName,
                                 @Context HttpHeaders headers,
                                 String body) {
-        String region = regionResolver.resolveRegion(headers);
-        Thing thing = iotService.updateThing(thingName, parseAttributes(body), parseExpectedVersion(body), region);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("thingName", thing.getThingName());
-        response.put("thingArn", thing.getThingArn());
-        response.put("version", thing.getVersion());
-        return Response.ok(response).build();
+        try {
+            JsonNode request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            JsonNode payload = request.path("attributePayload");
+            Map<String, String> attributes = payload.path("attributes").isObject() ? parseAttributes(body) : null;
+            Long expectedVersion = request.hasNonNull("expectedVersion") ? request.path("expectedVersion").asLong() : null;
+            Thing thing = iotService.updateThing(thingName, attributes, payload.path("merge").asBoolean(),
+                    request.path("thingTypeName").asText(null), request.path("removeThingType").asBoolean(),
+                    expectedVersion, regionResolver.resolveRegion(headers));
+            ObjectNode response = objectMapper.createObjectNode();
+            response.put("thingName", thing.getThingName());
+            response.put("thingArn", thing.getThingArn());
+            response.put("version", thing.getVersion());
+            return Response.ok(response).build();
+        } catch (JsonProcessingException e) {
+            throw new AwsException("InvalidRequestException", e.getMessage(), 400);
+        }
     }
 
     @DELETE
     @Path("/things/{thingName}")
     public Response deleteThing(@PathParam("thingName") String thingName,
+                                @QueryParam("expectedVersion") Long expectedVersion,
                                 @Context HttpHeaders headers) {
         String region = regionResolver.resolveRegion(headers);
-        iotService.deleteThing(thingName, region);
+        iotService.deleteThing(thingName, expectedVersion, region);
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
@@ -895,15 +906,6 @@ public class IotController {
         }
     }
 
-    private Long parseExpectedVersion(String body) {
-        try {
-            JsonNode request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
-            return request.hasNonNull("expectedVersion") ? request.path("expectedVersion").asLong() : null;
-        } catch (JsonProcessingException e) {
-            throw new AwsException("InvalidRequestException", e.getMessage(), 400);
-        }
-    }
-
     private String parseThingTypeName(String body) {
         try {
             JsonNode request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
@@ -1223,7 +1225,7 @@ public class IotController {
 
     private void putEpoch(ObjectNode node, String field, Instant instant) {
         if (instant != null) {
-            node.put(field, instant.toEpochMilli() / 1000.0);
+            node.put(field, EpochSeconds.fromInstant(instant));
         }
     }
 

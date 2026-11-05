@@ -365,7 +365,7 @@ class RedshiftOperationsTest {
                 .masterUserPassword(PASSWORD)
                 .build());
         clustersToCleanup.add(clusterId);
-        String arn = "arn:aws:redshift:us-east-1:000000000000:cluster:" + clusterId;
+        String arn = TestFixtures.arn("redshift", "000000000000", "cluster:" + clusterId);
 
         client.createTags(CreateTagsRequest.builder()
                 .resourceName(arn)
@@ -388,7 +388,7 @@ class RedshiftOperationsTest {
                 .build());
         assertThat(modified.cluster().nodeType()).isEqualTo("ra3.xlplus");
 
-        String roleArn = "arn:aws:iam::000000000000:role/rs-copy-role";
+        String roleArn = TestFixtures.globalArn("iam", "000000000000", "role/rs-copy-role");
         ModifyClusterIamRolesResponse withRole = client.modifyClusterIamRoles(ModifyClusterIamRolesRequest.builder()
                 .clusterIdentifier(clusterId)
                 .addIamRoles(roleArn)

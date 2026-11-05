@@ -1,970 +1,592 @@
 package io.github.hectorvent.floci.services.ec2;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.CidrCanonicalizer;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.acm.AcmService;
-import io.github.hectorvent.floci.services.ec2.model.ClientVpnAuthentication;
-import io.github.hectorvent.floci.services.ec2.model.ClientVpnAuthorizationRule;
+import io.github.hectorvent.floci.services.acm.model.Certificate;
 import io.github.hectorvent.floci.services.ec2.model.ClientVpnEndpoint;
-import io.github.hectorvent.floci.services.ec2.model.ClientVpnRoute;
-import io.github.hectorvent.floci.services.ec2.model.ClientVpnTargetNetwork;
+import io.github.hectorvent.floci.services.ec2.model.ClientVpnEndpoint.AuthorizationRule;
+import io.github.hectorvent.floci.services.ec2.model.ClientVpnEndpoint.Route;
+import io.github.hectorvent.floci.services.ec2.model.ClientVpnEndpoint.TargetNetwork;
 import io.github.hectorvent.floci.services.ec2.model.SecurityGroup;
 import io.github.hectorvent.floci.services.ec2.model.Subnet;
 import io.github.hectorvent.floci.services.ec2.model.Tag;
-import io.github.hectorvent.floci.services.ec2.model.Vpc;
 import jakarta.enterprise.context.ApplicationScoped;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
 import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.HashSet;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static io.github.hectorvent.floci.services.ec2.Ec2Ids.randomHex;
 
 /**
- * AWS Client VPN control plane: endpoints, target network associations, ingress authorization
- * rules and routes.
+ * EC2 Client VPN: endpoints, their target network associations, authorization rules and routes, and
+ * the client configuration export. A configuration registry: no VPN server runs, so clients cannot
+ * connect. Associations, rules and routes settle at once in the state AWS reaches after its
+ * transitional one.
  *
- * <p>Transitional states are reported in the mutation responses exactly as AWS returns them
- * ({@code associating}, {@code authorizing}, {@code creating}, {@code deleting}, ...), while the
- * stored state settles immediately: describes return {@code associated} / {@code active}, and a
- * deleted endpoint, association, rule or route is gone from the next describe. No VPN data plane
- * runs; clients cannot connect.
+ * <p>An endpoint's target networks, authorization rules and routes are replaced, never changed in
+ * place, so a describe reading them while another request writes sees one whole list or the other.
+ * An association pins its subnet and VPC, as the network interface AWS places in the subnet does:
+ * {@code DeleteSubnet} and {@code DeleteVpc} refuse them until it is disassociated.
  */
 @ApplicationScoped
-public class Ec2ClientVpnService {
+public class Ec2ClientVpnService implements VpcDependencyProvider {
 
     static final String ENDPOINT_PREFIX = "cvpn-endpoint-";
-    private static final Set<String> AUTHENTICATION_TYPES = Set.of(
-            "certificate-authentication", "directory-service-authentication", "federated-authentication");
-    private static final Set<String> IP_ADDRESS_TYPES = Set.of("ipv4", "ipv6", "dual-stack");
-    private static final Set<Integer> SESSION_TIMEOUT_HOURS = Set.of(8, 10, 12, 24);
-    private static final Set<String> ENDPOINT_FILTERS = Set.of("endpoint-id", "transport-protocol", "tag-key", "tag-value");
-    private static final Set<String> TARGET_NETWORK_FILTERS = Set.of("association-id", "target-network-id", "vpc-id");
-    private static final Set<String> AUTHORIZATION_RULE_FILTERS = Set.of("description", "destination-cidr", "group-id");
-    private static final Set<String> ROUTE_FILTERS = Set.of("destination-cidr", "origin", "target-subnet");
-    private static final Pattern CERTIFICATE_ARN =
-            Pattern.compile("arn:aws[a-z-]*:acm:([a-z0-9-]+):\\d{12}:certificate/[A-Za-z0-9-]+");
-    private static final DateTimeFormatter LOG_STREAM_DATE = DateTimeFormatter.ofPattern("yyyy/MM/dd")
-            .withZone(ZoneOffset.UTC);
+    private static final String ASSOCIATION_PREFIX = "cvpn-assoc-";
+    private static final Pattern ENDPOINT_ID = Pattern.compile("cvpn-endpoint-[0-9a-f]{8,17}");
+    private static final String ORIGIN_ASSOCIATE = "associate";
+    private static final String ORIGIN_ADD_ROUTE = "add-route";
+    private static final int DEFAULT_VPN_PORT = 443;
+    private static final int DEFAULT_SESSION_TIMEOUT_HOURS = 24;
 
-    private static final ObjectMapper MAPPER = new ObjectMapper();
-
-    private final Ec2Service ec2;
-    // region::clientVpnEndpointId -> endpoint and its sub-resources
     private final StorageBackend<String, ClientVpnEndpoint> endpoints;
-    private final Supplier<AcmService> acm;
-    private final Object lock = new Object();
-
-    /** Every setting of CreateClientVpnEndpoint and ModifyClientVpnEndpoint; null means omitted. */
-    public static final class EndpointSettings {
-        public String clientCidrBlock;
-        public String serverCertificateArn;
-        public List<ClientVpnAuthentication> authenticationOptions = new ArrayList<>();
-        public Boolean connectionLogEnabled;
-        public String connectionLogGroup;
-        public String connectionLogStream;
-        /** ModifyClientVpnEndpoint's DnsServers.Enabled; CreateClientVpnEndpoint leaves it null. */
-        public Boolean dnsServersEnabled;
-        public List<String> dnsServers;
-        public String transportProtocol;
-        public Integer vpnPort;
-        public String description;
-        public Boolean splitTunnel;
-        public List<String> securityGroupIds = new ArrayList<>();
-        public String vpcId;
-        public String selfServicePortal;
-        public Boolean clientConnectEnabled;
-        public String clientConnectLambdaFunctionArn;
-        public Integer sessionTimeoutHours;
-        public Boolean clientLoginBannerEnabled;
-        public String clientLoginBannerText;
-        public Boolean clientRouteEnforced;
-        public Boolean disconnectOnSessionTimeout;
-        public String endpointIpAddressType;
-        public String trafficIpAddressType;
-        public boolean transitGatewayConfiguration;
-        public String clientToken;
-    }
+    private final Ec2Service ec2;
+    private final AcmService acm;
 
     @Inject
-    public Ec2ClientVpnService(Ec2Service ec2, StorageFactory storageFactory, Instance<AcmService> acm) {
-        this(ec2, storageFactory.create("ec2", "ec2-client-vpn-endpoints.json",
-                        new TypeReference<Map<String, ClientVpnEndpoint>>() {}),
-                () -> acm != null && acm.isResolvable() ? acm.get() : null);
+    public Ec2ClientVpnService(StorageFactory storageFactory, Ec2Service ec2, AcmService acm) {
+        this(storageFactory.create("ec2", "ec2-client-vpn-endpoints.json",
+                new TypeReference<Map<String, ClientVpnEndpoint>>() {}), ec2, acm);
     }
 
-    // Package-private for hermetic tests. A null ACM supplier result validates certificate ARNs by format only.
-    Ec2ClientVpnService(Ec2Service ec2, StorageBackend<String, ClientVpnEndpoint> endpoints,
-                        Supplier<AcmService> acm) {
-        this.ec2 = ec2;
+    Ec2ClientVpnService(StorageBackend<String, ClientVpnEndpoint> endpoints, Ec2Service ec2, AcmService acm) {
         this.endpoints = endpoints;
+        this.ec2 = ec2;
         this.acm = acm;
     }
 
-    // ─── Endpoints ──────────────────────────────────────────────────────────
+    /** What CreateClientVpnEndpoint takes; null members take AWS's defaults. */
+    public record EndpointRequest(String clientCidrBlock, String serverCertificateArn,
+                                  List<ClientVpnEndpoint.Authentication> authentication,
+                                  Boolean connectionLogEnabled, String connectionLogGroup,
+                                  String connectionLogStream, List<String> dnsServers, String transportProtocol,
+                                  Integer vpnPort, String description, Boolean splitTunnel,
+                                  List<String> securityGroupIds, String vpcId, String selfServicePortal,
+                                  Boolean clientConnectEnabled, String clientConnectLambdaFunctionArn,
+                                  Integer sessionTimeoutHours, Boolean clientLoginBannerEnabled,
+                                  String clientLoginBannerText, Boolean clientRouteEnforced,
+                                  Boolean disconnectOnSessionTimeout, String clientToken) {}
 
-    public ClientVpnEndpoint createEndpoint(String region, EndpointSettings request) {
-        synchronized (lock) {
-            if (request.clientToken != null && !request.clientToken.isBlank()) {
-                Optional<ClientVpnEndpoint> replay = regionEndpoints(region).stream()
-                        .filter(endpoint -> request.clientToken.equals(endpoint.getClientToken()))
-                        .findFirst();
-                if (replay.isPresent()) {
-                    return replay.get();
-                }
-            }
-            rejectTransitGatewayConfiguration(request);
-            requireParameter(request.serverCertificateArn, "ServerCertificateArn");
-            if (request.authenticationOptions.isEmpty()) {
-                throw new AwsException("MissingParameter",
-                        "The request must contain the parameter AuthenticationOptions", 400);
-            }
-            validateAuthentication(request.authenticationOptions);
-            String trafficType = orDefault(request.trafficIpAddressType, "ipv4");
-            String endpointType = orDefault(request.endpointIpAddressType, "ipv4");
-            requireOneOf(trafficType, IP_ADDRESS_TYPES, "TrafficIpAddressType");
-            requireOneOf(endpointType, IP_ADDRESS_TYPES, "EndpointIpAddressType");
-            if (!"ipv6".equals(trafficType)) {
-                requireParameter(request.clientCidrBlock, "ClientCidrBlock");
-            }
-            if (request.clientCidrBlock != null) {
-                validateClientCidr(request.clientCidrBlock);
-            }
-            String transport = orDefault(request.transportProtocol, "udp");
-            requireOneOf(transport, Set.of("udp", "tcp"), "TransportProtocol");
-            int vpnPort = validVpnPort(request.vpnPort == null ? 443 : request.vpnPort);
-            List<String> dnsServers = validDnsServers(request.dnsServers == null ? List.of() : request.dnsServers);
-            int sessionTimeout = validSessionTimeout(request.sessionTimeoutHours == null ? 24 : request.sessionTimeoutHours);
-            String portal = orDefault(request.selfServicePortal, "disabled");
-            requireOneOf(portal, Set.of("enabled", "disabled"), "SelfServicePortal");
-            validateDescription(request.description);
+    // ── Endpoints ──
 
-            List<String> securityGroupIds = List.of();
-            if (!request.securityGroupIds.isEmpty() && request.vpcId == null) {
-                throw new AwsException("InvalidParameterValue",
-                        "VpcId must be specified when SecurityGroupIds are specified", 400);
+    public synchronized ClientVpnEndpoint createEndpoint(String region, EndpointRequest request, List<Tag> tags) {
+        if (request.clientToken() != null) {
+            Optional<ClientVpnEndpoint> replay = all(region).stream()
+                    .filter(endpoint -> request.clientToken().equals(endpoint.getClientToken()))
+                    .findFirst();
+            if (replay.isPresent()) {
+                return replay.get();
             }
-            if (request.vpcId != null) {
-                requireVpc(region, request.vpcId);
-                securityGroupIds = resolveSecurityGroups(region, request.vpcId, request.securityGroupIds);
-            }
-
-            String id = ENDPOINT_PREFIX + randomHex(17);
-            ClientVpnEndpoint endpoint = new ClientVpnEndpoint();
-            endpoint.setClientVpnEndpointId(id);
-            endpoint.setRegion(region);
-            endpoint.setOwnerId(ec2.callerAccountId());
-            endpoint.setStatus("pending-associate");
-            endpoint.setCreationTime(Instant.now().truncatedTo(ChronoUnit.SECONDS).toString());
-            endpoint.setDnsName("*." + id + ".prod.clientvpn." + region + ".amazonaws.com");
-            endpoint.setClientCidrBlock(request.clientCidrBlock);
-            endpoint.setDnsServers(new ArrayList<>(dnsServers));
-            endpoint.setSplitTunnel(Boolean.TRUE.equals(request.splitTunnel));
-            endpoint.setTransportProtocol(transport);
-            endpoint.setVpnPort(vpnPort);
-            endpoint.setAuthenticationOptions(new ArrayList<>(request.authenticationOptions));
-            endpoint.setSecurityGroupIds(new ArrayList<>(securityGroupIds));
-            endpoint.setVpcId(request.vpcId);
-            endpoint.setSelfServicePortal(portal);
-            endpoint.setSessionTimeoutHours(sessionTimeout);
-            endpoint.setDisconnectOnSessionTimeout(Boolean.TRUE.equals(request.disconnectOnSessionTimeout));
-            endpoint.setClientRouteEnforced(Boolean.TRUE.equals(request.clientRouteEnforced));
-            endpoint.setEndpointIpAddressType(endpointType);
-            endpoint.setTrafficIpAddressType(trafficType);
-            endpoint.setDescription(request.description);
-            endpoint.setClientToken(request.clientToken);
-            applyConnectionLog(endpoint, region, request.connectionLogEnabled, request.connectionLogGroup,
-                    request.connectionLogStream);
-            applyClientConnect(endpoint, request.clientConnectEnabled, request.clientConnectLambdaFunctionArn);
-            applyLoginBanner(endpoint, request.clientLoginBannerEnabled, request.clientLoginBannerText);
-
-            String arn = endpointArn(endpoint);
-            List<String> certificates = certificateArns(request.serverCertificateArn, request.authenticationOptions);
-            for (String certificate : certificates) {
-                requireCertificate(region, certificate);
-            }
-            endpoint.setServerCertificateArn(request.serverCertificateArn);
-            for (String certificate : certificates) {
-                markCertificateInUse(region, certificate, arn);
-            }
-            endpoints.put(key(region, id), endpoint);
-            return endpoint;
         }
-    }
-
-    public List<ClientVpnEndpoint> describeEndpoints(String region, List<String> endpointIds,
-                                                     Map<String, List<String>> filters) {
-        requireSupportedFilters(filters, ENDPOINT_FILTERS, true);
-        for (String endpointId : endpointIds) {
-            requireEndpoint(region, endpointId);
+        if (request.clientCidrBlock() == null || !Ipv4Cidrs.isIpv4(request.clientCidrBlock())) {
+            throw invalid("ClientCidrBlock must be an IPv4 CIDR block.");
         }
-        return regionEndpoints(region).stream()
-                .filter(endpoint -> endpointIds.isEmpty() || endpointIds.contains(endpoint.getClientVpnEndpointId()))
-                .filter(endpoint -> filters.entrySet().stream().allMatch(filter -> {
-                    List<String> values = filter.getValue();
-                    List<Tag> tags = tags(endpoint);
-                    return switch (filter.getKey()) {
-                        case "endpoint-id" -> matchesAny(values, endpoint.getClientVpnEndpointId());
-                        case "transport-protocol" -> matchesAny(values, endpoint.getTransportProtocol());
-                        case "tag-key" -> tags.stream().anyMatch(tag -> matchesAny(values, tag.getKey()));
-                        case "tag-value" -> tags.stream().anyMatch(tag -> matchesAny(values, tag.getValue()));
-                        default -> {
-                            String tagKey = filter.getKey().substring("tag:".length());
-                            yield tags.stream().anyMatch(tag -> tagKey.equals(tag.getKey())
-                                    && matchesAny(values, tag.getValue()));
-                        }
-                    };
-                }))
-                .collect(Collectors.toList());
-    }
-
-    public void modifyEndpoint(String region, String endpointId, EndpointSettings changes) {
-        synchronized (lock) {
-            ClientVpnEndpoint endpoint = copy(requireEndpoint(region, endpointId));
-            rejectTransitGatewayConfiguration(changes);
-            String arn = endpointArn(endpoint);
-
-            if (changes.serverCertificateArn != null) {
-                requireCertificate(region, changes.serverCertificateArn);
-            }
-            if (changes.vpnPort != null) {
-                validVpnPort(changes.vpnPort);
-            }
-            if (changes.sessionTimeoutHours != null) {
-                validSessionTimeout(changes.sessionTimeoutHours);
-            }
-            if (changes.selfServicePortal != null) {
-                requireOneOf(changes.selfServicePortal, Set.of("enabled", "disabled"), "SelfServicePortal");
-            }
-            validateDescription(changes.description);
-            // Everything is validated before the stored record is touched, so a rejected
-            // modification leaves the endpoint unchanged.
-            if (Boolean.TRUE.equals(changes.connectionLogEnabled)) {
-                requireParameter(changes.connectionLogGroup, "ConnectionLogOptions.CloudwatchLogGroup");
-            }
-            if (Boolean.TRUE.equals(changes.clientConnectEnabled)) {
-                requireParameter(changes.clientConnectLambdaFunctionArn, "ClientConnectOptions.LambdaFunctionArn");
-            }
-            if (Boolean.TRUE.equals(changes.clientLoginBannerEnabled)) {
-                validateBannerText(changes.clientLoginBannerText);
-            }
-            List<String> dnsServers = null;
-            if (changes.dnsServersEnabled != null) {
-                dnsServers = changes.dnsServersEnabled
-                        ? validDnsServers(changes.dnsServers == null ? List.of() : changes.dnsServers)
-                        : List.of();
-            }
-
-            String vpcId = endpoint.getVpcId();
-            List<String> securityGroupIds = null;
-            if (!changes.securityGroupIds.isEmpty() && changes.vpcId == null) {
-                throw new AwsException("InvalidParameterValue",
-                        "VpcId must be specified when SecurityGroupIds are specified", 400);
-            }
-            if (changes.vpcId != null) {
-                if (!changes.vpcId.equals(endpoint.getVpcId()) && hasActiveAssociations(endpoint)) {
-                    throw new AwsException("InvalidParameterValue", "Cannot change the VPC of Client VPN endpoint "
-                            + endpointId + " while it has associated target networks", 400);
-                }
-                requireVpc(region, changes.vpcId);
-                vpcId = changes.vpcId;
-                securityGroupIds = resolveSecurityGroups(region, vpcId, changes.securityGroupIds);
-            }
-
-            ClientVpnEndpoint updated = endpoint;
-            applyConnectionLog(updated, region, changes.connectionLogEnabled,
-                    changes.connectionLogGroup, changes.connectionLogStream);
-            applyClientConnect(updated, changes.clientConnectEnabled, changes.clientConnectLambdaFunctionArn);
-            applyLoginBanner(updated, changes.clientLoginBannerEnabled, changes.clientLoginBannerText);
-
-            if (changes.serverCertificateArn != null
-                    && !changes.serverCertificateArn.equals(updated.getServerCertificateArn())) {
-                String previous = updated.getServerCertificateArn();
-                updated.setServerCertificateArn(changes.serverCertificateArn);
-                markCertificateInUse(region, changes.serverCertificateArn, arn);
-                if (!certificateArns(updated.getServerCertificateArn(), updated.getAuthenticationOptions())
-                        .contains(previous)) {
-                    releaseCertificate(region, previous, arn);
-                }
-            }
-            if (dnsServers != null) {
-                updated.setDnsServers(new ArrayList<>(dnsServers));
-            }
-            if (changes.vpnPort != null) {
-                updated.setVpnPort(changes.vpnPort);
-            }
-            if (changes.description != null) {
-                updated.setDescription(changes.description);
-            }
-            if (changes.splitTunnel != null) {
-                updated.setSplitTunnel(changes.splitTunnel);
-            }
-            if (securityGroupIds != null) {
-                updated.setVpcId(vpcId);
-                updated.setSecurityGroupIds(new ArrayList<>(securityGroupIds));
-            }
-            if (changes.selfServicePortal != null) {
-                updated.setSelfServicePortal(changes.selfServicePortal);
-            }
-            if (changes.sessionTimeoutHours != null) {
-                updated.setSessionTimeoutHours(changes.sessionTimeoutHours);
-            }
-            if (changes.clientRouteEnforced != null) {
-                updated.setClientRouteEnforced(changes.clientRouteEnforced);
-            }
-            if (changes.disconnectOnSessionTimeout != null) {
-                updated.setDisconnectOnSessionTimeout(changes.disconnectOnSessionTimeout);
-            }
-            endpoints.put(key(region, endpointId), updated);
+        if (blank(request.serverCertificateArn())) {
+            throw missing("ServerCertificateArn");
         }
-    }
-
-    /** Deletes the endpoint and returns it as it was; AWS reports it {@code deleting}. */
-    public ClientVpnEndpoint deleteEndpoint(String region, String endpointId) {
-        synchronized (lock) {
-            ClientVpnEndpoint endpoint = copy(requireEndpoint(region, endpointId));
-            if (hasActiveAssociations(endpoint)) {
-                throw new AwsException("DependencyViolation", "Client VPN endpoint " + endpointId
-                        + " has associated target networks. Disassociate them before deleting the endpoint.", 400);
-            }
-            endpoints.delete(key(region, endpointId));
-            ec2.deleteResourceTags(region, endpointId);
-            String arn = endpointArn(endpoint);
-            for (String certificate : certificateArns(endpoint.getServerCertificateArn(),
-                    endpoint.getAuthenticationOptions())) {
-                releaseCertificate(region, certificate, arn);
-            }
-            return endpoint;
+        if (request.authentication() == null || request.authentication().isEmpty()) {
+            throw missing("Authentication");
         }
-    }
-
-    public ClientVpnEndpoint requireEndpoint(String region, String endpointId) {
-        if (endpointId == null || endpointId.isBlank()) {
-            throw new AwsException("MissingParameter", "The request must contain the parameter ClientVpnEndpointId", 400);
+        if (request.connectionLogEnabled() == null) {
+            throw missing("ConnectionLogOptions.Enabled");
         }
-        return endpoints.get(key(region, endpointId)).orElseThrow(() -> new AwsException(
-                "InvalidClientVpnEndpointId.NotFound",
-                "The Client VPN endpoint ID '" + endpointId + "' does not exist", 400));
+        String transport = Objects.requireNonNullElse(request.transportProtocol(), "udp");
+        if (!transport.equals("udp") && !transport.equals("tcp")) {
+            throw invalid("TransportProtocol must be udp or tcp.");
+        }
+        List<String> securityGroups = request.securityGroupIds() == null ? List.of() : request.securityGroupIds();
+        if (!securityGroups.isEmpty() && blank(request.vpcId())) {
+            throw invalid("VpcId is required when SecurityGroupIds are specified.");
+        }
+        String vpcId = request.vpcId();
+        if (vpcId != null) {
+            ec2.requireVpc(region, vpcId);
+            securityGroups = securityGroupsOf(region, vpcId, securityGroups);
+        }
+
+        ClientVpnEndpoint endpoint = new ClientVpnEndpoint();
+        endpoint.setClientVpnEndpointId(ENDPOINT_PREFIX + randomHex(17));
+        endpoint.setDescription(request.description());
+        endpoint.setCreationTime(Instant.now());
+        endpoint.setClientCidrBlock(request.clientCidrBlock());
+        endpoint.setServerCertificateArn(request.serverCertificateArn());
+        endpoint.setAuthentication(new ArrayList<>(request.authentication()));
+        endpoint.setConnectionLogEnabled(request.connectionLogEnabled());
+        endpoint.setConnectionLogGroup(request.connectionLogGroup());
+        endpoint.setConnectionLogStream(request.connectionLogStream());
+        endpoint.setDnsServers(request.dnsServers() == null ? null : new ArrayList<>(request.dnsServers()));
+        endpoint.setTransportProtocol(transport);
+        endpoint.setVpnPort(Objects.requireNonNullElse(request.vpnPort(), DEFAULT_VPN_PORT));
+        endpoint.setSplitTunnel(Boolean.TRUE.equals(request.splitTunnel()));
+        endpoint.setVpcId(vpcId);
+        endpoint.setSecurityGroupIds(new ArrayList<>(securityGroups));
+        endpoint.setSelfServicePortal(Objects.requireNonNullElse(request.selfServicePortal(), "disabled"));
+        endpoint.setClientConnectEnabled(Boolean.TRUE.equals(request.clientConnectEnabled()));
+        endpoint.setClientConnectLambdaFunctionArn(request.clientConnectLambdaFunctionArn());
+        endpoint.setSessionTimeoutHours(Objects.requireNonNullElse(request.sessionTimeoutHours(),
+                DEFAULT_SESSION_TIMEOUT_HOURS));
+        endpoint.setClientLoginBannerEnabled(Boolean.TRUE.equals(request.clientLoginBannerEnabled()));
+        endpoint.setClientLoginBannerText(request.clientLoginBannerText());
+        endpoint.setClientRouteEnforced(Boolean.TRUE.equals(request.clientRouteEnforced()));
+        endpoint.setDisconnectOnSessionTimeout(Boolean.TRUE.equals(request.disconnectOnSessionTimeout()));
+        endpoint.setEndpointIpAddressType("ipv4");
+        endpoint.setTrafficIpAddressType("ipv4");
+        endpoint.setClientToken(request.clientToken());
+        endpoints.put(key(region, endpoint.getClientVpnEndpointId()), endpoint);
+        if (tags != null && !tags.isEmpty()) {
+            ec2.createTags(region, List.of(endpoint.getClientVpnEndpointId()), tags);
+        }
+        return endpoint;
     }
 
-    public List<Tag> tags(ClientVpnEndpoint endpoint) {
-        return ec2.resourceTags(endpoint.getRegion(), endpoint.getClientVpnEndpointId());
+    /** The endpoints the ids name, or all of them; an unknown or malformed id is refused, as AWS does. */
+    public synchronized List<ClientVpnEndpoint> describeEndpoints(String region, List<String> ids) {
+        if (ids == null || ids.isEmpty()) {
+            return all(region);
+        }
+        List<ClientVpnEndpoint> found = new ArrayList<>();
+        for (String id : ids) {
+            found.add(require(region, id));
+        }
+        return found;
     }
 
-    public String endpointArn(ClientVpnEndpoint endpoint) {
-        return AwsArnUtils.Arn.of("ec2", endpoint.getRegion(), endpoint.getOwnerId(),
-                "client-vpn-endpoint/" + endpoint.getClientVpnEndpointId()).toString();
+    /** What ModifyClientVpnEndpoint changes; null members are left as they are. */
+    public record EndpointChange(String serverCertificateArn, Boolean connectionLogEnabled, String connectionLogGroup,
+                                 String connectionLogStream, Boolean dnsServersEnabled, List<String> dnsServers,
+                                 Integer vpnPort, String description, Boolean splitTunnel,
+                                 List<String> securityGroupIds, String vpcId, String selfServicePortal,
+                                 Boolean clientConnectEnabled, String clientConnectLambdaFunctionArn,
+                                 Integer sessionTimeoutHours, Boolean clientLoginBannerEnabled,
+                                 String clientLoginBannerText, Boolean clientRouteEnforced,
+                                 Boolean disconnectOnSessionTimeout) {}
+
+    public synchronized void modifyEndpoint(String region, String id, EndpointChange change) {
+        ClientVpnEndpoint endpoint = require(region, id);
+        String vpcId = change.vpcId() != null ? change.vpcId() : endpoint.getVpcId();
+        if (change.vpcId() != null && !change.vpcId().equals(endpoint.getVpcId())) {
+            ec2.requireVpc(region, change.vpcId());
+            if (!endpoint.getTargetNetworks().isEmpty()) {
+                throw invalid("The VPC of an endpoint with associated target networks cannot be changed.");
+            }
+        }
+        List<String> securityGroups = null;
+        if (change.securityGroupIds() != null || change.vpcId() != null) {
+            if (vpcId == null) {
+                throw invalid("VpcId is required when SecurityGroupIds are specified.");
+            }
+            securityGroups = securityGroupsOf(region, vpcId,
+                    change.securityGroupIds() != null ? change.securityGroupIds() : List.of());
+        }
+        if (change.serverCertificateArn() != null) {
+            endpoint.setServerCertificateArn(change.serverCertificateArn());
+        }
+        if (change.connectionLogEnabled() != null) {
+            endpoint.setConnectionLogEnabled(change.connectionLogEnabled());
+            endpoint.setConnectionLogGroup(change.connectionLogGroup());
+            endpoint.setConnectionLogStream(change.connectionLogStream());
+        }
+        if (Boolean.FALSE.equals(change.dnsServersEnabled())) {
+            endpoint.setDnsServers(null);
+        } else if (change.dnsServers() != null) {
+            endpoint.setDnsServers(new ArrayList<>(change.dnsServers()));
+        }
+        if (change.vpnPort() != null) {
+            endpoint.setVpnPort(change.vpnPort());
+        }
+        if (change.description() != null) {
+            endpoint.setDescription(change.description());
+        }
+        if (change.splitTunnel() != null) {
+            endpoint.setSplitTunnel(change.splitTunnel());
+        }
+        if (securityGroups != null) {
+            endpoint.setVpcId(vpcId);
+            endpoint.setSecurityGroupIds(new ArrayList<>(securityGroups));
+        }
+        if (change.selfServicePortal() != null) {
+            endpoint.setSelfServicePortal(change.selfServicePortal());
+        }
+        if (change.clientConnectEnabled() != null) {
+            endpoint.setClientConnectEnabled(change.clientConnectEnabled());
+            endpoint.setClientConnectLambdaFunctionArn(change.clientConnectLambdaFunctionArn());
+        }
+        if (change.sessionTimeoutHours() != null) {
+            endpoint.setSessionTimeoutHours(change.sessionTimeoutHours());
+        }
+        if (change.clientLoginBannerEnabled() != null) {
+            endpoint.setClientLoginBannerEnabled(change.clientLoginBannerEnabled());
+            endpoint.setClientLoginBannerText(change.clientLoginBannerText());
+        }
+        if (change.clientRouteEnforced() != null) {
+            endpoint.setClientRouteEnforced(change.clientRouteEnforced());
+        }
+        if (change.disconnectOnSessionTimeout() != null) {
+            endpoint.setDisconnectOnSessionTimeout(change.disconnectOnSessionTimeout());
+        }
+        endpoints.put(key(region, id), endpoint);
     }
+
+    /** Refused while target networks are associated, as AWS requires them disassociated first. */
+    public synchronized void deleteEndpoint(String region, String id) {
+        ClientVpnEndpoint endpoint = require(region, id);
+        if (!endpoint.getTargetNetworks().isEmpty()) {
+            throw new AwsException("IncorrectState",
+                    "Client VPN endpoint " + id + " has associated target networks; disassociate them first.", 400);
+        }
+        endpoints.delete(key(region, id));
+        ec2.deleteTags(region, List.of(id), List.of());
+    }
+
+    /** {@code pending-associate} until a target network is associated, then {@code available}. */
+    public static String statusOf(ClientVpnEndpoint endpoint) {
+        return endpoint.getTargetNetworks().isEmpty() ? "pending-associate" : "available";
+    }
+
+    /** {@code *.cvpn-endpoint-<id>.prod.clientvpn.<region>.<dns suffix>}, as AWS names it. */
+    public static String dnsNameOf(ClientVpnEndpoint endpoint, String region) {
+        return "*." + endpoint.getClientVpnEndpointId() + ".prod.clientvpn." + region + "."
+                + AwsRegions.dnsSuffixFor(region);
+    }
+
+    // ── Target networks ──
 
     /**
-     * The Client VPN endpoint that keeps {@code resourceId} (a subnet, security group or VPC) in
-     * use, if any. AWS refuses to delete such a resource with {@code DependencyViolation}.
+     * Associates a subnet of the endpoint's VPC (or, for an endpoint without one, sets the VPC and its
+     * default security group), one per Availability Zone, and adds the route to the VPC through it.
      */
-    public Optional<String> dependentEndpoint(String region, String resourceId) {
-        if (resourceId == null) {
+    public synchronized TargetNetwork associate(String region, String id, String subnetId, String clientToken) {
+        // Held while the subnet is checked and the association saved, so a DeleteSubnet cannot pass its
+        // dependency check in between.
+        return ec2.supplyWithSubnetReferencesHeld(region, () -> associateWithSubnetsHeld(region, id, subnetId,
+                clientToken));
+    }
+
+    private TargetNetwork associateWithSubnetsHeld(String region, String id, String subnetId, String clientToken) {
+        ClientVpnEndpoint endpoint = require(region, id);
+        if (clientToken != null) {
+            Optional<TargetNetwork> replay = endpoint.getTargetNetworks().stream()
+                    .filter(network -> clientToken.equals(network.getClientToken())).findFirst();
+            if (replay.isPresent()) {
+                return replay.get();
+            }
+        }
+        if (blank(subnetId)) {
+            throw missing("SubnetId");
+        }
+        Subnet subnet = ec2.requireSubnet(region, subnetId);
+        if (endpoint.getVpcId() != null && !endpoint.getVpcId().equals(subnet.getVpcId())) {
+            throw invalid("Subnet " + subnetId + " is not in the endpoint's VPC " + endpoint.getVpcId() + ".");
+        }
+        for (TargetNetwork network : endpoint.getTargetNetworks()) {
+            if (network.getSubnetId().equals(subnetId)) {
+                throw invalid("Subnet " + subnetId + " is already associated with " + id + ".");
+            }
+            if (Objects.equals(network.getAvailabilityZone(), subnet.getAvailabilityZone())) {
+                throw invalid("A subnet in Availability Zone " + subnet.getAvailabilityZone()
+                        + " is already associated with " + id + ".");
+            }
+        }
+        if (endpoint.getVpcId() == null) {
+            endpoint.setVpcId(subnet.getVpcId());
+            endpoint.setSecurityGroupIds(new ArrayList<>(securityGroupsOf(region, subnet.getVpcId(), List.of())));
+        }
+        TargetNetwork network = new TargetNetwork();
+        network.setAssociationId(ASSOCIATION_PREFIX + randomHex(17));
+        network.setSubnetId(subnetId);
+        network.setVpcId(subnet.getVpcId());
+        network.setAvailabilityZone(subnet.getAvailabilityZone());
+        network.setClientToken(clientToken);
+        endpoint.setTargetNetworks(with(endpoint.getTargetNetworks(), network));
+
+        Route route = new Route();
+        route.setDestinationCidr(ec2.requireVpc(region, subnet.getVpcId()).getCidrBlock());
+        route.setTargetSubnet(subnetId);
+        route.setOrigin(ORIGIN_ASSOCIATE);
+        route.setDescription("Default Route");
+        endpoint.setRoutes(with(endpoint.getRoutes(), route));
+        endpoints.put(key(region, id), endpoint);
+        return network;
+    }
+
+    public synchronized List<TargetNetwork> describeTargetNetworks(String region, String id, List<String> associationIds) {
+        ClientVpnEndpoint endpoint = require(region, id);
+        if (associationIds == null || associationIds.isEmpty()) {
+            return endpoint.getTargetNetworks();
+        }
+        return endpoint.getTargetNetworks().stream()
+                .filter(network -> associationIds.contains(network.getAssociationId())).toList();
+    }
+
+    /** Removes the association and every route through its subnet. */
+    public synchronized TargetNetwork disassociate(String region, String id, String associationId) {
+        ClientVpnEndpoint endpoint = require(region, id);
+        TargetNetwork network = endpoint.getTargetNetworks().stream()
+                .filter(candidate -> candidate.getAssociationId().equals(associationId)).findFirst()
+                .orElseThrow(() -> new AwsException("InvalidClientVpnAssociationId.NotFound",
+                        "Association " + associationId + " does not exist", 400));
+        endpoint.setTargetNetworks(without(endpoint.getTargetNetworks(), candidate -> candidate == network));
+        endpoint.setRoutes(without(endpoint.getRoutes(),
+                route -> network.getSubnetId().equals(route.getTargetSubnet())));
+        endpoints.put(key(region, id), endpoint);
+        return network;
+    }
+
+    /** Sets the security groups the endpoint applies in its VPC, for every associated network. */
+    public synchronized List<String> applySecurityGroups(String region, String id, String vpcId,
+                                                         List<String> securityGroupIds) {
+        ClientVpnEndpoint endpoint = require(region, id);
+        if (blank(vpcId)) {
+            throw missing("VpcId");
+        }
+        if (securityGroupIds == null || securityGroupIds.isEmpty()) {
+            throw missing("SecurityGroupId");
+        }
+        if (endpoint.getVpcId() != null && !endpoint.getVpcId().equals(vpcId)) {
+            throw invalid("VPC " + vpcId + " is not the endpoint's VPC " + endpoint.getVpcId() + ".");
+        }
+        List<String> groups = securityGroupsOf(region, vpcId, securityGroupIds);
+        endpoint.setVpcId(vpcId);
+        endpoint.setSecurityGroupIds(new ArrayList<>(groups));
+        endpoints.put(key(region, id), endpoint);
+        return groups;
+    }
+
+    // ── Authorization rules ──
+
+    public synchronized void authorize(String region, String id, String targetNetworkCidr, String accessGroupId,
+                                       Boolean authorizeAllGroups, String description) {
+        ClientVpnEndpoint endpoint = require(region, id);
+        requireCidr(targetNetworkCidr, "TargetNetworkCidr");
+        boolean all = Boolean.TRUE.equals(authorizeAllGroups);
+        if (all == !blank(accessGroupId)) {
+            throw invalid("Specify either AccessGroupId or AuthorizeAllGroups.");
+        }
+        boolean exists = endpoint.getAuthorizationRules().stream()
+                .anyMatch(rule -> CidrCanonicalizer.sameBlock(rule.getDestinationCidr(), targetNetworkCidr)
+                        && rule.isAccessAll() == all && Objects.equals(rule.getGroupId(), all ? "" : accessGroupId));
+        if (exists) {
+            throw invalid("An authorization rule for " + targetNetworkCidr + " already exists.");
+        }
+        AuthorizationRule rule = new AuthorizationRule();
+        rule.setDestinationCidr(targetNetworkCidr);
+        rule.setGroupId(all ? "" : accessGroupId);
+        rule.setAccessAll(all);
+        rule.setDescription(description);
+        endpoint.setAuthorizationRules(with(endpoint.getAuthorizationRules(), rule));
+        endpoints.put(key(region, id), endpoint);
+    }
+
+    public synchronized List<AuthorizationRule> describeAuthorizationRules(String region, String id) {
+        return require(region, id).getAuthorizationRules();
+    }
+
+    public synchronized void revoke(String region, String id, String targetNetworkCidr, String accessGroupId,
+                                    Boolean revokeAllGroups) {
+        ClientVpnEndpoint endpoint = require(region, id);
+        requireCidr(targetNetworkCidr, "TargetNetworkCidr");
+        boolean all = Boolean.TRUE.equals(revokeAllGroups);
+        List<AuthorizationRule> kept = without(endpoint.getAuthorizationRules(), rule ->
+                CidrCanonicalizer.sameBlock(rule.getDestinationCidr(), targetNetworkCidr)
+                        && (all ? rule.isAccessAll() : Objects.equals(rule.getGroupId(), accessGroupId)));
+        if (kept.size() == endpoint.getAuthorizationRules().size()) {
+            throw new AwsException("InvalidClientVpnEndpointAuthorizationRuleNotFound",
+                    "Authorization rule for " + targetNetworkCidr + " does not exist", 400);
+        }
+        endpoint.setAuthorizationRules(kept);
+        endpoints.put(key(region, id), endpoint);
+    }
+
+    // ── Routes ──
+
+    /** Adds a route through an associated subnet, or {@code local}. */
+    public synchronized void createRoute(String region, String id, String destinationCidr, String targetSubnet,
+                                         String description) {
+        ClientVpnEndpoint endpoint = require(region, id);
+        requireCidr(destinationCidr, "DestinationCidrBlock");
+        if (blank(targetSubnet)) {
+            throw missing("TargetVpcSubnetId");
+        }
+        boolean associated = "local".equals(targetSubnet) || endpoint.getTargetNetworks().stream()
+                .anyMatch(network -> network.getSubnetId().equals(targetSubnet));
+        if (!associated) {
+            throw invalid("Subnet " + targetSubnet + " is not associated with " + id + ".");
+        }
+        boolean exists = endpoint.getRoutes().stream()
+                .anyMatch(route -> CidrCanonicalizer.sameBlock(route.getDestinationCidr(), destinationCidr)
+                        && route.getTargetSubnet().equals(targetSubnet));
+        if (exists) {
+            throw new AwsException("InvalidClientVpnDuplicateRoute",
+                    "Route " + destinationCidr + " through " + targetSubnet + " already exists", 400);
+        }
+        Route route = new Route();
+        route.setDestinationCidr(destinationCidr);
+        route.setTargetSubnet(targetSubnet);
+        route.setOrigin(ORIGIN_ADD_ROUTE);
+        route.setDescription(description);
+        endpoint.setRoutes(with(endpoint.getRoutes(), route));
+        endpoints.put(key(region, id), endpoint);
+    }
+
+    public synchronized List<Route> describeRoutes(String region, String id) {
+        return require(region, id).getRoutes();
+    }
+
+    /** Removes the matching routes; a route an association added goes with the association only. */
+    public synchronized void deleteRoute(String region, String id, String destinationCidr, String targetSubnet) {
+        ClientVpnEndpoint endpoint = require(region, id);
+        requireCidr(destinationCidr, "DestinationCidrBlock");
+        List<Route> kept = without(endpoint.getRoutes(), route -> ORIGIN_ADD_ROUTE.equals(route.getOrigin())
+                && CidrCanonicalizer.sameBlock(route.getDestinationCidr(), destinationCidr)
+                && (targetSubnet == null || route.getTargetSubnet().equals(targetSubnet)));
+        if (kept.size() == endpoint.getRoutes().size()) {
+            throw new AwsException("InvalidClientVpnRouteNotFound",
+                    "Route " + destinationCidr + " does not exist", 400);
+        }
+        endpoint.setRoutes(kept);
+        endpoints.put(key(region, id), endpoint);
+    }
+
+    // ── Client configuration ──
+
+    /**
+     * The OpenVPN configuration AWS exports: the endpoint's address and port, its transport, the
+     * server certificate's chain as the CA, and its common name to verify. The chain and name come
+     * from the server certificate in ACM; a certificate ACM does not hold leaves them out.
+     */
+    public String exportClientConfiguration(String region, String id) {
+        ClientVpnEndpoint endpoint = require(region, id);
+        Optional<Certificate> certificate = serverCertificate(endpoint, region);
+        StringBuilder config = new StringBuilder()
+                .append("client\n")
+                .append("dev tun\n")
+                .append("proto ").append(endpoint.getTransportProtocol()).append('\n')
+                .append("remote ").append(dnsNameOf(endpoint, region).substring(2)).append(' ')
+                .append(endpoint.getVpnPort()).append('\n')
+                .append("remote-random-hostname\n")
+                .append("resolv-retry infinite\n")
+                .append("nobind\n")
+                .append("remote-cert-tls server\n")
+                .append("cipher AES-256-GCM\n")
+                .append("verb 3\n");
+        certificate.map(Certificate::getCertificateChain).filter(chain -> !chain.isBlank())
+                .ifPresent(chain -> config.append("<ca>\n").append(chain.strip()).append("\n\n</ca>\n\n\n"));
+        config.append("reneg-sec 0\n\n");
+        certificate.map(Certificate::getDomainName).filter(name -> !name.isBlank())
+                .ifPresent(name -> config.append("verify-x509-name ").append(name).append(" name\n\n"));
+        return config.toString();
+    }
+
+    private Optional<Certificate> serverCertificate(ClientVpnEndpoint endpoint, String region) {
+        try {
+            return Optional.ofNullable(acm.getCertificate(endpoint.getServerCertificateArn(), region));
+        } catch (AwsException expected) {
+            // A certificate ACM does not hold: the export goes without the CA. Anything else surfaces.
+            if (!"ResourceNotFoundException".equals(expected.getErrorCode())) {
+                throw expected;
+            }
             return Optional.empty();
         }
-        return regionEndpoints(region).stream()
-                .filter(endpoint -> resourceId.equals(endpoint.getVpcId())
-                        || endpoint.getSecurityGroupIds().contains(resourceId)
-                        || endpoint.getTargetNetworks().stream()
-                                .anyMatch(network -> resourceId.equals(network.getSubnetId())))
-                .map(ClientVpnEndpoint::getClientVpnEndpointId)
-                .findFirst();
     }
 
-    // ─── Target networks ────────────────────────────────────────────────────
+    // ── Helpers ──
 
-    public ClientVpnTargetNetwork associateTargetNetwork(String region, String endpointId, String subnetId,
-                                                         String clientToken) {
-        synchronized (lock) {
-            ClientVpnEndpoint endpoint = copy(requireEndpoint(region, endpointId));
-            if (clientToken != null && !clientToken.isBlank()) {
-                Optional<ClientVpnTargetNetwork> replay = endpoint.getTargetNetworks().stream()
-                        .filter(network -> clientToken.equals(network.getClientToken()))
-                        .findFirst();
-                if (replay.isPresent()) {
-                    return replay.get();
-                }
-            }
-            requireParameter(subnetId, "SubnetId");
-            if (!subnetId.startsWith("subnet-")) {
-                throw new AwsException("InvalidSubnetID.Malformed", "Invalid id: \"" + subnetId + "\"", 400);
-            }
-            Subnet subnet = requireSubnet(region, subnetId);
-            if (endpoint.getTargetNetworks().stream().anyMatch(network -> subnetId.equals(network.getSubnetId()))) {
-                throw new AwsException("InvalidClientVpnDuplicateAssociationException",
-                        "Subnet " + subnetId + " is already associated with Client VPN endpoint " + endpointId, 400);
-            }
-            if (endpoint.getVpcId() != null && !endpoint.getVpcId().equals(subnet.getVpcId())) {
-                throw new AwsException("InvalidParameterValue", "Subnet " + subnetId
-                        + " does not belong to VPC " + endpoint.getVpcId() + " of Client VPN endpoint " + endpointId, 400);
-            }
-            if (endpoint.getTargetNetworks().stream()
-                    .anyMatch(network -> Objects.equals(subnet.getAvailabilityZone(), network.getAvailabilityZone()))) {
-                throw new AwsException("InvalidClientVpnSubnetId.DuplicateAz", "Client VPN endpoint " + endpointId
-                        + " already has a target network in Availability Zone " + subnet.getAvailabilityZone(), 400);
-            }
-            Vpc vpc = requireVpc(region, subnet.getVpcId());
-            if (endpoint.getClientCidrBlock() != null) {
-                for (String vpcCidr : vpcIpv4Cidrs(vpc)) {
-                    if (Ipv4Cidrs.overlaps(vpcCidr, endpoint.getClientCidrBlock())) {
-                        throw new AwsException("InvalidClientVpnSubnetId.OverlappingCidr", "The client CIDR "
-                                + endpoint.getClientCidrBlock() + " overlaps the CIDR " + vpcCidr + " of VPC "
-                                + vpc.getVpcId(), 400);
-                    }
-                }
-            }
-            if (endpoint.getVpcId() == null) {
-                // AWS binds an endpoint created without a VPC to the first associated subnet's VPC.
-                endpoint.setVpcId(vpc.getVpcId());
-                endpoint.setSecurityGroupIds(new ArrayList<>(resolveSecurityGroups(region, vpc.getVpcId(), List.of())));
-            }
-
-            ClientVpnTargetNetwork network = new ClientVpnTargetNetwork();
-            network.setAssociationId("cvpn-assoc-" + randomHex(17));
-            network.setVpcId(vpc.getVpcId());
-            network.setSubnetId(subnetId);
-            network.setAvailabilityZone(subnet.getAvailabilityZone());
-            network.setAvailabilityZoneId(subnet.getAvailabilityZoneId());
-            network.setStatus("associated");
-            network.setClientToken(clientToken);
-            endpoint.getTargetNetworks().add(network);
-            if (!"ipv6".equals(endpoint.getTrafficIpAddressType()) && vpc.getCidrBlock() != null
-                    && endpoint.getRoutes().stream().noneMatch(route -> subnetId.equals(route.getTargetSubnet())
-                            && sameCidr(vpc.getCidrBlock(), route.getDestinationCidr()))) {
-                ClientVpnRoute route = new ClientVpnRoute();
-                route.setDestinationCidr(vpc.getCidrBlock());
-                route.setTargetSubnet(subnetId);
-                route.setType("Nat");
-                route.setOrigin("associate");
-                route.setDescription("Default Route");
-                route.setStatus("active");
-                endpoint.getRoutes().add(route);
-            }
-            endpoint.setStatus("available");
-            endpoints.put(key(region, endpointId), endpoint);
-            return network;
+    /** The endpoint an id names: AWS's error for a malformed id and for an unknown one. */
+    public ClientVpnEndpoint require(String region, String id) {
+        if (id == null || !ENDPOINT_ID.matcher(id).matches()) {
+            throw invalid("ClientVpnEndpointId you provided is not valid");
         }
+        return endpoints.get(key(region, id)).orElseThrow(() -> new AwsException(
+                "InvalidClientVpnEndpointId.NotFound", "Endpoint " + id + " does not exist", 400));
     }
 
-    /** Removes the association and the routes that target its subnet; AWS reports it {@code disassociating}. */
-    public ClientVpnTargetNetwork disassociateTargetNetwork(String region, String endpointId, String associationId) {
-        synchronized (lock) {
-            ClientVpnEndpoint endpoint = copy(requireEndpoint(region, endpointId));
-            requireParameter(associationId, "AssociationId");
-            ClientVpnTargetNetwork network = endpoint.getTargetNetworks().stream()
-                    .filter(candidate -> associationId.equals(candidate.getAssociationId()))
-                    .findFirst()
-                    .orElseThrow(() -> new AwsException("InvalidClientVpnAssociationIdNotFound",
-                            "The association ID '" + associationId + "' does not exist", 400));
-            endpoint.getTargetNetworks().remove(network);
-            endpoint.getRoutes().removeIf(route -> network.getSubnetId().equals(route.getTargetSubnet()));
-            if (!hasActiveAssociations(endpoint)) {
-                endpoint.setStatus("pending-associate");
-            }
-            endpoints.put(key(region, endpointId), endpoint);
-            return network;
-        }
-    }
-
-    public List<ClientVpnTargetNetwork> describeTargetNetworks(String region, String endpointId,
-                                                               List<String> associationIds,
-                                                               Map<String, List<String>> filters) {
-        requireSupportedFilters(filters, TARGET_NETWORK_FILTERS, false);
-        ClientVpnEndpoint endpoint = requireEndpoint(region, endpointId);
-        return endpoint.getTargetNetworks().stream()
-                .filter(network -> associationIds.isEmpty() || associationIds.contains(network.getAssociationId()))
-                .filter(network -> filters.entrySet().stream().allMatch(filter -> switch (filter.getKey()) {
-                    case "association-id" -> matchesAny(filter.getValue(), network.getAssociationId());
-                    case "target-network-id" -> matchesAny(filter.getValue(), network.getSubnetId());
-                    default -> matchesAny(filter.getValue(), network.getVpcId());
-                }))
-                .collect(Collectors.toList());
-    }
-
-    // ─── Authorization rules ────────────────────────────────────────────────
-
-    public void authorizeIngress(String region, String endpointId, String targetNetworkCidr, String accessGroupId,
-                                 Boolean authorizeAllGroups, String description, String clientToken) {
-        synchronized (lock) {
-            ClientVpnEndpoint endpoint = copy(requireEndpoint(region, endpointId));
-            if (clientToken != null && !clientToken.isBlank()
-                    && endpoint.getAuthorizationRules().stream().anyMatch(rule -> clientToken.equals(rule.getClientToken()))) {
-                return;
-            }
-            requireParameter(targetNetworkCidr, "TargetNetworkCidr");
-            requireCidr(targetNetworkCidr, "TargetNetworkCidr");
-            boolean all = Boolean.TRUE.equals(authorizeAllGroups);
-            boolean group = accessGroupId != null && !accessGroupId.isBlank();
-            if (all == group) {
-                throw new AwsException("InvalidParameterValue",
-                        "Specify either AccessGroupId or AuthorizeAllGroups=true, but not both", 400);
-            }
-            validateDescription(description);
-            boolean duplicate = endpoint.getAuthorizationRules().stream().anyMatch(rule ->
-                    sameCidr(rule.getDestinationCidr(), targetNetworkCidr) && rule.isAccessAll() == all
-                            && (all || accessGroupId.equals(rule.getGroupId())));
-            if (duplicate) {
-                throw new AwsException("InvalidClientVpnDuplicateAuthorizationRule",
-                        "An authorization rule for " + targetNetworkCidr + " already exists", 400);
-            }
-            ClientVpnAuthorizationRule rule = new ClientVpnAuthorizationRule();
-            rule.setDestinationCidr(targetNetworkCidr);
-            rule.setAccessAll(all);
-            rule.setGroupId(all ? null : accessGroupId);
-            rule.setDescription(description);
-            rule.setStatus("active");
-            rule.setClientToken(clientToken);
-            endpoint.getAuthorizationRules().add(rule);
-            endpoints.put(key(region, endpointId), endpoint);
-        }
-    }
-
-    public void revokeIngress(String region, String endpointId, String targetNetworkCidr, String accessGroupId,
-                              Boolean revokeAllGroups) {
-        synchronized (lock) {
-            ClientVpnEndpoint endpoint = copy(requireEndpoint(region, endpointId));
-            requireParameter(targetNetworkCidr, "TargetNetworkCidr");
-            requireCidr(targetNetworkCidr, "TargetNetworkCidr");
-            boolean all = Boolean.TRUE.equals(revokeAllGroups);
-            boolean group = accessGroupId != null && !accessGroupId.isBlank();
-            if (all == group) {
-                throw new AwsException("InvalidParameterValue",
-                        "Specify either AccessGroupId or RevokeAllGroups=true, but not both", 400);
-            }
-            boolean removed = endpoint.getAuthorizationRules().removeIf(rule ->
-                    sameCidr(rule.getDestinationCidr(), targetNetworkCidr) && rule.isAccessAll() == all
-                            && (all || accessGroupId.equals(rule.getGroupId())));
-            if (!removed) {
-                throw new AwsException("InvalidClientVpnEndpointAuthorizationRuleNotFound",
-                        "No authorization rule for " + targetNetworkCidr + " exists on Client VPN endpoint "
-                                + endpointId, 400);
-            }
-            endpoints.put(key(region, endpointId), endpoint);
-        }
-    }
-
-    public List<ClientVpnAuthorizationRule> describeAuthorizationRules(String region, String endpointId,
-                                                                       Map<String, List<String>> filters) {
-        requireSupportedFilters(filters, AUTHORIZATION_RULE_FILTERS, false);
-        ClientVpnEndpoint endpoint = requireEndpoint(region, endpointId);
-        return endpoint.getAuthorizationRules().stream()
-                .filter(rule -> filters.entrySet().stream().allMatch(filter -> switch (filter.getKey()) {
-                    case "description" -> matchesAny(filter.getValue(), rule.getDescription());
-                    case "destination-cidr" -> matchesAny(filter.getValue(), rule.getDestinationCidr());
-                    default -> matchesAny(filter.getValue(), rule.getGroupId());
-                }))
-                .collect(Collectors.toList());
-    }
-
-    // ─── Routes ─────────────────────────────────────────────────────────────
-
-    public void createRoute(String region, String endpointId, String destinationCidrBlock, String targetSubnetId,
-                            String description, String clientToken) {
-        synchronized (lock) {
-            ClientVpnEndpoint endpoint = copy(requireEndpoint(region, endpointId));
-            if (clientToken != null && !clientToken.isBlank()
-                    && endpoint.getRoutes().stream().anyMatch(route -> clientToken.equals(route.getClientToken()))) {
-                return;
-            }
-            requireParameter(destinationCidrBlock, "DestinationCidrBlock");
-            requireParameter(targetSubnetId, "TargetVpcSubnetId");
-            requireCidr(destinationCidrBlock, "DestinationCidrBlock");
-            validateDescription(description);
-            if (endpoint.getTargetNetworks().stream().noneMatch(network -> targetSubnetId.equals(network.getSubnetId())
-                    && "associated".equals(network.getStatus()))) {
-                throw new AwsException("InvalidClientVpnActiveAssociationNotFound", "Subnet " + targetSubnetId
-                        + " is not associated with Client VPN endpoint " + endpointId, 400);
-            }
-            if (endpoint.getRoutes().stream().anyMatch(route -> targetSubnetId.equals(route.getTargetSubnet())
-                    && sameCidr(route.getDestinationCidr(), destinationCidrBlock))) {
-                throw new AwsException("InvalidClientVpnDuplicateRoute", "A route to " + destinationCidrBlock
-                        + " via " + targetSubnetId + " already exists", 400);
-            }
-            ClientVpnRoute route = new ClientVpnRoute();
-            route.setDestinationCidr(destinationCidrBlock);
-            route.setTargetSubnet(targetSubnetId);
-            route.setType("Nat");
-            route.setOrigin("add-route");
-            route.setDescription(description);
-            route.setStatus("active");
-            route.setClientToken(clientToken);
-            endpoint.getRoutes().add(route);
-            endpoints.put(key(region, endpointId), endpoint);
-        }
-    }
-
-    public void deleteRoute(String region, String endpointId, String destinationCidrBlock, String targetSubnetId) {
-        synchronized (lock) {
-            ClientVpnEndpoint endpoint = copy(requireEndpoint(region, endpointId));
-            requireParameter(destinationCidrBlock, "DestinationCidrBlock");
-            requireCidr(destinationCidrBlock, "DestinationCidrBlock");
-            Predicate<ClientVpnRoute> matches = route -> sameCidr(route.getDestinationCidr(), destinationCidrBlock)
-                    && (targetSubnetId == null || targetSubnetId.equals(route.getTargetSubnet()));
-            List<ClientVpnRoute> found = endpoint.getRoutes().stream().filter(matches).toList();
-            if (found.isEmpty()) {
-                throw new AwsException("InvalidClientVpnRouteNotFound", "No route to " + destinationCidrBlock
-                        + (targetSubnetId == null ? "" : " via " + targetSubnetId) + " exists on Client VPN endpoint "
-                        + endpointId, 400);
-            }
-            if (found.stream().anyMatch(route -> !"add-route".equals(route.getOrigin()))) {
-                throw new AwsException("InvalidParameterValue", "The route to " + destinationCidrBlock
-                        + " was added by a target network association and cannot be deleted", 400);
-            }
-            endpoint.getRoutes().removeAll(found);
-            endpoints.put(key(region, endpointId), endpoint);
-        }
-    }
-
-    public List<ClientVpnRoute> describeRoutes(String region, String endpointId, Map<String, List<String>> filters) {
-        requireSupportedFilters(filters, ROUTE_FILTERS, false);
-        ClientVpnEndpoint endpoint = requireEndpoint(region, endpointId);
-        return endpoint.getRoutes().stream()
-                .filter(route -> filters.entrySet().stream().allMatch(filter -> switch (filter.getKey()) {
-                    case "destination-cidr" -> matchesAny(filter.getValue(), route.getDestinationCidr());
-                    case "origin" -> matchesAny(filter.getValue(), route.getOrigin());
-                    default -> matchesAny(filter.getValue(), route.getTargetSubnet());
-                }))
-                .collect(Collectors.toList());
-    }
-
-    // ─── Validation helpers ─────────────────────────────────────────────────
-
-    private List<ClientVpnEndpoint> regionEndpoints(String region) {
-        return endpoints.scan(k -> k.startsWith(region + "::")).stream()
-                .filter(endpoint -> region.equals(endpoint.getRegion()))
-                .collect(Collectors.toList());
-    }
-
-    private static boolean hasActiveAssociations(ClientVpnEndpoint endpoint) {
-        return !endpoint.getTargetNetworks().isEmpty();
-    }
-
-    private static void rejectTransitGatewayConfiguration(EndpointSettings request) {
-        if (request.transitGatewayConfiguration) {
-            throw new AwsException("InvalidParameterValue",
-                    "TransitGatewayConfiguration is not supported by this emulator", 400);
-        }
-    }
-
-    private static void validateAuthentication(List<ClientVpnAuthentication> options) {
-        if (options.size() > 2) {
-            throw new AwsException("InvalidParameterValue", "At most two authentication options can be specified", 400);
-        }
-        Set<String> seen = new HashSet<>();
-        for (ClientVpnAuthentication option : options) {
-            String type = option.getType();
-            requireParameter(type, "AuthenticationOptions.Type");
-            requireOneOf(type, AUTHENTICATION_TYPES, "AuthenticationOptions.Type");
-            if (!seen.add(type)) {
-                throw new AwsException("InvalidParameterValue", "Duplicate authentication type " + type, 400);
-            }
-            switch (type) {
-                case "certificate-authentication" -> requireParameter(option.getClientRootCertificateChainArn(),
-                        "MutualAuthentication.ClientRootCertificateChainArn");
-                case "directory-service-authentication" ->
-                        requireParameter(option.getDirectoryId(), "ActiveDirectory.DirectoryId");
-                default -> requireParameter(option.getSamlProviderArn(), "FederatedAuthentication.SAMLProviderArn");
-            }
-        }
-        if (seen.contains("directory-service-authentication") && seen.contains("federated-authentication")) {
-            throw new AwsException("InvalidParameterValue",
-                    "Directory service and federated authentication cannot be combined", 400);
-        }
-    }
-
-    private static void validateClientCidr(String cidr) {
-        int slash = cidr.indexOf('/');
-        int prefix;
-        try {
-            prefix = slash < 0 ? -1 : Integer.parseInt(cidr.substring(slash + 1));
-        } catch (NumberFormatException e) {
-            prefix = -1;
-        }
-        if (!Ipv4Cidrs.isIpv4(cidr) || prefix < 12 || prefix > 22) {
-            throw new AwsException("InvalidParameterValue", "ClientCidrBlock " + cidr
-                    + " must be an IPv4 CIDR block with a prefix between /12 and /22", 400);
-        }
-    }
-
-    private static void requireCidr(String cidr, String name) {
-        if (CidrCanonicalizer.canonicalize(cidr).isEmpty()) {
-            throw new AwsException("InvalidParameterValue", "Invalid " + name + ": " + cidr, 400);
-        }
-    }
-
-    private static boolean sameCidr(String a, String b) {
-        return Objects.equals(CidrCanonicalizer.canonicalize(a).orElse(a), CidrCanonicalizer.canonicalize(b).orElse(b));
-    }
-
-    private static int validVpnPort(int port) {
-        if (port != 443 && port != 1194) {
-            throw new AwsException("InvalidParameterValue", "VpnPort must be 443 or 1194", 400);
-        }
-        return port;
-    }
-
-    private static int validSessionTimeout(int hours) {
-        if (!SESSION_TIMEOUT_HOURS.contains(hours)) {
-            throw new AwsException("InvalidParameterValue", "SessionTimeoutHours must be one of 8, 10, 12 or 24", 400);
-        }
-        return hours;
-    }
-
-    private static List<String> validDnsServers(List<String> servers) {
-        if (servers.size() > 2) {
-            throw new AwsException("InvalidParameterValue", "At most two DNS servers can be specified", 400);
-        }
-        for (String server : servers) {
-            boolean valid = server != null && (CidrCanonicalizer.canonicalize(server + "/32").isPresent()
-                    || CidrCanonicalizer.canonicalize(server + "/128").isPresent());
-            if (!valid) {
-                throw new AwsException("InvalidParameterValue", "Invalid DNS server address " + server, 400);
-            }
-        }
-        return servers;
-    }
-
-    private static void validateDescription(String description) {
-        if (description != null && description.length() > 255) {
-            throw new AwsException("InvalidParameterValue", "Description must be at most 255 characters", 400);
-        }
-    }
-
-    private Subnet requireSubnet(String region, String subnetId) {
-        try {
-            return ec2.requireSubnets(region, List.of(subnetId)).getFirst();
-        } catch (AwsException e) {
-            if (!"InvalidSubnetID.NotFound".equals(e.getErrorCode())) {
-                throw e;
-            }
-            throw new AwsException("InvalidClientVpnSubnetId.NotFound",
-                    "The subnet ID '" + subnetId + "' does not exist", 400);
-        }
-    }
-
-    private Vpc requireVpc(String region, String vpcId) {
-        // DescribeVpcs' service lookup answers an unknown id with no VPCs rather than an error.
-        return ec2.describeVpcs(region, List.of(vpcId), Map.of()).stream().findFirst()
-                .orElseThrow(() -> new AwsException("InvalidVpcID.NotFound",
-                        "The vpc ID '" + vpcId + "' does not exist", 400));
-    }
-
-    private static List<String> vpcIpv4Cidrs(Vpc vpc) {
-        List<String> cidrs = new ArrayList<>();
-        if (vpc.getCidrBlock() != null) {
-            cidrs.add(vpc.getCidrBlock());
-        }
-        vpc.getCidrBlockAssociationSet().stream()
-                .map(association -> association.getCidrBlock())
-                .filter(cidr -> cidr != null && !cidrs.contains(cidr))
-                .forEach(cidrs::add);
-        return cidrs;
-    }
-
-    /** The requested groups, validated against the VPC, or the VPC's default group when none are requested. */
-    private List<String> resolveSecurityGroups(String region, String vpcId, List<String> requested) {
-        if (requested.size() > 5) {
-            throw new AwsException("InvalidParameterValue", "At most five security groups can be specified", 400);
-        }
+    /** The groups given, each of the VPC; none given means the VPC's default security group. */
+    private List<String> securityGroupsOf(String region, String vpcId, List<String> requested) {
         if (requested.isEmpty()) {
-            return ec2.describeSecurityGroups(region, List.of(), List.of("default"),
-                            Map.of("vpc-id", List.of(vpcId))).stream()
-                    .map(SecurityGroup::getGroupId)
-                    .limit(1)
-                    .toList();
+            return ec2.defaultSecurityGroupOf(region, vpcId).map(SecurityGroup::getGroupId)
+                    .map(List::of).orElse(List.of());
         }
-        List<String> distinct = requested.stream().distinct().toList();
-        for (SecurityGroup group : ec2.describeSecurityGroups(region, distinct, List.of(), Map.of())) {
+        List<SecurityGroup> found = ec2.describeSecurityGroups(region, requested, List.of(), Map.of());
+        for (String groupId : requested) {
+            SecurityGroup group = found.stream().filter(candidate -> groupId.equals(candidate.getGroupId()))
+                    .findFirst().orElseThrow(() -> new AwsException("InvalidGroup.NotFound",
+                            "The security group '" + groupId + "' does not exist", 400));
             if (!vpcId.equals(group.getVpcId())) {
-                throw new AwsException("InvalidParameterValue", "Security group " + group.getGroupId()
-                        + " does not belong to VPC " + vpcId, 400);
+                throw invalid("Security group " + groupId + " is not in VPC " + vpcId + ".");
             }
         }
-        return distinct;
+        return List.copyOf(requested);
     }
 
-    private void applyConnectionLog(ClientVpnEndpoint endpoint, String region, Boolean enabled, String group,
-                                    String stream) {
-        if (enabled == null) {
-            return;
-        }
-        if (!enabled) {
-            endpoint.setConnectionLogEnabled(false);
-            endpoint.setConnectionLogGroup(null);
-            endpoint.setConnectionLogStream(null);
-            return;
-        }
-        requireParameter(group, "ConnectionLogOptions.CloudwatchLogGroup");
-        endpoint.setConnectionLogEnabled(true);
-        endpoint.setConnectionLogGroup(group);
-        // AWS names a stream itself when only the group is given.
-        endpoint.setConnectionLogStream(stream != null && !stream.isBlank() ? stream
-                : endpoint.getClientVpnEndpointId() + "-" + region + "-" + LOG_STREAM_DATE.format(Instant.now())
-                        + "-" + randomHex(12));
+    // ── Subnet and VPC references ──
+
+    /** A plain read over the stored endpoints, taking no lock of this service, as the interface requires. */
+    @Override
+    public boolean hasSubnetDependency(String region, String subnetId) {
+        return associations(region).anyMatch(network -> subnetId.equals(network.getSubnetId()));
     }
 
-    private static void applyClientConnect(ClientVpnEndpoint endpoint, Boolean enabled, String lambdaFunctionArn) {
-        if (enabled == null) {
-            return;
-        }
-        if (enabled) {
-            requireParameter(lambdaFunctionArn, "ClientConnectOptions.LambdaFunctionArn");
-        }
-        endpoint.setClientConnectEnabled(enabled);
-        endpoint.setClientConnectLambdaFunctionArn(enabled ? lambdaFunctionArn : null);
+    @Override
+    public boolean hasVpcDependency(String region, String vpcId) {
+        return associations(region).anyMatch(network -> vpcId.equals(network.getVpcId()));
     }
 
-    private static void applyLoginBanner(ClientVpnEndpoint endpoint, Boolean enabled, String text) {
-        if (enabled == null) {
-            return;
-        }
-        if (enabled) {
-            validateBannerText(text);
-        }
-        endpoint.setClientLoginBannerEnabled(enabled);
-        endpoint.setClientLoginBannerText(enabled ? text : null);
+    private Stream<TargetNetwork> associations(String region) {
+        return endpoints.scan(key -> key.startsWith(region + "::")).stream()
+                .flatMap(endpoint -> endpoint.getTargetNetworks().stream());
     }
 
-    private static void validateBannerText(String text) {
-        requireParameter(text, "ClientLoginBannerOptions.BannerText");
-        if (text.length() > 1400) {
-            throw new AwsException("InvalidParameterValue", "BannerText must be at most 1400 characters", 400);
+    private static <T> List<T> with(List<T> list, T item) {
+        List<T> copy = new ArrayList<>(list);
+        copy.add(item);
+        return copy;
+    }
+
+    private static <T> List<T> without(List<T> list, Predicate<T> drop) {
+        return new ArrayList<>(list.stream().filter(drop.negate()).toList());
+    }
+
+    private List<ClientVpnEndpoint> all(String region) {
+        return endpoints.scan(key -> key.startsWith(region + "::")).stream()
+                .sorted(Comparator.comparing(ClientVpnEndpoint::getClientVpnEndpointId)).toList();
+    }
+
+    private static void requireCidr(String cidr, String member) {
+        if (blank(cidr)) {
+            throw missing(member);
+        }
+        if (!Ipv4Cidrs.isIpv4(cidr)) {
+            throw invalid(member + " must be an IPv4 CIDR block.");
         }
     }
 
-    private static List<String> certificateArns(String serverCertificateArn,
-                                                List<ClientVpnAuthentication> authenticationOptions) {
-        List<String> arns = new ArrayList<>();
-        if (serverCertificateArn != null) {
-            arns.add(serverCertificateArn);
-        }
-        for (ClientVpnAuthentication option : authenticationOptions) {
-            String chain = option.getClientRootCertificateChainArn();
-            if (chain != null && !arns.contains(chain)) {
-                arns.add(chain);
-            }
-        }
-        return arns;
+    private static boolean blank(String value) {
+        return value == null || value.isBlank();
     }
 
-    private void requireCertificate(String region, String certificateArn) {
-        Matcher match = CERTIFICATE_ARN.matcher(certificateArn);
-        if (!match.matches()) {
-            throw new AwsException("InvalidParameterValue", "Invalid certificate ARN " + certificateArn, 400);
-        }
-        if (!region.equals(match.group(1))) {
-            throw new AwsException("InvalidParameterValue", "Certificate " + certificateArn
-                    + " must be in the same region as the Client VPN endpoint (" + region + ")", 400);
-        }
-        AcmService certificates = acm.get();
-        if (certificates == null) {
-            return;
-        }
-        try {
-            certificates.describeCertificate(certificateArn, region);
-        } catch (AwsException e) {
-            if (!"ResourceNotFoundException".equals(e.getErrorCode())) {
-                throw e;
-            }
-            throw new AwsException("InvalidParameterValue", "Certificate " + certificateArn + " does not exist", 400);
-        }
+    private static AwsException invalid(String message) {
+        return new AwsException("InvalidParameterValue", message, 400);
     }
 
-    private void markCertificateInUse(String region, String certificateArn, String endpointArn) {
-        AcmService certificates = acm.get();
-        if (certificates != null) {
-            certificates.addInUseBy(certificateArn, endpointArn, region);
-        }
-    }
-
-    private void releaseCertificate(String region, String certificateArn, String endpointArn) {
-        AcmService certificates = acm.get();
-        if (certificates != null && certificateArn != null) {
-            certificates.removeInUseBy(certificateArn, endpointArn, region);
-        }
-    }
-
-    private static void requireSupportedFilters(Map<String, List<String>> filters, Set<String> supported,
-                                                boolean tagFilters) {
-        for (String name : filters.keySet()) {
-            if (!supported.contains(name) && !(tagFilters && name.startsWith("tag:"))) {
-                throw new AwsException("InvalidParameterValue", "The filter '" + name + "' is invalid", 400);
-            }
-        }
-    }
-
-    private static boolean matchesAny(List<String> patterns, String value) {
-        if (value == null) {
-            return false;
-        }
-        for (String pattern : patterns) {
-            StringBuilder regex = new StringBuilder();
-            for (char ch : pattern.toCharArray()) {
-                regex.append(switch (ch) {
-                    case '*' -> ".*";
-                    case '?' -> ".";
-                    default -> Pattern.quote(String.valueOf(ch));
-                });
-            }
-            if (value.matches(regex.toString())) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private static void requireParameter(String value, String name) {
-        if (value == null || value.isBlank()) {
-            throw new AwsException("MissingParameter", "The request must contain the parameter " + name, 400);
-        }
-    }
-
-    private static void requireOneOf(String value, Set<String> allowed, String name) {
-        if (!allowed.contains(value)) {
-            throw new AwsException("InvalidParameterValue", "Invalid value '" + value + "' for " + name, 400);
-        }
-    }
-
-    private static String orDefault(String value, String fallback) {
-        return value == null || value.isBlank() ? fallback : value;
-    }
-
-    /** Mutations work on a copy so readers never observe a half-applied change of the stored record. */
-    private static ClientVpnEndpoint copy(ClientVpnEndpoint endpoint) {
-        return MAPPER.convertValue(endpoint, ClientVpnEndpoint.class);
+    private static AwsException missing(String member) {
+        return new AwsException("MissingParameter", "The request must contain the parameter " + member, 400);
     }
 
     private static String key(String region, String id) {
         return region + "::" + id;
-    }
-
-    private static String randomHex(int length) {
-        StringBuilder sb = new StringBuilder(length);
-        ThreadLocalRandom random = ThreadLocalRandom.current();
-        for (int i = 0; i < length; i++) {
-            sb.append(Integer.toHexString(random.nextInt(16)));
-        }
-        return sb.toString();
     }
 }

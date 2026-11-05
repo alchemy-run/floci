@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.core.common;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsDeliveryService;
 import io.github.hectorvent.floci.services.cloudwatch.logs.CloudWatchLogsService;
 import io.github.hectorvent.floci.services.cloudwatch.logs.LogGroupTagTarget;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbConditionKeys;
@@ -12,7 +13,12 @@ import io.github.hectorvent.floci.services.dynamodb.model.TableDefinition;
 import io.github.hectorvent.floci.services.ec2.Ec2Service;
 import io.github.hectorvent.floci.services.ec2.model.Tag;
 import io.github.hectorvent.floci.services.iam.IamActionRegistry;
+import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.ResourceArnBuilder;
+import io.github.hectorvent.floci.services.iam.model.IamRole;
+import io.github.hectorvent.floci.services.iam.model.IamUser;
+import io.github.hectorvent.floci.services.lambdaweb.LambdaWebService;
+import io.github.hectorvent.floci.services.s3.S3ControlTagConditionKeys;
 import io.github.hectorvent.floci.services.s3.S3ObjectActions;
 import io.github.hectorvent.floci.services.s3.S3ObjectKeys;
 import io.github.hectorvent.floci.services.s3.S3Service;
@@ -82,11 +88,17 @@ public class IamConditionContextResolver {
     public static final String OBJECT_LOCK_RETAIN_UNTIL_DATE = "s3:object-lock-retain-until-date";
     public static final String OBJECT_LOCK_REMAINING_RETENTION_DAYS = "s3:object-lock-remaining-retention-days";
     public static final String OBJECT_LOCK_LEGAL_HOLD = "s3:object-lock-legal-hold";
+    public static final String SERVER_SIDE_ENCRYPTION = "s3:x-amz-server-side-encryption";
+    public static final String SERVER_SIDE_ENCRYPTION_KMS_KEY_ID = "s3:x-amz-server-side-encryption-aws-kms-key-id";
+    static final String REQUEST_AUTH_TYPE = "lambda:Request/WebFunctionAuthType";
+    static final String RESOURCE_AUTH_TYPE = "lambda:Resource/WebFunctionAuthType";
 
     private final Instance<DynamoDbFacade> dynamoDbFacade;
     private final Instance<Ec2Service> ec2Service;
     private final Instance<S3Service> s3Service;
     private final Instance<CloudWatchLogsService> logsService;
+    private final Instance<IamService> iamService;
+    private final Instance<LambdaWebService> lambdaWebService;
     private final RequestContext requestContext;
     private final EmulatorConfig config;
     private final CurrentVertxRequest currentVertxRequest;
@@ -102,18 +114,22 @@ public class IamConditionContextResolver {
                                        Instance<Ec2Service> ec2Service,
                                        Instance<S3Service> s3Service,
                                        Instance<CloudWatchLogsService> logsService,
+                                       Instance<IamService> iamService,
+                                       Instance<LambdaWebService> lambdaWebService,
                                        RequestContext requestContext,
                                        EmulatorConfig config,
                                        CurrentVertxRequest currentVertxRequest,
                                        ResolvedServiceCatalog serviceCatalog) {
-        this(dynamoDbFacade, ec2Service, s3Service, logsService, requestContext, config, currentVertxRequest,
-                serviceCatalog, Clock.systemUTC());
+        this(dynamoDbFacade, ec2Service, s3Service, logsService, iamService, lambdaWebService, requestContext,
+                config, currentVertxRequest, serviceCatalog, Clock.systemUTC());
     }
 
     IamConditionContextResolver(Instance<DynamoDbFacade> dynamoDbFacade,
                                 Instance<Ec2Service> ec2Service,
                                 Instance<S3Service> s3Service,
                                 Instance<CloudWatchLogsService> logsService,
+                                Instance<IamService> iamService,
+                                Instance<LambdaWebService> lambdaWebService,
                                 RequestContext requestContext,
                                 EmulatorConfig config,
                                 CurrentVertxRequest currentVertxRequest,
@@ -122,6 +138,8 @@ public class IamConditionContextResolver {
         this.ec2Service = ec2Service;
         this.s3Service = s3Service;
         this.logsService = logsService;
+        this.iamService = iamService;
+        this.lambdaWebService = lambdaWebService;
         this.requestContext = requestContext;
         this.config = config;
         this.currentVertxRequest = currentVertxRequest;
@@ -137,6 +155,8 @@ public class IamConditionContextResolver {
             case "dynamodb" -> dynamoDbConditionContext(action, ctx);
             case "iam" -> iamConditionContext(action, ctx);
             case "logs" -> logsConditionContext(action, ctx);
+            case "lambda" -> lambdaConditionContext(action, ctx);
+            case "redshift" -> redshiftConditionContext(action, ctx);
             default -> null;
         };
     }
@@ -188,6 +208,10 @@ public class IamConditionContextResolver {
                 conditions.put("aws:TagKeys", keys);
             }
         }
+        if (direct && CloudWatchLogsDeliveryService.isDeliveryResourceArn(body.path("resourceArn").asText())) {
+            // A delivery source, destination or delivery: its request tags apply, its own tags are not read.
+            return conditions.isEmpty() ? null : conditions;
+        }
         String group = direct ? logGroupNameFromArn(body.path("resourceArn").asText())
                 : body.path("logGroupName").asText();
         Map<String, String> tags;
@@ -208,38 +232,91 @@ public class IamConditionContextResolver {
         return conditions;
     }
 
-    private static Map<String, List<String>> iamConditionContext(String action, ContainerRequestContext ctx) {
-        return switch (action) {
-            case "iam:AttachRolePolicy", "iam:DetachRolePolicy", "iam:AttachUserPolicy",
-                    "iam:DetachUserPolicy", "iam:AttachGroupPolicy", "iam:DetachGroupPolicy" -> {
-                String policyArn = formParameters(ctx).get("PolicyArn");
-                yield policyArn == null ? null : Map.of("iam:PolicyARN", List.of(policyArn));
+    private Map<String, List<String>> iamConditionContext(String action, ContainerRequestContext ctx) {
+        Map<String, String> members = IamConditionKeys.members(action);
+        Map<String, String> targets = IamConditionKeys.targets(action);
+        if (members.isEmpty() && targets.isEmpty()) {
+            return null;
+        }
+        Map<String, String> form = formParameters(ctx);
+        Map<String, List<String>> conditions = new LinkedHashMap<>();
+        members.forEach((key, member) -> {
+            String value = form.get(member);
+            if (value != null) {
+                conditions.put(key, List.of(value));
             }
-            default -> null;
+        });
+        // iam:PermissionsBoundary on an existing role or user is the boundary stored on it, left off when it has none.
+        targets.forEach((key, target) -> {
+            String value = storedPermissionsBoundary(target, form.get(target));
+            if (value != null) {
+                conditions.put(key, List.of(value));
+            }
+        });
+        return conditions.isEmpty() ? null : conditions;
+    }
+
+    private String storedPermissionsBoundary(String target, String name) {
+        if (name == null || !iamService.isResolvable()) {
+            return null;
+        }
+        String account = requestContext.getAccountId();
+        return switch (target) {
+            case "RoleName" -> iamService.get().findRole(account, name).map(IamRole::getPermissionsBoundaryArn).orElse(null);
+            case "UserName" -> iamService.get().findUser(account, name).map(IamUser::getPermissionsBoundaryArn).orElse(null);
+            default -> throw new IllegalStateException("Unknown IAM condition key target: " + target);
         };
+    }
+
+    /** The {@code redshift:} keys a Redshift request carries in its own members, such as its DbUser. */
+    private Map<String, List<String>> redshiftConditionContext(String action, ContainerRequestContext ctx) {
+        List<String> keys = RequestConditionKeys.requestKeys(action);
+        if (keys.isEmpty()) {
+            return null;
+        }
+        Map<String, String> form = formParameters(ctx);
+        Map<String, List<String>> conditions = new LinkedHashMap<>();
+        for (String key : keys) {
+            for (String member : RequestConditionKeys.members(action, key)) {
+                putIfPresent(conditions, key, form.get(member));
+            }
+        }
+        return conditions.isEmpty() ? null : conditions;
     }
 
     public static Map<String, List<String>> withGlobalContext(Map<String, List<String>> serviceContext,
                                                         String resourceArn, String region,
                                                         String accountId, String resourceOwnerAccountId) {
+        return withGlobalContext(serviceContext, resourceArn, region, accountId, resourceOwnerAccountId, null);
+    }
+
+    public static Map<String, List<String>> withGlobalContext(Map<String, List<String>> serviceContext,
+                                                        String resourceArn, String region,
+                                                        String accountId, String resourceOwnerAccountId, String action) {
         Map<String, List<String>> conditions = serviceContext == null
                 ? new LinkedHashMap<>()
                 : new LinkedHashMap<>(serviceContext);
-        // aws:ResourceAccount is the account that OWNS the resource, which is not always the
-        // caller's. Some ARNs carry it; S3 bucket and object ARNs deliberately do not, and there
-        // the owner has to come from service state. When neither source knows it, the key is left
-        // out rather than guessed: an absent key fails a Condition that tests it, whereas a wrong
-        // one would silently authorize cross-account access the policy meant to refuse.
-        String resourceAccount = accountFromArn(resourceArn);
-        if (resourceAccount == null || resourceAccount.isBlank()) {
-            resourceAccount = resourceOwnerAccountId;
-        }
-        putIfPresent(conditions, "aws:ResourceAccount", resourceAccount);
+        putResourceAccount(conditions, resourceArn, resourceOwnerAccountId, action);
         putIfPresent(conditions, "aws:PrincipalAccount", accountId);
         putIfPresent(conditions, "aws:RequestedRegion", region);
+        conditions.putIfAbsent("aws:ViaAWSService", List.of("false"));
         // Enforcement evaluates signed IAM credentials, not direct AWS service principals.
         conditions.put("aws:PrincipalIsAWSService", List.of("false"));
         return conditions;
+    }
+
+    private static void putResourceAccount(Map<String, List<String>> conditions, String resourceArn,
+                                           String resourceOwnerAccountId, String action) {
+        // S3 ARNs omit the owner account. Both condition keys must use the stored bucket owner,
+        // never the caller; leave them absent when neither the ARN nor service state knows it.
+        String account = AwsArnUtils.accountOrDefault(resourceArn, null);
+        if (account == null || account.isBlank()) {
+            account = resourceOwnerAccountId;
+        }
+        putIfPresent(conditions, "aws:ResourceAccount", account);
+        if (S3ControlTagConditionKeys.takes(action, "s3:ResourceAccount")) {
+            putIfPresent(conditions, "s3:ResourceAccount", account);
+        }
     }
 
     /**
@@ -257,8 +334,15 @@ public class IamConditionContextResolver {
     public static Map<String, List<String>> serviceCallContext(String servicePrincipal, String resourceArn,
                                                                String resourceOwnerAccountId,
                                                                String sourceArn, String sourceAccount) {
+        return serviceCallContext(servicePrincipal, resourceArn, resourceOwnerAccountId, sourceArn, sourceAccount, null);
+    }
+
+    public static Map<String, List<String>> serviceCallContext(String servicePrincipal, String resourceArn,
+                                                               String resourceOwnerAccountId,
+                                                               String sourceArn, String sourceAccount, String action) {
         Map<String, List<String>> conditions = new LinkedHashMap<>();
         conditions.put("aws:PrincipalIsAWSService", List.of("true"));
+        conditions.put("aws:ViaAWSService", List.of("false"));
         conditions.put("aws:PrincipalServiceName", List.of(servicePrincipal));
         conditions.put("aws:PrincipalServiceNamesList", List.of(servicePrincipal));
         putIfPresent(conditions, "aws:SourceArn", sourceArn);
@@ -267,19 +351,9 @@ public class IamConditionContextResolver {
                 && AwsArnUtils.isArnFor(resourceArn, "sns")) {
             putIfPresent(conditions, "aws:SourceOwner", sourceAccount);
         }
-        String resourceAccount = accountFromArn(resourceArn);
-        putIfPresent(conditions, "aws:ResourceAccount",
-                resourceAccount == null || resourceAccount.isBlank() ? resourceOwnerAccountId : resourceAccount);
+        putResourceAccount(conditions, resourceArn, resourceOwnerAccountId, action);
         putIfPresent(conditions, "aws:RequestedRegion", AwsArnUtils.regionOrDefault(resourceArn, null));
         return conditions;
-    }
-
-    private static String accountFromArn(String arn) {
-        if (arn == null || !arn.startsWith("arn:")) {
-            return null;
-        }
-        String[] segments = arn.split(":", 6);
-        return segments.length > 4 ? segments[4] : null;
     }
 
     private static void putIfPresent(Map<String, List<String>> conditions, String key, String value) {
@@ -288,9 +362,50 @@ public class IamConditionContextResolver {
         }
     }
 
+    // ── Lambda ──────────────────────────────────────────────────────────────────
+
+    /** The authType a web function endpoint request names, and the one the endpoint has before it. */
+    private Map<String, List<String>> lambdaConditionContext(String action, ContainerRequestContext ctx) {
+        Map<String, List<String>> conditions = new LinkedHashMap<>();
+        for (String member : RequestConditionKeys.members(action, REQUEST_AUTH_TYPE)) {
+            PassedRoles.values(PassedRoles.jsonBody(ctx), member.split("\\."))
+                    .forEach(value -> putIfPresent(conditions, REQUEST_AUTH_TYPE, value));
+        }
+        if (RequestConditionKeys.takes(action, RESOURCE_AUTH_TYPE)) {
+            putIfPresent(conditions, RESOURCE_AUTH_TYPE, storedAuthType(ctx));
+        }
+        return conditions.isEmpty() ? null : conditions;
+    }
+
+    private String storedAuthType(ContainerRequestContext ctx) {
+        if (!lambdaWebService.isResolvable()) {
+            return null;
+        }
+        String region = requestContext.getRegion() == null ? config.defaultRegion() : requestContext.getRegion();
+        String endpointArn = ResourceArnBuilder.webFunctionArn(ctx.getUriInfo().getPath(), region,
+                requestContext.getAccountId());
+        int child = endpointArn.lastIndexOf("/endpoint/");
+        if (child < 0) {
+            return null;
+        }
+        try {
+            return lambdaWebService.get().getEndpoint(region, endpointArn.substring(0, child),
+                    endpointArn.substring(child + "/endpoint/".length())).authType;
+        } catch (AwsException expected) {
+            // The handler refuses the same names, so the key is only left out, as for a missing endpoint on AWS.
+            return null;
+        }
+    }
+
     // ── S3 ──────────────────────────────────────────────────────────────────────
 
     private Map<String, List<String>> s3ConditionContext(String action, ContainerRequestContext ctx) {
+        // S3 Control's request tag keys come from the generated table; S3's own below were measured
+        // against AWS, and do not all match the Service Reference.
+        if (IamActionRegistry.isS3ControlRequest("s3", ctx)) {
+            return S3ControlTagConditionKeys.conditions(action, () -> bodyText(ctx),
+                    ctx.getUriInfo().getQueryParameters());
+        }
         Map<String, List<String>> conditions = s3ActionConditionContext(action, ctx);
         // A version action is checked only for a request naming a version, and carries its id.
         if (S3ObjectActions.isVersionAction(action) && ctx.getUriInfo() != null) {
@@ -327,16 +442,63 @@ public class IamConditionContextResolver {
                  "s3:PutObjectVersionAnnotation", "s3:DeleteObjectAnnotation",
                  "s3:DeleteObjectVersionAnnotation" -> s3ExistingObjectTagConditionContext(ctx);
             // The Object Lock keys come from what the request sets: an object creation's headers, the
-            // retention and legal-hold bodies.
-            case "s3:PutObject" -> S3ObjectActions.objectCreationConditions(ctx::getHeaderString,
-                    s3RequestTagging(ctx), S3ObjectActions.isCopy(ctx.getMethod(), ctx::getHeaderString),
-                    clock.instant());
+            // retention and legal-hold bodies. A part or a completion creates nothing from its own
+            // headers, and is judged by the encryption its upload recorded.
+            case "s3:PutObject" -> isPartOrCompletion(ctx)
+                    ? s3UploadEncryptionConditionContext(ctx)
+                    : S3ObjectActions.objectCreationConditions(ctx::getHeaderString,
+                            s3RequestTagging(ctx), S3ObjectActions.isCopy(ctx.getMethod(), ctx::getHeaderString),
+                            clock.instant());
             case "s3:PutObjectRetention" -> S3ObjectActions.retentionBodyConditions(bodyText(ctx), clock.instant());
             case "s3:PutObjectLegalHold" -> S3ObjectActions.legalHoldBodyConditions(bodyText(ctx), clock.instant());
             case "s3:PutObjectTagging", "s3:PutObjectVersionTagging" -> merge(
                     s3ExistingObjectTagConditionContext(ctx), S3ObjectActions.taggingBodyConditions(bodyText(ctx)));
             default -> null;
         };
+    }
+
+    /**
+     * The encryption keys of a part or a completion: what its upload recorded when it was created, as
+     * measured on S3, since a part sends neither header. An upload not held offers neither.
+     */
+    private Map<String, List<String>> s3UploadEncryptionConditionContext(ContainerRequestContext ctx) {
+        if (!s3Service.isResolvable()) {
+            return null;
+        }
+        String bucket = s3BucketName(ctx.getUriInfo().getPath());
+        try {
+            return s3Service.get().multipartEncryptionConditions(bucket, s3RequestObjectKey(ctx, bucket),
+                    ctx.getUriInfo().getQueryParameters().getFirst("uploadId"));
+        } catch (AwsException expected) {
+            // The handler answers an upload not held as NoSuchUpload; here it offers no keys.
+            return null;
+        }
+    }
+
+    /**
+     * A part or a completion as S3Controller routes them: a PUT naming an upload and a part number, or a
+     * POST naming an upload and not asking for a new one. Any other PUT or POST naming an {@code uploadId}
+     * creates an object or an upload, whatever that parameter says, and is judged by its own headers.
+     */
+    private static boolean isPartOrCompletion(ContainerRequestContext ctx) {
+        MultivaluedMap<String, String> params = ctx.getUriInfo().getQueryParameters();
+        if (!params.containsKey("uploadId")) {
+            return false;
+        }
+        return "PUT".equalsIgnoreCase(ctx.getMethod())
+                ? params.containsKey("partNumber")
+                : "POST".equalsIgnoreCase(ctx.getMethod()) && !params.containsKey("uploads");
+    }
+
+    /**
+     * Whether a request checked as {@code s3:PutObject} is a part or a completion of an upload S3 does
+     * not hold. There is no encryption to judge it by, and S3 answers it {@code NoSuchUpload} under a
+     * policy on the encryption keys, as measured.
+     */
+    boolean namesUploadNotHeld(String action, ContainerRequestContext ctx) {
+        return "s3:PutObject".equals(action) && isPartOrCompletion(ctx)
+                && ctx.getHeaderString("x-amz-copy-source") == null
+                && s3UploadEncryptionConditionContext(ctx) == null && s3Service.isResolvable();
     }
 
     private static String bodyText(ContainerRequestContext ctx) {
@@ -821,8 +983,10 @@ public class IamConditionContextResolver {
                 // Execution resolves ARN inputs within the request account; authorize that same table.
                 String executionTable = DynamoDbTableNames.resolveWithRegion(tableName, region).name();
                 String itemAction = "dynamodb:" + operation + "Item";
-                DynamoDbConditionKeys.Result keys = DynamoDbConditionKeys.extract(
-                        itemAction, request, describeTargetTable(executionTable));
+                TableDefinition table = describeTargetTable(executionTable);
+                DynamoDbConditionKeys.Result keys = read
+                        ? DynamoDbConditionKeys.extractTransactionGet(request, table)
+                        : DynamoDbConditionKeys.extract(itemAction, request, table);
                 Map<String, List<String>> context = new LinkedHashMap<>();
                 context.put("dynamodb:EnclosingOperation", List.of(read ? "TransactGetItems" : "TransactWriteItems"));
                 if (!keys.leadingKeys().isEmpty()) {
@@ -830,6 +994,9 @@ public class IamConditionContextResolver {
                 }
                 if (!keys.attributes().isEmpty()) {
                     context.put("dynamodb:Attributes", keys.attributes());
+                }
+                if (keys.select() != null) {
+                    context.put("dynamodb:Select", List.of(keys.select()));
                 }
                 if (!read && request.hasNonNull("ReturnValuesOnConditionCheckFailure")) {
                     context.put("dynamodb:ReturnValues",
@@ -842,20 +1009,32 @@ public class IamConditionContextResolver {
         return checks;
     }
 
-    /** Resolves each batch entry with its own schema, optionally restricted to one resource. */
+    /** Request-wide context for callers that do not yet have a resolved resource. */
     Map<String, List<String>> dynamoDbBatchConditionContext(String action, ContainerRequestContext ctx,
                                                             String resourceArn) {
+        List<Map<String, List<String>>> entries = dynamoDbBatchConditionContexts(action, ctx, resourceArn);
+        if (entries == null) {
+            return null;
+        }
+        Map<String, List<String>> combined = new LinkedHashMap<>();
+        for (Map<String, List<String>> entry : entries) {
+            entry.forEach((key, values) -> combined.computeIfAbsent(key, ignored -> new ArrayList<>()).addAll(values));
+        }
+        return combined;
+    }
+
+    /** Each table reference retains its own scalar selection, even when name and ARN resolve alike. */
+    List<Map<String, List<String>>> dynamoDbBatchConditionContexts(String action, ContainerRequestContext ctx,
+                                                                  String resourceArn) {
         if (!isDynamoDbBatch(action)) {
             return null;
         }
-        Map<String, List<String>> conditions = new LinkedHashMap<>();
+        List<Map<String, List<String>>> contexts = new ArrayList<>();
         JsonNode body = bufferedJsonBody(ctx);
         JsonNode items = body == null ? null : body.get("RequestItems");
         if (items == null || !items.isObject()) {
-            return conditions;
+            return List.of(Map.of());
         }
-        List<String> leadingKeys = new ArrayList<>();
-        Set<String> attributes = new LinkedHashSet<>();
         items.properties().forEach(entry -> {
             String reference = entry.getKey().trim();
             if (resourceArn != null && !matchesTableResource(reference, resourceArn)) {
@@ -866,16 +1045,19 @@ public class IamConditionContextResolver {
             single.putObject("RequestItems").set(entry.getKey(), entry.getValue());
             DynamoDbConditionKeys.Result keys = dynamoDbKeys(
                     action, single, describeTargetTable(reference), ctx);
-            leadingKeys.addAll(keys.leadingKeys());
-            attributes.addAll(keys.attributes());
+            Map<String, List<String>> conditions = new LinkedHashMap<>();
+            if (!keys.leadingKeys().isEmpty()) {
+                conditions.put("dynamodb:LeadingKeys", keys.leadingKeys());
+            }
+            if (!keys.attributes().isEmpty()) {
+                conditions.put("dynamodb:Attributes", keys.attributes());
+            }
+            if (keys.select() != null) {
+                conditions.put("dynamodb:Select", List.of(keys.select()));
+            }
+            contexts.add(conditions);
         });
-        if (!leadingKeys.isEmpty()) {
-            conditions.put("dynamodb:LeadingKeys", List.copyOf(leadingKeys));
-        }
-        if (!attributes.isEmpty()) {
-            conditions.put("dynamodb:Attributes", List.copyOf(attributes));
-        }
-        return conditions;
+        return contexts.isEmpty() ? List.of(Map.of()) : contexts;
     }
 
     private static boolean isDynamoDbBatch(String action) {

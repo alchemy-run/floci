@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.cognito.CognitoService.UserPoolDomainNames;
 import io.github.hectorvent.floci.services.cognito.model.CognitoGroup;
@@ -152,6 +153,7 @@ public class CognitoJsonHandler {
             case "StartWebAuthnRegistration" -> handleStartWebAuthnRegistration(request);
             case "CompleteWebAuthnRegistration" -> handleCompleteWebAuthnRegistration(request);
             case "ListWebAuthnCredentials" -> handleListWebAuthnCredentials(request);
+            case "AdminListUserAuthEvents" -> handleAdminListUserAuthEvents(request);
             case "DeleteWebAuthnCredential" -> handleDeleteWebAuthnCredential(request);
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
@@ -194,7 +196,7 @@ public class CognitoJsonHandler {
 
     private Response handleAddCustomAttributes(JsonNode request) {
         String userPoolId = request.path("UserPoolId").asText();
-        List<Map<String, Object>> customAttributes = new java.util.ArrayList<>();
+        List<Map<String, Object>> customAttributes = new ArrayList<>();
         JsonNode attrsNode = request.path("CustomAttributes");
         if (attrsNode.isArray()) {
             for (JsonNode attrNode : attrsNode) {
@@ -746,7 +748,8 @@ public class CognitoJsonHandler {
         service.adminUpdateUserAttributes(
                 request.path("UserPoolId").asText(),
                 request.path("Username").asText(),
-                attrs
+                attrs,
+                clientMetadata(request)
         );
         return Response.ok(objectMapper.createObjectNode()).build();
     }
@@ -1206,9 +1209,9 @@ public class CognitoJsonHandler {
         node.put("DeletionProtection", p.getDeletionProtection() != null ? p.getDeletionProtection() : "INACTIVE");
         node.set("LambdaConfig", objectMapper.valueToTree(p.getLambdaConfig() != null ? p.getLambdaConfig() : new HashMap<>()));
         node.set("SchemaAttributes", objectMapper.valueToTree(CognitoStandardAttributes.merge(p.getSchemaAttributes())));
-        node.set("AutoVerifiedAttributes", objectMapper.valueToTree(p.getAutoVerifiedAttributes() != null ? p.getAutoVerifiedAttributes() : new java.util.ArrayList<>()));
-        node.set("AliasAttributes", objectMapper.valueToTree(p.getAliasAttributes() != null ? p.getAliasAttributes() : new java.util.ArrayList<>()));
-        node.set("UsernameAttributes", objectMapper.valueToTree(p.getUsernameAttributes() != null ? p.getUsernameAttributes() : new java.util.ArrayList<>()));
+        node.set("AutoVerifiedAttributes", objectMapper.valueToTree(p.getAutoVerifiedAttributes() != null ? p.getAutoVerifiedAttributes() : new ArrayList<>()));
+        node.set("AliasAttributes", objectMapper.valueToTree(p.getAliasAttributes() != null ? p.getAliasAttributes() : new ArrayList<>()));
+        node.set("UsernameAttributes", objectMapper.valueToTree(p.getUsernameAttributes() != null ? p.getUsernameAttributes() : new ArrayList<>()));
 
         if (p.getSmsVerificationMessage() != null) node.put("SmsVerificationMessage", p.getSmsVerificationMessage());
         if (p.getEmailVerificationMessage() != null) node.put("EmailVerificationMessage", p.getEmailVerificationMessage());
@@ -1427,7 +1430,7 @@ public class CognitoJsonHandler {
             return List.of();
         }
 
-        List<ResourceServerScope> scopes = new java.util.ArrayList<>();
+        List<ResourceServerScope> scopes = new ArrayList<>();
         scopesNode.forEach(item -> {
             ResourceServerScope scope = new ResourceServerScope();
             scope.setScopeName(item.path("ScopeName").asText());
@@ -1442,7 +1445,7 @@ public class CognitoJsonHandler {
             return List.of();
         }
 
-        List<String> values = new java.util.ArrayList<>();
+        List<String> values = new ArrayList<>();
         node.forEach(item -> values.add(item.asText()));
         return values;
     }
@@ -1666,7 +1669,15 @@ public class CognitoJsonHandler {
     private Response handleListWebAuthnCredentials(JsonNode request) {
         return Response.ok(objectMapper.valueToTree(service.listWebAuthnCredentials(
                 request.path("AccessToken").asText(),
-                request.hasNonNull("MaxResults") ? request.path("MaxResults").asInt() : null,
+                Pagination.parseMaxResults(request, "MaxResults", "SerializationException"),
+                request.hasNonNull("NextToken") ? request.path("NextToken").asText() : null))).build();
+    }
+
+    private Response handleAdminListUserAuthEvents(JsonNode request) {
+        return Response.ok(objectMapper.valueToTree(service.adminListUserAuthEvents(
+                request.path("UserPoolId").asText(),
+                request.path("Username").asText(),
+                Pagination.parseMaxResults(request, "MaxResults", "SerializationException"),
                 request.hasNonNull("NextToken") ? request.path("NextToken").asText() : null))).build();
     }
 

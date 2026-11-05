@@ -86,7 +86,6 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
@@ -101,14 +100,21 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
+import java.util.function.LongPredicate;
 import java.util.function.Predicate;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -142,10 +148,21 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
      * Configured by {@code floci.services.ecs.steady-state-window-seconds}.
      */
     private final Duration steadyStateWindow;
+    private final boolean publishAwsvpcPortsToHost;
+    private final boolean dynamicAwsvpcHostPorts;
     private final boolean sweepLeftoverContainers;
     private final String baseUrl;
     // Replaced by afterReset() after a state reset, whose container teardown shuts this scheduler down.
     private volatile ScheduledExecutorService reconciler = newReconciler();
+    /**
+     * Docker stops the task stopper runs at once. Each holds its thread for the containers' whole
+     * {@code stopTimeout}, up to two minutes a container, so this bounds that work without making
+     * unrelated services take turns behind one slow task.
+     */
+    private static final int TASK_STOP_CONCURRENCY = 8;
+    // Runs the service scheduler's Docker stops (see stopInBackground). A container teardown drains
+    // and shuts it down, and afterReset() replaces it, as with the reconciler.
+    private volatile ExecutorService taskStopper = newTaskStopper();
     private final Object reconcilerLock = new Object();
     private final Object reconciliationPassLock = new Object();
     // False until a previous run's task containers are confirmed gone; no task starts before.
@@ -163,6 +180,8 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     private final Map<String, EcsTask> tasks = new ConcurrentHashMap<>();
     // taskArn → EcsTaskHandle (running containers or pending resource cleanup)
     private final Map<String, EcsTaskHandle> taskHandles = new ConcurrentHashMap<>();
+    // taskArn → the Docker stop the task stopper is running for that task, until the stop has landed.
+    private final Map<String, CompletableFuture<Void>> taskStops = new ConcurrentHashMap<>();
     private final Set<String> shutdownCleanupTasks = ConcurrentHashMap.newKeySet();
     // region::clusterName/serviceName → EcsServiceModel
     private Map<String, EcsServiceModel> services = new ConcurrentHashMap<>();
@@ -255,7 +274,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     // is how AWS describes it: "the account settings for the root user or the default setting".
     private Map<String, String> accountSettings = new ConcurrentHashMap<>();
     // deploymentIds for which SERVICE_DEPLOYMENT_IN_PROGRESS has already been emitted this process.
-    private final Set<String> inProgressEmitted = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private final Set<String> inProgressEmitted = ConcurrentHashMap.newKeySet();
     // serviceArn → why the reconciler's last attempt to launch one of its tasks failed, and for which
     // deployment. Memory-only.
     private final Map<String, LaunchFailure> launchFailures = new ConcurrentHashMap<>();
@@ -271,7 +290,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 execSessions, discoveryRegistrar, cloudWatchMetricsService, Clock.systemUTC());
     }
 
-    /** With the clock that dates Container Insights samples, which a test pins. */
+    /** With the clock for Container Insights samples and task protection deadlines. */
     EcsService(RegionResolver regionResolver, EcsContainerManager containerManager,
                EmulatorConfig config, EcsLoadBalancerRegistrar lbRegistrar,
                StorageFactory storageFactory, EcsEventPublisher eventPublisher,
@@ -282,6 +301,8 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         this.containerManager = containerManager;
         this.dockerMode = !config.services().ecs().mock();
         this.steadyStateWindow = Duration.ofSeconds(Math.max(0, config.services().ecs().steadyStateWindowSeconds()));
+        this.publishAwsvpcPortsToHost = config.services().ecs().publishAwsvpcPortsToHost();
+        this.dynamicAwsvpcHostPorts = config.services().ecs().dynamicAwsvpcHostPorts();
         this.sweepLeftoverContainers = dockerMode && config.services().ecs().reconcileContainersOnStartup();
         this.leftoverTaskVolumesRemoved = !sweepLeftoverContainers;
         this.baseUrl = config.effectiveBaseUrl();
@@ -352,6 +373,22 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 r -> { Thread t = new Thread(r, "ecs-reconciler"); t.setDaemon(true); return t; });
     }
 
+    /**
+     * Its threads exist only while there is something to stop. The queue is unbounded, but
+     * {@link #taskStops} admits one stop per task, so it never holds more stops than there are tasks.
+     */
+    private static ExecutorService newTaskStopper() {
+        AtomicInteger threads = new AtomicInteger();
+        ThreadPoolExecutor stopper = new ThreadPoolExecutor(TASK_STOP_CONCURRENCY, TASK_STOP_CONCURRENCY,
+                30, TimeUnit.SECONDS, new LinkedBlockingQueue<>(), r -> {
+                    Thread t = new Thread(r, "ecs-task-stopper-" + threads.incrementAndGet());
+                    t.setDaemon(true);
+                    return t;
+                });
+        stopper.allowCoreThreadTimeOut(true);
+        return stopper;
+    }
+
     void initializeStorage() {
         if (storageFactory == null) {
             return; // keeps non-CDI unit tests working
@@ -412,8 +449,9 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
      * state reset. Task state is transient (memory-only), so without this the containers
      * outlive the process as orphans. The reconciler is shut down first, and any in-flight
      * tick awaited, so it cannot restart drained tasks between this teardown and the final
-     * storage flush. A reset brings it back in {@link #afterReset()}. Handles are claimed
-     * atomically to avoid racing an explicit StopTask.
+     * storage flush. A reset brings it back in {@link #afterReset()}. The stops the task stopper
+     * already has are let finish, since each owns its task's handle until it lands. The remaining
+     * handles are claimed atomically to avoid racing an explicit StopTask.
      */
     @Override
     public void stopManagedContainers() {
@@ -424,7 +462,13 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+        drainTaskStopper();
         for (String taskArn : new ArrayList<>(taskHandles.keySet())) {
+            if (taskStops.containsKey(taskArn)) {
+                // Only after an interrupted drain: stopping its containers beside that stop would race it.
+                LOG.warnv("Leaving ECS task {0} to the stop still running for it", taskArn);
+                continue;
+            }
             EcsTaskHandle claimed = taskHandles.remove(taskArn);
             if (claimed == null) {
                 continue;
@@ -455,6 +499,23 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         }
     }
 
+    /**
+     * Lets every stop handed to the task stopper finish, queued ones included, and land its task
+     * as usual, rather than stopping the same containers again beside it. The stopper takes no new
+     * stop until {@link #afterReset()} replaces it. The wait is no longer than stopping those tasks
+     * here would have taken: each stop is bounded by its containers' stop timeouts and Docker's API
+     * timeout, and they run side by side.
+     */
+    private void drainTaskStopper() {
+        ExecutorService current = taskStopper;
+        current.shutdown();
+        try {
+            current.awaitTermination(Long.MAX_VALUE, TimeUnit.NANOSECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+    }
+
     @Override
     public void clear() {
         // The stores hold the ECS state and afterReset() restarts the reconciler. The reset also
@@ -465,14 +526,18 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
 
     /**
      * Runs at the end of every state reset, never on shutdown. The reset's teardown stopped the
-     * reconciler, so without a new one no service would be reconciled again until the emulator
-     * restarted. This hook rather than {@code clear()} because the controller runs it even when
-     * the storage wipe or another service's {@code clear()} threw, and a failed reset must not
-     * leave ECS without a reconciler for good.
+     * reconciler and the task stopper, so without new ones no service would be reconciled again,
+     * nor any of its tasks stopped, until the emulator restarted. This hook rather than
+     * {@code clear()} because the controller runs it even when the storage wipe or another
+     * service's {@code clear()} threw, and a failed reset must not leave ECS without a reconciler
+     * for good. The stopper comes back first, so the new reconciler's first tick has one.
      */
     @Override
     public void afterReset() {
         synchronized (reconcilerLock) {
+            if (taskStopper.isShutdown()) {
+                taskStopper = newTaskStopper();
+            }
             if (reconciler.isShutdown()) {
                 ScheduledExecutorService replacement = newReconciler();
                 scheduleReconciliation(replacement);
@@ -722,7 +787,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             if (cluster != null) {
                 result.add(cluster);
             } else {
-                failures.add(Failure.missing(id != null && id.startsWith("arn:")
+                failures.add(Failure.missing(AwsArnUtils.looksLikeArn(id)
                         ? id : regionResolver.buildArn("ecs", region, "cluster/" + id)));
             }
         }
@@ -1434,7 +1499,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         if (ref == null) {
             return false;
         }
-        String tail = ref.startsWith("arn:") ? ref.substring(ref.lastIndexOf('/') + 1) : ref;
+        String tail = AwsArnUtils.looksLikeArn(ref) ? ref.substring(ref.lastIndexOf('/') + 1) : ref;
         int colon = tail.lastIndexOf(':');
         if (colon < 0) {
             return false;
@@ -1600,7 +1665,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                     synchronized (task) {
                         taskHandles.put(taskArn, handle);
                         markTaskRunning(task);
-                        cluster.setRunningTasksCount(cluster.getRunningTasksCount() + 1);
+                        adjustRunningTasksCount(cluster, 1);
                         LOG.infov("Started ECS task (docker): {0}", taskArn);
                         stopRequested = TaskStatus.STOPPED.name().equals(task.getDesiredStatus());
                         if (!stopRequested) {
@@ -1641,7 +1706,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             } else {
                 task.setContainers(mockContainers(task, taskDef, region));
                 markTaskRunning(task);
-                cluster.setRunningTasksCount(cluster.getRunningTasksCount() + 1);
+                adjustRunningTasksCount(cluster, 1);
                 LOG.infov("Started ECS task (mock): {0}", taskArn);
                 if (eventPublisher != null) {
                     eventPublisher.emitTaskLadder(task, TaskStatus.PENDING, TaskStatus.RUNNING, region);
@@ -1701,6 +1766,20 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         task.setConnectivityAt(Instant.now());
         task.setHealthStatus(HEALTH_STATUS_UNKNOWN);
         task.bumpVersion();
+    }
+
+    /**
+     * Moves a cluster's running task count by {@code delta}, never below zero, and says whether it
+     * moved. Launches, the reconciler and the task stopper's threads all change it, so it is read
+     * and written under the cluster's monitor rather than one update overwriting another.
+     */
+    private static boolean adjustRunningTasksCount(EcsCluster cluster, int delta) {
+        synchronized (cluster) {
+            int count = Math.max(0, cluster.getRunningTasksCount() + delta);
+            boolean moved = count != cluster.getRunningTasksCount();
+            cluster.setRunningTasksCount(count);
+            return moved;
+        }
     }
 
     /**
@@ -2006,12 +2085,44 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
      */
     private EcsTask stopTask(String clusterRef, String taskRef, String reason, String stopCode, String region) {
         EcsTask task = resolveTaskOrThrow(taskRef, region);
-        synchronized (task) {
-            return stopTaskLocked(task, reason, stopCode, region);
+        while (true) {
+            CompletableFuture<Void> running;
+            synchronized (task) {
+                running = taskStops.get(task.getTaskArn());
+                if (running == null) {
+                    return stopTaskLocked(task, reason, stopCode, region, false);
+                }
+            }
+            // The service scheduler is already stopping it. Waiting for that stop, outside the
+            // monitor it lands under, answers as a stop queued behind another always has: with the
+            // task STOPPED, or by retrying a stop that failed. A stop that failed can be retried by
+            // a tick before this thread takes the monitor back, so that retry is waited for too.
+            running.join();
         }
     }
 
-    private EcsTask stopTaskLocked(EcsTask task, String reason, String stopCode, String region) {
+    /** A stop the service scheduler decides on, whose Docker side runs in the background. */
+    private void stopServiceTask(EcsTask task, String reason, String region) {
+        synchronized (task) {
+            stopTaskLocked(task, reason, STOP_CODE_SERVICE_SCHEDULER_INITIATED, region, true);
+        }
+    }
+
+    private void stopServiceTaskIfUnprotected(EcsTask task, String reason, String region) {
+        synchronized (task) {
+            if (!isTaskProtected(task, clock.instant())) {
+                stopTaskLocked(task, reason, STOP_CODE_SERVICE_SCHEDULER_INITIATED, region, true);
+            }
+        }
+    }
+
+    /**
+     * @param inBackground run the Docker stop on the task stopper and return with the task still
+     *                     STOPPING, as the reconciler must (see {@link #stopInBackground}); otherwise
+     *                     run it on this thread and return once it has landed, as StopTask does
+     */
+    private EcsTask stopTaskLocked(EcsTask task, String reason, String stopCode, String region,
+                                   boolean inBackground) {
         if (TaskStatus.STOPPED.name().equals(task.getLastStatus())) {
             return task;
         }
@@ -2026,50 +2137,126 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             deregisterTaskFromServiceDiscovery(task, region);
         }
 
-        Map<String, Integer> exitCodes = Map.of();
-        Map<String, Instant> finishedAt = Map.of();
-        if (dockerMode) {
-            EcsTaskHandle handle = taskHandles.get(task.getTaskArn());
-            if (handle == null) {
-                handle = recoverTaskHandle(task, region);
-                if (handle == null) {
-                    LOG.warnv("Cannot stop ECS task {0}: no Docker container IDs are available", task.getTaskArn());
-                    return task;
-                }
-            }
-            try {
-                exitCodes = containerManager.stopTaskAndCollectExitCodes(handle);
-            } catch (Exception e) {
-                LOG.warnv(e, "Could not stop ECS task {0}; retrying on the next reconciliation tick",
-                        task.getTaskArn());
-                return task;
-            }
-            if (exitCodes.size() != handle.getContainerIds().size()
-                    || !handle.allContainersRemoved()) {
-                LOG.warnv("ECS task {0} still has containers pending removal; retrying on the next reconciliation tick",
-                        task.getTaskArn());
-                return task;
-            }
-            taskHandles.remove(task.getTaskArn(), handle);
-            retainPendingCleanupHandle(task.getTaskArn(), handle);
-            finishedAt = handle.getFinishedAt();
+        if (!dockerMode) {
+            markTaskStopped(task, Map.of(), Map.of(), region);
+            return task;
         }
+        if (taskStops.containsKey(task.getTaskArn())) {
+            return task; // the stop already running for it lands it
+        }
+        EcsTaskHandle handle = taskHandles.get(task.getTaskArn());
+        if (handle == null) {
+            handle = recoverTaskHandle(task, region);
+            if (handle == null) {
+                LOG.warnv("Cannot stop ECS task {0}: no Docker container IDs are available", task.getTaskArn());
+                return task;
+            }
+        }
+        if (inBackground) {
+            stopInBackground(task, handle, region);
+            return task;
+        }
+        Map<String, Integer> exitCodes;
+        try {
+            exitCodes = containerManager.stopTaskAndCollectExitCodes(handle);
+        } catch (Exception e) {
+            LOG.warnv(e, "Could not stop ECS task {0}; retrying on the next reconciliation tick",
+                    task.getTaskArn());
+            return task;
+        }
+        landDockerStop(task, handle, exitCodes, region);
+        return task;
+    }
 
+    /**
+     * Hands a task's Docker stop to the task stopper. The stop waits out each container's
+     * {@code stopTimeout}, up to two minutes a container; run on the reconciler thread, it held up
+     * every other task and service for that long, one slow task after another. The task is
+     * already STOPPING and deregistered; the stop lands it STOPPED once Docker is done, or leaves
+     * it STOPPING for a later tick to retry, as a failed stop always has. {@link #taskStops} keeps
+     * the ticks in between from starting it again. Called holding the task's monitor, which the
+     * stop takes only to land: nothing holds it while Docker works.
+     */
+    private void stopInBackground(EcsTask task, EcsTaskHandle handle, String region) {
+        String taskArn = task.getTaskArn();
+        String accountId = taskAccountId(taskArn);
+        CompletableFuture<Void> stop = new CompletableFuture<>();
+        // Recorded before it can run, so its own removal below always comes after this.
+        taskStops.put(taskArn, stop);
+        try {
+            taskStopper.execute(() -> {
+                try {
+                    // A stopper thread has no request context, and account-aware storage reads the
+                    // account from it.
+                    RequestScopes.runAs(accountId, () -> runBackgroundStop(task, handle, region));
+                } catch (RuntimeException e) {
+                    LOG.warnv(e, "Could not finish stopping ECS task {0}: {1}", taskArn, e.getMessage());
+                } finally {
+                    taskStops.remove(taskArn, stop);
+                    stop.complete(null);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            // Only while a container teardown has the stopper shut down. The task keeps its handle,
+            // so that teardown, or the first tick after a reset, stops it instead.
+            taskStops.remove(taskArn, stop);
+            stop.complete(null);
+            LOG.debugv("ECS task stopper is shut down, leaving task {0} STOPPING: {1}", taskArn, e.getMessage());
+        }
+    }
+
+    /** The task stopper's half of {@link #stopInBackground}: the Docker stop, then its landing. */
+    private void runBackgroundStop(EcsTask task, EcsTaskHandle handle, String region) {
+        Map<String, Integer> exitCodes;
+        try {
+            exitCodes = containerManager.stopTaskAndCollectExitCodes(handle);
+        } catch (Exception e) {
+            LOG.warnv(e, "Could not stop ECS task {0}; retrying on the next reconciliation tick",
+                    task.getTaskArn());
+            return;
+        }
+        synchronized (task) {
+            // Nothing else takes a task out of STOPPING while its stop runs here; checked all the
+            // same, so a stop can never land a task twice.
+            if (TaskStatus.STOPPING.name().equals(task.getLastStatus())) {
+                landDockerStop(task, handle, exitCodes, region);
+            }
+        }
+    }
+
+    /**
+     * Lands a Docker stop that came back: STOPPED once every container is gone, still STOPPING
+     * otherwise, for a later reconciliation tick to retry. Called holding the task's monitor.
+     */
+    private void landDockerStop(EcsTask task, EcsTaskHandle handle, Map<String, Integer> exitCodes,
+                                String region) {
+        if (exitCodes.size() != handle.getContainerIds().size()
+                || !handle.allContainersRemoved()) {
+            LOG.warnv("ECS task {0} still has containers pending removal; retrying on the next reconciliation tick",
+                    task.getTaskArn());
+            return;
+        }
+        taskHandles.remove(task.getTaskArn(), handle);
+        retainPendingCleanupHandle(task.getTaskArn(), handle);
+        markTaskStopped(task, exitCodes, handle.getFinishedAt(), region);
+    }
+
+    /** The STOPPED half of a stop, with what Docker reported about each container. */
+    private void markTaskStopped(EcsTask task, Map<String, Integer> exitCodes, Map<String, Instant> finishedAt,
+                                 String region) {
         task.setLastStatus(TaskStatus.STOPPED.name());
         task.setStoppedAt(Instant.now());
         task.setExecutionStoppedAt(Instant.now());
         task.bumpVersion();
         containerManager.releaseTaskNetwork(task, region);
         if (task.getContainers() != null) {
-            final Map<String, Integer> codes = exitCodes;
-            final Map<String, Instant> finishTimes = finishedAt;
             task.getContainers().forEach(c -> {
                 c.setLastStatus("STOPPED");
-                Integer code = codes.get(c.getName());
+                Integer code = exitCodes.get(c.getName());
                 if (code != null) {
                     c.setExitCode(code);
                 }
-                Instant finished = finishTimes.get(c.getName());
+                Instant finished = finishedAt.get(c.getName());
                 if (finished != null) {
                     c.setFinishedAt(finished);
                 }
@@ -2077,8 +2264,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         }
 
         EcsCluster cluster = resolveClusterByArn(task.getClusterArn());
-        if (cluster != null && cluster.getRunningTasksCount() > 0) {
-            cluster.setRunningTasksCount(cluster.getRunningTasksCount() - 1);
+        if (cluster != null && adjustRunningTasksCount(cluster, -1)) {
             persistCluster(region, cluster);
         }
 
@@ -2086,7 +2272,6 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         if (eventPublisher != null) {
             eventPublisher.emitTaskLadder(task, TaskStatus.RUNNING, TaskStatus.STOPPED, region);
         }
-        return task;
     }
 
     /** Registers a freshly-started task's containers as ELBv2 targets if its service is load-balanced. */
@@ -2162,10 +2347,8 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 continue;
             }
             for (NetworkBinding binding : container.getNetworkBindings()) {
-                addresses.add(new EcsTaskAddress(host, binding.hostPort()));
-                if (!EcsTaskAddress.isLoopback(host)) {
-                    addresses.add(new EcsTaskAddress(host, binding.containerPort()));
-                }
+                int port = EcsTaskAddress.isLoopback(host) ? binding.hostPort() : binding.containerPort();
+                addresses.add(new EcsTaskAddress(host, port));
             }
         }
         return addresses;
@@ -2400,7 +2583,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             if (task != null) {
                 result.add(task);
             } else {
-                failures.add(Failure.missing(ref != null && ref.startsWith("arn:")
+                failures.add(Failure.missing(AwsArnUtils.looksLikeArn(ref)
                         ? ref
                         : regionResolver.buildArn("ecs", region,
                                 "task/" + cluster.getClusterName() + "/" + ref)));
@@ -2509,8 +2692,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             return 0;
         }
         try {
-            return Integer.parseInt(new String(Base64.getUrlDecoder().decode(nextToken),
-                    StandardCharsets.UTF_8));
+            return Integer.parseInt(Base64Url.decode(nextToken));
         } catch (IllegalArgumentException e) {
             throw new AwsException("InvalidParameterException", "The nextToken is not valid.", 400);
         }
@@ -2527,6 +2709,30 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
 
     public List<ProtectedTask> getTaskProtection(String clusterRef, List<String> taskRefs, String region) {
         return getTaskProtectionDetailed(clusterRef, taskRefs, region).protectedTasks();
+    }
+
+    private static boolean isTaskProtected(EcsTask task, Instant now) {
+        if (!task.isProtectionEnabled()) {
+            return false;
+        }
+        Instant until = task.getProtectedUntil();
+        if (until == null || now.isBefore(until)) {
+            return true;
+        }
+        task.setProtectionEnabled(false);
+        task.setProtectedUntil(null);
+        task.bumpVersion();
+        return false;
+    }
+
+    private boolean isProtectedTask(EcsTask task) {
+        synchronized (task) {
+            return isTaskProtected(task, clock.instant());
+        }
+    }
+
+    private boolean eligibleForServiceStop(EcsTask task) {
+        return !isProtectedTask(task);
     }
 
     // ── Services ──────────────────────────────────────────────────────────────
@@ -3071,7 +3277,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
 
     /** Echoes an ARN the caller supplied, otherwise builds the ARN the service would have had. */
     private String missingServiceArn(EcsCluster cluster, String serviceRef, String region) {
-        if (serviceRef != null && serviceRef.startsWith("arn:")) {
+        if (AwsArnUtils.looksLikeArn(serviceRef)) {
             return serviceRef;
         }
         return regionResolver.buildArn("ecs", region,
@@ -3489,6 +3695,9 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             "ACTIVE", "DRAINING", "REGISTERING", "DEREGISTERING", "REGISTRATION_FAILED", "INACTIVE");
     /** "The only valid values for this action are ACTIVE and DRAINING." */
     private static final Set<String> UPDATABLE_CONTAINER_INSTANCE_STATUSES = Set.of("ACTIVE", "DRAINING");
+    private static final Pattern RUNNING_TASKS_COUNT_FILTER = Pattern.compile(
+            "^\\s*runningTasksCount\\s*(==|!=|>=|<=|>|<|equals|not_equals|greater_than_equal|"
+                    + "greater_than|less_than_equal|less_than)\\s*(-?\\d+)\\s*$");
     /** "A list of up to 10 container instance IDs or full ARN entries." */
     private static final int MAX_CONTAINER_INSTANCES_PER_UPDATE = 10;
     /** What the agent reports when a registration carried no versionInfo of its own. */
@@ -3601,7 +3810,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             if (instance != null) {
                 result.add(instance);
             } else {
-                failures.add(Failure.missing(ref.startsWith("arn:") ? ref
+                failures.add(Failure.missing(AwsArnUtils.looksLikeArn(ref) ? ref
                         : containerInstanceArnFor(cluster, ref, region)));
             }
         }
@@ -3614,20 +3823,23 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     public List<String> listContainerInstances(String clusterRef, String status, String region) {
-        return listContainerInstances(clusterRef, status, null, null, region).arns();
+        return listContainerInstances(clusterRef, status, null, null, null, region).arns();
     }
 
     /**
      * Lists container instance ARNs. A request that names no status gets every instance other than
      * the {@code INACTIVE} ones, which is AWS's documented default rather than everything.
      */
-    public ListPage listContainerInstances(String clusterRef, String status, Integer maxResults,
-                                            String nextToken, String region) {
+    public ListPage listContainerInstances(String clusterRef, String status, String filter,
+                                            Integer maxResults, String nextToken, String region) {
         EcsCluster cluster = resolveClusterOrDefault(clusterRef, region);
         if (status != null && !CONTAINER_INSTANCE_STATUSES.contains(status)) {
             throw new AwsException("InvalidParameterException",
                     "Invalid container instance status: " + status, 400);
         }
+        LongPredicate query = containerInstanceCountFilter(filter);
+        Map<String, Long> runningCounts = filter == null ? Map.of()
+                : runningTaskCountsForClusterArn(cluster.getClusterArn());
         String prefix = containerInstanceKey(cluster.getClusterArn(), "");
         List<String> arns = containerInstances.entrySet().stream()
                 .filter(e -> e.getKey().startsWith(prefix))
@@ -3635,9 +3847,65 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 .filter(ci -> status != null
                         ? status.equals(ci.getStatus())
                         : !STATUS_INACTIVE.equals(ci.getStatus()))
+                .filter(ci -> query.test(runningCounts.getOrDefault(ci.getContainerInstanceArn(), 0L)))
                 .map(ContainerInstance::getContainerInstanceArn)
                 .toList();
         return paginate(arns, maxResults, nextToken);
+    }
+
+    long runningTaskCountForInstance(String clusterRef, String instanceArn, String region) {
+        if (instanceArn == null) {
+            return 0;
+        }
+        String clusterArn = resolveClusterOrDefault(clusterRef, region).getClusterArn();
+        return tasks.values().stream()
+                .filter(EcsService::countsTowardRunningTasks)
+                .filter(task -> clusterArn.equals(task.getClusterArn()))
+                .filter(task -> instanceArn.equals(task.getContainerInstanceArn()))
+                .count();
+    }
+
+    Map<String, Long> runningTaskCountsForCluster(String clusterRef, String region) {
+        return runningTaskCountsForClusterArn(resolveClusterOrDefault(clusterRef, region).getClusterArn());
+    }
+
+    private Map<String, Long> runningTaskCountsForClusterArn(String clusterArn) {
+        return tasks.values().stream()
+                .filter(task -> clusterArn.equals(task.getClusterArn()))
+                .filter(EcsService::countsTowardRunningTasks)
+                .collect(Collectors.groupingBy(EcsTask::getContainerInstanceArn, Collectors.counting()));
+    }
+
+    private static boolean countsTowardRunningTasks(EcsTask task) {
+        return task.getContainerInstanceArn() != null
+                && TaskStatus.RUNNING.name().equals(task.getDesiredStatus());
+    }
+
+    private static LongPredicate containerInstanceCountFilter(String filter) {
+        if (filter == null) {
+            return count -> true;
+        }
+        Matcher matcher = RUNNING_TASKS_COUNT_FILTER.matcher(filter);
+        if (!matcher.matches()) {
+            throw new AwsException("InvalidParameterException",
+                    "Unsupported or invalid container instance filter: " + filter, 400);
+        }
+        long count;
+        try {
+            count = Long.parseLong(matcher.group(2));
+        } catch (NumberFormatException e) {
+            throw new AwsException("InvalidParameterException",
+                    "Invalid runningTasksCount in container instance filter: " + filter, 400);
+        }
+        return switch (matcher.group(1)) {
+            case "==", "equals" -> running -> running == count;
+            case "!=", "not_equals" -> running -> running != count;
+            case ">", "greater_than" -> running -> running > count;
+            case ">=", "greater_than_equal" -> running -> running >= count;
+            case "<", "less_than" -> running -> running < count;
+            case "<=", "less_than_equal" -> running -> running <= count;
+            default -> throw new IllegalStateException("Unmatched container instance filter operator");
+        };
     }
 
     public ContainerInstance updateContainerAgent(String clusterRef, String instanceRef, String region) {
@@ -3674,7 +3942,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         for (String ref : instanceRefs) {
             ContainerInstance instance = resolveContainerInstance(cluster.getClusterArn(), ref);
             if (instance == null) {
-                failures.add(Failure.missing(ref.startsWith("arn:") ? ref
+                failures.add(Failure.missing(AwsArnUtils.looksLikeArn(ref) ? ref
                         : containerInstanceArnFor(cluster, ref, region)));
                 continue;
             }
@@ -3799,7 +4067,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                                 .findFirst().orElse(null));
             };
             if (cp == null) {
-                failures.add(Failure.missing(ref.startsWith("arn:") ? ref
+                failures.add(Failure.missing(AwsArnUtils.looksLikeArn(ref) ? ref
                         : regionResolver.buildArn("ecs", region, "capacity-provider/" + ref)));
                 continue;
             }
@@ -4081,7 +4349,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             if (match != null) {
                 found.add(match);
             } else {
-                failures.add(Failure.missing(ref.startsWith("arn:") ? ref
+                failures.add(Failure.missing(AwsArnUtils.looksLikeArn(ref) ? ref
                         : regionResolver.buildArn("ecs", region, "task-set/"
                                 + cluster.getClusterName() + "/" + svc.getServiceName() + "/" + ref)));
             }
@@ -4161,7 +4429,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         // This deployment's own tasks: counting the ones still draining from the previous
         // deployment would report a task-definition change COMPLETED as soon as it was made.
         long running = runningOnCurrentDeployment(svc);
-        boolean converged = steadyOnCurrentDeployment(svc) >= svc.getDesiredCount();
+        boolean converged = steadyOnCurrentDeployment(svc) >= svc.getDesiredCount() && !hasProtectedStaleTask(svc);
         boolean rollbackPending = latestServiceDeployment(svc.getServiceArn(), candidate ->
                 DEPLOYMENT_STATUS_ROLLBACK_IN_PROGRESS.equals(candidate.getStatus())) != null;
         ServiceDeployment record = lockedCopyOf(deploymentRecordOf(svc));
@@ -4332,7 +4600,8 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
      */
     public List<ServiceEvent> eventsFor(EcsServiceModel svc) {
         if (svc == null || !"ACTIVE".equals(svc.getStatus())
-                || steadyOnCurrentDeployment(svc) < svc.getDesiredCount()) {
+                || steadyOnCurrentDeployment(svc) < svc.getDesiredCount()
+                || hasProtectedStaleTask(svc)) {
             return List.of();
         }
         String deploymentId = deploymentId(svc);
@@ -4345,7 +4614,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     private static String newDeploymentId() {
-        return "ecs-svc/" + java.util.UUID.randomUUID().toString().replace("-", "");
+        return "ecs-svc/" + UUID.randomUUID().toString().replace("-", "");
     }
 
     /**
@@ -4386,6 +4655,20 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 .filter(t -> TaskStatus.RUNNING.name().equals(t.getLastStatus()))
                 .filter(t -> !isStaleForDeployment(t, currentDeploymentId, taskDefinitionArn))
                 .count();
+    }
+
+    private boolean hasProtectedStaleTask(EcsServiceModel svc) {
+        EcsCluster cluster = resolveClusterByArn(svc.getClusterArn());
+        if (cluster == null) {
+            return false;
+        }
+        String currentDeploymentId = deploymentId(svc);
+        String taskDefinitionArn = resolvedTaskDefinitionArn(svc, serviceRegion(svc));
+        return tasks.values().stream()
+                .filter(t -> ownedBy(t, svc, cluster))
+                .filter(t -> TaskStatus.RUNNING.name().equals(t.getLastStatus()))
+                .filter(t -> isStaleForDeployment(t, currentDeploymentId, taskDefinitionArn))
+                .anyMatch(this::isProtectedTask);
     }
 
     /**
@@ -4523,7 +4806,8 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                     && deployment.getTargetServiceRevisionArn().endsWith("/" + taskSetId(svc))
                     && DEPLOYMENT_STATUS_IN_PROGRESS.equals(deployment.getStatus())
                     && STATUS_ACTIVE.equals(svc.getStatus())
-                    && steadyOnCurrentDeployment(svc) >= svc.getDesiredCount()) {
+                    && steadyOnCurrentDeployment(svc) >= svc.getDesiredCount()
+                    && !hasProtectedStaleTask(svc)) {
                 Instant now = Instant.now();
                 deployment.setStatus(DEPLOYMENT_STATUS_SUCCESSFUL);
                 if (deployment.getAlarmNames() != null) {
@@ -5017,7 +5301,9 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
 
     private void reconcileTaskLocked(String taskArn, EcsTask task) {
         if (TaskStatus.STOPPING.name().equals(task.getLastStatus())) {
-            stopTask(task.getClusterArn(), taskArn, task.getStoppedReason(), task.getStopCode(), taskRegion(task));
+            // Never stopTask(...), which waits for a stop already running: that stop lands under
+            // this task's monitor, held here.
+            stopTaskLocked(task, task.getStoppedReason(), task.getStopCode(), taskRegion(task), true);
             return;
         }
 
@@ -5088,8 +5374,8 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         task.bumpVersion();
 
         EcsCluster cluster = resolveClusterByArn(task.getClusterArn());
-        if (cluster != null && cluster.getRunningTasksCount() > 0) {
-            cluster.setRunningTasksCount(cluster.getRunningTasksCount() - 1);
+        if (cluster != null) {
+            adjustRunningTasksCount(cluster, -1);
         }
 
         LOG.infov("ECS task {0} reconciled to STOPPED (all containers exited)", taskArn);
@@ -5260,9 +5546,8 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 // maximumPercent is 100 for DAEMON: the replacement starts once this is STOPPED.
                 if (!TaskStatus.STOPPING.name().equals(t.getLastStatus())) {
                     try {
-                        stopTask(clusterName, t.getTaskArn(),
-                                "Service deployment replaced task definition " + t.getTaskDefinitionArn(),
-                                STOP_CODE_SERVICE_SCHEDULER_INITIATED, region);
+                        stopServiceTaskIfUnprotected(t, "Service deployment replaced task definition "
+                                + t.getTaskDefinitionArn(), region);
                     } catch (Exception e) {
                         LOG.warnv("Service reconciler failed to stop daemon task {0}: {1}",
                                 t.getTaskArn(), e.getMessage());
@@ -5270,6 +5555,8 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 }
                 if (TaskStatus.STOPPED.name().equals(t.getLastStatus())) {
                     covered.remove(instanceArn);
+                } else if (TaskStatus.RUNNING.name().equals(t.getLastStatus())) {
+                    running++;
                 }
                 continue;
             }
@@ -5283,10 +5570,9 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 continue; // teardown already in flight
             }
             try {
-                stopTask(clusterName, t.getTaskArn(), instanceArn == null || !activeArns.contains(instanceArn)
+                stopServiceTask(t, instanceArn == null || !activeArns.contains(instanceArn)
                         ? "Daemon task's container instance is no longer active"
-                        : "Daemon service already has a task on this container instance",
-                        STOP_CODE_SERVICE_SCHEDULER_INITIATED, region);
+                        : "Daemon service already has a task on this container instance", region);
             } catch (Exception e) {
                 LOG.warnv("Service reconciler failed to stop daemon task {0}: {1}", t.getTaskArn(), e.getMessage());
             }
@@ -5357,7 +5643,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
      */
     private String resolvedTaskDefinitionArn(EcsServiceModel svc, String region) {
         String ref = svc.getTaskDefinition();
-        if (ref == null || ref.startsWith("arn:")) {
+        if (ref == null || AwsArnUtils.looksLikeArn(ref)) {
             return ref;
         }
         try {
@@ -5521,7 +5807,7 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         if (judgeDeploymentTasks(svc, cluster, region)) {
             return;
         }
-        boolean converged = steadyOnCurrentDeployment(svc) >= svc.getDesiredCount();
+        boolean converged = steadyOnCurrentDeployment(svc) >= svc.getDesiredCount() && !hasProtectedStaleTask(svc);
         if (converged) {
             dropDrainedFailedDeployments(key, svc, runningTasks);
         }
@@ -5551,6 +5837,34 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             if (currentDeploymentId.equals(svc.getFailedDeploymentId())) {
                 return;
             }
+            Map<String, Object> deploymentConfiguration = svc.getDeploymentConfiguration();
+            if (dockerMode && deploymentConfiguration != null
+                    && deploymentConfiguration.get("minimumHealthyPercent") instanceof Number minimum
+                    && minimum.doubleValue() == 0) {
+                Set<Integer> replacementPorts = fixedPublishedPorts(
+                        resolveTaskDefinitionOrThrow(currentTaskDefinitionArn, region));
+                List<EcsTask> draining = tasks.values().stream()
+                        .filter(task -> ownedBy(task, svc, cluster))
+                        .filter(task -> isStaleForDeployment(task, currentDeploymentId, currentTaskDefinitionArn))
+                        .filter(task -> !TaskStatus.STOPPED.name().equals(task.getLastStatus()))
+                        .filter(task -> !Collections.disjoint(replacementPorts,
+                                fixedPublishedPorts(resolveTaskDefinitionOrThrow(task.getTaskDefinitionArn(), region))))
+                        .toList();
+                if (!draining.isEmpty()) {
+                    for (EcsTask task : draining) {
+                        try {
+                            stopServiceTaskIfUnprotected(task,
+                                    "Service deployment replaced task definition " + task.getTaskDefinitionArn(), region);
+                        } catch (Exception e) {
+                            LOG.warnv(e, "Service reconciler failed to drain task {0}: {1}",
+                                    task.getTaskArn(), e.getMessage());
+                        }
+                    }
+                    svc.setRunningCount((int) runningTasks.stream()
+                            .filter(task -> TaskStatus.RUNNING.name().equals(task.getLastStatus())).count());
+                    return;
+                }
+            }
             deployment = deploymentRecordForCurrentWorkload(svc);
             int toStart = svc.getDesiredCount() - (int) current;
             List<EcsTask> currentTasks = runningTasks.stream()
@@ -5572,19 +5886,21 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 }
             }
         } else if (running > svc.getDesiredCount()) {
-            int toStop = (int) running - svc.getDesiredCount();
             // Drain stale tasks first: once their replacements are RUNNING this is the second
-            // half of the rolling deployment, not a scale-in.
-            Stream.concat(staleTasks.stream(),
-                            runningTasks.stream().filter(t -> !staleTasks.contains(t)))
-                    .limit(toStop)
+            // half of the rolling deployment. Protected stale tasks cannot displace the
+            // desired number of current-revision tasks.
+            int currentToStop = Math.max(0, (int) current - svc.getDesiredCount());
+            Stream.concat(staleTasks.stream().filter(this::eligibleForServiceStop),
+                            runningTasks.stream()
+                                    .filter(t -> !staleTasks.contains(t))
+                                    .filter(this::eligibleForServiceStop)
+                                    .limit(currentToStop))
                     .forEach(t -> {
                         boolean stale = staleTasks.contains(t);
                         try {
-                            stopTask(clusterName, t.getTaskArn(),
-                                    stale ? "Service deployment replaced task definition " + t.getTaskDefinitionArn()
-                                          : "Service scale-in",
-                                    STOP_CODE_SERVICE_SCHEDULER_INITIATED, region);
+                            stopServiceTaskIfUnprotected(t,
+                                    stale ? "Service deployment replaced task definition "
+                                            + t.getTaskDefinitionArn() : "Service scale-in", region);
                         } catch (Exception e) {
                             LOG.warnv("Service reconciler failed to stop task {0}: {1}",
                                     t.getTaskArn(), e.getMessage());
@@ -5597,6 +5913,17 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         if (settled != null) {
             settleStatus(settled);
         }
+    }
+
+    private Set<Integer> fixedPublishedPorts(TaskDefinition definition) {
+        return definition.getContainerDefinitions().stream()
+                .filter(container -> container.getPortMappings() != null)
+                .flatMap(container -> container.getPortMappings().stream())
+                // ContainerLifecycleManager currently publishes every mapping as TCP.
+                .map(port -> EcsContainerManager.publishedHostPort(port, definition.getNetworkMode(),
+                        publishAwsvpcPortsToHost, dynamicAwsvpcHostPorts))
+                .filter(hostPort -> hostPort > 0)
+                .collect(Collectors.toSet());
     }
 
     private ServiceDeployment deploymentRecordForCurrentWorkload(EcsServiceModel svc) {
@@ -6111,15 +6438,14 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 failures.add(Failure.taskNotValid(task.getTaskArn()));
                 continue;
             }
-            task.setProtectionEnabled(protectionEnabled);
-            Instant expiration = null;
-            if (protectionEnabled && expiresInMinutes != null) {
-                expiration = Instant.now().plusSeconds(expiresInMinutes * 60L);
+            synchronized (task) {
+                task.setProtectionEnabled(protectionEnabled);
+                Instant expiration = protectionEnabled
+                        ? clock.instant().plusSeconds((expiresInMinutes == null ? 120L : expiresInMinutes) * 60L)
+                        : null;
                 task.setProtectedUntil(expiration);
-            } else {
-                task.setProtectedUntil(null);
+                result.add(new ProtectedTask(task.getTaskArn(), protectionEnabled, expiration));
             }
-            result.add(new ProtectedTask(task.getTaskArn(), protectionEnabled, expiration));
         }
         return new TaskProtectionResult(result, failures);
     }
@@ -6133,7 +6459,10 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 failures.add(Failure.taskNotValid(task.getTaskArn()));
                 continue;
             }
-            result.add(new ProtectedTask(task.getTaskArn(), task.isProtectionEnabled(), task.getProtectedUntil()));
+            synchronized (task) {
+                result.add(new ProtectedTask(task.getTaskArn(), isTaskProtected(task, clock.instant()),
+                        task.getProtectedUntil()));
+            }
         }
         return new TaskProtectionResult(result, failures);
     }

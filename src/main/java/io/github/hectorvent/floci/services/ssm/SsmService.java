@@ -1,6 +1,8 @@
 package io.github.hectorvent.floci.services.ssm;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -10,6 +12,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.DeadlineCharSequence;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
@@ -26,6 +29,7 @@ import io.github.hectorvent.floci.services.secretsmanager.model.Secret;
 import io.github.hectorvent.floci.services.secretsmanager.model.SecretVersion;
 import io.github.hectorvent.floci.services.ssm.model.Parameter;
 import io.github.hectorvent.floci.services.ssm.model.ParameterHistory;
+import io.github.hectorvent.floci.services.ssm.model.ParameterResourcePolicy;
 import io.github.hectorvent.floci.services.ssm.model.ParameterStringFilter;
 import io.github.hectorvent.floci.services.ssm.model.PatchBaselineIdentity;
 import io.github.hectorvent.floci.services.ssm.model.ServiceSetting;
@@ -65,6 +69,10 @@ public class SsmService implements ResourceProvider {
     private static final Logger LOG = Logger.getLogger(SsmService.class);
 
     private static final String PUBLIC_PARAMETER_PREFIX = "/aws/service/";
+    private static final String ECS_AL2023_RECOMMENDED =
+            "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended";
+    private static final String ECS_AL2023_ARM64_RECOMMENDED =
+            "/aws/service/ecs/optimized-ami/amazon-linux-2023/arm64/recommended";
     private static final DateTimeFormatter SOURCE_RESULT_DATE =
             DateTimeFormatter.ofPattern("MMM d, yyyy, h:mm:ss a", Locale.US).withZone(ZoneOffset.UTC);
     static final String SECRET_REFERENCE_PREFIX = "/aws/reference/secretsmanager/";
@@ -80,6 +88,9 @@ public class SsmService implements ResourceProvider {
     private static final String TAG_KEY_REGEX = "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$";
     private static final Pattern TAG_KEY_PATTERN = Pattern.compile(TAG_KEY_REGEX);
     private static final int MAX_TAG_KEY_LENGTH = 128;
+    private static final int MAX_RESOURCE_POLICY_BYTES = 1024;
+    private static final ObjectMapper POLICY_JSON = new ObjectMapper()
+            .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
     /** The tail AWS appends to every rejected parameter name, whichever prefix the operation reserves. */
     private static final String PARAMETER_NAME_FORMAT_RULE = "If formed as a path, it can consist of sub-paths "
             + "divided by slash symbol; each sub-path can be formed as a mix of letters, numbers and the following "
@@ -109,11 +120,12 @@ public class SsmService implements ResourceProvider {
     private final Ec2ImageCatalog imageCatalog;
     private final SecretsManagerService secretsManager;
     private final SsmEventPublisher eventPublisher;
+    private final KmsService kmsService;
 
     @Inject
     public SsmService(StorageFactory storageFactory, EmulatorConfig config, RegionResolver regionResolver,
                       Ec2ImageCatalog imageCatalog, SecretsManagerService secretsManager,
-                      SsmEventPublisher eventPublisher) {
+                      SsmEventPublisher eventPublisher, KmsService kmsService) {
         this(
                 storageFactory.create("ssm", "ssm-parameters.json",
                         new TypeReference<>() {
@@ -137,7 +149,8 @@ public class SsmService implements ResourceProvider {
                 regionResolver,
                 imageCatalog,
                 secretsManager,
-                eventPublisher
+                eventPublisher,
+                kmsService
         );
     }
 
@@ -211,6 +224,21 @@ public class SsmService implements ResourceProvider {
                int maxParameterHistory, RegionResolver regionResolver,
                Ec2ImageCatalog imageCatalog, SecretsManagerService secretsManager,
                SsmEventPublisher eventPublisher) {
+        this(parameterStore, historyStore, documentPermissionStore, documentStore, serviceSettingStore,
+                associationStore, maxParameterHistory, regionResolver, imageCatalog, secretsManager,
+                eventPublisher, null);
+    }
+
+    /** A null KMS service stores SecureString values without a ciphertext. */
+    SsmService(StorageBackend<String, Parameter> parameterStore,
+               StorageBackend<String, List<ParameterHistory>> historyStore,
+               StorageBackend<String, List<String>> documentPermissionStore,
+               StorageBackend<String, SsmDocument> documentStore,
+               StorageBackend<String, ServiceSetting> serviceSettingStore,
+               StorageBackend<String, SsmAssociation> associationStore,
+               int maxParameterHistory, RegionResolver regionResolver,
+               Ec2ImageCatalog imageCatalog, SecretsManagerService secretsManager,
+               SsmEventPublisher eventPublisher, KmsService kmsService) {
         this.parameterStore = parameterStore;
         this.historyStore = historyStore;
         this.documentPermissionStore = documentPermissionStore;
@@ -222,6 +250,7 @@ public class SsmService implements ResourceProvider {
         this.imageCatalog = imageCatalog;
         this.secretsManager = secretsManager;
         this.eventPublisher = eventPublisher;
+        this.kmsService = kmsService;
     }
 
     /**
@@ -343,6 +372,7 @@ public class SsmService implements ResourceProvider {
         // or asks for Intelligent-Tiering.
         parameter.setTier(tier != null ? tier : existing != null ? tierOf(existing) : "Standard");
         parameter.setArn(regionResolver.buildArn("ssm", region, parameterResource(name)));
+        parameter.setEncryptedValue(encryptedValueOf(parameter, region));
         parameter.setLastModifiedDate(Instant.now());
 
         if (existing != null && existing.getTags() != null) {
@@ -350,12 +380,37 @@ public class SsmService implements ResourceProvider {
         } else if (tags != null && !tags.isEmpty()) {
             parameter.setTags(new HashMap<>(tags));
         }
+        if (existing != null && existing.getResourcePolicy() != null) {
+            requireResourcePolicyEligible(parameter);
+            parameter.setResourcePolicy(existing.getResourcePolicy());
+        }
 
         parameterStore.put(storageKey, parameter);
         addHistory(storageKey, parameter);
 
         LOG.infov("Put parameter: {0} in region {1} (version {2})", name, region, version);
         return parameter;
+    }
+
+    /**
+     * AWS encrypts a SecureString under its KMS key with the {@code PARAMETER_ARN} encryption context
+     * and returns that ciphertext to a read without decryption. A key KMS cannot use, which AWS refuses
+     * on PutParameter, leaves the parameter without one.
+     */
+    private String encryptedValueOf(Parameter parameter, String region) {
+        if (kmsService == null || !"SecureString".equals(parameter.getType())) {
+            return null;
+        }
+        try {
+            byte[] ciphertext = kmsService.encrypt(parameter.getKeyId(),
+                    parameter.getValue().getBytes(StandardCharsets.UTF_8),
+                    Map.of("PARAMETER_ARN", parameter.getArn()), region);
+            return Base64.getEncoder().encodeToString(ciphertext);
+        } catch (AwsException e) {
+            LOG.warnv("Storing SecureString {0} without a ciphertext: KMS cannot encrypt under {1}: {2}",
+                    parameter.getArn(), parameter.getKeyId(), e.getMessage());
+            return null;
+        }
     }
 
     /** AWS's form is {@code parameter/<name>} whether or not the name starts with a slash. */
@@ -368,10 +423,11 @@ public class SsmService implements ResourceProvider {
         return getParameter(parameterName(nameOrArn, region), true, region);
     }
 
-    public Parameter getParameter(String name, boolean withDecryption, String region) {
-        if (name != null && name.startsWith(SECRET_REFERENCE_PREFIX)) {
-            return secretReference(name, withDecryption, region);
+    public Parameter getParameter(String nameOrArn, boolean withDecryption, String region) {
+        if (nameOrArn != null && nameOrArn.startsWith(SECRET_REFERENCE_PREFIX)) {
+            return secretReference(nameOrArn, withDecryption, region);
         }
+        String name = parameterReadName(nameOrArn, region);
         return findParameter(name, region).orElseThrow(() -> {
             int separator = name == null ? -1 : name.lastIndexOf(':');
             if (separator > 0 && separator < name.length() - 1
@@ -566,15 +622,24 @@ public class SsmService implements ResourceProvider {
                         : h.getLabels() != null && h.getLabels().contains(selector))
                 .max(Comparator.comparingLong(ParameterHistory::getVersion))
                 .map(h -> {
-                    Parameter parameter = new Parameter(baseName, h.getValue(), h.getType());
-                    parameter.setVersion(h.getVersion());
-                    parameter.setDescription(h.getDescription());
-                    parameter.setLastModifiedDate(h.getLastModifiedDate());
-                    parameter.setArn(current.get().getArn());
-                    parameter.setDataType(current.get().getDataType());
+                    Parameter parameter = historicalParameter(current.get(), h);
                     parameter.setSelector(":" + selector);
                     return parameter;
                 });
+    }
+
+    private static Parameter historicalParameter(Parameter current, ParameterHistory history) {
+        Parameter parameter = new Parameter(current.getName(), history.getValue(), history.getType());
+        parameter.setEncryptedValue(history.getEncryptedValue());
+        parameter.setVersion(history.getVersion());
+        parameter.setDescription(history.getDescription());
+        parameter.setLastModifiedDate(history.getLastModifiedDate());
+        // Older stored history has no KeyId; only the current version can recover it reliably.
+        parameter.setKeyId(history.getKeyId() != null ? history.getKeyId()
+                : history.getVersion() == current.getVersion() ? current.getKeyId() : null);
+        parameter.setArn(current.getArn());
+        parameter.setDataType(current.getDataType());
+        return parameter;
     }
 
     /**
@@ -589,7 +654,23 @@ public class SsmService implements ResourceProvider {
             return Optional.empty();
         }
         return imageCatalog.findByPublicParameterName(name).map(image -> {
-            Parameter parameter = new Parameter(name, image.imageId, "String");
+            String value = image.imageId;
+            if (name.startsWith(ECS_AL2023_RECOMMENDED)
+                    || name.startsWith(ECS_AL2023_ARM64_RECOMMENDED)) {
+                ObjectNode metadata = JsonNodeFactory.instance.objectNode();
+                metadata.put("schema_version", 1);
+                metadata.put("image_name", image.name);
+                metadata.put("image_id", image.imageId);
+                metadata.put("os", "Amazon Linux 2023");
+                // The catalog image is synthetic; do not claim an installed ECS agent or runtime version.
+                metadata.put("ecs_agent_version", "unknown");
+                metadata.put("ecs_runtime_version", "unknown");
+                String recommendedName = name.startsWith(ECS_AL2023_ARM64_RECOMMENDED)
+                        ? ECS_AL2023_ARM64_RECOMMENDED : ECS_AL2023_RECOMMENDED;
+                value = name.equals(recommendedName) ? metadata.toString()
+                        : metadata.required(name.substring(recommendedName.length() + 1)).asText();
+            }
+            Parameter parameter = new Parameter(name, value, "String");
             parameter.setArn(AwsArnUtils.Arn.of("ssm", region, "", parameterResource(name)).toString());
             parameter.setLastModifiedDate(Instant.parse(image.creationDate));
             return parameter;
@@ -600,8 +681,19 @@ public class SsmService implements ResourceProvider {
                                               List<ParameterStringFilter> filters, String region) {
         filters.forEach(SsmService::validateGetParametersByPathFilter);
         List<ParameterStringFilter> matchingFilters = filters.stream().filter(filter -> !"Label".equals(filter.key())).toList();
+        List<ParameterStringFilter> labelFilters = filters.stream().filter(filter -> "Label".equals(filter.key())).toList();
+        if (labelFilters.isEmpty()) {
+            return getParametersByPath(path, recursive, region).stream()
+                    .filter(parameter -> matchingFilters.stream().allMatch(filter -> matchesParameterFilter(parameter, filter)))
+                    .toList();
+        }
+        // Labels belong to versions, so matching only the latest parameter would lose older releases.
         return getParametersByPath(path, recursive, region).stream()
-                .filter(parameter -> matchingFilters.stream().allMatch(filter -> matchesParameterFilter(parameter, filter)))
+                .flatMap(parameter -> historyStore.get(regionKey(region, parameter.getName())).orElse(List.of()).stream()
+                        .filter(history -> history.getLabels() != null && labelFilters.stream().allMatch(filter ->
+                                filter.values().stream().anyMatch(history.getLabels()::contains)))
+                        .map(history -> historicalParameter(parameter, history))
+                        .filter(history -> matchingFilters.stream().allMatch(filter -> matchesParameterFilter(history, filter))))
                 .toList();
     }
 
@@ -767,6 +859,11 @@ public class SsmService implements ResourceProvider {
         return actual != null && matchesAny(actual, filter);
     }
 
+    /** The account the current request acts in; parameter storage is partitioned by it. */
+    String accountId() {
+        return regionResolver.getAccountId();
+    }
+
     /** Parameters stored before Floci kept a tier are Standard, as AWS defaults them. */
     static String tierOf(Parameter parameter) {
         return parameter.getTier() != null ? parameter.getTier() : "Standard";
@@ -774,10 +871,14 @@ public class SsmService implements ResourceProvider {
 
     /** A SecureString put without a KeyId is encrypted with the AWS managed key. */
     static String keyIdOf(Parameter parameter) {
-        if (!"SecureString".equals(parameter.getType())) {
+        return keyIdOf(parameter.getType(), parameter.getKeyId());
+    }
+
+    static String keyIdOf(String type, String keyId) {
+        if (!"SecureString".equals(type)) {
             return null;
         }
-        return parameter.getKeyId() != null ? parameter.getKeyId() : DEFAULT_SSM_KEY_ID;
+        return keyId != null ? keyId : DEFAULT_SSM_KEY_ID;
     }
 
     private static boolean matchesAny(String actual, ParameterStringFilter filter) {
@@ -984,7 +1085,7 @@ public class SsmService implements ResourceProvider {
      */
     static String labelListViolation(List<String> labels) {
         if (labels == null) {
-            return "Value null at 'labels' failed to satisfy constraint: Member must not be null";
+            return SmithyValidationErrors.notNull("labels");
         }
         String prefix = "Value '" + labels + "' at 'labels' failed to satisfy constraint: ";
         if (labels.isEmpty()) {
@@ -1092,15 +1193,153 @@ public class SsmService implements ResourceProvider {
     }
 
     /**
+     * Attaches or replaces the parameter's resource policy. A parameter holds one policy, so
+     * replacing it takes the current {@code policyId} and {@code policyHash}, which keeps two
+     * writers from overwriting each other.
+     */
+    public synchronized ParameterResourcePolicy putResourcePolicy(String resourceArn, String policy,
+                                                                  String policyId, String policyHash,
+                                                                  String region) {
+        Parameter parameter = resourcePolicyParameter(resourceArn, region);
+        requireResourcePolicyEligible(parameter);
+        if (policy.getBytes(StandardCharsets.UTF_8).length > MAX_RESOURCE_POLICY_BYTES) {
+            throw new AwsException("ResourcePolicyLimitExceededException",
+                    "A policy can't be greater than " + MAX_RESOURCE_POLICY_BYTES + " bytes in size.", 400);
+        }
+        if (!isJsonObject(policy)) {
+            throw new AwsException("MalformedResourcePolicyDocumentException",
+                    "The specified policy document is malformed or invalid.", 400);
+        }
+
+        ParameterResourcePolicy current = parameter.getResourcePolicy();
+        String id;
+        if (current == null) {
+            if (policyId != null) {
+                throw resourcePolicyNotFound();
+            }
+            id = UUID.randomUUID().toString();
+        } else {
+            if (policyId == null) {
+                throw resourcePolicyConflict();
+            }
+            requireCurrentPolicy(current, policyId, policyHash);
+            id = current.policyId();
+        }
+
+        ParameterResourcePolicy updated = new ParameterResourcePolicy(id, policyHash(policy), policy);
+        parameter.setResourcePolicy(updated);
+        parameterStore.put(regionKey(region, parameter.getName()), parameter);
+        LOG.debugv("Put resource policy {0} on parameter: {1}", id, parameter.getName());
+        return updated;
+    }
+
+    public List<ParameterResourcePolicy> getResourcePolicies(String resourceArn, String region) {
+        ParameterResourcePolicy policy = resourcePolicyParameter(resourceArn, region).getResourcePolicy();
+        return policy == null ? List.of() : List.of(policy);
+    }
+
+    public synchronized void deleteResourcePolicy(String resourceArn, String policyId, String policyHash,
+                                                  String region) {
+        Parameter parameter = resourcePolicyParameter(resourceArn, region);
+        ParameterResourcePolicy current = parameter.getResourcePolicy();
+        if (current == null) {
+            throw resourcePolicyNotFound();
+        }
+        requireCurrentPolicy(current, policyId, policyHash);
+        parameter.setResourcePolicy(null);
+        parameterStore.put(regionKey(region, parameter.getName()), parameter);
+        LOG.debugv("Deleted resource policy {0} from parameter: {1}", policyId, parameter.getName());
+    }
+
+    /** Only a parameter ARN in the caller's account and region addresses a parameter here. */
+    private Parameter resourcePolicyParameter(String resourceArn, String region) {
+        Optional<Parameter> parameter = AwsArnUtils.isArnFor(resourceArn, "ssm")
+                ? parameterStore.get(regionKey(region, parameterReadName(resourceArn, region)))
+                : Optional.empty();
+        return parameter.orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                "The specified parameter to be shared could not be found.", 400));
+    }
+
+    /**
+     * Only an advanced-tier parameter, and not a SecureString under the default aws/ssm key, can have a
+     * resource policy, whether one is being attached or an overwrite would keep one.
+     */
+    private static void requireResourcePolicyEligible(Parameter parameter) {
+        if (!"Advanced".equals(tierOf(parameter))) {
+            throw new AwsException("ResourcePolicyInvalidParameterException",
+                    "Only parameters in the advanced tier can have a resource policy.", 400);
+        }
+        if (isDefaultSsmKey(keyIdOf(parameter))) {
+            throw new AwsException("ResourcePolicyInvalidParameterException",
+                    "A SecureString parameter encrypted with the default aws/ssm key can't have a resource policy.",
+                    400);
+        }
+    }
+
+    /** The AWS managed aws/ssm key, named by its alias or by the alias's ARN. */
+    private static boolean isDefaultSsmKey(String keyId) {
+        return DEFAULT_SSM_KEY_ID.equals(keyId)
+                || keyId != null && AwsArnUtils.isArnFor(keyId, "kms") && keyId.endsWith(":" + DEFAULT_SSM_KEY_ID);
+    }
+
+    private static void requireCurrentPolicy(ParameterResourcePolicy current, String policyId, String policyHash) {
+        if (!current.policyId().equals(policyId)) {
+            throw resourcePolicyNotFound();
+        }
+        if (!current.policyHash().equals(policyHash)) {
+            throw resourcePolicyConflict();
+        }
+    }
+
+    private static AwsException resourcePolicyConflict() {
+        return new AwsException("ResourcePolicyConflictException",
+                "The hash provided in the call doesn't match the stored hash.", 400);
+    }
+
+    private static AwsException resourcePolicyNotFound() {
+        return new AwsException("ResourcePolicyNotFoundException",
+                "No policies with the specified policy ID and hash could be found.", 400);
+    }
+
+    private static boolean isJsonObject(String policy) {
+        try {
+            JsonNode document = POLICY_JSON.readTree(policy);
+            return document != null && document.isObject();
+        } catch (JsonProcessingException e) {
+            return false;
+        }
+    }
+
+    /** AWS documents the hash only as a value to send back; this one changes whenever the document does. */
+    private static String policyHash(String policy) {
+        return Digests.sha256Hex(policy);
+    }
+
+    /**
      * The stored name a parameter name or ARN addresses. The ARN carries a leading slash the stored name may
      * lack, so {@code parameter/foo} falls back to {@code foo} when only {@code foo} is stored. A version or
      * label selector after the last colon is kept, but the fallback checks the name without it.
      */
     private String parameterName(String nameOrArn, String region) {
-        if (nameOrArn != null && nameOrArn.startsWith("arn:")) {
+        return parameterName(nameOrArn, region, false);
+    }
+
+    String parameterReadName(String nameOrArn, String region) {
+        return parameterName(nameOrArn, region, true);
+    }
+
+    private String parameterName(String nameOrArn, String region, boolean parameterRead) {
+        if (AwsArnUtils.looksLikeArn(nameOrArn)) {
             try {
                 AwsArnUtils.Arn arn = AwsArnUtils.parse(nameOrArn);
                 if ("ssm".equals(arn.service()) && arn.resource().startsWith("parameter")) {
+                    if (parameterRead && (!arn.resource().startsWith("parameter/")
+                            || arn.resource().startsWith("parameter" + SECRET_REFERENCE_PREFIX)
+                            || !arn.accountId().equals(regionResolver.getAccountId())
+                            || !arn.region().equals(region)
+                            || !arn.partition().equals(regionResolver.partitionForRegion(region)))) {
+                        return nameOrArn;
+                    }
                     String name = arn.resource().substring("parameter".length());
                     int separator = name.lastIndexOf(':');
                     String baseName = separator > 0 ? name.substring(0, separator) : name;
@@ -1635,9 +1874,6 @@ public class SsmService implements ResourceProvider {
     }
 
     static final String AWS_MANAGED_SSM_ALIAS = "alias/aws/ssm";
-
-    @Inject
-    KmsService kmsService;
 
     public List<Parameter> getParameters(List<String> names, String region) {
         List<Parameter> result = new ArrayList<>();

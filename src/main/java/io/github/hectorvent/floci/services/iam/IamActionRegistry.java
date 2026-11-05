@@ -4,17 +4,27 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsProtocolClaimFilter;
 import io.github.hectorvent.floci.core.common.AwsQueryServiceResolver;
 import io.github.hectorvent.floci.core.common.ProtocolClaim;
+import io.github.hectorvent.floci.core.common.RequestResources;
 import io.github.hectorvent.floci.core.common.WireProtocol;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbPartiQLParser;
+import io.github.hectorvent.floci.services.eks.EksController;
+import io.github.hectorvent.floci.services.route53.Route53Controller;
 import io.github.hectorvent.floci.services.s3.S3ObjectActions;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.ws.rs.container.ContainerRequestContext;
+import jakarta.ws.rs.container.ResourceInfo;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
+import org.jboss.resteasy.reactive.server.core.ResteasyReactiveRequestContext;
+import org.jboss.resteasy.reactive.server.spi.ResteasyReactiveContainerRequestContext;
 
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -25,21 +35,41 @@ import java.util.regex.Pattern;
  * parameter, or the controller's Operation fallback, is mapped directly to
  * {@code <service>:<Action>}.
  *
- * For REST-JSON services the first matching rule wins (specific before wildcard).
+ * For REST-JSON services the first matching rule wins (specific before wildcard), and a request no
+ * rule matches is the operation whose route in botocore's model it matches ({@link IamRestRoutes}),
+ * when Floci can check that operation as AWS does.
  */
 @ApplicationScoped
 public class IamActionRegistry {
 
+    private static final Map<String, String> ROUTE53_DELEGATION_ACTIONS = Map.of(
+            "createReusableDelegationSet", "route53:CreateReusableDelegationSet",
+            "getReusableDelegationSet", "route53:GetReusableDelegationSet",
+            "listReusableDelegationSets", "route53:ListReusableDelegationSets",
+            "deleteReusableDelegationSet", "route53:DeleteReusableDelegationSet");
+
     private static final Logger LOG = Logger.getLogger(IamActionRegistry.class);
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private final IamRestRoutes restRoutes;
+
+    public IamActionRegistry() {
+        this(IamRestRoutes.vendored());
+    }
+
+    IamActionRegistry(IamRestRoutes restRoutes) {
+        this.restRoutes = restRoutes;
+    }
 
     /**
      * A route and the action it is checked as. A rule naming a query parameter matches only a request
      * carrying it with that value, as {@code GET /layers?find=LayerVersion} is GetLayerVersionByArn
-     * where {@code GET /layers} is ListLayers.
+     * where {@code GET /layers} is ListLayers. A rule flagged to match before the S3 query
+     * overrides is one of the S3 Control routes, which the control plane answers whatever its
+     * query string carries.
      */
     private record ActionRule(String service, String method, Pattern pathPattern, String queryParameter,
-                              String queryValue, String action) {
+                              String queryValue, String action, boolean beforeS3QueryOverrides) {
 
         boolean matches(String scope, String requestMethod, String path, ContainerRequestContext ctx) {
             return service.equals(scope) && method.equals(requestMethod) && pathPattern.matcher(path).find()
@@ -48,7 +78,36 @@ public class IamActionRegistry {
         }
     }
 
+    /**
+     * The routes of the S3 Control model, checked as the actions the Service Reference gives
+     * them by {@code IamRestRouteCoverageTest}. S3 Control clients sign with the s3 scope
+     * (botocore's s3control model declares signingName "s3"), so its operations are
+     * {@code s3:} actions, and its routes must be matched before the S3 data-plane query
+     * overrides: the control plane answers a tagging route whatever its query string carries,
+     * so a parameter such as {@code ?tagging} must not re-point the authorization at the
+     * data-plane object tagging it suggests, and the data-plane rules below would otherwise
+     * read {@code /v20180820/...} as a bucket named v20180820.
+     *
+     * <p>The account-level Block Public Access is the one route the Service Reference cannot
+     * settle, because it files S3's and S3 Control's GetPublicAccessBlock, PutPublicAccessBlock
+     * and DeletePublicAccessBlock under the bucket actions; the S3 User Guide's Block Public
+     * Access page gives the account level its own actions, and the exception is written down
+     * where the data is checked. ListAccessPoints and the account actions have no resource
+     * type, so IAM checks them against the wildcard rather than a bucket.
+     */
     private static final List<ActionRule> RULES = List.of(
+        // ── S3 Control ───────────────────────────────────────────────────────────
+        s3ControlRule("GET",    "^/v20180820/tags/.+",        "s3:ListTagsForResource"),
+        s3ControlRule("POST",   "^/v20180820/tags/.+",        "s3:TagResource"),
+        s3ControlRule("DELETE", "^/v20180820/tags/.+",        "s3:UntagResource"),
+        s3ControlRule("GET",    "^/v20180820/accesspoint/?$", "s3:ListAccessPoints"),
+        s3ControlRule("PUT",    "^/v20180820/configuration/publicAccessBlock/?$",
+                "s3:PutAccountPublicAccessBlock"),
+        s3ControlRule("GET",    "^/v20180820/configuration/publicAccessBlock/?$",
+                "s3:GetAccountPublicAccessBlock"),
+        s3ControlRule("DELETE", "^/v20180820/configuration/publicAccessBlock/?$",
+                "s3:PutAccountPublicAccessBlock"),
+
         // ── S3 ─────────────────────────────────────────────────────────────────
         rule("s3", "GET",    "^/?$",                              "s3:ListAllMyBuckets"),
         rule("s3", "PUT",    "^/[^/]+/?$",                       "s3:CreateBucket"),
@@ -229,6 +288,9 @@ public class IamActionRegistry {
         rule("rds-data", "POST", "^/CommitTransaction/?$",    "rds-data:CommitTransaction"),
         rule("rds-data", "POST", "^/RollbackTransaction/?$",  "rds-data:RollbackTransaction"),
 
+        // ── Amazon Inspector ───────────────────────────────────────────────────
+        rule("inspector2", "POST", "^/disable/?$", "inspector2:Disable"),
+
         // ── API Gateway ────────────────────────────────────────────────────────
         // The management API, v1 and v2, is authorized by HTTP method on the resource path:
         // apigateway:GET, POST, PUT, PATCH or DELETE. Two operations have an action of their own. The
@@ -289,12 +351,15 @@ public class IamActionRegistry {
         rule("pipes", "DELETE", "^/tags(/.+)?$",           "pipes:UntagResource"),
 
         // ── EKS ────────────────────────────────────────────────────────────────
-        // Floci takes an access entry's principal ARN whole, slashes included, so a GET or DELETE under an
-        // entry is DescribeAccessEntry or DeleteAccessEntry: the entry's access policy routes, which Floci
-        // does not serve, run as those and are checked as those.
+        // Floci takes an access entry's principal ARN whole, slashes included, so any other GET or DELETE under
+        // an entry is DescribeAccessEntry or DeleteAccessEntry. The entry's access policy routes come first, as
+        // they win in the router; a DELETE is a disassociate only when a cluster access policy ARN follows.
+        rule("eks", "GET",    "^/clusters/[^/]+/access-entries/.+/access-policies$",     "eks:ListAssociatedAccessPolicies"),
+        rule("eks", "POST",   "^/clusters/[^/]+/access-entries/.+/access-policies$",     "eks:AssociateAccessPolicy"),
+        rule("eks", "DELETE", "^/clusters/[^/]+/access-entries/.+/access-policies/" + EksController.ACCESS_POLICY_ARN + "$",
+                "eks:DisassociateAccessPolicy"),
         rule("eks", "GET",    "^/clusters/[^/]+/access-entries/.+$",                     "eks:DescribeAccessEntry"),
         rule("eks", "DELETE", "^/clusters/[^/]+/access-entries/.+$",                     "eks:DeleteAccessEntry"),
-        rule("eks", "POST",   "^/clusters/[^/]+/access-entries/.+/access-policies$",     "eks:AssociateAccessPolicy"),
         rule("eks", "POST",   "^/clusters/[^/]+/access-entries/.+$",                     "eks:UpdateAccessEntry"),
         rule("eks", "GET",    "^/clusters/[^/]+/access-entries$",                        "eks:ListAccessEntries"),
         rule("eks", "POST",   "^/clusters/[^/]+/access-entries$",                        "eks:CreateAccessEntry"),
@@ -369,6 +434,16 @@ public class IamActionRegistry {
         rule("eks", "GET",    "^/tags(/.+)?$",                                           "eks:ListTagsForResource"),
         rule("eks", "POST",   "^/tags(/.+)?$",                                           "eks:TagResource"),
         rule("eks", "DELETE", "^/tags(/.+)?$",                                           "eks:UntagResource"),
+
+        // ── Control Tower ──────────────────────────────────────────────────────
+        rule("controltower", "GET",    "^/tags(/.+)?$", "controltower:ListTagsForResource"),
+        rule("controltower", "POST",   "^/tags(/.+)?$", "controltower:TagResource"),
+        rule("controltower", "DELETE", "^/tags(/.+)?$", "controltower:UntagResource"),
+
+        // ── Bedrock ────────────────────────────────────────────────────────────
+        rule("bedrock", "POST",   "^/resource-policy$",   "bedrock:PutResourcePolicy"),
+        rule("bedrock", "GET",    "^/resource-policy/.+", "bedrock:GetResourcePolicy"),
+        rule("bedrock", "DELETE", "^/resource-policy/.+", "bedrock:DeleteResourcePolicy"),
 
         // ── SES v2 ─────────────────────────────────────────────────────────────
         // SES v1 is a Query API and resolves from its Action like any other; v2 is REST-JSON under
@@ -629,7 +704,35 @@ public class IamActionRegistry {
     private static ActionRule rule(String service, String method, String path, String queryParameter,
                                    String queryValue, String action) {
         return new ActionRule(service, method, Pattern.compile(path, Pattern.CASE_INSENSITIVE), queryParameter,
-                queryValue, action);
+                queryValue, action, false);
+    }
+
+    private static ActionRule s3ControlRule(String method, String path, String action) {
+        return new ActionRule("s3", method, Pattern.compile(path, Pattern.CASE_INSENSITIVE), null, null,
+                action, true);
+    }
+
+    /**
+     * Whether the request is one of the S3 Control routes, as the rules flag them. A denial then
+     * answers in S3 Control's own REST-XML envelope, the only one the s3control SDK
+     * deserializers read (issue #557), so the route decides the shape and not the action: the
+     * data plane resolves actions a control route never shares, and an action-name list would
+     * have to track every route to stay right. A request whose route cannot be read, which only
+     * a synthetic context is, is not a control one.
+     */
+    public static boolean isS3ControlRequest(String credentialScope, ContainerRequestContext ctx) {
+        if (!"s3".equals(credentialScope) || ctx.getMethod() == null || ctx.getUriInfo() == null
+                || ctx.getUriInfo().getRequestUri() == null) {
+            return false;
+        }
+        String method = ctx.getMethod().toUpperCase();
+        String path = sentPath(ctx.getUriInfo());
+        for (ActionRule rule : RULES) {
+            if (rule.beforeS3QueryOverrides() && rule.matches(credentialScope, method, path, ctx)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -642,7 +745,8 @@ public class IamActionRegistry {
      * For JSON 1.1 protocol the action comes from {@code X-Amz-Target}
      * (e.g. {@code DynamoDB_20120810.PutItem} → {@code dynamodb:PutItem}).
      *
-     * For REST-JSON services the action is derived from the path rule table.
+     * For REST-JSON services the action is derived from the path rule table, or else from the
+     * operation whose botocore route the request matches.
      *
      * Returns {@code null} when the action is unknown (caller treats this as ALLOW).
      */
@@ -656,13 +760,18 @@ public class IamActionRegistry {
         }
 
         // JSON 1.1: X-Amz-Target → the action AWS checks for the operation it names
-        String target = ctx.getHeaderString("X-Amz-Target");
-        if (target != null && target.contains(".")) {
-            String operationName = target.substring(target.lastIndexOf('.') + 1);
+        String operationName = targetOperation(ctx);
+        if (operationName != null) {
             return resolveOperation(credentialScope, operationName, ctx);
         }
 
         return resolveRoute(credentialScope, ctx);
+    }
+
+    /** The operation a JSON request's {@code X-Amz-Target} names, the part after its last dot; null without one. */
+    public static String targetOperation(ContainerRequestContext ctx) {
+        String target = ctx.getHeaderString("X-Amz-Target");
+        return target != null && target.contains(".") ? target.substring(target.lastIndexOf('.') + 1) : null;
     }
 
     /** The action for a dispatched operation, including statement-dependent JSON and CBOR calls. */
@@ -677,6 +786,16 @@ public class IamActionRegistry {
         return IamAuthorizedActions.actionFor(credentialScope, operationName);
     }
 
+    /** The serving method identifies these actions even when path encoding or matrix parameters vary. */
+    public String resolveMatchedRoute(String credentialScope, ResourceInfo resourceInfo) {
+        if ("route53".equals(credentialScope) && resourceInfo != null
+                && Route53Controller.class.equals(resourceInfo.getResourceClass())
+                && resourceInfo.getResourceMethod() != null) {
+            return ROUTE53_DELEGATION_ACTIONS.get(resourceInfo.getResourceMethod().getName());
+        }
+        return null;
+    }
+
     /**
      * The action of a REST request, from its method and path alone. A REST request is the operation
      * whose route it reached, so neither an {@code X-Amz-Target} header nor a Query {@code Action}
@@ -686,20 +805,34 @@ public class IamActionRegistry {
      * so the route's rule would not match and the call would pass as an unknown action. It is read
      * from the request URI because RESTEasy Reactive does not serve {@code UriInfo.getPath(false)}.
      *
-     * <p>Returns {@code null} when no rule matches (caller treats this as ALLOW).
+     * <p>A request no rule matches is the operation whose route, in botocore's model of its service, it
+     * matches, and is checked as that operation's action ({@link IamAuthorizedActions#actionFor}), as a
+     * request naming its operation is, when Floci can check it as AWS does ({@code checkedAsAws}). One it
+     * cannot is left unmapped rather than checked on {@code *}, which would refuse a grant scoped to the
+     * resource AWS checks it on. The scopes the vendored routes list as hand-routed, S3's and API Gateway's,
+     * have their rules alone. Returns {@code null} when nothing maps the request (caller treats this as
+     * ALLOW).
      */
     public String resolveRoute(String credentialScope, ContainerRequestContext ctx) {
         String method = ctx.getMethod().toUpperCase();
         // An S3 key may end in a slash, PUT /bucket// writes the key "/", and S3's rules already take a
         // bucket's one trailing slash, so an S3 path is matched as sent.
-        String path = "s3".equals(credentialScope) ? rawPath(ctx.getUriInfo()) : routedPath(ctx.getUriInfo());
+        String path = "s3".equals(credentialScope) ? sentPath(ctx.getUriInfo()) : routedPath(ctx);
 
-        // S3 sub-resource override: the URL path alone doesn't distinguish
-        // s3:GetObjectAcl / s3:PutObjectAcl from s3:GetObject / s3:PutObject
-        // — only the {@code ?acl} query parameter does. Without this hook,
-        // an actor with s3:GetObject permission could read ACLs that their
-        // policy intends to forbid.
         if ("s3".equals(credentialScope)) {
+            // An S3 Control route is matched before the query overrides below, which would read the
+            // query string of a route the control plane answers whatever it carries: ?tagging on a
+            // tagging route is caller-supplied noise, not the object sub-resource it names.
+            for (ActionRule rule : RULES) {
+                if (rule.beforeS3QueryOverrides() && rule.matches(credentialScope, method, path, ctx)) {
+                    return rule.action();
+                }
+            }
+            // S3 sub-resource override: the URL path alone doesn't distinguish
+            // s3:GetObjectAcl / s3:PutObjectAcl from s3:GetObject / s3:PutObject:
+            // only the {@code ?acl} query parameter does. Without this hook,
+            // an actor with s3:GetObject permission could read ACLs that their
+            // policy intends to forbid.
             String s3SubAction = resolveS3SubResourceAction(method, ctx);
             if (s3SubAction != null) {
                 return s3SubAction;
@@ -711,21 +844,92 @@ public class IamActionRegistry {
                 return rule.action();
             }
         }
+        Optional<String> operation = restRoutes.operation(credentialScope, method, path,
+                ctx.getUriInfo() == null ? null : ctx.getUriInfo().getQueryParameters());
+        if (operation.isPresent()) {
+            String action = IamAuthorizedActions.actionFor(credentialScope, operation.get());
+            if (checkedAsAws(credentialScope, operation.get(), action)) {
+                return action;
+            }
+        }
 
         LOG.debugv("No action mapping for {0} {1} {2} — defaulting to ALLOW", credentialScope, method, path);
         return null;
     }
 
     /**
+     * The value a REST request's path gives each label of the vendored route it matches, decoded, by the label's
+     * name; empty when it matches none. {@link RequestResources} reads a member the table of request resources
+     * locates in the path from them, as {@link #resolveRoute} matches the route.
+     */
+    public static Map<String, String> pathLabels(String credentialScope, ContainerRequestContext ctx) {
+        IamRestRoutes routes = IamRestRoutes.vendored();
+        if (credentialScope == null || !routes.routes(credentialScope)) {
+            return Map.of();
+        }
+        return routes.match(credentialScope, ctx.getMethod().toUpperCase(), routedPath(ctx),
+                        ctx.getUriInfo() == null ? null : ctx.getUriInfo().getQueryParameters())
+                .map(IamRestRoutes.Match::labels).orElse(Map.of());
+    }
+
+    /**
+     * Whether a request of the operation is checked on the resources AWS checks its action on: those its request
+     * names, which the vendored request resources read for the operation ({@link RequestResources#reads}) or
+     * {@code ResourceArnBuilder} builds for its namespace ({@link RequestResources#builtByHand}), or {@code *}
+     * when AWS authorizes the action on no resource type ({@link IamAuthorizedActions#actsOnNoResourceType}), so
+     * none of the resources in the request's path is needed.
+     */
+    private static boolean checkedAsAws(String credentialScope, String operation, String action) {
+        return RequestResources.reads(credentialScope + ":" + operation)
+                || RequestResources.builtByHand(credentialScope)
+                || IamAuthorizedActions.actsOnNoResourceType(action);
+    }
+
+    /**
+     * The path the router matched, relative to the application root. A request no filter rewrote is matched
+     * on its normalized path, still percent-encoded but with encoded unreserved characters such as {@code %2E}
+     * decoded and dot segments removed, so {@code /functions/x/%2E%2E/fn} is {@code /functions/fn}; a request
+     * a filter rewrote is matched on its new path, decoded. {@link #sentPath} for a synthetic context.
+     */
+    static String rawPath(ContainerRequestContext ctx) {
+        ResteasyReactiveRequestContext request = routingContext(ctx);
+        return request == null ? sentPath(ctx.getUriInfo()) : rooted(request.getPathWithoutPrefix());
+    }
+
+    /**
      * The request path relative to the application root, as {@link UriInfo#getPath()} gives it, but
      * still percent-encoded.
      */
-    static String rawPath(UriInfo uriInfo) {
+    static String sentPath(UriInfo uriInfo) {
         String path = uriInfo.getRequestUri().getRawPath();
         String base = uriInfo.getBaseUri().getRawPath();
         if (base != null && base.length() > 1 && path.startsWith(base)) {
             path = path.substring(base.length() - 1);
         }
+        return rooted(path);
+    }
+
+    /**
+     * {@link #rawPath} decoded: the path {@link UriInfo#getPath()} would give for the route the router
+     * matched. {@link UriInfo#getPath()} itself for a synthetic context.
+     */
+    public static String decodedPath(ContainerRequestContext ctx) {
+        ResteasyReactiveRequestContext request = routingContext(ctx);
+        if (request == null) {
+            return ctx.getUriInfo().getPath();
+        }
+        String path = request.getPathWithoutPrefix();
+        boolean rewritten = !request.getPath().equals(request.serverRequest().getRequestNormalisedPath());
+        return rooted(rewritten ? path : URLDecoder.decode(path.replace("+", "%2B"), StandardCharsets.UTF_8));
+    }
+
+    private static ResteasyReactiveRequestContext routingContext(ContainerRequestContext ctx) {
+        return ctx instanceof ResteasyReactiveContainerRequestContext container
+                && container.getServerRequestContext() instanceof ResteasyReactiveRequestContext request
+                ? request : null;
+    }
+
+    private static String rooted(String path) {
         return path.startsWith("/") ? path : "/" + path;
     }
 
@@ -734,12 +938,17 @@ public class IamActionRegistry {
      * so a rule ending at the route's last segment has to match it too, or the request would pass as an
      * unknown action.
      */
-    static String routedPath(UriInfo uriInfo) {
-        String path = rawPath(uriInfo);
-        while (path.length() > 1 && path.endsWith("/")) {
-            path = path.substring(0, path.length() - 1);
+    static String routedPath(ContainerRequestContext ctx) {
+        return withoutTrailingSlash(rawPath(ctx));
+    }
+
+    /** The path without its trailing slashes, the root's own kept. */
+    static String withoutTrailingSlash(String path) {
+        String trimmed = path;
+        while (trimmed.length() > 1 && trimmed.endsWith("/")) {
+            trimmed = trimmed.substring(0, trimmed.length() - 1);
         }
-        return path;
+        return trimmed;
     }
 
     /**
@@ -802,6 +1011,7 @@ public class IamActionRegistry {
             sub("website",           "s3:GetBucketWebsite"),
             sub("logging",           "s3:GetBucketLogging"),
             sub("policy",            "s3:GetBucketPolicy"),
+            sub("policyStatus",      "s3:GetBucketPolicyStatus"),
             sub("cors",              "s3:GetBucketCORS"),
             sub("lifecycle",         "s3:GetLifecycleConfiguration"),
             sub("acl",               "s3:GetBucketAcl"),

@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.iam;
 
 import io.github.hectorvent.floci.core.common.AwsQueryController;
+import io.github.hectorvent.floci.testing.SamlMetadata;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
@@ -555,6 +556,87 @@ class IamIntegrationTest {
                     contains("aws:CurrentTime", "aws:username"));
     }
 
+    /**
+     * {@code PolicySourceArn} is {@code arnType}, min 20, and the simulator used to resolve the
+     * entity out of whatever followed the last slash, so a value far too short to be an ARN
+     * simulated against a user named after its tail. IAM answers that minimum with a
+     * {@code ValidationError} naming the length, which is what both principal readers answer now.
+     *
+     * <p>What AWS answers for a value that clears 20 characters and parses as no ARN is
+     * {@link #aPolicySourceArnThatParsesAsNoArnIsInvalidInput} below, captured since.
+     */
+    @Test
+    @Order(88)
+    void aPolicySourceArnUnderItsDeclaredLengthIsAValidationError() {
+        String expected = "1 validation error detected: Value at 'policySourceArn' failed to "
+                + "satisfy constraint: Member must have length greater than or equal to 20";
+
+        given()
+            .formParam("Action", "SimulatePrincipalPolicy")
+            .formParam("PolicySourceArn", ":user/bob")
+            .formParam("ActionNames.member.1", "s3:GetObject")
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("ErrorResponse.Error.Code", equalTo("ValidationError"))
+            .body("ErrorResponse.Error.Message", equalTo(expected));
+
+        given()
+            .formParam("Action", "GetContextKeysForPrincipalPolicy")
+            .formParam("PolicySourceArn", ":role/admin")
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("ErrorResponse.Error.Code", equalTo("ValidationError"))
+            .body("ErrorResponse.Error.Message", equalTo(expected));
+    }
+
+    /**
+     * The other half of the member, captured from a real account: a value long enough to clear
+     * {@code arnType}'s minimum and malformed enough to parse as no ARN answers
+     * {@code InvalidInput} quoting it, where the simulator used to resolve the user its tail
+     * named. The length violation above is read first, since the shape runs before the operation.
+     */
+    @Test
+    @Order(89)
+    void aPolicySourceArnThatParsesAsNoArnIsInvalidInput() {
+        String malformed = "arn:aws:iam:user/simulate-user";
+
+        given()
+            .formParam("Action", "SimulatePrincipalPolicy")
+            .formParam("PolicySourceArn", malformed)
+            .formParam("ActionNames.member.1", "s3:GetObject")
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("ErrorResponse.Error.Code", equalTo("InvalidInput"))
+            .body("ErrorResponse.Error.Type", equalTo("Sender"))
+            .body("ErrorResponse.Error.Message",
+                    equalTo("Invalid ARN provided in the request: " + malformed));
+
+        given()
+            .formParam("Action", "GetContextKeysForPrincipalPolicy")
+            .formParam("PolicySourceArn", malformed)
+            .header("Authorization",
+                    "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(400)
+            .body("ErrorResponse.Error.Code", equalTo("InvalidInput"))
+            .body("ErrorResponse.Error.Message",
+                    equalTo("Invalid ARN provided in the request: " + malformed));
+    }
+
     @Test
     @Order(41)
     void getContextKeysForPrincipalPolicyMergesAttachedAndExtraPolicies() {
@@ -682,7 +764,7 @@ class IamIntegrationTest {
     void getAccessKeyLastUsedReturnsNeverUsedShape() {
         given()
             .formParam("Action", "GetAccessKeyLastUsed")
-            .formParam("AccessKeyId", "AKIAEXAMPLE")
+            .formParam("AccessKeyId", "AKIAIOSFODNN7EXAMPLE")
             .header("Authorization",
                     "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request")
         .when()
@@ -751,8 +833,7 @@ class IamIntegrationTest {
     @Order(54)
     void getSamlProviderDoesNotCrossAccountBoundaries() {
         String providerName = "cross-account-saml-" + System.nanoTime();
-        String metadata = "<md:EntityDescriptor xmlns:md=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"https://idp.example.test/"
-                + providerName + "\"><md:IDPSSODescriptor><md:KeyDescriptor use=\"signing\"><ds:KeyInfo xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:X509Data><ds:X509Certificate>Y2VydA==</ds:X509Certificate></ds:X509Data></ds:KeyInfo></md:KeyDescriptor></md:IDPSSODescriptor></md:EntityDescriptor>";
+        String metadata = SamlMetadata.forEntity("https://idp.example.test/" + providerName);
         String ownerAuth = "AWS4-HMAC-SHA256 Credential=111111111111/20260227/us-east-1/iam/aws4_request";
         String otherAccountAuth = "AWS4-HMAC-SHA256 Credential=222222222222/20260227/us-east-1/iam/aws4_request";
         given().formParam("Action", "CreateSAMLProvider").formParam("Name", providerName)
@@ -1650,8 +1731,8 @@ class IamIntegrationTest {
             .when().post("/").then()
                 .statusCode(400)
                 .body("ErrorResponse.Error.Code", equalTo("ValidationError"))
-                .body("ErrorResponse.Error.Message", equalTo("1 validation error detected: Value '" + name
-                        + "' at 'roleName' failed to satisfy constraint: " + entry.getValue()));
+                .body("ErrorResponse.Error.Message", equalTo("1 validation error detected: Value at"
+                        + " 'roleName' failed to satisfy constraint: " + entry.getValue()));
 
             given()
                 .formParam("Action", "GetRole")
@@ -1676,8 +1757,8 @@ class IamIntegrationTest {
         .when().post("/").then()
             .statusCode(400)
             .body("ErrorResponse.Error.Code", equalTo("ValidationError"))
-            .body("ErrorResponse.Error.Message", equalTo("1 validation error detected: Value null"
-                    + " at 'roleName' failed to satisfy constraint: Member must not be null"));
+            .body("ErrorResponse.Error.Message", equalTo("1 validation error detected: Value at"
+                    + " 'roleName' failed to satisfy constraint: Member must not be null"));
 
         given()
             .formParam("Action", "CreateRole")
@@ -1687,8 +1768,10 @@ class IamIntegrationTest {
         .when().post("/").then()
             .statusCode(400)
             .body("ErrorResponse.Error.Code", equalTo("ValidationError"))
-            .body("ErrorResponse.Error.Message", equalTo("1 validation error detected: Value ''"
-                    + " at 'roleName' failed to satisfy constraint: Member must have length greater than or equal to 1"));
+            .body("ErrorResponse.Error.Message", equalTo("2 validation errors detected: Value at"
+                    + " 'roleName' failed to satisfy constraint: Member must have length greater"
+                    + " than or equal to 1; Value at 'roleName' failed to satisfy constraint:"
+                    + " Member must satisfy regular expression pattern: [\\w+=,.@-]+"));
 
         given()
             .formParam("Action", "CreateRole")
@@ -1703,7 +1786,7 @@ class IamIntegrationTest {
     @Order(87)
     void roleActionsRejectANameOutsideTheRoleNamePattern() {
         String name = "aws:ec2-instance";
-        String message = "1 validation error detected: Value '" + name + "' at 'roleName' failed to satisfy"
+        String message = "1 validation error detected: Value at 'roleName' failed to satisfy"
                 + " constraint: Member must satisfy regular expression pattern: [\\w+=,.@-]+";
         Map<String, Map<String, String>> actions = new LinkedHashMap<>();
         actions.put("GetRole", Map.of());

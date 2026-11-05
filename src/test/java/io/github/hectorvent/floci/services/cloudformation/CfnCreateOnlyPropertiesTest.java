@@ -36,6 +36,14 @@ class CfnCreateOnlyPropertiesTest {
     }
 
     @Test
+    void signingProfileReplacesForEverythingButTags() {
+        assertTrue(CfnCreateOnlyProperties.isCreateOnly("AWS::Signer::SigningProfile", "ProfileName"));
+        assertTrue(CfnCreateOnlyProperties.isCreateOnly("AWS::Signer::SigningProfile", "PlatformId"));
+        assertTrue(CfnCreateOnlyProperties.isCreateOnly("AWS::Signer::SigningProfile", "SignatureValidityPeriod"));
+        assertFalse(CfnCreateOnlyProperties.isCreateOnly("AWS::Signer::SigningProfile", "Tags"));
+    }
+
+    @Test
     void isCreateOnly_returnsFalseForMutableProperties() {
         assertFalse(CfnCreateOnlyProperties.isCreateOnly("AWS::SQS::Queue", "VisibilityTimeout"));
         assertFalse(CfnCreateOnlyProperties.isCreateOnly("AWS::Redshift::Cluster", "NumberOfNodes"));
@@ -83,6 +91,43 @@ class CfnCreateOnlyPropertiesTest {
         assertFalse(CfnCreateOnlyProperties.isCreateOnly(type, "LogDestinationConfigs"));
         assertFalse(CfnCreateOnlyProperties.isCreateOnly(type, "RedactedFields"));
         assertFalse(CfnCreateOnlyProperties.isCreateOnly(type, "LoggingFilter"));
+    }
+
+    @Test
+    void isCreateOnly_recordSetGroupReplacesOnlyForItsHostedZone() {
+        String type = "AWS::Route53::RecordSetGroup";
+        assertTrue(CfnCreateOnlyProperties.isCreateOnly(type, "HostedZoneId"));
+        assertTrue(CfnCreateOnlyProperties.isCreateOnly(type, "HostedZoneName"));
+        assertFalse(CfnCreateOnlyProperties.isCreateOnly(type, "RecordSets"));
+        assertFalse(CfnCreateOnlyProperties.isCreateOnly(type, "Comment"));
+    }
+
+    @Test
+    void isCreateOnly_appConfigReplacesOnlyOnItsSchemaProperties() {
+        assertFalse(CfnCreateOnlyProperties.isCreateOnly("AWS::AppConfig::Application", "Name"));
+        assertTrue(CfnCreateOnlyProperties.isCreateOnly("AWS::AppConfig::Environment", "ApplicationId"));
+        assertFalse(CfnCreateOnlyProperties.isCreateOnly("AWS::AppConfig::Environment", "Name"));
+        assertEquals(Set.of("ApplicationId", "LocationUri", "Type"),
+                CfnCreateOnlyProperties.getCreateOnlyProperties("AWS::AppConfig::ConfigurationProfile"));
+        assertFalse(CfnCreateOnlyProperties.isCreateOnly("AWS::AppConfig::ConfigurationProfile", "Name"));
+        assertEquals(Set.of("Name", "ReplicateTo"),
+                CfnCreateOnlyProperties.getCreateOnlyProperties("AWS::AppConfig::DeploymentStrategy"));
+        assertFalse(CfnCreateOnlyProperties.isCreateOnly("AWS::AppConfig::DeploymentStrategy", "GrowthFactor"));
+    }
+
+    @Test
+    void eventsV2CreateOnlyPropertiesMatchTheRegistrySchemas() {
+        assertEquals(Set.of("Name"), CfnCreateOnlyProperties.getCreateOnlyProperties("AWS::EventsV2::EventBus"));
+        assertFalse(CfnCreateOnlyProperties.isCreateOnly("AWS::EventsV2::EventBus", "Description"));
+        String subscriber = "AWS::EventsV2::Subscriber";
+        assertEquals(Set.of("Name", "EventBusArn", "InvokeConfiguration/TargetArn", "Type", "StartingPosition",
+                        "PointInTimeConfiguration"),
+                CfnCreateOnlyProperties.getCreateOnlyProperties(subscriber));
+        assertTrue(CfnCreateOnlyProperties.isCreateOnly(subscriber, "EventBusArn"));
+        assertTrue(CfnCreateOnlyProperties.isCreateOnly(subscriber, "Type"));
+        assertTrue(CfnCreateOnlyProperties.isCreateOnly(subscriber, "InvokeConfiguration"));
+        assertFalse(CfnCreateOnlyProperties.isCreateOnly(subscriber, "SubscriberFilters"));
+        assertFalse(CfnCreateOnlyProperties.isCreateOnly(subscriber, "RetryPolicy"));
     }
 
     @Test

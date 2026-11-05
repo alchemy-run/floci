@@ -37,7 +37,9 @@ jobs:
   # ── Build native artifact — amd64 ────────────────────────────────────────
   build-native-amd64:
     name: Build native artifact (amd64)
-    runs-on: ubuntu-latest
+    # Pinned, like the arm64 jobs. Built on ubuntu-26.04 the binary asks glibc for x86-64-v3
+    # whatever -march says, and no longer starts on x86-64-v2 CPUs.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
 
     steps:
@@ -57,6 +59,12 @@ jobs:
         # conditional-branch range and the build dies with BranchTargetOutOfBoundsException.
         # The flag only exists on Mandrel, so it is passed here rather than in application.yml.
         run: mvn clean package -Dnative -DskipTests -B -Dquarkus.native.additional-build-args-append="-march=x86-64-v2,-H:-AOTSingleCallsiteInline"
+
+      - name: Check the x86-64 ISA level of the binary
+        # The image and the release asset must run on x86-64-v2 CPUs. The runner's CPU has v3, so
+        # starting the binary here proves nothing; the script reads the ISA level the binary asks
+        # glibc for.
+        run: .github/scripts/check-isa-level.sh "$(ls target/*-runner)"
 
       - name: Smoke-test the standalone binary
         # The same binary is published as a release asset (publish-binaries), so it is checked
@@ -411,7 +419,7 @@ jobs:
 
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
@@ -429,14 +437,11 @@ jobs:
 
       - name: Build and push native multi-arch image
         id: native
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        env:
-          SOURCE_DATE_EPOCH: ${{ steps.source_date.outputs.epoch }}
+        uses: ./.github/actions/push-zstd-image
         with:
-          context: .
+          source-date-epoch: ${{ steps.source_date.outputs.epoch }}
           file: docker/Dockerfile.native-package
           platforms: linux/amd64,linux/arm64
-          push: true
           provenance: mode=max
           sbom: true
           tags: |
@@ -471,14 +476,11 @@ jobs:
 
       - name: Build and push ARMv8.0 baseline image
         id: baseline
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        env:
-          SOURCE_DATE_EPOCH: ${{ steps.source_date.outputs.epoch }}
+        uses: ./.github/actions/push-zstd-image
         with:
-          context: .
+          source-date-epoch: ${{ steps.source_date.outputs.epoch }}
           file: docker/Dockerfile.native-package
           platforms: linux/arm64
-          push: true
           provenance: mode=max
           sbom: true
           tags: |
@@ -500,14 +502,11 @@ jobs:
 
       - name: Build and push compat multi-arch image
         id: compat
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        env:
-          SOURCE_DATE_EPOCH: ${{ steps.source_date.outputs.epoch }}
+        uses: ./.github/actions/push-zstd-image
         with:
-          context: .
+          source-date-epoch: ${{ steps.source_date.outputs.epoch }}
           file: docker/Dockerfile.compat
           platforms: linux/amd64,linux/arm64
-          push: true
           provenance: mode=max
           sbom: true
           tags: |
@@ -553,7 +552,7 @@ jobs:
 
       # cosign writes each signature back to the registry beside the image it
       # signs, so both destinations need a logged-in session here as well.
-      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}

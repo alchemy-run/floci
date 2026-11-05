@@ -18,6 +18,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig.EcsServiceConfig.ImagePu
 import io.github.hectorvent.floci.services.lambda.launcher.ImageCacheService.LaunchImage;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -32,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.nullable;
 import static org.mockito.Mockito.mock;
@@ -67,7 +69,28 @@ class ImageCacheServiceTest {
 
         verify(pullImage).exec(any(PullImageResultCallback.class));
         verify(pullImage, never()).withPlatform(nullable(String.class));
-        verify(callback).awaitCompletion(5, TimeUnit.MINUTES);
+        verify(callback).awaitCompletion(300, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void eachPullAttemptWaitsAsLongAsTheConfiguredImagePullTimeout() throws Exception {
+        DockerClient dockerClient = mock(DockerClient.class);
+        InspectImageCmd inspectImage = mock(InspectImageCmd.class);
+        PullImageCmd pullImage = mock(PullImageCmd.class);
+        PullImageResultCallback callback = completedPull();
+        when(dockerClient.inspectImageCmd(IMAGE)).thenReturn(inspectImage);
+        when(inspectImage.exec()).thenThrow(new NotFoundException("image not found"))
+                .thenReturn(new InspectImageResponse()
+                        .withId("sha256:native")
+                        .withOs("linux")
+                        .withArch("amd64"));
+        when(dockerClient.pullImageCmd(IMAGE)).thenReturn(pullImage);
+        when(pullImage.withAuthConfig(any())).thenReturn(pullImage);
+        when(pullImage.exec(any(PullImageResultCallback.class))).thenReturn(callback);
+
+        newService(dockerClient, 1800).ensureImageExists(IMAGE);
+
+        verify(callback).awaitCompletion(1800, TimeUnit.SECONDS);
     }
 
     @Test
@@ -105,7 +128,7 @@ class ImageCacheServiceTest {
 
         assertEquals("sha256:arm64", resolvedImage);
         verify(pullImage).withPlatform("linux/arm64");
-        verify(callback).awaitCompletion(5, TimeUnit.MINUTES);
+        verify(callback).awaitCompletion(300, TimeUnit.SECONDS);
     }
 
     @Test
@@ -405,7 +428,7 @@ class ImageCacheServiceTest {
         daemon.registry.put(REGISTRY_IMAGE, image("sha256:new", REGISTRY_REPO + "@sha256:new-manifest"));
 
         assertEquals(new LaunchImage("sha256:new", "sha256:new-manifest"),
-                service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT));
+                service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT, null));
         assertEquals("sha256:new", service.ensureImageExists(REGISTRY_IMAGE));
         assertEquals(2, daemon.pulls.get());
     }
@@ -417,7 +440,7 @@ class ImageCacheServiceTest {
         ImageCacheService service = newService(daemon.client);
 
         assertEquals(new LaunchImage("sha256:built", null),
-                service.resolveForLaunch(LOCAL_IMAGE, ImagePullBehavior.DEFAULT));
+                service.resolveForLaunch(LOCAL_IMAGE, ImagePullBehavior.DEFAULT, null));
         assertEquals("sha256:built", service.ensureImageExists(LOCAL_IMAGE));
         assertEquals(1, daemon.pulls.get());
     }
@@ -427,7 +450,7 @@ class ImageCacheServiceTest {
         FakeDaemon daemon = new FakeDaemon();
 
         assertThrows(NotFoundException.class,
-                () -> newService(daemon.client).resolveForLaunch(LOCAL_IMAGE, ImagePullBehavior.DEFAULT));
+                () -> newService(daemon.client).resolveForLaunch(LOCAL_IMAGE, ImagePullBehavior.DEFAULT, null));
     }
 
     @Test
@@ -438,7 +461,7 @@ class ImageCacheServiceTest {
         daemon.hangingPulls.add(REGISTRY_IMAGE);
 
         DockerClientException error = assertThrows(DockerClientException.class,
-                () -> newService(daemon.client).resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.ALWAYS));
+                () -> newService(daemon.client).resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.ALWAYS, null));
         assertTrue(error.getMessage().contains("Timed out pulling image " + REGISTRY_IMAGE), error.getMessage());
     }
 
@@ -448,7 +471,7 @@ class ImageCacheServiceTest {
         daemon.store(LOCAL_IMAGE, image("sha256:built"));
 
         assertThrows(NotFoundException.class,
-                () -> newService(daemon.client).resolveForLaunch(LOCAL_IMAGE, ImagePullBehavior.ALWAYS));
+                () -> newService(daemon.client).resolveForLaunch(LOCAL_IMAGE, ImagePullBehavior.ALWAYS, null));
     }
 
     @Test
@@ -461,7 +484,7 @@ class ImageCacheServiceTest {
         daemon.store(REGISTRY_IMAGE, image("sha256:new", REGISTRY_REPO + "@sha256:new-manifest"));
 
         assertEquals(new LaunchImage("sha256:new", "sha256:new-manifest"),
-                service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.PREFER_CACHED));
+                service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.PREFER_CACHED, null));
         assertEquals("sha256:new", service.ensureImageExists(REGISTRY_IMAGE));
         assertEquals(0, daemon.pulls.get());
     }
@@ -472,7 +495,7 @@ class ImageCacheServiceTest {
         daemon.registry.put(REGISTRY_IMAGE, image("sha256:new", REGISTRY_REPO + "@sha256:new-manifest"));
 
         assertEquals(new LaunchImage("sha256:new", "sha256:new-manifest"),
-                newService(daemon.client).resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.PREFER_CACHED));
+                newService(daemon.client).resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.PREFER_CACHED, null));
         assertEquals(1, daemon.pulls.get());
     }
 
@@ -483,11 +506,11 @@ class ImageCacheServiceTest {
         daemon.registry.put(REGISTRY_IMAGE, image("sha256:old", REGISTRY_REPO + "@sha256:old-manifest"));
         ImageCacheService service = newService(daemon.client);
 
-        service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.ONCE);
+        service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.ONCE, null);
         daemon.registry.put(REGISTRY_IMAGE, image("sha256:new", REGISTRY_REPO + "@sha256:new-manifest"));
 
         assertEquals(new LaunchImage("sha256:old", "sha256:old-manifest"),
-                service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.ONCE));
+                service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.ONCE, null));
         assertEquals("sha256:old", service.ensureImageExists(REGISTRY_IMAGE));
         assertEquals(1, daemon.pulls.get());
     }
@@ -500,9 +523,9 @@ class ImageCacheServiceTest {
         daemon.registry.put(REGISTRY_IMAGE, image(oldId, REGISTRY_REPO + "@sha256:old-manifest"));
         ImageCacheService service = newService(daemon.client);
 
-        LaunchImage first = service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT);
+        LaunchImage first = service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT, null);
         daemon.registry.put(REGISTRY_IMAGE, image(newId, REGISTRY_REPO + "@sha256:new-manifest"));
-        LaunchImage second = service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT);
+        LaunchImage second = service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT, null);
 
         assertEquals(new LaunchImage(oldId, "sha256:old-manifest"), first);
         assertEquals(new LaunchImage(newId, "sha256:new-manifest"), second);
@@ -529,9 +552,52 @@ class ImageCacheServiceTest {
         ImageCacheService service = newService(daemon.client);
 
         for (ImagePullBehavior behavior : ImagePullBehavior.values()) {
-            assertEquals(new LaunchImage(imageId, null), service.resolveForLaunch(imageId, behavior));
+            assertEquals(new LaunchImage(imageId, null), service.resolveForLaunch(imageId, behavior, null));
         }
         assertEquals(0, daemon.pulls.get());
+    }
+
+    @Test
+    void aLaunchForAnotherPlatformRunsTheLocalImageBuiltForIt() {
+        FakeDaemon daemon = new FakeDaemon();
+        daemon.store(LOCAL_IMAGE, image("sha256:amd64-build"));
+        ImageCacheService service = newService(daemon.client, "aarch64");
+
+        for (ImagePullBehavior behavior : List.of(ImagePullBehavior.DEFAULT, ImagePullBehavior.PREFER_CACHED)) {
+            assertEquals(new LaunchImage("sha256:amd64-build", null),
+                    service.resolveForLaunch(LOCAL_IMAGE, behavior, "linux/amd64"));
+        }
+    }
+
+    @Test
+    void aLaunchOnTheDaemonsPlatformDoesNotReuseALocalImageOfAnother() {
+        FakeDaemon daemon = new FakeDaemon();
+        daemon.store(LOCAL_IMAGE, image("sha256:amd64-build"));
+
+        assertThrows(NotFoundException.class, () -> newService(daemon.client, "aarch64")
+                .resolveForLaunch(LOCAL_IMAGE, ImagePullBehavior.PREFER_CACHED, null));
+        assertEquals(1, daemon.pulls.get());
+    }
+
+    @Test
+    void aLaunchForAnotherPlatformPullsThatPlatform() {
+        FakeDaemon daemon = new FakeDaemon();
+        daemon.registry.put(REGISTRY_IMAGE, image("sha256:amd64", REGISTRY_REPO + "@sha256:amd64-manifest"));
+
+        newService(daemon.client, "aarch64").resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.ALWAYS, "linux/amd64");
+
+        assertEquals(List.of("linux/amd64"), daemon.pullPlatforms);
+    }
+
+    @Test
+    void aLaunchOnTheDaemonsPlatformPullsWithoutNamingOne() {
+        FakeDaemon daemon = new FakeDaemon();
+        daemon.registry.put(REGISTRY_IMAGE, image("sha256:amd64", REGISTRY_REPO + "@sha256:amd64-manifest"));
+
+        newService(daemon.client).resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.ALWAYS, null);
+
+        assertEquals(1, daemon.pulls.get());
+        assertEquals(List.of(), daemon.pullPlatforms);
     }
 
     @Test
@@ -539,7 +605,7 @@ class ImageCacheServiceTest {
         FakeDaemon daemon = new FakeDaemon();
 
         assertThrows(DockerClientException.class, () -> newService(daemon.client)
-                .resolveForLaunch("sha256:" + "e".repeat(64), ImagePullBehavior.ALWAYS));
+                .resolveForLaunch("sha256:" + "e".repeat(64), ImagePullBehavior.ALWAYS, null));
         assertEquals(0, daemon.pulls.get());
     }
 
@@ -551,7 +617,7 @@ class ImageCacheServiceTest {
         daemon.registryDigests.put(REGISTRY_IMAGE, "sha256:index");
 
         assertEquals(new LaunchImage("sha256:config", "sha256:index"),
-                newService(daemon.client).resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT));
+                newService(daemon.client).resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT, null));
     }
 
     @Test
@@ -560,7 +626,7 @@ class ImageCacheServiceTest {
         daemon.registry.put(REGISTRY_IMAGE, image("sha256:config", REGISTRY_REPO + "@sha256:first-manifest"));
         daemon.registryDigests.put(REGISTRY_IMAGE, "sha256:first-manifest");
         ImageCacheService service = newService(daemon.client);
-        service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT);
+        service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT, null);
 
         // A docker pull outside Floci moves the tag to a second manifest of the same image config,
         // which the classic image store keeps under the same image id.
@@ -568,7 +634,7 @@ class ImageCacheServiceTest {
                 REGISTRY_REPO + "@sha256:first-manifest", REGISTRY_REPO + "@sha256:second-manifest"));
 
         assertEquals(new LaunchImage("sha256:config", null),
-                service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.PREFER_CACHED));
+                service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.PREFER_CACHED, null));
     }
 
     @Test
@@ -578,7 +644,7 @@ class ImageCacheServiceTest {
                 REGISTRY_REPO + "@sha256:platform-manifest", REGISTRY_REPO + "@sha256:index"));
 
         assertEquals(new LaunchImage("sha256:index", "sha256:index"),
-                newService(daemon.client).resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.PREFER_CACHED));
+                newService(daemon.client).resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.PREFER_CACHED, null));
     }
 
     @Test
@@ -587,12 +653,12 @@ class ImageCacheServiceTest {
         daemon.registry.put(REGISTRY_IMAGE, image("sha256:old", REGISTRY_REPO + "@sha256:old-manifest"));
         daemon.registryDigests.put(REGISTRY_IMAGE, "sha256:old-manifest");
         ImageCacheService service = newService(daemon.client);
-        service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT);
+        service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.DEFAULT, null);
 
         daemon.store(REGISTRY_IMAGE, image("sha256:rebuilt"));
 
         assertEquals(new LaunchImage("sha256:rebuilt", null),
-                service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.PREFER_CACHED));
+                service.resolveForLaunch(REGISTRY_IMAGE, ImagePullBehavior.PREFER_CACHED, null));
     }
 
     @Test
@@ -649,6 +715,7 @@ class ImageCacheServiceTest {
         final Map<String, String> registryDigests = new HashMap<>();
         final Set<String> hangingPulls = new HashSet<>();
         final AtomicInteger pulls = new AtomicInteger();
+        final List<String> pullPlatforms = new ArrayList<>();
 
         FakeDaemon() {
             when(client.inspectImageCmd(anyString())).thenAnswer(invocation -> {
@@ -667,6 +734,10 @@ class ImageCacheServiceTest {
                 String reference = invocation.getArgument(0);
                 PullImageCmd pull = mock(PullImageCmd.class);
                 when(pull.withAuthConfig(any())).thenReturn(pull);
+                when(pull.withPlatform(anyString())).thenAnswer(platform -> {
+                    pullPlatforms.add(platform.getArgument(0));
+                    return pull;
+                });
                 when(pull.exec(any(PullImageResultCallback.class))).thenAnswer(execution -> {
                     pulls.incrementAndGet();
                     if (hangingPulls.contains(reference)) {
@@ -697,18 +768,32 @@ class ImageCacheServiceTest {
 
     private static PullImageResultCallback completedPull() throws InterruptedException {
         PullImageResultCallback callback = mock(PullImageResultCallback.class);
-        when(callback.awaitCompletion(5, TimeUnit.MINUTES)).thenReturn(true);
+        when(callback.awaitCompletion(anyLong(), any(TimeUnit.class))).thenReturn(true);
         return callback;
     }
 
     private static ImageCacheService newService(DockerClient dockerClient) {
+        return newService(dockerClient, 300);
+    }
+
+    private static ImageCacheService newService(DockerClient dockerClient, String daemonArchitecture) {
+        return newService(dockerClient, 300, daemonArchitecture);
+    }
+
+    private static ImageCacheService newService(DockerClient dockerClient, int imagePullTimeoutSeconds) {
+        return newService(dockerClient, imagePullTimeoutSeconds, "amd64");
+    }
+
+    private static ImageCacheService newService(DockerClient dockerClient, int imagePullTimeoutSeconds,
+                                                String daemonArchitecture) {
         InfoCmd infoCmd = mock(InfoCmd.class);
         when(dockerClient.infoCmd()).thenReturn(infoCmd);
-        when(infoCmd.exec()).thenReturn(new Info().withOsType("linux").withArchitecture("amd64"));
+        when(infoCmd.exec()).thenReturn(new Info().withOsType("linux").withArchitecture(daemonArchitecture));
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.DockerConfig dockerConfig = mock(EmulatorConfig.DockerConfig.class);
         when(config.docker()).thenReturn(dockerConfig);
         when(dockerConfig.registryCredentials()).thenReturn(List.of());
+        when(dockerConfig.imagePullTimeoutSeconds()).thenReturn(imagePullTimeoutSeconds);
         return new ImageCacheService(dockerClient, config);
     }
 }

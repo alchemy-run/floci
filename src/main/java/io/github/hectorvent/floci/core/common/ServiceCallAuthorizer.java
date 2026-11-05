@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.services.iam.IamPolicyEvaluator;
 import io.github.hectorvent.floci.services.iam.IamPolicyEvaluator.Decision;
 import io.github.hectorvent.floci.services.iam.ResourcePolicyProvider;
 import io.github.hectorvent.floci.services.iam.ResourcePolicyProviders;
+import io.quarkus.runtime.Startup;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -30,6 +31,7 @@ import java.util.Map;
  * The decision is returned rather than thrown, because what a refusal means is the caller's to
  * decide: a notification that is not delivered, a delivery that is retried, or an error.
  */
+@Startup
 @ApplicationScoped
 public class ServiceCallAuthorizer {
 
@@ -59,6 +61,15 @@ public class ServiceCallAuthorizer {
      */
     public Decision authorize(String service, String action, String resourceArn,
                               String sourceArn, String sourceAccount) {
+        return authorize(service, action, resourceArn, sourceArn, sourceAccount, Map.of());
+    }
+
+    /**
+     * As {@link #authorize(String, String, String, String, String)}, with the keys the target
+     * service adds for the request, such as {@code s3:versionid} for an object version.
+     */
+    public Decision authorize(String service, String action, String resourceArn, String sourceArn,
+                              String sourceAccount, Map<String, List<String>> requestKeys) {
         if (!config.services().iam().enforcementEnabled()) {
             return Decision.ALLOW;
         }
@@ -72,7 +83,8 @@ public class ServiceCallAuthorizer {
                 .filter(document -> document != null && !document.isBlank())
                 .toList();
         Map<String, List<String>> context = IamConditionContextResolver.serviceCallContext(
-                servicePrincipal, resourceArn, ownerAccountId, sourceArn, sourceAccount);
+                servicePrincipal, resourceArn, ownerAccountId, sourceArn, sourceAccount, action);
+        context.putAll(requestKeys);
         Decision decision = evaluator.evaluateServicePrincipal(
                 documents.isEmpty() ? null : documents, servicePrincipal, action, resourceArn, context);
         if (decision == Decision.DENY) {

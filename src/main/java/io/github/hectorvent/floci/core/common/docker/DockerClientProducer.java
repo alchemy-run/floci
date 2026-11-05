@@ -12,6 +12,7 @@ import com.github.dockerjava.transport.DockerHttpClient;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.Digests;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Disposes;
 import jakarta.enterprise.inject.Produces;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -407,6 +408,12 @@ public class DockerClientProducer {
         return requireAtLeastOne(seconds, "floci.docker.api-timeout-seconds", "FLOCI_DOCKER_API_TIMEOUT_SECONDS");
     }
 
+    /** At 0 every pull would be given up at once, so a launch that needs an image could never start. */
+    public static int validateImagePullTimeoutSeconds(int seconds) {
+        return requireAtLeastOne(seconds, "floci.docker.image-pull-timeout-seconds",
+                "FLOCI_DOCKER_IMAGE_PULL_TIMEOUT_SECONDS");
+    }
+
     private static int requireAtLeastOne(int value, String setting, String envVar) {
         if (value < 1) {
             throw new IllegalArgumentException(setting + " (" + envVar + ") must be at least 1, got: " + value);
@@ -442,6 +449,14 @@ public class DockerClientProducer {
     public DockerClient streamingDockerClient() {
         return buildDockerClient(buildClientConfig(),
                 validateStreamingMaxConnections(config.docker().streamingMaxConnections()), "streaming");
+    }
+
+    void disposeDockerClient(@Disposes DockerClient client) throws IOException {
+        client.close();
+    }
+
+    void disposeStreamingDockerClient(@Disposes @StreamingDocker DockerClient client) throws IOException {
+        client.close();
     }
 
     /**

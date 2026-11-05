@@ -67,6 +67,7 @@ import software.amazon.awssdk.services.elasticloadbalancingv2.ElasticLoadBalanci
 import software.amazon.awssdk.services.emr.EmrClient;
 import software.amazon.awssdk.services.emrserverless.EmrServerlessClient;
 import software.amazon.awssdk.services.eventbridge.EventBridgeClient;
+import software.amazon.awssdk.services.eventbridgev2.EventBridgeV2Client;
 import software.amazon.awssdk.services.firehose.FirehoseClient;
 import software.amazon.awssdk.services.fis.FisClient;
 import software.amazon.awssdk.services.globalaccelerator.GlobalAcceleratorClient;
@@ -106,6 +107,7 @@ import software.amazon.awssdk.services.neptune.NeptuneClient;
 import software.amazon.awssdk.services.oam.OamClient;
 import software.amazon.awssdk.services.opensearch.OpenSearchClient;
 import software.amazon.awssdk.services.organizations.OrganizationsClient;
+import software.amazon.awssdk.services.paymentcryptography.PaymentCryptographyClient;
 import software.amazon.awssdk.services.pipes.PipesClient;
 import software.amazon.awssdk.services.ram.RamClient;
 import software.amazon.awssdk.services.rds.RdsClient;
@@ -155,6 +157,8 @@ import software.amazon.awssdk.services.sesv2.model.CreateEmailIdentityRequest;
 import software.amazon.awssdk.services.sesv2.model.CreateEmailIdentityResponse;
 import software.amazon.awssdk.services.sesv2.model.GetEmailIdentityRequest;
 import software.amazon.awssdk.services.sfn.SfnClient;
+import software.amazon.awssdk.services.sfn.model.DescribeExecutionResponse;
+import software.amazon.awssdk.services.sfn.model.ExecutionStatus;
 import software.amazon.awssdk.services.signin.SigninClient;
 import software.amazon.awssdk.services.sns.SnsClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
@@ -171,21 +175,35 @@ import software.amazon.awssdk.services.wafv2.Wafv2Client;
 
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
+import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
+import java.security.KeyStore;
 import java.security.SecureRandom;
+import java.security.cert.Certificate;
+import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.function.BooleanSupplier;
 import java.util.function.Supplier;
 import java.util.zip.ZipEntry;
@@ -268,6 +286,22 @@ public final class TestFixtures {
             Thread.sleep(pollMillis);
         }
         throw new AssertionError(resourceName + " timed out waiting for " + expected + timeoutDetails.get());
+    }
+
+    /** Opens a JDBC connection, retrying for up to 60 seconds while the database endpoint starts. */
+    public static Connection awaitJdbcConnection(String url, Properties properties)
+            throws SQLException, InterruptedException {
+        long deadline = System.nanoTime() + Duration.ofSeconds(60).toNanos();
+        SQLException last = null;
+        while (System.nanoTime() < deadline) {
+            try {
+                return DriverManager.getConnection(url, properties);
+            } catch (SQLException e) {
+                last = e;
+                Thread.sleep(1000);
+            }
+        }
+        throw last != null ? last : new SQLException("Timed out waiting for " + url);
     }
 
     /** The region every fixture client signs for, for tests that build or compare region-scoped values. */
@@ -388,6 +422,28 @@ public final class TestFixtures {
      */
     public static String proxyHost() {
         return ENDPOINT.getHost();
+    }
+
+    /**
+     * A TLS context that trusts only the CA Floci serves at {@code /_floci/ca.pem}, for a client
+     * that verifies an endpoint Floci signs, such as a DSQL cluster or an encrypted cache.
+     */
+    public static SSLContext flociCaTrust() throws IOException, InterruptedException, GeneralSecurityException {
+        HttpResponse<String> ca = emulatorHttpClient().send(
+                HttpRequest.newBuilder(ENDPOINT.resolve("/_floci/ca.pem")).build(),
+                HttpResponse.BodyHandlers.ofString());
+        KeyStore trusted = KeyStore.getInstance(KeyStore.getDefaultType());
+        trusted.load(null, null);
+        int index = 0;
+        for (Certificate certificate : CertificateFactory.getInstance("X.509").generateCertificates(
+                new ByteArrayInputStream(ca.body().getBytes(StandardCharsets.US_ASCII)))) {
+            trusted.setCertificateEntry("floci-" + index++, certificate);
+        }
+        TrustManagerFactory trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        trust.init(trusted);
+        SSLContext context = SSLContext.getInstance("TLS");
+        context.init(null, trust.getTrustManagers(), null);
+        return context;
     }
 
     // ============================================
@@ -828,7 +884,7 @@ public final class TestFixtures {
 
     private static boolean isDnsResolvable(String hostname) {
         try {
-            java.net.InetAddress.getByName(hostname);
+            InetAddress.getByName(hostname);
             return true;
         } catch (Exception e) {
             return false;
@@ -846,7 +902,7 @@ public final class TestFixtures {
                 .region(REGION)
                 .credentialsProvider(CREDENTIALS)
                 .endpointProvider((S3ControlEndpointProvider) params ->
-                        java.util.concurrent.CompletableFuture.completedFuture(
+                        CompletableFuture.completedFuture(
                                 Endpoint.builder().url(endpoint).build()))
                 .build();
     }
@@ -990,6 +1046,28 @@ public final class TestFixtures {
         }
     }
 
+    /**
+     * The execution's description once it is no longer {@code RUNNING}, or its last description at the
+     * timeout. It checks every 50 ms against Floci and every 500 ms against real AWS, like
+     * {@link #awaitStackTerminal}.
+     */
+    public static DescribeExecutionResponse awaitExecutionTerminal(SfnClient sfn, String executionArn, Duration timeout)
+            throws InterruptedException {
+        long pollMillis = isRealAws() ? 500 : 50;
+        long deadline = System.nanoTime() + timeout.toNanos();
+        while (true) {
+            DescribeExecutionResponse execution = sfn.describeExecution(request -> request.executionArn(executionArn));
+            if (execution.status() != ExecutionStatus.RUNNING) {
+                return execution;
+            }
+            long remainingNanos = deadline - System.nanoTime();
+            if (remainingNanos <= 0) {
+                return execution;
+            }
+            Thread.sleep(Math.min(pollMillis, Math.max(1, Duration.ofNanos(remainingNanos).toMillis())));
+        }
+    }
+
     public static GlueClient glueClient() {
         return GlueClient.builder()
                 .endpointOverride(ENDPOINT)
@@ -1028,6 +1106,23 @@ public final class TestFixtures {
 
     public static KmsClient kmsClient(Region region) {
         return KmsClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(region)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    /**
+     * The Payment Cryptography control plane. The real service is an awsJson 1.0 service
+     * that signs for {@code payment-cryptography}, and the SDK talks to it through the
+     * {@code PaymentCryptographyControlPlane} target prefix.
+     */
+    public static PaymentCryptographyClient paymentCryptographyClient() {
+        return paymentCryptographyClient(REGION);
+    }
+
+    public static PaymentCryptographyClient paymentCryptographyClient(Region region) {
+        return PaymentCryptographyClient.builder()
                 .endpointOverride(ENDPOINT)
                 .region(region)
                 .credentialsProvider(CREDENTIALS)
@@ -1110,6 +1205,14 @@ public final class TestFixtures {
 
     public static EventBridgeClient eventBridgeClient() {
         return EventBridgeClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static EventBridgeV2Client eventBridgeV2Client() {
+        return EventBridgeV2Client.builder()
                 .endpointOverride(ENDPOINT)
                 .region(REGION)
                 .credentialsProvider(CREDENTIALS)
@@ -1584,6 +1687,14 @@ public final class TestFixtures {
                 .endpointOverride(ENDPOINT)
                 .region(REGION)
                 .credentialsProvider(CREDENTIALS)
+                .build();
+    }
+
+    public static BedrockAgentCoreControlClient bedrockAgentCoreControlClient(String accountId) {
+        return BedrockAgentCoreControlClient.builder()
+                .endpointOverride(ENDPOINT)
+                .region(REGION)
+                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create(accountId, "test")))
                 .build();
     }
 

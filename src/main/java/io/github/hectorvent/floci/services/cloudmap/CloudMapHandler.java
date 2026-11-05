@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsJson11Controller;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.services.cloudmap.model.Instance;
 import io.github.hectorvent.floci.services.cloudmap.model.Namespace;
 import io.github.hectorvent.floci.services.cloudmap.model.Operation;
@@ -116,10 +118,16 @@ public class CloudMapHandler {
     }
 
     private Response handleListNamespaces(JsonNode request, String region) {
+        PaginatedResult<Namespace> page = service.listNamespaces(region, parseFilters(request),
+                Pagination.parseMaxResults(request, "MaxResults", "InvalidInput"),
+                Pagination.parseNextToken(request, "NextToken", "InvalidInput"));
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode arr = response.putArray("Namespaces");
-        for (Namespace ns : service.listNamespaces(region, parseFilters(request))) {
+        for (Namespace ns : page.items()) {
             arr.add(buildNamespaceNode(ns));
+        }
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
         }
         return Response.ok(response).build();
     }
@@ -135,13 +143,19 @@ public class CloudMapHandler {
 
     private Response handleListOperations(JsonNode request, String region) {
         Map<String, List<String>> filters = parseFilters(request);
+        PaginatedResult<Operation> page = service.listOperations(
+                region, filters, Pagination.parseMaxResults(request, "MaxResults", "InvalidInput"),
+                Pagination.parseNextToken(request, "NextToken", "InvalidInput"));
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode arr = response.putArray("Operations");
-        for (Operation op : service.listOperations(region, filters)) {
+        for (Operation op : page.items()) {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("Id", op.getId());
             node.put("Status", op.getStatus());
             arr.add(node);
+        }
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
         }
         return Response.ok(response).build();
     }
@@ -152,7 +166,7 @@ public class CloudMapHandler {
         Service created = service.createService(
                 text(request, "Name"), text(request, "NamespaceId"), text(request, "CreatorRequestId"),
                 text(request, "Description"), rawJson(request.path("DnsConfig")),
-                rawJson(request.path("HealthCheckConfig")), rawJson(request.path("HealthCheckCustomConfig")),
+                rawJson(request.path("HealthCheckConfig")), objectJson(request.path("HealthCheckCustomConfig")),
                 text(request, "Type"), parseTags(request), region);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("Service", buildServiceNode(created));
@@ -170,10 +184,16 @@ public class CloudMapHandler {
         Map<String, List<String>> filters = parseFilters(request);
         String namespaceId = filters.containsKey("NAMESPACE_ID") && !filters.get("NAMESPACE_ID").isEmpty()
                 ? filters.get("NAMESPACE_ID").get(0) : null;
+        PaginatedResult<Service> page = service.listServices(
+                region, namespaceId, Pagination.parseMaxResults(request, "MaxResults", "InvalidInput"),
+                Pagination.parseNextToken(request, "NextToken", "InvalidInput"));
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode arr = response.putArray("Services");
-        for (Service s : service.listServices(region, namespaceId)) {
+        for (Service s : page.items()) {
             arr.add(buildServiceSummaryNode(s));
+        }
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
         }
         return Response.ok(response).build();
     }
@@ -472,6 +492,11 @@ public class CloudMapHandler {
 
     private String rawJson(JsonNode node) {
         return (node != null && node.isObject() && !node.isEmpty()) ? node.toString() : null;
+    }
+
+    /** Unlike {@link #rawJson}, keeps {@code {}}: an empty HealthCheckCustomConfig still enables it. */
+    private String objectJson(JsonNode node) {
+        return node.isObject() ? node.toString() : null;
     }
 
     private void setRawJson(ObjectNode target, String field, String rawJson) {

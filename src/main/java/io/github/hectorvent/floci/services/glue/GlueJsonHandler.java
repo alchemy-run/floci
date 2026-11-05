@@ -4,6 +4,8 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsJsonTimestamp;
+import io.github.hectorvent.floci.core.common.EpochSeconds;
 import io.github.hectorvent.floci.services.glue.model.*;
 import io.github.hectorvent.floci.services.glue.model.Classifier;
 import io.github.hectorvent.floci.services.glue.model.Connection;
@@ -142,7 +144,7 @@ public class GlueJsonHandler {
                 String dbName = request.get("DatabaseName").asText();
                 String tableName = request.get("Name").asText();
                 Table table = glueService.getTable(dbName, tableName);
-                yield Response.ok(Map.of("Table", table)).build();
+                yield Response.ok(Map.of("Table", GlueService.withReadDefaults(table))).build();
             }
             case "CreatePartitionIndex" -> {
                 String dbName = request.get("DatabaseName").asText();
@@ -170,7 +172,8 @@ public class GlueJsonHandler {
             }
             case "GetTables" -> {
                 String dbName = request.get("DatabaseName").asText();
-                yield Response.ok(Map.of("TableList", glueService.getTables(dbName))).build();
+                List<Table> tables = glueService.getTables(dbName).stream().map(GlueService::withReadDefaults).toList();
+                yield Response.ok(Map.of("TableList", tables)).build();
             }
             case "UpdateTable" -> {
                 String dbName = request.get("DatabaseName").asText();
@@ -233,7 +236,10 @@ public class GlueJsonHandler {
                 String dbName = request.get("DatabaseName").asText();
                 String tableName = request.get("TableName").asText();
                 String expression = request.path("Expression").asText(null);
-                yield Response.ok(Map.of("Partitions", glueService.getPartitions(dbName, tableName, expression))).build();
+                GlueService.Segment segment = request.hasNonNull("Segment") ? segment(request.get("Segment")) : null;
+                List<Partition> partitions = glueService.getPartitions(dbName, tableName, expression, segment).stream()
+                        .map(GlueService::withReadDefaults).toList();
+                yield Response.ok(Map.of("Partitions", partitions)).build();
             }
             case "DeletePartition" -> handleDeletePartition(request);
             case "BatchDeletePartition" -> handleBatchDeletePartition(request);
@@ -488,12 +494,47 @@ public class GlueJsonHandler {
                 glueService.deleteSecurityConfiguration(request.path("Name").asText(null), region);
                 yield Response.ok(Map.of()).build();
             }
-            // Read-only Glue actions for resources the emulator does not model. The AWS SDK
-            // expects each to return a 200 with its result key present (empty), so we emit the
-            // documented empty shape rather than an InvalidAction 400 that callers can't read.
-            case "ListDataQualityRulesets" -> Response.ok(Map.of("Rulesets", List.of())).build();
-            case "GetSecurityConfigurations" -> Response.ok(Map.of(
-                    "SecurityConfigurations", glueService.getSecurityConfigurations(region))).build();
+            case "GetSecurityConfigurations" -> {
+                GlueService.Page<SecurityConfiguration> page = glueService.getSecurityConfigurations(
+                        region, readMaxResults(request), readNextToken(request));
+                yield Response.ok(pageResponse("SecurityConfigurations", page.items(), page.nextToken())).build();
+            }
+            case "CreateDataQualityRuleset" -> {
+                Map<String, String> tags = request.hasNonNull("Tags")
+                        ? mapper.convertValue(request.get("Tags"), STRING_MAP)
+                        : null;
+                DataQualityRuleset created = glueService.createDataQualityRuleset(
+                        request.path("Name").asText(null), request.path("Description").asText(null),
+                        request.path("Ruleset").asText(null), readTargetTable(request.get("TargetTable")),
+                        request.path("DataQualitySecurityConfiguration").asText(null), tags, region);
+                yield Response.ok(Map.of("Name", created.getName())).build();
+            }
+            case "GetDataQualityRuleset" ->
+                    Response.ok(glueService.getDataQualityRuleset(request.path("Name").asText(null), region)).build();
+            case "UpdateDataQualityRuleset" -> {
+                DataQualityRuleset updated = glueService.updateDataQualityRuleset(request.path("Name").asText(null),
+                        request.path("Description").asText(null), request.path("Ruleset").asText(null), region);
+                Map<String, Object> response = new LinkedHashMap<>();
+                response.put("Name", updated.getName());
+                putIfNotNull(response, "Description", updated.getDescription());
+                response.put("Ruleset", updated.getRuleset());
+                yield Response.ok(response).build();
+            }
+            case "DeleteDataQualityRuleset" -> {
+                glueService.deleteDataQualityRuleset(request.path("Name").asText(null), region);
+                yield Response.ok(Map.of()).build();
+            }
+            case "ListDataQualityRulesets" -> {
+                Map<String, String> tags = request.hasNonNull("Tags")
+                        ? mapper.convertValue(request.get("Tags"), STRING_MAP)
+                        : null;
+                GlueService.Page<DataQualityRuleset> page = glueService.listDataQualityRulesets(
+                        readDataQualityFilter(request.get("Filter")), tags,
+                        readMaxResults(request), readNextToken(request), region);
+                yield Response.ok(pageResponse("Rulesets",
+                        page.items().stream().map(GlueJsonHandler::dataQualityListItem).toList(),
+                        page.nextToken())).build();
+            }
             case "CreateTrigger" -> {
                 Trigger trigger = toTrigger(request);
                 trigger.setName(request.path("Name").asText(null));
@@ -697,13 +738,37 @@ public class GlueJsonHandler {
         return Response.ok(Map.of("Errors", glueService.batchUpdatePartitions(dbName, tableName, entries))).build();
     }
 
+    /**
+     * A Segment that is not a structure of integers is a malformed request, refused with SerializationException
+     * before its constraints are checked, as the awsJson1_1 protocol refuses a member of the wrong type; the
+     * message is Floci's.
+     */
+    private static GlueService.Segment segment(JsonNode segment) {
+        if (!segment.isObject()) {
+            throw new AwsException("SerializationException", "Segment must be a structure", 400);
+        }
+        return new GlueService.Segment(
+                integerMember(segment, "SegmentNumber"), integerMember(segment, "TotalSegments"));
+    }
+
+    private static Integer integerMember(JsonNode segment, String member) {
+        JsonNode value = segment.get(member);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.isIntegralNumber() || !value.canConvertToInt()) {
+            throw new AwsException("SerializationException", "Segment." + member + " must be an integer", 400);
+        }
+        return value.intValue();
+    }
+
     private Response handleGetPartition(JsonNode request) {
         String dbName = request.get("DatabaseName").asText();
         String tableName = request.get("TableName").asText();
         List<String> partitionValues = mapper.convertValue(request.get("PartitionValues"), STRING_LIST);
         return Response.ok(Map.of(
                 "Partition",
-                glueService.getPartition(dbName, tableName, partitionValues)))
+                GlueService.withReadDefaults(glueService.getPartition(dbName, tableName, partitionValues))))
                 .build();
     }
 
@@ -714,8 +779,10 @@ public class GlueJsonHandler {
         List<List<String>> partitionValues = partitionsToGet.stream()
                 .map(partition -> mapper.convertValue(partition.get("Values"), STRING_LIST))
                 .toList();
+        List<Partition> partitions = glueService.batchGetPartitions(dbName, tableName, partitionValues).stream()
+                .map(GlueService::withReadDefaults).toList();
         return Response.ok(Map.of(
-                "Partitions", glueService.batchGetPartitions(dbName, tableName, partitionValues),
+                "Partitions", partitions,
                 "UnprocessedKeys", List.of()))
                 .build();
     }
@@ -742,7 +809,8 @@ public class GlueJsonHandler {
         GlueService.Page<Table> page = glueService.searchTables(
                 request.path("SearchText").asText(null), filters, sortCriteria,
                 readMaxResults(request), readNextToken(request));
-        return Response.ok(pageResponse("TableList", page.items(), page.nextToken())).build();
+        List<Table> tables = page.items().stream().map(GlueService::withReadDefaults).toList();
+        return Response.ok(pageResponse("TableList", tables, page.nextToken())).build();
     }
 
     private Response handleDeletePartition(JsonNode request) {
@@ -1141,6 +1209,38 @@ public class GlueJsonHandler {
         if (value != null) {
             target.put(key, value);
         }
+    }
+
+    private static DataQualityRuleset.TargetTable readTargetTable(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        return new DataQualityRuleset.TargetTable(node.path("TableName").asText(null),
+                node.path("DatabaseName").asText(null), node.path("CatalogId").asText(null));
+    }
+
+    private static GlueService.DataQualityRulesetFilter readDataQualityFilter(JsonNode node) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+        return new GlueService.DataQualityRulesetFilter(node.path("Name").asText(null),
+                node.path("Description").asText(null),
+                AwsJsonTimestamp.epochSeconds(node, "CreatedBefore", "InvalidInputException"),
+                AwsJsonTimestamp.epochSeconds(node, "CreatedAfter", "InvalidInputException"),
+                AwsJsonTimestamp.epochSeconds(node, "LastModifiedBefore", "InvalidInputException"),
+                AwsJsonTimestamp.epochSeconds(node, "LastModifiedAfter", "InvalidInputException"),
+                readTargetTable(node.get("TargetTable")));
+    }
+
+    private static Map<String, Object> dataQualityListItem(DataQualityRuleset ruleset) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("Name", ruleset.getName());
+        putIfNotNull(item, "Description", ruleset.getDescription());
+        item.put("CreatedOn", EpochSeconds.fromInstant(ruleset.getCreatedOn()));
+        item.put("LastModifiedOn", EpochSeconds.fromInstant(ruleset.getLastModifiedOn()));
+        putIfNotNull(item, "TargetTable", ruleset.getTargetTable());
+        putIfNotNull(item, "RuleCount", GlueService.dataQualityRuleCount(ruleset.getRuleset()));
+        return item;
     }
 
     private static String iso(Instant instant) {

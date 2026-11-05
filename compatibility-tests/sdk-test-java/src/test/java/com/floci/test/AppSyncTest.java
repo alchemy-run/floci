@@ -24,6 +24,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -934,7 +935,7 @@ class AppSyncTest {
     @Order(100)
     void createDomainName() {
         // Use unique domain name to avoid conflicts
-        String domainSuffix = java.util.UUID.randomUUID().toString().substring(0, 8);
+        String domainSuffix = UUID.randomUUID().toString().substring(0, 8);
         CreateDomainNameResponse resp = client.createDomainName(
                 CreateDomainNameRequest.builder()
                         .domainName("sdk-" + domainSuffix + ".example.com")
@@ -1195,7 +1196,7 @@ class AppSyncTest {
     void listDomainNames() {
         CreateDomainNameResponse created = client.createDomainName(
                 CreateDomainNameRequest.builder()
-                        .domainName("list-test-" + java.util.UUID.randomUUID().toString().substring(0, 8) + ".example.com")
+                        .domainName("list-test-" + UUID.randomUUID().toString().substring(0, 8) + ".example.com")
                         .certificateArn("arn:aws:acm:us-east-1:000000000000:certificate/test")
                         .build());
 
@@ -1325,7 +1326,7 @@ class AppSyncTest {
     void listGraphqlApisWithMaxResults() {
         for (int i = 0; i < 2; i++) {
             client.createGraphqlApi(CreateGraphqlApiRequest.builder()
-                    .name("pg-sdk-api-" + i + "-" + java.util.UUID.randomUUID().toString().substring(0, 8))
+                    .name("pg-sdk-api-" + i + "-" + UUID.randomUUID().toString().substring(0, 8))
                     .authenticationType("API_KEY")
                     .build());
         }
@@ -1350,7 +1351,7 @@ class AppSyncTest {
         for (int i = 0; i < 2; i++) {
             client.createDataSource(CreateDataSourceRequest.builder()
                     .apiId(apiId)
-                    .name("pg-sdk-ds-" + i + "-" + java.util.UUID.randomUUID().toString().substring(0, 8))
+                    .name("pg-sdk-ds-" + i + "-" + UUID.randomUUID().toString().substring(0, 8))
                     .type("NONE")
                     .build());
         }
@@ -1377,7 +1378,7 @@ class AppSyncTest {
     @Test
     @Order(130)
     void createDataSourceDuplicateThrowsBadRequestException() {
-        String dsName = "sdk-conflict-ds-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+        String dsName = "sdk-conflict-ds-" + UUID.randomUUID().toString().substring(0, 8);
         client.createDataSource(CreateDataSourceRequest.builder()
                 .apiId(apiId)
                 .name(dsName)
@@ -1399,7 +1400,7 @@ class AppSyncTest {
     @Order(131)
     void createApiKeyExceedsLimitThrowsApiKeyLimitExceededException() {
         CreateGraphqlApiResponse tempApi = client.createGraphqlApi(CreateGraphqlApiRequest.builder()
-                .name("sdk-limit-test-" + java.util.UUID.randomUUID().toString().substring(0, 8))
+                .name("sdk-limit-test-" + UUID.randomUUID().toString().substring(0, 8))
                 .authenticationType("API_KEY")
                 .build());
         String tempApiId = tempApi.graphqlApi().apiId();
@@ -1480,7 +1481,7 @@ class AppSyncTest {
     @Order(137)
     void createSourceApiAssociationDuplicateThrowsConcurrentModificationException() {
         String sourceApiId = client.createGraphqlApi(CreateGraphqlApiRequest.builder()
-                .name("sdk-dup-source-" + java.util.UUID.randomUUID().toString().substring(0, 8))
+                .name("sdk-dup-source-" + UUID.randomUUID().toString().substring(0, 8))
                 .authenticationType("API_KEY")
                 .build()).graphqlApi().apiId();
 

@@ -36,6 +36,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -128,6 +129,12 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
     private static final String STATUS_ACTIVE = "ACTIVE";
     private static final String STATUS_PENDING_CLOSURE = "PENDING_CLOSURE";
 
+    /** CreateAccount's RoleName default, the role AWS preconfigures in every account it creates. */
+    private static final String DEFAULT_ACCOUNT_ACCESS_ROLE_NAME = "OrganizationAccountAccessRole";
+    /** The RoleName pattern CreateAccount publishes, which also refuses the reserved prefix. */
+    private static final Pattern ACCOUNT_ACCESS_ROLE_NAME_PATTERN = Pattern.compile("[\\w+=,.@-]{1,64}");
+    private static final String AWS_SERVICE_ROLE_PREFIX = "AWSServiceRoleFor";
+
     private static final String HANDSHAKE_REQUESTED = "REQUESTED";
     private static final String HANDSHAKE_ACCEPTED = "ACCEPTED";
     private static final String HANDSHAKE_DECLINED = "DECLINED";
@@ -165,10 +172,12 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
     private final RegionResolver regionResolver;
     private final boolean scpEnforcementEnabled;
     private final String managementAccountEmail;
+    private final AccountAccessRoleProvisioner accountAccessRoleProvisioner;
 
     @Inject
     public OrganizationsService(StorageFactory storageFactory, ObjectMapper objectMapper,
-                                EmulatorConfig config, RegionResolver regionResolver) {
+                                EmulatorConfig config, RegionResolver regionResolver,
+                                AccountAccessRoleProvisioner accountAccessRoleProvisioner) {
         EmulatorConfig.OrganizationsServiceConfig organizationsConfig = config.services().organizations();
         this.scpEnforcementEnabled = organizationsConfig.scpEnforcementEnabled();
         this.managementAccountEmail = organizationsConfig.managementAccountEmail()
@@ -176,6 +185,7 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
                 .orElse(null);
         this.objectMapper = objectMapper;
         this.regionResolver = regionResolver;
+        this.accountAccessRoleProvisioner = accountAccessRoleProvisioner;
         this.organizations = storageFactory.create("organizations", "organizations-organizations.json",
                 new TypeReference<Map<String, Organization>>() {});
         this.accounts = storageFactory.create("organizations", "organizations-accounts.json",
@@ -225,6 +235,22 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
                          AccountAwareStorageBackend<Handshake> handshakes,
                          boolean scpEnforcementEnabled,
                          String managementAccountEmail) {
+        this(objectMapper, regionResolver, organizations, accounts, organizationalUnits, policies,
+                createAccountStatuses, handshakes, scpEnforcementEnabled, managementAccountEmail,
+                AccountAccessRoleProvisioner.NOOP);
+    }
+
+    OrganizationsService(ObjectMapper objectMapper,
+                         RegionResolver regionResolver,
+                         AccountAwareStorageBackend<Organization> organizations,
+                         AccountAwareStorageBackend<OrganizationAccount> accounts,
+                         AccountAwareStorageBackend<OrganizationalUnit> organizationalUnits,
+                         AccountAwareStorageBackend<OrganizationPolicy> policies,
+                         AccountAwareStorageBackend<CreateAccountStatus> createAccountStatuses,
+                         AccountAwareStorageBackend<Handshake> handshakes,
+                         boolean scpEnforcementEnabled,
+                         String managementAccountEmail,
+                         AccountAccessRoleProvisioner accountAccessRoleProvisioner) {
         this.objectMapper = objectMapper;
         this.regionResolver = regionResolver;
         this.organizations = organizations;
@@ -237,6 +263,7 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
         this.managementAccountEmail = managementAccountEmail == null
                 ? null
                 : requireValidConfiguredEmail(managementAccountEmail);
+        this.accountAccessRoleProvisioner = accountAccessRoleProvisioner;
     }
 
     /** A parent reference as returned by {@code ListParents}. */
@@ -575,10 +602,22 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
 
     public CreateAccountStatus createAccount(String callerAccountId, String email, String accountName,
                                              Map<String, String> tags, boolean govCloud) {
+        return createAccount(callerAccountId, email, accountName, tags, null, govCloud);
+    }
+
+    /**
+     * Creates a member account and preconfigures its access role, the way AWS does
+     * (CreateAccount reference): the role, named by {@code roleName} or defaulted, exists in
+     * the new account, trusts the management account and carries administrator permissions,
+     * so the management account can assume it with {@code sts:AssumeRole}.
+     */
+    public CreateAccountStatus createAccount(String callerAccountId, String email, String accountName,
+                                             Map<String, String> tags, String roleName, boolean govCloud) {
         Organization organization = requireManagementAccount(callerAccountId);
         validateEmail(email);
         validateName(accountName, "AccountName", MAX_ACCOUNT_NAME_LENGTH);
         validateTags(tags);
+        validateAccountAccessRoleName(roleName);
 
         boolean emailTaken = accountsIn(organization).stream()
                 .anyMatch(account -> email.equalsIgnoreCase(account.getEmail()));
@@ -599,8 +638,14 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
 
         String newAccountId = allocateAccountId(organization);
         OrganizationAccount account = newMemberAccount(organization, newAccountId, email, accountName, "CREATED");
+        if (tags != null) {
+            account.getTags().putAll(tags);
+        }
         accounts.putForAccount(organization.getMasterAccountId(), newAccountId, account);
         attachFullAwsAccess(organization, newAccountId);
+        accountAccessRoleProvisioner.provision(newAccountId,
+                roleName == null ? DEFAULT_ACCOUNT_ACCESS_ROLE_NAME : roleName,
+                organization.getMasterAccountId());
 
         status.setState("SUCCEEDED");
         status.setAccountId(newAccountId);
@@ -634,9 +679,9 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
         return requireAccount(requireOrganizationForCaller(callerAccountId), accountId);
     }
 
-    public java.util.Optional<OrganizationAccount> findAccountForPortal(String accountId) {
+    public Optional<OrganizationAccount> findAccountForPortal(String accountId) {
         if (accountId == null || !ACCOUNT_ID_PATTERN.matcher(accountId).matches()) {
-            return java.util.Optional.empty();
+            return Optional.empty();
         }
         return accounts.scanAllAccounts().stream()
                 .filter(account -> accountId.equals(account.getId()))
@@ -995,7 +1040,7 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
         Set<String> existingOuIds = organizationalUnitsIn(organization).stream()
                 .map(OrganizationalUnit::getId)
                 .collect(java.util.stream.Collectors.toSet());
-        Set<String> targetIds = new java.util.LinkedHashSet<>();
+        Set<String> targetIds = new LinkedHashSet<>();
         registeredOuIds.stream().filter(existingOuIds::contains).forEach(targetIds::add);
         organizationalUnitsIn(organization).stream()
                 .filter(ou -> "Security".equals(ou.getName()))
@@ -1855,7 +1900,7 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
         handshake.setExpirationTimestamp(now.plus(HANDSHAKE_TTL_DAYS, ChronoUnit.DAYS));
         handshake.setOrganizationId(organization.getId());
         handshake.setArn(arn(organization.getMasterAccountId(),
-                "handshake/" + organization.getId() + "/" + action.toLowerCase(java.util.Locale.ROOT)
+                "handshake/" + organization.getId() + "/" + action.toLowerCase(Locale.ROOT)
                         + "/" + handshake.getId()));
         return handshake;
     }
@@ -1981,7 +2026,7 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
 
     private String policyArn(Organization organization, String policyId, String type) {
         return arn(organization.getMasterAccountId(),
-                "policy/" + organization.getId() + "/" + type.toLowerCase(java.util.Locale.ROOT) + "/" + policyId);
+                "policy/" + organization.getId() + "/" + type.toLowerCase(Locale.ROOT) + "/" + policyId);
     }
 
     /** Organizations ARNs carry no region; they take the request's partition. */
@@ -2062,8 +2107,37 @@ public class OrganizationsService implements ScpProvider, RootAccessOrganization
         });
     }
 
+    /**
+     * CreateAccount's optional RoleName, when sent: the pattern the reference publishes
+     * ({@code [\w+=,.@-]{1,64}}) plus the reserved prefix its InvalidInputException reasons
+     * list refuses (INVALID_ROLE_NAME: a role name can't begin with AWSServiceRoleFor). An
+     * absent name is the caller saying "default", so it passes and is defaulted later. The
+     * reference answers a value off the pattern with INVALID_PATTERN, and both reasons ride
+     * the error's Reason member, which the SDKs read off InvalidInputException.
+     */
+    private void validateAccountAccessRoleName(String roleName) {
+        if (roleName == null) {
+            return;
+        }
+        if (!ACCOUNT_ACCESS_ROLE_NAME_PATTERN.matcher(roleName).matches()) {
+            throw invalidInput("RoleName must be 1-64 characters matching [\\w+=,.@-].", "INVALID_PATTERN");
+        }
+        if (roleName.startsWith(AWS_SERVICE_ROLE_PREFIX)) {
+            throw invalidInput("RoleName can't begin with the reserved prefix AWSServiceRoleFor.",
+                    "INVALID_ROLE_NAME");
+        }
+    }
+
     private static AwsException invalidInput(String message) {
         return new AwsException("InvalidInputException", message, 400);
+    }
+
+    /**
+     * {@link #invalidInput(String)} carrying a Reason member, the way CreateAccount's
+     * reference reports its InvalidInputException causes.
+     */
+    private static AwsException invalidInput(String message, String reason) {
+        return new AwsException("InvalidInputException", message, 400, Map.of("Reason", reason));
     }
 
     private static AwsException accessDenied(String message) {

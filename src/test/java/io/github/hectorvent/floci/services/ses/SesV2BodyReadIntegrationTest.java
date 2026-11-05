@@ -25,6 +25,7 @@ import static org.hamcrest.Matchers.notNullValue;
 class SesV2BodyReadIntegrationTest {
 
     private static final String IDENTITY = "/v2/email/identities/body-read-ghost.example.com";
+    private static final String REPUTATION_ENTITY = "/v2/email/reputation/entities/RESOURCE/body-read-ghost";
 
     private static final List<Arguments> ENDPOINTS = List.of(
             Arguments.of("POST", "/v2/email/tenants/list"),
@@ -44,7 +45,10 @@ class SesV2BodyReadIntegrationTest {
             Arguments.of("POST", "/v2/email/outbound-emails"),
             Arguments.of("POST", "/v2/email/dedicated-ip-pools"),
             Arguments.of("PUT", "/v2/email/suppression/addresses"),
-            Arguments.of("POST", "/v2/email/tags"));
+            Arguments.of("POST", "/v2/email/tags"),
+            Arguments.of("POST", "/v2/email/reputation/entities"),
+            Arguments.of("PUT", REPUTATION_ENTITY + "/policy"),
+            Arguments.of("PUT", REPUTATION_ENTITY + "/customer-managed-status"));
 
     static Stream<Arguments> malformedBodyCases() {
         return ENDPOINTS.stream().flatMap(endpoint -> Stream.of("{", "{\"a\":}", "{} x", "{}{}")

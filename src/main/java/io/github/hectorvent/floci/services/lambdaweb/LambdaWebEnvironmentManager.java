@@ -8,6 +8,7 @@ import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.Frame;
 import com.github.dockerjava.api.model.StreamType;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.ContainerTeardown;
 import io.github.hectorvent.floci.core.common.FileTrees;
 import io.github.hectorvent.floci.core.common.docker.ContainerBuilder;
@@ -82,7 +83,8 @@ public class LambdaWebEnvironmentManager implements ContainerTeardown {
     static final String TASK_DIR = "/var/task";
     static final String RUNTIME_DIR = "/var/runtime";
     private static final String RUNTIME_RESOURCE = "lambdaweb/index.mjs";
-    static final int MEMORY_MB = 2048;
+    // The total the process sees on AWS. Node sizes a heap flag that NODE_OPTIONS leaves out from it.
+    static final long CONTAINER_MEMORY_BYTES = 2519064576L;
     static final Duration LISTEN_TIMEOUT = Duration.ofSeconds(9);
     static final Duration SUMMARY_PERIOD = Duration.ofSeconds(60);
     static final List<String> NODE_FLAGS = List.of("--expose-gc", "--max-http-header-size", "135168",
@@ -313,8 +315,9 @@ public class LambdaWebEnvironmentManager implements ContainerTeardown {
      * for it. The least busy one is taken, the one idle longest on a tie, so requests rotate. When
      * all are full a new one starts. At {@code maxEnvironments} an idle environment of another
      * revision makes room, and without one the request is {@link Throttled}. {@code endpointKey}
-     * names one creation of the endpoint in one region, so a recreated endpoint starts afresh. The
-     * caller releases the environment when the request is over. Blocks on Docker and S3.
+     * names one creation of the endpoint in one region, so a recreated endpoint starts afresh.
+     * {@code region} is the region the environment serves. The caller releases the environment
+     * when the request is over. Blocks on Docker and S3.
      */
     public Environment acquire(String accountId, String region, WebFunction fn, String endpointKey,
                                Integer maxEnvironments, WebFunctionRevision revision) {
@@ -547,7 +550,8 @@ public class LambdaWebEnvironmentManager implements ContainerTeardown {
     }
 
     private void start(Environment environment, String region, WebFunction fn, WebFunctionRevision revision) {
-        if (!executionRole.assumableFor(region, fn.functionArn, revision.serviceConfig.executionRoleArn)) {
+        String homeRegion = AwsArnUtils.parse(fn.functionArn).region();
+        if (!executionRole.assumableFor(homeRegion, fn.functionArn, revision.serviceConfig.executionRoleArn)) {
             throw new StartFailure(LambdaWebErrorPages.CANNOT_ASSUME_ROLE);
         }
         // Before the session and the token, which a failed start must not leave behind.
@@ -575,7 +579,7 @@ public class LambdaWebEnvironmentManager implements ContainerTeardown {
                 .withEntrypoint(List.of("/var/lang/bin/node"))
                 .withCmd(cmd)
                 .withWorkingDir(TASK_DIR)
-                .withMemoryMb(MEMORY_MB)
+                .withMemoryBytes(CONTAINER_MEMORY_BYTES)
                 .withLoopbackPortBinding(APP_PORT, 0)
                 .withInit()
                 .withDockerNetwork(config.services().lambda().dockerNetwork())
@@ -594,17 +598,17 @@ public class LambdaWebEnvironmentManager implements ContainerTeardown {
         }
         LambdaWebPlatformLog platform = null;
         try {
-            copyCode(containerId, accountId, region, fn, revision);
+            copyCode(containerId, accountId, homeRegion, fn, revision);
             RetryingTarCopier.copyBytes(lifecycleManager.getDockerClient(), containerId, RUNTIME_DIR, "index.js",
                     runtime, 0644);
             environment.containerId = containerId;
             environment.logStream = LOG_STREAM_DATE.format(Instant.now()) + "/" + fn.functionName + "["
                     + revision.revisionId + "]" + UUID.randomUUID().toString().replace("-", "");
-            environment.logs = logs.open(accountId, region, revision.serviceConfig.logGroup, environment.logStream,
-                    revision.serviceConfig.systemLogLevel);
+            environment.logs = logs.open(accountId, region, homeRegion, revision.serviceConfig.logGroup,
+                    environment.logStream, revision.serviceConfig.systemLogLevel);
             platform = new LambdaWebPlatformLog(environment.logs, region, fn.functionName, revision.revisionId,
                     revision.buildConfig.runtime, revision.serviceConfig.applicationLogLevel,
-                    metrics.environment(accountId, region, fn.functionName));
+                    metrics.environment(accountId, region, homeRegion, fn.functionName));
             environment.platformLog = platform;
             ContainerInfo info = lifecycleManager.startCreated(containerId, spec);
             platform.initStart();
@@ -701,7 +705,7 @@ public class LambdaWebEnvironmentManager implements ContainerTeardown {
         env.add("AWS_LAMBDA_HTTP_ENDPOINT=0.0.0.0:" + APP_PORT);
         env.add("AWS_LAMBDA_INITIALIZATION_TYPE=native-http");
         env.add("AWS_EXECUTION_ENV=AWS_Lambda_" + revision.buildConfig.runtime + "-lite");
-        env.add("AWS_LAMBDA_FUNCTION_MEMORY_SIZE=" + MEMORY_MB);
+        env.add("AWS_LAMBDA_FUNCTION_MEMORY_SIZE=2048");
         env.add("AWS_LAMBDA_LOG_LEVEL=" + revision.serviceConfig.applicationLogLevel);
         // AWS names the metadata server as the runtime API too, and it answers the runtime paths with 404.
         env.add("AWS_LAMBDA_METADATA_API=" + metadataApi);

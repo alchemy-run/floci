@@ -1,8 +1,11 @@
 package com.floci.test;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.redshiftdata.RedshiftDataClient;
 import software.amazon.awssdk.services.redshiftdata.model.DescribeStatementResponse;
 import software.amazon.awssdk.services.redshiftdata.model.ExecuteStatementResponse;
@@ -29,8 +32,12 @@ import software.amazon.awssdk.services.redshiftserverless.model.UsageLimitUsageT
 import software.amazon.awssdk.services.redshiftserverless.model.ValidationException;
 import software.amazon.awssdk.services.redshiftserverless.model.Workgroup;
 import software.amazon.awssdk.services.redshiftserverless.model.WorkgroupStatus;
+import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
+import software.amazon.awssdk.services.secretsmanager.model.SecretsManagerException;
 
 import java.time.Instant;
+import java.util.List;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -41,6 +48,58 @@ import static org.junit.jupiter.api.Assumptions.assumeFalse;
 class RedshiftServerlessTest {
 
     private static final Logger LOG = Logger.getLogger(RedshiftServerlessTest.class);
+
+    @Test
+    void managedNamespaceSecretAuthenticatesDataApiAndIsRemovedWhenManagementIsDisabled() throws Exception {
+        assumeFalse(TestFixtures.isRealAws(), "Creates local resources and verifies immediate secret cleanup");
+
+        try (RedshiftServerlessClient client = TestFixtures.redshiftServerlessClient();
+             SecretsManagerClient secrets = TestFixtures.secretsManagerClient();
+             RedshiftDataClient data = TestFixtures.redshiftDataClient()) {
+            String suffix = UUID.randomUUID().toString().substring(0, 8);
+            String namespaceName = "floci-managed-ns-" + suffix;
+            String workgroupName = "floci-managed-wg-" + suffix;
+            try {
+                Namespace created = client.createNamespace(request -> request.namespaceName(namespaceName)
+                        .adminUsername("admin").dbName("analytics").manageAdminPassword(true)).namespace();
+                String secretArn = created.adminPasswordSecretArn();
+                assertThat(secretArn).isNotBlank();
+                assertThat(client.getNamespace(request -> request.namespaceName(namespaceName))
+                        .namespace().adminPasswordSecretArn()).isEqualTo(secretArn);
+                JsonNode credentials = new ObjectMapper().readTree(secrets.getSecretValue(request -> request
+                        .secretId(secretArn)).secretString());
+                assertThat(credentials.path("username").asText()).isEqualTo("admin");
+                assertThat(credentials.path("password").asText()).isNotBlank();
+                assertThat(credentials.path("dbname").asText()).isEqualTo("analytics");
+                assertThat(credentials.path("engine").asText()).isEqualTo("redshift");
+                assertThat(secrets.describeSecret(request -> request.secretId(secretArn)).owningService())
+                        .isEqualTo("redshift");
+
+                client.createWorkgroup(request -> request.workgroupName(workgroupName).namespaceName(namespaceName));
+                ExecuteStatementResponse executed = data.executeStatement(request -> request
+                        .workgroupName(workgroupName).secretArn(secretArn).database("analytics")
+                        .sql("SELECT 1").waitTimeSeconds(30));
+                DescribeStatementResponse described = data.describeStatement(request -> request.id(executed.id()));
+                assertThat(described.status()).as(described.error()).isEqualTo(StatusString.FINISHED);
+                assertThat(data.getStatementResult(request -> request.id(executed.id()))
+                        .records().get(0).get(0).longValue()).isEqualTo(1L);
+
+                Namespace updated = client.updateNamespace(request -> request.namespaceName(namespaceName)
+                        .manageAdminPassword(false).adminUserPassword("Replacement123!")).namespace();
+                assertThat(updated.adminPasswordSecretArn()).isNull();
+                assertThat(updated.adminPasswordSecretKmsKeyId()).isNull();
+                assertThat(client.getNamespace(request -> request.namespaceName(namespaceName))
+                        .namespace().adminPasswordSecretArn()).isNull();
+                assertThatThrownBy(() -> secrets.getSecretValue(request -> request.secretId(secretArn)))
+                        .isInstanceOfSatisfying(SecretsManagerException.class,
+                                error -> assertThat(error.awsErrorDetails().errorCode())
+                                        .isEqualTo("ResourceNotFoundException"));
+            } finally {
+                deleteWorkgroupBestEffort(client, workgroupName);
+                deleteBestEffort(client, namespaceName);
+            }
+        }
+    }
 
     @Test
     void namespaceLifecycleUsesAwsSdk() {
@@ -397,24 +456,31 @@ class RedshiftServerlessTest {
 
     @Test
     void snapshotCopyDestinationCanChangeOnlyAfterDeletion() {
-        assumeFalse(TestFixtures.isRealAws(), "Asserts metadata-only snapshot copying");
+        assumeFalse(TestFixtures.isRealAws(), "Asserts emulator-local snapshot copy configuration rules");
+        List<String> others = Region.regions().stream()
+                .filter(r -> !r.isGlobalRegion() && !r.equals(TestFixtures.region()))
+                .filter(r -> r.metadata() != null && TestFixtures.partition().equals(r.metadata().partition().id()))
+                .map(Region::id).sorted().toList();
+        assumeFalse(others.isEmpty(), () -> "no second region in partition " + TestFixtures.partition());
+        String first = others.get(0);
+        String replacement = others.get(others.size() - 1);
         try (RedshiftServerlessClient client = TestFixtures.redshiftServerlessClient()) {
             String namespaceName = "floci-compat-copy-ns";
             try {
                 client.createNamespace(request -> request.namespaceName(namespaceName).adminUsername("admin"));
                 String copyId = client.createSnapshotCopyConfiguration(request -> request
-                        .namespaceName(namespaceName).destinationRegion("us-west-2"))
+                        .namespaceName(namespaceName).destinationRegion(first))
                         .snapshotCopyConfiguration().snapshotCopyConfigurationId();
                 assertThatThrownBy(() -> client.createSnapshotCopyConfiguration(request -> request
-                        .namespaceName(namespaceName).destinationRegion("eu-west-1")))
+                        .namespaceName(namespaceName).destinationRegion(replacement)))
                         .isInstanceOf(ConflictException.class);
                 client.deleteSnapshotCopyConfiguration(request -> request.snapshotCopyConfigurationId(copyId));
                 String replacementId = client.createSnapshotCopyConfiguration(request -> request
-                        .namespaceName(namespaceName).destinationRegion("eu-west-1"))
+                        .namespaceName(namespaceName).destinationRegion(replacement))
                         .snapshotCopyConfiguration().snapshotCopyConfigurationId();
                 assertThat(client.listSnapshotCopyConfigurations(request -> request.namespaceName(namespaceName))
                         .snapshotCopyConfigurations()).extracting(configuration -> configuration.destinationRegion())
-                        .containsExactly("eu-west-1");
+                        .containsExactly(replacement);
                 assertThatThrownBy(() -> client.listSnapshotCopyConfigurations(request -> request
                         .namespaceName(namespaceName).maxResults(0)))
                         .isInstanceOf(ValidationException.class);
@@ -447,6 +513,15 @@ class RedshiftServerlessTest {
                                 .build())).scheduledAction();
                 assertThat(action.state().toString()).isEqualTo("ACTIVE");
                 assertThat(action.schedule().cron()).isEqualTo("cron(0 3 * * ? *)");
+                assertThat(action.nextInvocations()).hasSize(1);
+                assertThatThrownBy(() -> client.createScheduledAction(request -> request
+                        .scheduledActionName("floci-compat-too-often").namespaceName(namespaceName)
+                        .roleArn("arn:aws:iam::000000000000:role/r")
+                        .schedule(Schedule.builder().cron("cron(0,30 * * * ? *)").build())
+                        .targetAction(TargetAction.builder().createSnapshot(CreateSnapshotScheduleActionParameters
+                                .builder().namespaceName(namespaceName).snapshotNamePrefix("nightly").build())
+                                .build())))
+                        .isInstanceOf(ValidationException.class);
                 client.deleteScheduledAction(request -> request.scheduledActionName("floci-compat-sched"));
             } finally {
                 deleteBestEffort(client, namespaceName);

@@ -8,7 +8,35 @@ import java.util.HexFormat;
 /** Message digests every Java runtime is required to provide, without the checked exception. */
 public final class Digests {
 
+    private static final MessageDigest MD5 = newDigest("MD5");
+
     private Digests() {
+    }
+
+    /** A fresh MD5 digest. Cloning the prototype costs far less than MessageDigest.getInstance. */
+    public static MessageDigest md5Digest() {
+        try {
+            return (MessageDigest) MD5.clone();
+        } catch (CloneNotSupportedException e) {
+            return newDigest("MD5");
+        }
+    }
+
+    public static byte[] md5(byte[] data) {
+        return md5Digest().digest(data);
+    }
+
+    private static MessageDigest newDigest(String algorithm) {
+        try {
+            return MessageDigest.getInstance(algorithm);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(algorithm + " is not available", e);
+        }
+    }
+
+    /** The MD5 digest of {@code data} as lowercase hex. */
+    public static String md5Hex(byte[] data) {
+        return HexFormat.of().formatHex(md5(data));
     }
 
     public static byte[] sha1(byte[] data) {

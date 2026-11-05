@@ -55,6 +55,9 @@ public class FlowLog {
     public String getLogDestination() { return logDestination; }
     public void setLogDestination(String logDestination) { this.logDestination = logDestination; }
 
+    public String getLogGroupName() { return logGroupName; }
+    public void setLogGroupName(String logGroupName) { this.logGroupName = logGroupName; }
+
     public String getDeliverLogsPermissionArn() { return deliverLogsPermissionArn; }
     public void setDeliverLogsPermissionArn(String deliverLogsPermissionArn) {
         this.deliverLogsPermissionArn = deliverLogsPermissionArn;
@@ -88,9 +91,6 @@ public class FlowLog {
 
     private List<Tag> tags = new ArrayList<>();
 
-    public String getLogGroupName() { return logGroupName; }
-
-    public void setLogGroupName(String logGroupName) { this.logGroupName = logGroupName; }
 
     public List<Tag> getTags() { return tags; }
 

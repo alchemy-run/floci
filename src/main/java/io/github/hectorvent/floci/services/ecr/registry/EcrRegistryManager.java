@@ -16,7 +16,9 @@ import io.github.hectorvent.floci.core.common.docker.ContainerDetector;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.ContainerInfo;
 import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.ContainerPresence;
+import io.github.hectorvent.floci.core.common.docker.ContainerLifecycleManager.EndpointInfo;
 import io.github.hectorvent.floci.core.common.docker.ContainerLogStreamer;
+import io.github.hectorvent.floci.core.common.docker.ContainerNetworks;
 import io.github.hectorvent.floci.core.common.docker.ContainerSpec;
 import io.github.hectorvent.floci.core.common.docker.ContainerStorageHelper;
 import io.github.hectorvent.floci.core.common.docker.CurrentContainerNetworkResolver;
@@ -37,6 +39,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.OptionalInt;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -68,6 +71,19 @@ public class EcrRegistryManager {
     private static final Pattern AWS_ECR_URI = Pattern.compile(
             "^([0-9]{12})\\.dkr\\.ecr\\.([a-z0-9-]+)\\." + AwsPartitions.dnsSuffixRegex() + "/(.+)$");
 
+    /** The host and port of a {@code repositoryUri} Floci's ECR hands out. */
+    private static final String FLOCI_REGISTRY_HOST = "localhost(?:\\.floci\\.io)?:[0-9]+";
+
+    /**
+     * The Region of an image in an ECR repository: in {@code <account>.dkr.ecr.<region>.<dnsSuffix>/<repo>}, AWS's
+     * form in any partition, or in {@code <account>.dkr.ecr.<region>.localhost:<port>/<repo>}, Floci's
+     * {@code repositoryUri} in the default URI style, or in {@code localhost:<port>/<account>/<region>/<repo>},
+     * Floci's in the path style.
+     */
+    private static final Pattern ECR_IMAGE_REGION = Pattern.compile("^(?:[0-9]{12}\\.dkr\\.ecr\\.([a-z0-9-]+)\\.(?:"
+            + AwsPartitions.dnsSuffixRegex() + "|" + FLOCI_REGISTRY_HOST + ")"
+            + "|" + FLOCI_REGISTRY_HOST + "/[0-9]{12}/([a-z0-9-]+))/.+$");
+
     /**
      * The container name actually in use. Differs from {@link #registryContainerName()} only when
      * a legacy-named container surviving a pre-migration version was adopted.
@@ -85,11 +101,13 @@ public class EcrRegistryManager {
 
     private volatile boolean started;
     private volatile boolean reconciled;
+    /** host:port Docker reports for the running registry; null until one is started or adopted. */
+    private volatile String registryAddress;
     private volatile boolean unavailableLogged;
     private volatile int hostPort;
     private volatile String containerId;
     private volatile Closeable logStream;
-    private volatile java.util.function.Consumer<List<String>> reconcileHook;
+    private volatile Consumer<List<String>> reconcileHook;
 
     @Inject
     public EcrRegistryManager(ContainerBuilder containerBuilder,
@@ -151,6 +169,18 @@ public class EcrRegistryManager {
         String rewritten = "localhost:" + advertisedPort() + "/" + internalRepoName(account, region, repoAndTag);
         LOG.infov("Rewriting ECR image URI {0} -> {1}", image, rewritten);
         return rewritten;
+    }
+
+    /**
+     * The Region of the ECR repository an image URI names, AWS-shaped or one Floci's ECR hands out; empty for an
+     * image outside ECR.
+     */
+    public static Optional<String> imageRegion(String image) {
+        Matcher m = image != null ? ECR_IMAGE_REGION.matcher(image) : null;
+        if (m == null || !m.matches()) {
+            return Optional.empty();
+        }
+        return Optional.of(m.group(1) != null ? m.group(1) : m.group(2));
     }
 
     private boolean isPresentOnDaemon(String image) {
@@ -255,7 +285,10 @@ public class EcrRegistryManager {
     /** Returns a {@link RegistryHttpClient} bound to the current registry endpoint. */
     public RegistryHttpClient httpClient() {
         if (containerDetector.isRunningInContainer()) {
-            return new RegistryHttpClient(internalEndpoint());
+            // Not the container name: deleting the last repository replaces the container, and a
+            // name lookup Floci cached for the old one keeps answering with its address.
+            String address = registryAddress;
+            return new RegistryHttpClient(address != null ? "http://" + address : internalEndpoint());
         }
         return new RegistryHttpClient("http://localhost:" + effectivePort());
     }
@@ -265,7 +298,7 @@ public class EcrRegistryManager {
      * list of repository names known to the backing registry. EcrService uses this
      * to recreate metadata entries for blobs whose metadata is missing (FR-013).
      */
-    public void setReconcileHook(java.util.function.Consumer<List<String>> hook) {
+    public void setReconcileHook(Consumer<List<String>> hook) {
         this.reconcileHook = hook;
     }
 
@@ -316,6 +349,7 @@ public class EcrRegistryManager {
             closeLogStream();
             containerId = null;
             registryInternalHost = null;
+            registryAddress = null;
             started = false;
             if (presence == ContainerPresence.ABSENT) {
                 portAllocator.release(hostPort);
@@ -336,14 +370,15 @@ public class EcrRegistryManager {
             existing = lifecycleManager.findByName(adoptedName);
         }
         if (existing.isPresent()) {
-            if (hasLoopbackBinding(existing.get())) {
+            if (!hasLoopbackBinding(existing.get())) {
+                LOG.infov("Recreating ECR backing registry {0} with a loopback-only port binding", adoptedName);
+            } else if (!onAnotherNetwork(existing.get())) {
                 this.activeContainerName = adoptedName;
                 adoptExisting(existing.get());
                 runReconcileOnce();
                 return;
             }
             // Recreated under the current name; the data volume is resolved by its own probe.
-            LOG.infov("Recreating ECR backing registry {0} with a loopback-only port binding", adoptedName);
             lifecycleManager.stopAndRemove(existing.get().getId(), null);
         }
         this.activeContainerName = name;
@@ -356,6 +391,7 @@ public class EcrRegistryManager {
                         ContainerInfo info = lifecycleManager.createAndStart(registryContainerSpec(name, port));
                         this.containerId = info.containerId();
                         rememberInternalHost(info);
+                        rememberRegistryAddress(info);
                         return port;
                     });
             this.started = true;
@@ -632,6 +668,7 @@ public class EcrRegistryManager {
         lifecycleManager.stopAndRemove(containerId, logStream);
         portAllocator.release(hostPort);
         containerId = null;
+        registryAddress = null;
         logStream = null;
         started = false;
         reconciled = false;
@@ -663,8 +700,9 @@ public class EcrRegistryManager {
         try {
             ContainerInfo info = lifecycleManager.adopt(containerId, List.of(CONTAINER_INTERNAL_PORT),
                     containerBuilder.resolveDockerNetwork(resolveRegistryDockerNetwork()));
+            rememberRegistryAddress(info);
             // The control plane reaches the backing registry through this published loopback
-            // binding when Floci runs on the host. In Docker, httpClient() uses container DNS.
+            // binding when Floci runs on the host. In Docker, httpClient() uses the in-network address.
             OptionalInt published = info.publishedHostPort(CONTAINER_INTERNAL_PORT);
             if (published.isPresent()) {
                 this.hostPort = published.getAsInt();
@@ -682,7 +720,19 @@ public class EcrRegistryManager {
         } catch (Exception e) {
             LOG.warnv("Failed to adopt existing ECR registry container: {0}", e.getMessage());
             this.containerId = null;
+            this.registryAddress = null;
         }
+    }
+
+    private void rememberRegistryAddress(ContainerInfo info) {
+        EndpointInfo endpoint = info.getEndpoint(CONTAINER_INTERNAL_PORT);
+        this.registryAddress = endpoint != null ? endpoint.toString() : null;
+    }
+
+    // Floci in a container reaches the registry over the Docker network; on the host it uses the loopback port.
+    private boolean onAnotherNetwork(Container survivor) {
+        return containerDetector.isRunningInContainer() && ContainerNetworks.onAnotherNetwork(
+                survivor, containerBuilder.resolveDockerNetwork(resolveRegistryDockerNetwork()).orElse(null));
     }
 
     private static boolean hasLoopbackBinding(Container container) {

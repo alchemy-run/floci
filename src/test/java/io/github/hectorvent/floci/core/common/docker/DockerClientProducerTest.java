@@ -264,7 +264,7 @@ class DockerClientProducerTest {
     // therefore be genuinely separate DockerClient instances (and thus separate pools),
     // not the same instance handed out under two qualifiers.
     @Test
-    void dockerClientAndStreamingDockerClient_areDistinctInstances() {
+    void dockerClientAndStreamingDockerClient_areDistinctInstances() throws IOException {
         EmulatorConfig config = mock(EmulatorConfig.class);
         EmulatorConfig.DockerConfig docker = mock(EmulatorConfig.DockerConfig.class);
         when(config.docker()).thenReturn(docker);
@@ -277,13 +277,13 @@ class DockerClientProducerTest {
 
         DockerClientProducer producer = new DockerClientProducer(config);
 
-        DockerClient controlPlaneClient = producer.dockerClient();
-        DockerClient streamingClient = producer.streamingDockerClient();
-
-        assertNotNull(controlPlaneClient);
-        assertNotNull(streamingClient);
-        assertNotSame(controlPlaneClient, streamingClient,
-                "Control-plane and streaming DockerClient beans must use separate connection pools");
+        try (DockerClient controlPlaneClient = producer.dockerClient();
+             DockerClient streamingClient = producer.streamingDockerClient()) {
+            assertNotNull(controlPlaneClient);
+            assertNotNull(streamingClient);
+            assertNotSame(controlPlaneClient, streamingClient,
+                    "Control-plane and streaming DockerClient beans must use separate connection pools");
+        }
     }
 
     private static void writeContextFixture(Path dockerConfigDir, String contextName, String host)
@@ -690,6 +690,22 @@ class DockerClientProducerTest {
     void validateApiTimeoutSeconds_positive_returnsItUnchanged() {
         assertEquals(1, DockerClientProducer.validateApiTimeoutSeconds(1));
         assertEquals(300, DockerClientProducer.validateApiTimeoutSeconds(300));
+    }
+
+    // Catches: a zero pull timeout, which would give up on every pull at once.
+    @ParameterizedTest
+    @ValueSource(ints = {0, -1})
+    void validateImagePullTimeoutSeconds_belowOne_throwsNamingTheSetting(int seconds) {
+        IllegalArgumentException e = assertThrows(IllegalArgumentException.class,
+                () -> DockerClientProducer.validateImagePullTimeoutSeconds(seconds));
+
+        assertThat(e.getMessage(), containsString("floci.docker.image-pull-timeout-seconds"));
+    }
+
+    @Test
+    void validateImagePullTimeoutSeconds_positive_returnsItUnchanged() {
+        assertEquals(1, DockerClientProducer.validateImagePullTimeoutSeconds(1));
+        assertEquals(1800, DockerClientProducer.validateImagePullTimeoutSeconds(1800));
     }
 
     /**

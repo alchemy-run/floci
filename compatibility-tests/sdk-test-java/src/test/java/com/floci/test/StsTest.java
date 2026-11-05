@@ -26,6 +26,7 @@ import javax.xml.crypto.dsig.SignedInfo;
 import javax.xml.crypto.dsig.Transform;
 import javax.xml.crypto.dsig.XMLSignatureFactory;
 import javax.xml.crypto.dsig.dom.DOMSignContext;
+import javax.xml.crypto.dsig.spec.C14NMethodParameterSpec;
 import javax.xml.crypto.dsig.spec.TransformParameterSpec;
 import javax.xml.crypto.dsig.spec.XPathFilter2ParameterSpec;
 import javax.xml.crypto.dsig.spec.XPathFilterParameterSpec;
@@ -349,11 +350,16 @@ class StsTest {
 
     @Test
     void getSessionTokenDefaultDuration() {
+        Instant beforeRequest = Instant.now();
         GetSessionTokenResponse response = sts.getSessionToken(
                 GetSessionTokenRequest.builder().build());
+        Instant afterResponse = Instant.now();
 
         assertThat(response.credentials()).isNotNull();
-        assertThat(response.credentials().expiration()).isAfter(Instant.now().plusSeconds(3600));
+        // Root credentials default to one hour; wire timestamps have millisecond precision.
+        assertThat(response.credentials().expiration()).isBetween(
+                beforeRequest.plusSeconds(3600).minusMillis(1),
+                afterResponse.plusSeconds(3600).plusMillis(1));
     }
 
     @Test
@@ -459,7 +465,7 @@ class StsTest {
                     transforms.apply(factory), null, null);
             SignedInfo signedInfo = factory.newSignedInfo(
                     factory.newCanonicalizationMethod("http://www.w3.org/2001/10/xml-exc-c14n#",
-                                                (javax.xml.crypto.dsig.spec.C14NMethodParameterSpec) null),
+                                                (C14NMethodParameterSpec) null),
                     factory.newSignatureMethod(SignatureMethod.RSA_SHA256, null), List.of(reference));
             factory.newXMLSignature(signedInfo, null)
                     .sign(new DOMSignContext(signingKeys.getPrivate(), assertion));

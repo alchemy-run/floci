@@ -5,7 +5,10 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.ContainerTeardowns;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Resettable;
+import io.github.hectorvent.floci.core.common.SignedMarkers;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -59,14 +62,14 @@ public class ProvisionedConcurrencyPool implements Resettable {
     private final boolean ephemeral;
     private final long drainTimeoutNanos;
     private final Map<String, Allocation> allocations = new HashMap<>();
+    private final SignedMarkers listMarkers = new SignedMarkers();
     private final Map<ContainerHandle, Allocation> leases = new HashMap<>();
     private final Map<ContainerHandle, Configuration> owned = new HashMap<>();
     private final Set<Allocation> launchingAllocations = new HashSet<>();
     private final Set<ContainerHandle> pendingTeardown = new HashSet<>();
     private final Map<ContainerHandle, CountDownLatch> stopping = new HashMap<>();
     private final ExecutorService workers = Executors.newVirtualThreadPerTaskExecutor();
-    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(
-            Thread.ofPlatform().daemon().name("lambda-provisioned-concurrency").factory());
+    private final ScheduledExecutorService scheduler;
     private boolean stopped;
     private int activeLaunches;
     private long shutdownDeadlineNanos;
@@ -82,6 +85,8 @@ public class ProvisionedConcurrencyPool implements Resettable {
 
     public record Status(int requested, int allocated, int available, String status,
                          String reason, String lastModified) {}
+
+    public record ListedConfiguration(String functionArn, Status status) {}
 
     private static final class Allocation {
         final Configuration configuration;
@@ -115,6 +120,15 @@ public class ProvisionedConcurrencyPool implements Resettable {
     ProvisionedConcurrencyPool(LambdaRuntimeLauncher launcher, LambdaFunctionStore functions,
                               LambdaAliasStore aliases, StorageBackend<String, Configuration> storage,
                               Clock clock, int maxPerFunction, int maxTotal, boolean ephemeral, int drainSeconds) {
+        this(launcher, functions, aliases, storage, clock, maxPerFunction, maxTotal, ephemeral,
+                drainSeconds, Executors.newSingleThreadScheduledExecutor(
+                        Thread.ofPlatform().daemon().name("lambda-provisioned-concurrency").factory()));
+    }
+
+    ProvisionedConcurrencyPool(LambdaRuntimeLauncher launcher, LambdaFunctionStore functions,
+                              LambdaAliasStore aliases, StorageBackend<String, Configuration> storage,
+                              Clock clock, int maxPerFunction, int maxTotal, boolean ephemeral, int drainSeconds,
+                              ScheduledExecutorService scheduler) {
         this.launcher = launcher;
         this.functions = functions;
         this.aliases = aliases;
@@ -124,6 +138,7 @@ public class ProvisionedConcurrencyPool implements Resettable {
         this.maxTotal = maxTotal;
         this.ephemeral = ephemeral;
         this.drainTimeoutNanos = TimeUnit.SECONDS.toNanos(drainSeconds);
+        this.scheduler = scheduler;
     }
 
     @PostConstruct
@@ -233,6 +248,30 @@ public class ProvisionedConcurrencyPool implements Resettable {
             }
             return status(allocation);
         }
+    }
+
+    public PaginatedResult<ListedConfiguration> list(String region, String name, String account,
+                                                    String maxItems, String marker) {
+        List<String> errors = new ArrayList<>();
+        Integer limit = LambdaPagination.parseMaxItems(maxItems, 50, errors);
+        if (!errors.isEmpty()) {
+            throw SmithyValidationErrors.validationException(errors);
+        }
+        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolveWithRegion(region, name, null);
+        String owner = ref.account() == null ? account : ref.account();
+        String functionArn = AwsArnUtils.Arn.of("lambda", region, owner, "function:" + ref.name()).toString();
+        functions.getForAccount(owner, region, ref.name())
+                .orElseThrow(() -> missing("Function not found: " + functionArn));
+        reconcile();
+        List<ListedConfiguration> entries;
+        synchronized (lock) {
+            entries = allocations.values().stream()
+                    .filter(allocation -> functionArn.equals(allocation.configuration.functionArn()))
+                    .map(allocation -> new ListedConfiguration(allocation.configuration.key(), status(allocation)))
+                    .toList();
+        }
+        return LambdaPagination.paginate(entries, ListedConfiguration::functionArn, limit, 50, marker,
+                listMarkers, functionArn + "\n");
     }
 
     public void delete(String region, String name, String qualifier, String account) {
@@ -496,6 +535,10 @@ public class ProvisionedConcurrencyPool implements Resettable {
     }
 
     private static void validateSupportedTarget(LambdaFunction fn) {
+        if ("PublishedVersions".equals(fn.getSnapStartApplyOn())) {
+            throw new AwsException("ResourceConflictException", "The operation cannot be performed at this time. "
+                    + "Provisioned Concurrency is not supported for SnapStart enabled functions", 409);
+        }
         if (fn.isHotReload() || fn.isDurable()) {
             throw invalid("Provisioned concurrency is not supported for hot-reload or durable functions");
         }
@@ -725,10 +768,7 @@ public class ProvisionedConcurrencyPool implements Resettable {
         if ("$LATEST".equals(qualifier)) {
             throw invalid("The function resource provided must be an alias or a published version.");
         }
-        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolveWithQualifier(name, qualifier);
-        if (ref.region() != null && !region.equals(ref.region())) {
-            throw invalid("Function ARN region must match the request region");
-        }
+        LambdaArnUtils.ResolvedFunctionRef ref = LambdaArnUtils.resolveWithRegion(region, name, qualifier);
         account = ref.account() != null ? ref.account() : account;
         boolean publishedVersion = qualifier.matches("[0-9]+");
         String qualifiedArn = AwsArnUtils.Arn.of("lambda", region, account,

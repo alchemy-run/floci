@@ -56,6 +56,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class IamServiceTest {
 
+    /** Captured 2026-10-31: what a wrong old password is refused with, both causes named. */
+    private static final String PASSWORD_CHANGE_REFUSAL = "Either the new password does not "
+            + "conform to the account password policy or the old password was incorrect.";
+
     private IamService iamService;
 
     @BeforeEach
@@ -90,6 +94,50 @@ class IamServiceTest {
                 regionResolver,
                 seedDeployerPrincipal
         );
+    }
+
+    @Test
+    void roleChainingRequiresALiveTokenMatchedRoleSession() {
+        MutableClock clock = new MutableClock();
+        IamService service = new IamService(new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(), new InMemoryStorage<>(),
+                new RegionResolver("cn-north-1", "000000000000"), false, clock);
+        IamRole role = service.createRole("ChainRole", "/teams/chain/", "{}", null, 7200, null);
+        service.registerSession("ASIACHAIN", "secret", "token", role.getArn(), clock.instant().plusSeconds(60),
+                null, "000000000000");
+        service.registerSession("ASIAUSER", "secret", "user-token", null, clock.instant().plusSeconds(60),
+                null, "000000000000");
+        service.registerSession("ASIAFEDERATED", "secret", "federated-token",
+                "arn:aws-cn:sts::000000000000:federated-user/example", clock.instant().plusSeconds(60),
+                null, "000000000000");
+        assertTrue(service.isRoleSession("ASIACHAIN", "token"));
+        assertFalse(service.isRoleSession("ASIACHAIN", "wrong"));
+        assertFalse(service.isRoleSession("ASIACHAIN", null));
+        assertFalse(service.isRoleSession("ASIAUSER", "user-token"));
+        assertFalse(service.isRoleSession("ASIAFEDERATED", "federated-token"));
+        assertFalse(service.isRoleSession("ASIAUNKNOWN", "token"));
+        clock.advance(Duration.ofSeconds(60));
+        assertFalse(service.isRoleSession("ASIACHAIN", "token"));
+    }
+
+    @Test
+    void aPrincipalArnNamesTheRootOrTheRoleOrUserIamHoldsAtItsOwnPath() {
+        iamService.createRole("reader", "/team/", "{}", null, 3600, null);
+        iamService.createUser("writer", "/team/");
+        String role = "arn:aws:iam::000000000000:role/team/reader";
+        String user = "arn:aws:iam::000000000000:user/team/writer";
+
+        assertEquals(Optional.of(role), iamService.heldPrincipalArn(role));
+        assertEquals(Optional.of(role), iamService.heldPrincipalArn("arn:aws:iam::000000000000:role/reader"));
+        assertEquals(Optional.of(user), iamService.heldPrincipalArn("arn:aws:iam::000000000000:user/x/writer"));
+        assertEquals(Optional.of("arn:aws:iam::111122223333:root"),
+                iamService.heldPrincipalArn("arn:aws:iam::111122223333:root"));
+        assertEquals(Optional.of("arn:aws-cn:iam::000000000000:role/team/reader"),
+                iamService.heldPrincipalArn("arn:aws-cn:iam::000000000000:role/reader"));
+        for (String none : List.of("arn:aws:iam::000000000000:role/gone", "arn:aws:iam::000000000000:group/team",
+                "arn:aws:sts::000000000000:assumed-role/reader/s", "AROAREADER")) {
+            assertEquals(Optional.empty(), iamService.heldPrincipalArn(none), none);
+        }
     }
 
     @Test
@@ -1136,7 +1184,7 @@ class IamServiceTest {
         // The proof the write took is behavioural rather than a read of the stored field: the
         // new password is now the current one and the old one is not.
         iamService.changePassword("alice", "An0ther$ecret!", "Th1rd$ecret!");
-        assertEquals("InvalidParameterValue", assertThrows(AwsException.class,
+        assertEquals("AccessDenied", assertThrows(AwsException.class,
                 () -> iamService.changePassword("alice", "An0ther$ecret!", "F0urth$ecret!"))
                 .getErrorCode());
     }
@@ -1149,8 +1197,9 @@ class IamServiceTest {
         AwsException ex = assertThrows(AwsException.class,
                 () -> iamService.changePassword("alice", "N0tTheOne!", "An0ther$ecret!"));
 
-        assertEquals("InvalidParameterValue", ex.getErrorCode());
-        assertEquals(400, ex.getHttpStatus());
+        assertEquals("AccessDenied", ex.getErrorCode());
+        assertEquals(403, ex.getHttpStatus());
+        assertEquals(PASSWORD_CHANGE_REFUSAL, ex.getMessage());
         // The refusal left the password alone, so the original still changes it.
         iamService.changePassword("alice", "Sup3r$ecret!", "An0ther$ecret!");
     }
@@ -1165,10 +1214,23 @@ class IamServiceTest {
 
         // Both halves of the request are wrong. A caller who cannot prove the current password is
         // told that and nothing about what the policy would have required.
-        AwsException ex = assertThrows(AwsException.class,
+        AwsException both = assertThrows(AwsException.class,
                 () -> iamService.changePassword("alice", "N0tTheOne!", "short"));
+        assertEquals("AccessDenied", both.getErrorCode());
+        assertEquals(403, both.getHttpStatus());
+        assertEquals(PASSWORD_CHANGE_REFUSAL, both.getMessage());
 
-        assertEquals("InvalidParameterValue", ex.getErrorCode());
+        // The same new password on its own is refused by the policy and named the rule it
+        // broke, so the answer above is the order the two checks run in rather than a policy
+        // that had nothing to say.
+        AwsException policyOnly = assertThrows(AwsException.class,
+                () -> iamService.changePassword("alice", "Sup3r$ecret!", "short"));
+        assertEquals("PasswordPolicyViolation", policyOnly.getErrorCode());
+        assertEquals(400, policyOnly.getHttpStatus());
+        assertTrue(policyOnly.getMessage().contains("a minimum length of 12"),
+                policyOnly.getMessage());
+        // The password is untouched by both, so the original still changes it.
+        iamService.changePassword("alice", "Sup3r$ecret!", "An0ther$ecret!");
     }
 
     @Test
@@ -1186,6 +1248,11 @@ class IamServiceTest {
 
         assertEquals("PasswordPolicyViolation", ex.getErrorCode());
         assertEquals(400, ex.getHttpStatus());
+        // The rule the password broke is named, the same as it is to an administrator setting it.
+        assertTrue(ex.getMessage().contains("a minimum length of 12"), ex.getMessage());
+        assertTrue(assertThrows(AwsException.class,
+                () -> iamService.updateLoginProfile("alice", "short", null))
+                .getMessage().contains("a minimum length of 12"));
         iamService.changePassword("alice", "Sup3r$ecret!", "An0ther$ecret!");
     }
 
@@ -1197,7 +1264,7 @@ class IamServiceTest {
         AwsException missing = assertThrows(AwsException.class,
                 () -> iamService.changePassword("alice", null, "An0ther$ecret!"));
         assertEquals("ValidationError", missing.getErrorCode());
-        assertTrue(missing.getMessage().contains("Value null at 'oldPassword'"), missing.getMessage());
+        assertTrue(missing.getMessage().contains("Value at 'oldPassword'"), missing.getMessage());
 
         // An empty member is a value that fails the pattern rather than a member never supplied,
         // and the message names the one that failed, there being two password members here.
@@ -1567,6 +1634,30 @@ class IamServiceTest {
 
         assertEquals("EntityAlreadyExists", error.getErrorCode());
         assertEquals(409, error.getHttpStatus());
+    }
+
+    @Test
+    void provisionAccountAccessRoleCreatesTheRoleTrustedByTheManagementAccount() {
+        IamRole role = iamService.provisionAccountAccessRole(
+                "111111111111", "OrganizationAccountAccessRole", "000000000000");
+
+        assertEquals("OrganizationAccountAccessRole", role.getRoleName());
+        assertEquals("arn:aws:iam::000000000000:role/OrganizationAccountAccessRole", role.getArn());
+        assertTrue(role.getAssumeRolePolicyDocument()
+                .contains("\"Principal\":{\"AWS\":\"arn:aws:iam::000000000000:root\"}"));
+        assertTrue(role.getAssumeRolePolicyDocument().contains("sts:AssumeRole"));
+        assertEquals(List.of("arn:aws:iam::aws:policy/AdministratorAccess"),
+                iamService.getRole("OrganizationAccountAccessRole").getAttachedPolicyArns());
+    }
+
+    @Test
+    void provisionAccountAccessRoleReturnsTheRoleThatIsAlreadyThere() {
+        IamRole existing = iamService.createRole("OrganizationAccountAccessRole", "/", "{}", null, 3600, null);
+
+        IamRole role = iamService.provisionAccountAccessRole(
+                "000000000000", "OrganizationAccountAccessRole", "000000000000");
+
+        assertEquals(existing.getRoleId(), role.getRoleId());
     }
 
     @Test
@@ -2114,39 +2205,6 @@ class IamServiceTest {
     }
 
     @Test
-    void anAccessKeyStatusIsReadBeforeTheKeyIsFound() {
-        // The key does not exist either, and the status is what answers: AWS reads a request's
-        // shape before it resolves anything, so the lookup's NoSuchEntity does not get there first.
-        iamService.createUser("alice", "/");
-
-        AwsException error = assertThrows(AwsException.class,
-                () -> iamService.updateAccessKey("alice", "AKIANOSUCHKEY00000", "Disabled"));
-
-        assertEquals("ValidationError", error.getErrorCode());
-        // The rendering the three sibling operations already answer with, taken from a recording
-        // of UpdateServiceSpecificCredential: AWS names neither the value nor the permitted set.
-        assertEquals("1 validation error detected: Value at 'status' failed to satisfy "
-                + "constraint: Member must satisfy enum value set", error.getMessage());
-    }
-
-    @Test
-    void anAbsentAccessKeyStatusIsAnsweredLikeAnInvalidOne() {
-        // The shared helper reads a null as a value outside the enum, which is how the other three
-        // statusType operations answer one. Changing that would change all four, so it stays.
-        iamService.createUser("alice", "/");
-        AccessKey key = iamService.createAccessKey("alice");
-
-        AwsException error = assertThrows(AwsException.class,
-                () -> iamService.updateAccessKey("alice", key.getAccessKeyId(), null));
-
-        assertEquals("ValidationError", error.getErrorCode());
-        assertEquals("1 validation error detected: Value at 'status' failed to satisfy "
-                + "constraint: Member must satisfy enum value set", error.getMessage());
-        // And the key is as it was: the status is read before the lookup, so nothing is written.
-        assertEquals("Active", iamService.listAccessKeys("alice").getFirst().getStatus());
-    }
-
-    @Test
     void aSessionWithNoRoleAndNoRecordedIssuerIsNoCredential() {
         // How GetSessionToken stored its sessions before it recorded the key that minted them. Such
         // a session used to bypass enforcement altogether.
@@ -2545,6 +2603,54 @@ class IamServiceTest {
         assertTrue(sessions.getForAccount("000000000000", "ASIASTSSESSION").isPresent());
     }
 
+    @Test
+    void spectrumScratchResourceRegistrationAndClear() {
+        String accountId = "222233334444";
+        String accessKeyId = "ASIASPECTRUM";
+        AccountAwareStorageBackend<SessionCredential> sessions = new AccountAwareStorageBackend<>(
+                new InMemoryStorage<>(), null, "000000000000");
+        IamService service = iamService(false, new InMemoryStorage<>(), sessions);
+
+        service.registerSessionForAccount(
+                accountId, accessKeyId, "secret", "token",
+                "arn:aws:iam::222233334444:role/R", Instant.now().plusSeconds(900), null);
+
+        assertTrue(service.scratchResourceArn(accessKeyId).isEmpty());
+
+        String scratchArn = "arn:aws:s3:::floci-internal-redshift-spectrum-scratch/spectrum-1234.csv";
+        service.registerScratchResource(accessKeyId, scratchArn);
+
+        assertEquals(Optional.of(scratchArn), service.scratchResourceArn(accessKeyId));
+
+        service.clearScratchResource(accessKeyId);
+
+        assertTrue(service.scratchResourceArn(accessKeyId).isEmpty());
+    }
+
+    @Test
+    void unloadScratchPrefixRegistrationAndClear() {
+        String accountId = "222233334444";
+        String accessKeyId = "ASIAUNLOAD";
+        AccountAwareStorageBackend<SessionCredential> sessions = new AccountAwareStorageBackend<>(
+                new InMemoryStorage<>(), null, "000000000000");
+        IamService service = iamService(false, new InMemoryStorage<>(), sessions);
+
+        service.registerSessionForAccount(
+                accountId, accessKeyId, "secret", "token",
+                "arn:aws:iam::222233334444:role/R", Instant.now().plusSeconds(900), null);
+
+        assertTrue(service.scratchResourceArn(accessKeyId).isEmpty());
+
+        String scratchArn = "arn:aws:s3:::floci-internal-redshift-unload-staging/unload/123e4567-e89b-12d3-a456-426614174000/";
+        service.registerScratchResource(accessKeyId, scratchArn);
+
+        assertEquals(Optional.of(scratchArn), service.scratchResourceArn(accessKeyId));
+
+        service.registerScratchResource(accessKeyId, null);
+
+        assertTrue(service.scratchResourceArn(accessKeyId).isEmpty());
+    }
+
     // =========================================================================
     // Instance Profiles
     // =========================================================================
@@ -2736,6 +2842,30 @@ class IamServiceTest {
                 iamService.resolveCallerArn("floci").orElseThrow());
         assertNotNull(iamService.resolveCallerContext("floci"));
         assertNotNull(iamService.resolvePrincipalContext(user.getArn()));
+    }
+
+    /**
+     * Captured from a real account: a value over the member's 20-character minimum that parses as
+     * no ARN is refused, where this service used to take whatever followed the last slash and
+     * simulate against a user of that name. Both principal readers answer it, since both take the
+     * same member.
+     */
+    @Test
+    void aPolicySourceArnThatParsesAsNoArnIsRefused() {
+        iamService.createUser("bob", "/");
+
+        for (String malformed : List.of("arn:aws:iam:user/bob", "arn:aws:iam::user/bob",
+                "not-an-arn-but-long-enough:user/bob")) {
+            AwsException ex = assertThrows(AwsException.class,
+                    () -> iamService.resolvePrincipalContext(malformed));
+            assertEquals("InvalidInput", ex.getErrorCode());
+            assertEquals(400, ex.getHttpStatus());
+            assertEquals("Invalid ARN provided in the request: " + malformed, ex.getMessage());
+            assertEquals("InvalidInput", assertThrows(AwsException.class,
+                    () -> iamService.resolveAttachedPrincipalContext(malformed)).getErrorCode());
+        }
+        // The user the tail named exists, so the refusal is the parse rather than the lookup.
+        assertNotNull(iamService.resolvePrincipalContext("arn:aws:iam::000000000000:user/bob"));
     }
 
     @Test

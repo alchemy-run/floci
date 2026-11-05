@@ -1,8 +1,6 @@
 package io.github.hectorvent.floci.services.emrserverless;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -13,11 +11,14 @@ import io.github.hectorvent.floci.core.common.RequestContext;
 import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
+import io.github.hectorvent.floci.services.ecr.registry.EcrRegistryManager;
 import io.github.hectorvent.floci.services.emrserverless.model.Application;
 import io.github.hectorvent.floci.services.emrserverless.model.ApplicationSummary;
 import io.github.hectorvent.floci.services.emrserverless.model.CreateApplicationRequest;
+import io.github.hectorvent.floci.services.emrserverless.model.ImageConfiguration;
 import io.github.hectorvent.floci.services.emrserverless.model.ListApplicationsRequest;
 import io.github.hectorvent.floci.services.emrserverless.model.UpdateApplicationRequest;
+import io.github.hectorvent.floci.services.emrserverless.model.WorkerTypeSpecification;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -29,6 +30,7 @@ import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -82,18 +84,10 @@ public class EmrServerlessService {
         if (request.getType() == null || request.getType().isBlank()) {
             throw new AwsException("ValidationException", "type is required", 400);
         }
-        // EMR Serverless reports the engine as it names it, whatever case the request used.
-        String type;
-        if ("SPARK".equalsIgnoreCase(request.getType())) {
-            type = "Spark";
-        } else if ("HIVE".equalsIgnoreCase(request.getType())) {
-            type = "Hive";
-        } else {
-            throw new AwsException("ValidationException", "type must be SPARK or HIVE", 400);
-        }
         if (request.getClientToken() == null || request.getClientToken().isBlank()) {
             throw new AwsException("ValidationException", "clientToken is required", 400);
         }
+        validateImages(request.getImageConfiguration(), request.getWorkerTypeSpecifications(), true);
 
         String region = regionResolver.getRegion();
         if (request.getClientToken() != null) {
@@ -114,7 +108,7 @@ public class EmrServerlessService {
         app.setArn(arn);
         app.setName(request.getName());
         app.setReleaseLabel(request.getReleaseLabel());
-        app.setType(type);
+        app.setType(request.getType());
         app.setState("CREATED");
         app.setStateDetails("");
         app.setCreatedAt(createdAt);
@@ -180,6 +174,7 @@ public class EmrServerlessService {
     }
 
     public synchronized Application updateApplication(String applicationId, UpdateApplicationRequest request) {
+        validateImages(request.getImageConfiguration(), request.getWorkerTypeSpecifications(), false);
         Application app = getApplication(applicationId);
         
         String state = app.getState();
@@ -209,9 +204,14 @@ public class EmrServerlessService {
             app.setArchitecture(request.getArchitecture());
         }
         if (request.getImageConfiguration() != null) {
-            app.setImageConfiguration(request.getImageConfiguration());
+            app.setImageConfiguration(imageOrNone(request.getImageConfiguration()));
         }
         if (request.getWorkerTypeSpecifications() != null) {
+            for (WorkerTypeSpecification specification : request.getWorkerTypeSpecifications().values()) {
+                if (specification != null) {
+                    specification.setImageConfiguration(imageOrNone(specification.getImageConfiguration()));
+                }
+            }
             app.setWorkerTypeSpecifications(request.getWorkerTypeSpecifications());
         }
         if (request.getMonitoringConfiguration() != null) {
@@ -247,7 +247,6 @@ public class EmrServerlessService {
         if (!"CREATED".equals(state) && !"STOPPED".equals(state)) {
             throw new AwsException("ValidationException", "Application must be in a stopped or created state in order to be deleted.", 400);
         }
-        jobs.deleteApplicationJobs(accountId(), region(), applicationId);
         app.setState("TERMINATED");
         app.setUpdatedAt(now());
         storage.put(applicationId, app);
@@ -361,7 +360,21 @@ public class EmrServerlessService {
 
     /** Whether the application exists and has not been deleted, which leaves it TERMINATED. */
     public synchronized boolean isLive(String applicationId) {
-        return storage.get(applicationId).filter(app -> !"TERMINATED".equals(app.getState())).isPresent();
+        return live(applicationId).isPresent();
+    }
+
+    /**
+     * Runs {@code use} on the application when it exists and has not been deleted, under this service's
+     * lock, so that it cannot be deleted meanwhile, as with {@link #admitJobRun}; returns whether it ran.
+     */
+    public synchronized boolean whileLive(String applicationId, Consumer<Application> use) {
+        Optional<Application> app = live(applicationId);
+        app.ifPresent(use);
+        return app.isPresent();
+    }
+
+    private Optional<Application> live(String applicationId) {
+        return storage.get(applicationId).filter(app -> !"TERMINATED".equals(app.getState()));
     }
 
     static AwsException resourceNotFound(String arn) {
@@ -422,6 +435,48 @@ public class EmrServerlessService {
             violations.add(SmithyValidationErrors.notAllInEnum(states, "states", allowed));
         }
         return violations;
+    }
+
+    /**
+     * Refuses an image configuration, the application's or a worker type's, that a new application leaves
+     * without an {@code imageUri} ("This field is required when you create a new application"), or whose image
+     * is in an ECR repository of another Region ("The Amazon ECR repository must be in the same AWS Region that
+     * you use to launch EMR Serverless applications"). No source words either refusal, so both are Floci's. An
+     * image outside ECR has no Region to compare.
+     */
+    private void validateImages(ImageConfiguration image, Map<String, WorkerTypeSpecification> workerTypes,
+                                boolean creating) {
+        validateImage("imageConfiguration", image, creating);
+        if (workerTypes != null) {
+            workerTypes.forEach((workerType, specification) -> validateImage(
+                    "workerTypeSpecifications." + workerType + ".imageConfiguration",
+                    specification != null ? specification.getImageConfiguration() : null, creating));
+        }
+    }
+
+    private void validateImage(String member, ImageConfiguration image, boolean creating) {
+        if (image == null) {
+            return;
+        }
+        String uri = image.getImageUri();
+        if (uri == null) {
+            if (creating) {
+                throw new AwsException("ValidationException", member + ".imageUri is required", 400);
+            }
+            return;
+        }
+        String region = regionResolver.getRegion();
+        Optional<String> imageRegion = EcrRegistryManager.imageRegion(uri);
+        if (imageRegion.isPresent() && !imageRegion.get().equals(region)) {
+            throw new AwsException("ValidationException", "Image " + uri + " is in an Amazon ECR repository in "
+                    + imageRegion.get() + "; it must be in the application's Region, " + region + ".", 400);
+        }
+    }
+
+    // An update's image configuration, or none when it leaves imageUri out: "If you leave this field blank in an
+    // update, Amazon EMR will remove the image configuration."
+    private static ImageConfiguration imageOrNone(ImageConfiguration image) {
+        return image != null && image.getImageUri() != null ? image : null;
     }
 
     /** At most 50 tags, each key and value within TagKey and TagValue and free of the reserved prefix. */
@@ -497,113 +552,4 @@ public class EmrServerlessService {
         summary.setArchitecture(app.getArchitecture());
         return summary;
     }
-
-    @Inject
-    EmrServerlessJobService jobs;
-
-    public PaginatedResult<ObjectNode> listJobRuns(String applicationId, Integer maxResults, String nextToken,
-                                                   List<String> states, Double after, Double before, String mode) {
-        getApplication(applicationId);
-        return jobs.list(accountId(), region(), applicationId, maxResults, nextToken, states, after, before, mode);
-    }
-
-    public List<Map<String, Object>> listSessions(String applicationId, Integer maxResults, String nextToken) {
-        getApplication(applicationId);
-        // Session submission remains unsupported; batch job runs are a separate collection.
-        return Pagination.paginate(List.<Map<String, Object>>of(), item -> "",
-                maxResults, nextToken, 50, "ValidationException").items();
-    }
-
-    public synchronized ObjectNode startJobRun(String applicationId, JsonNode request, String authorization) {
-        Application app = getApplication(applicationId);
-        requireExecutionRequest(request);
-        if (!List.of("CREATED", "STOPPED", "STARTED").contains(app.getState())) {
-            throw new AwsException("ValidationException", "Application is not available for job submission", 400);
-        }
-        if (!"STARTED".equals(app.getState()) && app.getAutoStartConfiguration() != null
-                && Boolean.FALSE.equals(app.getAutoStartConfiguration().getEnabled())) {
-            throw new AwsException("ValidationException", "Start the application before submitting a job when auto-start is disabled", 400);
-        }
-        ObjectNode result = jobs.start(app, request, accountId(), region(), authorization);
-        if (!EmrServerlessJobService.terminal(jobs.get(accountId(), region(), applicationId,
-                result.path("jobRunId").asText(), null)) && !"STARTED".equals(app.getState())) {
-            app.setState("STARTED");
-            app.setUpdatedAt(java.time.Instant.now());
-            storage.put(applicationId, app);
-        }
-        return result;
-    }
-
-    public ObjectNode getJobRun(String applicationId, String jobRunId, String attempt) {
-        getApplication(applicationId);
-        return jobs.get(accountId(), region(), applicationId, jobRunId, attempt);
-    }
-
-    public ObjectNode cancelJobRun(String applicationId, String jobRunId) {
-        getApplication(applicationId);
-        return jobs.cancel(accountId(), region(), applicationId, jobRunId);
-    }
-
-    public PaginatedResult<ObjectNode> listJobRunAttempts(String applicationId, String jobRunId,
-                                                         Integer maxResults, String nextToken) {
-        getApplication(applicationId);
-        return jobs.attempts(accountId(), region(), applicationId, jobRunId, maxResults, nextToken);
-    }
-
-    public void getDashboardForJobRun(String applicationId, String jobRunId) {
-        getJobRun(applicationId, jobRunId, null);
-        throw new AwsException("UnsupportedOperationException", "Spark dashboards are not implemented", 501);
-    }
-
-    public void startSession(String applicationId, JsonNode request) {
-        Application app = getApplication(applicationId);
-        requireExecutionRequest(request);
-        if (app.getInteractiveConfiguration() == null
-                || !Boolean.TRUE.equals(app.getInteractiveConfiguration().getProperties().get("sessionEnabled"))) {
-            throw new AwsException("ValidationException",
-                    "Sessions must be enabled in the application's interactiveConfiguration.", 400);
-        }
-        throw new AwsException("UnsupportedOperationException",
-                "EMR Serverless session execution is not implemented.", 501);
-    }
-
-    /**
-     * AWS denies GetResourceDashboard for every caller, including {@code Action: "*"}
-     * administrators, before any resource lookup; the message carries no resource.
-     */
-    public void getResourceDashboard(String applicationId, String resourceId, String resourceType,
-                                     String authorization) {
-        if (resourceId == null || resourceId.isBlank() || resourceType == null || resourceType.isBlank()) {
-            throw new AwsException("ValidationException", "resourceId and resourceType are required", 400);
-        }
-        throw new AwsException("AccessDeniedException", "User: " + jobs.creator(accountId(), authorization)
-                + " is not authorized to perform: emr-serverless:GetResourceDashboard", 403);
-    }
-
-    private void requireExecutionRequest(JsonNode request) {
-        if (request == null || !request.isObject()) {
-            throw new AwsException("ValidationException", "A request body is required", 400);
-        }
-        for (String field : List.of("clientToken", "executionRoleArn")) {
-            if (!request.path(field).isTextual() || request.path(field).textValue().isBlank()) {
-                throw new AwsException("ValidationException", field + " is required", 400);
-            }
-        }
-    }
-
-
-    private String storageKey(String applicationId) {
-        return region() + "/" + applicationId;
-    }
-
-    private String region() {
-        return requestContext != null && requestContext.getRegion() != null
-                ? requestContext.getRegion() : config.defaultRegion();
-    }
-
-    private String accountId() {
-        return requestContext != null && requestContext.getAccountId() != null
-                ? requestContext.getAccountId() : config.defaultAccountId();
-    }
-
 }

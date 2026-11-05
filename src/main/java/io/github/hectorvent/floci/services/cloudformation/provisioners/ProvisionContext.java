@@ -1,13 +1,16 @@
 package io.github.hectorvent.floci.services.cloudformation.provisioners;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.services.cloudformation.CloudFormationTemplateEngine;
 import io.github.hectorvent.floci.services.cloudformation.model.StackEvent;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Consumer;
 
@@ -73,6 +76,31 @@ public record ProvisionContext(CloudFormationTemplateEngine engine, String regio
     }
 
     /**
+     * The top-level properties the previous template declared and {@code props}, the properties
+     * this update applies, no longer has: the ones an update that removes a property has to clear.
+     * A property the stack never declared is not in the set, so a value set outside the stack
+     * survives, and a property whose {@code Fn::If} chose {@code AWS::NoValue} on either template
+     * counts as not declared there, as in {@link #previouslyDeclared}. Empty for a create, and for
+     * a resource whose previous template did not declare it.
+     *
+     * <p>The rule only says which names went; what clearing one means is the service's own. A
+     * provisioner clears each by the call its service offers and leaves out the ones AWS keeps
+     * (a create-only property is a replacement question, not a clear).
+     */
+    public Set<String> droppedProperties(JsonNode props) {
+        Set<String> dropped = new LinkedHashSet<>();
+        if (!isUpdate() || priorProperties == null) {
+            return dropped;
+        }
+        priorProperties.fieldNames().forEachRemaining(name -> {
+            if (previouslyDeclared(name) && (props == null || !props.has(name))) {
+                dropped.add(name);
+            }
+        });
+        return dropped;
+    }
+
+    /**
      * Resolves a CloudFormation tag property to a map, preserving template order. Both registry
      * shapes are read: the {@code [{Key, Value}]} list most types declare, and the
      * {@code {key: value}} object types such as {@code AWS::Batch::*} declare. The whole node is
@@ -85,6 +113,10 @@ public record ProvisionContext(CloudFormationTemplateEngine engine, String regio
      * "the template said nothing, leave stored tags alone" must keep that distinction themselves.
      */
     public Map<String, String> resolveTags(JsonNode props, String name) {
+        return resolveTags(props, name, engine);
+    }
+
+    public static Map<String, String> resolveTags(JsonNode props, String name, CloudFormationTemplateEngine engine) {
         Map<String, String> tags = new LinkedHashMap<>();
         if (props == null || !props.has(name)) {
             return tags;
@@ -120,6 +152,26 @@ public record ProvisionContext(CloudFormationTemplateEngine engine, String regio
             return null;
         }
         return engine.resolve(props.get(name));
+    }
+
+    /**
+     * Resolves an optional integer property, or null when it is absent or explicitly null. One an
+     * intrinsic resolves to nothing stays null too: the engine resolves {@code AWS::NoValue} to blank,
+     * which is how the common {@code Fn::If [cond, value, AWS::NoValue]} drops a property. A value
+     * written into the template has to be an integer, a literal blank included, as CloudFormation's
+     * schema type check requires. A {@code Ref} to a parameter whose value is blank cannot be told
+     * apart from {@code AWS::NoValue} here, so it stays null as well.
+     */
+    public Integer resolveOptionalInt(JsonNode props, String name) {
+        String value = resolveOptional(props, name);
+        if (value == null || (value.isBlank() && !props.get(name).isTextual())) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(value.trim());
+        } catch (NumberFormatException e) {
+            throw new AwsException("ValidationError", "Value of property " + name + " must be an integer.", 400);
+        }
     }
 
     /**

@@ -2,14 +2,18 @@ package io.github.hectorvent.floci.services.lambda;
 
 import io.github.hectorvent.floci.core.common.Digests;
 import io.quarkus.test.junit.QuarkusTest;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
 
 import java.io.ByteArrayOutputStream;
+import java.net.URI;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
+import java.util.Random;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -334,7 +338,7 @@ class LambdaIntegrationTest {
             // base64 encoding) actually exceeds Jackson's former 20 MB limit
             zos.putNextEntry(new ZipEntry("padding.bin"));
             byte[] chunk = new byte[1024 * 1024];
-            java.util.Random rng = new java.util.Random(42);
+            Random rng = new Random(42);
             for (int i = 0; i < 16; i++) {
                 rng.nextBytes(chunk);
                 zos.write(chunk);
@@ -477,6 +481,41 @@ class LambdaIntegrationTest {
             .statusCode(204);
     }
 
+    @Test
+    @Order(24)
+    void imageConfigResponseOnlyWhenImageConfigSet() {
+        String create = """
+            {
+                "FunctionName": "%s",
+                "PackageType": "Image",
+                "Role": "arn:aws:iam::000000000000:role/lambda-role",
+                "Code": {
+                    "ImageUri": "123456789012.dkr.ecr.us-east-1.amazonaws.com/my-repo:latest"
+                }%s
+            }
+            """;
+        given().contentType("application/json")
+            .body(create.formatted("image-no-config-fn", ""))
+            .when().post(BASE_PATH + "/functions")
+            .then().statusCode(201);
+        given().contentType("application/json")
+            .body(create.formatted("image-cmd-fn", ", \"ImageConfig\": {\"Command\": [\"app.handler\"]}"))
+            .when().post(BASE_PATH + "/functions")
+            .then().statusCode(201);
+
+        given().when().get(BASE_PATH + "/functions/image-no-config-fn/configuration")
+            .then().statusCode(200)
+            .body("PackageType", equalTo("Image"))
+            .body("$", not(hasKey("ImageConfigResponse")));
+        given().when().get(BASE_PATH + "/functions/image-cmd-fn/configuration")
+            .then().statusCode(200)
+            .body("ImageConfigResponse.ImageConfig.Command", contains("app.handler"))
+            .body("ImageConfigResponse.ImageConfig", not(hasKey("EntryPoint")));
+
+        given().delete(BASE_PATH + "/functions/image-no-config-fn");
+        given().delete(BASE_PATH + "/functions/image-cmd-fn");
+    }
+
     // ──────────────────────────── Invoke payload size limits ────────────────────────────
 
     @Test
@@ -589,7 +628,7 @@ class LambdaIntegrationTest {
             .extract().path("CodeSha256");
 
         // Follow Code.Location against the same test server via its path.
-        String path = java.net.URI.create(location).getRawPath();
+        String path = URI.create(location).getRawPath();
         byte[] pkg = given()
             .when()
             .get(path)
@@ -598,13 +637,13 @@ class LambdaIntegrationTest {
             .extract().asByteArray();
 
         // Valid zip → local file header magic "PK\003\004".
-        org.junit.jupiter.api.Assertions.assertTrue(pkg.length > 0, "package must not be empty");
-        org.junit.jupiter.api.Assertions.assertEquals('P', pkg[0]);
-        org.junit.jupiter.api.Assertions.assertEquals('K', pkg[1]);
+        Assertions.assertTrue(pkg.length > 0, "package must not be empty");
+        Assertions.assertEquals('P', pkg[0]);
+        Assertions.assertEquals('K', pkg[1]);
 
         // Byte-exact: downloaded package hashes to the stored CodeSha256.
         String downloadedSha256 = Base64.getEncoder().encodeToString(Digests.sha256(pkg));
-        org.junit.jupiter.api.Assertions.assertEquals(expectedSha256, downloadedSha256,
+        Assertions.assertEquals(expectedSha256, downloadedSha256,
                 "downloaded package must be byte-identical to the uploaded zip");
 
         // Redeploy overwrites in place (stable key), no stale package accumulates.
@@ -622,7 +661,7 @@ class LambdaIntegrationTest {
         .then()
             .statusCode(200);
         byte[] pkg2 = given().when().get(path).then().statusCode(200).extract().asByteArray();
-        org.junit.jupiter.api.Assertions.assertFalse(java.util.Arrays.equals(pkg, pkg2),
+        Assertions.assertFalse(Arrays.equals(pkg, pkg2),
                 "redeploy must replace the stored package");
 
         // Deleting the function removes the stored package (Code.Location 404s).

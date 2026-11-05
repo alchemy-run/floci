@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.EpochSeconds;
 import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.ecs.container.HostVolumePolicy;
 import io.github.hectorvent.floci.services.ecs.model.Attribute;
@@ -897,7 +898,7 @@ public class EcsJsonHandler {
         request.setTags(parseTagMap(req.path("tags")));
         ContainerInstance instance = service.registerContainerInstance(request, region);
         ObjectNode resp = objectMapper.createObjectNode();
-        resp.set("containerInstance", writer.containerInstanceNode(instance));
+        resp.set("containerInstance", writer.containerInstanceNode(instance, request.getCluster(), region));
         return Response.ok(resp).build();
     }
 
@@ -907,7 +908,7 @@ public class EcsJsonHandler {
         boolean force = req.path("force").asBoolean(false);
         ContainerInstance instance = service.deregisterContainerInstance(cluster, containerInstance, force, region);
         ObjectNode resp = objectMapper.createObjectNode();
-        resp.set("containerInstance", writer.containerInstanceNode(instance));
+        resp.set("containerInstance", writer.containerInstanceNode(instance, cluster, region));
         return Response.ok(resp).build();
     }
 
@@ -921,10 +922,8 @@ public class EcsJsonHandler {
         EcsService.DescribeContainerInstancesResult found =
                 service.describeContainerInstancesDetailed(cluster, instanceRefs, region);
         ObjectNode resp = objectMapper.createObjectNode();
-        ArrayNode arr = objectMapper.createArrayNode();
-        found.instances().forEach(ci ->
-                arr.add(writer.containerInstanceNode(ci, includeTags, includeHealth)));
-        resp.set("containerInstances", arr);
+        resp.set("containerInstances", writer.containerInstanceNodes(
+                found.instances(), cluster, region, includeTags, includeHealth));
         ArrayNode failures = objectMapper.createArrayNode();
         found.failures().forEach(f -> failures.add(writer.failureNode(f)));
         resp.set("failures", failures);
@@ -934,10 +933,11 @@ public class EcsJsonHandler {
     private Response handleListContainerInstances(JsonNode req, String region) {
         String cluster = req.has("cluster") ? req.path("cluster").asText() : null;
         String status = parseChoice(req, "status", CONTAINER_INSTANCE_STATUSES);
+        String filter = req.hasNonNull("filter") ? req.path("filter").asText() : null;
         Integer maxResults = req.hasNonNull("maxResults") ? req.path("maxResults").asInt() : null;
         String nextToken = req.hasNonNull("nextToken") ? req.path("nextToken").asText() : null;
         EcsService.ListPage page =
-                service.listContainerInstances(cluster, status, maxResults, nextToken, region);
+                service.listContainerInstances(cluster, status, filter, maxResults, nextToken, region);
         ObjectNode resp = objectMapper.createObjectNode();
         ArrayNode arr = objectMapper.createArrayNode();
         page.arns().forEach(arr::add);
@@ -953,7 +953,7 @@ public class EcsJsonHandler {
         String containerInstance = req.path("containerInstance").asText();
         ContainerInstance instance = service.updateContainerAgent(cluster, containerInstance, region);
         ObjectNode resp = objectMapper.createObjectNode();
-        resp.set("containerInstance", writer.containerInstanceNode(instance));
+        resp.set("containerInstance", writer.containerInstanceNode(instance, cluster, region));
         return Response.ok(resp).build();
     }
 
@@ -964,9 +964,8 @@ public class EcsJsonHandler {
         EcsService.UpdateContainerInstancesStateResult updated =
                 service.updateContainerInstancesState(cluster, instanceRefs, status, region);
         ObjectNode resp = objectMapper.createObjectNode();
-        ArrayNode arr = objectMapper.createArrayNode();
-        updated.instances().forEach(ci -> arr.add(writer.containerInstanceNode(ci)));
-        resp.set("containerInstances", arr);
+        resp.set("containerInstances", writer.containerInstanceNodes(
+                updated.instances(), cluster, region, true, true));
         ArrayNode failures = objectMapper.createArrayNode();
         updated.failures().forEach(f -> failures.add(writer.failureNode(f)));
         resp.set("failures", failures);
@@ -1145,9 +1144,9 @@ public class EcsJsonHandler {
             brief.put("serviceArn", d.getServiceArn());
             brief.put("clusterArn", d.getClusterArn());
             brief.put("status", d.getStatus());
-            if (d.getCreatedAt() != null) { brief.put("createdAt", d.getCreatedAt().toEpochMilli() / 1000.0); }
-            if (d.getStartedAt() != null) { brief.put("startedAt", d.getStartedAt().toEpochMilli() / 1000.0); }
-            if (d.getFinishedAt() != null) { brief.put("finishedAt", d.getFinishedAt().toEpochMilli() / 1000.0); }
+            if (d.getCreatedAt() != null) { brief.put("createdAt", EpochSeconds.fromInstant(d.getCreatedAt())); }
+            if (d.getStartedAt() != null) { brief.put("startedAt", EpochSeconds.fromInstant(d.getStartedAt())); }
+            if (d.getFinishedAt() != null) { brief.put("finishedAt", EpochSeconds.fromInstant(d.getFinishedAt())); }
             if (d.getTargetServiceRevisionArn() != null) {
                 brief.put("targetServiceRevisionArn", d.getTargetServiceRevisionArn());
             }
@@ -1386,7 +1385,7 @@ public class EcsJsonHandler {
         for (JsonNode item : node) {
             result.add(new VolumeFrom(
                     item.path("sourceContainer").asText(),
-                    item.path("readOnly").asBoolean(false)));
+                    item.hasNonNull("readOnly") ? item.get("readOnly").asBoolean() : null));
         }
         return result;
     }
@@ -1465,8 +1464,8 @@ public class EcsJsonHandler {
         }
         if (!node.hasNonNull("type")) {
             throw SmithyValidationErrors.exception("ClientException",
-                    "Value null at 'containerDefinitions." + containerIndex
-                            + ".member.firelensConfiguration.type' failed to satisfy constraint: Member must not be null");
+                    SmithyValidationErrors.notNull("containerDefinitions." + containerIndex
+                            + ".member.firelensConfiguration.type"));
         }
         String type = node.path("type").asText();
         if (!"fluentd".equals(type) && !"fluentbit".equals(type)) {
@@ -1564,7 +1563,7 @@ public class EcsJsonHandler {
             result.add(new MountPoint(
                     item.path("sourceVolume").asText(),
                     item.path("containerPath").asText(),
-                    item.path("readOnly").asBoolean(false)));
+                    item.hasNonNull("readOnly") ? item.get("readOnly").asBoolean() : null));
         }
         return result;
     }

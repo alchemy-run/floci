@@ -5,6 +5,7 @@ import io.github.hectorvent.floci.services.cloudfront.model.Distribution;
 import io.github.hectorvent.floci.services.cloudfront.model.DistributionConfig;
 import io.github.hectorvent.floci.services.cloudfront.model.Origin;
 import io.github.hectorvent.floci.services.iam.IamService;
+import io.github.hectorvent.floci.services.lambdaweb.LambdaWebCodeBuckets;
 import io.github.hectorvent.floci.services.lambdaweb.LambdaWebRoles;
 import io.github.hectorvent.floci.services.lambdaweb.LambdaWebZips;
 import io.github.hectorvent.floci.services.s3.S3Service;
@@ -89,7 +90,7 @@ class CloudFrontWebFunctionOriginServingTest {
     static String createFunction(S3Service s3Service, IamService iamService, PartitionCleanup cleanup,
                                  String functionName, String authType) {
         LambdaWebRoles.trustLambda(iamService, ROLE);
-        s3Service.createBucket(BUCKET, "us-east-1");
+        LambdaWebCodeBuckets.create(s3Service, BUCKET);
         s3Service.putObject(BUCKET, "app.zip", LambdaWebZips.indexJs(""), "application/zip", Map.of());
         String domain = given().contentType("application/json")
                 .body("""

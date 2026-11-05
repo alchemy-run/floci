@@ -13,6 +13,7 @@ import io.github.hectorvent.floci.services.dynamodb.DynamoDbStreamService;
 import io.github.hectorvent.floci.services.dynamodb.DynamoDbTtlIdentity;
 import io.github.hectorvent.floci.services.dynamodb.backend.DynamoDbStreamReader;
 import io.github.hectorvent.floci.services.kinesis.KinesisService;
+import io.github.hectorvent.floci.services.kinesis.model.KinesisRecord;
 import io.github.hectorvent.floci.services.pipes.model.DesiredState;
 import io.github.hectorvent.floci.services.pipes.model.Pipe;
 import io.github.hectorvent.floci.services.sqs.SqsService;
@@ -167,7 +168,7 @@ public class PipesPoller implements Resettable {
     void pollSqs(Pipe pipe, String region) {
         String queueUrl = AwsArnUtils.arnToQueueUrl(pipe.getSource(), baseUrl);
         int batchSize = getBatchSize(pipe, "SqsQueueParameters");
-        List<Message> messages = sqsService.receiveMessage(queueUrl, batchSize, 30, 0, region);
+        List<Message> messages = sqsService.receiveMessage(queueUrl, Math.min(10, batchSize), 30, 0, region);
         if (messages.isEmpty()) {
             return;
         }
@@ -246,9 +247,9 @@ public class PipesPoller implements Resettable {
         }
     }
 
-    private void pollKinesis(Pipe pipe, String region) {
+    void pollKinesis(Pipe pipe, String region) {
         String pipeKey = pipeKey(pipe);
-        String streamName = extractResourceName(pipe.getSource());
+        String streamName = kinesisStreamName(pipe.getSource());
         String pipeAccountId = pipe.getAccountId();
         int batchSize = getBatchSize(pipe, "KinesisStreamParameters");
         String iterator = kinesisIterators.get(pipeKey);
@@ -263,10 +264,17 @@ public class PipesPoller implements Resettable {
                     ? kinesisService.getRecordsForAccount(pipeAccountId, iterator, batchSize, region)
                     : kinesisService.getRecords(iterator, batchSize, region);
             String nextIterator = (String) result.get("NextShardIterator");
-            if (nextIterator != null) {
-                kinesisIterators.put(pipeKey, nextIterator);
-            }
             List<?> records = (List<?>) result.get("Records");
+            if (nextIterator == null && records != null && !records.isEmpty()) {
+                KinesisRecord last = (KinesisRecord) records.getLast();
+                nextIterator = pipeAccountId != null
+                        ? kinesisService.getShardIteratorForAccount(pipeAccountId, streamName,
+                                "shardId-000000000000", "AFTER_SEQUENCE_NUMBER", last.getSequenceNumber(), region)
+                        : kinesisService.getShardIterator(streamName, "shardId-000000000000",
+                                "AFTER_SEQUENCE_NUMBER", last.getSequenceNumber(), null, region);
+            }
+            // Remember even the initial exhausted cursor, before filtering or delivery.
+            kinesisIterators.put(pipeKey, nextIterator != null ? nextIterator : iterator);
             if (records == null || records.isEmpty()) {
                 return;
             }
@@ -913,13 +921,15 @@ public class PipesPoller implements Resettable {
         return AwsArnUtils.regionOrDefault(arn, defaultRegion);
     }
 
-    private static String extractResourceName(String arn) {
-        int slashIdx = arn.lastIndexOf('/');
-        if (slashIdx >= 0) {
-            return arn.substring(slashIdx + 1);
-        }
-        int colonIdx = arn.lastIndexOf(':');
-        return colonIdx >= 0 ? arn.substring(colonIdx + 1) : arn;
+    /**
+     * The stream a Kinesis source names: the segment after {@code stream/}, so a stream-consumer ARN
+     * ({@code stream/S/consumer/C:123}) still names stream {@code S}.
+     */
+    static String kinesisStreamName(String source) {
+        String resource = AwsArnUtils.resourceIfArnFor(source, "kinesis").orElse(source);
+        String name = resource.startsWith("stream/") ? resource.substring("stream/".length()) : resource;
+        int slash = name.indexOf('/');
+        return slash >= 0 ? name.substring(0, slash) : name;
     }
 
 

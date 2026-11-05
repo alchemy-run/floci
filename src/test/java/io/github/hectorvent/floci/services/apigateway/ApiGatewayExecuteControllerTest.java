@@ -49,12 +49,45 @@ import static org.mockito.Mockito.when;
 class ApiGatewayExecuteControllerTest {
 
     private static ApiGatewayExecuteController controller(ObjectMapper objectMapper) {
+        return controller(objectMapper, new ApiGatewayExecuteRouteContext());
+    }
+
+    private static ApiGatewayExecuteController controller(ObjectMapper objectMapper,
+                                                         ApiGatewayExecuteRouteContext routeContext) {
         RegionResolver regionResolver = mock(RegionResolver.class);
         when(regionResolver.getAccountId()).thenReturn("000000000000");
         return new ApiGatewayExecuteController(
                 null, null, null, null,
                 regionResolver, objectMapper, null,
-                null, null, null, null, new ApiGatewayExecuteRouteContext(), null, null, null, null, null);
+                null, null, null, null, routeContext, null, null, null, null, null, null);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "/index/a%25b", "/index/a%2Fb", "/index/a%252Fb", "/index/a//b", "/index/a/./b", "/index/a/../b"
+    })
+    void recordedRewritePathTakesPrecedenceOverTheEscapedRoutingUri(String resourcePath) {
+        ApiGatewayExecuteRouteContext routeContext = new ApiGatewayExecuteRouteContext();
+        String intendedPath = "/execute-api/api1/prod" + resourcePath;
+        routeContext.recordSignedRequestPath("/public" + resourcePath);
+        routeContext.recordRewrittenRequestPath(intendedPath);
+        UriInfo uriInfo = mock(UriInfo.class);
+        when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:4566"
+                + intendedPath.replace("%", "%25")));
+        ApiGatewayExecuteController controller = controller(new ObjectMapper(), routeContext);
+
+        assertEquals(intendedPath, controller.rawRequestPath(uriInfo));
+        assertEquals(resourcePath,
+                ApiGatewayExecuteController.rawStagelessPath(resourcePath, controller.rawRequestPath(uriInfo)));
+        assertEquals("/public" + resourcePath, routeContext.signedRequestPath());
+    }
+
+    @Test
+    void pathStyleRequestsUseTheRawUriPathWhenNoRewriteWasRecorded() {
+        UriInfo uriInfo = mock(UriInfo.class);
+        when(uriInfo.getRequestUri()).thenReturn(URI.create("http://localhost:4566/execute-api/api1/prod/a%2525b"));
+
+        assertEquals("/execute-api/api1/prod/a%2525b", controller(new ObjectMapper()).rawRequestPath(uriInfo));
     }
 
     @Test
@@ -457,7 +490,7 @@ class ApiGatewayExecuteControllerTest {
         ApiGatewayExecuteController controller = new ApiGatewayExecuteController(
                 apiGatewayService, null, apiGatewayV2Service, null,
                 regionResolver, new ObjectMapper(), null,
-                null, null, null, null, new ApiGatewayExecuteRouteContext(), null, null, null, null, null);
+                null, null, null, null, new ApiGatewayExecuteRouteContext(), null, null, null, null, null, null);
 
         Response response = controller.dispatch("GET", "abc123", "prod", "hello", headers, null, null);
 
@@ -489,7 +522,7 @@ class ApiGatewayExecuteControllerTest {
         ApiGatewayExecuteController controller = new ApiGatewayExecuteController(
                 apiGatewayService, null, apiGatewayV2Service, null,
                 regionResolver, new ObjectMapper(), null,
-                null, null, null, null, new ApiGatewayExecuteRouteContext(), null, requestContext, null, null, null);
+                null, null, null, null, new ApiGatewayExecuteRouteContext(), null, requestContext, null, null, null, null);
 
         controller.dispatch("GET", "abc123", "prod", "hello", headers, null, null);
 
@@ -524,7 +557,7 @@ class ApiGatewayExecuteControllerTest {
         ApiGatewayExecuteController controller = new ApiGatewayExecuteController(
                 apiGatewayService, null, apiGatewayV2Service, null,
                 regionResolver, new ObjectMapper(), null,
-                null, null, null, null, new ApiGatewayExecuteRouteContext(), null, null, null, null, null);
+                null, null, null, null, new ApiGatewayExecuteRouteContext(), null, null, null, null, null, null);
 
         controller.dispatch("GET", "restapi1", "prod", "hello", headers, null, null);
 
@@ -767,7 +800,7 @@ class ApiGatewayExecuteControllerTest {
         ApiGatewayExecuteController controller = controller(new ObjectMapper());
         assertEnglishUtcTimeUnderNonUtcHost(() -> controller.buildRequestAuthorizerEventV2("GET", "/items",
                 "GET /items", "api1", "$default", "us-east-1", emptyHeaders(),
-                uriInfoFor("http://localhost/items"), null));
+                uriInfoFor("http://localhost/items"), null).toString());
     }
 
     private static HttpHeaders emptyHeaders() {

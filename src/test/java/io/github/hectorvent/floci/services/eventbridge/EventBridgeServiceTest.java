@@ -32,6 +32,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -39,8 +40,10 @@ import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -74,7 +77,8 @@ class EventBridgeServiceTest {
                 null,
                 dispatcherMock,
                 replayDispatcherMock,
-                new ResourceGroupsTaggingService(null)
+                new ResourceGroupsTaggingService(null),
+                mock(AppSyncTargetValidator.class)
         );
     }
 
@@ -304,6 +308,18 @@ class EventBridgeServiceTest {
                 .getEventSourceArn());
         assertEquals(custom, service.createArchive("on-custom", custom, null, null, 0, REGION)
                 .getEventSourceArn());
+    }
+
+    @Test
+    void archiveLengthBoundsCountSupplementaryCharactersOnce() {
+        String scalar = "\uD83D\uDE00";
+        String pattern = "{\"detail\":[\"" + scalar.repeat(4081) + "\"]}";
+        assertDoesNotThrow(() -> service.createArchive(
+                "unicode-archive", DEFAULT_BUS, scalar.repeat(512), pattern, 0, REGION));
+        assertThrows(AwsException.class, () -> service.createArchive(
+                "long-description", DEFAULT_BUS, scalar.repeat(513), null, 0, REGION));
+        assertThrows(AwsException.class, () -> service.createArchive(
+                "long-pattern", DEFAULT_BUS, null, pattern + " ", 0, REGION));
     }
 
     /** The messages AWS returns; the account is checked before the region. */
@@ -761,15 +777,24 @@ class EventBridgeServiceTest {
     }
 
     @ParameterizedTest
-    @ValueSource(ints = {1, 1600})
-    void putTargetsAcceptsRoleArnAtModelLengthBounds(int length) {
+    @ValueSource(ints = {38, 1600})
+    void putTargetsAcceptsWellFormedRoleArnWithinModelLengthBounds(int length) {
         service.putRule("role-rule", null, "{}", null, RuleState.ENABLED, null, null, null, REGION);
         Target target = new Target("workflow", "arn:aws:states:us-east-1:000000000000:stateMachine:example", null, null);
-        target.setRoleArn("r".repeat(length));
+        String prefix = "arn:aws:iam::000000000000:role/";
+        target.setRoleArn(prefix + "r".repeat(length - prefix.length()));
 
         service.putTargets("role-rule", null, List.of(target), REGION);
 
         assertEquals(target.getRoleArn(), service.listTargetsByRule("role-rule", null, REGION).getFirst().getRoleArn());
+    }
+
+    @Test
+    void putTargetsRejectsRoleArnThatOnlySatisfiesTheMinimumLength() {
+        Target target = new Target("workflow", "arn:aws:states:us-east-1:000000000000:stateMachine:example", null, null);
+        target.setRoleArn("r");
+
+        assertPutTargetsValidation("Parameter r is not valid. Reason: Provided Arn is not in correct format.", target);
     }
 
     @Test
@@ -857,6 +882,57 @@ class EventBridgeServiceTest {
         service.putEvents(List.of(Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{}")), REGION);
 
         verify(dispatcherMock).dispatch(eq(rule.getArn()), eq(target), anyString(), eq(REGION), any());
+    }
+
+    @Test
+    void publishServiceEventSendsTheEventToTheRegionsDefaultBus() throws Exception {
+        Rule rule = service.putRule("emr", null, "{\"source\":[\"aws.emr\"]}", null, RuleState.ENABLED,
+                null, null, null, REGION);
+        Target target = new Target("t1", "arn:aws:sqs:us-east-1:000000000000:queue-1", null, null);
+        service.putTargets("emr", null, List.of(target), REGION);
+
+        service.publishServiceEvent("aws.emr", "EMR Cluster State Change", "{\"state\":\"WAITING\"}", null, REGION);
+
+        ArgumentCaptor<String> eventJson = ArgumentCaptor.forClass(String.class);
+        verify(dispatcherMock).dispatch(eq(rule.getArn()), eq(target), eventJson.capture(), eq(REGION), any());
+        JsonNode event = OBJECT_MAPPER.readTree(eventJson.getValue());
+        assertEquals("aws.emr", event.path("source").asText());
+        assertEquals("EMR Cluster State Change", event.path("detail-type").asText());
+        assertEquals(REGION, event.path("region").asText());
+        assertEquals(0, event.path("resources").size());
+        assertEquals("WAITING", event.path("detail").path("state").asText());
+    }
+
+    @Test
+    void publishServiceEventLeavesAnEntryTheBusRejectsUndelivered() {
+        service.putRule("emr", null, "{\"source\":[\"aws.emr\"]}", null, RuleState.ENABLED,
+                null, null, null, REGION);
+        service.putTargets("emr", null,
+                List.of(new Target("t1", "arn:aws:sqs:us-east-1:000000000000:queue-1", null, null)), REGION);
+
+        assertDoesNotThrow(() -> service.publishServiceEvent("aws.emr", "EMR Cluster State Change", "not json",
+                null, REGION));
+
+        verify(dispatcherMock, never()).dispatch(anyString(), any(), anyString(), anyString(), any());
+    }
+
+    @Test
+    void publishServiceEventPassesOverACallEventBridgeRefuses() {
+        EventBridgeService refusing = spy(service);
+        doThrow(new AwsException("InternalException", "unavailable", 500))
+                .when(refusing).putEvents(anyList(), eq(REGION));
+
+        assertDoesNotThrow(() -> refusing.publishServiceEvent("aws.emr", "EMR Cluster State Change", "{}", null,
+                REGION));
+    }
+
+    @Test
+    void publishServiceEventPassesOverAnyOtherFailure() {
+        EventBridgeService faulty = spy(service);
+        doThrow(new IllegalStateException("broken")).when(faulty).putEvents(anyList(), eq(REGION));
+
+        assertDoesNotThrow(() -> faulty.publishServiceEvent("aws.emr", "EMR Cluster State Change", "{}", null,
+                REGION));
     }
 
     private void assertPutTargetsValidation(String expectedMessage, Target... targets) {
@@ -950,6 +1026,37 @@ class EventBridgeServiceTest {
 
         EventBridgeService.PutEventsResult result = service.putEvents(entries, REGION);
         assertEquals(1, result.failedCount());
+    }
+
+    /**
+     * A request's entry for an event bus that does not exist is answered as published and dropped: it gets an
+     * event id, is not counted as failed and reaches no rule, the default bus's included. An entry that is not
+     * valid still fails, whatever bus it names.
+     */
+    @Test
+    void aRequestsEntryForANonExistentBusIsAnsweredAsPublishedAndDropped() {
+        service.putRule("on-my-app", null, "{\"source\":[\"my.app\"]}", null, RuleState.ENABLED,
+                null, null, null, REGION);
+        Target target = new Target();
+        target.setId("t1");
+        target.setArn("arn:aws:sqs:us-east-1:000000000000:queue-1");
+        service.putTargets("on-my-app", null, List.of(target), REGION);
+
+        EventBridgeService.PutEventsResult result = service.putEventsFromRequest(List.of(
+                Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{}", "EventBusName", "non-existent-bus"),
+                Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{}"),
+                Map.of("Source", "my.app", "DetailType", "Test", "Detail", "{", "EventBusName", "non-existent-bus")),
+                REGION);
+
+        assertEquals(1, result.failedCount());
+        assertEquals(3, result.entries().size());
+        assertNotNull(result.entries().get(0).get("EventId"));
+        assertNull(result.entries().get(0).get("ErrorCode"));
+        assertNotNull(result.entries().get(1).get("EventId"));
+        assertEquals("MalformedDetail", result.entries().get(2).get("ErrorCode"));
+        verify(dispatcherMock).dispatch(anyString(), any(Target.class),
+                contains("\"event-bus-name\":\"default\""), anyString(), any());
+        verify(dispatcherMock).dispatch(anyString(), any(Target.class), anyString(), anyString(), any());
     }
 
     @Test
@@ -1266,7 +1373,7 @@ class EventBridgeServiceTest {
         target.setArn("arn:aws:sqs:us-west-2:000000000000:replay-queue");
         service.putTargets("my-rule", null, List.of(target), "us-west-2");
 
-        java.util.Map<String, Object> entry = new java.util.HashMap<>();
+        Map<String, Object> entry = new HashMap<>();
         entry.put("Source", "my.app");
         entry.put("DetailType", "Test");
         entry.put("Detail", "{}");

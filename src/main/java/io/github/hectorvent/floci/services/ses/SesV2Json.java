@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.EpochSeconds;
+import io.github.hectorvent.floci.core.common.JsonNumberCoercion;
 import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.ses.model.Tag;
 
@@ -15,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Predicate;
 
 /**
  * Helpers shared by the SES v2 REST JSON controllers: body and member shape checks that answer
@@ -207,6 +210,22 @@ final class SesV2Json {
      * an empty one.
      */
     static Map<String, String> filterValues(Map<String, String> filter, List<String> keys) {
+        return filterValues(filter, keys, String::isEmpty, "Member must have length greater than or equal to 1");
+    }
+
+    /**
+     * As above, for a filter whose values are bounded above too. SES printed both bounds for an
+     * empty value, so a value over the bound is taken to be answered the same way.
+     */
+    static Map<String, String> filterValues(Map<String, String> filter, List<String> keys, int maxValueLength) {
+        return filterValues(filter, keys,
+                v -> v.isEmpty() || v.codePointCount(0, v.length()) > maxValueLength,
+                "Member must have length less than or equal to " + maxValueLength
+                        + ", Member must have length greater than or equal to 1");
+    }
+
+    private static Map<String, String> filterValues(Map<String, String> filter, List<String> keys,
+                                                    Predicate<String> invalidValue, String valueConstraint) {
         if (filter == null) {
             return Map.of();
         }
@@ -215,10 +234,10 @@ final class SesV2Json {
                     + "failed to satisfy constraint: Map keys must satisfy constraint: "
                     + "[Member must satisfy enum value set: [" + String.join(", ", keys) + "]]");
         }
-        if (filter.containsValue("")) {
+        if (filter.values().stream().anyMatch(v -> v != null && invalidValue.test(v))) {
             throw SmithyValidationErrors.badRequest( "Value at 'filter' "
                     + "failed to satisfy constraint: Map value must satisfy constraint: "
-                    + "[Member must have length greater than or equal to 1]");
+                    + "[" + valueConstraint + "]");
         }
         Map<String, String> values = new LinkedHashMap<>();
         filter.forEach((key, value) -> {
@@ -301,9 +320,8 @@ final class SesV2Json {
     }
 
     // Integer variant of stringMemberOrAbsent: absent/null returns null and a string, a boolean, an
-    // object or a list gets the deserializer's message for it. A number is narrowed to an int: AWS
-    // accepts 1.5 and range-checks 4294967296 as 2147483647, which a double-to-int cast reproduces
-    // where intValue would truncate 4294967296 to 0.
+    // object or a list gets the deserializer's message for it. Numeric narrowing is shared with
+    // other JSON protocol deserializers.
     static Integer intMemberOrAbsent(JsonNode parent, String field) {
         JsonNode n = parent.path(field);
         if (n.isMissingNode() || n.isNull()) {
@@ -319,7 +337,7 @@ final class SesV2Json {
         if (n.isContainerNode()) {
             throw unexpectedStartError(n);
         }
-        return (int) n.doubleValue();
+        return JsonNumberCoercion.truncateAndClampToInt(n);
     }
 
     static String readRequiredStringField(JsonNode request, String fieldName) {
@@ -344,18 +362,9 @@ final class SesV2Json {
         return coerceBoolean(enabledNode);
     }
 
-    /**
-     * Epoch seconds with the millisecond fraction, the shape AWS returns for every SES v2
-     * timestamp (probe-confirmed, e.g. {@code 1.790312384592E9}). It must stay a JSON number: an
-     * ISO string, as the v1 Query path writes, breaks the SDK's unixTimestamp unmarshaller.
-     */
-    static double epochSeconds(Instant instant) {
-        return instant.toEpochMilli() / 1000.0;
-    }
-
     static void putTimestamp(ObjectNode node, String field, Instant value) {
         if (value != null) {
-            node.put(field, epochSeconds(value));
+            node.put(field, EpochSeconds.fromInstant(value));
         }
     }
 }

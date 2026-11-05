@@ -26,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -203,7 +204,7 @@ public class NeptuneService {
     }
 
     public boolean hasResourceWithArn(String arn) {
-        if (arn == null || !arn.startsWith("arn:")) {
+        if (!AwsArnUtils.looksLikeArn(arn)) {
             return false;
         }
         return scanClusters().stream()
@@ -218,7 +219,7 @@ public class NeptuneService {
             // full ARN against each cluster's stored ARN rather than reducing it to
             // the bare identifier, so a cross-account or cross-region ARN does not
             // resolve a same-named local cluster.
-            if (filterId.startsWith("arn:")) {
+            if (AwsArnUtils.looksLikeArn(filterId)) {
                 return scanClusters().stream()
                         .filter(c -> filterId.equalsIgnoreCase(c.getDbClusterArn()))
                         .toList();
@@ -390,7 +391,7 @@ public class NeptuneService {
         if (filterId != null && !filterId.isBlank()) {
             // The db-instance-id filter accepts ARNs as well as identifiers; see
             // listDbClusters for why the match is against the stored ARN.
-            if (filterId.startsWith("arn:")) {
+            if (AwsArnUtils.looksLikeArn(filterId)) {
                 return scanInstances().stream()
                         .filter(i -> filterId.equalsIgnoreCase(i.getDbInstanceArn()))
                         .toList();
@@ -529,7 +530,7 @@ public class NeptuneService {
         String region = currentRegion();
         String key = clusterKey(region, id);
         if (clusters instanceof AccountAwareStorageBackend<NeptuneCluster> aware) {
-            return aware.getForAccountMigratingLegacyKeys(account, key, java.util.List.of(id),
+            return aware.getForAccountMigratingLegacyKeys(account, key, List.of(id),
                     value -> belongsTo(value.getDbClusterArn(), account, region));
         }
         return clusters.get(key);
@@ -540,7 +541,7 @@ public class NeptuneService {
         String region = currentRegion();
         String key = instanceKey(region, id);
         if (instances instanceof AccountAwareStorageBackend<NeptuneInstance> aware) {
-            return aware.getForAccountMigratingLegacyKeys(account, key, java.util.List.of(id),
+            return aware.getForAccountMigratingLegacyKeys(account, key, List.of(id),
                     value -> belongsTo(value.getDbInstanceArn(), account, region));
         }
         return instances.get(key);
@@ -606,7 +607,7 @@ public class NeptuneService {
                                       String account, String region, NeptuneCluster cluster) {
         String key = clusterKey(region, cluster.getDbClusterIdentifier());
         aware.getForAccountMigratingLegacyKeys(account, key,
-                java.util.List.of(cluster.getDbClusterIdentifier()),
+                List.of(cluster.getDbClusterIdentifier()),
                 value -> belongsTo(value.getDbClusterArn(), account, region))
                 .ifPresent(value -> aware.putForAccount(account, key, value));
     }
@@ -615,7 +616,7 @@ public class NeptuneService {
                                        String account, String region, NeptuneInstance instance) {
         String key = instanceKey(region, instance.getDbInstanceIdentifier());
         aware.getForAccountMigratingLegacyKeys(account, key,
-                java.util.List.of(instance.getDbInstanceIdentifier()),
+                List.of(instance.getDbInstanceIdentifier()),
                 value -> belongsTo(value.getDbInstanceArn(), account, region))
                 .ifPresent(value -> aware.putForAccount(account, key, value));
     }

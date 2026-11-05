@@ -33,8 +33,6 @@ import org.jboss.logging.Logger;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
-import java.time.format.DateTimeFormatter;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
@@ -67,7 +65,6 @@ public class LambdaWebDataPlane {
     private static final Logger LOG = Logger.getLogger(LambdaWebDataPlane.class);
     private static final String BASE32 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
     private static final int REQUEST_ID_LENGTH = 26;
-    private static final DateTimeFormatter HTTP_DATE = DateTimeFormatter.RFC_1123_DATE_TIME.withZone(ZoneOffset.UTC);
     /** Floci sees an exit some tens of milliseconds after it. A process that keeps running is not waited for longer. */
     private static final Duration EXIT_WAIT = Duration.ofSeconds(1);
     /** The edge counts the request line, the header lines and the blank line, as the client sent them. */
@@ -228,9 +225,12 @@ public class LambdaWebDataPlane {
         acquire(request, host, target, revision, requestId, null);
     }
 
-    /** The domain is minted for each creation, so a recreated endpoint shares no state with the deleted one. */
+    /**
+     * The domain is minted for each creation, so a recreated endpoint shares no state with the deleted one.
+     * Each region of an endpoint has its own environments and rate limit.
+     */
     private static String endpointKey(WebFunctionTarget target) {
-        return String.join("|", target.accountId(), target.region(), target.endpoint().domainName);
+        return String.join("|", target.accountId(), target.servingRegion(), target.endpoint().domainName);
     }
 
     /** Starts or reuses the revision's environment off the event loop, then forwards. */
@@ -240,9 +240,12 @@ public class LambdaWebDataPlane {
             if (dead != null) {
                 environments.discard(dead);
             }
+            if (!service.isRevisionActive(target, revision.revisionId)) {
+                throw new StartFailure(LambdaWebErrorPages.REVISION_NOT_ACTIVE);
+            }
             Integer maxEnvironments = target.endpoint().scalingConfig == null
                     ? null : target.endpoint().scalingConfig.maxEnvironments;
-            return environments.acquire(target.accountId(), target.region(), target.function(),
+            return environments.acquire(target.accountId(), target.servingRegion(), target.function(),
                     endpointKey(target), maxEnvironments, revision);
         }, false)
                 .onSuccess(environment -> forward(request, host, target, revision, environment, requestId, dead == null))
@@ -587,7 +590,13 @@ public class LambdaWebDataPlane {
         headers.set("Connection", "close");
     }
 
+    /**
+     * The platform writes its own {@code Date} in place of the app's, but lets a {@code date} in lowercase pass. It
+     * writes {@code text/plain} for an app that sends no {@code Content-Type}, even on a 204 or a HEAD, but not with a
+     * {@code Content-Length} of 0.
+     */
     static void copyResponseHeaders(MultiMap headers, HttpServerResponse out) {
+        out.headers().add("Date", LambdaWebErrorPages.platformDate(Instant.now()));
         Set<String> dropped = new HashSet<>(DROPPED_RESPONSE_HEADERS);
         for (String connection : headers.getAll("Connection")) {
             for (String token : connection.split(",")) {
@@ -595,9 +604,13 @@ public class LambdaWebDataPlane {
             }
         }
         for (Map.Entry<String, String> header : headers) {
-            if (!dropped.contains(header.getKey().toLowerCase(Locale.ROOT))) {
-                out.headers().add(header.getKey(), header.getValue());
+            String name = header.getKey();
+            if (!"Date".equals(name) && !dropped.contains(name.toLowerCase(Locale.ROOT))) {
+                out.headers().add("Content-Type".equalsIgnoreCase(name) ? "Content-Type" : name, header.getValue());
             }
+        }
+        if (!headers.contains("Content-Type") && !"0".equals(headers.get("Content-Length"))) {
+            out.headers().add("Content-Type", "text/plain; charset=utf-8");
         }
     }
 
@@ -631,7 +644,7 @@ public class LambdaWebDataPlane {
         if (page.errorType() != null) {
             response.headers().set("lambda-web-error-type", page.errorType());
         }
-        response.headers().set("date", HTTP_DATE.format(Instant.now()));
+        response.headers().set("date", LambdaWebErrorPages.platformDate(Instant.now()));
         String html = LambdaWebErrorPages.html(page, requestId);
         // A HEAD request gets the length of the page it does not get, as on AWS.
         response.headers().set("content-length", String.valueOf(html.getBytes(StandardCharsets.UTF_8).length));
@@ -666,7 +679,7 @@ public class LambdaWebDataPlane {
         response.setStatusCode(414).setStatusMessage("URI Too Long");
         response.headers().set("connection", "close");
         response.headers().set("content-length", "0");
-        response.headers().set("date", HTTP_DATE.format(Instant.now()));
+        response.headers().set("date", LambdaWebErrorPages.platformDate(Instant.now()));
         response.end().onComplete(ignored -> response.close());
     }
 

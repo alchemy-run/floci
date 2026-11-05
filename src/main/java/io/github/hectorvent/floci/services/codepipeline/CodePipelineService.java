@@ -9,6 +9,7 @@ import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.DeadlineCharSequence;
+import io.github.hectorvent.floci.core.common.EpochSeconds;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
@@ -127,8 +128,9 @@ public class CodePipelineService {
     // An execution's status turns Failed as soon as one action fails, while its runner is still waiting
     // on sibling actions. Retries check this set so they never overlap a runner that has not finished.
     final Set<String> activeRuns = ConcurrentHashMap.newKeySet();
-    private final long sourcePollIntervalMs;
-    private long workerPollIntervalMs = DEFAULT_WORKER_POLL_INTERVAL_MS;
+    // Package-private so tests can assert the resolved intervals instead of timing schedules and sleeps.
+    final long sourcePollIntervalMs;
+    final long workerPollIntervalMs;
     // Test hooks, set only through the package-private constructor: a shortened wait, and a probe
     // for the gap before the override timeout cleanup.
     private final long runFinishWaitNanos;
@@ -150,7 +152,7 @@ public class CodePipelineService {
                         CodeBuildService codeBuildService, CodeDeployService codeDeployService,
                         LambdaService lambdaService, S3Service s3Service) {
         this(storageFactory, mapper, codeBuildService, codeDeployService, lambdaService, s3Service,
-                detachedEventPublisher(mapper), DEFAULT_SOURCE_POLL_INTERVAL_MS,
+                detachedEventPublisher(mapper), DEFAULT_SOURCE_POLL_INTERVAL_MS, DEFAULT_WORKER_POLL_INTERVAL_MS,
                 DEFAULT_RUN_FINISH_WAIT_NANOS, () -> { });
     }
 
@@ -169,9 +171,9 @@ public class CodePipelineService {
                                EmulatorConfig config, CodePipelineEventPublisher eventPublisher) {
         this(storageFactory, mapper, codeBuildService, codeDeployService, lambdaService, s3Service,
                 eventPublisher,
-                resolveSourcePollInterval(config.services().codepipeline().sourcePollIntervalMs()),
+                config.services().codepipeline().sourcePollIntervalMs(),
+                config.services().codepipeline().workerPollIntervalMs(),
                 DEFAULT_RUN_FINISH_WAIT_NANOS, () -> { });
-        this.workerPollIntervalMs = config.services().codepipeline().workerPollIntervalMs();
     }
 
     /**
@@ -187,20 +189,20 @@ public class CodePipelineService {
      * observer and stop the whole emulator becoming ready. A misconfigured value is not worth
      * failing every other service for, so it falls back with a warning.
      */
-    private static long resolveSourcePollInterval(long configured) {
+    static long resolvePollInterval(String kind, long configured, long fallback) {
         if (configured > 0) {
             return configured;
         }
-        LOG.warnv("Ignoring CodePipeline source poll interval {0}ms: must be a positive number of "
-                + "milliseconds, falling back to {1}ms", configured, DEFAULT_SOURCE_POLL_INTERVAL_MS);
-        return DEFAULT_SOURCE_POLL_INTERVAL_MS;
+        LOG.warnv("Ignoring CodePipeline {0} poll interval {1}ms: must be a positive number of "
+                + "milliseconds, falling back to {2}ms", kind, configured, fallback);
+        return fallback;
     }
 
     @SuppressWarnings("unchecked")
     CodePipelineService(StorageFactory storageFactory, ObjectMapper mapper,
                         CodeBuildService codeBuildService, CodeDeployService codeDeployService,
                         LambdaService lambdaService, S3Service s3Service,
-                        CodePipelineEventPublisher eventPublisher, long sourcePollIntervalMs,
+                        CodePipelineEventPublisher eventPublisher, long sourcePollIntervalMs, long workerPollIntervalMs,
                         long runFinishWaitNanos, Runnable beforeOverrideTimeoutCleanup) {
         this.pipelineStore = storageFactory.create(
                 "codepipeline", "codepipeline-pipelines.json", new TypeReference<Map<String, CodePipelinePipeline>>() {});
@@ -214,7 +216,10 @@ public class CodePipelineService {
         this.lambdaService = lambdaService;
         this.s3Service = s3Service;
         this.eventPublisher = eventPublisher;
-        this.sourcePollIntervalMs = sourcePollIntervalMs;
+        this.sourcePollIntervalMs = resolvePollInterval("source", sourcePollIntervalMs,
+                DEFAULT_SOURCE_POLL_INTERVAL_MS);
+        this.workerPollIntervalMs = resolvePollInterval("worker", workerPollIntervalMs,
+                DEFAULT_WORKER_POLL_INTERVAL_MS);
         this.runFinishWaitNanos = runFinishWaitNanos;
         this.beforeOverrideTimeoutCleanup = beforeOverrideTimeoutCleanup;
     }
@@ -1453,7 +1458,7 @@ public class CodePipelineService {
         ObjectNode item = mapper.createObjectNode();
         item.set("definition", webhook.deepCopy());
         item.put("url", "http://localhost:4566/codepipeline/webhooks/" + name);
-        item.put("arn", AwsArnUtils.Arn.of("codepipeline", region, account, "webhook/" + name).toString());
+        item.put("arn", AwsArnUtils.Arn.of("codepipeline", region, account, "webhook:" + name).toString());
         if (request.path("tags").isArray() && !request.path("tags").isEmpty()) {
             item.set("tags", request.path("tags").deepCopy());
         }
@@ -2057,7 +2062,7 @@ public class CodePipelineService {
                 revision.put("revisionChangeIdentifier", unquoteETag(object.getETag()));
                 revision.put("revisionSummary", bucket + "/" + key);
                 revision.put("revisionUrl", "s3://" + bucket + "/" + key);
-                revision.put("created", object.getLastModified().toEpochMilli() / 1000.0);
+                revision.put("created", EpochSeconds.fromInstant(object.getLastModified()));
                 execution.getArtifactRevisions().add(revision);
                 upsertSourceRevision(execution, state.getActionName(), revisionId, bucket, key, object);
                 pinResolvedS3Version(execution, state.getActionName(), object.getVersionId());
@@ -3205,7 +3210,7 @@ public class CodePipelineService {
     }
 
     private static double now() {
-        return Instant.now().toEpochMilli() / 1000.0;
+        return EpochSeconds.fromInstant(Instant.now());
     }
 
     private static void putIfNotNull(ObjectNode node, String field, Object value) {

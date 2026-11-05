@@ -33,6 +33,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -114,8 +115,161 @@ class VpcNetworkManagerTest {
         manager = new VpcNetworkManager(config, docker);
     }
 
+    @Test
+    void deletingVpcRemovesANetworkWhoseCreationIsStillInFlight() throws Exception {
+        manager.declareVpc(REGION, "vpc-1", "10.0.0.0/16");
+        manager.declareSubnet(REGION, "vpc-1", "subnet-a", "10.0.1.0/24");
+        String address = manager.allocatePrivateIp(REGION, "subnet-a").orElseThrow();
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(docker.createNetworkCmd().exec()).thenAnswer(invocation -> {
+            entered.countDown();
+            assertTrue(release.await(5, TimeUnit.SECONDS));
+            return new CreateNetworkResponse();
+        });
+
+        try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+            Future<?> attaching = executor.submit(() ->
+                    manager.attach(REGION, "vpc-1", "subnet-a", "container-1", address));
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS));
+                Future<?> deleting = executor.submit(() -> manager.deleteVpcNetwork(REGION, "vpc-1"));
+                await().atMost(2, TimeUnit.SECONDS)
+                        .until(() -> manager.effectiveVpcCidr(REGION, "vpc-1").isEmpty());
+                release.countDown();
+                attaching.get(2, TimeUnit.SECONDS);
+                deleting.get(2, TimeUnit.SECONDS);
+            } finally {
+                release.countDown();
+            }
+        }
+
+        assertEquals(List.of(manager.networkName(REGION, "vpc-1")), removedNetworks);
+        assertTrue(manager.attach(REGION, "vpc-1", "subnet-a", "container-2", address).isEmpty());
+        verify(docker.createNetworkCmd(), times(1)).exec();
+    }
+
+    @Test
+    void anAttachThatWasPlanningWhenVpcWasDeletedCannotCreateItsNetwork() throws Exception {
+        manager.declareVpc(REGION, "vpc-1", "10.0.0.0/16");
+        CountDownLatch entered = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(docker.listNetworksCmd().exec()).thenAnswer(invocation -> {
+            entered.countDown();
+            assertTrue(release.await(5, TimeUnit.SECONDS));
+            return List.of();
+        });
+
+        try (ExecutorService executor = Executors.newSingleThreadExecutor()) {
+            Future<Boolean> attaching = executor.submit(() ->
+                    manager.attachContainer(REGION, "vpc-1", "container-1"));
+            try {
+                assertTrue(entered.await(2, TimeUnit.SECONDS));
+                manager.deleteVpcNetwork(REGION, "vpc-1");
+            } finally {
+                release.countDown();
+            }
+            assertFalse(attaching.get(2, TimeUnit.SECONDS));
+        }
+
+        verify(docker, never()).createNetworkCmd();
+        assertTrue(removedNetworks.isEmpty());
+    }
+
     private void existingNetwork(String name, String subnet, Map<String, String> labels) {
         existingNetwork(name, subnet, labels, Map.of());
+    }
+
+    @Test
+    void deletingAVpcAfterARestartRemovesTheNetworkItsPredecessorCreated() {
+        // A restarted process declares the VPC again but has not materialised it: no instance in
+        // it has started since. The network from before the restart must still go with the VPC.
+        String networkName = manager.networkName(REGION, "vpc-1");
+        existingNetwork(networkName, "10.0.0.0/16", ourLabels("vpc-1", "4650"));
+        manager.reconcileOrphans((region, vpcId) -> true); // startup: the VPC is still declared
+        manager.declareVpc(REGION, "vpc-1", "10.0.0.0/16");
+
+        manager.deleteVpcNetwork(REGION, "vpc-1");
+
+        assertEquals(List.of(networkName), removedNetworks);
+    }
+
+    @Test
+    void thePredecessorsNetworkGoesWithItsVpcWithStartupReapingOffToo() {
+        when(config.services().ec2().vpcNetworks().reconcileOnStartup()).thenReturn(false);
+        String networkName = manager.networkName(REGION, "vpc-1");
+        existingNetwork(networkName, "10.0.0.0/16", ourLabels("vpc-1", "4650"));
+        existingNetwork("floci-vpc-4650-us-east-1-vpc-dead", "10.7.0.0/16", ourLabels("vpc-dead", "4650"));
+        manager.reconcileOrphans((region, vpcId) -> "vpc-1".equals(vpcId));
+        assertTrue(removedNetworks.isEmpty(), "with reaping off an orphan stays");
+        manager.declareVpc(REGION, "vpc-1", "10.0.0.0/16");
+
+        manager.deleteVpcNetwork(REGION, "vpc-1");
+
+        assertEquals(List.of(networkName), removedNetworks);
+    }
+
+    @Test
+    void aPredecessorsNetworkUnderItsLegacyNameGoesWithItsVpc() {
+        // A version before the floci-aws- prefix named the network floci-vpc-...; it is deleted
+        // by that name, not by the one this version would give it.
+        String legacyName = "floci-vpc-4650-us-east-1-vpc-1";
+        existingNetwork(legacyName, "10.0.0.0/16", ourLabels("vpc-1", "4650"));
+        manager.reconcileOrphans((region, vpcId) -> true);
+        manager.declareVpc(REGION, "vpc-1", "10.0.0.0/16");
+
+        manager.deleteVpcNetwork(REGION, "vpc-1");
+
+        assertEquals(List.of(legacyName), removedNetworks);
+    }
+
+    @Test
+    void bothSpellingsOfAPredecessorsNetworkGoWithAVpcThisRunNeverMaterialised() {
+        // An upgrade plus another restart can leave both: the legacy bridge on a fallback CIDR and
+        // the current-named one on the declared CIDR. Neither may be forgotten.
+        String legacyName = "floci-vpc-4650-us-east-1-vpc-1";
+        String currentName = manager.networkName(REGION, "vpc-1");
+        existingNetwork(legacyName, "10.200.0.0/16", ourLabels("vpc-1", "4650"));
+        existingNetwork(currentName, "10.0.0.0/16", ourLabels("vpc-1", "4650"));
+        manager.reconcileOrphans((region, vpcId) -> true);
+        manager.declareVpc(REGION, "vpc-1", "10.0.0.0/16");
+
+        manager.deleteVpcNetwork(REGION, "vpc-1");
+
+        assertEquals(2, removedNetworks.size(), "each removed once: " + removedNetworks);
+        assertEquals(Set.of(legacyName, currentName), Set.copyOf(removedNetworks));
+    }
+
+    @Test
+    void aVpcThisRunMaterialisedNextToItsPredecessorsLegacyNetworkTakesBothWithIt() {
+        // An instance started after the restart: this run created the computed-name network while
+        // the legacy-named one from before still exists. Deleting the VPC removes both.
+        String legacyName = "floci-vpc-4650-us-east-1-vpc-1";
+        existingNetwork(legacyName, "10.0.0.0/16", ourLabels("vpc-1", "4650"));
+        manager.reconcileOrphans((region, vpcId) -> true);
+        manager.declareVpc(REGION, "vpc-1", "10.0.0.0/16");
+        manager.declareSubnet(REGION, "vpc-1", "subnet-a", "10.0.1.0/24");
+        String address = manager.allocatePrivateIp(REGION, "subnet-a").orElseThrow();
+        assertTrue(manager.attach(REGION, "vpc-1", "subnet-a", "container-1", address).isPresent());
+
+        manager.deleteVpcNetwork(REGION, "vpc-1");
+
+        assertEquals(List.of(manager.networkName(REGION, "vpc-1"), legacyName), removedNetworks);
+    }
+
+    @Test
+    void aVpcThisRunReusedItsPredecessorsNetworkForRemovesItOnce() {
+        String networkName = manager.networkName(REGION, "vpc-1");
+        existingNetwork(networkName, "10.0.0.0/16", ourLabels("vpc-1", "4650"));
+        manager.reconcileOrphans((region, vpcId) -> true);
+        manager.declareVpc(REGION, "vpc-1", "10.0.0.0/16");
+        manager.declareSubnet(REGION, "vpc-1", "subnet-a", "10.0.1.0/24");
+        String address = manager.allocatePrivateIp(REGION, "subnet-a").orElseThrow();
+        assertTrue(manager.attach(REGION, "vpc-1", "subnet-a", "container-1", address).isPresent());
+
+        manager.deleteVpcNetwork(REGION, "vpc-1");
+
+        assertEquals(List.of(networkName), removedNetworks);
     }
 
     @Test

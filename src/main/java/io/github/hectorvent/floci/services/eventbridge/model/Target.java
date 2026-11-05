@@ -18,9 +18,11 @@ public class Target {
     private SqsParameters sqsParameters;
     private BatchParameters batchParameters;
     private EcsParameters ecsParameters;
+    private RedshiftDataParameters redshiftDataParameters;
     private RetryPolicy retryPolicy;
     private DeadLetterConfig deadLetterConfig;
     private HttpParameters httpParameters;
+    private AppSyncParameters appSyncParameters;
 
     public Target() {}
 
@@ -58,6 +60,11 @@ public class Target {
     public EcsParameters getEcsParameters() { return ecsParameters; }
     public void setEcsParameters(EcsParameters ecsParameters) { this.ecsParameters = ecsParameters; }
 
+    public RedshiftDataParameters getRedshiftDataParameters() { return redshiftDataParameters; }
+    public void setRedshiftDataParameters(RedshiftDataParameters redshiftDataParameters) {
+        this.redshiftDataParameters = redshiftDataParameters;
+    }
+
     public RetryPolicy getRetryPolicy() { return retryPolicy; }
     public void setRetryPolicy(RetryPolicy retryPolicy) { this.retryPolicy = retryPolicy; }
 
@@ -66,6 +73,14 @@ public class Target {
 
     public HttpParameters getHttpParameters() { return httpParameters; }
     public void setHttpParameters(HttpParameters httpParameters) { this.httpParameters = httpParameters; }
+
+    public AppSyncParameters getAppSyncParameters() { return appSyncParameters; }
+    public void setAppSyncParameters(AppSyncParameters appSyncParameters) { this.appSyncParameters = appSyncParameters; }
+
+    @RegisterForReflection
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record AppSyncParameters(@JsonProperty("GraphQLOperation") String graphQLOperation) {}
 
     @RegisterForReflection
     @JsonIgnoreProperties(ignoreUnknown = true)

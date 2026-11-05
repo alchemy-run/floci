@@ -14,10 +14,4 @@ public class UpdateApplicationResponse {
     public void setArn(String arn) { this.arn = arn; }
     public String getName() { return name; }
     public void setName(String name) { this.name = name; }
-
-    private Application application;
-
-    public Application getApplication() { return application; }
-
-    public void setApplication(Application application) { this.application = application; }
 }

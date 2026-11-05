@@ -13,6 +13,8 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -28,8 +30,9 @@ import static org.mockito.Mockito.when;
 
 /**
  * A REST request is authorized by its route, so an operation is checked as the IAM action AWS checks
- * for it only if a rule in {@link IamActionRegistry} maps its route to that action. This builds a
- * request on each operation's route, as botocore's model gives it ({@code rest-routes.json}, from
+ * for it only if a rule in {@link IamActionRegistry} maps its route to that action, or, for an action AWS
+ * authorizes on no resource type, the vendored route it matches is its own. This builds a request on each
+ * operation's route, as botocore's model gives it ({@code rest-routes.json}, from
  * {@code tools/aws/regen_rest_routes.py}), and compares the action the registry resolves with the one
  * {@code iam-authorized-actions.json} names for the operation, or else the operation's own name.
  */
@@ -45,20 +48,57 @@ class IamRestRouteCoverageTest {
      * Operations Floci does not serve, whose request runs as another operation instead and so is checked
      * as that one: S3 has no bucket metadata configuration, and {@code ?metadataConfiguration} on a
      * bucket falls through to ListObjects and DeleteBucket. Checking it as the metadata table action
-     * would let that action list or delete the bucket. EKS takes an access entry's principal as the rest
-     * of the path, so an entry's access policy routes read and delete the entry of a longer principal.
+     * would let that action list or delete the bucket.
      */
     private static final Map<String, String> RUN_AS_ANOTHER_OPERATION = Map.of(
             "GetBucketMetadataConfiguration", "s3:ListBucket",
-            "DeleteBucketMetadataConfiguration", "s3:DeleteBucket",
-            "ListAssociatedAccessPolicies", "eks:DescribeAccessEntry",
-            "DisassociateAccessPolicy", "eks:DeleteAccessEntry");
+            "DeleteBucketMetadataConfiguration", "s3:DeleteBucket");
 
-    /** Models every operation of which is checked: the services whose routes the registry maps in full. */
-    private static final Set<String> FULLY_ROUTED_MODELS =
-            Set.of("scheduler", "pipes", "eks", "lambda", "lambda-microvms", "lambda-core", "dsql");
+    /**
+     * The S3 Control operations Floci serves, the rest-routes entry of which is a route the
+     * registry maps. Every other operation of the s3control model has no route in Floci: the
+     * request falls through to the S3 data plane and is checked as the object or bucket
+     * operation that runs.
+     */
+    private static final Set<String> SERVED_S3_CONTROL_OPERATIONS = Set.of(
+            "DeletePublicAccessBlock", "GetPublicAccessBlock", "ListAccessPoints", "ListTagsForResource",
+            "PutPublicAccessBlock", "TagResource", "UntagResource");
+
+    /**
+     * The account-level Block Public Access, the one route the Service Reference cannot settle.
+     * It files S3's and S3 Control's GetPublicAccessBlock, PutPublicAccessBlock and
+     * DeletePublicAccessBlock under the bucket actions (s3:GetBucketPublicAccessBlock,
+     * s3:PutBucketPublicAccessBlock and s3:DeleteBucketPublicAccessBlock), one action between
+     * the two clients, although the account level is a different permission. The S3 User
+     * Guide's Block Public Access page gives the account level s3:PutAccountPublicAccessBlock
+     * to write and s3:GetAccountPublicAccessBlock to read, and a delete needs the same action
+     * as the write it undoes.
+     * https://docs.aws.amazon.com/AmazonS3/latest/userguide/access-control-block-public-access.html
+     */
+    private static final Map<String, String> ACCOUNT_PUBLIC_ACCESS_BLOCK_ACTIONS = Map.of(
+            "GetPublicAccessBlock", "s3:GetAccountPublicAccessBlock",
+            "PutPublicAccessBlock", "s3:PutAccountPublicAccessBlock",
+            "DeletePublicAccessBlock", "s3:PutAccountPublicAccessBlock");
 
     private final IamActionRegistry registry = new IamActionRegistry();
+
+    @TestFactory
+    Stream<DynamicTest> servedAccessAnalyzerOperationsUseTheirModeledRoutes() throws IOException {
+        JsonNode model = load("/aws/rest-routes.json").path("models").path("accessanalyzer");
+        assertFalse(model.isMissingNode(), "Access Analyzer's routes must be vendored from the AWS model");
+        String scope = model.path("credentialScope").asText();
+        List<DynamicTest> tests = new ArrayList<>();
+        for (String operation : Set.of("ValidatePolicy", "ListAnalyzers", "CreateAnalyzer", "GetAnalyzer",
+                "DeleteAnalyzer")) {
+            JsonNode http = model.path("operations").path(operation);
+            assertFalse(http.isMissingNode(), "no model route for " + operation);
+            Route route = new Route(scope, "accessanalyzer", operation,
+                    http.path("method").asText(), http.path("requestUri").asText());
+            tests.add(DynamicTest.dynamicTest("accessanalyzer " + operation,
+                    () -> assertEquals("access-analyzer:" + operation, resolve(route), route.toString())));
+        }
+        return tests.stream();
+    }
 
     @TestFactory
     Stream<DynamicTest> eachVendoredActionOfARestServiceIsWhatItsRouteResolvesTo() throws IOException {
@@ -82,25 +122,113 @@ class IamRestRouteCoverageTest {
         return tests.stream();
     }
 
+    /**
+     * Every operation of a scope the vendored routes do not leave to the rules alone resolves to its action when
+     * Floci can check it as AWS does: its resources built by hand for its namespace or read by the vendored request
+     * resources, or none, AWS authorizing its action on no resource type. Any other operation stays unmapped,
+     * unchecked rather than checked on {@code *}, until the resources in its path are read.
+     */
     @TestFactory
-    Stream<DynamicTest> everyOperationOfAFullyRoutedServiceResolvesToItsAction() throws IOException {
-        JsonNode models = load("/aws/rest-routes.json").path("models");
+    Stream<DynamicTest> everyOperationOfARoutedScopeResolvesToItsActionWhenFlociCanCheckIt() throws IOException {
+        JsonNode document = load("/aws/rest-routes.json");
+        JsonNode models = document.path("models");
         JsonNode authorized = load("/aws/iam-authorized-actions.json").path("authorizedActions");
+        JsonNode requestResources = load("/aws/iam-request-resources.json");
+        Set<String> handBuilt = new HashSet<>();
+        requestResources.path("handBuilt").forEach(namespace -> handBuilt.add(namespace.asText()));
         List<DynamicTest> tests = new ArrayList<>();
-        for (String model : FULLY_ROUTED_MODELS) {
+        for (String model : routedModels(document)) {
             String scope = models.path(model).path("credentialScope").asText();
             Iterator<Map.Entry<String, JsonNode>> operations = models.path(model).path("operations").fields();
             while (operations.hasNext()) {
                 Map.Entry<String, JsonNode> operation = operations.next();
                 Route route = new Route(scope, model, operation.getKey(), operation.getValue().path("method").asText(),
                         operation.getValue().path("requestUri").asText());
-                String expected = RUN_AS_ANOTHER_OPERATION.getOrDefault(operation.getKey(),
+                String action = RUN_AS_ANOTHER_OPERATION.getOrDefault(operation.getKey(),
                         authorized.path(scope).path(operation.getKey()).asText(scope + ":" + operation.getKey()));
+                boolean read = requestResources.path("operations").has(scope + ":" + operation.getKey());
+                String expected = handBuilt.contains(scope) || read || IamAuthorizedActions.actsOnNoResourceType(action)
+                        ? action : null;
                 tests.add(DynamicTest.dynamicTest(model + " " + operation.getKey(),
                         () -> assertEquals(expected, resolve(route), route.toString())));
             }
         }
         return tests.stream();
+    }
+
+    /**
+     * Every route of a scope the vendored routes do not leave to the rules alone is, by those routes alone, an
+     * operation checked as its own operation's action: the most specific route a request on it matches is its own,
+     * or a sibling model's of the same scope and action (Lambda's and Lambda MicroVMs' tagging routes).
+     */
+    @TestFactory
+    Stream<DynamicTest> everyRouteOfARoutedScopeIsItsOperationByTheVendoredRoutesAlone() throws IOException {
+        JsonNode document = load("/aws/rest-routes.json");
+        JsonNode models = document.path("models");
+        List<DynamicTest> tests = new ArrayList<>();
+        for (String model : routedModels(document)) {
+            String scope = models.path(model).path("credentialScope").asText();
+            Iterator<Map.Entry<String, JsonNode>> operations = models.path(model).path("operations").fields();
+            while (operations.hasNext()) {
+                Map.Entry<String, JsonNode> operation = operations.next();
+                Route route = new Route(scope, model, operation.getKey(), operation.getValue().path("method").asText(),
+                        operation.getValue().path("requestUri").asText());
+                tests.add(DynamicTest.dynamicTest(model + " " + operation.getKey(), () -> {
+                    ContainerRequestContext request = route.request();
+                    String matched = IamRestRoutes.vendored().operation(scope, route.method(),
+                            request.getUriInfo().getPath(), request.getUriInfo().getQueryParameters()).orElse(null);
+                    assertEquals(IamAuthorizedActions.actionFor(scope, operation.getKey()),
+                            matched == null ? null : IamAuthorizedActions.actionFor(scope, matched), route.toString());
+                }));
+            }
+        }
+        return tests.stream();
+    }
+
+    /**
+     * Every route of the s3control model, which signs with the s3 scope. A route Floci serves is
+     * checked as the action the Service Reference gives the operation, with the account-level
+     * Block Public Access as its one written-down exception; a route Floci does not serve runs
+     * as the S3 data plane, so it must not resolve to any of the served routes' actions.
+     */
+    @TestFactory
+    Stream<DynamicTest> everyS3ControlRouteIsCheckedAsTheServiceReferenceGivesIt() throws IOException {
+        JsonNode models = load("/aws/rest-routes.json").path("models");
+        JsonNode authorized = load("/aws/iam-authorized-actions.json").path("authorizedActions");
+        Map<String, String> served = new HashMap<>();
+        for (String operation : SERVED_S3_CONTROL_OPERATIONS) {
+            served.put(operation, ACCOUNT_PUBLIC_ACCESS_BLOCK_ACTIONS.getOrDefault(operation,
+                    authorized.path("s3").path(operation).asText("s3:" + operation)));
+        }
+        List<DynamicTest> tests = new ArrayList<>();
+        Iterator<Map.Entry<String, JsonNode>> operations =
+                models.path("s3control").path("operations").fields();
+        while (operations.hasNext()) {
+            Map.Entry<String, JsonNode> operation = operations.next();
+            Route route = new Route("s3", "s3control", operation.getKey(),
+                    operation.getValue().path("method").asText(),
+                    operation.getValue().path("requestUri").asText());
+            String expected = served.get(operation.getKey());
+            tests.add(expected == null
+                    ? DynamicTest.dynamicTest("s3control " + operation.getKey() + " (not served)",
+                            () -> assertFalse(served.containsValue(resolve(route)), route.toString()))
+                    : DynamicTest.dynamicTest("s3control " + operation.getKey(),
+                            () -> assertEquals(expected, resolve(route), route.toString())));
+        }
+        return tests.stream();
+    }
+
+    /** The models of every credential scope the vendored routes do not list as hand-routed. */
+    private static List<String> routedModels(JsonNode document) {
+        List<String> models = new ArrayList<>();
+        Iterator<Map.Entry<String, JsonNode>> all = document.path("models").fields();
+        while (all.hasNext()) {
+            Map.Entry<String, JsonNode> model = all.next();
+            if (!document.path("handRouted").has(model.getValue().path("credentialScope").asText())) {
+                models.add(model.getKey());
+            }
+        }
+        return models;
     }
 
     /** Every model route of {@code operation} among the models Floci authorizes under {@code scope}. */
@@ -153,12 +281,18 @@ class IamRestRouteCoverageTest {
             return ctx;
         }
 
-        /** The path with each {@code {label}} filled in, and a greedy {@code {label+}} given two segments. */
+        /**
+         * The path with each {@code {label}} filled in, and a greedy {@code {label+}} given two segments. A
+         * {@code {policyArn}} gets a cluster access policy ARN, encoded as an SDK sends it, since only that
+         * shape routes to the policy operations.
+         */
         private static String fill(String template) {
             Matcher label = LABEL.matcher(template);
             StringBuilder path = new StringBuilder();
             while (label.find()) {
-                String value = label.group(1).toLowerCase() + "-value";
+                String value = label.group(1).equals("policyArn")
+                        ? "arn%3Aaws%3Aeks%3A%3Aaws%3Acluster-access-policy%2FAmazonEKSViewPolicy"
+                        : label.group(1).toLowerCase() + "-value";
                 label.appendReplacement(path, label.group(2).isEmpty() ? value : value + "/part");
             }
             label.appendTail(path);

@@ -15,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
@@ -26,6 +27,7 @@ import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -80,14 +82,15 @@ class KinesisServiceTest {
     }
 
     @Test
-    void listStreams() {
-        kinesisService.createStream("stream-a", 1, REGION);
+    void listStreamDetails() {
         kinesisService.createStream("stream-b", 1, REGION);
+        kinesisService.createStream("stream-a", 1, REGION);
         kinesisService.createStream("other", 1, "eu-west-1");
 
-        List<String> names = kinesisService.listStreams(REGION);
-        assertEquals(2, names.size());
-        assertTrue(names.containsAll(List.of("stream-a", "stream-b")));
+        List<String> names = kinesisService.listStreamDetails(REGION).stream()
+                .map(KinesisStream::getStreamName)
+                .toList();
+        assertEquals(List.of("stream-a", "stream-b"), names);
     }
 
     @Test
@@ -97,11 +100,34 @@ class KinesisServiceTest {
     }
 
     @Test
+    void describeStreamByArnFindsTheStreamWithThatExactArn() {
+        KinesisStream created = kinesisService.createStream("orders-events", 1, REGION);
+
+        assertEquals(created.getStreamArn(),
+                kinesisService.describeStreamByArn(created.getStreamArn(), REGION).getStreamArn());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+        "orders-events",
+        "arn:aws:kinesis:eu-west-1:000000000000:stream/orders-events",
+        "arn:aws:kinesis:us-east-1:111111111111:stream/orders-events",
+        "arn:aws:kinesis:us-east-1:000000000000:not-a-stream/orders-events"
+    })
+    void describeStreamByArnNamesNoStreamForAnotherIdentityWithTheSameName(String streamArn) {
+        kinesisService.createStream("orders-events", 1, REGION);
+
+        AwsException e = assertThrows(AwsException.class, () -> kinesisService.describeStreamByArn(streamArn, REGION));
+
+        assertEquals("ResourceNotFoundException", e.getErrorCode());
+    }
+
+    @Test
     void deleteStream() {
         kinesisService.createStream("to-delete", 1, REGION);
         kinesisService.deleteStream("to-delete", REGION);
 
-        assertTrue(kinesisService.listStreams(REGION).isEmpty());
+        assertTrue(kinesisService.listStreamDetails(REGION).isEmpty());
     }
 
     @Test
@@ -362,7 +388,7 @@ class KinesisServiceTest {
             while (!done.get()) {
                 // A fresh snapshot of the live list, exactly as a lock-free DescribeStream/ListShards sees it.
                 List<KinesisShard> snapshot = new ArrayList<>(stream.getShards());
-                Map<String, Integer> splitChildCount = new java.util.HashMap<>();
+                Map<String, Integer> splitChildCount = new HashMap<>();
                 for (KinesisShard s : snapshot) {
                     // Split children carry a parent but no adjacent-parent (that marks a merge child).
                     if (s.getParentShardId() != null && s.getAdjacentParentShardId() == null) {
@@ -582,7 +608,7 @@ class KinesisServiceTest {
             assertEquals(closedParent.getHashKeyRange().startingHashKey(), first.getHashKeyRange().startingHashKey());
             assertEquals(closedParent.getHashKeyRange().endingHashKey(), second.getHashKeyRange().endingHashKey());
             assertEquals(
-                    new java.math.BigInteger(first.getHashKeyRange().endingHashKey()).add(java.math.BigInteger.ONE).toString(),
+                    new BigInteger(first.getHashKeyRange().endingHashKey()).add(BigInteger.ONE).toString(),
                     second.getHashKeyRange().startingHashKey(),
                     "children must tile the parent's range with no gap or overlap");
         }
@@ -593,7 +619,7 @@ class KinesisServiceTest {
         kinesisService.createStream("my-stream", 4, REGION);
         KinesisStream before = kinesisService.describeStream("my-stream", REGION);
         List<KinesisShard> originalOpenShards = before.getShards().stream()
-                .sorted(Comparator.comparing(s -> new java.math.BigInteger(s.getHashKeyRange().startingHashKey())))
+                .sorted(Comparator.comparing(s -> new BigInteger(s.getHashKeyRange().startingHashKey())))
                 .toList();
 
         kinesisService.updateShardCount("my-stream", 2, "UNIFORM_SCALING", REGION);
@@ -730,7 +756,7 @@ class KinesisServiceTest {
 
         // Hand-crafted 5-part iterator in the pre-bump format.
         String raw = "my-stream|shardId-000000000000|TRIM_HORIZON||0";
-        String legacyIterator = java.util.Base64.getEncoder()
+        String legacyIterator = Base64.getEncoder()
                 .encodeToString(raw.getBytes(StandardCharsets.UTF_8));
 
         Map<String, Object> result = kinesisService.getRecords(legacyIterator, null, REGION);
@@ -1007,7 +1033,7 @@ class KinesisServiceTest {
 
         // The delete ran after the producer's persist, so the stream must be gone, not resurrected
         // by a stale trailing store.put.
-        assertTrue(kinesisService.listStreams(REGION).isEmpty(),
+        assertTrue(kinesisService.listStreamDetails(REGION).isEmpty(),
                 "a deleted stream must not be resurrected by an overlapping append");
         assertThrows(AwsException.class, () -> kinesisService.describeStream("res", REGION),
                 "the resurrected stream must not be describable");
@@ -1074,7 +1100,7 @@ class KinesisServiceTest {
         assertEquals("ResourceNotFoundException", ((AwsException) t).getErrorCode(),
                 "a delete-before-append must surface the same missing-stream error as any absent stream");
 
-        assertTrue(kinesisService.listStreams(REGION).isEmpty(),
+        assertTrue(kinesisService.listStreamDetails(REGION).isEmpty(),
                 "the deleted stream must not be resurrected by the failed append");
     }
 
@@ -1270,7 +1296,7 @@ class KinesisServiceTest {
             pool.shutdownNow();
         }
 
-        assertTrue(service.listStreams(REGION).isEmpty(),
+        assertTrue(service.listStreamDetails(REGION).isEmpty(),
                 () -> label + " must not resurrect a concurrently deleted stream");
         AwsException notFound = assertThrows(AwsException.class,
                 () -> service.describeStream(META_STREAM, REGION),

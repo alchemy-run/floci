@@ -168,7 +168,6 @@ public class ElbV2QueryHandler {
             xml.start("member").raw(loadBalancerXml(lb)).end("member");
         }
         xml.end("LoadBalancers")
-           .elem("NextMarker", "")
            .end("DescribeLoadBalancersResult")
            .raw(AwsQueryResponse.responseMetadata())
            .end("DescribeLoadBalancersResponse");
@@ -252,7 +251,9 @@ public class ElbV2QueryHandler {
                 .start("SetSecurityGroupsResponse", AwsNamespaces.ELB_V2)
                 .start("SetSecurityGroupsResult")
                   .start("SecurityGroupIds");
-        for (String sg : sgs) xml.start("member").elem("member", sg).end("member");
+        for (String sg : sgs) {
+            xml.elem("member", sg);
+        }
         xml.end("SecurityGroupIds")
            .end("SetSecurityGroupsResult")
            .raw(AwsQueryResponse.responseMetadata())
@@ -336,7 +337,6 @@ public class ElbV2QueryHandler {
             xml.start("member").raw(targetGroupXml(tg)).end("member");
         }
         xml.end("TargetGroups")
-           .elem("NextMarker", "")
            .end("DescribeTargetGroupsResult")
            .raw(AwsQueryResponse.responseMetadata())
            .end("DescribeTargetGroupsResponse");
@@ -458,7 +458,6 @@ public class ElbV2QueryHandler {
             xml.start("member").raw(listenerXml(l)).end("member");
         }
         xml.end("Listeners")
-           .elem("NextMarker", "")
            .end("DescribeListenersResult")
            .raw(AwsQueryResponse.responseMetadata())
            .end("DescribeListenersResponse");
@@ -475,6 +474,7 @@ public class ElbV2QueryHandler {
         String listenerArn = p.getFirst("ListenerArn");
         String protocol = p.getFirst("Protocol");
         Integer port = parseIntOrNull(p.getFirst("Port"));
+        ElbV2Service.validatePort(port, "port");
         String sslPolicy = p.getFirst("SslPolicy");
         List<String> certs = parseCertificateList(p, "Certificates");
         List<Action> defaultActions = parseActions(p, "DefaultActions", false);
@@ -579,7 +579,6 @@ public class ElbV2QueryHandler {
             xml.start("member").raw(ruleXml(r)).end("member");
         }
         xml.end("Rules")
-           .elem("NextMarker", "")
            .end("DescribeRulesResult")
            .raw(AwsQueryResponse.responseMetadata())
            .end("DescribeRulesResponse");
@@ -746,7 +745,6 @@ public class ElbV2QueryHandler {
             xml.start("member").elem("Name", e.getKey()).elem("Max", e.getValue()).end("member");
         }
         xml.end("Limits")
-           .elem("NextMarker", "")
            .end("DescribeAccountLimitsResult")
            .raw(AwsQueryResponse.responseMetadata())
            .end("DescribeAccountLimitsResponse");
@@ -897,18 +895,18 @@ public class ElbV2QueryHandler {
         xml.elem("LoadBalancerArn", l.getLoadBalancerArn());
         if (l.getPort() != null) xml.elem("Port", String.valueOf(l.getPort()));
         xml.elem("Protocol", safe(l.getProtocol()));
-        xml.elem("SslPolicy", safe(l.getSslPolicy()));
-        xml.start("Certificates");
+        xml.elem("SslPolicy", l.getSslPolicy());
         // DescribeListeners returns only the default certificate. SNI extras
         // are listed by DescribeListenerCertificates.
         List<String> listenerCerts = l.getCertificates();
         if (listenerCerts != null && !listenerCerts.isEmpty()) {
-            xml.start("member")
+            xml.start("Certificates")
+               .start("member")
                .elem("CertificateArn", listenerCerts.getFirst())
                .elem("IsDefault", true)
-               .end("member");
+               .end("member")
+               .end("Certificates");
         }
-        xml.end("Certificates");
         xml.start("DefaultActions");
         List<Action> defaultActions = l.getDefaultActions();
         if (defaultActions != null) {

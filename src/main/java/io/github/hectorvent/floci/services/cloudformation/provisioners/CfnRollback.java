@@ -1,7 +1,13 @@
 package io.github.hectorvent.floci.services.cloudformation.provisioners;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.services.cloudformation.model.StackResource;
 import org.jboss.logging.Logger;
+
+import java.util.function.BiConsumer;
 
 /**
  * Rollback bookkeeping shared by every {@link CfnResourceProvisioner} and read by
@@ -11,6 +17,7 @@ import org.jboss.logging.Logger;
 public final class CfnRollback {
 
     private static final Logger LOG = Logger.getLogger(CfnRollback.class);
+    private static final ObjectMapper MAPPER = new ObjectMapper();
 
     /**
      * Marks a resource whose backing entity this stack created. {@code CloudFormationService} reads
@@ -33,6 +40,21 @@ public final class CfnRollback {
      * is live. Lives here for the same reason as the marker above.
      */
     public static final String UPDATE_ROLLBACK_FAILURE_ATTR = "__FlociUpdateRollbackFailure";
+
+    /**
+     * Holds the child stack deployment a nested-stack resource carried before the update in flight
+     * re-provisioned it: the tags it ran with, its template body and the parameter values it was
+     * given. Descendant tags are captured too, without their deployment state. Written by
+     * {@code CloudFormationService.executeNestedStack} before it runs the child's template and
+     * spent once the update commits or the rollback restores the child's tags. A child whose live
+     * deployment no longer matches it is owed a template or parameter rollback this build defers,
+     * so the walker fails the stack honestly instead of restoring tags alone.
+     */
+    public static final String NESTED_STACK_UPDATE_SNAPSHOT_ATTR = "__FlociNestedStackUpdateSnapshot";
+
+    /** The namespace, credentials, secret and attributes overwritten by a Serverless namespace update. */
+    public static final String REDSHIFT_SERVERLESS_NAMESPACE_UPDATE_SNAPSHOT_ATTR =
+            "__FlociRedshiftServerlessNamespaceUpdateSnapshot";
 
     /**
      * Holds the configuration a pipe carried before the update in flight mutated it, so a failed
@@ -78,6 +100,9 @@ public final class CfnRollback {
      * {@code rollbackUpdate}.
      */
     public static final String EVENT_INVOKE_CONFIG_SNAPSHOT_ATTR = "__FlociEventInvokeConfigSnapshot";
+
+    /** The code signing config an in-place update changed, as stored, so a failed stack update can put it back. */
+    public static final String CODE_SIGNING_CONFIG_UPDATE_SNAPSHOT_ATTR = "__FlociCodeSigningConfigUpdateSnapshot";
 
     /** The prior WAFv2 logging configuration for an in-place update that may need rollback. */
     public static final String WAF_LOGGING_UPDATE_SNAPSHOT_ATTR = "__FlociWafLoggingUpdateSnapshot";
@@ -128,9 +153,11 @@ public final class CfnRollback {
 
     /**
      * Holds the name, description and endpoint configuration a REST API had before an in-place
-     * update patched them, and whether the update also re-applied an OpenAPI document, so a failed
-     * stack update can put them back. Written by {@code ApiGatewayRestApiCfnProvisioner} before its
-     * update call and spent by its {@code rollbackUpdate}.
+     * update patched them, so a failed stack update can put them back, and a {@code body} flag set
+     * once the update's OpenAPI document was applied, which the snapshot cannot undo. Written by
+     * {@code ApiGatewayRestApiCfnProvisioner} before its update call and spent by its
+     * {@code rollbackUpdate}; when its own undo did not complete, the provisioner carries it onto
+     * the restored resource through {@code mergeFailedUpdateResourceTracking}.
      */
     public static final String REST_API_UPDATE_SNAPSHOT_ATTR = "__FlociRestApiUpdateSnapshot";
 
@@ -141,6 +168,14 @@ public final class CfnRollback {
      * {@code rollbackUpdate}.
      */
     public static final String LAMBDA_WEB_UPDATE_SNAPSHOT_ATTR = "__FlociLambdaWebUpdateSnapshot";
+
+    /**
+     * Holds what an update did to an EC2 flow log, so a failed stack update can undo it: the tag
+     * keys it touched on the reused log with the values they had, or the log it created because
+     * the stack's own was gone. Written by {@code Ec2FlowLogCfnProvisioner} before its tag write or
+     * right after that creation, and spent by its {@code rollbackUpdate}.
+     */
+    public static final String FLOW_LOG_UPDATE_SNAPSHOT_ATTR = "__FlociEc2FlowLogUpdateSnapshot";
 
     /**
      * Holds the function ARN, status, caching flag, token settings and tags an IoT authorizer
@@ -160,6 +195,15 @@ public final class CfnRollback {
     public static final String API_KEY_UPDATE_SNAPSHOT_ATTR = "__FlociApiKeyUpdateSnapshot";
 
     /**
+     * Holds the name, description, stages with their method throttles, throttle, quota and tags a
+     * usage plan carried before an in-place update changed them, or the plan an update created because
+     * the one the stack held was gone, so a failed stack update can put the plan back or delete the
+     * created one. Written by {@code ApiGatewayUsagePlanCfnProvisioner} before its first in-place
+     * mutating call or right after that creation, and spent by its {@code rollbackUpdate}.
+     */
+    public static final String USAGE_PLAN_UPDATE_SNAPSHOT_ATTR = "__FlociUsagePlanUpdateSnapshot";
+
+    /**
      * Holds the role, object prefixes, tagging action and tags a GuardDuty Malware Protection plan
      * carried before an in-place update changed them, or the plan an update created because the one
      * the stack held was gone, so a failed stack update can put the plan back or delete the created
@@ -167,6 +211,26 @@ public final class CfnRollback {
      * call or right after that creation, and spent by its {@code rollbackUpdate}.
      */
     public static final String GUARDDUTY_PLAN_UPDATE_SNAPSHOT_ATTR = "__FlociGuardDutyPlanUpdateSnapshot";
+
+    /**
+     * Holds what an AppConfig application, environment, configuration profile or deployment
+     * strategy carried before an in-place update changed it, with the IDs that address it, so a
+     * failed stack update can put it back. Written by {@code AppConfigCfnProvisioner} before its
+     * update call and spent by its {@code rollbackUpdate}; when its own undo did not complete, the
+     * provisioner carries it onto the restored resource through
+     * {@code mergeFailedUpdateResourceTracking}.
+     */
+    public static final String APPCONFIG_UPDATE_SNAPSHOT_ATTR = "__FlociAppConfigUpdateSnapshot";
+
+    /**
+     * Holds the members an AppSync GraphQL API, data source, function, resolver or API key carried
+     * before an in-place update changed or cleared them, in the request shape its update call takes,
+     * with the identifiers that address it, so a failed stack update can put them back. Written by
+     * {@code AppSyncCfnProvisioner} before its update call and spent by its {@code rollbackUpdate};
+     * when its own undo did not complete, the provisioner carries it onto the restored resource
+     * through {@code mergeFailedUpdateResourceTracking}.
+     */
+    public static final String APPSYNC_UPDATE_SNAPSHOT_ATTR = "__FlociAppSyncUpdateSnapshot";
 
     /**
      * Holds the name and tags an API Gateway V2 VPC link carried before an in-place update changed
@@ -327,9 +391,12 @@ public final class CfnRollback {
      * deleted again by {@code undoCreate}, a reused one is put back by {@code undoInPlace}, which
      * restores the provisioner's snapshot and is a no-op when there is none. The engine only removes
      * a failed create it can see, and on a failed update it restores the previous resource metadata
-     * and discards the attempted one, snapshot included, so the undo has to happen here.
+     * and discards the attempted one, snapshot included, so the undo has to happen here. A
+     * provisioner whose snapshot a ContinueUpdateRollback still needs after an undo that failed
+     * carries it in {@link CfnResourceProvisioner#mergeFailedUpdateResourceTracking}.
      *
-     * <p>A compensation that fails is reported, never hidden. A created entity carries
+     * <p>A compensation that fails is reported, never hidden, and is attached to the failure as
+     * suppressed unless it rethrows that same exception. A created entity carries
      * {@link #ROLLBACK_OWNED_ATTR} while the steps run, so the engine's create rollback deletes it
      * (and reports that failing) if the undo here could not, and during an update the entity is
      * also listed in the cleanup record, which the engine carries onto the restored resource and
@@ -352,7 +419,9 @@ public final class CfnRollback {
                     undoCreate.run();
                     r.getAttributes().remove(ROLLBACK_OWNED_ATTR);
                 } catch (RuntimeException undo) {
-                    e.addSuppressed(undo);
+                    if (undo != e) {
+                        e.addSuppressed(undo);
+                    }
                     String reason = "Could not remove " + r.getPhysicalId() + ", created for " + r.getLogicalId()
                             + " by a failed update: " + undo.getMessage();
                     LOG.warn(reason);
@@ -367,7 +436,9 @@ public final class CfnRollback {
                 try {
                     undoInPlace.run();
                 } catch (RuntimeException undo) {
-                    e.addSuppressed(undo);
+                    if (undo != e) {
+                        e.addSuppressed(undo);
+                    }
                     String reason = "Could not restore " + r.getPhysicalId() + " for " + r.getLogicalId()
                             + " after a failed update: " + undo.getMessage();
                     LOG.warn(reason);
@@ -376,5 +447,59 @@ public final class CfnRollback {
             }
             throw e;
         }
+    }
+
+    /**
+     * Records that an update created the entity because the one at the prior physical id was gone,
+     * so {@link #undoCreatedByUpdate} can delete it and name the prior id again.
+     */
+    public static void recordCreatedByUpdate(StackResource r, ProvisionContext ctx, String snapshotAttr) {
+        ObjectNode snapshot = MAPPER.createObjectNode();
+        snapshot.put("region", ctx.region());
+        snapshot.put("createdId", r.getPhysicalId());
+        snapshot.put("priorId", ctx.priorPhysicalId());
+        r.getAttributes().put(snapshotAttr, snapshot.toString());
+    }
+
+    /** The update snapshot held in {@code snapshotAttr}, or null when the resource carries none. */
+    public static JsonNode updateSnapshot(StackResource resource, String snapshotAttr) {
+        String raw = resource.getAttributes().get(snapshotAttr);
+        if (raw == null) {
+            return null;
+        }
+        try {
+            return MAPPER.readTree(raw);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Could not read the update snapshot " + snapshotAttr + " for "
+                    + resource.getLogicalId(), e);
+        }
+    }
+
+    /** A snapshotted string, or null when the field is absent or JSON null. */
+    public static String snapshotText(JsonNode snapshot, String field) {
+        JsonNode value = snapshot.get(field);
+        return value == null || value.isNull() ? null : value.asText();
+    }
+
+    /**
+     * Undoes an update {@link #recordCreatedByUpdate} recorded: deletes the created entity with
+     * {@code deleteInRegion}, which takes its id and region, names the prior id again as the physical
+     * id and in {@code idAttribute}, and spends the snapshot. Returns false, changing nothing, when
+     * the update did not create the entity.
+     */
+    public static boolean undoCreatedByUpdate(StackResource resource, JsonNode snapshot, String snapshotAttr,
+                                              String idAttribute, BiConsumer<String, String> deleteInRegion) {
+        String createdId = snapshotText(snapshot, "createdId");
+        if (createdId == null) {
+            return false;
+        }
+        // Deleted before the resource names the prior id again, so a failed delete leaves the
+        // resource naming the created entity and deleting the stack still removes it.
+        deleteInRegion.accept(createdId, snapshot.path("region").asText());
+        String priorId = snapshot.path("priorId").asText();
+        resource.setPhysicalId(priorId);
+        resource.getAttributes().put(idAttribute, priorId);
+        resource.getAttributes().remove(snapshotAttr);
+        return true;
     }
 }

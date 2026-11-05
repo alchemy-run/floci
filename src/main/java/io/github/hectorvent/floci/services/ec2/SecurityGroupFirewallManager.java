@@ -104,6 +104,13 @@ public class SecurityGroupFirewallManager {
     public Namespace createNamespace(String service, String resourceId, String accountId, String region,
                                      Optional<String> dockerNetwork, Map<Integer, Integer> portBindings,
                                      Map<String, String> extraLabels) {
+        return createNamespace(service, resourceId, accountId, region, dockerNetwork, portBindings, extraLabels, null);
+    }
+
+    /** Lets the owning service choose the host interface for published namespace ports. */
+    public Namespace createNamespace(String service, String resourceId, String accountId, String region,
+                                     Optional<String> dockerNetwork, Map<Integer, Integer> portBindings,
+                                     Map<String, String> extraLabels, String hostIp) {
         if (!enabled()) {
             throw new IllegalStateException("Security-group enforcement is disabled");
         }
@@ -131,7 +138,13 @@ public class SecurityGroupFirewallManager {
                         ContainerStorageHelper.OWNER_LABEL, ContainerStorageHelper.ownerIdentity(config)))
                 .withLabels(extraLabels);
         if (portBindings != null) {
-            portBindings.forEach(builder::withPortBinding);
+            portBindings.forEach((containerPort, hostPort) -> {
+                if (hostIp == null) {
+                    builder.withPortBinding(containerPort, hostPort);
+                } else {
+                    builder.withPortBinding(containerPort, hostPort, hostIp);
+                }
+            });
         }
         ContainerSpec spec = builder.build();
         String helperId = null;
@@ -178,6 +191,17 @@ public class SecurityGroupFirewallManager {
             }
             quarantine(helperId);
             throw e;
+        }
+    }
+
+    /** Removes the port-owning helper without forgetting its identity if Docker fails. */
+    public void removeNamespaceStrict(String eniId) {
+        ProtectedEndpoint endpoint;
+        synchronized (this) {
+            endpoint = endpoints.get(eniId);
+        }
+        if (endpoint != null) {
+            lifecycleManager.removeIfExistsStrict(endpoint.helperId());
         }
     }
 

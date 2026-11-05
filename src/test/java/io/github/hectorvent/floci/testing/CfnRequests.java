@@ -1,6 +1,9 @@
 package io.github.hectorvent.floci.testing;
 
+import io.github.hectorvent.floci.core.common.XmlParser;
 import io.restassured.specification.RequestSpecification;
+
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 
@@ -13,4 +16,26 @@ public final class CfnRequests {
                 .formParam("Action", action);
         return stackName == null ? request : request.formParam("StackName", stackName);
     }
+
+    public static String physicalIdUnauthenticated(String stackName, String logicalId) {
+        return physicalId(stackName, logicalId, null);
+    }
+
+    public static String physicalId(String stackName, String logicalId, String authorization) {
+        RequestSpecification request = cfn("DescribeStackResource", stackName)
+                .formParam("LogicalResourceId", logicalId);
+        if (authorization != null) {
+            request.header("Authorization", authorization);
+        }
+        return request.when().post("/").then().statusCode(200)
+                .extract().xmlPath().getString("**.find { it.name() == 'PhysicalResourceId' }");
+    }
+
+    /** Returns the stack-level tags reported by DescribeStacks. */
+    public static Map<String, String> tags(String stackName) {
+        String xml = cfn("DescribeStacks", stackName).when().post("/")
+                .then().statusCode(200).extract().asString();
+        return XmlParser.extractPairs(xml, "member", "Key", "Value");
+    }
+
 }

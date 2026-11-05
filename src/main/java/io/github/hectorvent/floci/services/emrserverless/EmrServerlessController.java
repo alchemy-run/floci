@@ -1,8 +1,5 @@
 package io.github.hectorvent.floci.services.emrserverless;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.services.emrserverless.model.Application;
@@ -31,7 +28,6 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
-import jakarta.ws.rs.HeaderParam;
 import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.Path;
@@ -41,7 +37,6 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 
 import java.util.List;
-import java.util.Map;
 
 @Path("/_emrserverless/applications")
 @ApplicationScoped
@@ -102,8 +97,6 @@ public class EmrServerlessController {
                                                      UpdateApplicationRequest request) {
         Application app = service.updateApplication(applicationId, request);
         UpdateApplicationResponse response = new UpdateApplicationResponse();
-        // AWS answers with the application; the flat fields are kept for older floci callers.
-        response.setApplication(app);
         response.setApplicationId(app.getApplicationId());
         response.setArn(app.getArn());
         response.setName(app.getName());
@@ -200,38 +193,5 @@ public class EmrServerlessController {
         response.setApplicationId(run.getApplicationId());
         response.setJobRunId(run.getJobRunId());
         return response;
-    }
-
-
-    @GET
-    @Path("/{applicationId}/jobruns/{jobRunId}/dashboard")
-    public void getDashboardForJobRun(@PathParam("applicationId") String applicationId,
-                                      @PathParam("jobRunId") String jobRunId) {
-        service.getDashboardForJobRun(applicationId, jobRunId);
-    }
-
-
-    @GET
-    @Path("/{applicationId}/sessions")
-    public Map<String, Object> listSessions(@PathParam("applicationId") String applicationId,
-                                           @QueryParam("maxResults") String maxResults,
-                                           @QueryParam("nextToken") String nextToken) {
-        return Map.of("sessions", service.listSessions(applicationId,
-                Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken));
-    }
-
-    @POST
-    @Path("/{applicationId}/sessions")
-    public void startSession(@PathParam("applicationId") String applicationId, JsonNode request) {
-        service.startSession(applicationId, request);
-    }
-
-    @GET
-    @Path("/{applicationId}/dashboard")
-    public void getResourceDashboard(@PathParam("applicationId") String applicationId,
-                                     @QueryParam("resourceId") String resourceId,
-                                     @QueryParam("resourceType") String resourceType,
-                                     @HeaderParam("Authorization") String authorization) {
-        service.getResourceDashboard(applicationId, resourceId, resourceType, authorization);
     }
 }

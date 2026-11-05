@@ -255,6 +255,43 @@ class SqsServiceTest {
     }
 
     @ParameterizedTest
+    @ValueSource(strings = {"901", "-1", "abc", " 5"})
+    void delaySecondsAttributeOutsideAwsRangeIsRejected(String invalid) {
+        String region = "eu-west-1";
+        AwsException onCreate = assertThrows(AwsException.class,
+                () -> sqsService.createQueue("delay-range", Map.of("DelaySeconds", invalid), region));
+        assertEquals("InvalidAttributeValue", onCreate.getErrorCode());
+        assertEquals("Invalid value for the parameter DelaySeconds.", onCreate.getMessage());
+
+        Queue queue = sqsService.createQueue("delay-range", null, region);
+        AwsException onSet = assertThrows(AwsException.class,
+                () -> sqsService.setQueueAttributes(queue.getQueueUrl(), Map.of("DelaySeconds", invalid), region));
+        assertEquals("InvalidAttributeValue", onSet.getErrorCode());
+        assertEquals("Invalid value for the parameter DelaySeconds.", onSet.getMessage());
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {901, -1})
+    void sendMessageRejectsDelaySecondsOutsideAwsRange(int delay) {
+        String region = "eu-west-1";
+        Queue queue = sqsService.createQueue("delay-send", null, region);
+        AwsException e = assertThrows(AwsException.class,
+                () -> sqsService.sendMessage(queue.getQueueUrl(), "x", delay, region));
+        assertEquals("InvalidParameterValue", e.getErrorCode());
+        assertEquals("Value " + delay + " for parameter DelaySeconds is invalid. Reason: Must be >= 0 and <= 900.",
+                e.getMessage());
+    }
+
+    @Test
+    void delaySecondsAcceptsAwsRangeBounds() {
+        String region = "eu-west-1";
+        Queue queue = sqsService.createQueue("delay-bounds", Map.of("DelaySeconds", "900"), region);
+        sqsService.setQueueAttributes(queue.getQueueUrl(), Map.of("DelaySeconds", "0"), region);
+        sqsService.sendMessage(queue.getQueueUrl(), "x", 0, region);
+        sqsService.sendMessage(queue.getQueueUrl(), "x", 900, region);
+    }
+
+    @ParameterizedTest
     @CsvSource({"60, 60", "1209600, 1209600", "060, 60", "+60, 60"})
     void messageRetentionPeriodIsStoredInCanonicalForm(String value, String stored) {
         String region = "eu-west-1";
@@ -266,6 +303,69 @@ class SqsServiceTest {
         sqsService.setQueueAttributes(updated.getQueueUrl(), Map.of("MessageRetentionPeriod", value), region);
         assertEquals(stored, sqsService.getQueueAttributes(updated.getQueueUrl(),
                 List.of("MessageRetentionPeriod"), region).get("MessageRetentionPeriod"));
+    }
+
+    @Test
+    void redrivePolicyIsStoredAsCompactJson() {
+        String region = "eu-west-1";
+        Queue dlq = sqsService.createQueue("redrive-compact-dlq", null, region);
+        String dlqArn = sqsService.getQueueAttributes(dlq.getQueueUrl(), List.of("QueueArn"), region).get("QueueArn");
+        String spaced = "{\n  \"deadLetterTargetArn\": \"" + dlqArn + "\",\n  \"maxReceiveCount\": 3\n}\n";
+        String compact = "{\"deadLetterTargetArn\":\"" + dlqArn + "\",\"maxReceiveCount\":3}";
+
+        Queue created = sqsService.createQueue("redrive-compact-created", Map.of("RedrivePolicy", spaced), region);
+        assertEquals(compact, sqsService.getQueueAttributes(created.getQueueUrl(),
+                List.of("RedrivePolicy"), region).get("RedrivePolicy"));
+
+        Queue updated = sqsService.createQueue("redrive-compact-updated", null, region);
+        sqsService.setQueueAttributes(updated.getQueueUrl(), Map.of("RedrivePolicy", spaced), region);
+        assertEquals(compact, sqsService.getQueueAttributes(updated.getQueueUrl(),
+                List.of("RedrivePolicy"), region).get("RedrivePolicy"));
+    }
+
+    @Test
+    void redriveAllowPolicyIsStoredAsCompactJson() {
+        String region = "eu-west-1";
+        Queue queue = sqsService.createQueue("redrive-allow-compact", null, region);
+        sqsService.setQueueAttributes(queue.getQueueUrl(),
+                Map.of("RedriveAllowPolicy", "{ \"redrivePermission\": \"allowAll\" }\n"), region);
+        assertEquals("{\"redrivePermission\":\"allowAll\"}", sqsService.getQueueAttributes(queue.getQueueUrl(),
+                List.of("RedriveAllowPolicy"), region).get("RedriveAllowPolicy"));
+    }
+
+    @Test
+    void createQueue_recreateWithSameRedrivePolicyInOtherWhitespaceIsNotAConflict() {
+        String region = "eu-west-1";
+        Queue dlq = sqsService.createQueue("redrive-recreate-dlq", null, region);
+        String dlqArn = sqsService.getQueueAttributes(dlq.getQueueUrl(), List.of("QueueArn"), region).get("QueueArn");
+        String compact = "{\"deadLetterTargetArn\":\"" + dlqArn + "\",\"maxReceiveCount\":3}";
+        Queue queue = sqsService.createQueue("redrive-recreate", Map.of("RedrivePolicy", compact), region);
+
+        Queue same = sqsService.createQueue("redrive-recreate", Map.of("RedrivePolicy", compact + "\n"), region);
+        assertEquals(queue.getQueueUrl(), same.getQueueUrl());
+    }
+
+    @Test
+    void createQueue_recreateMatchesASavedNonCompactRedrivePolicy() {
+        String region = "eu-west-1";
+        InMemoryStorage<String, Queue> store = new InMemoryStorage<>();
+        SqsService service = new SqsService(store, 30, 1048576, BASE_URL, clock);
+        Queue dlq = service.createQueue("saved-redrive-dlq", null, region);
+        String dlqArn = service.getQueueAttributes(dlq.getQueueUrl(), List.of("QueueArn"), region).get("QueueArn");
+        String original = "{\"deadLetterTargetArn\":\"" + dlqArn + "\",\"maxReceiveCount\":3}\n";
+        Queue queue = service.createQueue("saved-redrive", Map.of("RedrivePolicy", original), region);
+
+        // A queue persisted by a build that stored the policy as sent, whitespace included.
+        String storageKey = store.keys().stream()
+                .filter(key -> key.endsWith("/saved-redrive"))
+                .findFirst().orElseThrow();
+        Queue stored = store.get(storageKey).orElseThrow();
+        stored.getAttributes().put("RedrivePolicy", original);
+        store.put(storageKey, stored);
+
+        Queue same = service.createQueue("saved-redrive", Map.of("RedrivePolicy", original), region);
+        assertEquals(queue.getQueueUrl(), same.getQueueUrl(),
+                "Resending the original CreateQueue request must not conflict with the saved queue");
     }
 
     @Test

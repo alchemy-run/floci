@@ -281,8 +281,7 @@ public class SesAccountController {
         if (node.isMissingNode() || node.isNull()) {
             if (required) {
                 throw SmithyValidationErrors.badRequest(
-                        "Value null at '" + path
-                                + "' failed to satisfy constraint: Member must not be null");
+                        SmithyValidationErrors.notNull(path));
             }
             return false;
         }

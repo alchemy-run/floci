@@ -1,7 +1,6 @@
 package io.github.hectorvent.floci.services.iam;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.iam.model.ServiceLastAccessedEntity;
@@ -48,6 +47,18 @@ public class ServiceLastAccessedService {
     }
 
     /**
+     * {@code AccessAdvisorUsageGranularityType}, checked on its own so the handler can read it
+     * before it resolves the ARN the report is for: an enum AWS declares is refused whether or not
+     * the entity exists. {@link #generate} checks it too, being reachable without the handler.
+     */
+    public static void validateGranularity(String granularity) {
+        if (granularity != null && !GRANULARITIES.contains(granularity)) {
+            throw IamValidationErrors.validationError("granularity", granularity,
+                    "Member must satisfy enum value set: [SERVICE_LEVEL, ACTION_LEVEL]");
+        }
+    }
+
+    /**
      * Records a completed job for {@code arn} together with the report it produced, and returns
      * it. The report is computed by the caller and stored here, because AWS fixes a report at
      * generation time and the {@code Get*} operations only retrieve it. There is no work left to
@@ -56,12 +67,7 @@ public class ServiceLastAccessedService {
     public ServiceLastAccessedJob generate(String accountId, String arn, String granularity,
                                            List<String> serviceNamespaces,
                                            List<ServiceLastAccessedEntity> entities) {
-        if (granularity != null && !GRANULARITIES.contains(granularity)) {
-            throw SmithyValidationErrors.validationError(
-                    "Value '" + granularity + "' at 'granularity' "
-                            + "failed to satisfy constraint: Member must satisfy enum value set: "
-                            + "[SERVICE_LEVEL, ACTION_LEVEL]");
-        }
+        validateGranularity(granularity);
         Instant now = Instant.now();
         // jobIDType is min 36 / max 36, which is exactly a UUID string.
         ServiceLastAccessedJob job = new ServiceLastAccessedJob(UUID.randomUUID().toString(), arn,

@@ -295,7 +295,7 @@ public class HttpProxyInvoker {
 
     public ProxyResult invoke(Integration integration, RequestContext ctx, ProxyOptions options) {
         // 1. Resolve target URL from IntegrationUri template + captured path params
-        String resolvedUrl = PathTemplateResolver.resolve(integration.getIntegrationUri(), ctx.pathParams());
+        String resolvedUrl = PathTemplateResolver.resolve(integration.getIntegrationUri(), ctx.targetPathParams());
 
         // 2. Determine HTTP method (integration.method=ANY/null means use the inbound method)
         String method = integration.getIntegrationMethod();
@@ -321,12 +321,21 @@ public class HttpProxyInvoker {
         }
         builder.setBody(ctx.body());
 
-        // 4. Apply RequestParameters
-        mapper.apply(integration.getRequestParameters(), builder, ctx);
+        // 4. Apply RequestParameters and settle the target URL. Everything here parses the URL, and
+        // an integration URI or mapped path that does not parse is the backend call failing.
+        String finalUrl;
+        boolean pinned;
+        try {
+            mapper.apply(integration.getRequestParameters(), builder, ctx);
+            finalUrl = buildFinalUrl(builder);
+            pinned = finalUrl.startsWith("http://") && (hasHeader(builder, "Host") || isNamedHost(finalUrl));
+        } catch (IllegalArgumentException e) {
+            LOG.warnv("HTTP_PROXY: invalid target URL: {0}", e.getMessage());
+            return errorResult("Bad Gateway: invalid target URL: " + e.getMessage());
+        }
 
         // 5. Build java.net.http.HttpRequest
-        String finalUrl = buildFinalUrl(builder);
-        if (finalUrl.startsWith("http://") && (hasHeader(builder, "Host") || isNamedHost(finalUrl))) {
+        if (pinned) {
             try {
                 return invokeHttpPinned(finalUrl, method, builder, options.timeout());
             } catch (PinnedHttpClient.ResponseTooLargeException ignored) {
@@ -349,7 +358,6 @@ public class HttpProxyInvoker {
 
         switch (method.toUpperCase()) {
             case "GET" -> hrb.GET();
-            case "DELETE" -> hrb.DELETE();
             case "HEAD" -> hrb.method("HEAD", HttpRequest.BodyPublishers.noBody());
             case "OPTIONS" -> hrb.method("OPTIONS", HttpRequest.BodyPublishers.noBody());
             default -> hrb.method(method.toUpperCase(),

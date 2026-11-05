@@ -27,6 +27,7 @@ import io.github.hectorvent.floci.services.ssoadmin.model.SsoInstance;
 import io.github.hectorvent.floci.services.ssoadmin.model.TrustedTokenIssuer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.Mockito;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -55,8 +56,8 @@ class SsoAdminServiceTest {
 
     @BeforeEach
     void setUp() {
-        identityStoreService = org.mockito.Mockito.mock(IdentityStoreService.class);
-        organizationsService = org.mockito.Mockito.mock(OrganizationsService.class);
+        identityStoreService = Mockito.mock(IdentityStoreService.class);
+        organizationsService = Mockito.mock(OrganizationsService.class);
         applicationAccessScopes = new InMemoryStorage<>();
         applicationAuthenticationMethods = new InMemoryStorage<>();
         applicationGrants = new InMemoryStorage<>();
@@ -89,6 +90,7 @@ class SsoAdminServiceTest {
                 new InMemoryStorage<String, String>(),
                 identityStoreService,
                 organizationsService,
+                new SsoAdminRequestContext(),
                 ACCOUNT_ID,
                 "us-east-1");
         service.ensureBootstrapInstance(ACCOUNT_ID, "us-east-1");
@@ -380,7 +382,7 @@ class SsoAdminServiceTest {
         request.put("InstanceArn", instance.instanceArn());
         emptyService.deleteInstance(request, ACCOUNT_ID);
         assertError("ResourceNotFoundException", () -> emptyService.getApplication(createdApplication.applicationArn()));
-        org.mockito.Mockito.verify(identityStoreService).deleteIdentityStore(instance.identityStoreId());
+        Mockito.verify(identityStoreService).deleteIdentityStore(instance.identityStoreId());
     }
 
     @Test
@@ -505,7 +507,7 @@ class SsoAdminServiceTest {
 
     @Test
     void createInstanceRejectsOrganizationsManagementAccounts() {
-        org.mockito.Mockito.when(organizationsService.isManagementAccount(ACCOUNT_ID)).thenReturn(true);
+        Mockito.when(organizationsService.isManagementAccount(ACCOUNT_ID)).thenReturn(true);
         SsoAdminService emptyService = emptyService();
 
         assertError("AccessDeniedException",
@@ -546,7 +548,7 @@ class SsoAdminServiceTest {
         providerFilter.putObject("Filter")
                 .put("ApplicationProvider", "arn:aws:sso::aws:applicationProvider/custom")
                 .put("ApplicationAccount", ACCOUNT_ID);
-        assertTrue(service.listApplications(providerFilter, ACCOUNT_ID).items().containsAll(java.util.List.of(first, second)));
+        assertTrue(service.listApplications(providerFilter, ACCOUNT_ID).items().containsAll(List.of(first, second)));
 
         ObjectNode memberWithoutFilter = mapper.createObjectNode().put("InstanceArn", service.getInstanceArn());
         assertError("AccessDeniedException",
@@ -629,12 +631,12 @@ class SsoAdminServiceTest {
 
         ApplicationAccessScope created = service.putApplicationAccessScope(request);
         assertEquals("api:read", created.scope());
-        assertEquals(java.util.List.of(service.getInstanceArn()), created.authorizedTargets());
+        assertEquals(List.of(service.getInstanceArn()), created.authorizedTargets());
         assertEquals(created, service.getApplicationAccessScope(request));
 
         request.putArray("AuthorizedTargets").add(application.applicationArn());
         ApplicationAccessScope updated = service.putApplicationAccessScope(request);
-        assertEquals(java.util.List.of(application.applicationArn()), updated.authorizedTargets());
+        assertEquals(List.of(application.applicationArn()), updated.authorizedTargets());
 
         ObjectNode invalid = request.deepCopy();
         invalid.putArray("AuthorizedTargets").add("not-an-arn");
@@ -645,7 +647,7 @@ class SsoAdminServiceTest {
     void listApplicationAccessScopesPaginatesScopesForTheRequestedApplication() {
         SsoApplication application = createApplication("List Scope App", "list-scope-app-token");
         SsoApplication otherApplication = createApplication("Other Scope App", "other-scope-app-token");
-        for (String scope : java.util.List.of("api:read", "api:write")) {
+        for (String scope : List.of("api:read", "api:write")) {
             ObjectNode put = mapper.createObjectNode();
             put.put("ApplicationArn", application.applicationArn());
             put.put("Scope", scope);
@@ -664,7 +666,7 @@ class SsoAdminServiceTest {
         PaginatedResult<ApplicationAccessScope> first = service.listApplicationAccessScopes(request);
         assertEquals(1, first.items().size());
         assertEquals("api:read", first.items().get(0).scope());
-        assertEquals(java.util.List.of(service.getInstanceArn()), first.items().get(0).authorizedTargets());
+        assertEquals(List.of(service.getInstanceArn()), first.items().get(0).authorizedTargets());
         assertNotNull(first.nextToken());
 
         request.put("NextToken", first.nextToken());
@@ -690,7 +692,7 @@ class SsoAdminServiceTest {
         String scope = "api:read";
         String key = SsoAdminService.applicationAccessScopeKey(application.applicationArn(), scope);
         applicationAccessScopes.put(key, new ApplicationAccessScope(
-                application.applicationArn(), scope, java.util.List.of(service.getInstanceArn())));
+                application.applicationArn(), scope, List.of(service.getInstanceArn())));
 
         ObjectNode request = mapper.createObjectNode();
         request.put("ApplicationArn", application.applicationArn());
@@ -1044,7 +1046,7 @@ class SsoAdminServiceTest {
     void listApplicationProvidersReturnsCustomProviderAndValidatesPagination() {
         ObjectNode request = mapper.createObjectNode();
         PaginatedResult<String> page = service.listApplicationProviders(request, "us-east-1");
-        assertEquals(java.util.List.of("arn:aws:sso::aws:applicationProvider/custom"), page.items());
+        assertEquals(List.of("arn:aws:sso::aws:applicationProvider/custom"), page.items());
         assertEquals(null, page.nextToken());
 
         ObjectNode invalidMaxResults = mapper.createObjectNode().put("MaxResults", 101);
@@ -1090,7 +1092,7 @@ class SsoAdminServiceTest {
         groupAssignment.put("PrincipalId", groupId);
         groupAssignment.put("PrincipalType", "GROUP");
         service.createApplicationAssignment(groupAssignment);
-        org.mockito.Mockito.when(identityStoreService.groupIdsForUser(service.getIdentityStoreId(), PRINCIPAL_ID))
+        Mockito.when(identityStoreService.groupIdsForUser(service.getIdentityStoreId(), PRINCIPAL_ID))
                 .thenReturn(Set.of(groupId));
 
         ObjectNode request = mapper.createObjectNode();
@@ -1298,7 +1300,7 @@ class SsoAdminServiceTest {
 
     @Test
     void addRegionEnforcesTheDocumentedSixRegionQuotaIncludingPrimary() {
-        for (String region : java.util.List.of("us-west-1", "us-west-2", "eu-west-1", "eu-central-1", "ap-south-1")) {
+        for (String region : List.of("us-west-1", "us-west-2", "eu-west-1", "eu-central-1", "ap-south-1")) {
             ObjectNode request = mapper.createObjectNode();
             request.put("InstanceArn", service.getInstanceArn());
             request.put("RegionName", region);
@@ -1586,6 +1588,41 @@ class SsoAdminServiceTest {
                 () -> accountInstanceService.listAssignmentsForPrincipal(accountInstanceRequest, ACCOUNT_ID));
     }
 
+    /**
+     * A {@code ProvisionPermissionSet} for {@code ALL_PROVISIONED_ACCOUNTS} provisions the permission set to the
+     * accounts its permission check found it provisioned to, not to one another request provisioned it to in between:
+     * a permission set change then leaves that account not provisioned, and this request was not checked on it.
+     */
+    @Test
+    void allProvisionedAccountsAreTheOnesThePermissionCheckFound() {
+        PermissionSet permissionSet = createPermissionSet("PinnedAccounts");
+        service.createAssignment(assignmentRequest(permissionSet.arn()));
+        assertEquals(List.of("arn:aws:sso:::account/" + ACCOUNT_ID),
+                service.through("PermissionSetArn", permissionSet.arn(), "us-east-1"));
+
+        ObjectNode other = assignmentRequest(permissionSet.arn());
+        other.put("TargetId", "222222222222");
+        service.createAssignment(other);
+        service.attachPolicy(service.getInstanceArn(), permissionSet.arn(), "arn:aws:iam::aws:policy/ReadOnlyAccess");
+        ObjectNode all = mapper.createObjectNode();
+        all.put("InstanceArn", service.getInstanceArn());
+        all.put("PermissionSetArn", permissionSet.arn());
+        all.put("TargetType", "ALL_PROVISIONED_ACCOUNTS");
+        service.provisionPermissionSet(all);
+
+        assertEquals(List.of(ACCOUNT_ID), accountsProvisioned(permissionSet.arn(), "LATEST_PERMISSION_SET_PROVISIONED"));
+        assertEquals(List.of("222222222222"),
+                accountsProvisioned(permissionSet.arn(), "LATEST_PERMISSION_SET_NOT_PROVISIONED"));
+    }
+
+    private List<String> accountsProvisioned(String permissionSetArn, String status) {
+        ObjectNode request = mapper.createObjectNode();
+        request.put("InstanceArn", service.getInstanceArn());
+        request.put("PermissionSetArn", permissionSetArn);
+        request.put("ProvisioningStatus", status);
+        return service.listAccountsForProvisionedPermissionSet(request).items();
+    }
+
     @Test
     void provisionPermissionSetSupportsSingleAndAllProvisionedAccounts() {
         PermissionSet permissionSet = createPermissionSet("ProvisionAdmins");
@@ -1643,7 +1680,7 @@ class SsoAdminServiceTest {
     void listPermissionSetsProvisionedToAccountFiltersCurrentAndStaleProvisioning() {
         PermissionSet first = createPermissionSet("ProvisionedListOne");
         PermissionSet second = createPermissionSet("ProvisionedListTwo");
-        for (PermissionSet permissionSet : java.util.List.of(first, second)) {
+        for (PermissionSet permissionSet : List.of(first, second)) {
             ObjectNode provision = mapper.createObjectNode();
             provision.put("InstanceArn", service.getInstanceArn());
             provision.put("PermissionSetArn", permissionSet.arn());
@@ -1673,7 +1710,7 @@ class SsoAdminServiceTest {
         assertEquals(1, service.listPermissionSetsProvisionedToAccount(request).items().size());
 
         request.put("ProvisioningStatus", "LATEST_PERMISSION_SET_NOT_PROVISIONED");
-        assertEquals(java.util.List.of(first.arn()), service.listPermissionSetsProvisionedToAccount(request).items());
+        assertEquals(List.of(first.arn()), service.listPermissionSetsProvisionedToAccount(request).items());
 
         request.put("ProvisioningStatus", "FAILED");
         assertError("ValidationException", () -> service.listPermissionSetsProvisionedToAccount(request));
@@ -1682,7 +1719,7 @@ class SsoAdminServiceTest {
     @Test
     void listAccountsForProvisionedPermissionSetFiltersCurrentAndStaleAccounts() {
         PermissionSet permissionSet = createPermissionSet("ProvisionedAccountsList");
-        for (String accountId : java.util.List.of(ACCOUNT_ID, "210987654321")) {
+        for (String accountId : List.of(ACCOUNT_ID, "210987654321")) {
             ObjectNode provision = mapper.createObjectNode();
             provision.put("InstanceArn", service.getInstanceArn());
             provision.put("PermissionSetArn", permissionSet.arn());
@@ -1836,6 +1873,19 @@ class SsoAdminServiceTest {
                 () -> service.getAssignmentOperation(service.getInstanceArn(), operation.requestId()));
     }
 
+    @Test
+    void permissionSetFindsItsInstanceInThePartitionItWasMintedIn() {
+        SsoAdminService china = emptyService("cn-north-1");
+        ObjectNode request = mapper.createObjectNode()
+                .put("InstanceArn", china.getInstanceArn())
+                .put("Name", "ChinaAdmins");
+        PermissionSet permissionSet = china.createPermissionSet(request);
+
+        assertTrue(permissionSet.arn().startsWith("arn:aws-cn:sso:::permissionSet/"));
+        assertEquals(china.getInstanceArn(),
+                china.instanceForPermissionSetForPortal(permissionSet.arn()).instanceArn());
+    }
+
     /** The seeded instance lives in the deployment's home region, so its ARN takes that partition. */
     @Test
     void seededInstanceTakesTheHomeRegionsPartition() {
@@ -1907,6 +1957,7 @@ class SsoAdminServiceTest {
                 new InMemoryStorage<String, String>(),
                 identityStoreService,
                 organizationsService,
+                new SsoAdminRequestContext(),
                 "999999999999",
                 defaultRegion);
     }

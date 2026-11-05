@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.EpochSeconds;
 import io.github.hectorvent.floci.core.common.IamEnforcementFilter;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
@@ -17,6 +18,7 @@ import io.github.hectorvent.floci.services.ssm.model.CommandInvocation;
 import io.github.hectorvent.floci.services.ssm.model.InstanceInformation;
 import io.github.hectorvent.floci.services.ssm.model.Parameter;
 import io.github.hectorvent.floci.services.ssm.model.ParameterHistory;
+import io.github.hectorvent.floci.services.ssm.model.ParameterResourcePolicy;
 import io.github.hectorvent.floci.services.ssm.model.ParameterStringFilter;
 import io.github.hectorvent.floci.services.ssm.model.PatchBaselineIdentity;
 import io.github.hectorvent.floci.services.ssm.model.ServiceSetting;
@@ -36,6 +38,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.regex.Pattern;
 
 import static io.github.hectorvent.floci.services.ssm.SsmJsonDeserialization.serializationException;
@@ -73,6 +76,9 @@ public class SsmJsonHandler {
             case "AddTagsToResource" -> handleAddTagsToResource(request, region);
             case "ListTagsForResource" -> handleListTagsForResource(request, region);
             case "RemoveTagsFromResource" -> handleRemoveTagsFromResource(request, region);
+            case "PutResourcePolicy" -> handlePutResourcePolicy(request, region);
+            case "GetResourcePolicies" -> handleGetResourcePolicies(request, region);
+            case "DeleteResourcePolicy" -> handleDeleteResourcePolicy(request, region);
             // Run Command (public API)
             case "SendCommand" -> handleSendCommand(request, region);
             case "GetCommandInvocation" -> handleGetCommandInvocation(request, region);
@@ -164,7 +170,7 @@ public class SsmJsonHandler {
         authorizeSecretValues(List.of(param), authorization);
 
         ObjectNode response = objectMapper.createObjectNode();
-        response.set("Parameter", parameterToNode(param));
+        response.set("Parameter", parameterToNode(param, withDecryption));
         return Response.ok(response).build();
     }
 
@@ -180,11 +186,12 @@ public class SsmJsonHandler {
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode parametersArray = objectMapper.createArrayNode();
         for (Parameter p : params) {
-            parametersArray.add(parameterToNode(p));
+            parametersArray.add(parameterToNode(p, withDecryption));
         }
         response.set("Parameters", parametersArray);
         response.set("InvalidParameters", invalidParameterNames(names,
-                params.stream().map(p -> p.getName() + (p.getSelector() == null ? "" : p.getSelector())).toList()));
+                params.stream().map(p -> p.getName() + (p.getSelector() == null ? "" : p.getSelector())).toList(),
+                name -> ssmService.parameterReadName(name, region)));
         return Response.ok(response).build();
     }
 
@@ -229,17 +236,29 @@ public class SsmJsonHandler {
     }
 
     private Response handleGetParametersByPath(JsonNode request, String region) {
+        PageRequest pageRequest = pageRequest(request, GET_PARAMETERS_BY_PATH_MAX_RESULTS);
         String path = request.path("Path").asText();
         boolean recursive = request.path("Recursive").asBoolean(false);
+        boolean withDecryption = request.path("WithDecryption").asBoolean(false);
 
-        List<Parameter> params = ssmService.getParametersByPath(path, recursive, parameterFilters(request), region);
+        List<ParameterStringFilter> filters = parameterFilters(request);
+        List<Parameter> params = ssmService.getParametersByPath(path, recursive, filters, region);
+        boolean labeledVersions = filters.stream().anyMatch(filter -> "Label".equals(filter.key()));
+        // A label query can return several versions of one name. The separator keeps name order,
+        // and the padded version lets the cursor resume inside that parameter's history.
+        Function<Parameter, String> cursor = labeledVersions
+                ? p -> p.getName() + "\0" + String.format("%019d", p.getVersion()) : Parameter::getName;
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode parametersArray = objectMapper.createArrayNode();
-        for (Parameter p : params) {
-            parametersArray.add(parameterToNode(p));
+        PaginatedResult<Parameter> page = page(pageRequest, params, cursor, ALL_ITEMS,
+                GET_PARAMETERS_BY_PATH_TOKEN + ssmService.accountId() + ":" + region + ":" + recursive + ":"
+                        + (path.endsWith("/") ? path : path + "/") + (labeledVersions ? ":labels" : ""));
+        for (Parameter p : page.items()) {
+            parametersArray.add(parameterToNode(p, withDecryption));
         }
         response.set("Parameters", parametersArray);
+        putNextToken(response, page);
         return Response.ok(response).build();
     }
 
@@ -264,27 +283,41 @@ public class SsmJsonHandler {
     }
 
     private ArrayNode invalidParameterNames(List<String> requestedNames, List<String> returnedNames) {
+        return invalidParameterNames(requestedNames, returnedNames, Function.identity());
+    }
+
+    private ArrayNode invalidParameterNames(List<String> requestedNames, List<String> returnedNames,
+                                             Function<String, String> resolveName) {
         Set<String> returnedNameSet = new HashSet<>(returnedNames);
         ArrayNode invalidNames = objectMapper.createArrayNode();
         requestedNames.stream()
-                .filter(name -> !returnedNameSet.contains(name))
+                .filter(name -> !returnedNameSet.contains(resolveName.apply(name)))
                 .forEach(invalidNames::add);
         return invalidNames;
     }
 
     private Response handleGetParameterHistory(JsonNode request, String region) {
+        PageRequest pageRequest = pageRequest(request, GET_PARAMETER_HISTORY_MAX_RESULTS);
         String name = request.path("Name").asText();
+        boolean withDecryption = request.path("WithDecryption").asBoolean(false);
         List<ParameterHistory> history = ssmService.getParameterHistory(name, region);
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode historyArray = objectMapper.createArrayNode();
-        for (ParameterHistory h : history) {
+        // Zero-padded so the cursor's string order is version order ("10" would sort before "9").
+        PaginatedResult<ParameterHistory> page = page(pageRequest, history,
+                h -> String.format("%019d", h.getVersion()), ALL_ITEMS,
+                GET_PARAMETER_HISTORY_TOKEN + ssmService.accountId() + ":" + region + ":" + name);
+        for (ParameterHistory h : page.items()) {
             ObjectNode node = objectMapper.createObjectNode();
             node.put("Name", h.getName());
             node.put("Version", h.getVersion());
-            node.put("Value", h.getValue());
+            node.put("Value", responseValue(withDecryption, h.getValue(), h.getEncryptedValue()));
             node.put("Type", h.getType());
-            node.put("LastModifiedDate", h.getLastModifiedDate().toEpochMilli() / 1000.0);
+            if (h.getKeyId() != null) {
+                node.put("KeyId", h.getKeyId());
+            }
+            node.put("LastModifiedDate", EpochSeconds.fromInstant(h.getLastModifiedDate()));
             if (h.getDescription() != null) {
                 node.put("Description", h.getDescription());
             }
@@ -296,10 +329,57 @@ public class SsmJsonHandler {
             historyArray.add(node);
         }
         response.set("Parameters", historyArray);
+        putNextToken(response, page);
         return Response.ok(response).build();
     }
 
     private static final int DESCRIBE_PARAMETERS_MAX_RESULTS = 50;
+    private static final int GET_PARAMETERS_BY_PATH_MAX_RESULTS = 10;
+    private static final int GET_PARAMETER_HISTORY_MAX_RESULTS = 50;
+    private static final int ALL_ITEMS = Integer.MAX_VALUE;
+    private static final String DESCRIBE_PARAMETERS_TOKEN = "DescribeParameters:";
+    private static final String GET_PARAMETERS_BY_PATH_TOKEN = "GetParametersByPath:";
+    private static final String GET_PARAMETER_HISTORY_TOKEN = "GetParameterHistory:";
+
+    private record PageRequest(Integer maxResults, String nextToken) {
+    }
+
+    /**
+     * Reads {@code MaxResults}/{@code NextToken} before the operation runs, so a malformed field is
+     * reported as such rather than masked by, say, {@code ParameterNotFound}. A non-numeric
+     * {@code MaxResults} or non-string {@code NextToken} fails to deserialize, as on AWS.
+     */
+    private static PageRequest pageRequest(JsonNode request, int maxPage) {
+        Integer maxResults = request.hasNonNull("MaxResults")
+                ? SsmJsonDeserialization.optionalInteger(request.path("MaxResults"), 0) : null;
+        if (maxResults != null && (maxResults < 1 || maxResults > maxPage)) {
+            throw SmithyValidationErrors.validationException(
+                    "Value '" + maxResults + "' at 'maxResults' failed to "
+                            + "satisfy constraint: Member must have value between 1 and " + maxPage);
+        }
+        return new PageRequest(maxResults, optionalString(request, "NextToken"));
+    }
+
+    /**
+     * Pages a listing, returning {@code defaultPage} items when {@code MaxResults} is omitted.
+     * GetParametersByPath and GetParameterHistory pass {@link #ALL_ITEMS} rather than AWS's single
+     * page, so callers that never follow {@code NextToken} still see every item. A token carries
+     * {@code namespace}, so one minted for another operation, account, region, path or parameter is refused
+     * instead of read as a position here.
+     */
+    private static <T> PaginatedResult<T> page(PageRequest pageRequest, List<T> items,
+                                               Function<T, String> cursorOf, int defaultPage, String namespace) {
+        Integer maxResults = pageRequest.maxResults();
+        return Pagination.paginate(items, cursorOf, maxResults != null ? maxResults : defaultPage,
+                pageRequest.nextToken(), namespace,
+                token -> new AwsException("InvalidNextToken", "The specified token isn't valid.", 400));
+    }
+
+    private static void putNextToken(ObjectNode response, PaginatedResult<?> page) {
+        if (page.nextToken() != null) {
+            response.put("NextToken", page.nextToken());
+        }
+    }
 
     private Response handleDescribeParameters(JsonNode request, String region) {
         List<ParameterStringFilter> filters = parameterFilters(request);
@@ -312,17 +392,10 @@ public class SsmJsonHandler {
             filters.add(new ParameterStringFilter(key, "Equals", textValues(f.path("Values"))));
         }
 
-        Integer maxResults = request.hasNonNull("MaxResults") ? request.path("MaxResults").asInt() : null;
-        if (maxResults != null && (maxResults < 1 || maxResults > DESCRIBE_PARAMETERS_MAX_RESULTS)) {
-            throw SmithyValidationErrors.validationException(
-                    "Value '" + maxResults + "' at 'maxResults' failed to "
-                            + "satisfy constraint: Member must have value between 1 and "
-                            + DESCRIBE_PARAMETERS_MAX_RESULTS);
-        }
-        PaginatedResult<Parameter> page = Pagination.paginate(
-                ssmService.describeParameters(filters, region), Parameter::getName,
-                maxResults, request.path("NextToken").asText(null),
-                DESCRIBE_PARAMETERS_MAX_RESULTS, "InvalidNextToken");
+        PageRequest pageRequest = pageRequest(request, DESCRIBE_PARAMETERS_MAX_RESULTS);
+        PaginatedResult<Parameter> page = page(pageRequest, ssmService.describeParameters(filters, region),
+                Parameter::getName, DESCRIBE_PARAMETERS_MAX_RESULTS,
+                DESCRIBE_PARAMETERS_TOKEN + ssmService.accountId() + ":" + region);
 
         ObjectNode response = objectMapper.createObjectNode();
         ArrayNode parametersArray = objectMapper.createArrayNode();
@@ -332,13 +405,14 @@ public class SsmJsonHandler {
             node.put("ARN", p.getArn());
             node.put("Type", p.getType());
             node.put("Version", p.getVersion());
-            node.put("LastModifiedDate", p.getLastModifiedDate().toEpochMilli() / 1000.0);
+            node.put("LastModifiedDate", EpochSeconds.fromInstant(p.getLastModifiedDate()));
             if (p.getDescription() != null) {
                 node.put("Description", p.getDescription());
             }
             node.put("DataType", p.getDataType());
-            if (SsmService.keyIdOf(p) != null) {
-                node.put("KeyId", SsmService.keyIdOf(p));
+            String keyId = SsmService.keyIdOf(p);
+            if (keyId != null) {
+                node.put("KeyId", keyId);
             }
             if (p.getAllowedPattern() != null) {
                 node.put("AllowedPattern", p.getAllowedPattern());
@@ -356,9 +430,7 @@ public class SsmJsonHandler {
             parametersArray.add(node);
         }
         response.set("Parameters", parametersArray);
-        if (page.nextToken() != null) {
-            response.put("NextToken", page.nextToken());
-        }
+        putNextToken(response, page);
         return Response.ok(response).build();
     }
 
@@ -477,8 +549,7 @@ public class SsmJsonHandler {
         String permissionType = request.path("PermissionType").asText();
         if (permissionType == null || permissionType.isBlank()) {
             throw SmithyValidationErrors.validationException(
-                    "Value null at 'permissionType' failed to satisfy "
-                            + "constraint: Member must not be null");
+                    SmithyValidationErrors.notNull("permissionType"));
         }
         if (!"Share".equals(permissionType)) {
             throw new AwsException("InvalidPermissionType",
@@ -605,8 +676,7 @@ public class SsmJsonHandler {
         JsonNode contentNode = request.path("Content");
         if (!contentNode.isTextual() || contentNode.asText().isBlank()) {
             throw SmithyValidationErrors.validationException(
-                    "Value null at 'content' failed to satisfy "
-                            + "constraint: Member must not be null");
+                    SmithyValidationErrors.notNull("content"));
         }
         return contentNode.asText();
     }
@@ -709,7 +779,7 @@ public class SsmJsonHandler {
             ObjectNode docNode = objectMapper.createObjectNode();
             docNode.put("Name", d.getName());
             if (d.getCreatedDate() != null) {
-                docNode.put("CreatedDate", d.getCreatedDate().toEpochMilli() / 1000.0);
+                docNode.put("CreatedDate", EpochSeconds.fromInstant(d.getCreatedDate()));
             }
             docNode.put("DocumentType", d.getDocumentType());
             docNode.put("DocumentVersion", String.valueOf(d.getDocumentVersion()));
@@ -772,7 +842,7 @@ public class SsmJsonHandler {
         JsonNode nameNode = request.path("Name");
         if (!nameNode.isTextual() || nameNode.asText().isBlank()) {
             throw SmithyValidationErrors.validationException(
-                    "Value null at 'name' failed to satisfy constraint: Member must not be null");
+                    SmithyValidationErrors.notNull("name"));
         }
         String name = nameNode.asText();
 
@@ -805,7 +875,7 @@ public class SsmJsonHandler {
         String associationId = request.hasNonNull("AssociationId") ? request.path("AssociationId").asText() : null;
         if (associationId == null || associationId.isBlank()) {
             throw SmithyValidationErrors.validationException(
-                    "Value null at 'associationId' failed to satisfy constraint: Member must not be null");
+                    SmithyValidationErrors.notNull("associationId"));
         }
 
         String associationName = request.hasNonNull("AssociationName") ? request.path("AssociationName").asText() : null;
@@ -934,7 +1004,7 @@ public class SsmJsonHandler {
             node.put("ScheduleExpression", assoc.getScheduleExpression());
         }
         if (assoc.getLastExecutionDate() != null) {
-            node.put("LastExecutionDate", assoc.getLastExecutionDate().toEpochMilli() / 1000.0);
+            node.put("LastExecutionDate", EpochSeconds.fromInstant(assoc.getLastExecutionDate()));
         }
         return node;
     }
@@ -985,7 +1055,7 @@ public class SsmJsonHandler {
                 statusNode.put("Message", assoc.getStatus().getMessage());
             }
             if (assoc.getStatus().getDate() != null) {
-                statusNode.put("Date", assoc.getStatus().getDate().toEpochMilli() / 1000.0);
+                statusNode.put("Date", EpochSeconds.fromInstant(assoc.getStatus().getDate()));
             }
             if (assoc.getStatus().getAdditionalInfo() != null) {
                 statusNode.put("AdditionalInfo", assoc.getStatus().getAdditionalInfo());
@@ -999,10 +1069,10 @@ public class SsmJsonHandler {
             desc.set("Overview", overviewNode);
         }
         if (assoc.getCreatedDate() != null) {
-            desc.put("Date", assoc.getCreatedDate().toEpochMilli() / 1000.0);
+            desc.put("Date", EpochSeconds.fromInstant(assoc.getCreatedDate()));
         }
         if (assoc.getLastExecutionDate() != null) {
-            desc.put("LastExecutionDate", assoc.getLastExecutionDate().toEpochMilli() / 1000.0);
+            desc.put("LastExecutionDate", EpochSeconds.fromInstant(assoc.getLastExecutionDate()));
         }
         if (assoc.getComplianceSeverity() != null) {
             desc.put("ComplianceSeverity", assoc.getComplianceSeverity());
@@ -1104,12 +1174,12 @@ public class SsmJsonHandler {
 
         List<String> violations = new ArrayList<>();
         if (name == null) {
-            violations.add("Value null at 'name' failed to satisfy constraint: Member must not be null");
+            violations.add(SmithyValidationErrors.notNull("name"));
         } else if (name.isEmpty()) {
             violations.add("Value '' at 'name' failed to satisfy constraint: Member must have length greater than or equal to 1");
         }
         if (parameterVersion == null) {
-            violations.add("Value null at 'parameterVersion' failed to satisfy constraint: Member must not be null");
+            violations.add(SmithyValidationErrors.notNull("parameterVersion"));
         }
         String labelViolation = SsmService.labelListViolation(labels);
         if (labelViolation != null) {
@@ -1177,15 +1247,100 @@ public class SsmJsonHandler {
         return Response.ok(objectMapper.createObjectNode()).build();
     }
 
-    private ObjectNode parameterToNode(Parameter p) {
+    private static final int GET_RESOURCE_POLICIES_MAX_RESULTS = 50;
+    private static final String GET_RESOURCE_POLICIES_TOKEN = "GetResourcePolicies:";
+    private static final String POLICY_PATTERN = "^(?!\\s*$).+";
+
+    private Response handlePutResourcePolicy(JsonNode request, String region) {
+        String resourceArn = optionalString(request, "ResourceArn");
+        String policy = optionalString(request, "Policy");
+        List<String> violations = new ArrayList<>();
+        addResourceArnViolation(violations, resourceArn);
+        if (policy == null) {
+            violations.add(SmithyValidationErrors.notNull("policy"));
+        } else if (policy.isBlank()) {
+            violations.add(SmithyValidationErrors.pattern("policy", policy, POLICY_PATTERN));
+        }
+        if (!violations.isEmpty()) {
+            throw SsmService.validationErrors(violations);
+        }
+
+        ParameterResourcePolicy stored = ssmService.putResourcePolicy(resourceArn, policy,
+                optionalText(request, "PolicyId"), optionalText(request, "PolicyHash"), region);
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("PolicyId", stored.policyId());
+        response.put("PolicyHash", stored.policyHash());
+        return Response.ok(response).build();
+    }
+
+    private Response handleGetResourcePolicies(JsonNode request, String region) {
+        String resourceArn = optionalString(request, "ResourceArn");
+        List<String> violations = new ArrayList<>();
+        addResourceArnViolation(violations, resourceArn);
+        if (!violations.isEmpty()) {
+            throw SsmService.validationErrors(violations);
+        }
+        PageRequest pageRequest = pageRequest(request, GET_RESOURCE_POLICIES_MAX_RESULTS);
+
+        PaginatedResult<ParameterResourcePolicy> page = page(pageRequest,
+                ssmService.getResourcePolicies(resourceArn, region), ParameterResourcePolicy::policyId,
+                GET_RESOURCE_POLICIES_MAX_RESULTS,
+                GET_RESOURCE_POLICIES_TOKEN + ssmService.accountId() + ":" + region + ":" + resourceArn);
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode policies = response.putArray("Policies");
+        for (ParameterResourcePolicy p : page.items()) {
+            policies.addObject()
+                    .put("PolicyId", p.policyId())
+                    .put("PolicyHash", p.policyHash())
+                    .put("Policy", p.policy());
+        }
+        putNextToken(response, page);
+        return Response.ok(response).build();
+    }
+
+    private Response handleDeleteResourcePolicy(JsonNode request, String region) {
+        String resourceArn = optionalString(request, "ResourceArn");
+        String policyId = optionalString(request, "PolicyId");
+        String policyHash = optionalString(request, "PolicyHash");
+        List<String> violations = new ArrayList<>();
+        addResourceArnViolation(violations, resourceArn);
+        if (policyId == null) {
+            violations.add(SmithyValidationErrors.notNull("policyId"));
+        }
+        if (policyHash == null) {
+            violations.add(SmithyValidationErrors.notNull("policyHash"));
+        }
+        if (!violations.isEmpty()) {
+            throw SsmService.validationErrors(violations);
+        }
+
+        ssmService.deleteResourcePolicy(resourceArn, policyId, policyHash, region);
+        return Response.ok(objectMapper.createObjectNode()).build();
+    }
+
+    private static void addResourceArnViolation(List<String> violations, String resourceArn) {
+        String violation = resourceArn == null
+                ? SmithyValidationErrors.notNull("resourceArn")
+                : SmithyValidationErrors.lengthOutOfRange("resourceArn", resourceArn, 20, 2048);
+        if (violation != null) {
+            violations.add(violation);
+        }
+    }
+
+    /** A SecureString read without decryption answers the ciphertext PutParameter stored, as AWS does. */
+    private static String responseValue(boolean withDecryption, String value, String encryptedValue) {
+        return withDecryption || encryptedValue == null ? value : encryptedValue;
+    }
+
+    private ObjectNode parameterToNode(Parameter p, boolean withDecryption) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("Name", p.getName());
         if (p.getValue() != null) {
-            node.put("Value", p.getValue());
+            node.put("Value", responseValue(withDecryption, p.getValue(), p.getEncryptedValue()));
         }
         node.put("Type", p.getType());
         node.put("Version", p.getVersion());
-        node.put("LastModifiedDate", p.getLastModifiedDate().toEpochMilli() / 1000.0);
+        node.put("LastModifiedDate", EpochSeconds.fromInstant(p.getLastModifiedDate()));
         node.put("ARN", p.getArn());
         if (p.getDataType() != null) {
             node.put("DataType", p.getDataType());
@@ -1212,8 +1367,7 @@ public class SsmJsonHandler {
         String settingId = request.path("SettingId").asText();
         if (settingId == null || settingId.isBlank()) {
             throw SmithyValidationErrors.validationException(
-                    "Value null at 'settingId' failed to satisfy "
-                            + "constraint: Member must not be null");
+                    SmithyValidationErrors.notNull("settingId"));
         }
         return settingId;
     }
@@ -1231,8 +1385,7 @@ public class SsmJsonHandler {
         String settingValue = valueNode.asText();
         if (!valueNode.isTextual() || settingValue.isEmpty()) {
             throw SmithyValidationErrors.validationException(
-                    "Value null at 'settingValue' failed to satisfy "
-                            + "constraint: Member must not be null");
+                    SmithyValidationErrors.notNull("settingValue"));
         }
         if (settingValue.length() > MAX_SETTING_VALUE_LENGTH) {
             throw SmithyValidationErrors.validationException(
@@ -1272,7 +1425,7 @@ public class SsmJsonHandler {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("SettingId", s.getSettingId());
         node.put("SettingValue", s.getSettingValue());
-        node.put("LastModifiedDate", s.getLastModifiedDate().toEpochMilli() / 1000.0);
+        node.put("LastModifiedDate", EpochSeconds.fromInstant(s.getLastModifiedDate()));
         node.put("LastModifiedUser", s.getLastModifiedUser());
         node.put("ARN", s.getArn());
         node.put("Status", s.getStatus());
@@ -1357,8 +1510,8 @@ public class SsmJsonHandler {
         node.put("DocumentName", c.getDocumentName());
         if (c.getDocumentVersion() != null) node.put("DocumentVersion", c.getDocumentVersion());
         if (c.getComment() != null) node.put("Comment", c.getComment());
-        if (c.getRequestedDateTime() != null) node.put("RequestedDateTime", c.getRequestedDateTime().toEpochMilli() / 1000.0);
-        if (c.getExpiresAfter() != null) node.put("ExpiresAfter", c.getExpiresAfter().toEpochMilli() / 1000.0);
+        if (c.getRequestedDateTime() != null) node.put("RequestedDateTime", EpochSeconds.fromInstant(c.getRequestedDateTime()));
+        if (c.getExpiresAfter() != null) node.put("ExpiresAfter", EpochSeconds.fromInstant(c.getExpiresAfter()));
         // c is the same live, shared Command object SsmCommandService's writers (updateCommandStatus,
         // cancelCommand) synchronize on before touching Status/StatusDetails together. Reading the
         // pair here without the same lock would let this read straddle a concurrent writer's update -
@@ -1396,7 +1549,7 @@ public class SsmJsonHandler {
         if (inv.getComment() != null) node.put("Comment", inv.getComment());
         node.put("DocumentName", inv.getDocumentName());
         if (inv.getDocumentVersion() != null) node.put("DocumentVersion", inv.getDocumentVersion());
-        if (inv.getRequestedDateTime() != null) node.put("RequestedDateTime", inv.getRequestedDateTime().toEpochMilli() / 1000.0);
+        if (inv.getRequestedDateTime() != null) node.put("RequestedDateTime", EpochSeconds.fromInstant(inv.getRequestedDateTime()));
         // Same reasoning as commandToNode: inv is the same live, shared CommandInvocation object its
         // writers (cancelCommand, direct/agent completion, timeout sweeps) now synchronize on.
         synchronized (inv) {
@@ -1431,8 +1584,8 @@ public class SsmJsonHandler {
         if (info.getIpAddress() != null) node.put("IPAddress", info.getIpAddress());
         if (info.getComputerName() != null) node.put("ComputerName", info.getComputerName());
         node.put("ResourceType", info.getResourceType());
-        if (info.getLastPingDateTime() != null) node.put("LastPingDateTime", info.getLastPingDateTime().toEpochMilli() / 1000.0);
-        if (info.getRegistrationDate() != null) node.put("RegistrationDate", info.getRegistrationDate().toEpochMilli() / 1000.0);
+        if (info.getLastPingDateTime() != null) node.put("LastPingDateTime", EpochSeconds.fromInstant(info.getLastPingDateTime()));
+        if (info.getRegistrationDate() != null) node.put("RegistrationDate", EpochSeconds.fromInstant(info.getRegistrationDate()));
         return node;
     }
 
@@ -1475,23 +1628,6 @@ public class SsmJsonHandler {
     }
 
 
-
-    private Response handleGetParameters(JsonNode request, String region) {
-        List<String> names = new ArrayList<>();
-        request.path("Names").forEach(n -> names.add(n.asText()));
-
-        List<Parameter> params = ssmService.getParameters(names, region);
-
-        ObjectNode response = objectMapper.createObjectNode();
-        ArrayNode parametersArray = objectMapper.createArrayNode();
-        for (Parameter p : params) {
-            parametersArray.add(parameterToNode(p));
-        }
-        response.set("Parameters", parametersArray);
-        response.set("InvalidParameters", invalidParameterNames(names,
-                params.stream().map(Parameter::getName).toList()));
-        return Response.ok(response).build();
-    }
 
     private Map<String, String> documentTags(String name, String region) {
         try {

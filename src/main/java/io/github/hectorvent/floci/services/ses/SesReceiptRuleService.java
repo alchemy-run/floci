@@ -523,8 +523,7 @@ public class SesReceiptRuleService {
     private static void requireMember(List<String> violations, ReceiptAction action,
                                       String member, String path) {
         if (action.property(member) == null) {
-            violations.add("Value at '" + path + "' failed to satisfy constraint: "
-                    + "Member must not be null");
+            violations.add(SmithyValidationErrors.notNullWithoutValue(path));
         }
     }
 
@@ -735,8 +734,7 @@ public class SesReceiptRuleService {
             // Probed: an absent FilterName is the one case the wire rejects; deleting a missing
             // or malformed name succeeds without error.
             throw SmithyValidationErrors.validationError(
-                    "Value at 'filterName' failed to satisfy "
-                            + "constraint: Member must not be null");
+                    SmithyValidationErrors.notNullWithoutValue("filterName"));
         }
         receiptFilterStore.delete(receiptFilterKey(region, filterName));
         LOG.infov("Deleted SES receipt filter: {0} in region {1}", filterName, region);
@@ -753,34 +751,29 @@ public class SesReceiptRuleService {
      */
     private static void validateFilterShape(ReceiptFilter filter) {
         if (filter == null) {
-            throw SmithyValidationErrors.validationError(
-                    notNullViolation("filter"));
+            throw SmithyValidationErrors.validationError(SmithyValidationErrors.notNullWithoutValue("filter"));
         }
         List<String> violations = new ArrayList<>();
         if (filter.getName() == null) {
-            violations.add(notNullViolation("filter.name"));
+            violations.add(SmithyValidationErrors.notNullWithoutValue("filter.name"));
         }
         boolean hasIpFilter = filter.getPolicy() != null || filter.getCidr() != null;
         if (!hasIpFilter) {
-            violations.add(notNullViolation("filter.ipFilter"));
+            violations.add(SmithyValidationErrors.notNullWithoutValue("filter.ipFilter"));
         } else {
             if (filter.getPolicy() == null) {
-                violations.add(notNullViolation("filter.ipFilter.policy"));
+                violations.add(SmithyValidationErrors.notNullWithoutValue("filter.ipFilter.policy"));
             } else if (!"Allow".equals(filter.getPolicy()) && !"Block".equals(filter.getPolicy())) {
                 violations.add("Value at 'filter.ipFilter.policy' failed to satisfy constraint: "
                         + "Member must satisfy enum value set: [Allow, Block]");
             }
             if (filter.getCidr() == null) {
-                violations.add(notNullViolation("filter.ipFilter.cidr"));
+                violations.add(SmithyValidationErrors.notNullWithoutValue("filter.ipFilter.cidr"));
             }
         }
         if (!violations.isEmpty()) {
             throw SmithyValidationErrors.validationError(violations);
         }
-    }
-
-    private static String notNullViolation(String path) {
-        return "Value at '" + path + "' failed to satisfy constraint: Member must not be null";
     }
 
     /**

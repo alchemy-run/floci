@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.cloudformation;
 import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -660,7 +661,7 @@ class CloudFormationResourceConditionIntegrationTest {
         }
     }
 
-    private static io.restassured.response.Response getQueueUrl(String queueName) {
+    private static Response getQueueUrl(String queueName) {
         return given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "GetQueueUrl")
@@ -1534,6 +1535,7 @@ class CloudFormationResourceConditionIntegrationTest {
         .then()
             .statusCode(200)
             .body(containsString("<StackId>"));
+        CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE");
     }
 
     private static void updateStack(String stackName, String template) {
@@ -1547,6 +1549,7 @@ class CloudFormationResourceConditionIntegrationTest {
         .then()
             .statusCode(200)
             .body(containsString("<StackId>"));
+        CfnStackWaits.awaitStatus(stackName, "UPDATE_COMPLETE");
     }
 
     private static void deleteStack(String stackName) {

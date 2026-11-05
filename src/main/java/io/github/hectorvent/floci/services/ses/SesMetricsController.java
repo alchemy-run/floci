@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.EpochSeconds;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.ses.model.SentEmail;
@@ -31,7 +32,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 
-import static io.github.hectorvent.floci.services.ses.SesV2Json.epochSeconds;
 import static io.github.hectorvent.floci.services.ses.SesV2Json.readOptionBody;
 
 /**
@@ -160,7 +160,7 @@ public class SesMetricsController {
         node.put("Id", query.id());
         ArrayNode timestamps = node.putArray("Timestamps");
         for (Instant timestamp : series.timestamps()) {
-            timestamps.add(epochSeconds(timestamp));
+            timestamps.add(EpochSeconds.fromInstant(timestamp));
         }
         ArrayNode values = node.putArray("Values");
         for (Long value : series.values()) {
@@ -348,7 +348,8 @@ public class SesMetricsController {
     private static Instant requireTimestamp(JsonNode query, String field, String member, int position) {
         JsonNode node = query.path(field);
         if (node.isMissingNode() || node.isNull()) {
-            throw aggregated(List.of(memberConstraint(position, member, "Member must not be null")));
+            throw aggregated(List.of(
+                    SmithyValidationErrors.notNullWithoutValue("queries." + position + ".member." + member)));
         }
         if (node.isNumber()) {
             try {

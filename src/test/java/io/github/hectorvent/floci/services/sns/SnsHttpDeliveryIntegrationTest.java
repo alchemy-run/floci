@@ -15,6 +15,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.logging.Level;
+import java.util.logging.Logger;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
@@ -32,8 +34,8 @@ class SnsHttpDeliveryIntegrationTest {
     private static int httpPort;
     private static final List<ReceivedRequest> receivedRequests = new CopyOnWriteArrayList<>();
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    private static final java.util.logging.Logger LOG =
-            java.util.logging.Logger.getLogger(SnsHttpDeliveryIntegrationTest.class.getName());
+    private static final Logger LOG =
+            Logger.getLogger(SnsHttpDeliveryIntegrationTest.class.getName());
     record ReceivedRequest(String body, Map<String, List<String>> headers) {}
 
     @BeforeAll
@@ -67,7 +69,7 @@ class SnsHttpDeliveryIntegrationTest {
                 // Record even on failure so awaitRequests unblocks and the assertion
                 // reports the real state instead of timing out opaquely.
                 receivedRequests.add(received);
-                LOG.log(java.util.logging.Level.SEVERE,
+                LOG.log(Level.SEVERE,
                         "confirming-webhook: subscription confirmation failed", e);
                 exchange.sendResponseHeaders(500, 0);
             } finally {
@@ -157,6 +159,9 @@ class SnsHttpDeliveryIntegrationTest {
         assertEquals(1, receivedRequests.size());
         ReceivedRequest confirmReq = receivedRequests.get(0);
         assertEquals("SubscriptionConfirmation", confirmReq.headers().get("X-amz-sns-message-type").get(0));
+        // AWS SNS posts plain HTTP/1.1, with no h2c upgrade offer.
+        assertNull(firstHeader(confirmReq.headers(), "Upgrade"));
+        assertNull(firstHeader(confirmReq.headers(), "HTTP2-Settings"));
 
         // Confirm the subscription
         confirmSubscription(confirmReq);
@@ -190,6 +195,8 @@ class SnsHttpDeliveryIntegrationTest {
         assertEquals(topicArn, req.headers().get("X-amz-sns-topic-arn").get(0));
         assertNotNull(req.headers().get("X-amz-sns-message-id"));
         assertNotNull(req.headers().get("X-amz-sns-subscription-arn"));
+        assertNull(firstHeader(req.headers(), "Upgrade"));
+        assertNull(firstHeader(req.headers(), "HTTP2-Settings"));
 
         // Verify body is a proper SNS notification envelope
         JsonNode envelope = objectMapper.readTree(req.body());

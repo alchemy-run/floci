@@ -76,6 +76,7 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
 
             createStack(stackName, template);
             stackCreated = true;
+            CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE", CFN_AUTH);
             String describeXml = describeStack(stackName);
             assertTrue(describeXml.contains("<StackStatus>CREATE_COMPLETE</StackStatus>"),
                     "stack should be CREATE_COMPLETE: " + describeXml);
@@ -157,6 +158,7 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
 
             createStack(stackName, template);
             stackCreated = true;
+            CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE", CFN_AUTH);
             String describeXml = describeStack(stackName);
             assertTrue(describeXml.contains("<StackStatus>CREATE_COMPLETE</StackStatus>"),
                     "stack should be CREATE_COMPLETE: " + describeXml);
@@ -227,6 +229,7 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
 
             createStack(stackName, template);
             stackCreated = true;
+            CfnStackWaits.awaitStatus(stackName, "ROLLBACK_COMPLETE", CFN_AUTH);
             String describeXml = describeStack(stackName);
             assertTrue(describeXml.contains("<StackStatus>ROLLBACK_COMPLETE</StackStatus>"),
                     "stack should be ROLLBACK_COMPLETE: " + describeXml);
@@ -294,6 +297,7 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
 
             createStack(stackName, template);
             stackCreated = true;
+            CfnStackWaits.awaitStatus(stackName, "ROLLBACK_COMPLETE", CFN_AUTH);
             String describeXml = describeStack(stackName);
             assertTrue(describeXml.contains("<StackStatus>ROLLBACK_COMPLETE</StackStatus>"),
                     "stack should be ROLLBACK_COMPLETE: " + describeXml);

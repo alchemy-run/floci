@@ -12,7 +12,6 @@ import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
 import io.github.hectorvent.floci.core.resource.SupportedResourceType;
 import io.github.hectorvent.floci.core.storage.AccountAwareStorageBackend;
-import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.core.storage.StorageFactory;
 import io.github.hectorvent.floci.services.opensearch.model.AdvancedSecurityOptions;
 import io.github.hectorvent.floci.services.opensearch.model.ClusterConfig;
@@ -22,6 +21,8 @@ import io.github.hectorvent.floci.services.opensearch.model.DomainMaintenance;
 import io.github.hectorvent.floci.services.opensearch.model.EbsOptions;
 import io.github.hectorvent.floci.services.opensearch.model.EncryptionAtRestOptions;
 import io.github.hectorvent.floci.services.opensearch.model.NodeToNodeEncryptionOptions;
+import io.github.hectorvent.floci.services.opensearch.model.OffPeakWindowOptions;
+import io.github.hectorvent.floci.services.opensearch.model.SoftwareUpdateOptions;
 import io.github.hectorvent.floci.services.opensearch.model.VolumeOwnership;
 import io.github.hectorvent.floci.services.opensearch.model.VpcOptions;
 import jakarta.annotation.PostConstruct;
@@ -34,14 +35,25 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
+/**
+ * Domain metadata, scoped to an account and a region the way AWS scopes it: a domain name is
+ * unique within one account and region, and every lookup (describe, update, delete, list)
+ * resolves inside the caller's region only. The storage key carries the region next to the
+ * name; records persisted before the region joined the key are migrated onto it, taking the
+ * region from the domain's ARN, which has always carried it.
+ */
 @ApplicationScoped
 public class OpenSearchService implements ResourceProvider {
 
@@ -49,11 +61,14 @@ public class OpenSearchService implements ResourceProvider {
 
     private static final String DEFAULT_ENGINE_VERSION = OpenSearchVersions.DEFAULT_VERSION;
 
-    private final StorageBackend<String, Domain> domainStore;
+    private final AccountAwareStorageBackend<Domain> domainStore;
     private final EmulatorConfig config;
     private final RegionResolver regionResolver;
     private final OpenSearchDomainManager domainManager;
     private final ScheduledExecutorService poller = Executors.newSingleThreadScheduledExecutor();
+    // The account and storage key of each domain a createDomain is creating, from its existence
+    // check to its save, so a concurrent create of the same name is refused and starts no container.
+    private final Set<String> creating = ConcurrentHashMap.newKeySet();
 
     @Inject
     public OpenSearchService(StorageFactory storageFactory, EmulatorConfig config,
@@ -65,7 +80,7 @@ public class OpenSearchService implements ResourceProvider {
         this.domainManager = domainManager;
     }
 
-    OpenSearchService(StorageBackend<String, Domain> domainStore, EmulatorConfig config,
+    OpenSearchService(AccountAwareStorageBackend<Domain> domainStore, EmulatorConfig config,
                       RegionResolver regionResolver, OpenSearchDomainManager domainManager) {
         this.domainStore = domainStore;
         this.config = config;
@@ -75,6 +90,7 @@ public class OpenSearchService implements ResourceProvider {
 
     @PostConstruct
     public void init() {
+        migrateLegacyDomainKeys();
         if (!config.services().opensearch().mock()) {
             startReadinessPoller();
         }
@@ -101,10 +117,30 @@ public class OpenSearchService implements ResourceProvider {
             AdvancedSecurityOptions advancedSecurityOptions,
             EncryptionAtRestOptions encryptionAtRestOptions,
             NodeToNodeEncryptionOptions nodeToNodeEncryptionOptions,
-            DomainEndpointOptions domainEndpointOptions) {
+            DomainEndpointOptions domainEndpointOptions,
+            Map<String, String> advancedOptions,
+            String ipAddressType,
+            OffPeakWindowOptions offPeakWindowOptions,
+            SoftwareUpdateOptions softwareUpdateOptions) {
 
         public static final DomainOptions EMPTY = new DomainOptions(null, null, null, null, null);
+
+        public DomainOptions(VpcOptions vpcOptions, AdvancedSecurityOptions advancedSecurityOptions,
+                             EncryptionAtRestOptions encryptionAtRestOptions,
+                             NodeToNodeEncryptionOptions nodeToNodeEncryptionOptions,
+                             DomainEndpointOptions domainEndpointOptions) {
+            this(vpcOptions, advancedSecurityOptions, encryptionAtRestOptions, nodeToNodeEncryptionOptions,
+                    domainEndpointOptions, null, null, null, null);
+        }
     }
+
+    /** AWS's address type for a domain whose request names none. */
+    static final String DEFAULT_IP_ADDRESS_TYPE = "ipv4";
+    /**
+     * The start AWS gives an off-peak window the request leaves unset: 10:00 P.M., which AWS
+     * reads as the Region's local time. Floci keeps no time zone per Region and reports it in UTC.
+     */
+    static final long DEFAULT_OFF_PEAK_START_HOURS = 22;
 
     public Domain createDomain(String domainName, String engineVersion, ClusterConfig clusterConfig,
                                 EbsOptions ebsOptions, Map<String, String> tags, String region) {
@@ -119,16 +155,12 @@ public class OpenSearchService implements ResourceProvider {
         OpenSearchVersions.validate(engineVersion);
         validateOptions(options);
 
-        if (domainStore.get(domainName).isPresent()) {
-            throw new AwsException("ResourceAlreadyExistsException",
-                    "Domain with name " + domainName + " already exists.", 409);
-        }
-
         String accountId = regionResolver.getAccountId();
         Domain domain = new Domain();
         domain.setDomainName(domainName);
         domain.setDomainId(accountId + "/" + domainName);
         domain.setAccountId(accountId);
+        domain.setRegion(region);
         domain.setArn(AwsArnUtils.Arn.of("es", region, accountId, "domain/" + domainName).toString());
         domain.setEngineVersion(engineVersion != null ? engineVersion : DEFAULT_ENGINE_VERSION);
         domain.setAccessPolicies(accessPolicies);
@@ -152,19 +184,30 @@ public class OpenSearchService implements ResourceProvider {
             domain.setTags(tags);
         }
         applyDomainOptions(domain, options);
+        applyCreateDefaults(domain);
 
-        if (config.services().opensearch().mock()) {
-            domain.setProcessing(false);
-            domain.setEndpoint(synthesizedEndpoint(domainName, region));
-        } else {
-            domain.setProcessing(true);
-            if (!domainManager.tryStartDomain(domain)) {
-                domain.setProcessing(false);
-                domain.setEndpoint(synthesizedEndpoint(domainName, region));
-            }
+        String creatingKey = accountId + "/" + storageKey(region, domainName);
+        if (!creating.add(creatingKey)) {
+            throw domainAlreadyExists(domainName);
         }
-
-        domainStore.put(domainName, domain);
+        try {
+            if (findDomain(accountId, region, domainName).isPresent()) {
+                throw domainAlreadyExists(domainName);
+            }
+            if (config.services().opensearch().mock()) {
+                domain.setProcessing(false);
+                domain.setEndpoint(synthesizedEndpoint(domain, region));
+            } else {
+                domain.setProcessing(true);
+                if (!domainManager.tryStartDomain(domain)) {
+                    domain.setProcessing(false);
+                    domain.setEndpoint(synthesizedEndpoint(domain, region));
+                }
+            }
+            domainStore.putForAccount(accountId, storageKey(region, domainName), domain);
+        } finally {
+            creating.remove(creatingKey);
+        }
         ensureEndpointCertificate(region);
         LOG.infov("Created OpenSearch domain: {0}", domainName);
         return domain;
@@ -176,33 +219,51 @@ public class OpenSearchService implements ResourceProvider {
      * {@link OpenSearchDomainManager#tryStartDomain} returns false rather than rethrowing.
      *
      * <p>It reports an AWS-shaped endpoint in place of a blank one,
-     * {@code search-<domain>-<suffix>.<region>.es.<dnsSuffix>}, taking the DNS suffix from the
-     * region's partition rather than assuming the commercial one, with the name suffix derived from the
-     * domain name so it survives a restart. A domain reporting {@code Processing false} alongside
+     * {@code search-<domain>-<suffix>.<region>.es.<dnsSuffix>}, or {@code vpc-<domain>-...} for a domain in a
+     * VPC, taking the DNS suffix from the region's partition rather than assuming the commercial one, with the
+     * name suffix derived from the domain name so it survives a restart. A domain reporting {@code Processing false} alongside
      * {@code Endpoint ""} describes a state AWS never returns, and a client that reads the endpoint
      * to address the domain gets an empty string to connect to.
      */
-    private static String synthesizedEndpoint(String domainName, String region) {
+    private static String synthesizedEndpoint(Domain domain, String region) {
+        String domainName = domain.getDomainName();
         String suffix = Integer.toHexString(domainName.hashCode() & 0x7fffffff);
-        return "search-" + domainName + "-" + suffix + "." + region + ".es."
+        String prefix = domain.getVpcOptions() != null ? "vpc-" : "search-";
+        return prefix + domainName + "-" + suffix + "." + region + ".es."
                 + AwsRegions.dnsSuffixFor(region);
     }
 
-    public Domain describeDomain(String domainName) {
-        return domainStore.get(domainName)
+    public Domain describeDomain(String domainName, String region) {
+        return findDomain(regionResolver.getAccountId(), region, domainName)
                 .orElseThrow(() -> new AwsException("ResourceNotFoundException",
                         "Domain not found: " + domainName, 409));
     }
 
-    public List<Domain> describeDomains(List<String> domainNames) {
+    /** The domain called {@code domainName} in the caller's account and {@code region}, empty when there is none. */
+    public Optional<Domain> findDomain(String domainName, String region) {
+        return findDomain(regionResolver.getAccountId(), region, domainName);
+    }
+
+    /** The domain an ARN names in the caller's account, empty when there is none. */
+    public Optional<Domain> findDomainByArn(String arn) {
+        try {
+            return Optional.of(findByArn(arn));
+        } catch (AwsException e) {
+            return Optional.empty();
+        }
+    }
+
+    public List<Domain> describeDomains(List<String> domainNames, String region) {
         return domainNames.stream()
                 .distinct()
-                .flatMap(name -> domainStore.get(name).stream())
+                .flatMap(name -> findDomain(name, region).stream())
                 .toList();
     }
 
-    public List<Domain> listDomainNames(String engineType) {
-        return domainStore.scan(k -> true).stream()
+    public List<Domain> listDomainNames(String engineType, String region) {
+        String accountId = regionResolver.getAccountId();
+        migrateLegacyDomainKeys(accountId);
+        return domainStore.scanForAccount(accountId, key -> key.startsWith(region + "::")).stream()
                 .filter(d -> !d.isDeleted())
                 .filter(d -> engineType == null || engineType.isBlank()
                         || matchesEngineType(d.getEngineVersion(), engineType))
@@ -210,15 +271,15 @@ public class OpenSearchService implements ResourceProvider {
     }
 
     public Domain updateDomainConfig(String domainName, String engineVersion,
-                                      ClusterConfig clusterConfig, EbsOptions ebsOptions) {
+                                      ClusterConfig clusterConfig, EbsOptions ebsOptions, String region) {
         return updateDomainConfig(domainName, engineVersion, clusterConfig, ebsOptions, null,
-                DomainOptions.EMPTY);
+                DomainOptions.EMPTY, region);
     }
 
     public Domain updateDomainConfig(String domainName, String engineVersion,
                                       ClusterConfig clusterConfig, EbsOptions ebsOptions,
-                                      String accessPolicies, DomainOptions options) {
-        Domain domain = describeDomain(domainName);
+                                      String accessPolicies, DomainOptions options, String region) {
+        Domain domain = describeDomain(domainName, region);
         OpenSearchVersions.validate(engineVersion);
         validateOptions(options);
 
@@ -232,7 +293,7 @@ public class OpenSearchService implements ResourceProvider {
         applyEbsOptions(domain.getEbsOptions(), ebsOptions);
         applyDomainOptions(domain, options);
 
-        domainStore.put(domainName, domain);
+        putDomain(domain);
         return domain;
     }
 
@@ -253,6 +314,15 @@ public class OpenSearchService implements ResourceProvider {
         if (supplied.isZoneAwarenessEnabled() != null) {
             existing.setZoneAwarenessEnabled(supplied.isZoneAwarenessEnabled());
         }
+        if (supplied.getAvailabilityZoneCount() != null) {
+            existing.setAvailabilityZoneCount(supplied.getAvailabilityZoneCount());
+        }
+        if (supplied.getDedicatedMasterType() != null) {
+            existing.setDedicatedMasterType(supplied.getDedicatedMasterType());
+        }
+        if (supplied.getDedicatedMasterCount() != null) {
+            existing.setDedicatedMasterCount(supplied.getDedicatedMasterCount());
+        }
     }
 
     /** Copies only the fields the request supplied (non-null) onto {@code existing}. */
@@ -269,16 +339,22 @@ public class OpenSearchService implements ResourceProvider {
         if (supplied.getVolumeSize() != null && supplied.getVolumeSize() > 0) {
             existing.setVolumeSize(supplied.getVolumeSize());
         }
+        if (supplied.getIops() != null) {
+            existing.setIops(supplied.getIops());
+        }
+        if (supplied.getThroughput() != null) {
+            existing.setThroughput(supplied.getThroughput());
+        }
     }
 
-    public Domain deleteDomain(String domainName) {
-        Domain domain = describeDomain(domainName);
+    public Domain deleteDomain(String domainName, String region) {
+        Domain domain = describeDomain(domainName, region);
         domain.setDeleted(true);
         if (!config.services().opensearch().mock()) {
             domainManager.stopDomain(domain);
             domainManager.removeDomainStorage(domain);
         }
-        domainStore.delete(domainName);
+        domainStore.deleteForAccount(regionResolver.getAccountId(), storageKey(region, domainName));
         LOG.infov("Deleted OpenSearch domain: {0}", domainName);
         return domain;
     }
@@ -286,7 +362,7 @@ public class OpenSearchService implements ResourceProvider {
     public void addTags(String arn, Map<String, String> tags) {
         Domain domain = findByArn(arn);
         domain.getTags().putAll(tags);
-        domainStore.put(domain.getDomainName(), domain);
+        putDomain(domain);
     }
 
     public Map<String, String> listTags(String arn) {
@@ -296,27 +372,96 @@ public class OpenSearchService implements ResourceProvider {
     public void removeTags(String arn, List<String> tagKeys) {
         Domain domain = findByArn(arn);
         tagKeys.forEach(domain.getTags()::remove);
-        domainStore.put(domain.getDomainName(), domain);
+        putDomain(domain);
     }
 
-    public Domain upgradeDomain(String domainName, String targetVersion) {
-        Domain domain = describeDomain(domainName);
+    public Domain upgradeDomain(String domainName, String targetVersion, String region) {
+        Domain domain = describeDomain(domainName, region);
         if (targetVersion == null || targetVersion.isBlank()) {
             throw new AwsException("ValidationException",
                     "TargetVersion is required for UpgradeDomain.", 400);
         }
         OpenSearchVersions.validateUpgrade(domain.getEngineVersion(), targetVersion);
         domain.setEngineVersion(targetVersion);
-        domainStore.put(domainName, domain);
+        putDomain(domain);
         return domain;
     }
 
+    /**
+     * Resolves a domain inside one account and region, migrating a pre-region-scoping record
+     * stored under the bare name onto the region-scoped key when the domain's own ARN proves
+     * it belongs to this account and region.
+     */
+    private Optional<Domain> findDomain(String accountId, String region, String domainName) {
+        return domainStore.getForAccountMigratingLegacyKeys(accountId, storageKey(region, domainName),
+                List.of(domainName), domain -> ownsDomain(domain, accountId, region));
+    }
+
+    /**
+     * Resolves the domain an ARN names, the way the tag operations address domains. The ARN
+     * carries the account, region and name, so it names exactly one key; a stored record
+     * matches only when its own ARN is the one asked for.
+     */
     private Domain findByArn(String arn) {
-        return domainStore.scan(k -> true).stream()
-                .filter(d -> arn.equals(d.getArn()))
-                .findFirst()
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Domain not found for ARN: " + arn, 409));
+        AwsArnUtils.Arn parsed;
+        try {
+            parsed = AwsArnUtils.parse(arn);
+        } catch (IllegalArgumentException e) {
+            throw domainNotFoundForArn(arn);
+        }
+        if (!"es".equals(parsed.service()) || !parsed.resource().startsWith("domain/")) {
+            throw domainNotFoundForArn(arn);
+        }
+        if (AwsArnUtils.isForeignAccount(parsed, regionResolver.getAccountId())) {
+            throw domainNotFoundForArn(arn);
+        }
+        String domainName = parsed.resource().substring("domain/".length());
+        return domainStore.getForAccountMigratingLegacyKeys(
+                        parsed.accountId(), storageKey(parsed.region(), domainName),
+                        List.of(domainName), domain -> arn.equals(domain.getArn()))
+                .orElseThrow(() -> domainNotFoundForArn(arn));
+    }
+
+    private static AwsException domainNotFoundForArn(String arn) {
+        return new AwsException("ResourceNotFoundException",
+                "Domain not found for ARN: " + arn, 409);
+    }
+
+    /**
+     * Whether a stored record is the domain the account and region name: its ARN must be an
+     * OpenSearch ARN carrying exactly that account and region.
+     */
+    private static boolean ownsDomain(Domain domain, String accountId, String region) {
+        try {
+            AwsArnUtils.Arn arn = AwsArnUtils.parse(domain.getArn());
+            return "es".equals(arn.service()) && accountId.equals(arn.accountId())
+                    && region.equals(arn.region());
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether a stored record's ARN is an OpenSearch ARN naming exactly this account. The
+     * migration's ownership proof: the destination region comes from the same ARN, so proving
+     * the account is enough there.
+     */
+    private static boolean ownsAccount(Domain domain, String accountId) {
+        try {
+            AwsArnUtils.Arn arn = AwsArnUtils.parse(domain.getArn());
+            return "es".equals(arn.service()) && accountId.equals(arn.accountId());
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
+    }
+
+    private static AwsException domainAlreadyExists(String domainName) {
+        return new AwsException("ResourceAlreadyExistsException",
+                "Domain with name " + domainName + " already exists.", 409);
+    }
+
+    private static String storageKey(String region, String domainName) {
+        return region + "::" + domainName;
     }
 
     private void validateDomainName(String name) {
@@ -384,6 +529,55 @@ public class OpenSearchService implements ResourceProvider {
         if (options.domainEndpointOptions() != null) {
             domain.setDomainEndpointOptions(options.domainEndpointOptions());
         }
+        if (options.advancedOptions() != null) {
+            domain.setAdvancedOptions(new HashMap<>(options.advancedOptions()));
+        }
+        if (options.ipAddressType() != null) {
+            domain.setIpAddressType(options.ipAddressType());
+        }
+        if (options.offPeakWindowOptions() != null) {
+            OffPeakWindowOptions supplied = options.offPeakWindowOptions();
+            OffPeakWindowOptions current = domain.getOffPeakWindowOptions() != null
+                    ? domain.getOffPeakWindowOptions() : new OffPeakWindowOptions();
+            if (supplied.getEnabled() != null) {
+                current.setEnabled(supplied.getEnabled());
+            }
+            if (supplied.getStartHours() != null) {
+                current.setStartHours(supplied.getStartHours());
+                current.setStartMinutes(supplied.getStartMinutes() != null ? supplied.getStartMinutes() : 0L);
+            }
+            domain.setOffPeakWindowOptions(current);
+        }
+        if (options.softwareUpdateOptions() != null
+                && options.softwareUpdateOptions().getAutoSoftwareUpdateEnabled() != null) {
+            domain.setSoftwareUpdateOptions(options.softwareUpdateOptions());
+        }
+    }
+
+    /**
+     * The settings a new domain reports when its request leaves them out, as AWS fills them: an
+     * {@code ipv4} address type, an enabled off-peak window starting at 10:00 P.M., and automatic
+     * software updates off.
+     */
+    private static void applyCreateDefaults(Domain domain) {
+        if (domain.getIpAddressType() == null) {
+            domain.setIpAddressType(DEFAULT_IP_ADDRESS_TYPE);
+        }
+        OffPeakWindowOptions offPeak = domain.getOffPeakWindowOptions();
+        if (offPeak == null) {
+            offPeak = new OffPeakWindowOptions(true, null, null);
+            domain.setOffPeakWindowOptions(offPeak);
+        }
+        if (offPeak.getEnabled() == null) {
+            offPeak.setEnabled(true);
+        }
+        if (offPeak.getStartHours() == null) {
+            offPeak.setStartHours(DEFAULT_OFF_PEAK_START_HOURS);
+            offPeak.setStartMinutes(0L);
+        }
+        if (domain.getSoftwareUpdateOptions() == null) {
+            domain.setSoftwareUpdateOptions(new SoftwareUpdateOptions(false));
+        }
     }
 
     private boolean matchesEngineType(String engineVersion, String engineType) {
@@ -413,25 +607,65 @@ public class OpenSearchService implements ResourceProvider {
     }
 
     private List<Domain> allDomains() {
-        if (domainStore instanceof AccountAwareStorageBackend<Domain> aware) {
-            return aware.scanAllAccounts();
-        }
-        return domainStore.scan(k -> true);
+        return domainStore.scanAllAccounts();
     }
 
+    /**
+     * Persists a domain under the key its ARN names, so the poller writes a record back to the
+     * account and region that own it rather than to whatever account the background thread
+     * happens to run under. A record whose ARN cannot be parsed is left un-persisted, with a
+     * warning, rather than guessed at.
+     */
     private void putDomain(Domain domain) {
-        if (domain.getAccountId() != null && domainStore instanceof AccountAwareStorageBackend<Domain> aware) {
-            aware.putForAccount(domain.getAccountId(), domain.getDomainName(), domain);
-        } else {
-            domainStore.put(domain.getDomainName(), domain);
+        try {
+            AwsArnUtils.Arn arn = AwsArnUtils.parse(domain.getArn());
+            domainStore.putForAccount(arn.accountId(), storageKey(arn.region(), domain.getDomainName()), domain);
+        } catch (IllegalArgumentException e) {
+            LOG.warnv("Not persisting OpenSearch domain {0}: its ARN {1} cannot be parsed",
+                    domain.getDomainName(), domain.getArn());
+        }
+    }
+
+    /**
+     * Moves records persisted before domains were keyed by region, one account partition at a
+     * time, from the bare domain name onto the region-scoped key. The destination region comes
+     * from the domain's ARN, which has always carried it, so a pre-scoping domain stays in its
+     * own region; a record whose ARN cannot be parsed is left where it is.
+     */
+    private void migrateLegacyDomainKeys() {
+        Set<String> accounts = new LinkedHashSet<>();
+        for (String rawKey : domainStore.scanAllAccountsWithRawKeys().keySet()) {
+            accounts.add(AccountAwareStorageBackend.hasAccountPrefix(rawKey)
+                    ? rawKey.substring(0, 12)
+                    : regionResolver.getDefaultAccountId());
+        }
+        accounts.forEach(this::migrateLegacyDomainKeys);
+    }
+
+    private void migrateLegacyDomainKeys(String accountId) {
+        domainStore.migrateLegacyEntries(accountId, key -> !key.contains("::"),
+                this::legacyDomainDestinationKey, domain -> ownsAccount(domain, accountId));
+    }
+
+    /**
+     * The region-scoped key for a legacy record, or null to leave it untouched when its ARN
+     * cannot be parsed.
+     */
+    private String legacyDomainDestinationKey(Domain domain) {
+        try {
+            return storageKey(AwsArnUtils.parse(domain.getArn()).region(), domain.getDomainName());
+        } catch (IllegalArgumentException e) {
+            LOG.warnv("Leaving OpenSearch domain {0} under its pre-region-scoping key: "
+                    + "its ARN {1} cannot be parsed", domain.getDomainName(), domain.getArn());
+            return null;
         }
     }
 
     @Override
     public List<ExplorerResource> getResources() {
         List<ExplorerResource> resources = new ArrayList<>();
-        for (Domain domain : listDomainNames(null)) {
-            if (domain.getArn() == null) {
+        for (Domain domain : domainStore.scan(key -> true)) {
+            if (domain.isDeleted() || domain.getArn() == null) {
                 continue;
             }
             AwsArnUtils.Arn parsed = AwsArnUtils.parse(domain.getArn());
@@ -482,9 +716,27 @@ public class OpenSearchService implements ResourceProvider {
      * {@code BaseException} rather than {@code ResourceNotFoundException}.
      */
     public Domain describeDomainOrBaseException(String domainName) {
-        return domainStore.get(domainName)
+        return findDomainInAnyRegion(domainName)
                 .orElseThrow(() -> new AwsException("BaseException",
                         "Domain not found: " + domainName, 400));
+    }
+
+    /**
+     * The caller's domain called {@code domainName}, for the operations whose route names no region
+     * of its own: domains are stored per region, so the first region holding one by that name wins.
+     */
+    public Domain describeDomain(String domainName) {
+        return findDomainInAnyRegion(domainName)
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Domain not found: " + domainName, 409));
+    }
+
+    private Optional<Domain> findDomainInAnyRegion(String domainName) {
+        String accountId = regionResolver.getAccountId();
+        migrateLegacyDomainKeys(accountId);
+        return domainStore.scanForAccount(accountId, key -> key.endsWith("::" + domainName)).stream()
+                .filter(domain -> domainName.equals(domain.getDomainName()) && !domain.isDeleted())
+                .findFirst();
     }
 
     /** A data node of a domain as reported by DescribeDomainNodes. */

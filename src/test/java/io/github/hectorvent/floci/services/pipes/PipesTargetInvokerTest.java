@@ -4,11 +4,16 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
+import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.ServiceRegistry;
 import io.github.hectorvent.floci.services.eventbridge.EventBridgeService;
 import io.github.hectorvent.floci.services.lambda.LambdaService;
 import io.github.hectorvent.floci.services.lambda.model.InvocationType;
+import io.github.hectorvent.floci.services.lambda.model.InvokeResult;
 import io.github.hectorvent.floci.services.pipes.model.DesiredState;
 import io.github.hectorvent.floci.services.pipes.model.Pipe;
+import io.github.hectorvent.floci.services.redshiftdata.RedshiftDataTargetSubmitter;
+import io.github.hectorvent.floci.services.redshiftdata.RedshiftTargetAuthorizer;
 import io.github.hectorvent.floci.services.sns.SnsService;
 import io.github.hectorvent.floci.services.sqs.SqsService;
 import io.github.hectorvent.floci.services.stepfunctions.StepFunctionsService;
@@ -19,10 +24,13 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -38,6 +46,9 @@ class PipesTargetInvokerTest {
     @Mock private SnsService snsService;
     @Mock private EventBridgeService eventBridgeService;
     @Mock private StepFunctionsService stepFunctionsService;
+    @Mock private RedshiftDataTargetSubmitter redshiftSubmitter;
+    @Mock private RedshiftTargetAuthorizer redshiftAuthorizer;
+    @Mock private ServiceRegistry serviceRegistry;
     @Mock private EmulatorConfig config;
 
     private PipesTargetInvoker invoker;
@@ -46,7 +57,164 @@ class PipesTargetInvokerTest {
     void setUp() {
         when(config.effectiveBaseUrl()).thenReturn("http://localhost:4566");
         invoker = new PipesTargetInvoker(lambdaService, sqsService, snsService,
-                eventBridgeService, stepFunctionsService, MAPPER, config);
+                eventBridgeService, stepFunctionsService, redshiftSubmitter, redshiftAuthorizer, serviceRegistry,
+                MAPPER, config);
+    }
+
+    private static final String CLUSTER = "arn:aws:redshift:us-east-1:000000000000:cluster:analytics";
+    private static final String PIPE_ROLE = "arn:aws:iam::000000000000:role/PipeRole";
+
+    private Pipe redshiftPipe(String targetParametersJson) throws Exception {
+        Pipe pipe = createPipe(CLUSTER, (ObjectNode) MAPPER.readTree(targetParametersJson));
+        pipe.setRoleArn(PIPE_ROLE);
+        pipe.setAccountId("000000000000");
+        return pipe;
+    }
+
+    @Test
+    void redshiftTarget_submitsTheSqlsUnderThePipeRoleAndReadsPathsFromTheSourceEvent() throws Exception {
+        when(serviceRegistry.isServiceEnabled("redshift-data")).thenReturn(true);
+        Pipe pipe = redshiftPipe("""
+                {"InputTemplate":"{\\"ignored\\": <$.messageId>}",
+                 "RedshiftDataParameters":{"Database":"dev","DbUser":"admin","StatementName":"load",
+                   "Sqls":["$.body.first","INSERT INTO t VALUES (2)"],"WithEvent":true}}""");
+        String event = "{\"messageId\":\"m1\",\"body\":\"{\\\"first\\\":\\\"INSERT INTO t VALUES (1)\\\"}\"}";
+
+        invoker.invoke(pipe, event, "us-east-1");
+
+        ArgumentCaptor<RedshiftDataTargetSubmitter.Statement> statement = ArgumentCaptor.captor();
+        ArgumentCaptor<UnaryOperator<String>> resolver = ArgumentCaptor.captor();
+        ArgumentCaptor<RedshiftDataTargetSubmitter.RoleCheck> roleCheck = ArgumentCaptor.captor();
+        verify(redshiftSubmitter).submit(eq(CLUSTER), statement.capture(), eq(PIPE_ROLE), eq("000000000000"),
+                eq("us-east-1"), resolver.capture(), roleCheck.capture());
+        assertEquals("dev", statement.getValue().database());
+        assertEquals("admin", statement.getValue().dbUser());
+        assertEquals("load", statement.getValue().statementName());
+        assertEquals(List.of("$.body.first", "INSERT INTO t VALUES (2)"), statement.getValue().sqls());
+        assertNull(statement.getValue().sql());
+        assertEquals(Boolean.TRUE, statement.getValue().withEvent());
+        // The path reads the event as it arrived, not what InputTemplate made of it.
+        assertEquals("INSERT INTO t VALUES (1)", resolver.getValue().apply("$.body.first"));
+        assertEquals("INSERT INTO t VALUES (2)", resolver.getValue().apply("INSERT INTO t VALUES (2)"));
+        roleCheck.getValue().refusal(List.of());
+        verify(redshiftAuthorizer).refusal("pipes.amazonaws.com", PIPE_ROLE, "000000000000", pipe.getArn(), List.of());
+        verifyNoInteractions(lambdaService, sqsService, snsService, eventBridgeService, stepFunctionsService);
+    }
+
+    @Test
+    void redshiftTarget_readsPathsFromAnArrayEnrichmentResponse() throws Exception {
+        when(serviceRegistry.isServiceEnabled("redshift-data")).thenReturn(true);
+        Pipe pipe = redshiftPipe("{\"RedshiftDataParameters\":{\"Database\":\"dev\",\"Sqls\":[\"$[0].statement\"]}}");
+
+        invoker.invoke(pipe, "[{\"statement\":\"INSERT INTO t VALUES (1)\"}]", "us-east-1");
+
+        ArgumentCaptor<UnaryOperator<String>> resolver = ArgumentCaptor.captor();
+        verify(redshiftSubmitter).submit(any(), any(), any(), any(), any(), resolver.capture(), any());
+        assertEquals("INSERT INTO t VALUES (1)", resolver.getValue().apply("$[0].statement"));
+    }
+
+    @Test
+    void redshiftTarget_readsPathsFromAKafkaValueDeliveredAsBase64() throws Exception {
+        when(serviceRegistry.isServiceEnabled("redshift-data")).thenReturn(true);
+        Pipe pipe = redshiftPipe("{\"RedshiftDataParameters\":{\"Database\":\"dev\","
+                + "\"Sqls\":[\"$.value.statement\",\"$.key\"]}}");
+        String value = Base64.getEncoder().encodeToString(
+                "{\"statement\":\"INSERT INTO t VALUES (1)\"}".getBytes(StandardCharsets.UTF_8));
+        String key = Base64.getEncoder().encodeToString(
+                "order-1".getBytes(StandardCharsets.UTF_8));
+        String event = "{\"eventSource\":\"SelfManagedKafka\",\"topic\":\"orders\",\"key\":\"" + key
+                + "\",\"value\":\"" + value + "\"}";
+
+        invoker.invoke(pipe, event, "us-east-1");
+
+        ArgumentCaptor<UnaryOperator<String>> resolver = ArgumentCaptor.captor();
+        verify(redshiftSubmitter).submit(any(), any(), any(), any(), any(), resolver.capture(), any());
+        assertEquals("INSERT INTO t VALUES (1)", resolver.getValue().apply("$.value.statement"));
+        assertEquals("order-1", resolver.getValue().apply("$.key"));
+    }
+
+    @Test
+    void redshiftTarget_readsPathsFromAKinesisDataDeliveredAsBase64() throws Exception {
+        when(serviceRegistry.isServiceEnabled("redshift-data")).thenReturn(true);
+        Pipe pipe = redshiftPipe("{\"RedshiftDataParameters\":{\"Database\":\"dev\","
+                + "\"Sqls\":[\"$[0].kinesis.data.statement\",\"$[0].kinesis.data\"]}}");
+        String data = Base64.getEncoder().encodeToString(
+                "{\"statement\":\"INSERT INTO t VALUES (1)\"}".getBytes(StandardCharsets.UTF_8));
+        String event = "[{\"eventSource\":\"aws:kinesis\",\"kinesis\":{\"partitionKey\":\"p\",\"data\":\""
+                + data + "\"}}]";
+
+        invoker.invoke(pipe, event, "us-east-1");
+
+        ArgumentCaptor<UnaryOperator<String>> resolver = ArgumentCaptor.captor();
+        verify(redshiftSubmitter).submit(any(), any(), any(), any(), any(), resolver.capture(), any());
+        assertEquals("INSERT INTO t VALUES (1)", resolver.getValue().apply("$[0].kinesis.data.statement"));
+        assertEquals("{\"statement\":\"INSERT INTO t VALUES (1)\"}", resolver.getValue().apply("$[0].kinesis.data"));
+    }
+
+    @Test
+    void extractJsonPath_decodesBase64OnlyInKafkaAndKinesisSourceRecords() {
+        String encoded = Base64.getEncoder().encodeToString("hello".getBytes(StandardCharsets.UTF_8));
+        String kafka = "{\"eventSource\":\"aws:kafka\",\"key\":\"" + encoded + "\",\"value\":\"" + encoded + "\"}";
+        String kinesis = "{\"eventSource\":\"aws:kinesis\",\"kinesis\":{\"data\":\"" + encoded + "\"}}";
+
+        assertEquals("\"hello\"", invoker.extractJsonPath("$.key", kafka));
+        assertEquals("\"hello\"", invoker.extractJsonPath("$.value", kafka));
+        assertEquals("\"hello\"", invoker.extractJsonPath("$.kinesis.data", kinesis));
+    }
+
+    @Test
+    void extractJsonPath_leavesFieldsOfAnEnrichmentResponseOrAnSqsBodyUnchanged() {
+        String encoded = Base64.getEncoder().encodeToString("hello".getBytes(StandardCharsets.UTF_8));
+        String enriched = "{\"data\":\"" + encoded + "\",\"key\":\"" + encoded + "\",\"value\":\"" + encoded
+                + "\",\"body\":\"" + encoded + "\",\"kinesis\":{\"data\":\"" + encoded + "\"}}";
+
+        for (String path : List.of("$.data", "$.key", "$.value", "$.body", "$.kinesis.data")) {
+            assertEquals("\"" + encoded + "\"", invoker.extractJsonPath(path, enriched), path);
+        }
+        assertEquals("\"" + encoded + "\"", invoker.extractJsonPath("$.key", "{\"key\":\"" + encoded + "\"}"));
+    }
+
+    @Test
+    void inputTemplate_readsAFieldOfBase64KinesisData() {
+        String data = Base64.getEncoder().encodeToString("{\"id\":7}".getBytes(StandardCharsets.UTF_8));
+        String event = "{\"eventSource\":\"aws:kinesis\",\"kinesis\":{\"data\":\"" + data + "\"}}";
+
+        assertEquals("{\"id\": 7}", invoker.applyInputTemplate("{\"id\": <$.kinesis.data.id>}", event));
+    }
+
+    @Test
+    void redshiftTarget_aPathThatResolvesToNothingIsAValidationError() throws Exception {
+        when(serviceRegistry.isServiceEnabled("redshift-data")).thenReturn(true);
+        Pipe pipe = redshiftPipe("{\"RedshiftDataParameters\":{\"Database\":\"dev\",\"Sqls\":[\"$.body.missing\"]}}");
+
+        invoker.invoke(pipe, "{\"messageId\":\"m1\",\"body\":\"{}\"}", "us-east-1");
+
+        ArgumentCaptor<UnaryOperator<String>> resolver = ArgumentCaptor.captor();
+        verify(redshiftSubmitter).submit(any(), any(), any(), any(), any(), resolver.capture(), any());
+        AwsException error = assertThrows(AwsException.class, () -> resolver.getValue().apply("$.body.missing"));
+        assertEquals("ValidationException", error.getErrorCode());
+    }
+
+    @Test
+    void redshiftTarget_withoutSqlsIsRejectedBeforeSubmitting() throws Exception {
+        when(serviceRegistry.isServiceEnabled("redshift-data")).thenReturn(true);
+        Pipe pipe = redshiftPipe("{\"RedshiftDataParameters\":{\"Database\":\"dev\"}}");
+
+        AwsException error = assertThrows(AwsException.class, () -> invoker.invoke(pipe, "{}", "us-east-1"));
+
+        assertEquals("ValidationException", error.getErrorCode());
+        verifyNoInteractions(redshiftSubmitter);
+    }
+
+    @Test
+    void redshiftTarget_isNotDeliveredWhenTheDataApiIsDisabled() throws Exception {
+        when(serviceRegistry.isServiceEnabled("redshift-data")).thenReturn(false);
+        Pipe pipe = redshiftPipe("{\"RedshiftDataParameters\":{\"Sqls\":[\"SELECT 1\"]}}");
+
+        AwsException error = assertThrows(AwsException.class, () -> invoker.invoke(pipe, "{}", "us-east-1"));
+
+        assertEquals("ServiceNotAvailableException", error.getErrorCode());
+        verifyNoInteractions(redshiftSubmitter);
     }
 
     private Pipe createPipe(String targetArn, ObjectNode targetParameters) {
@@ -109,7 +277,7 @@ class PipesTargetInvokerTest {
     void invoke_keepsTheQualifierOfTheTargetFunctionArn() {
         Pipe pipe = createPipe("arn:aws:lambda:us-east-1:000000000000:function:my-fn:PROD", null);
         when(lambdaService.invoke(anyString(), anyString(), any(byte[].class), any(InvocationType.class)))
-                .thenReturn(new io.github.hectorvent.floci.services.lambda.model.InvokeResult(200, null, "{}".getBytes(), null, "req"));
+                .thenReturn(new InvokeResult(200, null, "{}".getBytes(), null, "req"));
 
         invoker.invoke(pipe, "{}", "us-east-1");
 
@@ -359,9 +527,9 @@ class PipesTargetInvokerTest {
     void applyEnrichment_invokesLambdaAndReturnsResponse() {
         String region = "us-east-1";
         Pipe pipe = enrichmentPipe(region, "arn:aws:lambda:" + region + ":000000000000:function:enrich-fn");
-        byte[] resp = "{\"systemId\":\"S1\"}".getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        byte[] resp = "{\"systemId\":\"S1\"}".getBytes(StandardCharsets.UTF_8);
         when(lambdaService.invoke(eq(region), eq("enrich-fn"), any(byte[].class), eq(InvocationType.RequestResponse)))
-                .thenReturn(new io.github.hectorvent.floci.services.lambda.model.InvokeResult(200, null, resp, null, "req"));
+                .thenReturn(new InvokeResult(200, null, resp, null, "req"));
 
         String out = invoker.applyEnrichment(pipe, "[{\"body\":\"{}\"}]", region);
 
@@ -369,7 +537,7 @@ class PipesTargetInvokerTest {
         ArgumentCaptor<byte[]> payloadCaptor = ArgumentCaptor.forClass(byte[].class);
         verify(lambdaService).invoke(eq(region), eq("enrich-fn"), payloadCaptor.capture(), eq(InvocationType.RequestResponse));
         assertEquals("[{\"body\":\"{}\"}]",
-                new String(payloadCaptor.getValue(), java.nio.charset.StandardCharsets.UTF_8));
+                new String(payloadCaptor.getValue(), StandardCharsets.UTF_8));
     }
 
     @Test
@@ -377,7 +545,7 @@ class PipesTargetInvokerTest {
         String region = "us-east-1";
         Pipe pipe = enrichmentPipe(region, "arn:aws:lambda:" + region + ":000000000000:function:enrich-fn:PROD");
         when(lambdaService.invoke(eq(region), eq("enrich-fn:PROD"), any(byte[].class), eq(InvocationType.RequestResponse)))
-                .thenReturn(new io.github.hectorvent.floci.services.lambda.model.InvokeResult(200, null, "{}".getBytes(), null, "req"));
+                .thenReturn(new InvokeResult(200, null, "{}".getBytes(), null, "req"));
 
         invoker.applyEnrichment(pipe, "[]", region);
 
@@ -397,7 +565,7 @@ class PipesTargetInvokerTest {
         String region = "us-east-1";
         Pipe pipe = enrichmentPipe(region, "arn:aws:lambda:" + region + ":000000000000:function:enrich-fn");
         when(lambdaService.invoke(eq(region), eq("enrich-fn"), any(byte[].class), eq(InvocationType.RequestResponse)))
-                .thenReturn(new io.github.hectorvent.floci.services.lambda.model.InvokeResult(200, null, new byte[0], null, "req"));
+                .thenReturn(new InvokeResult(200, null, new byte[0], null, "req"));
         assertNull(invoker.applyEnrichment(pipe, "[]", region));
     }
 
@@ -408,8 +576,8 @@ class PipesTargetInvokerTest {
         Pipe pipe = enrichmentPipe(region, "arn:aws:lambda:" + region + ":000000000000:function:enrich-fn");
         for (String body : new String[]{"{}", "[]", "  { }  ", "[ ]"}) {
             when(lambdaService.invoke(eq(region), eq("enrich-fn"), any(byte[].class), eq(InvocationType.RequestResponse)))
-                    .thenReturn(new io.github.hectorvent.floci.services.lambda.model.InvokeResult(
-                            200, null, body.getBytes(java.nio.charset.StandardCharsets.UTF_8), null, "req"));
+                    .thenReturn(new InvokeResult(
+                            200, null, body.getBytes(StandardCharsets.UTF_8), null, "req"));
             assertNull(invoker.applyEnrichment(pipe, "[]", region),
                     "enrichment response " + body + " should skip the target");
         }
@@ -421,8 +589,8 @@ class PipesTargetInvokerTest {
         String region = "us-east-1";
         Pipe pipe = enrichmentPipe(region, "arn:aws:lambda:" + region + ":000000000000:function:enrich-fn");
         when(lambdaService.invoke(eq(region), eq("enrich-fn"), any(byte[].class), eq(InvocationType.RequestResponse)))
-                .thenReturn(new io.github.hectorvent.floci.services.lambda.model.InvokeResult(
-                        200, null, "[{}]".getBytes(java.nio.charset.StandardCharsets.UTF_8), null, "req"));
+                .thenReturn(new InvokeResult(
+                        200, null, "[{}]".getBytes(StandardCharsets.UTF_8), null, "req"));
         assertEquals("[{}]", invoker.applyEnrichment(pipe, "[]", region));
     }
 
@@ -441,7 +609,7 @@ class PipesTargetInvokerTest {
         String region = "us-east-1";
         Pipe pipe = enrichmentPipe(region, "arn:aws:lambda:" + region + ":000000000000:function:enrich-fn");
         when(lambdaService.invoke(eq(region), eq("enrich-fn"), any(byte[].class), eq(InvocationType.RequestResponse)))
-                .thenReturn(new io.github.hectorvent.floci.services.lambda.model.InvokeResult(200, "Unhandled", "boom".getBytes(), null, "req"));
+                .thenReturn(new InvokeResult(200, "Unhandled", "boom".getBytes(), null, "req"));
         assertThrows(RuntimeException.class, () -> invoker.applyEnrichment(pipe, "[]", region));
     }
 
@@ -452,7 +620,7 @@ class PipesTargetInvokerTest {
         String region = "us-east-1";
         Pipe pipe = createPipe("arn:aws:lambda:" + region + ":000000000000:function:my-fn", null);
         when(lambdaService.invoke(eq(region), eq("my-fn"), any(byte[].class), eq(InvocationType.RequestResponse)))
-                .thenReturn(new io.github.hectorvent.floci.services.lambda.model.InvokeResult(200, "Unhandled", "boom".getBytes(), null, "req"));
+                .thenReturn(new InvokeResult(200, "Unhandled", "boom".getBytes(), null, "req"));
         assertThrows(RuntimeException.class, () -> invoker.invoke(pipe, "{}", region));
     }
 

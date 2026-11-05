@@ -41,7 +41,8 @@ import static org.mockito.Mockito.when;
  * {@code TimeToLiveSpecification} reconcile, and the snapshot a failed table update rolls back
  * from. The stream and replica
  * behaviour keeps its own coverage in {@code DynamoDbStreamSpecificationCfnProvisionerTest} and
- * {@code DynamoDbReplicaCfnProvisionerTest}, which reach this class through the fixture.
+ * {@code DynamoDbReplicaCfnProvisionerTest}, which reach this class through the fixture, and
+ * {@code KinesisStreamSpecification} in {@code DynamoDbKinesisStreamSpecificationCfnProvisionerTest}.
  */
 class DynamoDbCfnProvisionerTest {
 
@@ -54,7 +55,7 @@ class DynamoDbCfnProvisionerTest {
 
     private final DynamoDbService dynamoDb = mock(DynamoDbService.class);
     private final ObjectMapper mapper = new ObjectMapper();
-    private final NativeDynamoDbBackend backend = new NativeDynamoDbBackend(null, null, dynamoDb, null, null, mapper);
+    private final NativeDynamoDbBackend backend = new NativeDynamoDbBackend(null, null, null, dynamoDb, null, null, mapper);
     private final DynamoDbCfnProvisioner provisioner = new DynamoDbCfnProvisioner(
             new DynamoDbFacade(backend, backend, new RegionResolver("us-east-1", "000000000000")));
 
@@ -464,6 +465,45 @@ class DynamoDbCfnProvisionerTest {
         assertEquals("Model validation failed (#/TimeToLiveSpecification/Enabled: expected type: Boolean,"
                 + " found: String)", e.getMessage());
         verifyNoInteractions(dynamoDb);
+    }
+
+    @Test
+    void aBooleanTimeToLiveFailsTemplateValidationBeforeTheTableIsCreated() throws Exception {
+        StackResource r = resource("AWS::DynamoDB::Table", "Orders");
+        JsonNode props = props("{\"TableName\":\"orders\",\"TimeToLiveSpecification\":false}");
+        ProvisionContext ctx = ctx();
+
+        AwsException e = assertThrows(AwsException.class, () -> provisioner.provision(r, props, ctx));
+
+        assertEquals("ValidationError", e.getErrorCode());
+        assertEquals("Property [TimeToLiveSpecification] expected type: JSONObject, found: String", e.getMessage());
+        verifyNoInteractions(dynamoDb);
+    }
+
+    @Test
+    void aListTimeToLiveFailsTemplateValidationBeforeTheTableIsCreated() throws Exception {
+        StackResource r = resource("AWS::DynamoDB::Table", "Orders");
+        JsonNode props = props("{\"TableName\":\"orders\",\"TimeToLiveSpecification\":[]}");
+        ProvisionContext ctx = ctx();
+
+        AwsException e = assertThrows(AwsException.class, () -> provisioner.provision(r, props, ctx));
+
+        assertEquals("Property [TimeToLiveSpecification] expected type: JSONObject, found: JSONArray",
+                e.getMessage());
+        verifyNoInteractions(dynamoDb);
+    }
+
+    @Test
+    void anUpdateWithANonObjectTimeToLiveLeavesTheDeclaredOneEnabled() throws Exception {
+        existingTable(withTimeToLive(table(false), "expiresAt"));
+        StackResource r = resource("AWS::DynamoDB::Table", "Orders");
+        r.setPhysicalId(TABLE_NAME);
+        JsonNode props = props("{\"TableName\":\"orders\",\"TimeToLiveSpecification\":\"off\"}");
+        ProvisionContext ctx = updateCtx(TABLE_NAME, TTL_PROPS);
+
+        assertThrows(AwsException.class, () -> provisioner.provision(r, props, ctx));
+
+        verify(dynamoDb, never()).updateTimeToLive(anyString(), any(), anyBoolean(), anyString());
     }
 
     /** CloudFormation renames a TTL attribute by disabling it in one update and enabling the new one in a later one. */

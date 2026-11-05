@@ -1,11 +1,14 @@
 """Shared generator for the vendored request shapes a service's request check reads.
 
-`regen_dynamodb_shapes.py`, `regen_sesv2_shapes.py` and `regen_ecs_shapes.py` each name a botocore
-model and an output file and hand the rest to `main()`. `regen_resource_groups_shapes.py` and
+`regen_dynamodb_shapes.py`, `regen_sesv2_shapes.py`, `regen_apigateway_shapes.py` and
+`regen_ecs_shapes.py` each name a botocore model and an output file and hand the rest to
+`main()`. `regen_resource_groups_shapes.py`, `regen_logs_delivery_shapes.py` and
 `regen_ecr_shapes.py` vendor constraints as well, through `build_constraints()`. The output keeps only what `RequestShapeModel` reads: the input
 shape of every operation, reduced to the members carried in the JSON body, and for every shape
 reachable from one, its type and the shapes of its members, list elements or map values.
 `regen_emr_serverless_shapes.py` keeps every operation's output shape too, with `outputs=True`.
+`regen_iam_shapes.py` and `regen_sts_shapes.py` name their operations instead, which switches
+`main()` to `build_constraints()`.
 
 Members bound to the URI, the query string or a header are left out: they never reach the body.
 A model without such members, as DynamoDB's, comes out whole.
@@ -15,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from regen_partitions import load_model as load_json_model
@@ -75,8 +79,9 @@ def build(model: dict, provenance: str, generator: str, outputs: bool = False) -
 
 def build_constraints(model: dict, operations: tuple[str, ...], provenance: str, generator: str) -> dict:
     """The input shapes of `operations` with the constraints `RequestConstraintCheck` reads: for every
-    shape reachable from one, its type, required members, min, max, pattern and enum, and the shapes
-    of its members, list elements or map keys and values. Unlike `build`, it keeps members bound to
+    shape reachable from one, its type, required members, min, max, pattern, the pattern a violation
+    quotes where that is not the one matched on, and enum, and the shapes of its members, list
+    elements or map keys and values. Unlike `build`, it keeps members bound to
     the URI, query string or headers, so it suits the JSON protocols, whose members all travel in
     the body."""
     kept: dict[str, dict] = {}
@@ -85,7 +90,8 @@ def build_constraints(model: dict, operations: tuple[str, ...], provenance: str,
         if name in kept:
             return
         shape = model["shapes"][name]
-        entry = {k: shape[k] for k in ("type", "required", "min", "max", "pattern", "enum") if k in shape}
+        entry = {k: shape[k] for k in ("type", "required", "min", "max", "pattern", "quotedPattern", "enum")
+                 if k in shape}
         kept[name] = entry
         if shape["type"] == "structure":
             entry["members"] = {k: v["shape"] for k, v in shape.get("members", {}).items()}
@@ -118,7 +124,19 @@ def generator_name(script: str) -> str:
 
 
 def main(argv: list[str] | None, *, script: str, model: Path, output: Path, description: str,
-         outputs: bool = False) -> int:
+         outputs: bool = False, operations: tuple[str, ...] | None = None,
+         prepare: Callable[[dict], dict] | None = None) -> int:
+    """Drives one generator: parse the flags, read the model, write or check the vendored file.
+
+    `operations` picks the constraints flavour, keeping those operations' declared constraints
+    through `build_constraints` where the default keeps every operation's member types through
+    `build`. The two vendor different things and are driven the same way, which is why the
+    Query-protocol generators share this too rather than each repeating the flags and the
+    staleness check.
+
+    `prepare` is the one thing a generator may do to the model before any of that, for an operation
+    it vendors in part: IAM reduces a paged request to its paging members, the rest of it keeping
+    the reading it has today."""
     parser = argparse.ArgumentParser(description=description, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--check", action="store_true", help="exit 1 when the vendored file differs from a fresh generation")
     parser.add_argument("--botocore-data", type=Path, help="botocore data directory")
@@ -126,7 +144,12 @@ def main(argv: list[str] | None, *, script: str, model: Path, output: Path, desc
     args = parser.parse_args(argv)
 
     data, provenance = resolve_botocore_data(args.botocore_data)
-    fresh = render(build(load_model(data, model), provenance, generator_name(script), outputs))
+    loaded = load_model(data, model)
+    if prepare is not None:
+        loaded = prepare(loaded)
+    generator = generator_name(script)
+    fresh = render(build_constraints(loaded, operations, provenance, generator) if operations is not None
+                   else build(loaded, provenance, generator, outputs))
 
     if args.check:
         current = args.output.read_text(encoding="utf-8") if args.output.exists() else ""

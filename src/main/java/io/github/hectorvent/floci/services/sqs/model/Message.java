@@ -2,13 +2,12 @@ package io.github.hectorvent.floci.services.sqs.model;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataOutputStream;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -52,10 +51,8 @@ public class Message {
     // move task. A standard DLQ keeps the original enqueue time.
     private Instant retentionStartTimestamp;
 
-    // Transient fields for visibility timeout tracking
-    @JsonIgnore
+    // Persist absolute delivery deadlines and the active receipt with the message.
     private String receiptHandle;
-    @JsonIgnore
     private Instant visibleAt;
 
     public Message() {
@@ -68,19 +65,33 @@ public class Message {
         this.messageAttributes = new HashMap<>();
         this.sentTimestamp = Instant.now();
         this.receiveCount = 0;
-        this.md5OfBody = computeMd5(body);
+        this.md5OfBody = Digests.md5Hex(body.getBytes(StandardCharsets.UTF_8));
     }
 
-    /** A copy for delivery to another queue by StartMessageMoveTask. The content carries over. AWS
-     *  gives it a new message id, and per-receive state (receive count, first-receive timestamp,
-     *  receipt handle, visibility) starts over. The source instance is untouched so a failed
-     *  delivery can put it back as it was. */
-    public Message copyForRedrive() {
+    /** A detached snapshot that retains this message's identity and delivery state. */
+    public Message copy() {
         Message copy = new Message();
-        copy.messageId = UUID.randomUUID().toString();
+        copy.messageId = messageId;
         copy.body = body;
-        copy.messageAttributes = messageAttributes == null ? new HashMap<>() : new HashMap<>(messageAttributes);
+        if (messageAttributes == null) {
+            copy.messageAttributes = null;
+        } else {
+            messageAttributes.forEach((name, attribute) -> {
+                if (attribute == null) {
+                    copy.messageAttributes.put(name, null);
+                    return;
+                }
+                MessageAttributeValue value = new MessageAttributeValue();
+                value.setStringValue(attribute.getStringValue());
+                value.setDataType(attribute.getDataType());
+                byte[] binary = attribute.getBinaryValue();
+                value.setBinaryValue(binary == null ? null : binary.clone());
+                copy.messageAttributes.put(name, value);
+            });
+        }
         copy.sentTimestamp = sentTimestamp;
+        copy.firstReceiveTimestamp = firstReceiveTimestamp;
+        copy.receiveCount = receiveCount;
         copy.md5OfBody = md5OfBody;
         copy.md5OfMessageAttributes = md5OfMessageAttributes;
         copy.messageGroupId = messageGroupId;
@@ -88,9 +99,28 @@ public class Message {
         copy.sequenceNumber = sequenceNumber;
         copy.originalSourceQueueUrl = originalSourceQueueUrl;
         copy.awsTraceHeader = awsTraceHeader;
-        copy.senderId = this.senderId;
+        copy.senderId = senderId;
+        copy.retentionStartTimestamp = retentionStartTimestamp;
+        copy.receiptHandle = receiptHandle;
+        copy.visibleAt = visibleAt;
+        return copy;
+    }
+
+    /** A copy for delivery to another queue by StartMessageMoveTask. The content carries over. AWS
+     *  gives it a new message id, and per-receive state (receive count, first-receive timestamp,
+     *  receipt handle, visibility) starts over. The source instance is untouched so a failed
+     *  delivery can put it back as it was. */
+    public Message copyForRedrive() {
+        Message copy = copy();
+        copy.messageId = UUID.randomUUID().toString();
+        if (copy.messageAttributes == null) {
+            copy.messageAttributes = new HashMap<>();
+        }
+        copy.receiveCount = 0;
+        copy.firstReceiveTimestamp = null;
+        copy.receiptHandle = null;
+        copy.visibleAt = null;
         copy.retentionStartTimestamp = Instant.now();
-        // receiveCount 0, firstReceiveTimestamp / receiptHandle / visibleAt null: a fresh life.
         return copy;
     }
 
@@ -165,7 +195,6 @@ public class Message {
             return null;
         }
         try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
             ByteArrayOutputStream bos = new ByteArrayOutputStream();
             DataOutputStream dos = new DataOutputStream(bos);
 
@@ -194,30 +223,10 @@ public class Message {
                 }
             }
 
-            byte[] digest = md.digest(bos.toByteArray());
-            StringBuilder sb = new StringBuilder();
-            for (byte b : digest) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
+            return Digests.md5Hex(bos.toByteArray());
         } catch (Exception ignored) {
             // Attribute serialization failure falls back to null MD5
             return null;
-        }
-    }
-
-    private static String computeMd5(String input) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : digest) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (NoSuchAlgorithmException ignored) {
-            // MD5 is always available in the standard JDK runtime
-            return "";
         }
     }
 }

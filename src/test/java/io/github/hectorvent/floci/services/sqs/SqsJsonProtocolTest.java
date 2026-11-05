@@ -419,7 +419,7 @@ class SqsJsonProtocolTest {
                 .body("Messages[0].MessageAttributes", not(hasKey("secret")))
                 .body("Messages[0].MD5OfMessageAttributes", equalTo("46db9885b8f221ea04082f03e3a63d14"));
 
-            for (String allSelector : new String[]{"All", ".*"}) {
+            for (String allSelector : new String[]{"All", ".*", "*"}) {
                 given()
                     .contentType(CONTENT_TYPE)
                     .header("X-Amz-Target", "AmazonSQS.ReceiveMessage")
@@ -1046,6 +1046,86 @@ class SqsJsonProtocolTest {
                     .append("\",\"ReceiptHandle\":\"rh\",\"VisibilityTimeout\":0}");
         }
         return "{\"QueueUrl\":\"" + url + "\",\"Entries\":[" + entries + "]}";
+    }
+
+    @Test
+    void delaySecondsOutsideTheAwsRangeIsRejected() {
+        String delayQueueUrl = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AmazonSQS.CreateQueue")
+            .body("{\"QueueName\":\"json-delay-range-queue\"}")
+        .when().post("/").then().statusCode(200)
+            .extract().jsonPath().getString("QueueUrl");
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AmazonSQS.SendMessage")
+            .body("{\"QueueUrl\":\"" + delayQueueUrl + "\",\"MessageBody\":\"x\",\"DelaySeconds\":901}")
+        .when().post("/").then()
+            .statusCode(400)
+            .body("__type", equalTo("InvalidParameterValue"))
+            .body("message", equalTo("Value 901 for parameter DelaySeconds is invalid. Reason: Must be >= 0 and <= 900."));
+
+        // Larger than an int: must not wrap around to a valid delay.
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AmazonSQS.SendMessage")
+            .body("{\"QueueUrl\":\"" + delayQueueUrl + "\",\"MessageBody\":\"x\",\"DelaySeconds\":4294967296}")
+        .when().post("/").then()
+            .statusCode(400)
+            .body("__type", equalTo("InvalidParameterValue"));
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AmazonSQS.SendMessageBatch")
+            .body("{\"QueueUrl\":\"" + delayQueueUrl + "\",\"Entries\":["
+                    + "{\"Id\":\"late\",\"MessageBody\":\"x\",\"DelaySeconds\":4294967296}]}")
+        .when().post("/").then()
+            .statusCode(400)
+            .body("__type", equalTo("InvalidParameterValue"));
+    }
+
+    @Test
+    void redrivePolicyReadsBackAsCompactJson() {
+        String dlqUrl = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AmazonSQS.CreateQueue")
+            .body("{\"QueueName\":\"json-redrive-compact-dlq\"}")
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().path("QueueUrl");
+        String dlqArn = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AmazonSQS.GetQueueAttributes")
+            .body("{\"QueueUrl\":\"" + dlqUrl + "\",\"AttributeNames\":[\"QueueArn\"]}")
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().path("Attributes.QueueArn");
+        String sourceUrl = given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AmazonSQS.CreateQueue")
+            .body("{\"QueueName\":\"json-redrive-compact-source\"}")
+        .when().post("/")
+        .then().statusCode(200)
+            .extract().path("QueueUrl");
+
+        // A trailing newline, as a YAML block scalar leaves on the document.
+        String policy = "{\\\"deadLetterTargetArn\\\":\\\"" + dlqArn + "\\\",\\\"maxReceiveCount\\\":3}\\n";
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AmazonSQS.SetQueueAttributes")
+            .body("{\"QueueUrl\":\"" + sourceUrl + "\",\"Attributes\":{\"RedrivePolicy\":\"" + policy + "\"}}")
+        .when().post("/")
+        .then().statusCode(200);
+
+        given()
+            .contentType(CONTENT_TYPE)
+            .header("X-Amz-Target", "AmazonSQS.GetQueueAttributes")
+            .body("{\"QueueUrl\":\"" + sourceUrl + "\",\"AttributeNames\":[\"RedrivePolicy\"]}")
+        .when().post("/")
+        .then().statusCode(200)
+            .body("Attributes.RedrivePolicy",
+                    equalTo("{\"deadLetterTargetArn\":\"" + dlqArn + "\",\"maxReceiveCount\":3}"));
     }
 
     @Test

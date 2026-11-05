@@ -3,11 +3,15 @@ package io.github.hectorvent.floci.services.iam;
 import io.github.hectorvent.floci.core.common.AwsProtocolClaimFilter;
 import io.github.hectorvent.floci.core.common.ProtocolClaim;
 import io.github.hectorvent.floci.core.common.WireProtocol;
+import io.github.hectorvent.floci.services.route53.Route53Controller;
 import jakarta.ws.rs.container.ContainerRequestContext;
+import jakarta.ws.rs.container.ResourceInfo;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.MultivaluedHashMap;
 import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.UriInfo;
+import org.jboss.resteasy.reactive.server.core.ResteasyReactiveRequestContext;
+import org.jboss.resteasy.reactive.server.spi.ResteasyReactiveContainerRequestContext;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvFileSource;
@@ -15,14 +19,19 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.Mockito;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.when;
@@ -35,6 +44,161 @@ import static org.mockito.Mockito.when;
 class IamActionRegistryTest {
 
     private final IamActionRegistry registry = new IamActionRegistry();
+
+    /**
+     * A REST request no rule maps is checked as the operation whose vendored route it matches, as that operation's
+     * action, when Floci checks it on the resources AWS does: built by hand for its namespace ({@code Invoke} as
+     * {@code lambda:InvokeFunction}), read by the vendored request resources ({@code DescribeRepositories}, and
+     * {@code DescribeDomain} and {@code GetAnalyzer} from their paths), or none, AWS authorizing its action on no
+     * resource type ({@code ListDomainNames}). One AWS checks on a resource Floci does not read stays unmapped
+     * ({@code GetBackupPlan}), as does a request matching no route, and a rule still decides a route it maps.
+     */
+    @Test
+    void aRouteNoRuleMapsIsCheckedAsItsOperationWhenFlociChecksItAsAwsDoes() throws IOException {
+        IamRestRoutes routes = IamRestRoutes.parse(new ByteArrayInputStream("""
+                {"handRouted": {},
+                 "models": {
+                   "opensearch": {"credentialScope": "es", "operations": {
+                     "ListDomainNames": {"method": "GET", "requestUri": "/unmapped/domain"},
+                     "DescribeDomain": {"method": "GET", "requestUri": "/unmapped/domain/{DomainName}"}
+                   }},
+                   "accessanalyzer": {"credentialScope": "access-analyzer", "operations": {
+                     "GetAnalyzer": {"method": "GET", "requestUri": "/unmapped/analyzer/{analyzerName}"}
+                   }},
+                   "backup": {"credentialScope": "backup", "operations": {
+                     "GetBackupPlan": {"method": "GET", "requestUri": "/unmapped/backup/plans/{backupPlanId}"}
+                   }},
+                   "ecr": {"credentialScope": "ecr", "operations": {
+                     "DescribeRepositories": {"method": "GET", "requestUri": "/unmapped/repositories"}
+                   }},
+                   "lambda": {"credentialScope": "lambda", "operations": {
+                     "Invoke": {"method": "POST", "requestUri": "/unmapped/{FunctionName}/invocations"},
+                     "ListFunctions": {"method": "GET", "requestUri": "/2015-03-31/functions/{FunctionName}"}
+                   }}
+                 }}""".getBytes(StandardCharsets.UTF_8)));
+        IamActionRegistry routed = new IamActionRegistry(routes);
+        MultivaluedMap<String, String> none = new MultivaluedHashMap<>();
+        assertEquals("es:ListDomainNames", routed.resolveRoute("es", mockCtx("GET", "/unmapped/domain", none, null, "")));
+        assertEquals("es:DescribeDomain", routed.resolveRoute("es", mockCtx("GET", "/unmapped/domain/logs", none, null, "")));
+        assertEquals("access-analyzer:GetAnalyzer", routed.resolveRoute("access-analyzer",
+                mockCtx("GET", "/unmapped/analyzer/a", none, null, "")));
+        assertNull(routed.resolveRoute("backup", mockCtx("GET", "/unmapped/backup/plans/p", none, null, "")));
+        assertNull(routed.resolveRoute("es", mockCtx("GET", "/other/domain", none, null, "")));
+        assertNull(routed.resolveRoute("other", mockCtx("GET", "/unmapped/domain", none, null, "")));
+        assertEquals("lambda:InvokeFunction", routed.resolveRoute("lambda",
+                mockCtx("POST", "/unmapped/fn/invocations", none, null, "")));
+        assertEquals("ecr:DescribeRepositories", routed.resolveRoute("ecr",
+                mockCtx("GET", "/unmapped/repositories", none, null, "")));
+        assertEquals("lambda:GetFunction", routed.resolveRoute("lambda",
+                mockCtx("GET", "/2015-03-31/functions/fn", none, null, "")));
+    }
+
+    /**
+     * With the vendored routes, OpenSearch's and Access Analyzer's requests whose actions act on no resource type
+     * are checked as their operations, the OpenSearch VPC endpoint operations among them, in both API versions.
+     */
+    @ParameterizedTest
+    @CsvSource({"es,GET,/2021-01-01/domain,es:ListDomainNames",
+            "es,GET,/2015-01-01/domain,es:ListDomainNames",
+            "es,GET,/2021-01-01/opensearch/versions,es:ListVersions",
+            "es,POST,/2021-01-01/opensearch/vpcEndpoints,es:CreateVpcEndpoint",
+            "es,GET,/2021-01-01/opensearch/vpcEndpoints,es:ListVpcEndpoints",
+            "es,POST,/2021-01-01/opensearch/vpcEndpoints/describe,es:DescribeVpcEndpoints",
+            "es,POST,/2021-01-01/opensearch/vpcEndpoints/update,es:UpdateVpcEndpoint",
+            "es,DELETE,/2021-01-01/opensearch/vpcEndpoints/aos-123,es:DeleteVpcEndpoint",
+            "es,GET,/2021-01-01/opensearch/domain/logs/vpcEndpoints,es:ListVpcEndpointsForDomain",
+            "es,GET,/2015-01-01/es/vpcEndpoints,es:ListVpcEndpoints",
+            "access-analyzer,GET,/analyzer,access-analyzer:ListAnalyzers",
+            "access-analyzer,POST,/policy/validation,access-analyzer:ValidatePolicy"})
+    void aVendoredRouteOfNoResourceTypeIsCheckedAsItsOperation(String scope, String method, String path,
+                                                                 String action) {
+        assertEquals(action, registry.resolveRoute(scope, mockCtx(method, path, new MultivaluedHashMap<>(), null, "")));
+    }
+
+    /**
+     * Access Analyzer's analyzer routes are checked as their operations, the vendored request resources reading the
+     * analyzer from the path or the body, and so are those of its archive rules, findings and access previews, which
+     * Floci does not serve.
+     */
+    @ParameterizedTest
+    @CsvSource({"PUT,/analyzer,access-analyzer:CreateAnalyzer",
+            "GET,/analyzer/default,access-analyzer:GetAnalyzer",
+            "DELETE,/analyzer/default,access-analyzer:DeleteAnalyzer",
+            "PUT,/analyzer/default/archive-rule,access-analyzer:CreateArchiveRule",
+            "GET,/analyzer/default/archive-rule/rule,access-analyzer:GetArchiveRule",
+            "POST,/finding,access-analyzer:ListFindings",
+            "GET,/access-preview/preview,access-analyzer:GetAccessPreview"})
+    void anAccessAnalyzerAnalyzerRouteIsCheckedAsItsOperation(String method, String path, String action) {
+        assertEquals(action, registry.resolveRoute("access-analyzer",
+                mockCtx(method, path, new MultivaluedHashMap<>(), null, "")));
+    }
+
+    /**
+     * OpenSearch's domain routes, in both API versions, are checked as their operations, the vendored request
+     * resources reading the domain from the path, the body or the query, and the labels the routed path gives the
+     * route are the ones the request resources read.
+     */
+    @ParameterizedTest
+    @CsvSource({"GET,/2021-01-01/opensearch/domain/logs,es:DescribeDomain",
+            "POST,/2021-01-01/opensearch/domain,es:CreateDomain",
+            "DELETE,/2021-01-01/opensearch/domain/logs,es:DeleteDomain",
+            "GET,/2021-01-01/opensearch/domain/logs/config,es:DescribeDomainConfig",
+            "GET,/2015-01-01/es/domain/logs,es:DescribeElasticsearchDomain",
+            "POST,/2015-01-01/es/domain/logs/config,es:UpdateElasticsearchDomainConfig"})
+    void anOpenSearchDomainRouteIsCheckedAsItsOperation(String method, String path, String action) {
+        assertEquals(action, registry.resolveRoute("es", mockCtx(method, path, new MultivaluedHashMap<>(), null, "")));
+    }
+
+    @Test
+    void theLabelsOfTheVendoredRouteARequestMatchesAreItsPathsValuesDecoded() {
+        MultivaluedMap<String, String> none = new MultivaluedHashMap<>();
+        assertEquals(Map.of("DomainName", "logs"),
+                IamActionRegistry.pathLabels("es", mockCtx("GET", "/2021-01-01/opensearch/domain/logs", none, null, "")));
+        assertEquals(Map.of("DomainName", "logs", "IndexName", "a b"), IamActionRegistry.pathLabels("es",
+                mockCtx("GET", "/2021-01-01/opensearch/domain/logs/index/a%20b", none, null, "")));
+        assertEquals(Map.of(), IamActionRegistry.pathLabels("es", mockCtx("GET", "/nothing", none, null, "")));
+        assertEquals(Map.of(), IamActionRegistry.pathLabels("sqs", mockCtx("GET", "/queue", none, null, "")));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"/policy/validation", "/%70olicy/validation", "/policy/%76alidation",
+            "/policy;ignored=yes/validation", "/policy/validation;ignored=yes",
+            "/%70olicy;ignored=yes/%76alidation;ignored=yes/", "/policy/%2e/validation",
+            "/x/%2e%2e/policy/validation", "//policy//validation"})
+    void validatePolicyResolvesThroughTheRouteTable(String path) {
+        ContainerRequestContext sent = mockCtx("POST", path,
+                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}");
+        UriInfo uriInfo = sent.getUriInfo();
+        ResteasyReactiveContainerRequestContext ctx = Mockito.mock(ResteasyReactiveContainerRequestContext.class);
+        ResteasyReactiveRequestContext routed = Mockito.mock(ResteasyReactiveRequestContext.class);
+        when(ctx.getMethod()).thenReturn("POST");
+        when(ctx.getUriInfo()).thenReturn(uriInfo);
+        when(ctx.getServerRequestContext()).thenReturn(routed);
+        when(routed.getPathWithoutPrefix()).thenReturn("/policy/validation");
+        assertEquals("access-analyzer:ValidatePolicy", registry.resolveRoute("access-analyzer", ctx));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"/policy%2Fvalidation", "/policy%253Bignored/validation", "/policy/validation/extra"})
+    void policyRouteDoesNotTurnEncodedDelimitersIntoStructure(String path) {
+        ContainerRequestContext ctx = mockCtx("POST", path,
+                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}");
+        assertNull(registry.resolveRoute("access-analyzer", ctx));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"createReusableDelegationSet,CreateReusableDelegationSet",
+            "getReusableDelegationSet,GetReusableDelegationSet",
+            "listReusableDelegationSets,ListReusableDelegationSets",
+            "deleteReusableDelegationSet,DeleteReusableDelegationSet"})
+    void matchedDelegationSetMethodsResolveTheirOwnActions(String method, String operation) {
+        ResourceInfo info = Mockito.mock(ResourceInfo.class);
+        Mockito.doReturn(Route53Controller.class).when(info).getResourceClass();
+        when(info.getResourceMethod()).thenReturn(Arrays.stream(Route53Controller.class.getMethods())
+                .filter(candidate -> candidate.getName().equals(method)).findFirst().orElseThrow());
+        assertEquals("route53:" + operation, registry.resolveMatchedRoute("route53", info));
+        assertNull(registry.resolveMatchedRoute("s3", info));
+    }
 
     @ParameterizedTest
     @CsvSource({"PUT,PutProvisionedConcurrencyConfig", "GET,GetProvisionedConcurrencyConfig",
@@ -68,6 +232,29 @@ class IamActionRegistryTest {
                 new MultivaluedHashMap<>(), null, "")));
         assertNull(registry.resolveRoute("resource-groups", mockCtx("POST", "/_rg/" + path + "/extra",
                 new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}")));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"POST,/2021-01-01/opensearch/vpcEndpoints,CreateVpcEndpoint",
+            "GET,/2021-01-01/opensearch/vpcEndpoints,ListVpcEndpoints",
+            "POST,/2021-01-01/opensearch/vpcEndpoints/describe,DescribeVpcEndpoints",
+            "POST,/2021-01-01/opensearch/vpcEndpoints/update,UpdateVpcEndpoint",
+            "DELETE,/2021-01-01/opensearch/vpcEndpoints/aos-0123456789ab,DeleteVpcEndpoint",
+            "GET,/2021-01-01/opensearch/domain/orders/vpcEndpoints,ListVpcEndpointsForDomain"})
+    void openSearchVpcEndpointRoutesResolveTheirOwnActions(String method, String path, String operation) {
+        ContainerRequestContext ctx = mockCtx(method, path,
+                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}");
+        assertEquals("es:" + operation, registry.resolveRoute("es", ctx));
+    }
+
+    @Test
+    void inspector2DisableRouteResolvesItsAction() {
+        ContainerRequestContext ctx = mockCtx("POST", "/disable",
+                new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}");
+
+        assertEquals("inspector2:Disable", registry.resolveRoute("inspector2", ctx));
+        assertNull(registry.resolveRoute("inspector2", mockCtx("GET", "/disable",
+                new MultivaluedHashMap<>(), null, "")));
     }
 
     @Test
@@ -348,6 +535,21 @@ class IamActionRegistryTest {
         assertEquals("lambda:DeleteResourcePolicy", lambdaAction("DELETE", "/2025-03-07/resource-policy/" + arn));
     }
 
+    @Test
+    void bedrockResourcePolicyRoutesResolveToTheirActions() {
+        String arn = "arn%3Aaws%3Abedrock%3Aus-east-1%3A000000000000%3Aguardrail%2Fabc123def456";
+        assertEquals("bedrock:PutResourcePolicy", bedrockAction("POST", "/resource-policy"));
+        assertEquals("bedrock:GetResourcePolicy", bedrockAction("GET", "/resource-policy/" + arn));
+        assertEquals("bedrock:DeleteResourcePolicy", bedrockAction("DELETE", "/resource-policy/" + arn));
+        assertNull(bedrockAction("GET", "/resource-policy"));
+        assertNull(bedrockAction("POST", "/resource-policy/" + arn));
+    }
+
+    private String bedrockAction(String method, String path) {
+        return registry.resolveRoute("bedrock",
+                mockCtx(method, path, new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}"));
+    }
+
     private String lambdaAction(String method, String path) {
         return registry.resolveRoute("lambda",
                 mockCtx(method, path, new MultivaluedHashMap<>(), MediaType.APPLICATION_JSON_TYPE, "{}"));
@@ -387,13 +589,24 @@ class IamActionRegistryTest {
 
     @Test
     void anEksAccessEntryRouteTakesThePrincipalAsTheRestOfThePath() {
-        // EKS reads the principal greedily, so a GET or DELETE under an entry reads or deletes an entry.
+        // EKS reads the principal greedily, but an entry's access policy routes win over the entry's own, as
+        // they do in the router.
         String entry = "/clusters/c/access-entries/arn:aws:iam::000000000000:role/team/worker";
         String[][] routes = {
             {"GET", entry, "eks:DescribeAccessEntry"},
-            {"GET", entry + "/access-policies", "eks:DescribeAccessEntry"},
-            {"DELETE", entry + "/access-policies/arn:aws:eks::aws:cluster-access-policy/Admin", "eks:DeleteAccessEntry"},
+            {"DELETE", entry, "eks:DeleteAccessEntry"},
+            {"GET", entry + "/access-policies", "eks:ListAssociatedAccessPolicies"},
+            {"DELETE", entry + "/access-policies/arn:aws:eks::aws:cluster-access-policy/Admin",
+                "eks:DisassociateAccessPolicy"},
             {"POST", entry + "/access-policies", "eks:AssociateAccessPolicy"},
+            {"DELETE", entry + "/access-policies/arn%3Aaws%3Aeks%3A%3Aaws%3Acluster-access-policy%2FAdmin",
+                "eks:DisassociateAccessPolicy"},
+            // A principal whose IAM path holds an access-policies segment is still an entry: only a cluster
+            // access policy ARN after it makes a DELETE a disassociate.
+            {"DELETE", "/clusters/c/access-entries/arn:aws:iam::000000000000:role/ci/access-policies/runner",
+                "eks:DeleteAccessEntry"},
+            {"GET", "/clusters/c/access-entries/arn:aws:iam::000000000000:role/ci/access-policies/runner",
+                "eks:DescribeAccessEntry"},
             {"POST", entry, "eks:UpdateAccessEntry"},
             {"GET", "/clusters/c/access-entries", "eks:ListAccessEntries"},
         };
@@ -569,6 +782,84 @@ class IamActionRegistryTest {
     }
 
     @Test
+    void s3ControlRoutesResolveToTheActionsAwsChecks() {
+        String bucketArn = "arn:aws:s3:::repro-bucket";
+        assertEquals("s3:ListTagsForResource", s3Action("GET", "/v20180820/tags/" + bucketArn));
+        assertEquals("s3:TagResource", s3Action("POST", "/v20180820/tags/" + bucketArn));
+        assertEquals("s3:UntagResource", s3Action("DELETE", "/v20180820/tags/" + bucketArn, "tagKeys=Env"));
+        // The Go SDK v2, and so Terraform's provider, percent-encodes the ARN's colons and slashes.
+        String encoded = "arn%3Aaws%3As3%3Aus-east-1%3A000000000000%3Abucket%2Frepro-bucket";
+        assertEquals("s3:ListTagsForResource", s3Action("GET", "/v20180820/tags/" + encoded));
+        assertEquals("s3:TagResource", s3Action("POST", "/v20180820/tags/" + encoded));
+        assertEquals("s3:UntagResource", s3Action("DELETE", "/v20180820/tags/" + encoded, "tagKeys=Env"));
+        assertEquals("s3:ListAccessPoints", s3Action("GET", "/v20180820/accesspoint", "bucket=b"));
+        // The account-level Block Public Access: the User Guide requires PutAccountPublicAccessBlock
+        // or GetAccountPublicAccessBlock, and a delete the same action as the write it undoes.
+        assertEquals("s3:PutAccountPublicAccessBlock",
+                s3Action("PUT", "/v20180820/configuration/publicAccessBlock"));
+        assertEquals("s3:GetAccountPublicAccessBlock",
+                s3Action("GET", "/v20180820/configuration/publicAccessBlock"));
+        assertEquals("s3:PutAccountPublicAccessBlock",
+                s3Action("DELETE", "/v20180820/configuration/publicAccessBlock"));
+    }
+
+    @Test
+    void s3ControlRulesClaimOnlyTheRoutesTheControllerServes() {
+        // PUT is no S3 Control tagging route, so a bucket actually named v20180820
+        // keeps its data-plane actions: the resource stays its own bucket and key.
+        assertEquals("s3:PutObject", s3Action("PUT", "/v20180820/tags/key.txt"));
+        assertEquals("s3:GetObject", s3Action("GET", "/v20180820/other/key.txt"));
+        assertEquals("s3:ListBucket", s3Action("GET", "/v20180820"));
+        assertEquals("s3:CreateBucket", s3Action("PUT", "/v20180820"));
+    }
+
+    /**
+     * A tagging route is matched before the data-plane query overrides: S3ControlController
+     * answers it whatever the query string carries, so {@code ?tagging} on the control route
+     * must not have the call checked as the object tagging of a bucket named v20180820, which a
+     * caller holding only that object action would pass while reading the bucket's tags, and a
+     * caller holding only the control action would fail.
+     */
+    @Test
+    void s3ControlRoutesWinOverTheDataPlaneQueryOverrides() {
+        String bucketArn = "arn:aws:s3:::repro-bucket";
+        assertEquals("s3:ListTagsForResource", s3Action("GET", "/v20180820/tags/" + bucketArn, "tagging"));
+        assertEquals("s3:ListTagsForResource",
+                s3Action("GET", "/v20180820/tags/" + bucketArn, "tagging", "versionId=1"));
+        assertEquals("s3:TagResource", s3Action("POST", "/v20180820/tags/" + bucketArn, "tagging"));
+        assertEquals("s3:UntagResource",
+                s3Action("DELETE", "/v20180820/tags/" + bucketArn, "tagging", "tagKeys=Env"));
+        // The Go SDK v2, and so Terraform's provider, percent-encodes the ARN's colons and slashes.
+        String encoded = "arn%3Aaws%3As3%3Aus-east-1%3A000000000000%3Abucket%2Frepro-bucket";
+        assertEquals("s3:ListTagsForResource", s3Action("GET", "/v20180820/tags/" + encoded, "tagging"));
+        // The data-plane object tagging the query names keeps its own action on its own path.
+        assertEquals("s3:GetObjectTagging", s3Action("GET", "/bucket/key.txt", "tagging"));
+        assertEquals("s3:GetObjectVersionTagging", s3Action("GET", "/bucket/key.txt", "tagging", "versionId=1"));
+    }
+
+    /**
+     * The envelope a denial answers in follows the route and not the action: a request the
+     * control controller serves is an S3 Control one however its query reads, and a data-plane
+     * request is not one, even one travelling under the control prefix, as into a bucket
+     * actually named v20180820.
+     */
+    @Test
+    void theControlRoutesDecideWhetherARequestIsAnS3ControlOne() {
+        assertTrue(IamActionRegistry.isS3ControlRequest("s3",
+                mockCtx("GET", "/v20180820/tags/arn:aws:s3:::repro-bucket",
+                        new MultivaluedHashMap<>(), null, "")));
+        assertTrue(IamActionRegistry.isS3ControlRequest("s3",
+                mockCtx("PUT", "/v20180820/configuration/publicAccessBlock",
+                        new MultivaluedHashMap<>(), null, "")));
+        assertFalse(IamActionRegistry.isS3ControlRequest("s3",
+                mockCtx("GET", "/v20180820/other/key.txt", new MultivaluedHashMap<>(), null, "")));
+        assertFalse(IamActionRegistry.isS3ControlRequest("s3",
+                mockCtx("GET", "/bucket/key.txt", new MultivaluedHashMap<>(), null, "")));
+        assertFalse(IamActionRegistry.isS3ControlRequest("lambda",
+                mockCtx("GET", "/2015-03-31/functions", new MultivaluedHashMap<>(), null, "")));
+    }
+
+    @Test
     void s3AccelerateYieldsToSubresourcesDispatchedFirst() {
         MultivaluedMap<String, String> withRequestPayment = new MultivaluedHashMap<>();
         withRequestPayment.add("requestPayment", "");
@@ -722,6 +1013,7 @@ class IamActionRegistryTest {
         assertEquals("s3:ListBucketVersions", bucketAction("GET", "versions"));
         assertEquals("s3:ListBucketMultipartUploads", bucketAction("GET", "uploads"));
         assertEquals("s3:GetBucketPolicy", bucketAction("GET", "policy"));
+        assertEquals("s3:GetBucketPolicyStatus", bucketAction("GET", "policyStatus"));
         assertEquals("s3:GetLifecycleConfiguration", bucketAction("GET", "lifecycle"));
         assertEquals("s3:GetEncryptionConfiguration", bucketAction("GET", "encryption"));
     }

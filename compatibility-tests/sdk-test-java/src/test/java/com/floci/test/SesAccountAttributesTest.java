@@ -1,12 +1,14 @@
 package com.floci.test;
 
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.services.ses.SesClient;
 import software.amazon.awssdk.services.ses.model.GetAccountSendingEnabledResponse;
 import software.amazon.awssdk.services.ses.model.UpdateAccountSendingEnabledRequest;
@@ -36,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("SES account attributes: sending, suppression, VDM (v1 + v2)")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@ResourceLock("ses-account")
 class SesAccountAttributesTest {
 
     private static SesClient sesV1;
@@ -215,7 +218,7 @@ class SesAccountAttributesTest {
         // review status or case id. Skip it entirely on real AWS rather than risk changing a real
         // caller's account; against Floci the in-memory store makes the round-trip safe and it still
         // catches a mis-wired route there.
-        org.junit.jupiter.api.Assumptions.assumeFalse(TestFixtures.isRealAws(),
+        Assumptions.assumeFalse(TestFixtures.isRealAws(),
                 "skipping on real AWS: PutAccountDetails cannot be reset and AWS owns ReviewDetails");
         sesV2.putAccountDetails(PutAccountDetailsRequest.builder()
                 .mailType(MailType.TRANSACTIONAL)

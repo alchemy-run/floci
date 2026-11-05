@@ -1,8 +1,10 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.ValidatableResponse;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -72,6 +74,7 @@ class CloudFormationWafV2ConfigGetAttIntegrationTest {
         .then()
             .statusCode(200);
 
+        CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE", CFN_AUTH);
         String describeBody = given()
             .contentType("application/x-www-form-urlencoded")
             .header("Authorization", CFN_AUTH)
@@ -98,7 +101,7 @@ class CloudFormationWafV2ConfigGetAttIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("WebACL.Name", org.hamcrest.Matchers.equalTo(aclName));
+            .body("WebACL.Name", Matchers.equalTo(aclName));
     }
 
     @Test
@@ -139,6 +142,7 @@ class CloudFormationWafV2ConfigGetAttIntegrationTest {
         .then()
             .statusCode(200);
 
+        CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE", CFN_AUTH);
         given()
             .contentType("application/x-www-form-urlencoded")
             .header("Authorization", CFN_AUTH)
@@ -161,7 +165,7 @@ class CloudFormationWafV2ConfigGetAttIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("ConfigRules[0].ConfigRuleName", org.hamcrest.Matchers.equalTo(ruleName));
+            .body("ConfigRules[0].ConfigRuleName", Matchers.equalTo(ruleName));
     }
 
     @Test
@@ -185,6 +189,7 @@ class CloudFormationWafV2ConfigGetAttIntegrationTest {
 
         createStack(stackName, template);
 
+        CfnStackWaits.awaitStatus(stackName, "ROLLBACK_COMPLETE", CFN_AUTH);
         describeStackEvents(stackName)
             .body(containsString("<ResourceStatus>CREATE_FAILED</ResourceStatus>"))
             .body(containsString(
@@ -210,6 +215,7 @@ class CloudFormationWafV2ConfigGetAttIntegrationTest {
 
         createStack(stackName, template);
 
+        CfnStackWaits.awaitStatus(stackName, "ROLLBACK_COMPLETE", CFN_AUTH);
         describeStackEvents(stackName)
             .body(containsString("<ResourceStatus>CREATE_FAILED</ResourceStatus>"))
             .body(containsString(
@@ -238,6 +244,7 @@ class CloudFormationWafV2ConfigGetAttIntegrationTest {
 
         createStack(stackName, template);
 
+        CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE", CFN_AUTH);
         given()
             .contentType(CONFIG_JSON)
             .header("X-Amz-Target", CONFIG_TARGET_PREFIX + "DescribeConfigRules")
@@ -246,7 +253,7 @@ class CloudFormationWafV2ConfigGetAttIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("ConfigRules[0].Scope.TagKey", org.hamcrest.Matchers.equalTo("env"))
+            .body("ConfigRules[0].Scope.TagKey", Matchers.equalTo("env"))
             .body("ConfigRules[0].Scope", not(hasKey("ComplianceResourceTypes")));
     }
 

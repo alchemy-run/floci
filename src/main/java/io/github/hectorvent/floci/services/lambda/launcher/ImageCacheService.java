@@ -6,18 +6,19 @@ import com.github.dockerjava.api.command.PullImageCmd;
 import com.github.dockerjava.api.command.PullImageResultCallback;
 import com.github.dockerjava.api.exception.DockerClientException;
 import com.github.dockerjava.api.exception.InternalServerErrorException;
+import com.github.dockerjava.api.exception.NotFoundException;
 import com.github.dockerjava.api.model.AuthConfig;
-import com.github.dockerjava.api.model.Info;
 import com.github.dockerjava.api.model.PullResponseItem;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.config.EmulatorConfig.EcsServiceConfig.ImagePullBehavior;
+import io.github.hectorvent.floci.core.common.docker.DockerClientProducer;
+import io.github.hectorvent.floci.core.common.docker.DockerPlatform;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -44,6 +45,8 @@ public class ImageCacheService {
 
     private final DockerClient dockerClient;
     private final List<EmulatorConfig.DockerConfig.RegistryCredential> registryCredentials;
+    // floci.docker.image-pull-timeout-seconds: how long each pull attempt may take.
+    private final int pullTimeoutSeconds;
     private final Map<ImageKey, String> resolvedImages = new ConcurrentHashMap<>();
     private final Set<ImageKey> pulledImages = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, Object> locks = new ConcurrentHashMap<>();
@@ -53,6 +56,8 @@ public class ImageCacheService {
     public ImageCacheService(DockerClient dockerClient, EmulatorConfig config) {
         this.dockerClient = dockerClient;
         this.registryCredentials = config.docker().registryCredentials();
+        this.pullTimeoutSeconds = DockerClientProducer.validateImagePullTimeoutSeconds(
+                config.docker().imagePullTimeoutSeconds());
     }
 
     public String ensureImageExists(String imageUri) {
@@ -77,7 +82,7 @@ public class ImageCacheService {
                 return resolvedImage;
             }
             InspectImageResponse localImage = inspectLocalImage(imageUri);
-            if (matchesPlatform(localImage, requestedPlatform)) {
+            if (DockerPlatform.matches(localImage, requestedPlatform)) {
                 resolvedImage = resolvedImageReference(imageUri, localImage);
                 resolvedImages.put(imageKey, resolvedImage);
                 LOG.infov("Image already present locally, skipping pull: {0}", imageUri);
@@ -99,19 +104,26 @@ public class ImageCacheService {
      * one or anyone else's) is what the next launch runs. The launch creates its container from the
      * returned image id rather than from the reference, so a pull by an overlapping launch that
      * moves the tag again cannot change what this one runs.
+     *
+     * @param platform the Docker platform the launch runs, such as {@code linux/amd64}, or null for
+     *        the daemon's own. A local image of another platform is never reused for it.
      */
-    public LaunchImage resolveForLaunch(String imageUri, ImagePullBehavior behavior) {
+    public LaunchImage resolveForLaunch(String imageUri, ImagePullBehavior behavior, String platform) {
         if (isImageId(imageUri)) {
             return new LaunchImage(existingImageId(imageUri), null);
         }
-        ImageKey imageKey = new ImageKey(imageUri, daemonPlatform());
+        boolean explicitPlatform = platform != null && !platform.isBlank();
+        ImageKey imageKey = new ImageKey(imageUri, explicitPlatform ? platform.trim() : daemonPlatform());
+        String pullPlatform = explicitPlatform ? imageKey.platform() : null;
         Object lock = locks.computeIfAbsent(imageUri, k -> new Object());
         synchronized (lock) {
             LocalImage image = switch (behavior) {
-                case DEFAULT -> pullOrUseCached(imageKey);
-                case ALWAYS -> pull(imageKey, null);
-                case ONCE -> pulledImages.contains(imageKey) ? cachedOrPull(imageKey) : pull(imageKey, null);
-                case PREFER_CACHED -> cachedOrPull(imageKey);
+                case DEFAULT -> pullOrUseCached(imageKey, pullPlatform);
+                case ALWAYS -> pull(imageKey, pullPlatform);
+                case ONCE -> pulledImages.contains(imageKey)
+                        ? cachedOrPull(imageKey, pullPlatform)
+                        : pull(imageKey, pullPlatform);
+                case PREFER_CACHED -> cachedOrPull(imageKey, pullPlatform);
             };
             String imageId = resolvedImageReference(imageUri, image.image());
             resolvedImages.put(imageKey, imageId);
@@ -144,9 +156,9 @@ public class ImageCacheService {
         return resolvedImageReference(imageId, image);
     }
 
-    private LocalImage pullOrUseCached(ImageKey imageKey) {
+    private LocalImage pullOrUseCached(ImageKey imageKey, String platform) {
         try {
-            return pull(imageKey, null);
+            return pull(imageKey, platform);
         } catch (RuntimeException e) {
             InspectImageResponse cached = Thread.currentThread().isInterrupted() ? null : cachedImage(imageKey);
             if (cached == null) {
@@ -158,14 +170,14 @@ public class ImageCacheService {
         }
     }
 
-    private LocalImage cachedOrPull(ImageKey imageKey) {
+    private LocalImage cachedOrPull(ImageKey imageKey, String platform) {
         InspectImageResponse cached = cachedImage(imageKey);
-        return cached != null ? new LocalImage(cached, null) : pull(imageKey, null);
+        return cached != null ? new LocalImage(cached, null) : pull(imageKey, platform);
     }
 
     private InspectImageResponse cachedImage(ImageKey imageKey) {
         InspectImageResponse local = inspectLocalImage(imageKey.imageUri());
-        return matchesPlatform(local, imageKey.platform()) ? local : null;
+        return DockerPlatform.matches(local, imageKey.platform()) ? local : null;
     }
 
     /**
@@ -186,8 +198,10 @@ public class ImageCacheService {
                 }
                 ManifestDigestCallback callback = new ManifestDigestCallback();
                 lastAttempt.set(callback);
-                if (!pullImage.<PullImageResultCallback>exec(callback).awaitCompletion(5, TimeUnit.MINUTES)) {
-                    throw new DockerClientException("Timed out pulling image " + imageUri + " after 5 minutes");
+                if (!pullImage.<PullImageResultCallback>exec(callback)
+                        .awaitCompletion(pullTimeoutSeconds, TimeUnit.SECONDS)) {
+                    throw new DockerClientException("Timed out pulling image " + imageUri + " after "
+                            + pullTimeoutSeconds + " seconds");
                 }
             });
         } catch (InterruptedException e) {
@@ -307,7 +321,7 @@ public class ImageCacheService {
     private InspectImageResponse inspectLocalImage(String imageUri) {
         try {
             return dockerClient.inspectImageCmd(imageUri).exec();
-        } catch (com.github.dockerjava.api.exception.NotFoundException e) {
+        } catch (NotFoundException e) {
             return null;
         }
     }
@@ -329,36 +343,9 @@ public class ImageCacheService {
         if (resolvedPlatform != null) {
             return resolvedPlatform;
         }
-        Info info = dockerClient.infoCmd().exec();
-        String architecture = info.getArchitecture();
-        if (architecture == null || architecture.isBlank()) {
-            throw new DockerClientException("Docker did not report its architecture");
-        }
-        String os = info.getOsType();
-        if (os == null || os.isBlank()) {
-            os = "linux";
-        }
-        String normalizedArchitecture = switch (architecture.toLowerCase(Locale.ROOT)) {
-            case "aarch64" -> "arm64";
-            case "x86_64" -> "amd64";
-            default -> architecture.toLowerCase(Locale.ROOT);
-        };
-        resolvedPlatform = os.toLowerCase(Locale.ROOT) + "/" + normalizedArchitecture;
+        resolvedPlatform = DockerPlatform.daemon(dockerClient);
         daemonPlatform = resolvedPlatform;
         return resolvedPlatform;
-    }
-
-    private static boolean matchesPlatform(InspectImageResponse image, String platform) {
-        if (image == null) {
-            return false;
-        }
-        if (platform == null) {
-            return true;
-        }
-        String[] parts = platform.split("/", 2);
-        return parts.length == 2
-                && parts[0].equals(image.getOs())
-                && parts[1].equals(image.getArch());
     }
 
     /**

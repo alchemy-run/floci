@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.empty;
@@ -48,10 +49,10 @@ class Route53ServiceTest {
         Mockito.when(config.defaultAccountId()).thenReturn(ACCOUNT);
         Mockito.when(config.services()).thenReturn(servicesConfig);
         Mockito.when(servicesConfig.route53()).thenReturn(route53Config);
-        Mockito.when(route53Config.defaultNameserver1()).thenReturn("ns-1.awsdns-00.com.");
-        Mockito.when(route53Config.defaultNameserver2()).thenReturn("ns-2.awsdns-00.net.");
-        Mockito.when(route53Config.defaultNameserver3()).thenReturn("ns-3.awsdns-00.org.");
-        Mockito.when(route53Config.defaultNameserver4()).thenReturn("ns-4.awsdns-00.co.uk.");
+        Mockito.when(route53Config.defaultNameserver1()).thenReturn(Optional.of("ns-1.awsdns-00.com."));
+        Mockito.when(route53Config.defaultNameserver2()).thenReturn(Optional.of("ns-2.awsdns-00.net."));
+        Mockito.when(route53Config.defaultNameserver3()).thenReturn(Optional.of("ns-3.awsdns-00.org."));
+        Mockito.when(route53Config.defaultNameserver4()).thenReturn(Optional.of("ns-4.awsdns-00.co.uk."));
         Mockito.when(route53Config.vpcAssociationControlPlaneDelayMs()).thenReturn(0L);
 
         Ec2Service ec2Service = Mockito.mock(Ec2Service.class);

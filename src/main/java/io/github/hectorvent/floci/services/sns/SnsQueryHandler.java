@@ -506,7 +506,7 @@ public class SnsQueryHandler {
             String entryPrefix = "PublishBatchRequestEntries.member." + i;
             String id = getParam(params, entryPrefix + ".Id");
             if (id == null) break;
-            Map<String, Object> entry = new java.util.HashMap<>();
+            Map<String, Object> entry = new HashMap<>();
             entry.put("Id", id);
             entry.put("Message", getParam(params, entryPrefix + ".Message"));
             entry.put("Subject", getParam(params, entryPrefix + ".Subject"));
@@ -590,7 +590,7 @@ public class SnsQueryHandler {
         Map<String, String> tags = extractSnsTags(params);
         try {
             snsService.tagResource(resourceArn, tags, region);
-            return Response.ok(AwsQueryResponse.envelopeNoResult("TagResource", AwsNamespaces.SNS)).build();
+            return Response.ok(AwsQueryResponse.envelopeEmptyResult("TagResource", AwsNamespaces.SNS)).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
         }
@@ -606,7 +606,7 @@ public class SnsQueryHandler {
         }
         try {
             snsService.untagResource(resourceArn, tagKeys, region);
-            return Response.ok(AwsQueryResponse.envelopeNoResult("UntagResource", AwsNamespaces.SNS)).build();
+            return Response.ok(AwsQueryResponse.envelopeEmptyResult("UntagResource", AwsNamespaces.SNS)).build();
         } catch (AwsException e) {
             return xmlErrorResponse(e);
         }

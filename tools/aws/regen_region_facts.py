@@ -38,12 +38,17 @@ China and GovCloud user guides for what neither transcribes, are the sources her
   https://docs.amazonaws.cn/en_us/aws/latest/userguide/cloudfront.html -> cn/cloudfront.md, whose
   Markdown rendering escapes the asterisk (`\\*.cloudfront.cn`). The other partitions have no
   CloudFront.
-- The Route 53 hosted zone of an API Gateway regional endpoint, for the two GovCloud regions only:
-  the GovCloud guide's API Gateway page (`APIGATEWAY_REGIONAL_ZONE_SENTENCE`),
+- The Route 53 hosted zone of an API Gateway regional endpoint: the data plane table of the General
+  Reference page (`APIGATEWAY_ENDPOINT_ROW`),
+  https://docs.aws.amazon.com/general/latest/gr/apigateway.html -> ../gr-apigateway.md, a sibling of
+  the guides directory, snapshotted by the `aws-refs` skill's docs driver. A region without a row
+  gets no field. The GovCloud guide's API Gateway page (`APIGATEWAY_REGIONAL_ZONE_SENTENCE`),
   https://docs.aws.amazon.com/govcloud-us/latest/UserGuide/govcloud-abp.html -> gov/govcloud-abp.md,
-  with the region
-  resolved through the region descriptions in `partitions.json`. No source in `local/aws` gives
-  the zone for any other region.
+  with the region resolved through the region descriptions in `partitions.json`, states the two
+  GovCloud zones as well; a table that disagrees with it is refused.
+
+- The RDS hosted zone id for us-east-1 comes from the AWS CLI describe-db-instances example
+  (`RDS_CLI_EXAMPLE_URL` -> rds/describe-db-instances.txt).
 
 Nothing is hand-typed. When the checkouts are absent (CI), `--check` only verifies the vendored
 file parses and keeps its shape; a regeneration needs `local/aws`.
@@ -76,6 +81,7 @@ CDK_FACT_TABLES = "packages/aws-cdk-lib/region-info/build-tools/fact-tables.ts"
 CDK_CLOUDFRONT_TARGET = "packages/aws-cdk-lib/aws-route53-targets/lib/cloudfront-target.ts"
 CDK_VPC_ENDPOINT = "packages/aws-cdk-lib/aws-ec2/lib/vpc-endpoint.ts"
 BOTOCORE_CLOUDFRONT = "cloudfront/2020-05-31/service-2.json"
+RDS_CLI_EXAMPLE_URL = "https://docs.aws.amazon.com/cli/v1/reference/rds/describe-db-instances.html"
 
 GO_ROW_RE = re.compile(r'^\s*endpoints\.([A-Za-z0-9]+)RegionID:\s*"([A-Z0-9]+)",')
 TS_ROW_RE = re.compile(r"^\s*'([a-z0-9-]+)':\s*'([A-Z0-9]+)',")
@@ -116,9 +122,22 @@ APIGATEWAY_REGIONAL_ZONE_PARTITION = "aws-us-gov"
 APIGATEWAY_REGIONAL_ZONE_SENTENCE = re.compile(
     r"The Amazon Route\s53 Hosted Zone ID for the regional endpoint in the (AWS GovCloud \([A-Za-z-]+\)) Region"
     r" is (Z[0-9A-Z]+)\.")
+# One row per region of the data plane table, the only table on the page with `execute-api` hosts.
+APIGATEWAY_ENDPOINTS_URL = "https://docs.aws.amazon.com/general/latest/gr/apigateway.html"
+APIGATEWAY_ENDPOINTS_PAGE = "gr-apigateway.md"
+APIGATEWAY_ENDPOINT_HOST = re.compile(r"\bexecute-api\.[a-z0-9-]+\.")
+APIGATEWAY_ENDPOINT_ROW = re.compile(
+    r"^\|[^|\n]*\|\s*([a-z0-9-]+)\s*\|\s*execute-api\.\1\.[a-z0-9.-]+\s*\|\s*HTTPS\s*\|\s*(Z[0-9A-Z]+)\s*$",
+    re.MULTILINE)
+RDS_ZONE_SENTENCES = {
+    "us-east-1": ("rds/describe-db-instances.txt", re.compile(
+        r'"Address":\s*"[^"\s]+\.us-east-1\.rds\.amazonaws\.com",\s*'
+        r'"Port":\s*[0-9]+,\s*"HostedZoneId":\s*"(Z[A-Z0-9]+)"')),
+}
 GUIDE_PAGES = sorted({page for page, _ in CONSOLE_HOST_SENTENCES.values()}
                      | {page for page, _ in CLOUDFRONT_SUFFIX_SENTENCES.values()}
-                     | {APIGATEWAY_REGIONAL_ZONE_PAGE})
+                     | {APIGATEWAY_REGIONAL_ZONE_PAGE}
+                     | {page for page, _ in RDS_ZONE_SENTENCES.values()})
 GO_PARTITION_IDS = {"AwsCn": "aws-cn", "AwsUsGov": "aws-us-gov", "AwsIso": "aws-iso", "AwsIsoB": "aws-iso-b",
                     "AwsIsoE": "aws-iso-e", "AwsIsoF": "aws-iso-f", "Aws": "aws"}
 
@@ -268,6 +287,30 @@ def parse_apigateway_regional_zones(text: str, partitions_doc: dict) -> dict[str
     return zones
 
 
+def parse_apigateway_endpoint_zones(text: str) -> dict[str, str]:
+    """region id -> hosted zone from the General Reference data plane table. A row the pattern
+    cannot read is refused rather than left to look like a region AWS does not list."""
+    rows = APIGATEWAY_ENDPOINT_ROW.findall(text)
+    if not rows:
+        raise ValueError(f"{APIGATEWAY_ENDPOINTS_PAGE}: no data plane hosted zone row found")
+    hosts = len(APIGATEWAY_ENDPOINT_HOST.findall(text))
+    if hosts != len(rows):
+        raise ValueError(f"{APIGATEWAY_ENDPOINTS_PAGE}: {hosts} execute-api hosts but {len(rows)} readable rows")
+    zones: dict[str, str] = {}
+    for region, zone in rows:
+        if zones.setdefault(region, zone) != zone:
+            raise ValueError(f"{APIGATEWAY_ENDPOINTS_PAGE}: two hosted zones for {region}")
+    return zones
+
+
+def cross_check_apigateway_zones(published: dict[str, str], govcloud: dict[str, str]) -> None:
+    """The General Reference table has to state what the GovCloud guide states."""
+    for region, zone in sorted(govcloud.items()):
+        if published.get(region) != zone:
+            raise ValueError(f"{APIGATEWAY_ENDPOINTS_PAGE}: {region} is {published.get(region)} but "
+                             f"{APIGATEWAY_REGIONAL_ZONE_PAGE} states {zone}")
+
+
 def apigateway_zone_regions(partitions_doc: dict) -> set[str]:
     """The regions the GovCloud API Gateway page must state a regional hosted zone for."""
     return {region["id"] for partition in partitions_doc["partitions"]
@@ -275,7 +318,7 @@ def apigateway_zone_regions(partitions_doc: dict) -> set[str]:
 
 
 def guides_present(guides: Path) -> bool:
-    return all((guides / page).exists() for page in GUIDE_PAGES)
+    return (guides.parent / APIGATEWAY_ENDPOINTS_PAGE).exists() and all((guides / page).exists() for page in GUIDE_PAGES)
 
 
 # --------------------------------------------------------------------------- #
@@ -301,8 +344,12 @@ def build(terraform: Path, cdk: Path, guides: Path, botocore_data: Path, partiti
         raise ValueError("the Classic and ALB hosted-zone maps differ; the generator assumed they are one table")
     console_hosts = parse_console_hosts(guides)
     cloudfront_suffixes = parse_cloudfront_suffixes(botocore_data, guides)
-    apigateway_zones = parse_apigateway_regional_zones(
-        (guides / APIGATEWAY_REGIONAL_ZONE_PAGE).read_text(encoding="utf-8"), partitions_doc)
+    apigateway_zones = parse_apigateway_endpoint_zones(
+        (guides.parent / APIGATEWAY_ENDPOINTS_PAGE).read_text(encoding="utf-8"))
+    cross_check_apigateway_zones(apigateway_zones, parse_apigateway_regional_zones(
+        (guides / APIGATEWAY_REGIONAL_ZONE_PAGE).read_text(encoding="utf-8"), partitions_doc))
+
+    rds_zones = parse_guide_sentences(guides, RDS_ZONE_SENTENCES)
 
     partition_ids = [p["id"] for p in partitions_doc["partitions"]]
     region_partition = {r["id"]: p for p in partitions_doc["partitions"] for r in p["regions"]}
@@ -310,7 +357,7 @@ def build(terraform: Path, cdk: Path, guides: Path, botocore_data: Path, partiti
 
     s3_website = dict(s3_cdk)
     s3_website.update(s3_tf)  # Terraform cites the website-endpoint table; it wins on conflicts
-    region_ids = sorted(set(alb) | set(nlb) | set(s3_website) | set(vpce_services) | set(apigateway_zones))
+    region_ids = sorted(set(alb) | set(nlb) | set(s3_website) | set(vpce_services) | set(apigateway_zones) | set(rds_zones))
     regions = {}
     for region in region_ids:
         if region not in region_partition:
@@ -330,6 +377,8 @@ def build(terraform: Path, cdk: Path, guides: Path, botocore_data: Path, partiti
             entry["vpcEndpointCnSuffixServices"] = vpce_cn_suffix[region]
         if region in apigateway_zones:
             entry["apiGatewayRegionalHostedZoneId"] = apigateway_zones[region]
+        if region in rds_zones:
+            entry["rdsHostedZoneId"] = rds_zones[region]
         regions[region] = entry
 
     partitions = {}
@@ -348,9 +397,11 @@ def build(terraform: Path, cdk: Path, guides: Path, botocore_data: Path, partiti
     return {
         "_source": {
             "generator": "tools/aws/regen_region_facts.py",
+            "rds": RDS_CLI_EXAMPLE_URL,
             "terraform": f"terraform-provider-aws {TF_ELB}, {TF_ELBV2}, {TF_S3}, {TF_CLIENT}",
             "cdk": f"aws-cdk {CDK_FACT_TABLES}, {CDK_CLOUDFRONT_TARGET}, {CDK_VPC_ENDPOINT}",
-            "docs": "aws-docs/partition-guides (snapshots of the China and GovCloud user guides) " + ", ".join(GUIDE_PAGES),
+            "docs": "aws-docs/partition-guides (snapshots of AWS guides and CLI examples) " + ", ".join(GUIDE_PAGES),
+            "apiGatewayRegionalHostedZones": f"{APIGATEWAY_ENDPOINTS_URL} (data plane table, snapshot aws-docs/{APIGATEWAY_ENDPOINTS_PAGE})",
             "botocore": f"botocore {BOTOCORE_CLOUDFRONT} (Distribution$DomainName, DistributionSummary$DomainName)",
             "s3WebsiteConflicts": "terraform wins over the CDK where they disagree (it cites the S3 website-endpoint table)",
         },
@@ -473,7 +524,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{rel}: sources not checked out, shape verified only")
             return 0
         raise SystemExit("error: regenerating needs the terraform-provider-aws, aws-cdk and botocore checkouts "
-                         "and the aws-docs/partition-guides snapshots under local/aws")
+                         f"and the aws-docs/partition-guides and aws-docs/{APIGATEWAY_ENDPOINTS_PAGE} snapshots under local/aws")
 
     document = build(args.terraform, args.cdk, args.guides, args.botocore_data,
                      json.loads(args.partitions.read_text(encoding="utf-8")))

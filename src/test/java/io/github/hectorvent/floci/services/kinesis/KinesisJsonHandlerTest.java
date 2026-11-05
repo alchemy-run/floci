@@ -13,11 +13,15 @@ import io.github.hectorvent.floci.services.kinesis.model.KinesisStream;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.math.BigDecimal;
+import java.nio.ByteBuffer;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
@@ -57,6 +61,53 @@ class KinesisJsonHandlerTest {
         handler = new KinesisJsonHandler(service, MAPPER, 300_000);
     }
 
+    @Test
+    void terminalGetRecordsIsJsonNullWithExactChildMetadata() throws Exception {
+        createStream("test-stream");
+        service.putRecord("test-stream", new byte[]{1}, "pk", REGION);
+        service.splitShard("test-stream", FIRST_SHARD_ID, "100", REGION);
+        String cursor = service.getShardIterator("test-stream", FIRST_SHARD_ID, "TRIM_HORIZON", null, null, REGION);
+        ObjectNode request = MAPPER.createObjectNode().put("ShardIterator", cursor);
+        JsonNode page = MAPPER.readTree(responseEntity(handler.handle("GetRecords", request, REGION)).toString());
+        assertTrue(page.has("NextShardIterator"));
+        assertTrue(page.get("NextShardIterator").isNull());
+        assertEquals(1, page.path("Records").size());
+        assertEquals(MAPPER.readTree("""
+                [{"ShardId":"shardId-000000000001","ParentShards":["shardId-000000000000"],
+                  "HashKeyRange":{"StartingHashKey":"0","EndingHashKey":"99"}},
+                 {"ShardId":"shardId-000000000002","ParentShards":["shardId-000000000000"],
+                  "HashKeyRange":{"StartingHashKey":"100","EndingHashKey":"340282366920938463463374607431768211455"}}]
+                """), page.path("ChildShards"));
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {false, true})
+    void subscriptionTerminalMetadataDoesNotContinueEvenWithRecords(boolean nonempty) throws Exception {
+        createStream("test-stream");
+        if (nonempty) {
+            service.putRecord("test-stream", new byte[]{1}, "pk", REGION);
+        }
+        String arn = service.registerStreamConsumer(STREAM_ARN, "terminal-consumer", REGION).getConsumerArn();
+        service.splitShard("test-stream", FIRST_SHARD_ID, "100", REGION);
+        ObjectNode request = MAPPER.createObjectNode().put("ConsumerARN", arn).put("ShardId", FIRST_SHARD_ID);
+        request.putObject("StartingPosition").put("Type", "TRIM_HORIZON");
+        byte[] wire = (byte[]) handler.handle("SubscribeToShard", request, REGION).getEntity();
+        ByteBuffer buffer = ByteBuffer.wrap(wire);
+        int initialLength = buffer.getInt();
+        buffer.position(initialLength);
+        int eventLength = buffer.getInt();
+        int headerLength = buffer.getInt();
+        buffer.position(initialLength + 12 + headerLength);
+        byte[] payload = new byte[eventLength - headerLength - 16];
+        buffer.get(payload);
+        JsonNode event = MAPPER.readTree(payload);
+        assertEquals(nonempty ? 1 : 0, event.path("Records").size());
+        assertFalse(event.has("ContinuationSequenceNumber"));
+        assertEquals(2, event.path("ChildShards").size());
+        assertEquals(FIRST_SHARD_ID, event.path("ChildShards").get(0).path("ParentShards").get(0).asText());
+        assertEquals("99", event.path("ChildShards").get(0).path("HashKeyRange").path("EndingHashKey").asText());
+    }
+
     // Retention is measured against the service clock, so a test that plants a fixed arrival
     // timestamp pins the clock just after it instead of relying on the wall clock.
     private void useClockFixedAt(Instant now) {
@@ -82,6 +133,58 @@ class KinesisJsonHandlerTest {
 
     private ObjectNode responseEntity(Response response) {
         return (ObjectNode) response.getEntity();
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PutRecord", "PutRecords"})
+    void writesReportAnOpenDescendantAfterRepeatedSplits(String action) {
+        createStream("test-stream");
+        KinesisStream stream = service.describeStream("test-stream", REGION);
+        service.splitShard("test-stream", FIRST_SHARD_ID,
+                "170141183460469231731687303715884105728", REGION);
+        service.splitShard("test-stream", stream.getShards().get(1).getShardId(),
+                "85070591730234615865843651857942052864", REGION);
+        service.splitShard("test-stream", stream.getShards().get(2).getShardId(),
+                "255211775190703847597530955573826158592", REGION);
+
+        ObjectNode request = MAPPER.createObjectNode().put("StreamName", "test-stream");
+        ObjectNode record = "PutRecords".equals(action) ? request.putArray("Records").addObject() : request;
+        record.put("PartitionKey", "b").put("Data", "AQ==");
+        ObjectNode response = responseEntity(handler.handle(action, request, REGION));
+        JsonNode result = "PutRecords".equals(action) ? response.path("Records").get(0) : response;
+
+        assertEquals(stream.getShards().get(3).getShardId(), result.path("ShardId").asText());
+        assertFalse(result.path("SequenceNumber").asText().isEmpty());
+        if ("PutRecords".equals(action)) {
+            assertEquals(0, response.path("FailedRecordCount").asInt());
+        }
+        assertEquals(1, stream.getShards().get(3).recordCount());
+        assertTrue(stream.getShards().stream().filter(KinesisShard::isClosed)
+                .allMatch(shard -> shard.recordCount() == 0));
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"PutRecord", "PutRecords"})
+    void writesFailWithoutAppendingWhenNoOpenDescendantExists(String action) {
+        createStream("test-stream");
+        KinesisShard shard = service.describeStream("test-stream", REGION).getShards().getFirst();
+        shard.setClosed(true);
+        ObjectNode request = MAPPER.createObjectNode().put("StreamName", "test-stream");
+        ObjectNode record = "PutRecords".equals(action) ? request.putArray("Records").addObject() : request;
+        record.put("PartitionKey", "b").put("Data", "AQ==");
+
+        if ("PutRecord".equals(action)) {
+            AwsException error = assertThrows(AwsException.class, () -> handler.handle(action, request, REGION));
+            assertEquals("InvalidArgumentException", error.getErrorCode());
+            assertEquals(400, error.getHttpStatus());
+        } else {
+            ObjectNode response = responseEntity(handler.handle(action, request, REGION));
+            assertEquals(1, response.path("FailedRecordCount").asInt());
+            assertEquals("InternalFailure", response.path("Records").get(0).path("ErrorCode").asText());
+            assertFalse(response.path("Records").get(0).has("SequenceNumber"));
+            assertFalse(response.path("Records").get(0).has("ShardId"));
+        }
+        assertEquals(0, shard.recordCount());
     }
 
     @Test
@@ -1418,7 +1521,7 @@ class KinesisJsonHandlerTest {
         assertEquals(3, shards.size());
 
         ObjectNode parent = (ObjectNode) shards.get(0);
-        List<ObjectNode> children = new java.util.ArrayList<>();
+        List<ObjectNode> children = new ArrayList<>();
         for (JsonNode s : shards) {
             if (s.has("ParentShardId") && s.get("ParentShardId").asText().equals(parent.get("ShardId").asText())) {
                 children.add((ObjectNode) s);

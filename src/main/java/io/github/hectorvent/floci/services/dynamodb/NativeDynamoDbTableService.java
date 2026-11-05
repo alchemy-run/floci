@@ -74,7 +74,7 @@ public class NativeDynamoDbTableService {
      * read-back of the stored {@link KinesisStreamingDestination}: that object is shared across
      * requests, so reading it again could report a status a concurrent call wrote in the meantime.
      */
-    record KinesisDestination(String tableName, String streamArn, String destinationStatus,
+    public record KinesisDestination(String tableName, String streamArn, String destinationStatus,
                               String approximateCreationDateTimePrecision) {}
 
     /** One GlobalSecondaryIndexOverride or LocalSecondaryIndexOverride entry; LSIs carry no throughput. */
@@ -527,13 +527,13 @@ public class NativeDynamoDbTableService {
      * @param precision an already validated ApproximateCreationDateTimePrecision
      * @return a snapshot of what this call left on the destination, with the canonical table name
      */
-    KinesisDestination enableKinesisStreamingDestination(String tableName, String streamArn, String precision, String region) {
+    public KinesisDestination enableKinesisStreamingDestination(String tableName, String streamArn, String precision,
+                                                                String region) {
         TableDefinition table = dynamoDbService.describeTable(tableName, region);
         String resolvedTableName = table.getTableName();
 
-        String streamName = streamArn.substring(streamArn.lastIndexOf('/') + 1);
         try {
-            kinesisService.describeStream(streamName, region);
+            kinesisService.describeStreamByArn(streamArn, region);
         } catch (AwsException e) {
             throw new AwsException("ResourceNotFoundException",
                     "Kinesis stream not found: " + streamArn, 400);
@@ -572,7 +572,7 @@ public class NativeDynamoDbTableService {
      * @param precision an already validated ApproximateCreationDateTimePrecision
      * @return a snapshot of what this call left on the destination, with the canonical table name
      */
-    KinesisDestination updateKinesisStreamingDestination(String tableName, String streamArn, String precision, String region) {
+    public KinesisDestination updateKinesisStreamingDestination(String tableName, String streamArn, String precision, String region) {
         TableDefinition table = dynamoDbService.describeTable(tableName, region);
         String resolvedTableName = table.getTableName();
         Optional<KinesisStreamingDestination> existing = table.findKinesisStreamingDestination(streamArn);
@@ -597,7 +597,7 @@ public class NativeDynamoDbTableService {
      *
      * @return a snapshot of what this call left on the destination, with the canonical table name
      */
-    KinesisDestination disableKinesisStreamingDestination(String tableName, String streamArn, String region) {
+    public KinesisDestination disableKinesisStreamingDestination(String tableName, String streamArn, String region) {
         TableDefinition table = dynamoDbService.describeTable(tableName, region);
         String resolvedTableName = table.getTableName();
 

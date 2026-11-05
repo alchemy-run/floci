@@ -137,11 +137,12 @@ public class SesExportJobService implements Resettable {
             throw new AwsException("BadRequestException", "One data source must be provided", 400);
         }
         if (!exportDestination.isObject()) {
-            throw notNull("exportDestination");
+            throw SmithyValidationErrors.badRequest(SmithyValidationErrors.notNullWithoutValue("exportDestination"));
         }
         String dataFormat = exportDestination.path("DataFormat").textValue();
         if (dataFormat == null) {
-            throw notNull("exportDestination.dataFormat");
+            throw SmithyValidationErrors.badRequest(
+                    SmithyValidationErrors.notNullWithoutValue("exportDestination.dataFormat"));
         }
         if (!DATA_FORMATS.contains(dataFormat)) {
             throw SmithyValidationErrors.badRequest(
@@ -540,11 +541,6 @@ public class SesExportJobService implements Resettable {
         return ExportJob.FORMAT_CSV.equals(dataFormat) ? "text/csv" : "application/json";
     }
 
-    private static AwsException notNull(String member) {
-        return SmithyValidationErrors.badRequest(
-                "Value at '" + member + "' failed to satisfy constraint: Member must not be null");
-    }
-
     /**
      * The model bounds {@code MaxResults} at 1 to 10000. An unchecked negative value reached
      * {@code subList} inside the filter and surfaced as a 500. The value is stored as the int it
@@ -572,10 +568,8 @@ public class SesExportJobService implements Resettable {
     private static Instant requireDate(JsonNode source, String field) {
         Instant value = date(source, field);
         if (value == null) {
-            throw SmithyValidationErrors.badRequest(
-                    "Value at '" + field.substring(0, 1).toLowerCase(Locale.ROOT)
-                            + field.substring(1) + "' failed to satisfy constraint: "
-                            + "Member must not be null");
+            throw SmithyValidationErrors.badRequest(SmithyValidationErrors.notNullWithoutValue(
+                    field.substring(0, 1).toLowerCase(Locale.ROOT) + field.substring(1)));
         }
         return value;
     }

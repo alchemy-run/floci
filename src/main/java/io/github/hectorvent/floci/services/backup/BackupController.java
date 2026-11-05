@@ -5,6 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.PaginatedResult;
+import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.services.backup.model.*;
 import io.github.hectorvent.floci.services.backup.model.BackupJob;
@@ -121,12 +123,18 @@ public class BackupController {
     @GET
     @Path("/backup-vaults/")
     public Response listBackupVaults(@Context HttpHeaders headers,
-                                      @QueryParam("vaultType") String byVaultType) {
+                                      @QueryParam("vaultType") String byVaultType,
+                                      @QueryParam("maxResults") String maxResults,
+                                      @QueryParam("nextToken") String nextToken) {
         String region = regionResolver.resolveRegion(headers);
-        List<BackupVault> vaults = service.listBackupVaults(region, byVaultType);
+        PaginatedResult<BackupVault> page = service.listBackupVaults(region, byVaultType,
+                Pagination.parseMaxResults(maxResults, "InvalidParameterValueException"), nextToken);
         ObjectNode out = objectMapper.createObjectNode();
         ArrayNode list = out.putArray("BackupVaultList");
-        vaults.forEach(v -> list.add(vaultJson(v)));
+        page.items().forEach(v -> list.add(vaultJson(v)));
+        if (page.nextToken() != null) {
+            out.put("NextToken", page.nextToken());
+        }
         return Response.ok(out).build();
     }
 
@@ -273,8 +281,8 @@ public class BackupController {
         List<BackupRule> rules = readRules(planNode.path("Rules"));
         String creatorRequestId = textOrNull(req, "CreatorRequestId");
 
-        BackupPlan plan = service.createBackupPlan(planName, rules, creatorRequestId, region);
-        service.tagResource(plan.getBackupPlanArn(), readStringMap(req, "BackupPlanTags"));
+        BackupPlan plan = service.createBackupPlan(planName, rules, creatorRequestId,
+                readStringMap(req, "BackupPlanTags"), region);
 
         ObjectNode out = objectMapper.createObjectNode();
         out.put("BackupPlanId", plan.getBackupPlanId());
@@ -319,24 +327,40 @@ public class BackupController {
     @DELETE
     @Path("/backup/plans/{backupPlanId}")
     public Response deleteBackupPlan(@PathParam("backupPlanId") String planId) {
-        service.deleteBackupPlan(planId);
-        return Response.noContent().build();
+        BackupPlan plan = service.deleteBackupPlan(planId);
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("BackupPlanId", plan.getBackupPlanId());
+        out.put("BackupPlanArn", plan.getBackupPlanArn());
+        out.put("DeletionDate", plan.getDeletionDate());
+        out.put("VersionId", plan.getVersionId());
+        return Response.ok(out).build();
     }
 
     @GET
     @Path("/backup/plans/")
-    public Response listBackupPlans() {
-        List<BackupPlan> plans = service.listBackupPlans();
+    public Response listBackupPlans(@Context HttpHeaders headers,
+                                      @QueryParam("includeDeleted") @DefaultValue("false") boolean includeDeleted,
+                                      @QueryParam("maxResults") String maxResults,
+                                      @QueryParam("nextToken") String nextToken) {
+        String region = regionResolver.resolveRegion(headers);
+        PaginatedResult<BackupPlan> page = service.listBackupPlans(region, includeDeleted,
+                Pagination.parseMaxResults(maxResults, "InvalidParameterValueException"), nextToken);
         ObjectNode out = objectMapper.createObjectNode();
         ArrayNode list = out.putArray("BackupPlansList");
-        for (BackupPlan plan : plans) {
+        for (BackupPlan plan : page.items()) {
             ObjectNode item = objectMapper.createObjectNode();
             item.put("BackupPlanId", plan.getBackupPlanId());
             item.put("BackupPlanArn", plan.getBackupPlanArn());
             item.put("BackupPlanName", plan.getBackupPlanName());
             item.put("CreationDate", plan.getCreationDate());
             item.put("VersionId", plan.getVersionId());
+            if (plan.getDeletionDate() != null) {
+                item.put("DeletionDate", plan.getDeletionDate());
+            }
             list.add(item);
+        }
+        if (page.nextToken() != null) {
+            out.put("NextToken", page.nextToken());
         }
         return Response.ok(out).build();
     }
@@ -591,13 +615,19 @@ public class BackupController {
         return n.asText();
     }
 
-    @SuppressWarnings("unchecked")
     private Map<String, String> readStringMap(JsonNode node, String field) {
         JsonNode mapNode = node.path(field);
         if (mapNode.isMissingNode() || mapNode.isNull()) {
             return new HashMap<>();
         }
-        return objectMapper.convertValue(mapNode, Map.class);
+        if (!mapNode.isObject() || mapNode.properties().stream()
+                .anyMatch(entry -> !entry.getValue().isTextual())) {
+            throw new AwsException("InvalidParameterValueException",
+                    field + " must be an object with string values", 400);
+        }
+        Map<String, String> result = new HashMap<>();
+        mapNode.properties().forEach(entry -> result.put(entry.getKey(), entry.getValue().textValue()));
+        return result;
     }
 
     private static List<String> readStringList(JsonNode node) {

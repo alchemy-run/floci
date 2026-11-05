@@ -2,7 +2,7 @@
   "_source": {
     "generator": "tools/aws/regen_iam_authorized_actions.py",
     "reference": "https://servicereference.us-east-1.amazonaws.com/",
-    "retrieved": "2026-10-14",
+    "retrieved": "2026-11-03",
     "note": "make iam-authorized-actions-verify checks every entry against AWS."
   },
   "authorizedActions": {
@@ -140,6 +140,23 @@
       "InvokeModelWithBidirectionalStream": "bedrock:InvokeModel",
       "RetrieveAndGenerateStream": "bedrock:RetrieveAndGenerate"
     },
+    "budgets": {
+      "CreateBudget": "budgets:ModifyBudget",
+      "CreateNotification": "budgets:ModifyBudget",
+      "CreateSubscriber": "budgets:ModifyBudget",
+      "DeleteBudget": "budgets:ModifyBudget",
+      "DeleteNotification": "budgets:ModifyBudget",
+      "DeleteSubscriber": "budgets:ModifyBudget",
+      "DescribeBudget": "budgets:ViewBudget",
+      "DescribeBudgetNotificationsForAccount": "budgets:ViewBudget",
+      "DescribeBudgetPerformanceHistory": "budgets:ViewBudget",
+      "DescribeBudgets": "budgets:ViewBudget",
+      "DescribeNotificationsForBudget": "budgets:ViewBudget",
+      "DescribeSubscribersForNotification": "budgets:ViewBudget",
+      "UpdateBudget": "budgets:ModifyBudget",
+      "UpdateNotification": "budgets:ModifyBudget",
+      "UpdateSubscriber": "budgets:ModifyBudget"
+    },
     "cassandra": {
       "GetKeyspace": "cassandra:Select",
       "GetTable": "cassandra:Select",
@@ -147,9 +164,6 @@
       "ListKeyspaces": "cassandra:Select",
       "ListTables": "cassandra:Select",
       "ListTypes": "cassandra:Select"
-    },
-    "cognito-idp": {
-      "DescribeTermsByClient": "cognito-idp:DescribeTerms"
     },
     "connect": {
       "UpdateUserConfig": "connect:UpdateUserPhoneConfig"
@@ -194,6 +208,9 @@
       "ListDataQualityStatistics": "glue:GetDataQualityResult",
       "PublishDataQualityResultV2": "glue:PublishDataQuality"
     },
+    "iotfleetwise": {
+      "BatchCreateVehicle": "iotfleetwise:CreateVehicle"
+    },
     "lakeformation": {
       "GetTemporaryDataLocationCredentials": "lakeformation:GetDataAccess"
     },
@@ -207,9 +224,11 @@
       "ListUtteranceMetrics": "lex:ListAggregatedUtterances"
     },
     "mediaconnect": {
+      "BatchGetDestinationEndpoint": "mediaconnect:GetDestinationEndpoint",
       "BatchGetRouterInput": "mediaconnect:GetRouterInput",
       "BatchGetRouterNetworkInterface": "mediaconnect:GetRouterNetworkInterface",
-      "BatchGetRouterOutput": "mediaconnect:GetRouterOutput"
+      "BatchGetRouterOutput": "mediaconnect:GetRouterOutput",
+      "BatchGetSourceEndpoint": "mediaconnect:GetSourceEndpoint"
     },
     "qapps": {
       "CreatePresignedUrl": "qapps:ImportDocument"
@@ -307,5 +326,109 @@
     "vpc-lattice": {
       "BatchUpdateRule": "vpc-lattice:UpdateRule"
     }
+  },
+  "actionsWithoutResourceTypes": {
+    "access-analyzer": [
+      "CancelPolicyGeneration",
+      "CheckAccessNotGranted",
+      "CheckNoNewAccess",
+      "CheckNoPublicAccess",
+      "GetGeneratedPolicy",
+      "ListAnalyzers",
+      "ListPolicyGenerations",
+      "StartPolicyGeneration",
+      "ValidatePolicy"
+    ],
+    "dsql": [
+      "InjectError",
+      "ListClusters"
+    ],
+    "eks": [
+      "CreateCluster",
+      "CreateEksAnywhereSubscription",
+      "DescribeAddonConfiguration",
+      "DescribeAddonVersions",
+      "DescribeClusterVersions",
+      "ListAccessPolicies",
+      "ListClusters",
+      "ListEksAnywhereSubscriptions",
+      "RegisterCluster"
+    ],
+    "es": [
+      "AcceptInboundConnection",
+      "AcceptInboundCrossClusterSearchConnection",
+      "AuthorizeVpcEndpointAccess",
+      "CreateApplication",
+      "CreateElasticsearchServiceRole",
+      "CreatePackage",
+      "CreateServiceRole",
+      "CreateVpcEndpoint",
+      "DeleteElasticsearchServiceRole",
+      "DeleteInboundConnection",
+      "DeleteInboundCrossClusterSearchConnection",
+      "DeleteOutboundConnection",
+      "DeleteOutboundCrossClusterSearchConnection",
+      "DeletePackage",
+      "DeleteVpcEndpoint",
+      "DescribeElasticsearchInstanceTypeLimits",
+      "DescribeInboundConnections",
+      "DescribeInboundCrossClusterSearchConnections",
+      "DescribeInstanceTypeLimits",
+      "DescribeOutboundConnections",
+      "DescribeOutboundCrossClusterSearchConnections",
+      "DescribePackages",
+      "DescribeReservedElasticsearchInstanceOfferings",
+      "DescribeReservedElasticsearchInstances",
+      "DescribeReservedInstanceOfferings",
+      "DescribeReservedInstances",
+      "DescribeVpcEndpoints",
+      "GetPackageVersionHistory",
+      "ListDomainNames",
+      "ListDomainsForPackage",
+      "ListElasticsearchInstanceTypeDetails",
+      "ListElasticsearchInstanceTypes",
+      "ListElasticsearchVersions",
+      "ListInstanceTypeDetails",
+      "ListVersions",
+      "ListVpcEndpointAccess",
+      "ListVpcEndpoints",
+      "ListVpcEndpointsForDomain",
+      "PurchaseReservedElasticsearchInstanceOffering",
+      "PurchaseReservedInstanceOffering",
+      "RejectInboundConnection",
+      "RejectInboundCrossClusterSearchConnection",
+      "RevokeVpcEndpointAccess",
+      "UpdatePackage",
+      "UpdatePackageScope",
+      "UpdateVpcEndpoint"
+    ],
+    "lambda": [
+      "ConnectMicrovm",
+      "CreateCodeSigningConfig",
+      "CreateEventSourceMapping",
+      "CreateMicrovmImage",
+      "GetAccountSettings",
+      "GetWebAccountSettings",
+      "ListCapacityProviders",
+      "ListCodeSigningConfigs",
+      "ListEventSourceMappings",
+      "ListFunctions",
+      "ListLayerVersions",
+      "ListLayers",
+      "ListManagedMicrovmImages",
+      "ListMicrovmImages",
+      "ListMicrovms",
+      "ListNetworkConnectors",
+      "ListWebFunctions",
+      "PassNetworkConnector"
+    ],
+    "pipes": [
+      "ListPipes"
+    ],
+    "scheduler": [
+      "ListScheduleGroups",
+      "ListSchedules",
+      "ListSchedulesByTarget"
+    ]
   }
 }

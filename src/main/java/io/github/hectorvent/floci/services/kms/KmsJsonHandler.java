@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsErrorResponse;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -20,6 +21,8 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 
 import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
 
 import static io.github.hectorvent.floci.core.common.ReservedTags.rejectUnknownReservedTags;
 
@@ -39,7 +42,7 @@ public class KmsJsonHandler {
 
     private static final Set<String> KEY_ID_OPERATIONS = Set.of(
             "GetPublicKey", "DescribeKey", "ReplicateKey", "CreateGrant", "ListGrants", "RevokeGrant", "Encrypt", "GenerateDataKey",
-            "GenerateDataKeyWithoutPlaintext", "Sign", "Verify", "GenerateMac", "VerifyMac", "ScheduleKeyDeletion",
+            "GenerateDataKeyWithoutPlaintext", "GenerateDataKeyPair", "GenerateDataKeyPairWithoutPlaintext", "Sign", "Verify", "GenerateMac", "VerifyMac", "ScheduleKeyDeletion",
             "CancelKeyDeletion", "TagResource", "UntagResource", "ListResourceTags", "GetKeyPolicy", "PutKeyPolicy",
             "ListKeyPolicies", "UpdateKeyDescription", "GetKeyRotationStatus", "EnableKeyRotation",
             "DisableKeyRotation", "EnableKey", "DisableKey", "RotateKeyOnDemand", "GetParametersForImport",
@@ -197,10 +200,7 @@ public class KmsJsonHandler {
         }
         if (!node.isTextual()) {
             // MarkerType is a string; any other JSON value is refused rather than coerced.
-            String token = node.isNumber() ? "NUMBER_VALUE"
-                    : node.isBoolean() ? (node.booleanValue() ? "TRUE_VALUE" : "FALSE_VALUE")
-                    : node.isArray() ? "START_ARRAY" : "START_OBJECT";
-            throw new AwsException("SerializationException", token + " can not be converted to a String", 400);
+            throw new AwsException("SerializationException", jsonToken(node) + " can not be converted to a String", 400);
         }
         String marker = node.textValue();
         if (marker.isEmpty()) {
@@ -290,7 +290,7 @@ public class KmsJsonHandler {
     private Response handleCreateGrant(JsonNode request, String region) {
         String keyId = request.path("KeyId").asText(null);
         String granteePrincipal = request.path("GranteePrincipal").asText(null);
-        List<String> operations = new java.util.ArrayList<>();
+        List<String> operations = new ArrayList<>();
         request.path("Operations").forEach(operation -> operations.add(operation.asText()));
         String retiringPrincipal = request.path("RetiringPrincipal").isMissingNode()
                 ? null : request.path("RetiringPrincipal").asText(null);
@@ -405,6 +405,37 @@ public class KmsJsonHandler {
         return Response.ok(response).build();
     }
 
+    private Response handleGenerateDataKeyPair(JsonNode request, String region) {
+        String keyId = request.path("KeyId").asText();
+        String spec = readDataKeyPairSpec(request);
+        Map<String, String> context = readStrictEncryptionContext(request.path("EncryptionContext"));
+
+        KmsService.DataKeyPair result = service.generateDataKeyPair(keyId, spec, context, region);
+
+        ObjectNode response = dataKeyPairResponse(result);
+        response.put("PrivateKeyPlaintext", Base64.getEncoder().encodeToString(result.privateKeyPlaintext()));
+        return Response.ok(response).build();
+    }
+
+    private Response handleGenerateDataKeyPairWithoutPlaintext(JsonNode request, String region) {
+        String keyId = request.path("KeyId").asText();
+        String spec = readDataKeyPairSpec(request);
+        Map<String, String> context = readStrictEncryptionContext(request.path("EncryptionContext"));
+
+        KmsService.DataKeyPair result = service.generateDataKeyPairWithoutPlaintext(keyId, spec, context, region);
+
+        return Response.ok(dataKeyPairResponse(result)).build();
+    }
+
+    private ObjectNode dataKeyPairResponse(KmsService.DataKeyPair result) {
+        ObjectNode response = objectMapper.createObjectNode();
+        response.put("PrivateKeyCiphertextBlob", Base64.getEncoder().encodeToString(result.privateKeyCiphertextBlob()));
+        response.put("PublicKey", Base64.getEncoder().encodeToString(result.publicKey()));
+        response.put("KeyId", result.keyArn());
+        response.put("KeyPairSpec", result.keyPairSpec());
+        return response;
+    }
+
     private Response handleReEncrypt(JsonNode request, String region) {
         byte[] ciphertext = requireSizedBlob(request, "CiphertextBlob", false, KmsService.MAX_CIPHERTEXT_BYTES);
         String destKeyId = request.path("DestinationKeyId").asText();
@@ -435,6 +466,37 @@ public class KmsJsonHandler {
         Map<String, String> result = new HashMap<>();
         node.fields().forEachRemaining(e -> result.put(e.getKey(), e.getValue().asText()));
         return result;
+    }
+
+    /**
+     * EncryptionContextType is a map of string to string, so any other JSON value is refused rather
+     * than read as no context: a private key encrypted without the caller's context would decrypt
+     * without it too.
+     */
+    private static Map<String, String> readStrictEncryptionContext(JsonNode node) {
+        if (node.isMissingNode() || node.isNull()) {
+            return Map.of();
+        }
+        if (!node.isObject()) {
+            throw new AwsException("SerializationException", jsonToken(node) + " can not be converted to a Map", 400);
+        }
+        Map<String, String> result = new HashMap<>();
+        node.fields().forEachRemaining(e -> {
+            if (!e.getValue().isTextual()) {
+                throw new AwsException("SerializationException",
+                        jsonToken(e.getValue()) + " can not be converted to a String", 400);
+            }
+            result.put(e.getKey(), e.getValue().textValue());
+        });
+        return result;
+    }
+
+    private static String jsonToken(JsonNode node) {
+        return node.isTextual() ? "STRING_VALUE"
+                : node.isNumber() ? "NUMBER_VALUE"
+                : node.isBoolean() ? (node.booleanValue() ? "TRUE_VALUE" : "FALSE_VALUE")
+                : node.isNull() ? "VALUE_NULL"
+                : node.isArray() ? "START_ARRAY" : "START_OBJECT";
     }
 
     private Response handleSign(JsonNode request, String region) {
@@ -559,7 +621,7 @@ public class KmsJsonHandler {
 
     private Response handleUntagResource(JsonNode request, String region) {
         String keyId = request.path("KeyId").asText();
-        java.util.List<String> keys = new java.util.ArrayList<>();
+        List<String> keys = new ArrayList<>();
         request.path("TagKeys").forEach(k -> keys.add(k.asText()));
         service.untagResource(keyId, keys, region);
         return Response.ok().build();
@@ -736,6 +798,22 @@ public class KmsJsonHandler {
         return spec;
     }
 
+    private static final List<String> DATA_KEY_PAIR_SPECS = List.of("RSA_2048", "RSA_3072", "RSA_4096",
+            "ECC_NIST_P256", "ECC_NIST_P384", "ECC_NIST_P521", "ECC_SECG_P256K1", "SM2", "ECC_NIST_EDWARDS25519");
+
+    private static String readDataKeyPairSpec(JsonNode request) {
+        String spec = request.path("KeyPairSpec").asText(null);
+        if (spec == null) {
+            throw SmithyValidationErrors.validationException(SmithyValidationErrors.notNull("keyPairSpec"));
+        }
+        if (!DATA_KEY_PAIR_SPECS.contains(spec)) {
+            throw SmithyValidationErrors.validationException("Value '" + spec
+                    + "' at 'keyPairSpec' failed to satisfy constraint: Member must satisfy enum value set: "
+                    + DATA_KEY_PAIR_SPECS.toString());
+        }
+        return spec;
+    }
+
     private static Integer readNumberOfBytes(JsonNode request) {
         JsonNode numberOfBytes = request.path("NumberOfBytes");
         if (!numberOfBytes.isNumber()) {
@@ -760,8 +838,7 @@ public class KmsJsonHandler {
         String name = Character.toLowerCase(member.charAt(0)) + member.substring(1);
         JsonNode value = request.path(member);
         if (value.isMissingNode() || value.isNull()) {
-            throw SmithyValidationErrors.validationException("Value null at '" + name
-                    + "' failed to satisfy constraint: Member must not be null");
+            throw SmithyValidationErrors.validationException(SmithyValidationErrors.notNull(name));
         }
         String keyId = value.asText();
         String pattern = "Value '" + keyId + "' at '" + name
@@ -863,15 +940,10 @@ public class KmsJsonHandler {
             if (!"PRIMARY".equals(candidate.getMultiRegionKeyType())) {
                 ObjectNode replica = replicas.addObject();
                 replica.put("Arn", candidate.getArn());
-                replica.put("Region", regionFromArn(candidate.getArn()));
+                replica.put("Region", AwsArnUtils.regionOrDefault(candidate.getArn(), ""));
             }
         }
         return configuration;
-    }
-
-    private static String regionFromArn(String arn) {
-        String[] parts = arn.split(":", 6);
-        return parts.length > 3 ? parts[3] : "";
     }
 
     private static void addTags(ArrayNode array, KmsKey key) {
@@ -915,35 +987,6 @@ public class KmsJsonHandler {
         } else if (KmsKeyUsage.KEY_AGREEMENT == key.getKeyUsage()) {
             response.putArray("KeyAgreementAlgorithms").add("ECDH");
         }
-    }
-
-    private Response handleGenerateDataKeyPair(JsonNode request, String region) {
-        Map<String, Object> result = generateDataKeyPair(request, region);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("KeyId", (String) result.get("KeyId"));
-        response.put("KeyPairSpec", (String) result.get("KeyPairSpec"));
-        response.put("PublicKey", Base64.getEncoder().encodeToString((byte[]) result.get("PublicKey")));
-        response.put("PrivateKeyPlaintext", Base64.getEncoder().encodeToString((byte[]) result.get("PrivateKeyPlaintext")));
-        response.put("PrivateKeyCiphertextBlob", Base64.getEncoder().encodeToString((byte[]) result.get("PrivateKeyCiphertextBlob")));
-        return Response.ok(response).build();
-    }
-
-    private Response handleGenerateDataKeyPairWithoutPlaintext(JsonNode request, String region) {
-        Map<String, Object> result = generateDataKeyPair(request, region);
-        ObjectNode response = objectMapper.createObjectNode();
-        response.put("KeyId", (String) result.get("KeyId"));
-        response.put("KeyPairSpec", (String) result.get("KeyPairSpec"));
-        response.put("PublicKey", Base64.getEncoder().encodeToString((byte[]) result.get("PublicKey")));
-        response.put("PrivateKeyCiphertextBlob", Base64.getEncoder().encodeToString((byte[]) result.get("PrivateKeyCiphertextBlob")));
-        return Response.ok(response).build();
-    }
-
-    private Map<String, Object> generateDataKeyPair(JsonNode request, String region) {
-        return service.generateDataKeyPair(
-                request.path("KeyId").asText(),
-                request.path("KeyPairSpec").asText(null),
-                readEncryptionContext(request.path("EncryptionContext")),
-                region);
     }
 
     private Response handleDeriveSharedSecret(JsonNode request, String region) {

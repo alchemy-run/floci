@@ -22,6 +22,7 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.IdentityHashMap;
@@ -55,6 +56,7 @@ public class SqsEventSourcePoller implements Resettable {
     private final LambdaTargetResolver targetResolver;
     private final EsmStore esmStore;
     private final long pollIntervalMs;
+    private final int initTimeoutSeconds;
     private final String baseUrl;
     private final ObjectMapper objectMapper;
     private final PipesFilterMatcher filterMatcher;
@@ -85,6 +87,7 @@ public class SqsEventSourcePoller implements Resettable {
         this.targetResolver = targetResolver;
         this.esmStore = esmStore;
         this.pollIntervalMs = config.services().lambda().pollIntervalMs();
+        this.initTimeoutSeconds = Math.max(0, config.services().lambda().initTimeoutSeconds());
         this.baseUrl = config.effectiveBaseUrl();
         this.objectMapper = objectMapper;
         this.filterMatcher = filterMatcher;
@@ -183,18 +186,19 @@ public class SqsEventSourcePoller implements Resettable {
                 // the window since the first buffered message expires.
                 int window = esm.getMaximumBatchingWindowInSeconds() == null
                         ? 0 : esm.getMaximumBatchingWindowInSeconds();
-                // A message can be buffered for the whole window and then processed for the full
-                // function timeout, so visibility has to cover both plus AWS's 30s margin, not the
-                // larger of the two. Otherwise a long invoke can outlive the visibility and another
-                // consumer receives the message, causing a duplicate delivery and a stale handle.
-                int visibilityTimeout = fn.getTimeout() + Math.max(window, 0) + 30;
+                // A message can be buffered for the whole window, wait out a cold start's Init
+                // budget and then be processed for the full function timeout, so visibility has to
+                // cover all three plus AWS's 30s margin, not the largest of them. Otherwise a long
+                // invoke can outlive the visibility and another consumer receives the message,
+                // causing a duplicate delivery and a stale handle.
+                int visibilityTimeout = fn.getTimeout() + Math.max(window, 0) + initTimeoutSeconds + 30;
 
                 PendingBatch pending = pendingBatches.get(esm.getUuid());
                 int alreadyBuffered = pending != null ? pending.messages.size() : 0;
                 int wanted = Math.max(1, esm.getBatchSize() - alreadyBuffered);
 
                 List<Message> received = sqsService.receiveMessage(
-                        esm.getQueueUrl(), wanted, visibilityTimeout, 0, esm.getRegion());
+                        esm.getQueueUrl(), Math.min(10, wanted), visibilityTimeout, 0, esm.getRegion());
 
                 List<Message> messages;
                 if (window <= 0) {
@@ -460,7 +464,7 @@ public class SqsEventSourcePoller implements Resettable {
                 attrNode.put("dataType", val.getDataType() != null ? val.getDataType() : "String");
                 if (val.getBinaryValue() != null) {
                     attrNode.put("binaryValue",
-                            java.util.Base64.getEncoder().encodeToString(val.getBinaryValue()));
+                            Base64.getEncoder().encodeToString(val.getBinaryValue()));
                 } else if (val.getStringValue() != null) {
                     attrNode.put("stringValue", val.getStringValue());
                 }

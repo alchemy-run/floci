@@ -42,10 +42,12 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Predicate;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
+import static io.github.hectorvent.floci.testing.EnforcementFixtures.auth;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.endsWith;
@@ -77,6 +79,7 @@ class LambdaWebDataPlaneDockerIntegrationTest {
             const http = require('node:http');
             const [host, port] = process.env.AWS_LAMBDA_HTTP_ENDPOINT.split(':');
             console.log('starting');
+            const STALE_DATE = 'Thu, 01 Jan 2015 00:00:00 GMT';
             if (process.env.MODE === 'throw') { throw new Error('init boom'); }
             if (process.env.MODE === 'exit') { process.exit(1); }
             if (process.env.MODE === 'missing') { require('no-such-module'); }
@@ -115,6 +118,12 @@ class LambdaWebDataPlaneDockerIntegrationTest {
                 }, (e) => { res.statusCode = 500; res.end(String(e)); });
                 return;
               }
+              if (req.url === '/date/none') { res.sendDate = false; res.end('none'); return; }
+              if (req.url === '/date/stale') { res.setHeader('Date', STALE_DATE); res.end('stale'); return; }
+              if (req.url === '/date/lower') { res.setHeader('date', STALE_DATE); res.end('lower'); return; }
+              if (req.url === '/type/none') { res.end('none'); return; }
+              if (req.url === '/type/empty') { res.end(); return; }
+              if (req.url === '/type/lower') { res.setHeader('content-type', 'application/x-custom'); res.end('lower'); return; }
               if (req.url.startsWith('/crash')) { setTimeout(() => process.exit(1), 50); return; }
               if (req.url.startsWith('/exit')) { res.end('bye', () => process.exit(0)); return; }
               let body = '';
@@ -125,7 +134,7 @@ class LambdaWebDataPlaneDockerIntegrationTest {
                   env: {endpoint: process.env.AWS_LAMBDA_HTTP_ENDPOINT, init: process.env.AWS_LAMBDA_INITIALIZATION_TYPE,
                         exec: process.env.AWS_EXECUTION_ENV, account: process.env.AWS_ACCOUNT_ID,
                         region: process.env.AWS_REGION, custom: process.env.CUSTOM},
-                  execArgv: process.execArgv}));
+                  execArgv: process.execArgv, heapSizeLimit: require('node:v8').getHeapStatistics().heap_size_limit}));
               });
             }).listen(Number(port), host);
             """;
@@ -234,6 +243,31 @@ class LambdaWebDataPlaneDockerIntegrationTest {
                 .body("headers.authorization", nullValue())
                 .body("headers.x-amz-security-token", nullValue())
                 .body("headers.x-amz-date", equalTo("20260101T000000Z"));
+
+        // The platform writes its own Date in place of the app's, as on AWS. A lowercase date passes beside it.
+        String own = "Date: [A-Z][a-z]{2}, \\d{2} [A-Z][a-z]{2} \\d{4} \\d{2}:\\d{2}:\\d{2} GMT";
+        String stale = "Thu, 01 Jan 2015 00:00:00 GMT";
+
+        List<String> none = headerLines(domain, "/date/none", "date");
+        assertEquals(1, none.size(), none.toString());
+        assertTrue(none.getFirst().matches(own), none.toString());
+
+        List<String> replaced = headerLines(domain, "/date/stale", "date");
+        assertEquals(1, replaced.size(), replaced.toString());
+        assertTrue(replaced.getFirst().matches(own) && !replaced.getFirst().endsWith(stale), replaced.toString());
+
+        List<String> lowercase = headerLines(domain, "/date/lower", "date");
+        assertEquals(2, lowercase.size(), lowercase.toString());
+        assertTrue(lowercase.getFirst().matches(own), lowercase.toString());
+        assertEquals("date: " + stale, lowercase.get(1));
+
+        // An answer without a Content-Type gets text/plain unless its Content-Length is 0, as on AWS. An app's
+        // content-type goes out as Content-Type.
+        String plain = "Content-Type: text/plain; charset=utf-8";
+        assertEquals(List.of(plain), headerLines(domain, "/type/none", "content-type"));
+        assertEquals(List.of(plain), headerLines(domain, "/status/204", "content-type"));
+        assertEquals(List.of(), headerLines(domain, "/type/empty", "content-type"));
+        assertEquals(List.of("Content-Type: application/x-custom"), headerLines(domain, "/type/lower", "content-type"));
     }
 
     @Test
@@ -369,6 +403,14 @@ class LambdaWebDataPlaneDockerIntegrationTest {
                 .when().get(presigned.pathAndQuery())
                 .then().statusCode(200)
                 .body("url", equalTo(presigned.pathAndQuery()));
+
+        // SigV4a for a region set that covers the region passes, and loses its signature the same way.
+        LambdaWebRequestSigner.Signed asymmetric = new LambdaWebRequestSigner().sigV4a("us-*").sign("GET", domain, "/a");
+        given().header("Host", domain).headers(asymmetric.headers())
+                .when().get("/a")
+                .then().statusCode(200)
+                .body("headers.authorization", nullValue())
+                .body("headers.x-amz-region-set", equalTo("us-*"));
     }
 
     @Test
@@ -431,6 +473,75 @@ class LambdaWebDataPlaneDockerIntegrationTest {
         assertEquals(401, answer.getInt("refused"));
         assertEquals(answer.getString("api"), answer.getString("runtimeApi"));
         assertTrue(answer.getString("token").matches("[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"));
+    }
+
+    @Test
+    @Timeout(240)
+    void aPerRegionEndpointServesEachRegionFromItsOwnEnvironments() throws Exception {
+        createFunction(30, 1);
+        String endpoints = BASE + "/web-functions/" + functionName + "/endpoints";
+        String revisionId = given().when().get(endpoints + "/dev").then().statusCode(200)
+                .extract().path("revisionWeights[0].revisionId");
+        JsonPath created = given().contentType("application/json")
+                .body("""
+                        {"endpointName": "per", "endpointType": "PerRegion", "regions": ["us-west-2"],
+                         "authType": "ApplicationManaged", "scalingConfig": {"maxEnvironments": 2},
+                         "revisionWeights": [{"revisionId": "%s", "weight": 100}]}""".formatted(revisionId))
+                .when().put(endpoints)
+                .then().statusCode(202)
+                .extract().jsonPath();
+        String east = created.getString("regionalEndpoints.us-east-1.domainName");
+        String west = created.getString("regionalEndpoints.us-west-2.domainName");
+
+        Response westEcho = given().header("Host", west).when().get("/");
+        westEcho.then().statusCode(200).body("env.region", equalTo("us-west-2"));
+        String westStream = westEcho.header("lambda-web-logstream");
+        given().header("Host", east).when().get("/").then().statusCode(200).body("env.region", equalTo("us-east-1"))
+                .header("lambda-web-logstream", not(equalTo(westStream)));
+        JsonPath zone = given().header("Host", west).when().get("/metadata").then().statusCode(200)
+                .extract().jsonPath();
+        assertEquals("{\"AvailabilityZoneID\":\"usw2-az1\"}\n", zone.getString("body"));
+
+        // maxEnvironments holds in each region on its own, as on AWS.
+        AtomicInteger next = new AtomicInteger();
+        CyclicBarrier together = new CyclicBarrier(4);
+        List<String> waited = parallel(4, () -> raw("GET /wait HTTP/1.1\r\nHost: "
+                + (next.getAndIncrement() % 2 == 0 ? east : west) + "\r\nConnection: close\r\n\r\n", together));
+        assertTrue(waited.stream().allMatch(response -> response.startsWith("HTTP/1.1 200 ")),
+                String.join("\n----\n", waited));
+
+        // The .local group is in the region that served and the centralized one in the home region. Each batch
+        // reaches the .local group first.
+        String group = "/aws/lambda/web/" + functionName;
+        Predicate<List<String>> started = events -> events.stream().anyMatch(event -> event.contains("\"starting\""));
+        assertTrue(started.test(awaitLogEvents(group, westStream + "-000000000000-us-west-2", started)));
+        List<String> local = logEvents("us-west-2", group + ".local", westStream);
+        JsonPath starting = JsonPath.from(local.stream().filter(event -> event.contains("\"starting\""))
+                .findFirst().orElseThrow());
+        assertEquals("us-west-2", starting.getString("region"));
+        JsonPath initStart = platformEvent(local, "platform.initStart");
+        assertEquals("us-west-2", initStart.getString("region"));
+        assertTrue(initStart.getString("record.runtimeVersionArn").startsWith(
+                "arn:aws:lambda:us-west-2::runtime/nodejs24.x/version/"), initStart.prettify());
+        assertEquals(List.of(), logEvents("us-east-1", group + ".local", westStream));
+
+        // AWS/Lambda/Web is also centralized in the home region. The usage metrics are not.
+        Map<String, String> endpoint = Map.of("FunctionName", functionName, "EndpointName", "per");
+        Map<String, String> westUsage = Map.of("FunctionName", functionName, "EndpointName", "per",
+                "ExecutionRegion", "us-west-2");
+        metrics.awaitPublished(Duration.ofSeconds(5));
+        assertEquals(4, LambdaWebMetricStatistics.of("us-west-2", LambdaWebMetrics.NAMESPACE, "ExecutedRequests",
+                endpoint, "Sum"));
+        assertEquals(7, LambdaWebMetricStatistics.of("us-east-1", LambdaWebMetrics.NAMESPACE, "ExecutedRequests",
+                endpoint, "Sum"));
+        assertEquals(4, LambdaWebMetricStatistics.of("us-west-2", LambdaWebMetrics.USAGE_NAMESPACE,
+                "ExecutedRequests", westUsage, "Sum"));
+        assertEquals(0, LambdaWebMetricStatistics.of("us-east-1", LambdaWebMetrics.USAGE_NAMESPACE,
+                "ExecutedRequests", westUsage, "Sum"));
+
+        given().when().delete(endpoints + "/per").then().statusCode(204);
+        given().header("Host", west).when().get("/").then().statusCode(404)
+                .header("lambda-web-error-type", "Platform.InvalidEndpoint");
     }
 
     @Test
@@ -560,7 +671,7 @@ class LambdaWebDataPlaneDockerIntegrationTest {
                                   String mode, String authType, String nodeOptions) throws IOException {
         functionName = "dp-docker-" + Long.toString(System.nanoTime(), 36);
         LambdaWebRoles.trustLambda(iamService, ROLE);
-        s3Service.createBucket(BUCKET, "us-east-1");
+        LambdaWebCodeBuckets.create(s3Service, BUCKET);
         s3Service.putObject(BUCKET, functionName + ".zip", zip(APP), "application/zip", Map.of());
         return given().contentType("application/json")
                 .body("""
@@ -696,7 +807,8 @@ class LambdaWebDataPlaneDockerIntegrationTest {
 
         given().header("Host", domain).when().get("/").then().statusCode(200)
                 .body("execArgv", contains("--expose-gc", "--max-http-header-size", "135168",
-                        "--no-experimental-require-module", "--max-old-space-size=1536"));
+                        "--no-experimental-require-module", "--max-old-space-size=1536"))
+                .body("heapSizeLimit", equalTo(1811939328));
     }
 
     @Test
@@ -786,9 +898,17 @@ class LambdaWebDataPlaneDockerIntegrationTest {
     }
 
     private static List<String> logEvents(String logGroup, String logStream) {
-        List<String> messages = RestAssuredJsonUtils.awsAction("Logs_20140328", "GetLogEvents",
-                        "{\"logGroupName\": \"%s\", \"logStreamName\": \"%s\", \"startFromHead\": true}"
-                                .formatted(logGroup, logStream))
+        return logEvents("us-east-1", logGroup, logStream);
+    }
+
+    private static List<String> logEvents(String region, String logGroup, String logStream) {
+        List<String> messages = given()
+                .header("Authorization", auth("test", region, "logs"))
+                .header("X-Amz-Target", "Logs_20140328.GetLogEvents")
+                .contentType("application/x-amz-json-1.1")
+                .body("{\"logGroupName\": \"%s\", \"logStreamName\": \"%s\", \"startFromHead\": true}"
+                        .formatted(logGroup, logStream))
+                .when().post("/")
                 .then().extract().jsonPath().getList("events.message", String.class);
         return messages == null ? List.of() : messages;
     }
@@ -811,6 +931,15 @@ class LambdaWebDataPlaneDockerIntegrationTest {
             InputStream in = socket.getInputStream();
             return new String(in.readAllBytes(), StandardCharsets.UTF_8);
         }
+    }
+
+    /** The {@code name} header lines of the answer to {@code path}, in their case and order. */
+    private static List<String> headerLines(String domain, String path, String name) throws Exception {
+        String response = raw("GET " + path + " HTTP/1.1\r\nHost: " + domain + "\r\nConnection: close\r\n\r\n");
+        String head = response.substring(0, response.indexOf("\r\n\r\n"));
+        String prefix = name + ":";
+        return List.of(head.split("\r\n")).stream()
+                .filter(line -> line.regionMatches(true, 0, prefix, 0, prefix.length())).toList();
     }
 
     private static byte[] zip(String indexJs) throws IOException {

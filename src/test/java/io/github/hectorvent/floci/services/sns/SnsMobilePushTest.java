@@ -6,11 +6,15 @@ import io.github.hectorvent.floci.core.storage.InMemoryStorage;
 import io.github.hectorvent.floci.services.sns.model.PlatformApplication;
 import io.github.hectorvent.floci.services.sns.model.PlatformEndpoint;
 import io.github.hectorvent.floci.services.sns.model.PushNotification;
+import io.github.hectorvent.floci.testutil.LogCapture;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -300,7 +304,7 @@ class SnsMobilePushTest {
     void publish_unknownEndpointArnReturnsNotFound() {
         AwsException e = assertThrows(AwsException.class, () -> snsService.publish(
                 null,
-                "arn:aws:sns:us-east-1:000000000000:endpoint/APNS/missing/" + java.util.UUID.randomUUID(),
+                "arn:aws:sns:us-east-1:000000000000:endpoint/APNS/missing/" + UUID.randomUUID(),
                 null, "hello", null, null, null, null, null, REGION));
         assertEquals("NotFound", e.getErrorCode());
         assertEquals(404, e.getHttpStatus());
@@ -354,6 +358,27 @@ class SnsMobilePushTest {
         assertEquals("fcm-token-b", capturedB.get(0).token());
         assertTrue(capturedA.get(0).payload().contains("market alert"));
         assertTrue(capturedB.get(0).payload().contains("market alert"));
+    }
+
+    @Test
+    void publish_logsEachPushAndSmsBelowInfo() {
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformEndpoint endpoint = snsService.createPlatformEndpoint(app.getArn(), "fcm-token", null, Map.of(), REGION);
+        String topicArn = snsService.createTopic("market-alerts", null, null, REGION).getTopicArn();
+        snsService.subscribe(topicArn, "application", endpoint.getArn(), REGION, Map.of());
+
+        List<LogRecord> records = LogCapture.capture(SnsService.class, () -> {
+            snsService.publish(topicArn, null, null, "to topic", null, null, null, null, null, REGION);
+            snsService.publish(null, endpoint.getArn(), null, "to endpoint", null, null, null, null, null, REGION);
+            snsService.publish(null, null, "+15555550100", "to phone", null, null, REGION);
+        });
+
+        assertEquals(2, records.stream().filter(r -> r.getMessage().startsWith("Captured push notification")).count());
+        assertEquals(1, records.stream().filter(r -> r.getMessage().startsWith("SNS SMS published")).count());
+        assertEquals(List.of(), records.stream()
+                .filter(r -> r.getLevel().intValue() >= Level.INFO.intValue())
+                .map(LogRecord::getMessage)
+                .toList());
     }
 
     @Test
@@ -497,7 +522,7 @@ class SnsMobilePushTest {
     @Test
     void deleteEndpoint_isIdempotent() {
         assertDoesNotThrow(() -> snsService.deleteEndpoint(
-                "arn:aws:sns:us-east-1:000000000000:endpoint/APNS/x/" + java.util.UUID.randomUUID(), REGION));
+                "arn:aws:sns:us-east-1:000000000000:endpoint/APNS/x/" + UUID.randomUUID(), REGION));
     }
 
     @Test

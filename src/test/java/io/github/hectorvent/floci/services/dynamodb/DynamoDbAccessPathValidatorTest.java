@@ -14,6 +14,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.regex.MatchResult;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -196,13 +198,13 @@ class DynamoDbAccessPathValidatorTest {
     void rejectsMalformedKeyAndFilterExpressions() {
         AwsException keyError = assertThrows(AwsException.class,
                 () -> validateExpression(tablePath, "pk ="));
-        assertEquals("Invalid KeyConditionExpression: Syntax error", keyError.getMessage());
+        assertEquals("Invalid KeyConditionExpression: Syntax error; token: \"<EOF>\", near: \"=\"", keyError.getMessage());
 
         AwsException filterError = assertThrows(AwsException.class,
                 () -> DynamoDbAccessPathValidator.validateQuery(
                         table, tablePath, null, "pk = :pk", "status =", null, null,
                         expressionValues(":pk")));
-        assertEquals("Invalid FilterExpression: Syntax error", filterError.getMessage());
+        assertEquals("Invalid FilterExpression: Syntax error; token: \"<EOF>\", near: \"=\"", filterError.getMessage());
     }
 
     @Test
@@ -563,10 +565,10 @@ class DynamoDbAccessPathValidatorTest {
     }
 
     private String[] extractPlaceholders(String expression) {
-        return java.util.regex.Pattern.compile(":\\w+")
+        return Pattern.compile(":\\w+")
                 .matcher(expression)
                 .results()
-                .map(java.util.regex.MatchResult::group)
+                .map(MatchResult::group)
                 .distinct()
                 .toArray(String[]::new);
     }

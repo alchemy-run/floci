@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.Base64Url;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.resource.ExplorerResource;
 import io.github.hectorvent.floci.core.resource.ResourceProvider;
@@ -493,6 +494,11 @@ public class CloudWatchLogsService implements ResourceProvider {
         groupStore.put(key, group);
     }
 
+    /** The account and partition this service mints its ARNs in. */
+    RegionResolver regionResolver() {
+        return regionResolver;
+    }
+
     /** The log group a tagging request's resourceArn names, refused when it is another account's or region's. */
     public LogGroupTagTarget resolveTagTarget(String resourceArn, String region) {
         return LogGroupTagTarget.resolve(resourceArn, region, regionResolver.getAccountId(), regionResolver.getPartition());
@@ -675,7 +681,7 @@ public class CloudWatchLogsService implements ResourceProvider {
                                                       int maxResults, String region) {
         String[] parts;
         try {
-            String raw = new String(Base64.getUrlDecoder().decode(nextToken), StandardCharsets.UTF_8);
+            String raw = Base64Url.decode(nextToken);
             parts = raw.split(":", 3);
         } catch (IllegalArgumentException e) {
             throw invalidNextToken();

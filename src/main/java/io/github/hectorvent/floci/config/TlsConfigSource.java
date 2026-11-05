@@ -93,6 +93,11 @@ public class TlsConfigSource implements ConfigSource {
         return List.copyOf(sans);
     }
 
+    /** Default endpoint names shared by HTTP and service-specific TLS listeners. */
+    public static List<String> defaultEndpointHostnames() {
+        return DEFAULT_SAN_HOSTNAMES.stream().filter(host -> !host.contains("*")).toList();
+    }
+
     private static volatile Path resolvedTlsDir;
 
     private final Map<String, String> properties = new HashMap<>();
@@ -420,15 +425,23 @@ public class TlsConfigSource implements ConfigSource {
     }
 
     /**
-     * Containers Floci launches get this bundle copied in (Docker) or mounted (Kubernetes). A
-     * failure here must not stop Floci: log it, and containers simply will not trust Floci HTTPS
-     * until a boot manages to write it.
+     * Containers Floci launches get this bundle copied in (Docker) or mounted (Kubernetes), and
+     * those whose workload is Java its trust store too. A failure here must not stop Floci: log it,
+     * and containers simply will not trust Floci HTTPS until a boot manages to write it.
      */
     private static void writeContainerCaBundle(Path tlsDir, Path trustAnchor) {
+        Path bundle;
         try {
-            ContainerCaBundle.write(tlsDir, trustAnchor);
+            bundle = ContainerCaBundle.write(tlsDir, trustAnchor);
         } catch (Exception e) {
             LOG.warnv(e, "TLS: could not write the container CA bundle under {0}: {1}", tlsDir, e.getMessage());
+            return;
+        }
+        try {
+            ContainerCaBundle.writeJavaTrustStore(bundle);
+        } catch (Exception e) {
+            LOG.warnv(e, "TLS: could not write the containers' Java trust store under {0}: {1}", tlsDir,
+                    e.getMessage());
         }
     }
 

@@ -7,6 +7,7 @@ import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.ext.Provider;
 
 import java.util.UUID;
+import java.util.concurrent.ThreadLocalRandom;
 
 /**
  * Adds AWS request-id response headers to every HTTP response.
@@ -21,7 +22,8 @@ import java.util.UUID;
  *
  * <p>This filter emits all three so that every AWS SDK variant can find the
  * header it expects.  If a controller already set {@code x-amz-request-id}
- * (e.g. Lambda invoke), the existing value is preserved.
+ * (e.g. Lambda invoke) or {@code x-amzn-RequestId}, that value is preserved and
+ * repeated in the other headers, so every SDK reads the same ID.
  */
 @Provider
 public class AwsRequestIdFilter implements ContainerResponseFilter {
@@ -35,7 +37,7 @@ public class AwsRequestIdFilter implements ContainerResponseFilter {
         MultivaluedMap<String, Object> headers = responseContext.getHeaders();
 
         // Reuse the same ID across all header variants for this response
-        String requestId = UUID.randomUUID().toString();
+        String requestId = existingRequestId(headers);
 
         if (!headers.containsKey(AMZ_REQUEST_ID)) {
             headers.putSingle(AMZ_REQUEST_ID, requestId);
@@ -46,5 +48,23 @@ public class AwsRequestIdFilter implements ContainerResponseFilter {
         if (!headers.containsKey(AMZ_ID_2)) {
             headers.putSingle(AMZ_ID_2, requestId);
         }
+    }
+
+    private static String existingRequestId(MultivaluedMap<String, Object> headers) {
+        for (String name : new String[] {AMZ_REQUEST_ID, AMZN_REQUEST_ID}) {
+            Object value = headers.getFirst(name);
+            if (value != null) {
+                return value.toString();
+            }
+        }
+        return newRequestId();
+    }
+
+    // A request id is not a secret, so it does not need SecureRandom.
+    private static String newRequestId() {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        long high = (random.nextLong() & 0xFFFFFFFFFFFF0FFFL) | 0x0000000000004000L;
+        long low = (random.nextLong() & 0x3FFFFFFFFFFFFFFFL) | 0x8000000000000000L;
+        return new UUID(high, low).toString();
     }
 }

@@ -3,6 +3,7 @@ package io.github.hectorvent.floci.services.cloudwatch.logs;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
@@ -318,7 +319,7 @@ public class CloudWatchLogsCrossAccountService {
         }
     }
     private static void requireArn(String value, String field) {
-        if (value == null || !value.startsWith("arn:") || value.length() < 10) {
+        if (!AwsArnUtils.looksLikeArn(value) || value.length() < 10) {
             throw invalid(field + " must be a valid ARN.");
         }
     }

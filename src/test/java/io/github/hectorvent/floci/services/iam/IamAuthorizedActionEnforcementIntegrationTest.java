@@ -88,39 +88,25 @@ class IamAuthorizedActionEnforcementIntegrationTest {
 
     @Test
     void aBatchPublishIsGrantedByPublish() {
-        String topicArn = given()
-                .header("Authorization", auth(ACCOUNT_ID, "sns"))
-                .contentType("application/x-www-form-urlencoded")
-                .formParam("Action", "CreateTopic")
-                .formParam("Version", "2010-03-31")
-                .formParam("Name", "authorized-" + UUID.randomUUID())
-        .when()
-                .post("/")
-        .then()
-                .statusCode(200)
-                .extract().xmlPath().getString("CreateTopicResponse.CreateTopicResult.TopicArn");
-        cleanup.register(() -> given()
-                .header("Authorization", auth(ACCOUNT_ID, "sns"))
-                .contentType("application/x-www-form-urlencoded")
-                .formParam("Action", "DeleteTopic")
-                .formParam("Version", "2010-03-31")
-                .formParam("TopicArn", topicArn)
-                .when().post("/").then().statusCode(200));
+        String topicArn = createTopic();
         String accessKeyId = userAllowed("sns:Publish");
 
-        given()
-                .header("Authorization", auth(accessKeyId, "sns"))
-                .contentType("application/x-www-form-urlencoded")
-                .formParam("Action", "PublishBatch")
-                .formParam("Version", "2010-03-31")
-                .formParam("TopicArn", topicArn)
-                .formParam("PublishBatchRequestEntries.member.1.Id", "one")
-                .formParam("PublishBatchRequestEntries.member.1.Message", "hello")
-        .when()
-                .post("/")
-        .then()
+        snsQuery(accessKeyId, "PublishBatch", publishBatch(topicArn))
                 .statusCode(200)
                 .body("PublishBatchResponse.PublishBatchResult.Successful.member.Id", equalTo("one"));
+    }
+
+    /** SNS refuses with its own {@code AuthorizationError}, the 403 every SNS operation lists. */
+    @Test
+    void aPolicyNamingTheBatchPublishGrantsNothingAndSnsRefusesWithAuthorizationError() {
+        String topicArn = createTopic();
+        String accessKeyId = userAllowed("sns:PublishBatch");
+
+        snsQuery(accessKeyId, "PublishBatch", publishBatch(topicArn))
+                .statusCode(403)
+                .body("ErrorResponse.Error.Code", equalTo("AuthorizationError"))
+                .body("ErrorResponse.Error.Type", equalTo("Sender"))
+                .body(containsString("sns:Publish"));
     }
 
     @Test
@@ -149,6 +135,35 @@ class IamAuthorizedActionEnforcementIntegrationTest {
                 .statusCode(400)
                 .body("__type", equalTo("AccessDeniedException"))
                 .body(containsString("dynamodb:GetItem"));
+    }
+
+    @Test
+    void aBudgetIsChangedUnderModifyBudgetAndReadUnderViewBudget() {
+        String budget = "authorized-" + UUID.randomUUID().toString().substring(0, 8);
+        String create = """
+                {"AccountId": "%s", "Budget": {"BudgetName": "%s", "BudgetType": "COST", "TimeUnit": "MONTHLY",
+                 "BudgetLimit": {"Amount": "100", "Unit": "USD"}}}
+                """.formatted(ACCOUNT_ID, budget);
+        String named = """
+                {"AccountId": "%s", "BudgetName": "%s"}
+                """.formatted(ACCOUNT_ID, budget);
+
+        // CreateBudget is no IAM action, so a policy naming it grants nothing.
+        budgets(userAllowed("budgets:CreateBudget"), "CreateBudget", create)
+                .statusCode(400)
+                .body("__type", equalTo("AccessDeniedException"))
+                .body(containsString("budgets:ModifyBudget"));
+        budgets(userAllowed("budgets:ModifyBudget"), "CreateBudget", create).statusCode(200);
+        cleanup.register(() -> budgets(ACCOUNT_ID, "DeleteBudget", named).statusCode(200));
+
+        String reader = userAllowed("budgets:ViewBudget");
+        budgets(reader, "DescribeBudget", named)
+                .statusCode(200)
+                .body("Budget.BudgetName", equalTo(budget));
+        budgets(reader, "DeleteBudget", named)
+                .statusCode(400)
+                .body("__type", equalTo("AccessDeniedException"))
+                .body(containsString("budgets:ModifyBudget"));
     }
 
     private String createTable() {
@@ -180,6 +195,20 @@ class IamAuthorizedActionEnforcementIntegrationTest {
         cleanup.register(() -> sqsQuery(ACCOUNT_ID, "DeleteQueue", Map.of("QueueUrl", queueUrl))
                 .statusCode(200));
         return queueUrl;
+    }
+
+    private String createTopic() {
+        String topicArn = snsQuery(ACCOUNT_ID, "CreateTopic", Map.of("Name", "authorized-" + UUID.randomUUID()))
+                .statusCode(200)
+                .extract().xmlPath().getString("CreateTopicResponse.CreateTopicResult.TopicArn");
+        cleanup.register(() -> snsQuery(ACCOUNT_ID, "DeleteTopic", Map.of("TopicArn", topicArn))
+                .statusCode(200));
+        return topicArn;
+    }
+
+    private static Map<String, String> publishBatch(String topicArn) {
+        return Map.of("TopicArn", topicArn, "PublishBatchRequestEntries.member.1.Id", "one",
+                "PublishBatchRequestEntries.member.1.Message", "hello");
     }
 
     private String userAllowed(String action) {
@@ -217,6 +246,27 @@ class IamAuthorizedActionEnforcementIntegrationTest {
         .when()
                 .post("/")
         .then();
+    }
+
+    private static ValidatableResponse budgets(String accessKeyId, String operation, String body) {
+        return given()
+                .header("Authorization", auth(accessKeyId, "budgets"))
+                .header("X-Amz-Target", "AWSBudgetServiceGateway." + operation)
+                .contentType("application/x-amz-json-1.1")
+                .body(body)
+        .when()
+                .post("/")
+        .then();
+    }
+
+    private static ValidatableResponse snsQuery(String accessKeyId, String action, Map<String, String> params) {
+        RequestSpecification spec = given()
+                .header("Authorization", auth(accessKeyId, "sns"))
+                .contentType("application/x-www-form-urlencoded")
+                .formParam("Action", action)
+                .formParam("Version", "2010-03-31");
+        params.forEach(spec::formParam);
+        return spec.when().post("/").then();
     }
 
     private static ValidatableResponse sqsQuery(String accessKeyId, String action, Map<String, String> params) {

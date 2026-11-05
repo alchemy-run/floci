@@ -1,6 +1,8 @@
 package io.github.hectorvent.floci.services.sqs;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -12,6 +14,7 @@ import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsEndpoints;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.AwsRegions;
+import io.github.hectorvent.floci.core.common.Digests;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -35,8 +38,6 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -45,7 +46,6 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
-import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -68,6 +68,7 @@ public class SqsService implements Resettable, ResourceProvider {
     private static final int DEDUP_WINDOW_SECONDS = 300; // 5 minutes
     private static final int DEDUP_LOCK_STRIPES = 256;
     private static final int MAX_RECEIVE_WAIT_TIME_SECONDS = 20;
+    private static final int MAX_DELAY_SECONDS = 900;
     private static final int MAX_BATCH_ENTRIES = 10;
     private static final int MAX_LIST_QUEUES_RESULTS = 1000;
     private static final String LIST_QUEUES_TOKEN_NAMESPACE = "sqs-list-queues";
@@ -109,7 +110,6 @@ public class SqsService implements Resettable, ResourceProvider {
                 return t;
             });
     private final AtomicLong sequenceCounter = new AtomicLong(0);
-    private static final HexFormat HEX = HexFormat.of();
 
     private record RedrivePolicy(int maxReceiveCount, String deadLetterTargetArn) {
     }
@@ -741,6 +741,8 @@ public class SqsService implements Resettable, ResourceProvider {
         validateMaximumMessageSize(attributes);
         attributes = validateMessageRetentionPeriod(attributes);
         attributes = withNormalizedPolicy(attributes);
+        validateDelaySeconds(attributes);
+        attributes = compactRedrivePolicies(attributes);
 
         String accountId = regionResolver.getAccountId();
         String queueUrl = buildQueueUrl(region, accountId, queueName);
@@ -753,7 +755,8 @@ public class SqsService implements Resettable, ResourceProvider {
                 Set<String> readOnlyAttrs = Set.of("QueueArn", "CreatedTimestamp", "LastModifiedTimestamp",
                         "ApproximateNumberOfMessages", "ApproximateNumberOfMessagesNotVisible",
                         "ApproximateNumberOfMessagesDelayed");
-                Map<String, String> effective = new LinkedHashMap<>(existing.getAttributes());
+                // A queue saved by an earlier build can hold a non-compact policy; compare compact forms.
+                Map<String, String> effective = new LinkedHashMap<>(compactRedrivePolicies(existing.getAttributes()));
                 applyDerivedAttributes(effective);
                 for (Map.Entry<String, String> entry : attributes.entrySet()) {
                     if (readOnlyAttrs.contains(entry.getKey())) {
@@ -1036,6 +1039,12 @@ public class SqsService implements Resettable, ResourceProvider {
                             "Reason: Message must be shorter than " + queueMaxMessageSize + " bytes.", 400);
         }
 
+        if (delaySeconds != null && (delaySeconds < 0 || delaySeconds > MAX_DELAY_SECONDS)) {
+            throw new AwsException("InvalidParameterValue",
+                    "Value " + delaySeconds + " for parameter DelaySeconds is invalid. "
+                            + "Reason: Must be >= 0 and <= " + MAX_DELAY_SECONDS + ".", 400);
+        }
+
         int queueDelaySeconds = parseNonNegativeSecondsAttribute(queue.getAttributes().get("DelaySeconds"));
         String effectiveSenderId = senderId != null ? senderId : senderIdFor(queueUrl);
 
@@ -1063,7 +1072,7 @@ public class SqsService implements Resettable, ResourceProvider {
             String dedupId = messageDeduplicationId;
             if (dedupId == null || dedupId.isEmpty()) {
                 if ("true".equalsIgnoreCase(queue.getAttributes().get("ContentBasedDeduplication"))) {
-                    dedupId = computeMd5(body);
+                    dedupId = Digests.md5Hex(body.getBytes(StandardCharsets.UTF_8));
                 } else {
                     throw new AwsException("InvalidParameterValue",
                             "The queue should either have ContentBasedDeduplication enabled or " +
@@ -1135,24 +1144,36 @@ public class SqsService implements Resettable, ResourceProvider {
                     return response;
                 }
 
-                persistDedup(storageKey);
-
-                Message message = new Message(body);
-                message.setSenderId(effectiveSenderId);
-                message.setMessageGroupId(messageGroupId);
-                message.setMessageDeduplicationId(dedupId);
-                message.setSequenceNumber(sequenceCounter.incrementAndGet());
-                message.setAwsTraceHeader(awsTraceHeader);
-                if (effectiveDelaySeconds > 0) {
-                    message.setVisibleAt(Instant.now().plusSeconds(effectiveDelaySeconds));
+                Message message;
+                GuardedMessageQueue messages;
+                try {
+                    persistDedup(storageKey);
+                    message = new Message(body);
+                    message.setSenderId(effectiveSenderId);
+                    message.setMessageGroupId(messageGroupId);
+                    message.setMessageDeduplicationId(dedupId);
+                    message.setSequenceNumber(sequenceCounter.incrementAndGet());
+                    message.setAwsTraceHeader(awsTraceHeader);
+                    if (effectiveDelaySeconds > 0) {
+                        message.setVisibleAt(Instant.now().plusSeconds(effectiveDelaySeconds));
+                    }
+                    if (messageAttributes != null && !messageAttributes.isEmpty()) {
+                        message.getMessageAttributes().putAll(messageAttributes);
+                        message.updateMd5OfMessageAttributes();
+                    }
+                    messages = getOrCreateQueue(storageKey);
+                    messages.addMessage(message);
+                } catch (RuntimeException exception) {
+                    dedupMap.remove(dedupCacheKey, expiry);
+                    try {
+                        persistDedup(storageKey);
+                    } catch (RuntimeException cleanupFailure) {
+                        if (cleanupFailure != exception) {
+                            exception.addSuppressed(cleanupFailure);
+                        }
+                    }
+                    throw exception;
                 }
-                if (messageAttributes != null && !messageAttributes.isEmpty()) {
-                    message.getMessageAttributes().putAll(messageAttributes);
-                    message.updateMd5OfMessageAttributes();
-                }
-
-                GuardedMessageQueue messages = getOrCreateQueue(storageKey);
-                messages.addMessage(message);
                 messages.activity().sent(totalSize, false);
                 deduplicationIdentityCache.computeIfAbsent(storageKey, k -> new ConcurrentHashMap<>())
                         .putIfAbsent(dedupCacheKey,
@@ -1244,6 +1265,62 @@ public class SqsService implements Resettable, ResourceProvider {
         Map<String, String> normalized = new HashMap<>(attributes);
         normalized.put("MessageRetentionPeriod", String.valueOf(parsed));
         return normalized;
+    }
+
+    private static final ObjectMapper REDRIVE_POLICY_MAPPER =
+            new ObjectMapper().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
+
+    /**
+     * AWS stores RedrivePolicy and RedriveAllowPolicy as compact JSON, so a document sent with
+     * whitespace (a trailing newline, pretty-printing) reads back without it. A value that is not
+     * a JSON object is left as supplied.
+     */
+    private static Map<String, String> compactRedrivePolicies(Map<String, String> attributes) {
+        if (attributes == null) {
+            return null;
+        }
+        Map<String, String> compacted = attributes;
+        for (String name : List.of("RedrivePolicy", "RedriveAllowPolicy")) {
+            String value = attributes.get(name);
+            if (value == null || value.isEmpty()) {
+                continue;
+            }
+            String compact;
+            try {
+                JsonNode document = REDRIVE_POLICY_MAPPER.readTree(value);
+                if (document == null || !document.isObject()) {
+                    continue;
+                }
+                compact = REDRIVE_POLICY_MAPPER.writeValueAsString(document);
+            } catch (JsonProcessingException ignored) {
+                continue;
+            }
+            if (!compact.equals(value)) {
+                if (compacted == attributes) {
+                    compacted = new HashMap<>(attributes);
+                }
+                compacted.put(name, compact);
+            }
+        }
+        return compacted;
+    }
+
+    private static void validateDelaySeconds(Map<String, String> attributes) {
+        String value = attributes == null ? null : attributes.get("DelaySeconds");
+        // An empty value is how a CloudFormation update resets the attribute.
+        if (value == null || value.isEmpty()) {
+            return;
+        }
+        int parsed;
+        try {
+            parsed = Integer.parseInt(value);
+        } catch (NumberFormatException ignored) {
+            parsed = -1;
+        }
+        if (parsed < 0 || MAX_DELAY_SECONDS < parsed) {
+            throw new AwsException("InvalidAttributeValue",
+                    "Invalid value for the parameter DelaySeconds.", 400);
+        }
     }
 
     private static AwsException invalidMessageRetentionPeriod() {
@@ -1370,17 +1447,6 @@ public class SqsService implements Resettable, ResourceProvider {
         }
     }
 
-    private static String computeMd5(String input) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
-            return HEX.formatHex(digest);
-        } catch (NoSuchAlgorithmException ignored) {
-            // MD5 is guaranteed to be available in the standard JDK runtime
-            return "";
-        }
-    }
-
     public List<Message> receiveMessage(String queueUrl, int maxMessages, int visibilityTimeout,
                                         Integer waitTimeSeconds, String region) {
         String storageKey = regionKey(region, queueUrl);
@@ -1389,7 +1455,9 @@ public class SqsService implements Resettable, ResourceProvider {
                         "The specified queue does not exist.", 400));
 
         if (maxMessages < 1 || maxMessages > 10) {
-            maxMessages = 1;
+            throw new AwsException("InvalidParameterValue",
+                    "Value " + maxMessages + " for parameter MaxNumberOfMessages is invalid. "
+                            + "Reason: Must be between 1 and 10, if provided.", 400);
         }
         if (waitTimeSeconds != null && (waitTimeSeconds < 0 || waitTimeSeconds > MAX_RECEIVE_WAIT_TIME_SECONDS)) {
             throw new AwsException("InvalidParameterValue",
@@ -1492,31 +1560,29 @@ public class SqsService implements Resettable, ResourceProvider {
         RedrivePolicy rp = getOrParseRedrivePolicy(queue, storageKey);
         int maxReceiveCount = rp != null ? rp.maxReceiveCount() : -1;
         String deadLetterTargetArn = rp != null ? rp.deadLetterTargetArn() : null;
+        String dlqUrl = deadLetterTargetArn != null ? queueUrlFromArn(deadLetterTargetArn, region) : null;
 
+        // The claim takes dead-letter candidates out of the source, so only name a target that resolves
         GuardedMessageQueue guardedQueue = unexpiredMessages(storageKey, queue);
         GuardedMessageQueue.ClaimResult claimResult = guardedQueue.claimVisibleMessages(
-                maxMessages, effectiveTimeout, queue.isFifo(), maxReceiveCount, deadLetterTargetArn);
+                maxMessages, effectiveTimeout, queue.isFifo(), maxReceiveCount,
+                dlqUrl != null ? deadLetterTargetArn : null);
 
-        // Route DLQ candidates to the dead-letter queue only if the destination resolves
-        if (!claimResult.dlqCandidates().isEmpty() && deadLetterTargetArn != null) {
-            String dlqUrl = queueUrlFromArn(deadLetterTargetArn, region);
-            if (dlqUrl != null) {
-                List<Message> dlqCandidates = claimResult.dlqCandidates();
-                guardedQueue.removeMessages(dlqCandidates);
-                for (Message msg : dlqCandidates) {
-                    msg.setVisibleAt(null);
-                    msg.setReceiptHandle(null);
-                    // Remember where the message came from so StartMessageMoveTask
-                    // with no DestinationArn can put it back.
-                    msg.setOriginalSourceQueueUrl(queue.getQueueUrl());
-                    if (queue.isFifo()) {
-                        msg.setRetentionStartTimestamp(Instant.now());
-                    }
+        List<Message> dlqCandidates = claimResult.dlqCandidates();
+        if (!dlqCandidates.isEmpty()) {
+            for (Message msg : dlqCandidates) {
+                msg.setVisibleAt(null);
+                msg.setReceiptHandle(null);
+                // Remember where the message came from so StartMessageMoveTask
+                // with no DestinationArn can put it back.
+                msg.setOriginalSourceQueueUrl(queue.getQueueUrl());
+                if (queue.isFifo()) {
+                    msg.setRetentionStartTimestamp(Instant.now());
                 }
-                String dlqStorageKey = regionKey(region, dlqUrl);
-                getOrCreateQueue(dlqStorageKey).addAll(dlqCandidates);
-                LOG.infov("Moved {0} messages to DLQ {1}", dlqCandidates.size(), dlqUrl);
             }
+            String dlqStorageKey = regionKey(region, dlqUrl);
+            getOrCreateQueue(dlqStorageKey).addAll(dlqCandidates);
+            LOG.infov("Moved {0} messages to DLQ {1}", dlqCandidates.size(), dlqUrl);
         }
 
         return claimResult.claimed();
@@ -1670,6 +1736,8 @@ public class SqsService implements Resettable, ResourceProvider {
         if (attributes != null && attributes.containsKey("RedrivePolicy")) {
             redrivePolicyCache.remove(storageKey);
         }
+        validateDelaySeconds(attributes);
+        attributes = compactRedrivePolicies(attributes);
         if (attributes != null) {
             for (Map.Entry<String, String> entry : attributes.entrySet()) {
                 if (entry.getValue() == null || entry.getValue().isEmpty()) {
@@ -2188,6 +2256,31 @@ public class SqsService implements Resettable, ResourceProvider {
         }
         // Bare queue name — construct the full URL the same way createQueue does.
         return baseUrl + "/" + regionResolver.getAccountId() + "/" + queueUrl;
+    }
+
+    /**
+     * The ARN of the queue {@code queueUrl} reaches from {@code region}, read as the lookups read it:
+     * the path names the account and the queue, the host does not count, and a value that names no
+     * account is in {@code defaultAccount}.
+     */
+    public static String queueArn(String queueUrl, String partition, String region, String defaultAccount) {
+        String url = queueUrl.contains("://") ? queueUrl : "sqs://queue/" + defaultAccount + "/" + queueUrl;
+        String path = extractQueuePath(url);
+        String account = accountFromQueueUrl(url);
+        return new AwsArnUtils.Arn(partition, "sqs", region, account != null ? account : defaultAccount,
+                path.substring(path.lastIndexOf('/') + 1)).toString();
+    }
+
+    /**
+     * The {@code Policy} attribute of the queue {@code queueArn} names, read from its account and
+     * Region whichever account the caller is in. Empty when the queue does not exist or has no policy.
+     */
+    public Optional<String> findQueuePolicy(String queueArn) {
+        AwsArnUtils.Arn arn = AwsArnUtils.parse(queueArn);
+        String queueUrl = "sqs://queue/" + arn.accountId() + "/" + arn.resource();
+        return getQueueByUrl(regionKey(arn.region(), queueUrl), queueUrl)
+                .map(queue -> queue.getAttributes().get("Policy"))
+                .filter(policy -> !policy.isBlank());
     }
 
     private String regionKey(String region, String queueUrl) {

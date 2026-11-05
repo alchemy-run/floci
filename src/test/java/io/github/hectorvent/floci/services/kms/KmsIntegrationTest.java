@@ -1,9 +1,11 @@
 package io.github.hectorvent.floci.services.kms;
 
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
+import io.github.hectorvent.floci.testing.TestAccounts;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.path.json.JsonPath;
 import io.restassured.response.Response;
+import io.restassured.response.ValidatableResponse;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -18,15 +20,21 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.Signature;
 import java.security.spec.ECGenParameterSpec;
 import java.security.spec.MGF1ParameterSpec;
+import java.security.spec.PKCS8EncodedKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashSet;
 import java.util.List;
+import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.emptyString;
@@ -863,37 +871,35 @@ class KmsIntegrationTest {
 
     @Test
     void listKeysPagesWithLimitAndMarker() {
+        String account = TestAccounts.randomId();
+        String authorization = "AWS4-HMAC-SHA256 Credential=" + account
+                + "/20261103/us-east-1/kms/aws4_request";
+        JsonPath initial = kmsAs(authorization, "ListKeys", "{}")
+                .then().statusCode(200)
+                .extract().jsonPath();
+        List<String> expectedKeyIds = new ArrayList<>(initial.getList("Keys.KeyId"));
         for (int i = 0; i < 2; i++) {
-            given()
-                    .header("X-Amz-Target", "TrentService.CreateKey")
-                    .contentType(KMS_CONTENT_TYPE)
-                    .body("{}")
-                    .when().post("/")
-                    .then().statusCode(200);
+            String keyId = kmsAs(authorization, "CreateKey", "{}")
+                    .then().statusCode(200)
+                    .extract().path("KeyMetadata.KeyId");
+            expectedKeyIds.add(keyId);
         }
 
-        JsonPath unpaged = given()
-                .header("X-Amz-Target", "TrentService.ListKeys")
-                .contentType(KMS_CONTENT_TYPE)
-                .body("{}")
-                .when().post("/")
+        JsonPath unpaged = kmsAs(authorization, "ListKeys", "{}")
                 .then()
                 .statusCode(200)
                 .body("Truncated", equalTo(false))
                 .body("$", not(hasKey("NextMarker")))
                 .extract().jsonPath();
         List<String> allKeyIds = unpaged.getList("Keys.KeyId");
-        assertTrue(allKeyIds.size() >= 2);
+        assertEquals(new HashSet<>(expectedKeyIds), new HashSet<>(allKeyIds));
+        assertEquals(expectedKeyIds.size(), allKeyIds.size());
 
         List<String> pagedKeyIds = new ArrayList<>();
         String marker = null;
         do {
             String body = marker == null ? "{\"Limit\":1}" : "{\"Limit\":1,\"Marker\":\"" + marker + "\"}";
-            JsonPath page = given()
-                    .header("X-Amz-Target", "TrentService.ListKeys")
-                    .contentType(KMS_CONTENT_TYPE)
-                    .body(body)
-                    .when().post("/")
+            JsonPath page = kmsAs(authorization, "ListKeys", body)
                     .then()
                     .statusCode(200)
                     .body("Keys.size()", equalTo(1))
@@ -1160,9 +1166,17 @@ class KmsIntegrationTest {
 
     @ParameterizedTest
     @CsvSource(delimiter = '|', value = {
-            "ListKeys|{}", "ListKeys|[]", "ListKeys|1", "ListKeys|true",
-            "ListAliases|{}", "ListAliases|[]", "ListAliases|1", "ListAliases|true"})
-    void listKeysAndAliasesRejectNonStringMarker(String action, String marker) {
+            "ListKeys|{}|START_OBJECT",
+            "ListKeys|[]|START_ARRAY",
+            "ListKeys|1|NUMBER_VALUE",
+            "ListKeys|true|TRUE_VALUE",
+            "ListKeys|false|FALSE_VALUE",
+            "ListAliases|{}|START_OBJECT",
+            "ListAliases|[]|START_ARRAY",
+            "ListAliases|1|NUMBER_VALUE",
+            "ListAliases|true|TRUE_VALUE",
+            "ListAliases|false|FALSE_VALUE"})
+    void listKeysAndAliasesRejectNonStringMarker(String action, String marker, String token) {
         given()
                 .header("X-Amz-Target", "TrentService." + action)
                 .contentType(KMS_CONTENT_TYPE)
@@ -1170,7 +1184,8 @@ class KmsIntegrationTest {
                 .when().post("/")
                 .then()
                 .statusCode(400)
-                .body("__type", equalTo("SerializationException"));
+                .body("__type", equalTo("SerializationException"))
+                .body("message", equalTo(token + " can not be converted to a String"));
     }
 
     @ParameterizedTest
@@ -1208,6 +1223,46 @@ class KmsIntegrationTest {
                 .body("{\"Limit\":1,\"Marker\":\"" + marker + "\"}")
                 .when().post("/")
                 .then().statusCode(200);
+    }
+
+    @Test
+    void anotherAccountsKeyOrAliasArnIsNotFound() {
+        String owner = "AWS4-HMAC-SHA256 Credential=000000000103/20260215/us-east-1/kms/aws4_request, "
+                + "SignedHeaders=host, Signature=abc";
+        String caller = "AWS4-HMAC-SHA256 Credential=000000000104/20260215/us-east-1/kms/aws4_request, "
+                + "SignedHeaders=host, Signature=abc";
+        String alias = "alias/shared-" + UUID.randomUUID();
+        String ownerKeyArn = kmsAs(owner, "CreateKey", "{}").then().statusCode(200)
+                .extract().path("KeyMetadata.Arn");
+        String callerKeyArn = kmsAs(caller, "CreateKey", "{}").then().statusCode(200)
+                .extract().path("KeyMetadata.Arn");
+        kmsAs(owner, "CreateAlias", "{\"AliasName\":\"%s\",\"TargetKeyId\":\"%s\"}".formatted(alias, ownerKeyArn))
+                .then().statusCode(200);
+        kmsAs(caller, "CreateAlias", "{\"AliasName\":\"%s\",\"TargetKeyId\":\"%s\"}".formatted(alias, callerKeyArn))
+                .then().statusCode(200);
+        String ownerAliasArn = "arn:aws:kms:us-east-1:000000000103:" + alias;
+        String callerAliasArn = "arn:aws:kms:us-east-1:000000000104:" + alias;
+
+        kmsAs(caller, "DescribeKey", "{\"KeyId\":\"%s\"}".formatted(ownerAliasArn)).then()
+                .statusCode(400)
+                .body("__type", equalTo("NotFoundException"))
+                .body("message", equalTo("Alias " + ownerAliasArn + " is not found."));
+        kmsAs(caller, "DescribeKey", "{\"KeyId\":\"%s\"}".formatted(ownerKeyArn)).then()
+                .statusCode(400)
+                .body("__type", equalTo("NotFoundException"))
+                .body("message", equalTo("Key '" + ownerKeyArn + "' does not exist"));
+        kmsAs(caller, "DescribeKey", "{\"KeyId\":\"%s\"}".formatted(callerAliasArn)).then()
+                .statusCode(200)
+                .body("KeyMetadata.Arn", equalTo(callerKeyArn));
+        kmsAs(owner, "DescribeKey", "{\"KeyId\":\"%s\"}".formatted(ownerAliasArn)).then()
+                .statusCode(200)
+                .body("KeyMetadata.Arn", equalTo(ownerKeyArn));
+
+        for (String[] created : new String[][] {{owner, ownerKeyArn}, {caller, callerKeyArn}}) {
+            kmsAs(created[0], "DeleteAlias", "{\"AliasName\":\"%s\"}".formatted(alias)).then().statusCode(200);
+            kmsAs(created[0], "ScheduleKeyDeletion", "{\"KeyId\":\"%s\",\"PendingWindowInDays\":7}"
+                    .formatted(created[1])).then().statusCode(200);
+        }
     }
 
     @ParameterizedTest
@@ -2504,6 +2559,141 @@ class KmsIntegrationTest {
     }
 
     @ParameterizedTest
+    @CsvSource({"RSA_2048", "RSA_4096", "ECC_NIST_P256", "ECC_NIST_P521", "ECC_SECG_P256K1", "ECC_NIST_EDWARDS25519"})
+    void generateDataKeyPairEncryptsItsPrivateKeyUnderTheKmsKey(String keyPairSpec) {
+        String keyArn = createKeyArn("SYMMETRIC_DEFAULT", "ENCRYPT_DECRYPT");
+
+        JsonPath pair = callKms("GenerateDataKeyPair",
+                "{\"KeyId\":\"%s\",\"KeyPairSpec\":\"%s\",\"EncryptionContext\":{\"purpose\":\"test\"}}"
+                        .formatted(keyArn, keyPairSpec))
+                .then()
+                .statusCode(200)
+                .body("KeyId", equalTo(keyArn))
+                .body("KeyPairSpec", equalTo(keyPairSpec))
+                .body("PublicKey", notNullValue())
+                .extract().jsonPath();
+
+        String plaintext = callKms("Decrypt",
+                "{\"CiphertextBlob\":\"%s\",\"EncryptionContext\":{\"purpose\":\"test\"}}"
+                        .formatted(pair.getString("PrivateKeyCiphertextBlob")))
+                .then().statusCode(200).extract().path("Plaintext");
+        assertEquals(pair.getString("PrivateKeyPlaintext"), plaintext);
+    }
+
+    @Test
+    void generateDataKeyPairWithoutPlaintextReturnsAPublicKeyThatMatchesTheEncryptedPrivateKey() throws Exception {
+        String keyArn = createKeyArn("SYMMETRIC_DEFAULT", "ENCRYPT_DECRYPT");
+        String alias = "alias/data-key-pair-" + UUID.randomUUID();
+        callKms("CreateAlias", "{\"AliasName\":\"%s\",\"TargetKeyId\":\"%s\"}".formatted(alias, keyArn))
+                .then().statusCode(200);
+
+        JsonPath pair = callKms("GenerateDataKeyPairWithoutPlaintext",
+                "{\"KeyId\":\"%s\",\"KeyPairSpec\":\"ECC_NIST_P256\",\"EncryptionContext\":{\"kid\":\"1\"}}".formatted(alias))
+                .then()
+                .statusCode(200)
+                .body("KeyId", equalTo(keyArn))
+                .body("KeyPairSpec", equalTo("ECC_NIST_P256"))
+                .body("$", not(hasKey("PrivateKeyPlaintext")))
+                .extract().jsonPath();
+        String privateKey = callKms("Decrypt",
+                "{\"CiphertextBlob\":\"%s\",\"EncryptionContext\":{\"kid\":\"1\"}}"
+                        .formatted(pair.getString("PrivateKeyCiphertextBlob")))
+                .then().statusCode(200).extract().path("Plaintext");
+
+        KeyFactory keyFactory = KeyFactory.getInstance("EC");
+        PrivateKey signingKey = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(Base64.getDecoder().decode(privateKey)));
+        PublicKey verifyingKey = keyFactory.generatePublic(
+                new X509EncodedKeySpec(Base64.getDecoder().decode(pair.getString("PublicKey"))));
+        Signature signer = Signature.getInstance("SHA256withECDSA");
+        signer.initSign(signingKey);
+        signer.update("message".getBytes(StandardCharsets.UTF_8));
+        byte[] signature = signer.sign();
+        Signature verifier = Signature.getInstance("SHA256withECDSA");
+        verifier.initVerify(verifyingKey);
+        verifier.update("message".getBytes(StandardCharsets.UTF_8));
+        assertTrue(verifier.verify(signature));
+    }
+
+    @Test
+    void generateDataKeyPairBindsItsCiphertextToTheEncryptionContext() {
+        String ciphertext = callKms("GenerateDataKeyPairWithoutPlaintext",
+                "{\"KeyId\":\"%s\",\"KeyPairSpec\":\"ECC_NIST_P256\",\"EncryptionContext\":{\"kid\":\"1\"}}"
+                        .formatted(createKeyArn("SYMMETRIC_DEFAULT", "ENCRYPT_DECRYPT")))
+                .then().statusCode(200).extract().path("PrivateKeyCiphertextBlob");
+
+        callKms("Decrypt", "{\"CiphertextBlob\":\"%s\",\"EncryptionContext\":{\"kid\":\"2\"}}".formatted(ciphertext))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidCiphertextException"));
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "GenerateDataKeyPair||Value null at 'keyPairSpec' failed to satisfy constraint: Member must not be null",
+            "GenerateDataKeyPairWithoutPlaintext||Value null at 'keyPairSpec' failed to satisfy constraint: Member must not be null",
+            "GenerateDataKeyPair|,\"KeyPairSpec\":\"AES_256\"|Value 'AES_256' at 'keyPairSpec' failed to satisfy constraint: Member must satisfy enum value set: [RSA_2048, RSA_3072, RSA_4096, ECC_NIST_P256, ECC_NIST_P384, ECC_NIST_P521, ECC_SECG_P256K1, SM2, ECC_NIST_EDWARDS25519]",
+            "GenerateDataKeyPairWithoutPlaintext|,\"KeyPairSpec\":\"HMAC_256\"|Value 'HMAC_256' at 'keyPairSpec' failed to satisfy constraint: Member must satisfy enum value set: [RSA_2048, RSA_3072, RSA_4096, ECC_NIST_P256, ECC_NIST_P384, ECC_NIST_P521, ECC_SECG_P256K1, SM2, ECC_NIST_EDWARDS25519]",
+    })
+    void generateDataKeyPairValidatesItsKeyPairSpecBeforeLookingUpTheKey(String operation, String member, String error) {
+        List<String> keysBefore = listKeyIds();
+
+        callKms(operation, "{\"KeyId\":\"00000000-0000-0000-0000-000000000000\"%s}".formatted(member == null ? "" : member))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("ValidationException"))
+                .body("message", equalTo("1 validation error detected: " + error));
+
+        assertEquals(keysBefore, listKeyIds());
+    }
+
+    @ParameterizedTest
+    @CsvSource(delimiter = '|', value = {
+            "GenerateDataKeyPair|\"kid-1\"|STRING_VALUE can not be converted to a Map",
+            "GenerateDataKeyPair|[\"kid\",\"1\"]|START_ARRAY can not be converted to a Map",
+            "GenerateDataKeyPairWithoutPlaintext|1|NUMBER_VALUE can not be converted to a Map",
+            "GenerateDataKeyPairWithoutPlaintext|true|TRUE_VALUE can not be converted to a Map",
+            "GenerateDataKeyPair|{\"kid\":1}|NUMBER_VALUE can not be converted to a String",
+            "GenerateDataKeyPairWithoutPlaintext|{\"kid\":{\"nested\":\"1\"}}|START_OBJECT can not be converted to a String",
+    })
+    void generateDataKeyPairRejectsAnEncryptionContextThatIsNotAStringMap(String operation, String context,
+                                                                          String error) {
+        String keyArn = createKeyArn("SYMMETRIC_DEFAULT", "ENCRYPT_DECRYPT");
+        List<String> keysBefore = listKeyIds();
+
+        callKms(operation, "{\"KeyId\":\"%s\",\"KeyPairSpec\":\"ECC_NIST_P256\",\"EncryptionContext\":%s}"
+                .formatted(keyArn, context))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("SerializationException"))
+                .body("message", equalTo(error));
+
+        assertEquals(keysBefore, listKeyIds());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"GenerateDataKeyPair", "GenerateDataKeyPairWithoutPlaintext"})
+    void generateDataKeyPairRejectsAnAsymmetricKey(String operation) {
+        callKms(operation, "{\"KeyId\":\"%s\",\"KeyPairSpec\":\"ECC_NIST_P256\"}"
+                .formatted(createKeyArn("RSA_2048", "ENCRYPT_DECRYPT")))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidKeyUsageException"))
+                .body("message", equalTo("You cannot generate a data key pair with an asymmetric CMK"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"GenerateDataKeyPair", "GenerateDataKeyPairWithoutPlaintext"})
+    void generateDataKeyPairNamesItsOperationInTheKeyUsageError(String operation) {
+        String keyArn = createKeyArn("ECC_NIST_P256", "SIGN_VERIFY");
+
+        callKms(operation, "{\"KeyId\":\"%s\",\"KeyPairSpec\":\"ECC_NIST_P256\"}".formatted(keyArn))
+                .then()
+                .statusCode(400)
+                .body("__type", equalTo("InvalidKeyUsageException"))
+                .body("message", equalTo(keyArn + " key usage is SIGN_VERIFY which is not valid for " + operation + "."));
+    }
+
+    @ParameterizedTest
     @CsvSource({"Sign", "Verify"})
     void messageTypeValidationListsTheEnumBeforeLookingUpTheKey(String operation) {
         callKms(operation, ("{\"KeyId\":\"00000000-0000-0000-0000-000000000000\",\"Message\":\"bWVzc2FnZQ==\","
@@ -3125,6 +3315,19 @@ class KmsIntegrationTest {
                 .when().post("/");
     }
 
+    private static Response kmsAs(String authorization, String operation, String body) {
+        return given()
+                .header("Authorization", authorization)
+                .header("X-Amz-Target", "TrentService." + operation)
+                .contentType(KMS_CONTENT_TYPE)
+                .body(body)
+                .when().post("/");
+    }
+
+    private static List<String> listKeyIds() {
+        return callKms("ListKeys", "{}").then().statusCode(200).extract().jsonPath().getList("Keys.KeyId");
+    }
+
     private static String createKeyArn(String keySpec, String keyUsage) {
         return given()
                 .header("X-Amz-Target", "TrentService.CreateKey")
@@ -3137,8 +3340,8 @@ class KmsIntegrationTest {
 
     private static byte[] sha512(byte[] value) {
         try {
-            return java.security.MessageDigest.getInstance("SHA-512").digest(value);
-        } catch (java.security.NoSuchAlgorithmException e) {
+            return MessageDigest.getInstance("SHA-512").digest(value);
+        } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException(e);
         }
     }
@@ -3202,11 +3405,11 @@ class KmsIntegrationTest {
                 .extract().path("PublicKey");
 
         PublicKey publicKey = KeyFactory.getInstance("RSA").generatePublic(
-                new java.security.spec.X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyBase64)));
+                new X509EncodedKeySpec(Base64.getDecoder().decode(publicKeyBase64)));
         Cipher cipher = Cipher.getInstance("RSA/ECB/OAEPPadding");
-        cipher.init(javax.crypto.Cipher.ENCRYPT_MODE, publicKey, new javax.crypto.spec.OAEPParameterSpec(
-                "SHA-256", "MGF1", java.security.spec.MGF1ParameterSpec.SHA256,
-                javax.crypto.spec.PSource.PSpecified.DEFAULT));
+        cipher.init(Cipher.ENCRYPT_MODE, publicKey, new OAEPParameterSpec(
+                "SHA-256", "MGF1", MGF1ParameterSpec.SHA256,
+                PSource.PSpecified.DEFAULT));
         byte[] localCiphertext = cipher.doFinal("secret payload".getBytes(StandardCharsets.UTF_8));
 
         given()
@@ -3575,7 +3778,7 @@ class KmsIntegrationTest {
                 .extract().path("KeyMetadata.KeyId");
     }
 
-    private io.restassured.response.ValidatableResponse describeKey(String keyId) {
+    private ValidatableResponse describeKey(String keyId) {
         return given()
                 .header("X-Amz-Target", "TrentService.DescribeKey")
                 .contentType(KMS_CONTENT_TYPE)

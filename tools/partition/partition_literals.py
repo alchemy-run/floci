@@ -10,6 +10,11 @@ not others. Each one is a silent bug in a non-commercial deployment, and each on
 trivial to add by accident, because the literal is exactly what an `aws` deployment
 prints.
 
+It also counts ARNs handled by hand, which name no partition but bypass the helpers that
+get every partition right: an ARN concatenated from `"arn:"` (`arn-concat`), a
+`startsWith("arn:")` probe (`arn-probe`) and a `split(":")` of an ARN-named value
+(`arn-split`). Those categories started with existing sites in the baseline, which only shrink.
+
 This script inventories those literals in `src/main/java` by category and gates them
 against a checked-in per-file baseline (`baseline.tsv`):
 
@@ -40,9 +45,12 @@ from pathlib import Path
 
 import yaml
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from java_sources import PACKAGE_DIR, SOURCE_ROOT as SOURCE_DIR  # noqa: E402
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
-SOURCE_ROOT = REPO_ROOT / "src/main/java"
-PACKAGE_ROOT = SOURCE_ROOT / "io/github/hectorvent/floci"
+SOURCE_ROOT = REPO_ROOT / SOURCE_DIR
+PACKAGE_ROOT = REPO_ROOT / PACKAGE_DIR
 TOOL_DIR = Path(__file__).resolve().parent
 ALLOWLIST = TOOL_DIR / "allowlist.yaml"
 BASELINE = TOOL_DIR / "baseline.tsv"
@@ -125,6 +133,32 @@ CATEGORIES: tuple[Category, ...] = (
         "a value compared with, or switched on, the literal \"aws\", which as a partition check holds only "
         "in the commercial partition; compare with AwsRegions.partitionFor(region) or the stored ARN's own "
         "partition, or escape a non-partition use (an account, a command name)",
+        "code",
+    ),
+    Category(
+        "arn-concat",
+        # An ARN assembled by concatenation. A regex built from PARTITION_REGEX is the sanctioned
+        # way to recognise one, so that form does not count.
+        re.compile(r'"arn:"\s*\+(?!\s*(?:AwsArnUtils\s*\.\s*)?PARTITION_REGEX\b)'),
+        True,
+        "an ARN or ARN prefix built by concatenating \"arn:\"; mint through AwsArnUtils.Arn.of / Arn.global "
+        "or RegionResolver.buildArn, and recognise one with AwsArnUtils.PARTITION_REGEX",
+        "code",
+    ),
+    Category(
+        "arn-probe",
+        re.compile(r'\.\s*startsWith\(\s*"arn:"\s*\)'),
+        True,
+        "a hand-rolled ARN check; use AwsArnUtils.isArn, isArnFor or parse",
+        "code",
+    ),
+    Category(
+        "arn-split",
+        # A split on ":" of a value whose name says it is an ARN (arn, roleArn, getArn(), arnParts...).
+        re.compile(r'\b(?:arn|\w*Arn)\w*(?:\(\s*\))?\s*\.\s*split\(\s*":"'),
+        True,
+        "an ARN cut into fields by hand; use AwsArnUtils.parse and its partition(), region(), accountId() "
+        "and resource()",
         "code",
     ),
 )

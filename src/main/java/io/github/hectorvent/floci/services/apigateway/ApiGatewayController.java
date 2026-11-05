@@ -3,13 +3,17 @@ package io.github.hectorvent.floci.services.apigateway;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.yaml.YAMLMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.SmithyValidationErrors;
 import io.github.hectorvent.floci.services.apigateway.ApiGatewayService.StoredMapping;
+import io.github.hectorvent.floci.services.apigateway.model.Account;
 import io.github.hectorvent.floci.services.apigateway.model.ApiGatewayResource;
 import io.github.hectorvent.floci.services.apigateway.model.ApiKey;
 import io.github.hectorvent.floci.services.apigateway.model.BasePathMapping;
@@ -19,10 +23,9 @@ import io.github.hectorvent.floci.services.apigateway.model.EndpointType;
 import io.github.hectorvent.floci.services.apigateway.model.GatewayResponse;
 import io.github.hectorvent.floci.services.apigateway.model.MethodConfig;
 import io.github.hectorvent.floci.services.apigateway.model.MethodResponse;
-import io.github.hectorvent.floci.services.apigateway.model.QuotaSettings;
+import io.github.hectorvent.floci.services.apigateway.model.MethodSetting;
 import io.github.hectorvent.floci.services.apigateway.model.RequestValidator;
 import io.github.hectorvent.floci.services.apigateway.model.RestApi;
-import io.github.hectorvent.floci.services.apigateway.model.ThrottleSettings;
 import io.github.hectorvent.floci.services.apigateway.model.UsagePlan;
 import io.github.hectorvent.floci.services.apigateway.model.UsagePlanKey;
 import io.github.hectorvent.floci.services.apigatewayv2.ApiGatewayV2OpenApiImporter;
@@ -56,6 +59,7 @@ import jakarta.ws.rs.core.Response;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -101,6 +105,7 @@ public class ApiGatewayController {
 
     private static final TypeReference<List<Map<String, String>>> PATCH_OPERATIONS =
             new TypeReference<>() { };
+    private static final TypeReference<Map<String, Object>> JSON_OBJECT = new TypeReference<>() { };
 
     /**
      * The {@code op} enum, verbatim from the model. Wider than what any one handler implements on
@@ -344,13 +349,13 @@ public class ApiGatewayController {
             if (body == null || body.isBlank()) {
                 throw new AwsException("BadRequestException", "Request body is required", 400);
             }
-            com.fasterxml.jackson.databind.JsonNode node = objectMapper.readTree(body).path("patchOperations");
+            JsonNode node = objectMapper.readTree(body).path("patchOperations");
             if (!node.isArray()) {
                 throw new AwsException("BadRequestException", "patchOperations must be an array", 400);
             }
 
             List<Map<String, String>> patchOperations = new ArrayList<>();
-            for (com.fasterxml.jackson.databind.JsonNode operationNode : node) {
+            for (JsonNode operationNode : node) {
                 if (operationNode == null || operationNode.isNull() || !operationNode.isObject()) {
                     throw new AwsException("BadRequestException", "Each patch operation must be an object", 400);
                 }
@@ -855,14 +860,36 @@ public class ApiGatewayController {
     @Path("/usageplans")
     public Response createUsagePlan(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
-        try {
-            @SuppressWarnings("unchecked")
-            Map<String, Object> request = objectMapper.readValue(body, Map.class);
-            UsagePlan plan = service.createUsagePlan(region, request);
-            return Response.status(201).entity(toUsagePlanNode(plan).toString()).type(MediaType.APPLICATION_JSON).build();
-        } catch (IOException e) {
-            throw new AwsException("BadRequestException", e.getMessage(), 400);
+        JsonNode node = readCreateUsagePlanBody(body);
+        ApiGatewayRequestShapes.check("CreateUsagePlan", node);
+        Map<String, Object> request = objectMapper.convertValue(node, JSON_OBJECT);
+        UsagePlan plan = service.createUsagePlan(region, request);
+        return Response.status(201).entity(toUsagePlanNode(plan, false).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    /**
+     * A CreateUsagePlan body as API Gateway reads it, measured: a zero-byte body is a missing input,
+     * and malformed JSON, trailing content or a body that is neither a JSON object nor an array is a
+     * SerializationException without a message. An array is left to the shape check. A fraction is
+     * read as a BigDecimal, which the conversion to the request map keeps, so an integer member is
+     * truncated from its decimal digits rather than from a double.
+     */
+    private JsonNode readCreateUsagePlanBody(String body) {
+        if (body == null || body.isEmpty()) {
+            throw SmithyValidationErrors.validationException(SmithyValidationErrors.notNull("createUsagePlanInput"));
         }
+        JsonNode node;
+        try {
+            node = objectMapper.reader()
+                    .with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS, DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+                    .readTree(body);
+        } catch (JsonProcessingException e) {
+            throw new AwsException("SerializationException", null, 400);
+        }
+        if (node == null || !node.isContainerNode()) {
+            throw new AwsException("SerializationException", null, 400);
+        }
+        return node;
     }
 
     @GET
@@ -872,7 +899,7 @@ public class ApiGatewayController {
         List<UsagePlan> plans = service.getUsagePlans(region);
         ObjectNode root = objectMapper.createObjectNode();
         ArrayNode items = root.putArray("item");
-        plans.forEach(p -> items.add(toUsagePlanNode(p)));
+        plans.forEach(p -> items.add(toUsagePlanNode(p, false)));
         return Response.ok(root.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
@@ -881,7 +908,7 @@ public class ApiGatewayController {
     public Response getUsagePlan(@Context HttpHeaders headers, @PathParam("usagePlanId") String usagePlanId) {
         String region = regionResolver.resolveRegion(headers);
         UsagePlan plan = service.getUsagePlan(region, usagePlanId);
-        ObjectNode node = toUsagePlanNode(plan);
+        ObjectNode node = toUsagePlanNode(plan, true);
         return Response.ok(node.toString()).type(MediaType.APPLICATION_JSON).build();
     }
 
@@ -889,9 +916,33 @@ public class ApiGatewayController {
     @Path("/usageplans/{usagePlanId}")
     public Response updateUsagePlan(@Context HttpHeaders headers, @PathParam("usagePlanId") String usagePlanId, String body) {
         String region = regionResolver.resolveRegion(headers);
+        checkUpdateUsagePlanInput(body);
         List<Map<String, String>> patchOperations = parsePatchOperations(body);
         UsagePlan plan = service.updateUsagePlan(region, usagePlanId, patchOperations);
-        return Response.ok(toUsagePlanNode(plan).toString()).type(MediaType.APPLICATION_JSON).build();
+        return Response.ok(toUsagePlanNode(plan, true).toString()).type(MediaType.APPLICATION_JSON).build();
+    }
+
+    /**
+     * UpdateUsagePlan's input model, measured on API Gateway: a member of the wrong JSON type is a
+     * SerializationException, then every op outside the model's enum is listed in one
+     * ValidationException. A body that is not a JSON object is left to {@link #parsePatchOperations}.
+     */
+    private void checkUpdateUsagePlanInput(String body) {
+        JsonNode node;
+        try {
+            node = objectMapper.readTree(body);
+        } catch (JsonProcessingException | IllegalArgumentException expected) {
+            // parsePatchOperations answers a body that is not JSON, as it does for every PATCH operation.
+            return;
+        }
+        if (node == null || !node.isObject()) {
+            return;
+        }
+        ApiGatewayRequestShapes.check("UpdateUsagePlan", node);
+        List<String> violations = UsagePlanLimits.opViolations(node.path("patchOperations"));
+        if (!violations.isEmpty()) {
+            throw SmithyValidationErrors.validationException(violations);
+        }
     }
 
     @DELETE
@@ -925,11 +976,11 @@ public class ApiGatewayController {
      *
      * <p>Each pair is {@code [used, remaining]}, not {@code [used, quota]}: measured against real
      * API Gateway, the second element is the quota limit minus the cumulative use so far in the
-     * period. Both elements are {@code 0} here because the emulator neither meters requests per API
-     * key nor stores a quota on a usage plan. Once a quota lives on {@code UsagePlan} and the
-     * execute path counts per key, this method is where both feed in; until then a caller that sums
-     * the used counts gets the same zero it already gets from an unsupported action, without having
-     * to special-case a missing endpoint.
+     * period. Both elements are {@code 0} here because the emulator does not meter requests per API
+     * key, so there is no use to report or to subtract from a plan's quota. Once the execute path
+     * counts per key, this method is where the count feeds in; until then a caller that sums the
+     * used counts gets the same zero it already gets from an unsupported action, without having to
+     * special-case a missing endpoint.
      */
     @GET
     @Path("/usageplans/{usagePlanId}/usage")
@@ -1375,7 +1426,7 @@ public class ApiGatewayController {
             throw new AwsException("BadRequestException", "Body is required for OpenAPI import", 400);
         }
         try {
-            com.fasterxml.jackson.databind.JsonNode root = objectMapper.readTree(payload);
+            JsonNode root = objectMapper.readTree(payload);
             if (root.isObject() && root.hasNonNull("body") && root.get("body").isTextual()) {
                 return root.get("body").asText();
             }
@@ -2164,7 +2215,7 @@ public class ApiGatewayController {
                                   @PathParam("resourceArn") String resourceArn,
                                   @QueryParam("tagKeys") List<String> tagKeys) {
         v2Service.untagResource(resourceArn,
-                tagKeys != null ? tagKeys : java.util.Collections.emptyList());
+                tagKeys != null ? tagKeys : Collections.emptyList());
         return Response.noContent().build();
     }
 
@@ -2227,12 +2278,10 @@ public class ApiGatewayController {
             service.findRootResourceId(region, api.getId()).ifPresent(id -> node.put("rootResourceId", id));
         }
 
-        // Neither member is settable on a REST API here: createRestApi ignores both and
-        // updateRestApi patches only /name and /description, so the emulated value is always
-        // the AWS default. Report the defaults rather than omitting them, because a client
-        // that reads an absent member back as "" or null sees it as a difference from the
-        // configuration it just sent and never converges.
-        node.put("apiKeySource", "HEADER");
+        node.put("apiKeySource", api.getApiKeySource());
+        // Not settable on a REST API here, so the emulated value is always the AWS default.
+        // Report it rather than omitting it, because a client that reads an absent member back
+        // as null sees it as a difference from the configuration it just sent and never converges.
         node.put("disableExecuteApiEndpoint", false);
 
         // AWS returns the policy JSON-escaped inside the string ({\"Version\":...}), and the
@@ -2407,7 +2456,7 @@ public class ApiGatewayController {
         return node;
     }
 
-    private ObjectNode toMethodSettingNode(io.github.hectorvent.floci.services.apigateway.model.MethodSetting setting) {
+    private ObjectNode toMethodSettingNode(MethodSetting setting) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("metricsEnabled", setting.isMetricsEnabled());
         node.put("loggingLevel", setting.getLoggingLevel());
@@ -2471,37 +2520,51 @@ public class ApiGatewayController {
         return node;
     }
 
-    private ObjectNode toUsagePlanNode(UsagePlan p) {
+    /**
+     * {@code alwaysTags} writes {@code "tags": {}} for a plan without tags, which GetUsagePlan and
+     * UpdateUsagePlan do on API Gateway; CreateUsagePlan and the GetUsagePlans items leave it out.
+     */
+    private ObjectNode toUsagePlanNode(UsagePlan p, boolean alwaysTags) {
         ObjectNode node = objectMapper.createObjectNode();
         node.put("id", p.getId());
         node.put("name", p.getName());
         if (p.getDescription() != null) node.put("description", p.getDescription());
-        if (p.getApiStages() != null && !p.getApiStages().isEmpty()) {
-            ArrayNode stages = node.putArray("apiStages");
-            p.getApiStages().forEach(stage -> {
-                ObjectNode item = stages.addObject();
-                if (stage.apiId() != null) item.put("apiId", stage.apiId());
-                if (stage.stage() != null) item.put("stage", stage.stage());
-            });
+        // One revision of the stages, throttle and quota, so a concurrent update cannot mix two in a response.
+        UsagePlan.Limits limits = p.limits();
+        // API Gateway always reports apiStages, as [] for a plan with none.
+        ArrayNode stages = node.putArray("apiStages");
+        for (UsagePlan.ApiStage stage : limits.apiStages()) {
+            ObjectNode stageNode = stages.addObject();
+            stageNode.put("apiId", stage.apiId());
+            stageNode.put("stage", stage.stage());
+            if (stage.throttle() != null) {
+                ObjectNode methods = stageNode.putObject("throttle");
+                stage.throttle().forEach((method, throttle) -> putThrottle(methods.putObject(method), throttle));
+            }
         }
-        ThrottleSettings throttle = p.getThrottle();
-        if (throttle != null && (throttle.getBurstLimit() != null || throttle.getRateLimit() != null)) {
-            ObjectNode throttleNode = node.putObject("throttle");
-            if (throttle.getBurstLimit() != null) throttleNode.put("burstLimit", throttle.getBurstLimit());
-            if (throttle.getRateLimit() != null) throttleNode.put("rateLimit", throttle.getRateLimit());
+        UsagePlan.Throttle throttle = limits.throttle();
+        if (throttle != null) {
+            putThrottle(node.putObject("throttle"), throttle);
         }
-        QuotaSettings quota = p.getQuota();
+        UsagePlan.Quota quota = limits.quota();
         if (quota != null) {
-            ObjectNode quotaNode = node.putObject("quota");
-            if (quota.getLimit() != null) quotaNode.put("limit", quota.getLimit());
-            if (quota.getOffset() != null) quotaNode.put("offset", quota.getOffset());
-            if (quota.getPeriod() != null) quotaNode.put("period", quota.getPeriod());
+            node.putObject("quota")
+                    .put("limit", quota.limit())
+                    .put("offset", quota.offset())
+                    .put("period", quota.period());
         }
-        if (p.getTags() != null && !p.getTags().isEmpty()) {
+        if (alwaysTags || (p.getTags() != null && !p.getTags().isEmpty())) {
             ObjectNode tags = node.putObject("tags");
-            p.getTags().forEach(tags::put);
+            if (p.getTags() != null) {
+                p.getTags().forEach(tags::put);
+            }
         }
         return node;
+    }
+
+    private static void putThrottle(ObjectNode node, UsagePlan.Throttle throttle) {
+        node.put("burstLimit", throttle.burstLimit());
+        node.put("rateLimit", throttle.rateLimit());
     }
 
     private ObjectNode toUsagePlanKeyNode(UsagePlanKey k) {
@@ -2644,7 +2707,7 @@ public class ApiGatewayController {
         return node;
     }
 
-    private ObjectNode toAccountNode(io.github.hectorvent.floci.services.apigateway.model.Account account) {
+    private ObjectNode toAccountNode(Account account) {
         ObjectNode node = objectMapper.createObjectNode();
         if (account.getApiKeyVersion() != null) {
             node.put("apiKeyVersion", account.getApiKeyVersion());
@@ -2674,7 +2737,7 @@ public class ApiGatewayController {
         node.put("name", api.getName());
         node.put("protocolType", api.getProtocolType());
         node.put("apiEndpoint", api.getApiEndpoint());
-        node.put("createdDate", java.time.Instant.ofEpochMilli(api.getCreatedDate()).toString());
+        node.put("createdDate", Instant.ofEpochMilli(api.getCreatedDate()).toString());
         node.put("disableExecuteApiEndpoint", api.isDisableExecuteApiEndpoint());
         if (api.getRouteSelectionExpression() != null) node.put("routeSelectionExpression", api.getRouteSelectionExpression());
         if (api.getDescription() != null) node.put("description", api.getDescription());
@@ -2746,6 +2809,9 @@ public class ApiGatewayController {
         if (i.getConnectionType() != null) node.put("connectionType", i.getConnectionType());
         if (i.getConnectionId() != null) node.put("connectionId", i.getConnectionId());
         node.put("payloadFormatVersion", i.getPayloadFormatVersion());
+        if (i.getCredentialsArn() != null) {
+            node.put("credentialsArn", i.getCredentialsArn());
+        }
         if (i.getIntegrationUri() != null) node.put("integrationUri", i.getIntegrationUri());
         if (i.getRequestTemplates() != null) {
             ObjectNode requestTemplates = node.putObject("requestTemplates");
@@ -2857,7 +2923,7 @@ public class ApiGatewayController {
         node.put("deploymentId", d.getDeploymentId());
         node.put("deploymentStatus", d.getDeploymentStatus());
         if (d.getDescription() != null) node.put("description", d.getDescription());
-        node.put("createdDate", java.time.Instant.ofEpochMilli(d.getCreatedDate()).toString());
+        node.put("createdDate", Instant.ofEpochMilli(d.getCreatedDate()).toString());
         return node;
     }
 
@@ -2879,6 +2945,9 @@ public class ApiGatewayController {
             if (a.getJwtConfiguration().issuer() != null) {
                 jwt.put("issuer", a.getJwtConfiguration().issuer());
             }
+        }
+        if (a.getAuthorizerCredentialsArn() != null) {
+            node.put("authorizerCredentialsArn", a.getAuthorizerCredentialsArn());
         }
         if (a.getAuthorizerUri() != null) {
             node.put("authorizerUri", a.getAuthorizerUri());

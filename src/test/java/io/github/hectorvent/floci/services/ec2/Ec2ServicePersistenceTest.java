@@ -4,10 +4,13 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.common.RegionResolver;
+import io.github.hectorvent.floci.core.common.XmlParser;
 import io.github.hectorvent.floci.core.storage.PersistentStorage;
 import io.github.hectorvent.floci.core.storage.StorageBackend;
 import io.github.hectorvent.floci.services.ec2.model.Address;
 import io.github.hectorvent.floci.services.ec2.model.BlockDeviceMapping;
+import io.github.hectorvent.floci.services.ec2.model.DhcpConfiguration;
+import io.github.hectorvent.floci.services.ec2.model.DhcpOptions;
 import io.github.hectorvent.floci.services.ec2.model.EbsBlockDevice;
 import io.github.hectorvent.floci.services.ec2.model.Image;
 import io.github.hectorvent.floci.services.ec2.model.Instance;
@@ -33,6 +36,7 @@ import io.github.hectorvent.floci.services.ec2.model.Vpc;
 import io.github.hectorvent.floci.services.ec2.model.VpcEndpoint;
 import io.github.hectorvent.floci.services.ec2.portforward.Ec2PortForwardManager;
 import jakarta.ws.rs.core.MultivaluedHashMap;
+import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -67,6 +71,58 @@ import static org.mockito.Mockito.when;
 class Ec2ServicePersistenceTest {
 
     private static final String REGION = "us-east-1";
+
+    @Test
+    void dhcpOptionsSurviveRestart(@TempDir Path dir) {
+        Ec2Service original = newService(dir);
+        String id = original.createDhcpOptions(REGION,
+                List.of(new DhcpConfiguration("domain-name", List.of("persistent.example")))).getDhcpOptionsId();
+
+        DhcpOptions restored = newService(dir).describeDhcpOptions(REGION, List.of(id), List.of(), 0, null)
+                .items().getFirst();
+        assertEquals(id, restored.getDhcpOptionsId());
+        assertEquals("persistent.example", restored.getConfigurations().getFirst().getValues().getFirst());
+    }
+
+    @Test
+    void startupRestoresDefaultDhcpOptionsReferencedByLegacyVpc(@TempDir Path dir) throws IOException {
+        Files.writeString(dir.resolve("ec2-vpcs.json"), """
+                {
+                  "us-east-1::vpc-legacy": {
+                    "vpcId": "vpc-legacy",
+                    "region": "us-east-1",
+                    "ownerId": "000000000000",
+                    "dhcpOptionsId": "dopt-default"
+                  }
+                }
+                """);
+
+        Ec2Service restarted = newService(dir);
+
+        DhcpOptions restored = restarted.describeDhcpOptions(REGION, List.of("dopt-default"), List.of(), 0, null)
+                .items().getFirst();
+        assertEquals("dopt-default", restored.getDhcpOptionsId());
+    }
+
+    @Test
+    void createVpcRestoresDeletedDefaultDhcpOptionsAfterRestart(@TempDir Path dir) {
+        Ec2Service original = newService(dir);
+        original.ensureDefaultResources(REGION);
+        String defaultVpcId = original.describeVpcs(REGION, List.of(), List.of()).stream()
+                .filter(Vpc::isDefault).findFirst().orElseThrow().getVpcId();
+        original.associateDhcpOptions(REGION, "default", defaultVpcId);
+        original.deleteDhcpOptions(REGION, "dopt-default");
+
+        Ec2Service restarted = newService(dir);
+        restarted.ensureDefaultResources(REGION);
+        assertTrue(restarted.describeDhcpOptions(REGION, List.of(), List.of(), 0, null)
+                .items().isEmpty());
+        assertEquals("dopt-default", restarted.createVpc(REGION, "10.78.0.0/16", false).getDhcpOptionsId());
+        DhcpOptions restored = restarted.describeDhcpOptions(REGION, List.of("dopt-default"), List.of(), 0, null)
+                .items().getFirst();
+        assertEquals("dopt-default", restored.getDhcpOptionsId());
+        assertEquals("default", restarted.requireVpc(REGION, defaultVpcId).getDhcpOptionsId());
+    }
 
     @Test
     void elasticIpMetadataSurvivesRestart(@TempDir Path dir) {
@@ -162,6 +218,37 @@ class Ec2ServicePersistenceTest {
         assertEquals("10.0.1.0/24", subnets.get(0).getCidrBlock());
     }
 
+    /**
+     * Issue #5580: a subnet persisted before zone ids took AWS's shape stored
+     * {@code ap-southeast-1-az1}, which DescribeAvailabilityZones no longer publishes.
+     */
+    @Test
+    void legacySubnetZoneIdReadsBackAsTheIdDescribeAvailabilityZonesPublishes(@TempDir Path dir)
+            throws IOException {
+        Files.writeString(dir.resolve("ec2-subnets.json"), """
+                {
+                  "ap-southeast-1::subnet-legacy": {
+                    "subnetId": "subnet-legacy",
+                    "vpcId": "vpc-legacy",
+                    "cidrBlock": "172.31.0.0/20",
+                    "state": "available",
+                    "availabilityZone": "ap-southeast-1b",
+                    "availabilityZoneId": "ap-southeast-1-az2",
+                    "region": "ap-southeast-1"
+                  }
+                }
+                """);
+
+        Ec2Service restarted = newService(dir);
+
+        Subnet subnet = restarted.describeSubnets("ap-southeast-1", List.of("subnet-legacy"), Map.of())
+                .getFirst();
+        assertEquals("apse1-az2", subnet.getAvailabilityZoneId());
+        List<Map<String, String>> zones = restarted.describeAvailabilityZones("ap-southeast-1", List.of(),
+                List.of(subnet.getAvailabilityZoneId()), List.of());
+        assertEquals("ap-southeast-1b", zones.getFirst().get("zoneName"));
+    }
+
     @Test
     void registeredImageAndSnapshotSurviveRestart(@TempDir Path dir) {
         Ec2Service first = newService(dir);
@@ -191,7 +278,8 @@ class Ec2ServicePersistenceTest {
         String instanceId = first.runInstances(REGION, "ami-0abcdef1234567890", "t3.micro", 1, 1, null,
                 List.of(), null, null, List.of(), null, null).getInstances().getFirst().getInstanceId();
         Image captured = first.createImage(REGION, instanceId, "provenance-capture", null, true);
-        Image copied = first.copyImage("us-west-2", REGION, captured.getImageId(), "provenance-copy", null);
+        Image copied = first.copyImage("us-west-2", REGION, captured.getImageId(),
+                "provenance-copy", null, false, List.of());
 
         Ec2Service restarted = newService(dir);
 
@@ -298,7 +386,8 @@ class Ec2ServicePersistenceTest {
         assertTrue(restarted.describeImages("us-west-2", List.of(), List.of(),
                 Map.of("source-image-id", List.of("*"))).isEmpty());
 
-        Image copiedNow = restarted.copyImage("us-west-2", REGION, capture, "copied-after-upgrade", null);
+        Image copiedNow = restarted.copyImage("us-west-2", REGION, capture,
+                "copied-after-upgrade", null, false, List.of());
         assertEquals(capture, copiedNow.getCreationSourceImageId());
         assertEquals(REGION, copiedNow.getCreationSourceImageRegion());
         assertEquals("ami-0abcdef1234567890", copiedNow.getSourceImageId());
@@ -468,7 +557,7 @@ class Ec2ServicePersistenceTest {
      * versions map at all, i.e. one only ever read via {@code getData()} pre-migration).
      */
     @Test
-    void legacyIamProfileAndInstanceTagsSurviveRestart(@TempDir Path dir) throws java.io.IOException {
+    void legacyIamProfileAndInstanceTagsSurviveRestart(@TempDir Path dir) throws IOException {
         String legacyJson = """
                 {
                   "us-east-1::lt-legacy-versioned": {
@@ -632,12 +721,119 @@ class Ec2ServicePersistenceTest {
                 .map(KeyPair::getKeyName).toList());
 
         String xml = (String) new Ec2QueryHandler(restarted, mock(EmulatorConfig.class), mock(FlowLogService.class),
-                mock(Ec2EbsEncryptionService.class), mock(Ec2SnapshotBlockPublicAccessService.class),
+                mock(Ec2EbsEncryptionService.class), mock(Ec2BlockPublicAccessService.class),
                 mock(Ec2IpamService.class), new RegionResolver(REGION, "000000000000"))
                 .handle("DescribeKeyPairs", new MultivaluedHashMap<>(), REGION).getEntity();
         assertTrue(xml.contains("<keyType>rsa</keyType>"), xml);
         assertTrue(xml.contains("<keyType>ed25519</keyType>"), xml);
         assertFalse(xml.contains("<createTime>"), xml);
+    }
+
+    @Test
+    void volumeKmsKeyIdSurvivesRestart(@TempDir Path dir) {
+        String keyArn = "arn:aws:kms:us-east-1:000000000000:key/1234abcd-12ab-34cd-56ef-1234567890ab";
+        String created = query(newService(dir), "CreateVolume", "AvailabilityZone", "us-east-1a", "Size", "1",
+                "Encrypted", "true", "KmsKeyId", keyArn);
+        String volumeId = XmlParser.extractFirst(created, "volumeId", null);
+
+        String described = query(newService(dir), "DescribeVolumes", "VolumeId.1", volumeId);
+
+        assertEquals(List.of("true"), XmlParser.extractAll(described, "encrypted"), described);
+        assertEquals(List.of(keyArn), XmlParser.extractAll(described, "kmsKeyId"), described);
+    }
+
+    /**
+     * A volume store as Floci wrote it before a volume kept its KMS key: an encrypted volume
+     * attached to an instance and an unencrypted one. Both load as they were stored, and
+     * DescribeVolumes leaves {@code kmsKeyId} out: the key the encrypted one was created with was
+     * never recorded, and the region's default may have changed since.
+     */
+    @Test
+    void volumesSavedBeforeTheirKmsKeyWasKeptLoadWithoutOne(@TempDir Path dir) throws IOException {
+        String legacyJson = """
+                {
+                  "us-east-1::vol-0aaaaaaaaaaaaaaaa" : {
+                    "volumeId" : "vol-0aaaaaaaaaaaaaaaa",
+                    "volumeType" : "gp3",
+                    "size" : 20,
+                    "state" : "in-use",
+                    "availabilityZone" : "us-east-1a",
+                    "encrypted" : true,
+                    "iops" : 0,
+                    "throughput" : 125,
+                    "snapshotId" : null,
+                    "createTime" : "2026-10-20T01:38:17.105Z",
+                    "multiAttachEnabled" : null,
+                    "region" : "us-east-1",
+                    "tags" : [ {
+                      "key" : "Team",
+                      "value" : "blue"
+                    } ],
+                    "attachments" : [ {
+                      "instanceId" : "i-0aaaaaaaaaaaaaaaa",
+                      "device" : "/dev/sdf",
+                      "state" : "attached",
+                      "attachTime" : "2026-10-20T01:39:02.411Z",
+                      "deleteOnTermination" : false,
+                      "volumeId" : "vol-0aaaaaaaaaaaaaaaa"
+                    } ]
+                  },
+                  "us-east-1::vol-0bbbbbbbbbbbbbbbb" : {
+                    "volumeId" : "vol-0bbbbbbbbbbbbbbbb",
+                    "volumeType" : "gp2",
+                    "size" : 8,
+                    "state" : "available",
+                    "availabilityZone" : "us-east-1b",
+                    "encrypted" : false,
+                    "iops" : 0,
+                    "throughput" : null,
+                    "snapshotId" : null,
+                    "createTime" : "2026-10-20T01:38:17.112Z",
+                    "multiAttachEnabled" : null,
+                    "region" : "us-east-1",
+                    "tags" : [ ],
+                    "attachments" : [ ]
+                  }
+                }
+                """;
+        Files.writeString(dir.resolve("ec2-volumes.json"), legacyJson);
+
+        Ec2Service restarted = newService(dir);
+
+        Map<String, Volume> restored = new HashMap<>();
+        for (Volume volume : restarted.describeVolumes(REGION, List.of(), Map.of())) {
+            restored.put(volume.getVolumeId(), volume);
+        }
+        assertEquals(2, restored.size());
+        Volume encrypted = restored.get("vol-0aaaaaaaaaaaaaaaa");
+        assertTrue(encrypted.isEncrypted());
+        assertEquals(20, encrypted.getSize());
+        assertEquals(125, encrypted.getThroughput());
+        assertEquals("i-0aaaaaaaaaaaaaaaa", encrypted.getAttachments().getFirst().getInstanceId());
+        assertEquals("blue", encrypted.getTags().getFirst().getValue());
+        assertFalse(restored.get("vol-0bbbbbbbbbbbbbbbb").isEncrypted());
+
+        String described = query(restarted, "DescribeVolumes");
+        List<String> volumeIds = XmlParser.extractAll(described, "volumeId");
+        assertTrue(volumeIds.contains("vol-0aaaaaaaaaaaaaaaa"), described);
+        assertTrue(volumeIds.contains("vol-0bbbbbbbbbbbbbbbb"), described);
+        assertTrue(XmlParser.extractAll(described, "encrypted").contains("true"), described);
+        assertEquals(List.of(), XmlParser.extractAll(described, "kmsKeyId"), described);
+    }
+
+    private static String query(Ec2Service service, String action, String... params) {
+        MultivaluedHashMap<String, String> form = new MultivaluedHashMap<>();
+        for (int i = 0; i < params.length; i += 2) {
+            form.add(params[i], params[i + 1]);
+        }
+        Response response = new Ec2QueryHandler(service, mock(EmulatorConfig.class),
+                mock(FlowLogService.class), mock(Ec2EbsEncryptionService.class),
+                mock(Ec2BlockPublicAccessService.class), mock(Ec2IpamService.class),
+                new RegionResolver(REGION, "000000000000"))
+                .handle(action, form, REGION);
+        String body = String.valueOf(response.getEntity());
+        assertEquals(200, response.getStatus(), action + ": " + body);
+        return body;
     }
 
     private static String jsonString(String value) {
@@ -685,7 +881,8 @@ class Ec2ServicePersistenceTest {
                 load(dir, "ec2-spot-instance-requests.json", new TypeReference<Map<String, SpotInstanceRequest>>() {}),
                 load(dir, "ec2-network-acls.json", new TypeReference<Map<String, NetworkAcl>>() {}),
                 load(dir, "ec2-managed-prefix-lists.json", new TypeReference<Map<String, ManagedPrefixList>>() {}),
-                load(dir, "ec2-tags.json", new TypeReference<Map<String, List<Tag>>>() {}));
+                load(dir, "ec2-tags.json", new TypeReference<Map<String, List<Tag>>>() {}),
+                load(dir, "ec2-dhcp-options.json", new TypeReference<Map<String, DhcpOptions>>() {}));
     }
 
     private <V> StorageBackend<String, V> load(Path dir, String file, TypeReference<Map<String, V>> type) {

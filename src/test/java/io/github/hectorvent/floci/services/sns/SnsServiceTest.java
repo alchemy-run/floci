@@ -70,6 +70,18 @@ class SnsServiceTest {
     }
 
     @Test
+    void createTopicWithStatusReportsWhetherTheTopicWasCreated() {
+        SnsService.TopicCreation first = snsService.createTopicWithStatus(
+                "status-topic", null, null, REGION);
+        SnsService.TopicCreation second = snsService.createTopicWithStatus(
+                "status-topic", null, null, REGION);
+
+        assertTrue(first.created());
+        assertFalse(second.created());
+        assertSame(first.topic(), second.topic());
+    }
+
+    @Test
     void smsAttributesAreScopedToAccountAndRegion() {
         RegionResolver regionResolver = mock(RegionResolver.class);
         when(regionResolver.getAccountId()).thenReturn("111122223333", "444455556666", "111122223333");
@@ -253,6 +265,19 @@ class SnsServiceTest {
     }
 
     @Test
+    void subscribeWithStatusReportsWhetherTheSubscriptionWasCreated() {
+        Topic topic = snsService.createTopic("status-topic", null, null, REGION);
+        SnsService.SubscriptionCreation first = snsService.subscribeWithStatus(
+                topic.getTopicArn(), "sqs", "http://localhost:4566/queue", REGION, Map.of());
+        SnsService.SubscriptionCreation second = snsService.subscribeWithStatus(
+                topic.getTopicArn(), "sqs", "http://localhost:4566/queue", REGION, Map.of());
+
+        assertTrue(first.created());
+        assertFalse(second.created());
+        assertSame(first.subscription(), second.subscription());
+    }
+
+    @Test
     void subscribe_firehoseRequiresValidRoleArn() {
         Topic topic = snsService.createTopic("firehose-topic", null, null, REGION);
         String streamArn = "arn:aws:firehose:us-east-1:000000000000:deliverystream/test-stream";
@@ -355,6 +380,45 @@ class SnsServiceTest {
         snsService.setSubscriptionAttribute(sub.getSubscriptionArn(), "SubscriptionRoleArn", updated, REGION);
         assertEquals(updated,
                 snsService.getSubscriptionAttributes(sub.getSubscriptionArn(), REGION).get("SubscriptionRoleArn"));
+    }
+
+    @Test
+    void getSubscriptionAttributes_reportsFilterPolicyScopeOnlyWithAFilterPolicy() {
+        Topic topic = snsService.createTopic("scope-topic", null, null, REGION);
+        Subscription sub = snsService.subscribe(topic.getTopicArn(), "sqs",
+                "arn:aws:sqs:us-east-1:000000000000:my-queue", REGION, Map.of());
+        assertFalse(snsService.getSubscriptionAttributes(sub.getSubscriptionArn(), REGION)
+                .containsKey("FilterPolicyScope"));
+
+        snsService.setSubscriptionAttribute(sub.getSubscriptionArn(), "FilterPolicy",
+                "{\"event\":[\"order\"]}", REGION);
+        assertEquals("MessageAttributes", snsService.getSubscriptionAttributes(sub.getSubscriptionArn(), REGION)
+                .get("FilterPolicyScope"));
+
+        snsService.setSubscriptionAttribute(sub.getSubscriptionArn(), "FilterPolicyScope", "MessageBody", REGION);
+        assertEquals("MessageBody", snsService.getSubscriptionAttributes(sub.getSubscriptionArn(), REGION)
+                .get("FilterPolicyScope"));
+
+        snsService.setSubscriptionAttribute(sub.getSubscriptionArn(), "FilterPolicy", "", REGION);
+        assertFalse(snsService.getSubscriptionAttributes(sub.getSubscriptionArn(), REGION)
+                .containsKey("FilterPolicyScope"), "A cleared filter policy hides the stored scope");
+    }
+
+    @Test
+    void getSubscriptionAttributes_reportsAScopeSetBeforeThePolicyOnceThePolicyIsSet() {
+        Topic topic = snsService.createTopic("scope-first-topic", null, null, REGION);
+        Subscription sub = snsService.subscribe(topic.getTopicArn(), "sqs",
+                "arn:aws:sqs:us-east-1:000000000000:my-queue", REGION, Map.of());
+
+        snsService.setSubscriptionAttribute(sub.getSubscriptionArn(), "FilterPolicyScope", "MessageBody", REGION);
+        Map<String, String> withoutPolicy = snsService.getSubscriptionAttributes(sub.getSubscriptionArn(), REGION);
+        assertFalse(withoutPolicy.containsKey("FilterPolicyScope"));
+        assertFalse(withoutPolicy.containsKey("FilterPolicy"));
+
+        snsService.setSubscriptionAttribute(sub.getSubscriptionArn(), "FilterPolicy",
+                "{\"event\":[\"order\"]}", REGION);
+        assertEquals("MessageBody", snsService.getSubscriptionAttributes(sub.getSubscriptionArn(), REGION)
+                .get("FilterPolicyScope"));
     }
 
     @Test
@@ -542,8 +606,8 @@ class SnsServiceTest {
     void publish_messagePlusAttributesExceedsLimit_throwsInvalidParameter() {
         Topic topic = snsService.createTopic("size-topic", null, null, REGION);
         String body = "x".repeat(262_100);
-        Map<String, io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue> attrs = Map.of(
-                "longAttribute", new io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue(
+        Map<String, MessageAttributeValue> attrs = Map.of(
+                "longAttribute", new MessageAttributeValue(
                         "y".repeat(200), "String"));
         AwsException ex = assertThrows(AwsException.class, () ->
                 snsService.publish(topic.getTopicArn(), null, null, body, null, attrs, REGION));
@@ -952,10 +1016,10 @@ class SnsServiceTest {
     @Test
     void filterPolicy_messageAttributes_unchanged() {
         Subscription sub = subscriptionWithPolicy("{\"event\":[\"order\"]}", null);
-        Map<String, io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue> matching = Map.of(
-                "event", new io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue("order", "String"));
-        Map<String, io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue> nonMatching = Map.of(
-                "event", new io.github.hectorvent.floci.services.sqs.model.MessageAttributeValue("refund", "String"));
+        Map<String, MessageAttributeValue> matching = Map.of(
+                "event", new MessageAttributeValue("order", "String"));
+        Map<String, MessageAttributeValue> nonMatching = Map.of(
+                "event", new MessageAttributeValue("refund", "String"));
         assertTrue(snsService.matchesFilterPolicy(sub, null, matching));
         assertFalse(snsService.matchesFilterPolicy(sub, null, nonMatching));
     }

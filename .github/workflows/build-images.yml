@@ -162,7 +162,9 @@ jobs:
     name: Build native artifact (amd64)
     if: inputs.publish-native
     needs: prepare
-    runs-on: ubuntu-latest
+    # Pinned, like the arm64 jobs. Built on ubuntu-26.04 the binary asks glibc for x86-64-v3
+    # whatever -march says, and no longer starts on x86-64-v2 CPUs.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     permissions:
       contents: read
@@ -295,7 +297,7 @@ jobs:
 
       - name: Log in to GitHub Container Registry
         if: needs.prepare.outputs.registry == 'ghcr.io'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -303,7 +305,7 @@ jobs:
 
       - name: Log in to configured registry
         if: needs.prepare.outputs.registry != 'ghcr.io'
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ${{ needs.prepare.outputs.registry }}
           username: ${{ secrets.REGISTRY_USERNAME }}

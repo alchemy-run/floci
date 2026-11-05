@@ -68,6 +68,7 @@ public class SAMLProviderService {
         provider.setArn(arn);
         provider.setEntityId(parsed.entityId());
         provider.setCertificate(parsed.certificateBase64());
+        provider.setMetadataDocument(metadata);
         provider.setTags(tags);
         synchronized (providerLock) {
             if (findForAccount(accountId, arn).isPresent()) {
@@ -148,6 +149,7 @@ public class SAMLProviderService {
             updated.setTags(existing.getTags());
             updated.setEntityId(parsed.entityId());
             updated.setCertificate(parsed.certificateBase64());
+            updated.setMetadataDocument(metadata);
             putBack(accountId, arn, updated);
             return updated;
         }

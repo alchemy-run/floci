@@ -25,6 +25,14 @@ public class Domain {
     @JsonProperty("ARN")
     private String arn;
 
+    /**
+     * The AWS region the domain was created in. Null on records persisted before domains were
+     * keyed by region, whose region comes from their ARN; also the marker that tells the
+     * container manager those records predate region-scoped data directories.
+     */
+    @JsonProperty("Region")
+    private String region;
+
     @JsonProperty("EngineVersion")
     private String engineVersion;
 
@@ -57,6 +65,19 @@ public class Domain {
 
     @JsonProperty("DomainEndpointOptions")
     private DomainEndpointOptions domainEndpointOptions;
+
+    @JsonProperty("AdvancedOptions")
+    private Map<String, String> advancedOptions = new HashMap<>();
+
+    /** Null on records written before this field existed; reported as {@code ipv4}. */
+    @JsonProperty("IPAddressType")
+    private String ipAddressType;
+
+    @JsonProperty("OffPeakWindowOptions")
+    private OffPeakWindowOptions offPeakWindowOptions;
+
+    @JsonProperty("SoftwareUpdateOptions")
+    private SoftwareUpdateOptions softwareUpdateOptions;
 
     @JsonProperty("Endpoint")
     private String endpoint = "";
@@ -97,6 +118,38 @@ public class Domain {
 
     public Domain() {}
 
+    public Map<String, String> getAdvancedOptions() {
+        return advancedOptions;
+    }
+
+    public void setAdvancedOptions(Map<String, String> advancedOptions) {
+        this.advancedOptions = advancedOptions != null ? advancedOptions : new HashMap<>();
+    }
+
+    public String getIpAddressType() {
+        return ipAddressType;
+    }
+
+    public void setIpAddressType(String ipAddressType) {
+        this.ipAddressType = ipAddressType;
+    }
+
+    public OffPeakWindowOptions getOffPeakWindowOptions() {
+        return offPeakWindowOptions;
+    }
+
+    public void setOffPeakWindowOptions(OffPeakWindowOptions offPeakWindowOptions) {
+        this.offPeakWindowOptions = offPeakWindowOptions;
+    }
+
+    public SoftwareUpdateOptions getSoftwareUpdateOptions() {
+        return softwareUpdateOptions;
+    }
+
+    public void setSoftwareUpdateOptions(SoftwareUpdateOptions softwareUpdateOptions) {
+        this.softwareUpdateOptions = softwareUpdateOptions;
+    }
+
     public String getDomainName() {
         return domainName;
     }
@@ -119,6 +172,14 @@ public class Domain {
 
     public void setArn(String arn) {
         this.arn = arn;
+    }
+
+    public String getRegion() {
+        return region;
+    }
+
+    public void setRegion(String region) {
+        this.region = region;
     }
 
     public String getEngineVersion() {

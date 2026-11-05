@@ -17,6 +17,7 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 
+import static io.github.hectorvent.floci.testing.EnforcementFixtures.auth;
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.matchesPattern;
@@ -127,6 +128,48 @@ class LambdaWebDataPlaneIntegrationTest {
         given().when().delete(BASE + "/web-functions/" + functionName + "/endpoints/dev").then().statusCode(204);
         given().header("Host", domain).when().get("/")
                 .then().statusCode(404).header("lambda-web-error-type", "Platform.InvalidEndpoint");
+        given().when().delete(BASE + "/web-functions/" + functionName).then().statusCode(204);
+    }
+
+    @Test
+    void aRevisionWhoseCodeVersionIsDeletedFailsForGood() {
+        String functionName = "dp-lost-" + Long.toString(System.nanoTime(), 36);
+        String domain = createFunction(functionName);
+        String versionId = s3Service.headObject(BUCKET, "app.zip").getVersionId();
+        String endpoint = BASE + "/web-functions/" + functionName + "/endpoints/dev";
+        String revisionId = given().when().get(endpoint).then().statusCode(200)
+                .extract().path("revisionWeights[0].revisionId");
+        String revision = BASE + "/web-functions/" + functionName + "/revisions/" + revisionId;
+
+        // A delete marker leaves the version the revision runs.
+        s3Service.deleteObject(BUCKET, "app.zip");
+        given().when().get(revision).then().statusCode(200).body("state", equalTo("Active"));
+
+        s3Service.deleteObject(BUCKET, "app.zip", versionId);
+        Response response = given().header("Host", domain).when().get("/");
+        response.then().statusLine("HTTP/1.1 409 Conflict")
+                .header("content-type", "text/html")
+                .header("connection", "keep-alive")
+                .header("lambda-web-error-type", "Platform.RevisionNotActive")
+                .header("content-length", "225")
+                .body(equalTo(LambdaWebErrorPages.html(LambdaWebErrorPages.REVISION_NOT_ACTIVE,
+                        response.header("lambda-web-request-id"))));
+        String reason = "The specified S3 object does not exist: s3://" + BUCKET + "/app.zip (versionId=" + versionId
+                + "). Verify the object exists and the versionId is correct.";
+        given().when().get(revision).then().statusCode(200)
+                .body("state", equalTo("Failed"))
+                .body("stateReason", equalTo(reason));
+
+        s3Service.putObject(BUCKET, "app.zip", LambdaWebZips.indexJs(""), "application/zip", Map.of());
+        given().when().get(revision).then().statusCode(200).body("state", equalTo("Failed"));
+        given().contentType("application/json")
+                .body("{\"autoDeploymentMode\": \"Disabled\", \"revisionWeights\": [{\"revisionId\": \"" + revisionId
+                        + "\", \"weight\": 100}]}")
+                .when().patch(endpoint)
+                .then().statusCode(409)
+                .body("message", equalTo("The revision " + revisionId + " is in Failed state and cannot be deployed."
+                        + " Only revisions in Active state can be deployed."));
+
         given().when().delete(BASE + "/web-functions/" + functionName).then().statusCode(204);
     }
 
@@ -302,6 +345,64 @@ class LambdaWebDataPlaneIntegrationTest {
     }
 
     @Test
+    void aPerRegionEndpointCountsAPageInTheRegionThatServedAndInTheHomeRegion() {
+        String functionName = "dp-regions-" + Long.toString(System.nanoTime(), 36);
+        createFunction(functionName);
+        String endpoints = BASE + "/web-functions/" + functionName + "/endpoints";
+        String revisionId = given().when().get(endpoints + "/dev").then().statusCode(200)
+                .extract().path("revisionWeights[0].revisionId");
+        String west = given().contentType("application/json")
+                .body("""
+                        {"endpointName": "per", "endpointType": "PerRegion", "regions": ["us-west-2"],
+                         "authType": "IamAuth", "revisionWeights": [{"revisionId": "%s", "weight": 100}]}"""
+                        .formatted(revisionId))
+                .when().put(endpoints)
+                .then().statusCode(202)
+                .extract().path("regionalEndpoints.us-west-2.domainName");
+        given().header("Host", west).when().get("/").then().statusCode(403);
+
+        Map<String, String> endpoint = Map.of("FunctionName", functionName, "EndpointName", "per");
+        metrics.awaitPublished(Duration.ofSeconds(5));
+        assertEquals(1, LambdaWebMetricStatistics.of("us-west-2", LambdaWebMetrics.NAMESPACE,
+                "HTTPResponseStatusClass4XX", endpoint, "Sum"));
+        assertEquals(1, LambdaWebMetricStatistics.of("us-east-1", LambdaWebMetrics.NAMESPACE,
+                "HTTPResponseStatusClass4XX", endpoint, "Sum"));
+
+        given().when().delete(endpoints + "/per").then().statusCode(204);
+        given().header("Host", west).when().get("/")
+                .then().statusCode(404).header("lambda-web-error-type", "Platform.InvalidEndpoint");
+        given().when().delete(BASE + "/web-functions/" + functionName).then().statusCode(204);
+    }
+
+    @Test
+    void theGlobalDomainOfAFunctionInAnotherRegionCountsAPageInTheDefaultRegion() {
+        String functionName = "dp-global-" + Long.toString(System.nanoTime(), 36);
+        createFunction("us-west-2", functionName, "ApplicationManaged", LambdaWebZips.indexJs(""), ROLE);
+        String west = auth("test", "us-west-2", "lambda");
+        String endpoints = BASE + "/web-functions/" + functionName + "/endpoints";
+        String revisionId = given().header("Authorization", west).when().get(endpoints + "/dev").then().statusCode(200)
+                .extract().path("revisionWeights[0].revisionId");
+        String global = given().header("Authorization", west).contentType("application/json")
+                .body("""
+                        {"endpointName": "global", "endpointType": "MultiRegion", "regions": ["us-east-1"],
+                         "authType": "IamAuth", "revisionWeights": [{"revisionId": "%s", "weight": 100}]}"""
+                        .formatted(revisionId))
+                .when().put(endpoints)
+                .then().statusCode(202)
+                .extract().path("domainName");
+        given().header("Host", global).when().get("/").then().statusCode(403);
+
+        Map<String, String> endpoint = Map.of("FunctionName", functionName, "EndpointName", "global");
+        metrics.awaitPublished(Duration.ofSeconds(5));
+        assertEquals(1, LambdaWebMetricStatistics.of("us-east-1", LambdaWebMetrics.NAMESPACE,
+                "HTTPResponseStatusClass4XX", endpoint, "Sum"));
+        assertEquals(1, LambdaWebMetricStatistics.of("us-west-2", LambdaWebMetrics.NAMESPACE,
+                "HTTPResponseStatusClass4XX", endpoint, "Sum"));
+        given().header("Authorization", west).when().delete(BASE + "/web-functions/" + functionName)
+                .then().statusCode(204);
+    }
+
+    @Test
     void otherHostsStillReachTheControlPlane() {
         given().when().get(BASE + "/web-account-settings").then().statusCode(200);
     }
@@ -319,10 +420,14 @@ class LambdaWebDataPlaneIntegrationTest {
     }
 
     private String createFunction(String functionName, String authType, byte[] code, String role) {
+        return createFunction("us-east-1", functionName, authType, code, role);
+    }
+
+    private String createFunction(String region, String functionName, String authType, byte[] code, String role) {
         LambdaWebRoles.trustLambda(iamService, role);
-        s3Service.createBucket(BUCKET, "us-east-1");
+        LambdaWebCodeBuckets.create(s3Service, BUCKET);
         s3Service.putObject(BUCKET, "app.zip", code, "application/zip", Map.of());
-        return given().contentType("application/json")
+        return given().header("Authorization", auth("test", region, "lambda")).contentType("application/json")
                 .body("""
                         {"functionName": "%s",
                          "revisionConfig": {

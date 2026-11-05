@@ -18,6 +18,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -162,10 +163,10 @@ class Route53VpcAuthorizationPersistenceTest {
         EmulatorConfig config = mock(EmulatorConfig.class, RETURNS_DEEP_STUBS);
         when(config.defaultAccountId()).thenReturn(ACCOUNT);
         when(config.storage().persistentPath()).thenReturn(directory.toString());
-        when(config.services().route53().defaultNameserver1()).thenReturn("ns-1.example.");
-        when(config.services().route53().defaultNameserver2()).thenReturn("ns-2.example.");
-        when(config.services().route53().defaultNameserver3()).thenReturn("ns-3.example.");
-        when(config.services().route53().defaultNameserver4()).thenReturn("ns-4.example.");
+        when(config.services().route53().defaultNameserver1()).thenReturn(Optional.of("ns-1.example."));
+        when(config.services().route53().defaultNameserver2()).thenReturn(Optional.of("ns-2.example."));
+        when(config.services().route53().defaultNameserver3()).thenReturn(Optional.of("ns-3.example."));
+        when(config.services().route53().defaultNameserver4()).thenReturn(Optional.of("ns-4.example."));
         when(config.services().route53().vpcAssociationControlPlaneDelayMs()).thenReturn(0L);
         ServiceConfigAccess access = mock(ServiceConfigAccess.class);
         when(access.storageMode(anyString())).thenReturn("persistent");

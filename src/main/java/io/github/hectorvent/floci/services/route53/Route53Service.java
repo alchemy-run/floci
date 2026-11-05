@@ -81,10 +81,10 @@ public class Route53Service {
 
         EmulatorConfig.Route53ServiceConfig r53 = config.services().route53();
         this.nameServers = List.of(
-                r53.defaultNameserver1(),
-                r53.defaultNameserver2(),
-                r53.defaultNameserver3(),
-                r53.defaultNameserver4()
+                r53.defaultNameserver1().orElse("ns-1.awsdns-01.org"),
+                r53.defaultNameserver2().orElse("ns-2.awsdns-02.net"),
+                r53.defaultNameserver3().orElse("ns-3.awsdns-03.com"),
+                r53.defaultNameserver4().orElse("ns-4.awsdns-04.co.uk")
         );
         this.defaultAccountId = config.defaultAccountId();
         this.regionResolver = regionResolver;

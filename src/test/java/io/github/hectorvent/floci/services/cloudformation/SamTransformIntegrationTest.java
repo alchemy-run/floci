@@ -1,6 +1,9 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.XmlParser;
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.AfterEach;
@@ -10,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -17,8 +21,10 @@ import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import static io.restassured.RestAssured.given;
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.emptyOrNullString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasItems;
@@ -26,6 +32,7 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.nullValue;
 import static org.hamcrest.Matchers.startsWith;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
 class SamTransformIntegrationTest {
@@ -105,6 +112,73 @@ class SamTransformIntegrationTest {
         assertThat(resourcesXml, containsString("<ResourceType>AWS::Lambda::Function</ResourceType>"));
         assertThat(resourcesXml, containsString("<ResourceType>AWS::IAM::Role</ResourceType>"));
         assertThat(resourcesXml, not(containsString("AWS::Serverless::Function")));
+    }
+
+    @Test
+    void samAutoPublishAliasReferenceCreatesLambdaPermission() throws Exception {
+        String stackName = "sam-ref-alias-" + Long.toString(System.nanoTime(), 36);
+        String functionName = stackName + "-fn";
+        stacksToDelete.add(stackName);
+
+        String template = """
+            Transform: AWS::Serverless-2016-10-31
+            Resources:
+              Fn:
+                Type: AWS::Serverless::Function
+                Properties:
+                  FunctionName: %s
+                  Runtime: nodejs22.x
+                  Handler: index.handler
+                  InlineCode: "exports.handler = async () => ({ ok: true });"
+                  AutoPublishAlias: live
+              FnPermission:
+                Type: AWS::Lambda::Permission
+                Properties:
+                  Action: lambda:InvokeFunction
+                  FunctionName: !Ref Fn.Alias
+                  Principal: events.amazonaws.com
+            Outputs:
+              AliasArn:
+                Value: !Ref Fn.Alias
+            """.formatted(functionName);
+
+        given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack")
+            .formParam("StackName", stackName)
+            .formParam("TemplateBody", template)
+            .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200);
+
+        waitForStackStatus(stackName, "CREATE_COMPLETE");
+        String stackXml = given()
+            .contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DescribeStacks")
+            .formParam("StackName", stackName)
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .extract().asString();
+        assertThat(stackXml, containsString(":function:" + functionName + ":live"));
+
+        String functionArn = given().when().get("/2015-03-31/functions/" + functionName)
+                .then().statusCode(200).extract().path("Configuration.FunctionArn");
+        String policyJson = given()
+        .when()
+            .get("/2015-03-31/functions/" + functionName + "/policy?Qualifier=live")
+        .then()
+            .statusCode(200)
+            .extract().path("Policy");
+        JsonNode statements = new ObjectMapper().readTree(policyJson).path("Statement");
+        assertEquals(1, statements.size());
+        JsonNode statement = statements.get(0);
+        assertEquals("lambda:InvokeFunction", statement.path("Action").asText());
+        assertEquals("events.amazonaws.com", statement.path("Principal").path("Service").asText());
+        assertEquals(functionArn + ":live", statement.path("Resource").asText());
     }
 
     @Test
@@ -279,6 +353,7 @@ class SamTransformIntegrationTest {
                   FunctionName: sam-code-sha-func
                   Handler: index.handler
                   Runtime: nodejs20.x
+                  Description: Release
                   AutoPublishAlias: live
                   AutoPublishCodeSha256: "%s"
                   InlineCode: "exports.handler = async () => ({ release: '%s' });"
@@ -310,6 +385,20 @@ class SamTransformIntegrationTest {
             .then().statusCode(200).body("FunctionVersion", equalTo("2"));
         given().when().get("/2015-03-31/functions/" + function + "/versions")
             .then().statusCode(200).body("Versions.Version", equalTo(List.of("$LATEST", "1", "2")));
+
+        // A new hash alone publishes too: SAM appends it to the function's Description, so the
+        // function changes even though its code does not.
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("cccccccccc", "second"))
+            .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "UPDATE_COMPLETE");
+        given().when().get("/2015-03-31/functions/" + function + "/aliases/live")
+            .then().statusCode(200).body("FunctionVersion", equalTo("3"));
+        given().queryParam("Qualifier", "live")
+        .when().get("/2015-03-31/functions/" + function + "/configuration")
+            .then().statusCode(200).body("Version", equalTo("3")).body("Description", equalTo("Release cccccccccc"));
     }
 
     /** Under AutoPublishAliasAllProperties a property outside the default hash, here Timeout, publishes. */
@@ -511,6 +600,146 @@ class SamTransformIntegrationTest {
             .body("__type", equalTo("ProvisionedConcurrencyConfigNotFoundException"));
     }
 
+    /**
+     * VersionDescription describes the version the alias publishes, resolved as CloudFormation
+     * resolves it, and not the function; each version keeps the description it was published with.
+     */
+    @Test
+    void samVersionDescriptionDescribesEachPublishedVersion() {
+        String stackName = "sam-version-description-stack";
+        String function = "sam-version-description-func";
+        stacksToDelete.add(stackName);
+        String template = """
+            Transform: AWS::Serverless-2016-10-31
+            Parameters:
+              Release:
+                Type: String
+            Resources:
+              Function:
+                Type: AWS::Serverless::Function
+                Properties:
+                  FunctionName: sam-version-description-func
+                  Handler: index.handler
+                  Runtime: nodejs20.x
+                  AutoPublishAlias: live
+                  VersionDescription:
+                    Fn::Sub: release ${Release}
+                  InlineCode: "exports.handler = async () => ({ release: '%s' });"
+            """;
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("first"))
+            .formParam("Parameters.member.1.ParameterKey", "Release")
+            .formParam("Parameters.member.1.ParameterValue", "1")
+            .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "CREATE_COMPLETE");
+        given().queryParam("Qualifier", "live")
+        .when().get("/2015-03-31/functions/" + function + "/configuration")
+            .then().statusCode(200).body("Version", equalTo("1")).body("Description", equalTo("release 1"));
+
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("second"))
+            .formParam("Parameters.member.1.ParameterKey", "Release")
+            .formParam("Parameters.member.1.ParameterValue", "2")
+            .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "UPDATE_COMPLETE");
+
+        given().queryParam("Qualifier", "live")
+        .when().get("/2015-03-31/functions/" + function + "/configuration")
+            .then().statusCode(200).body("Version", equalTo("2")).body("Description", equalTo("release 2"));
+        given().when().get("/2015-03-31/functions/" + function + "/versions")
+            .then().statusCode(200)
+            .body("Versions.Version", equalTo(List.of("$LATEST", "1", "2")))
+            .body("Versions.find { it.Version == '1' }.Description", equalTo("release 1"))
+            .body("Versions.find { it.Version == '$LATEST' }.Description", emptyOrNullString());
+    }
+
+    /**
+     * Under AutoPublishAliasAllProperties a Tags change names a new id but publishes nothing, since
+     * the function has not changed. A new VersionDescription alone keeps the id: the change set
+     * reports the version replaced, but floci keeps it with its first description, where AWS fails
+     * the update. The next new id, from another Tags change, publishes with the new description,
+     * which no longer matches the last version's.
+     */
+    @Test
+    void samVersionDescriptionAloneKeepsThePublishedVersion() {
+        String stackName = "sam-version-description-only-stack";
+        String function = "sam-version-description-only-func";
+        stacksToDelete.add(stackName);
+        String template = """
+            Transform: AWS::Serverless-2016-10-31
+            Resources:
+              Function:
+                Type: AWS::Serverless::Function
+                Properties:
+                  FunctionName: sam-version-description-only-func
+                  Handler: index.handler
+                  Runtime: nodejs20.x
+                  AutoPublishAlias: live
+                  AutoPublishAliasAllProperties: true
+                  VersionDescription: %s
+                  Tags:
+                    build: %s
+                  InlineCode: "exports.handler = async () => ({});"
+            """;
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("release 1", "a"))
+            .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "CREATE_COMPLETE");
+
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("release 1", "b"))
+            .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "UPDATE_COMPLETE");
+        given().when().get("/2015-03-31/functions/" + function + "/aliases/live")
+            .then().statusCode(200).body("FunctionVersion", equalTo("1"));
+
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "CreateChangeSet").formParam("StackName", stackName)
+            .formParam("ChangeSetName", "described").formParam("ChangeSetType", "UPDATE")
+            .formParam("TemplateBody", template.formatted("release 2", "b"))
+            .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        String changeSet = given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "DescribeChangeSet").formParam("StackName", stackName)
+            .formParam("ChangeSetName", "described")
+        .when().post("/").then().statusCode(200).extract().asString();
+        List<String> versionChanges = XmlParser.extractGroups(changeSet, "ResourceChange").stream()
+            .filter(change -> change.get("LogicalResourceId").startsWith("FunctionVersion"))
+            .map(change -> change.get("Action") + " " + change.get("Replacement"))
+            .toList();
+        assertThat(versionChanges, equalTo(List.of("Modify True")));
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "ExecuteChangeSet").formParam("StackName", stackName)
+            .formParam("ChangeSetName", "described")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "UPDATE_COMPLETE");
+        given().when().get("/2015-03-31/functions/" + function + "/versions")
+            .then().statusCode(200)
+            .body("Versions.Version", equalTo(List.of("$LATEST", "1")))
+            .body("Versions.find { it.Version == '1' }.Description", equalTo("release 1"));
+
+        given().contentType("application/x-www-form-urlencoded")
+            .formParam("Action", "UpdateStack").formParam("StackName", stackName)
+            .formParam("TemplateBody", template.formatted("release 2", "c"))
+            .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+        .when().post("/").then().statusCode(200);
+        waitForStackStatus(stackName, "UPDATE_COMPLETE");
+        given().when().get("/2015-03-31/functions/" + function + "/aliases/live")
+            .then().statusCode(200).body("FunctionVersion", equalTo("2"));
+        given().when().get("/2015-03-31/functions/" + function + "/versions")
+            .then().statusCode(200)
+            .body("Versions.find { it.Version == '1' }.Description", equalTo("release 1"))
+            .body("Versions.find { it.Version == '2' }.Description", equalTo("release 2"));
+    }
+
     @Test
     void samFunction_withoutAutoPublishAlias_createsNoAlias() {
         String stackName = "sam-no-alias-stack";
@@ -636,6 +865,7 @@ class SamTransformIntegrationTest {
                   Handler: app.handler
                   Runtime: python3.12
                   InlineCode: "def handler(event, context): return {'statusCode': 200}"
+                  Description: Configured by SAM
                   Timeout: 30
                   MemorySize: 256
                   Environment:
@@ -656,6 +886,7 @@ class SamTransformIntegrationTest {
             .statusCode(200)
             .body(containsString("<StackId>"));
 
+        CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE");
         given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "DescribeStacks")
@@ -674,6 +905,7 @@ class SamTransformIntegrationTest {
             .body("Configuration.FunctionName", equalTo("sam-configured-func"))
             .body("Configuration.Handler", equalTo("app.handler"))
             .body("Configuration.Runtime", equalTo("python3.12"))
+            .body("Configuration.Description", equalTo("Configured by SAM"))
             .body("Configuration.Timeout", equalTo(30))
             .body("Configuration.MemorySize", equalTo(256))
             .body("Configuration.Environment.Variables.TABLE_NAME", equalTo("my-table"))
@@ -709,6 +941,7 @@ class SamTransformIntegrationTest {
             .statusCode(200)
             .body(containsString("<StackId>"));
 
+        CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE");
         given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "DescribeStacks")
@@ -774,6 +1007,7 @@ class SamTransformIntegrationTest {
             .statusCode(200)
             .body(containsString("<StackId>"));
 
+        CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE");
         given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "DescribeStacks")
@@ -1403,6 +1637,7 @@ class SamTransformIntegrationTest {
             .statusCode(200)
             .body(containsString("<StackId>"));
 
+        CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE");
         given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "DescribeStacks")
@@ -1455,6 +1690,7 @@ class SamTransformIntegrationTest {
             .statusCode(200)
             .body(containsString("<StackId>"));
 
+        CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE");
         given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "DescribeStacks")
@@ -1512,6 +1748,7 @@ class SamTransformIntegrationTest {
             .statusCode(200)
             .body(containsString("<StackId>"));
 
+        CfnStackWaits.awaitStatus(stackName, "CREATE_COMPLETE");
         given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "DescribeStacks")
@@ -1984,6 +2221,109 @@ class SamTransformIntegrationTest {
             .body("definition", not(containsString("${TableName}")));
     }
 
+    @Test
+    void samLayerVersionPublishesPackagedCodeAndReturnsItsArn() {
+        String stack = "sam-layer-stack";
+        String bucket = "sam-layer-code";
+        stacksToDelete.add(stack);
+        given().when().put("/" + bucket).then().statusCode(200);
+        given().contentType("application/zip").body(buildHandlerZip())
+                .when().put("/" + bucket + "/layer.zip").then().statusCode(200);
+        String template = """
+                Transform: AWS::Serverless-2016-10-31
+                Parameters:
+                  Bucket: {Type: String}
+                  Runtimes: {Type: CommaDelimitedList, Default: 'nodejs22.x,python3.14'}
+                  Architectures: {Type: CommaDelimitedList, Default: arm64}
+                Globals:
+                  Function:
+                    Runtime: nodejs22.x
+                    Architectures: [arm64]
+                    Handler: index.handler
+                    Layers: [!Ref Layer]
+                Resources:
+                  Layer:
+                    Type: AWS::Serverless::LayerVersion
+                    Properties:
+                      LayerName: sam-shared-layer
+                      ContentUri:
+                        Bucket: !Ref Bucket
+                        Key: layer.zip
+                      CompatibleRuntimes: !Ref Runtimes
+                      CompatibleArchitectures: !Ref Architectures
+                      LicenseInfo: MIT
+                      RetentionPolicy: Delete
+                  Function:
+                    Type: AWS::Serverless::Function
+                    Properties:
+                      FunctionName: sam-layer-consumer
+                      InlineCode: 'exports.handler=async()=>({})'
+                      Environment:
+                        Variables:
+                          DependsOn: Layer
+                Outputs:
+                  LayerArn:
+                    Value: !Ref Layer
+                  LayerSub:
+                    Value: !Sub '${Layer}'
+                """;
+        try {
+            given().contentType("application/x-www-form-urlencoded")
+                    .formParam("Action", "CreateStack").formParam("StackName", stack)
+                    .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+                    .formParam("TemplateBody", template)
+                    .formParam("Parameters.member.1.ParameterKey", "Bucket")
+                    .formParam("Parameters.member.1.ParameterValue", bucket)
+                    .when().post("/").then().statusCode(200);
+            waitForStackStatus(stack, "CREATE_COMPLETE");
+            String description = given().contentType("application/x-www-form-urlencoded")
+                    .formParam("Action", "DescribeStacks").formParam("StackName", stack)
+                    .when().post("/").then().statusCode(200).extract().asString();
+            String arn = stackOutputValue(description, "LayerArn");
+            assertThat(arn, containsString(":layer:sam-shared-layer:1"));
+            assertThat(stackOutputValue(description, "LayerSub"), equalTo(arn));
+            given().when().get("/2018-10-31/layers/sam-shared-layer/versions/1")
+                    .then().statusCode(200).body("LayerVersionArn", equalTo(arn))
+                    .body("CompatibleRuntimes", hasItems("nodejs22.x", "python3.14"))
+                    .body("CompatibleArchitectures", hasItem("arm64"))
+                    .body("LicenseInfo", equalTo("MIT"))
+                    .body("Content.CodeSize", equalTo(buildHandlerZip().length));
+            given().when().get("/2015-03-31/functions/sam-layer-consumer")
+                    .then().statusCode(200).body("Configuration.Layers[0].Arn", equalTo(arn))
+                    .body("Configuration.Environment.Variables.DependsOn", equalTo("Layer"));
+            given().contentType("application/zip").body(buildHandlerZip())
+                    .when().put("/" + bucket + "/updated.zip").then().statusCode(200);
+            given().contentType("application/x-www-form-urlencoded")
+                    .formParam("Action", "UpdateStack").formParam("StackName", stack)
+                    .formParam("Capabilities.member.1", "CAPABILITY_IAM")
+                    .formParam("TemplateBody", template.replace("Key: layer.zip", "Key: updated.zip"))
+                    .formParam("Parameters.member.1.ParameterKey", "Bucket")
+                    .formParam("Parameters.member.1.ParameterValue", bucket)
+                    .when().post("/").then().statusCode(200);
+            waitForStackStatus(stack, "UPDATE_COMPLETE");
+            String updated = given().contentType("application/x-www-form-urlencoded")
+                    .formParam("Action", "DescribeStacks").formParam("StackName", stack)
+                    .when().post("/").then().statusCode(200).extract().asString();
+            assertThat(stackOutputValue(updated, "LayerArn"), containsString(":layer:sam-shared-layer:2"));
+            given().when().get("/2015-03-31/functions/sam-layer-consumer")
+                    .then().statusCode(200)
+                    .body("Configuration.Layers[0].Arn", equalTo(stackOutputValue(updated, "LayerArn")))
+                    .body("Configuration.Environment.Variables.DependsOn", equalTo("Layer"));
+            given().when().get("/2018-10-31/layers/sam-shared-layer/versions/1")
+                    .then().statusCode(404);
+            given().contentType("application/x-www-form-urlencoded")
+                    .formParam("Action", "DeleteStack").formParam("StackName", stack)
+                    .when().post("/").then().statusCode(200);
+            await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                    given().when().get("/2018-10-31/layers/sam-shared-layer/versions/2")
+                            .then().statusCode(404));
+        } finally {
+            given().when().delete("/" + bucket + "/updated.zip");
+            given().when().delete("/" + bucket + "/layer.zip");
+            given().when().delete("/" + bucket);
+        }
+    }
+
     private static String stackOutputValue(String describeStacksXml, String outputKey) {
         return describeStacksXml
                 .split("<OutputKey>" + outputKey + "</OutputKey>")[1]
@@ -1995,8 +2335,8 @@ class SamTransformIntegrationTest {
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             try (ZipOutputStream zos = new ZipOutputStream(baos)) {
-                zos.putNextEntry(new java.util.zip.ZipEntry("index.js"));
-                zos.write("exports.handler=async(e)=>({statusCode:200})".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                zos.putNextEntry(new ZipEntry("index.js"));
+                zos.write("exports.handler=async(e)=>({statusCode:200})".getBytes(StandardCharsets.UTF_8));
                 zos.closeEntry();
             }
             return baos.toByteArray();
@@ -2008,7 +2348,7 @@ class SamTransformIntegrationTest {
     private static void waitForStackStatus(String stackName, String status) {
         String expected = "<StackStatus>" + status + "</StackStatus>";
         String body = "";
-        long deadline = System.nanoTime() + java.time.Duration.ofSeconds(5).toNanos();
+        long deadline = System.nanoTime() + Duration.ofSeconds(5).toNanos();
         while (System.nanoTime() < deadline) {
             body = given()
                 .contentType("application/x-www-form-urlencoded")

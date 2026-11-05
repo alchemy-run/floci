@@ -5,6 +5,8 @@ import io.github.hectorvent.floci.testing.RealElbV2DataPlaneProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
 import io.restassured.response.Response;
+import io.restassured.specification.RequestSpecification;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -49,6 +51,13 @@ class ElbV2LambdaTargetDataPlaneIntegrationTest {
     private static String listenerArn;
     private static String functionArn;
 
+    private static RequestSpecification listenerRequest(String host) {
+        return given()
+                .baseUri("http://127.0.0.1")
+                .header("Host", host)
+                .port(LISTENER_PORT);
+    }
+
     private static String makeZipBase64() throws Exception {
         // Matches the reproduction script in the bug report (Python 3.11 / index.handler).
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -65,6 +74,9 @@ class ElbV2LambdaTargetDataPlaneIntegrationTest {
                 "        return {\"statusCode\": 200, \"body\": \"x\" * (1024 * 1024)}\n" +
                 "    if event.get(\"path\") == \"/response-oversized\":\n" +
                 "        return {\"statusCode\": 200, \"headers\": {\"Content-Length\": \"1048577\"}, \"body\": \"x\" * (1024 * 1024 + 1)}\n" +
+                "    if event.get(\"path\") == \"/forwarded-headers\":\n" +
+                "        names = [\"x-forwarded-for\", \"x-forwarded-proto\", \"x-forwarded-port\"]\n" +
+                "        return {\"statusCode\": 200, \"body\": \"|\".join(event[\"headers\"].get(n, \"\") for n in names)}\n" +
                 "    return {\"statusCode\": 200, \"body\": \"ok\"}\n"
             ).getBytes(StandardCharsets.UTF_8));
             zos.closeEntry();
@@ -153,8 +165,10 @@ class ElbV2LambdaTargetDataPlaneIntegrationTest {
                 .formParam("LoadBalancerArn", lbArn)
                 .formParam("Protocol", "HTTP")
                 .formParam("Port", String.valueOf(LISTENER_PORT))
-                .formParam("DefaultActions.member.1.Type", "forward")
-                .formParam("DefaultActions.member.1.TargetGroupArn", tgArn)
+                .formParam("DefaultActions.member.1.Type", "fixed-response")
+                .formParam("DefaultActions.member.1.FixedResponseConfig.StatusCode", "421")
+                .formParam("DefaultActions.member.1.FixedResponseConfig.ContentType", "text/plain")
+                .formParam("DefaultActions.member.1.FixedResponseConfig.MessageBody", "unexpected host")
                 .header("Authorization", AUTH)
             .when()
                 .post("/")
@@ -162,6 +176,20 @@ class ElbV2LambdaTargetDataPlaneIntegrationTest {
                 .statusCode(200)
                 .extract()
                 .path("CreateListenerResponse.CreateListenerResult.Listeners.member.ListenerArn");
+
+        given()
+                .formParam("Action", "CreateRule")
+                .formParam("ListenerArn", listenerArn)
+                .formParam("Priority", "1")
+                .formParam("Conditions.member.1.Field", "host-header")
+                .formParam("Conditions.member.1.HostHeaderConfig.Values.member.1", lbDnsName)
+                .formParam("Actions.member.1.Type", "forward")
+                .formParam("Actions.member.1.TargetGroupArn", tgArn)
+                .header("Authorization", AUTH)
+            .when()
+                .post("/")
+            .then()
+                .statusCode(200);
     }
 
     /**
@@ -169,14 +197,12 @@ class ElbV2LambdaTargetDataPlaneIntegrationTest {
      * must be forwarded to the Lambda and the Lambda's response must be returned
      * to the HTTP client. If `invokeLambdaTarget` blocks the Vert.x event loop
      * (the pre-fix behaviour), the Lambda Runtime API hosted on the same event
-     * loop is starved and the function times out — this assertion catches that.
+     * loop is starved and the function times out: this assertion catches that.
      */
     @Test
     @Order(5)
     void httpRequestThroughListenerInvokesLambda() {
-        given()
-                .baseUri("http://" + lbDnsName)
-                .port(LISTENER_PORT)
+        listenerRequest(lbDnsName)
                 .contentType("text/plain")
                 .body("hello")
             .when()
@@ -191,9 +217,7 @@ class ElbV2LambdaTargetDataPlaneIntegrationTest {
     void requestBodyAtOneMiBIsAccepted() {
         byte[] exactLimit = new byte[1024 * 1024];
 
-        given()
-                .baseUri("http://" + lbDnsName)
-                .port(LISTENER_PORT)
+        listenerRequest(lbDnsName)
                 .contentType("application/octet-stream")
                 .body(exactLimit)
             .when()
@@ -207,9 +231,7 @@ class ElbV2LambdaTargetDataPlaneIntegrationTest {
     @Order(7)
     void oversizedRequestBodyIsRejectedBeforeLambdaInvocation() {
         byte[] oversized = new byte[1024 * 1024 + 1];
-        int invocationCountBefore = Integer.parseInt(given()
-                .baseUri("http://" + lbDnsName)
-                .port(LISTENER_PORT)
+        int invocationCountBefore = Integer.parseInt(listenerRequest(lbDnsName)
             .when()
                 .get("/invocation-count")
             .then()
@@ -217,9 +239,7 @@ class ElbV2LambdaTargetDataPlaneIntegrationTest {
                 .extract()
                 .asString());
 
-        given()
-                .baseUri("http://" + lbDnsName)
-                .port(LISTENER_PORT)
+        listenerRequest(lbDnsName)
                 .contentType("application/octet-stream")
                 .body(oversized)
             .when()
@@ -227,9 +247,7 @@ class ElbV2LambdaTargetDataPlaneIntegrationTest {
             .then()
                 .statusCode(413);
 
-        int invocationCountAfter = Integer.parseInt(given()
-                .baseUri("http://" + lbDnsName)
-                .port(LISTENER_PORT)
+        int invocationCountAfter = Integer.parseInt(listenerRequest(lbDnsName)
             .when()
                 .get("/invocation-count")
             .then()
@@ -242,27 +260,46 @@ class ElbV2LambdaTargetDataPlaneIntegrationTest {
     @Test
     @Order(8)
     void lambdaResponseBodyAtOneMiBIsAccepted() {
-        given()
-                .baseUri("http://" + lbDnsName)
-                .port(LISTENER_PORT)
+        listenerRequest(lbDnsName)
             .when()
                 .get("/response-at-limit")
             .then()
                 .statusCode(200)
-                .body(org.hamcrest.Matchers.hasLength(1024 * 1024));
+                .body(Matchers.hasLength(1024 * 1024));
     }
 
     @Test
     @Order(9)
     void oversizedLambdaResponseIsRejected() {
-        Response response = given()
-                .baseUri("http://" + lbDnsName)
-                .port(LISTENER_PORT)
+        Response response = listenerRequest(lbDnsName)
             .when()
                 .get("/response-oversized");
 
         response.then().statusCode(502);
         assertNotEquals("1048577", response.getHeader("Content-Length"));
+    }
+
+    @Test
+    @Order(10)
+    void listenerRejectsUnexpectedHost() {
+        listenerRequest("unmatched.example.test")
+            .when()
+                .get("/check")
+            .then()
+                .statusCode(421)
+                .body(equalTo("unexpected host"));
+    }
+
+    @Test
+    @Order(11)
+    void eventCarriesTheForwardedHeaders() {
+        listenerRequest(lbDnsName)
+                .header("X-Forwarded-For", "198.51.100.7")
+            .when()
+                .get("/forwarded-headers")
+            .then()
+                .statusCode(200)
+                .body(equalTo("198.51.100.7, 127.0.0.1|http|" + LISTENER_PORT));
     }
 
     /**

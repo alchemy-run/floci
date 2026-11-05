@@ -1,7 +1,9 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.github.hectorvent.floci.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -165,6 +167,7 @@ class CloudFormationAccountOwnershipIntegrationTest {
                 .formParam("StackName", name)
                 .formParam("TemplateBody", template)
                 .when().post("/").then().statusCode(200).extract().body().asString();
+        CfnStackWaits.awaitStatus(name, "CREATE_COMPLETE", auth(account, region));
         return body.replaceFirst("(?s).*<StackId>([^<]+)</StackId>.*", "$1");
     }
 
@@ -177,9 +180,10 @@ class CloudFormationAccountOwnershipIntegrationTest {
                 .formParam("StackName", name)
                 .formParam("TemplateBody", template)
                 .when().post("/").then().statusCode(200);
+        CfnStackWaits.awaitStatus(name, "CREATE_COMPLETE", auth(account, region));
     }
 
-    private static io.restassured.response.ValidatableResponse describeStack(
+    private static ValidatableResponse describeStack(
             String account, String region, String name) {
         return given().header("Authorization", auth(account, region))
                 .contentType("application/x-www-form-urlencoded")
@@ -188,7 +192,7 @@ class CloudFormationAccountOwnershipIntegrationTest {
                 .when().post("/").then();
     }
 
-    private static io.restassured.response.ValidatableResponse describeStackResources(
+    private static ValidatableResponse describeStackResources(
             String account, String region, String name) {
         return given().header("Authorization", auth(account, region))
                 .contentType("application/x-www-form-urlencoded")
@@ -197,14 +201,14 @@ class CloudFormationAccountOwnershipIntegrationTest {
                 .when().post("/").then();
     }
 
-    private static io.restassured.response.ValidatableResponse listStacks(String accessKeyId, String region) {
+    private static ValidatableResponse listStacks(String accessKeyId, String region) {
         return given().header("Authorization", auth(accessKeyId, region))
                 .contentType("application/x-www-form-urlencoded")
                 .formParam("Action", "ListStacks")
                 .when().post("/").then();
     }
 
-    private static io.restassured.response.ValidatableResponse listExports(String account, String region) {
+    private static ValidatableResponse listExports(String account, String region) {
         return given().header("Authorization", auth(account, region))
                 .contentType("application/x-www-form-urlencoded")
                 .formParam("Action", "ListExports")

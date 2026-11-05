@@ -7,6 +7,7 @@ import io.restassured.RestAssured;
 import io.restassured.config.EncoderConfig;
 import io.restassured.http.ContentType;
 import io.restassured.parsing.Parser;
+import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -103,6 +104,7 @@ class CloudFormationCognitoUserPoolGroupIntegrationTest {
         .then()
             .statusCode(200);
 
+        assertEquals("UPDATE_COMPLETE", CfnStackWaits.awaitTerminal(stackName, CFN_AUTH).status());
         given()
             .contentType("application/x-www-form-urlencoded")
             .header("Authorization", CFN_AUTH)
@@ -142,6 +144,7 @@ class CloudFormationCognitoUserPoolGroupIntegrationTest {
         .then()
             .statusCode(200);
 
+        assertEquals("UPDATE_COMPLETE", CfnStackWaits.awaitTerminal(stackName, CFN_AUTH).status());
         cognito("GetGroup", "{\"UserPoolId\": \"" + poolId + "\", \"GroupName\": \"admin\"}")
             .statusCode(400)
             .body("__type", equalTo("ResourceNotFoundException"));
@@ -158,6 +161,7 @@ class CloudFormationCognitoUserPoolGroupIntegrationTest {
         String poolId = createStack(stackName, poolAndGroupsTemplate("admin", 0));
 
         updateStack(stackName, poolAndGroupsTemplate("operators", 0));
+        assertEquals("UPDATE_COMPLETE", CfnStackWaits.awaitTerminal(stackName, CFN_AUTH).status());
 
         String describeXml = describeStack(stackName);
         assertThat(describeXml, containsString("<StackStatus>UPDATE_COMPLETE</StackStatus>"));
@@ -181,6 +185,7 @@ class CloudFormationCognitoUserPoolGroupIntegrationTest {
         String original = output(describeXml, "GroupName");
 
         updateStack(stackName, twoPoolsAndUnnamedGroupTemplate("SecondPool"));
+        assertEquals("UPDATE_COMPLETE", CfnStackWaits.awaitTerminal(stackName, CFN_AUTH).status());
 
         describeXml = describeStack(stackName);
         assertThat(describeXml, containsString("<StackStatus>UPDATE_COMPLETE</StackStatus>"));
@@ -331,6 +336,7 @@ class CloudFormationCognitoUserPoolGroupIntegrationTest {
         .then()
             .statusCode(200);
 
+        assertEquals("CREATE_COMPLETE", CfnStackWaits.awaitTerminal(stackName, CFN_AUTH).status());
         String describeXml = given()
             .contentType("application/x-www-form-urlencoded")
             .header("Authorization", CFN_AUTH)
@@ -425,7 +431,7 @@ class CloudFormationCognitoUserPoolGroupIntegrationTest {
         return XmlParser.extractPairs(describeXml, "Outputs", "OutputKey", "OutputValue").get(key);
     }
 
-    private io.restassured.response.ValidatableResponse cognito(String target, String body) {
+    private ValidatableResponse cognito(String target, String body) {
         return given()
             .config(RestAssured.config().encoderConfig(EncoderConfig.encoderConfig()
                     .encodeContentTypeAs(COGNITO_CONTENT_TYPE, ContentType.TEXT)))

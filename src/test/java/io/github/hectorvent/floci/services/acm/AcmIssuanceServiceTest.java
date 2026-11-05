@@ -34,6 +34,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -297,10 +298,10 @@ class AcmIssuanceServiceTest {
         when(config.defaultAccountId()).thenReturn("000000000000");
         when(config.services()).thenReturn(services);
         when(services.route53()).thenReturn(dns);
-        when(dns.defaultNameserver1()).thenReturn("ns-1.example.test.");
-        when(dns.defaultNameserver2()).thenReturn("ns-2.example.test.");
-        when(dns.defaultNameserver3()).thenReturn("ns-3.example.test.");
-        when(dns.defaultNameserver4()).thenReturn("ns-4.example.test.");
+        when(dns.defaultNameserver1()).thenReturn(Optional.of("ns-1.example.test."));
+        when(dns.defaultNameserver2()).thenReturn(Optional.of("ns-2.example.test."));
+        when(dns.defaultNameserver3()).thenReturn(Optional.of("ns-3.example.test."));
+        when(dns.defaultNameserver4()).thenReturn(Optional.of("ns-4.example.test."));
         return new Route53Service(factory, config, new RegionResolver(REGION, "000000000000"),
                 mock(Ec2Service.class));
     }

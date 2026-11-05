@@ -32,10 +32,15 @@ import io.github.hectorvent.floci.testing.MutableClock;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.Execution;
+import org.junit.jupiter.api.parallel.ExecutionMode;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.mockito.ArgumentCaptor;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 import java.lang.management.ManagementFactory;
 import java.lang.management.ThreadInfo;
@@ -45,8 +50,10 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -71,6 +78,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
+@Execution(ExecutionMode.CONCURRENT)
 class CognitoServiceTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
@@ -1154,7 +1162,7 @@ class CognitoServiceTest {
                 true,
                 true,
                 List.of(" code ", "code", "implicit", "", "implicit"),
-                new ArrayList<>(java.util.Arrays.asList(" openid ", "openid", "email", null, "email")),
+                new ArrayList<>(Arrays.asList(" openid ", "openid", "email", null, "email")),
                 null,
                 List.of("https://example.com/callback"),
                 "https://example.com/callback",
@@ -2470,9 +2478,9 @@ class CognitoServiceTest {
     void expiredPendingEmailCodeLeavesActiveAttributeAndVerifiedFlagUnchanged() {
         VerificationCodeService verificationCodeService = inlineMock(VerificationCodeService.class);
         CognitoMessageDispatcher messageDispatcher = inlineMock(CognitoMessageDispatcher.class);
-        when(verificationCodeService.issue(any(), any(),
+        when(verificationCodeService.issueTracked(any(), any(),
                 eq(VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION), any()))
-                .thenReturn("123456");
+                .thenReturn(new VerificationCodeService.IssuedCode("123456", "test-hash"));
 
         CognitoService serviceWithVerification = new CognitoService(
                 new InMemoryStorage<>(),
@@ -2534,9 +2542,9 @@ class CognitoServiceTest {
     void verificationCodeForRequiredEmailUpdateUsesPendingDestination() {
         VerificationCodeService verificationCodeService = inlineMock(VerificationCodeService.class);
         CognitoMessageDispatcher messageDispatcher = inlineMock(CognitoMessageDispatcher.class);
-        when(verificationCodeService.issue(any(), any(),
+        when(verificationCodeService.issueTracked(any(), any(),
                 eq(VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION), any()))
-                .thenReturn("123456");
+                .thenReturn(new VerificationCodeService.IssuedCode("123456", "test-hash"));
 
         CognitoService serviceWithVerification = new CognitoService(
                 new InMemoryStorage<>(),
@@ -2606,11 +2614,11 @@ class CognitoServiceTest {
                 "email", "admin@example.com"));
 
         CognitoUser updated = fixture.service().adminGetUser(fixture.pool().getId(), "alice");
-        assertEquals("admin@example.com", updated.getAttributes().get("email"));
+        assertEquals("old@example.com", updated.getAttributes().get("email"));
+        assertEquals("admin@example.com", updated.getPendingAttributes().get("email"));
         assertEquals("updated", updated.getAttributes().get("custom:note"));
-        assertFalse(updated.getPendingAttributes().containsKey("email"));
         assertEquals("+12025550101", updated.getPendingAttributes().get("phone_number"));
-        verify(verificationCodeService, times(2)).invalidatePrevious(
+        verify(verificationCodeService).invalidatePrevious(
                 fixture.pool().getId(), "alice",
                 VerificationCode.Purpose.EMAIL_ATTRIBUTE_VERIFICATION);
         verify(verificationCodeService, never()).invalidatePrevious(
@@ -2676,6 +2684,9 @@ class CognitoServiceTest {
             VerificationCodeService verificationCodeService,
             CognitoMessageDispatcher messageDispatcher) {
         when(verificationCodeService.issue(any(), any(), any(), any())).thenReturn("123456");
+        when(verificationCodeService.issueTracked(any(), any(), any(), any()))
+                .thenReturn(new VerificationCodeService.IssuedCode("123456", "test-hash"));
+        when(verificationCodeService.hasUsableCode(any(), any(), any())).thenReturn(true);
         CognitoService serviceWithVerification = new CognitoService(
                 new InMemoryStorage<>(),
                 new InMemoryStorage<>(),
@@ -4948,7 +4959,7 @@ class CognitoServiceTest {
         // REFRESH_TOKEN_AUTH path never called the check at all, so this minted fresh tokens.
         long issuedAtMillis = System.currentTimeMillis() - Duration.ofMinutes(61).toMillis();
         String raw = pool.getId() + "|alice|" + client.getClientId() + "|" + issuedAtMillis + "|"
-                + java.util.UUID.randomUUID();
+                + UUID.randomUUID();
         String expiredRefreshToken = signRawRefreshToken(pool, raw);
 
         AwsException exception = assertThrows(AwsException.class, () ->
@@ -4990,7 +5001,7 @@ class CognitoServiceTest {
 
         // Attacker who knows the pool id, client id, and a valid username, but not the pool's secret.
         String raw = pool.getId() + "|alice|" + client.getClientId() + "|"
-                + System.currentTimeMillis() + "|" + java.util.UUID.randomUUID();
+                + System.currentTimeMillis() + "|" + UUID.randomUUID();
         String forgedToken = Base64.getEncoder().withoutPadding().encodeToString(raw.getBytes(StandardCharsets.UTF_8));
 
         AwsException exception = assertThrows(AwsException.class, () ->
@@ -5063,7 +5074,7 @@ class CognitoServiceTest {
 
         // Validly signed, but with a non-numeric issued-at field, must not throw an
         // uncaught NumberFormatException — it should be rejected as an invalid token.
-        String raw = pool.getId() + "|alice|" + client.getClientId() + "|not-a-number|" + java.util.UUID.randomUUID();
+        String raw = pool.getId() + "|alice|" + client.getClientId() + "|not-a-number|" + UUID.randomUUID();
         String malformedToken = signRawRefreshToken(pool, raw);
 
         AwsException exception = assertThrows(AwsException.class, () ->
@@ -5365,7 +5376,7 @@ class CognitoServiceTest {
 
         AwsException ex = assertThrows(AwsException.class, () ->
                 service.initiateAuth(client.getClientId(), "CUSTOM_AUTH",
-                        Map.of("USERNAME", "alice", "CHALLENGE_NAME", "SRP_A")));
+                        Map.of("USERNAME", "alice", "CHALLENGE_NAME", "SRP_A", "SRP_A", "ABCDEF1234567890")));
         assertEquals("InvalidUserPoolConfigurationException", ex.getErrorCode());
     }
 
@@ -5480,8 +5491,8 @@ class CognitoServiceTest {
         UserPool pool = createPoolAndUser();
         UserPoolClient client = openClient(service, pool.getId(), "c", true);
 
-        javax.crypto.Mac mac = javax.crypto.Mac.getInstance("HmacSHA256");
-        mac.init(new javax.crypto.spec.SecretKeySpec(
+        Mac mac = Mac.getInstance("HmacSHA256");
+        mac.init(new SecretKeySpec(
                 client.getClientSecret().getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
         String secretHash = Base64.getEncoder().encodeToString(
                 mac.doFinal(("alice" + client.getClientId()).getBytes(StandardCharsets.UTF_8)));
@@ -5642,7 +5653,7 @@ class CognitoServiceTest {
 
         IdentityProvider held = service.describeIdentityProvider(pool.getId(), "CopyOidc");
 
-        Map<String, String> updated = new java.util.LinkedHashMap<>(details);
+        Map<String, String> updated = new LinkedHashMap<>(details);
         updated.put("client_id", "after");
         service.updateIdentityProvider(pool.getId(), "CopyOidc", updated, null, null);
 
@@ -5968,7 +5979,7 @@ class CognitoServiceTest {
 
     private static boolean isUuid(String value) {
         try {
-            java.util.UUID.fromString(value);
+            UUID.fromString(value);
             return true;
         } catch (RuntimeException e) {
             return false;

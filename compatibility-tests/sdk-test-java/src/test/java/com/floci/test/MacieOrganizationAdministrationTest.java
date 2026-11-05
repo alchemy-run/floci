@@ -2,13 +2,17 @@ package com.floci.test;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.services.macie2.Macie2Client;
 import software.amazon.awssdk.services.macie2.model.CreateMemberResponse;
+
+import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 @DisplayName("Macie organization administration")
+@ResourceLock("organizations")
 class MacieOrganizationAdministrationTest {
     private static final String MANAGEMENT_ACCOUNT = "222222222222";
     private static final String ADMIN_ACCOUNT = "111111111111";
@@ -38,7 +42,7 @@ class MacieOrganizationAdministrationTest {
 
             CreateMemberResponse member = administrator.createMember(request -> request
                     .account(account -> account.accountId(MEMBER_ACCOUNT).email("member@example.com"))
-                    .tags(java.util.Map.of("team", "security")));
+                    .tags(Map.of("team", "security")));
             assertThat(member.arn())
                     .isEqualTo(TestFixtures.arn("macie2", ADMIN_ACCOUNT, "member/" + MEMBER_ACCOUNT));
             assertThat(administrator.listMembers(request -> request.onlyAssociated("true")).members())

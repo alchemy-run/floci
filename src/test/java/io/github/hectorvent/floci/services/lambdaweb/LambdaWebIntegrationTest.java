@@ -56,7 +56,7 @@ class LambdaWebIntegrationTest {
     @BeforeAll
     void seedCode() {
         LambdaWebRoles.trustLambda(iamService, ROLE);
-        s3Service.createBucket(BUCKET, "us-east-1");
+        LambdaWebCodeBuckets.create(s3Service, BUCKET);
         s3Service.putObject(BUCKET, KEY, LambdaWebZips.indexJs(""), "application/zip", Map.of());
     }
 
@@ -364,6 +364,21 @@ class LambdaWebIntegrationTest {
                 .then().statusCode(404)
                 .header("X-Amzn-Errortype", "ResourceNotFoundException")
                 .body("message", equalTo("The endpoint global does not exist."));
+
+        // The regional domains of a PerRegion endpoint share one id, and the home one leads.
+        String home = given().contentType("application/json")
+                .body("{\"endpointName\": \"per\", \"endpointType\": \"PerRegion\", \"regions\": [\"us-west-2\"],"
+                        + " \"authType\": \"ApplicationManaged\","
+                        + " \"revisionWeights\": [{\"revisionId\": \"" + revision1 + "\", \"weight\": 100}]}")
+                .when().put(endpoints)
+                .then().statusCode(202)
+                .body("domainName", matchesPattern("[a-z0-9]{16}\\.001\\.lambda-web\\.us-east-1\\..+"))
+                .extract().path("domainName");
+        given().when().get(endpoints + "/per")
+                .then().statusCode(200)
+                .body("regionalEndpoints.us-east-1.domainName", equalTo(home))
+                .body("regionalEndpoints.us-west-2.domainName", equalTo(home.replace(".us-east-1.", ".us-west-2.")));
+        given().when().delete(endpoints + "/per").then().statusCode(204);
     }
 
     @Test
@@ -440,6 +455,31 @@ class LambdaWebIntegrationTest {
                 .body("message", equalTo("The specified S3 object does not exist: s3://" + BUCKET
                         + "/missing.zip. Verify the object exists in the bucket."));
 
+        s3Service.putObject(BUCKET, "deleted.zip", LambdaWebZips.indexJs(""), "application/zip", Map.of());
+        String marker = s3Service.deleteObject(BUCKET, "deleted.zip").getVersionId();
+        given().contentType("application/json")
+                .body("""
+                        {"buildConfig": {"codeConfig": {"s3Object": {"bucket": "%s", "key": "deleted.zip"}},
+                                         "runtimeConfig": {"runtime": "nodejs24.x"}},
+                         "serviceConfig": {"executionRoleArn": "%s"}}
+                        """.formatted(BUCKET, ROLE))
+                .when().post(revisions)
+                .then().statusCode(400)
+                .header("X-Amzn-Errortype", "ValidationException")
+                .body("message", equalTo("The latest version of the S3 object is a delete marker. Upload a new object"
+                        + " version or pass an explicit S3ObjectVersion."));
+        given().contentType("application/json")
+                .body("""
+                        {"buildConfig": {"codeConfig": {"s3Object": {"bucket": "%s", "key": "deleted.zip",
+                                                                     "versionId": "%s"}},
+                                         "runtimeConfig": {"runtime": "nodejs24.x"}},
+                         "serviceConfig": {"executionRoleArn": "%s"}}
+                        """.formatted(BUCKET, marker, ROLE))
+                .when().post(revisions)
+                .then().statusCode(500)
+                .header("X-Amzn-Errortype", "InternalServerException")
+                .body(equalTo("{}"));
+
         given().contentType("application/json")
                 .body("""
                         {"buildConfig": %s, "serviceConfig": {"executionRoleArn": "%s",
@@ -505,8 +545,31 @@ class LambdaWebIntegrationTest {
                 .then().statusCode(400)
                 .body("message", equalTo("Lambda blocked the creation of this policy because it would grant public"
                         + " access to your function."));
+        String federatedPolicy = publicPolicy.replace("\"*\",\"Action\"",
+                "{\"Federated\":\"cognito-identity.amazonaws.com\"},\"Action\"");
+        given().contentType("application/json").body(Map.of("Policy", federatedPolicy))
+                .when().put(policyPath)
+                .then().statusCode(400)
+                .body("message", equalTo("Lambda blocked the creation of this policy because it would grant public"
+                        + " access to your function."));
+        given().contentType("application/json")
+                .body(Map.of("Policy", publicPolicy.replace(ARN, "arn:aws:lambda:*:*:web-function/" + FN)))
+                .when().put(policyPath)
+                .then().statusCode(400)
+                .body("message", equalTo("Lambda blocked the creation of this policy because it would grant public"
+                        + " access to your function."));
+        given().contentType("application/json")
+                .body(Map.of("Policy", publicPolicy.replace("\"lambda:InvokeWebFunctionEndpoint\"", "\"*\"")))
+                .when().put(policyPath)
+                .then().statusCode(400)
+                .body("message", equalTo("Lambda blocked the creation of this policy because it would grant public"
+                        + " access to your function."));
+        given().contentType("application/json").body(Map.of("Policy", publicPolicy.replace("\"Allow\"", "\"Maybe\"")))
+                .when().put(policyPath)
+                .then().statusCode(400)
+                .body("message", equalTo("Invalid effect: Maybe"));
 
-        String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+        String policy ="{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
                 + "{\"AWS\":\"arn:aws:iam::000000000000:root\"},\"Action\":\"lambda:InvokeWebFunctionEndpoint\","
                 + "\"Resource\":\"" + ARN + "/endpoint/*\"}]}";
         String revisionId = given().contentType("application/json").body(Map.of("Policy", policy))
@@ -530,6 +593,48 @@ class LambdaWebIntegrationTest {
         given().when().delete(policyPath)
                 .then().statusCode(404)
                 .body("message", equalTo("The function does not have a policy."));
+
+        // Lambda writes the policy back in its own form, and GetResourcePolicy names an account by its root.
+        String written = "{\"Statement\":{\"Resource\":[\"" + ARN + "/endpoint/*\"],\"Principal\":{\"AWS\":"
+                + "\"000000000000\"},\"Effect\":\"allow\",\"Action\":\"lambda:InvokeWebFunctionEndpoint\"}}";
+        String kept = "{\"Version\":\"2008-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"AWS\":"
+                + "\"000000000000\"},\"Action\":\"lambda:InvokeWebFunctionEndpoint\",\"Resource\":\"" + ARN
+                + "/endpoint/*\"}]}";
+        given().contentType("application/json").body(Map.of("Policy", written))
+                .when().put(policyPath)
+                .then().statusCode(200)
+                .body("Policy", equalTo(kept));
+        given().when().get(policyPath)
+                .then().statusCode(200)
+                .body("Policy", equalTo(kept.replace("\"000000000000\"", "\"arn:aws:iam::000000000000:root\"")));
+        given().when().delete(policyPath)
+                .then().statusCode(204);
+
+        // The roles a policy names have to exist, under the path IAM holds them.
+        String reader = "web-it-reader-" + Long.toString(System.nanoTime(), 36);
+        iamService.createRole(reader, "/team/", "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
+                + "\"Principal\":{\"Service\":\"lambda.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}", null, 3600, null);
+        String named = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"AWS\":\"%s\"},\"Action\":\"lambda:InvokeWebFunctionEndpoint\",\"Resource\":\"" + ARN
+                + "/endpoint/*\"}]}";
+        given().contentType("application/json")
+                .body(Map.of("Policy", named.formatted("arn:aws:iam::000000000000:role/" + reader)))
+                .when().put(policyPath)
+                .then().statusCode(400)
+                .body("message", equalTo("The principal arn provided does not match the actual principal arn."
+                        + " Please check your input and try again."));
+        given().contentType("application/json")
+                .body(Map.of("Policy", named.formatted("arn:aws:iam::000000000000:role/web-it-missing")))
+                .when().put(policyPath)
+                .then().statusCode(400)
+                .body("message", equalTo("The provided principal was invalid. Please check the principal and try again."));
+        given().contentType("application/json")
+                .body(Map.of("Policy", named.formatted("arn:aws:iam::000000000000:role/team/" + reader)))
+                .when().put(policyPath)
+                .then().statusCode(200);
+        given().when().delete(policyPath)
+                .then().statusCode(204);
+        iamService.deleteRole(reader);
     }
 
     @Test
@@ -571,6 +676,18 @@ class LambdaWebIntegrationTest {
                 .when().put(BASE + "/web-functions")
                 .then().statusCode(409)
                 .body("message", equalTo("The function " + ARN + " already exists."));
+        given().contentType("application/json")
+                .header("Authorization", "AWS4-HMAC-SHA256 Credential=test/20260101/us-west-2/lambda/aws4_request")
+                .body("""
+                        {"functionName": "%s",
+                         "revisionConfig": {"buildConfig": %s, "serviceConfig": {"executionRoleArn": "%s"}},
+                         "endpointConfig": {"endpointName": "dev", "endpointType": "HomeRegion",
+                                            "authType": "ApplicationManaged"}}
+                        """.formatted(FN, BUILD.replace("nodejs24.x", "nodejs22.x"), ROLE))
+                .when().put(BASE + "/web-functions")
+                .then().statusCode(409)
+                .body("message", equalTo("A function named " + FN + " already exists in the account. Function names"
+                        + " must be unique across all regions in an account."));
         given().when().get(BASE + "/web-functions/does-not-exist")
                 .then().statusCode(404)
                 .body("message", equalTo("The function arn:aws:lambda:us-east-1:000000000000:web-function/does-not-exist"
@@ -723,5 +840,114 @@ class LambdaWebIntegrationTest {
                         + " of 536870912 bytes"));
 
         given().when().delete(BASE + "/web-functions/" + fn).then().statusCode(204);
+    }
+
+    @Test
+    @Order(13)
+    void anActiveRevisionPastFiftyDeletesTheOldestUnusedOne() {
+        String fn = FN + "-many";
+        String first = given().contentType("application/json")
+                .body("""
+                        {"functionName": "%s",
+                         "revisionConfig": {"buildConfig": %s, "serviceConfig": {"executionRoleArn": "%s"}},
+                         "endpointConfig": {"endpointName": "dev", "endpointType": "HomeRegion",
+                                            "authType": "ApplicationManaged", "autoDeploymentMode": "LatestRevision"}}
+                        """.formatted(fn, BUILD, ROLE))
+                .when().put(BASE + "/web-functions")
+                .then().statusCode(202)
+                .extract().path("revision.revisionId");
+        String revision = """
+                {"buildConfig": %s, "serviceConfig": {"executionRoleArn": "%s"}}
+                """.formatted(BUILD, ROLE);
+        for (int i = 0; i < 50; i++) {
+            given().contentType("application/json").body(revision)
+                    .when().post(BASE + "/web-functions/" + fn + "/revisions")
+                    .then().statusCode(202);
+        }
+
+        given().contentType("application/json").body("{}")
+                .when().post(BASE + "/web-functions/" + fn + "/list-revisions")
+                .then().statusCode(200)
+                .body("revisions", hasSize(50))
+                .body("nextToken", nullValue());
+        given().when().get(BASE + "/web-functions/" + fn + "/revisions/" + first)
+                .then().statusCode(404)
+                .header("X-Amzn-Errortype", "ResourceNotFoundException")
+                .body("message", equalTo("The revision " + first + " does not exist."));
+
+        given().when().delete(BASE + "/web-functions/" + fn).then().statusCode(204);
+    }
+
+    @Test
+    @Order(14)
+    void anEgressConnectorIsAWebFunctionVersionOnAHomeRegionEndpoint() {
+        String fn = FN + "-connector";
+        String connectorArn = given().contentType("application/json")
+                .body("""
+                        {"Name": "web-it-connector", "OperatorRole": "arn:aws:iam::000000000000:role/web-it-operator",
+                         "ClientToken": "web-it-connector",
+                         "Configuration": {"VpcEgressConfiguration": {"SubnetIds": ["subnet-0web0000000000001"],
+                             "SecurityGroupIds": ["sg-0web0000000000001"], "NetworkProtocol": "IPv4",
+                             "AssociatedComputeResourceTypes": ["WebFunction"]}}}
+                        """)
+                .when().post("/2026-04-04/network-connectors")
+                .then().statusCode(202)
+                .extract().path("Arn");
+        String revision = given().contentType("application/json")
+                .body("""
+                        {"functionName": "%s",
+                         "revisionConfig": {"buildConfig": %s,
+                                            "serviceConfig": {"executionRoleArn": "%s", "egressNetworkConnectorArn": "%s:1"}},
+                         "endpointConfig": {"endpointName": "dev", "endpointType": "HomeRegion",
+                                            "authType": "ApplicationManaged"}}
+                        """.formatted(fn, BUILD, ROLE, connectorArn))
+                .when().put(BASE + "/web-functions")
+                .then().statusCode(202)
+                .extract().path("revision.revisionId");
+        given().when().get(BASE + "/web-functions/" + fn + "/revisions/" + revision)
+                .then().statusCode(200)
+                .body("serviceConfig.egressNetworkConnectorArn", equalTo(connectorArn + ":1"));
+
+        String revisions = BASE + "/web-functions/" + fn + "/revisions";
+        given().contentType("application/json")
+                .body("""
+                        {"buildConfig": %s, "serviceConfig": {"executionRoleArn": "%s", "egressNetworkConnectorArn": "%s:2"}}
+                        """.formatted(BUILD, ROLE, connectorArn))
+                .when().post(revisions)
+                .then().statusCode(404)
+                .header("X-Amzn-Errortype", "ResourceNotFoundException")
+                .body("message", equalTo("The egress network connector " + connectorArn + ":2 does not exist."));
+        given().contentType("application/json")
+                .body("""
+                        {"buildConfig": %s,
+                         "serviceConfig": {"executionRoleArn": "%s", "egressNetworkConnectorArn": "%s:9223372036854775808"}}
+                        """.formatted(BUILD, ROLE, connectorArn))
+                .when().post(revisions)
+                .then().statusCode(500)
+                .header("X-Amzn-Errortype", "InternalServerException")
+                .body(equalTo("{}"));
+        given().contentType("application/json")
+                .body("""
+                        {"buildConfig": %s, "serviceConfig": {"executionRoleArn": "%s", "egressNetworkConnectorArn": "%s:1"}}
+                        """.formatted(BUILD, ROLE, connectorArn.replace("000000000000", "111122223333")))
+                .when().post(revisions)
+                .then().statusCode(403)
+                .header("X-Amzn-Errortype", "AccessDeniedException")
+                .body("Message", equalTo("Cross-account pass lambda-network-connector is not allowed."));
+
+        given().contentType("application/json")
+                .body("""
+                        {"endpointName": "pr", "endpointType": "PerRegion", "authType": "ApplicationManaged",
+                         "regions": ["us-west-2"], "revisionWeights": [{"revisionId": "%s", "weight": 100}]}
+                        """.formatted(revision))
+                .when().put(BASE + "/web-functions/" + fn + "/endpoints")
+                .then().statusCode(400)
+                .header("X-Amzn-Errortype", "ValidationException")
+                .body("message", equalTo("The revision " + revision + " has an egressNetworkConnectorArn configured"
+                        + " and cannot be used by a PerRegion endpoint. Only HomeRegion endpoints support revisions"
+                        + " with an egressNetworkConnectorArn configured."));
+
+        given().when().delete(BASE + "/web-functions/" + fn).then().statusCode(204);
+        given().when().delete("/2026-04-04/network-connectors/" + connectorArn).then().statusCode(202);
     }
 }

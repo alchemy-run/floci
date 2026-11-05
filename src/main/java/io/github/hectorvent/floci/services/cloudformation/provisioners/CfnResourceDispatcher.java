@@ -58,6 +58,13 @@ public class CfnResourceDispatcher {
         return registry.isCustomResourceType(resourceType);
     }
 
+    /** Resolve an attribute using its resource owner's declared type. */
+    public JsonNode attributeValue(String resourceType, String attributeName, String value) {
+        return registry.forType(resourceType)
+                .map(owner -> owner.attributeValue(resourceType, attributeName, value))
+                .orElseGet(() -> objectMapper.getNodeFactory().textNode(value));
+    }
+
     /**
      * Provisions a single resource and returns the populated StackResource (physical id and
      * attributes set).
@@ -372,9 +379,10 @@ public class CfnResourceDispatcher {
     }
 
     /**
-     * Carries ownership discovered by a failed update onto the last known-good resource metadata
-     * that CloudFormation restores. Only additive cleanup tracking belongs here; normal attempted
-     * attributes must not overwrite the committed resource state.
+     * Carries ownership discovered by a failed update, and the snapshot of an undo it could not
+     * complete, onto the last known-good resource metadata that CloudFormation restores. Only
+     * additive tracking belongs here; normal attempted attributes must not overwrite the committed
+     * resource state.
      */
     public void mergeFailedUpdateResourceTracking(StackResource previous, StackResource attempted) {
         // Any provisioner using ReplacementCleanup: an entity the failed attempt created and could

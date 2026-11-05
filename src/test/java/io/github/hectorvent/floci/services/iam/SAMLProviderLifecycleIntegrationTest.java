@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.iam;
 
+import io.github.hectorvent.floci.testing.SamlMetadata;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.Test;
@@ -8,6 +9,7 @@ import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -21,11 +23,7 @@ class SAMLProviderLifecycleIntegrationTest {
             "AWS4-HMAC-SHA256 Credential=test/20260227/us-east-1/iam/aws4_request";
 
     private static String metadataFor(String entityId, String certBase64) {
-        return "<md:EntityDescriptor xmlns:md=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\""
-                + entityId + "\"><md:IDPSSODescriptor><md:KeyDescriptor use=\"signing\">"
-                + "<ds:KeyInfo xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:X509Data>"
-                + "<ds:X509Certificate>" + certBase64 + "</ds:X509Certificate></ds:X509Data></ds:KeyInfo>"
-                + "</md:KeyDescriptor></md:IDPSSODescriptor></md:EntityDescriptor>";
+        return SamlMetadata.forEntity(entityId, certBase64);
     }
 
     private static RequestSpecification iam(String action) {
@@ -60,6 +58,58 @@ class SAMLProviderLifecycleIntegrationTest {
             .body(not(containsString("https://idp.example.test/original")));
     }
 
+    /**
+     * An IdP's own metadata as uploaded: a default namespace rather than an {@code md:} prefix,
+     * an IDPSSODescriptor with SingleSignOnService endpoints, whitespace, and a {@code &amp;} in
+     * a URL. AWS returns the document as uploaded, so it must read back character for character.
+     */
+    private static String idpMetadata(String entityId, String certBase64) {
+        return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                + "<EntityDescriptor xmlns=\"urn:oasis:names:tc:SAML:2.0:metadata\" entityID=\"" + entityId + "\">\n"
+                + "  <IDPSSODescriptor WantAuthnRequestsSigned=\"false\""
+                + " protocolSupportEnumeration=\"urn:oasis:names:tc:SAML:2.0:protocol\">\n"
+                + "    <KeyDescriptor use=\"signing\">\n"
+                + "      <ds:KeyInfo xmlns:ds=\"http://www.w3.org/2000/09/xmldsig#\"><ds:X509Data>"
+                + "<ds:X509Certificate>" + certBase64 + "</ds:X509Certificate></ds:X509Data></ds:KeyInfo>\n"
+                + "    </KeyDescriptor>\n"
+                + "    <NameIDFormat>urn:oasis:names:tc:SAML:1.1:nameid-format:emailAddress</NameIDFormat>\n"
+                + "    <SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-Redirect\""
+                + " Location=\"https://idp.example.test/sso?app=aws&amp;mode=redirect\"/>\n"
+                + "    <SingleSignOnService Binding=\"urn:oasis:names:tc:SAML:2.0:bindings:HTTP-POST\""
+                + " Location=\"https://idp.example.test/sso?app=aws&amp;mode=post\"/>\n"
+                + "  </IDPSSODescriptor>\n"
+                + "  <!-- " + "x".repeat(SamlMetadata.MINIMUM_LENGTH) + " -->\n"
+                + "</EntityDescriptor>\n";
+    }
+
+    private static String getMetadataDocument(String arn) {
+        return iam("GetSAMLProvider").formParam("SAMLProviderArn", arn)
+            .when().post("/").then().statusCode(200)
+            .extract().xmlPath()
+            .getString("GetSAMLProviderResponse.GetSAMLProviderResult.SAMLMetadataDocument");
+    }
+
+    @Test
+    void getSamlProviderReturnsTheMetadataDocumentAsUploadedAfterCreateAndUpdate() {
+        String name = "verbatim-saml-" + System.nanoTime();
+        String arn = "arn:aws:iam::000000000000:saml-provider/" + name;
+        String original = idpMetadata("https://idp.example.test/verbatim", "b3JpZ2luYWw=");
+        iam("CreateSAMLProvider")
+            .formParam("Name", name)
+            .formParam("SAMLMetadataDocument", original)
+        .when().post("/").then().statusCode(200);
+
+        assertEquals(original, getMetadataDocument(arn));
+
+        String updated = idpMetadata("https://idp.example.test/verbatim-updated", "dXBkYXRlZA==");
+        iam("UpdateSAMLProvider")
+            .formParam("SAMLProviderArn", arn)
+            .formParam("SAMLMetadataDocument", updated)
+        .when().post("/").then().statusCode(200);
+
+        assertEquals(updated, getMetadataDocument(arn));
+    }
+
     @Test
     void updateSamlProviderWithNoMetadataLeavesTheExistingDocumentUnchanged() {
         String name = "update-noop-saml-" + System.nanoTime();
@@ -78,19 +128,25 @@ class SAMLProviderLifecycleIntegrationTest {
      * An omitted SAMLMetadataDocument is a no-op (above), but an explicitly empty one is
      * invalid input, the same as CreateSAMLProvider already rejects it as: the two are
      * distinguishable at the wire level (parameter absent vs. present with an empty value),
-     * and only the former should be treated as "nothing to update."
+     * and only the former should be treated as "nothing to update." An empty one is refused ahead
+     * of that by the document's own minimum length.
      */
     @Test
     void updateSamlProviderWithAnExplicitlyEmptyMetadataDocumentReturnsInvalidInput() {
         String name = "update-empty-metadata-saml-" + System.nanoTime();
         String arn = createProvider(name, "https://idp.example.test/not-emptied", "bm90ZW1wdGllZA==");
 
+        // The document declares a minimum of 1000 characters, so an empty one never reaches the
+        // parse that would call it invalid input: it is the constraint that refuses it.
         iam("UpdateSAMLProvider")
             .formParam("SAMLProviderArn", arn)
             .formParam("SAMLMetadataDocument", "")
         .when().post("/").then()
             .statusCode(400)
-            .body("ErrorResponse.Error.Code", equalTo("InvalidInput"));
+            .body("ErrorResponse.Error.Code", equalTo("ValidationError"))
+            .body("ErrorResponse.Error.Message", equalTo("1 validation error detected: Value at"
+                    + " 'sAMLMetadataDocument' failed to satisfy constraint: Member must have"
+                    + " length greater than or equal to 1000"));
 
         iam("GetSAMLProvider").formParam("SAMLProviderArn", arn)
         .when().post("/").then()
@@ -103,9 +159,11 @@ class SAMLProviderLifecycleIntegrationTest {
         String name = "update-bad-metadata-saml-" + System.nanoTime();
         String arn = createProvider(name, "https://idp.example.test/ok", "b2s=");
 
+        // Long enough to clear the document's own minimum, so what refuses it is the parse.
         iam("UpdateSAMLProvider")
             .formParam("SAMLProviderArn", arn)
-            .formParam("SAMLMetadataDocument", "<not-a-valid-saml-document/>")
+            .formParam("SAMLMetadataDocument",
+                    "<not-a-valid-saml-document/>" + "<!-- " + "x".repeat(1000) + " -->")
         .when().post("/").then()
             .statusCode(400)
             .body("ErrorResponse.Error.Code", equalTo("InvalidInput"));

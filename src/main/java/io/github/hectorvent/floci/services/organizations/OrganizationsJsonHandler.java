@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.EpochSeconds;
 import io.github.hectorvent.floci.core.common.JsonErrorResponseUtils;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
@@ -249,7 +250,8 @@ public class OrganizationsJsonHandler {
 
     private Response createAccount(JsonNode request, String caller, boolean govCloud) {
         CreateAccountStatus status = service.createAccount(caller,
-                text(request, "Email"), text(request, "AccountName"), parseTags(request.path("Tags")), govCloud);
+                text(request, "Email"), text(request, "AccountName"), parseTags(request.path("Tags")),
+                text(request, "RoleName"), govCloud);
         ObjectNode response = objectMapper.createObjectNode();
         response.set("CreateAccountStatus", createAccountStatusNode(status));
         return Response.ok(response).build();
@@ -783,7 +785,7 @@ public class OrganizationsJsonHandler {
 
     private void putTimestamp(ObjectNode node, String field, Instant timestamp) {
         if (timestamp != null) {
-            node.put(field, timestamp.toEpochMilli() / 1000.0);
+            node.put(field, EpochSeconds.fromInstant(timestamp));
         }
     }
 

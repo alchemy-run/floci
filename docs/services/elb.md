@@ -2,7 +2,7 @@
 
 **Protocol:** Query (XML) — `POST http://localhost:4566/` with `Action=` parameter
 
-Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB) through the ELBv2 management API. The control plane is AWS SDK / CLI / Terraform compatible, and HTTP and HTTPS listeners can forward to registered instance targets using the target's reachable local address.
+Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB) through the ELBv2 management API. The control plane is AWS SDK / CLI / Terraform compatible. HTTP, HTTPS, and TCP listeners can forward to registered instance and IP targets using the target's reachable local address.
 
 > Classic (v1) Elastic Load Balancing is a **different API** served from the same endpoint host —
 > see [ELB Classic (v1)](elb-classic.md). Requests are routed by their `Version` parameter:
@@ -47,6 +47,22 @@ Floci supports Application Load Balancers (ALB) and Network Load Balancers (NLB)
 ### Listeners
 
 HTTPS listeners require a default certificate. Supply one when creating a listener or changing an HTTP listener to HTTPS; an omitted certificate list on an existing HTTPS listener keeps its default.
+
+Listener responses omit `Certificates` when the listener has none. Configured certificates
+remain present in create, describe and modify responses.
+
+Creating an HTTPS or TLS listener without `SslPolicy` selects `ELBSecurityPolicy-2016-08`,
+matching AWS's default for API, CLI and CloudFormation creation. An explicit policy
+is preserved, and omitting the policy on subsequent modifications retains its current
+value. These policies remain present in create, describe and modify responses;
+listeners with no policy, such as HTTP listeners, omit `SslPolicy`.
+
+Changing HTTPS to HTTP or TLS to TCP removes the SSL policy and certificate configuration.
+Changing HTTP to HTTPS or TCP to TLS requires an explicit SSL policy and default certificate;
+missing either rejects the modification without changing the listener. Changing other
+properties without changing protocol retains the existing security settings.
+
+Gateway Load Balancer listeners require omitted `Port` and `Protocol` fields on both create and modify requests. Their portless control-plane configuration does not provide GENEVE packet forwarding.
 
 | Action | Description |
 |--------|-------------|
@@ -98,18 +114,50 @@ HTTPS listeners require a default certificate. Supply one when creating a listen
 
 ## Behavior Notes
 
+- `DescribeLoadBalancers`, `DescribeTargetGroups`, `DescribeListeners`, `DescribeRules`,
+  `DescribeAccountLimits` and `DescribeListenerCertificates` return their complete matching
+  results without a `NextMarker`. These handlers do not yet split results using `PageSize`
+  or resume from `Marker`.
+- HTTP and HTTPS target groups use their configured protocol for both application requests
+  and WebSocket upgrades. An HTTPS target requires a TLS handshake; a failed handshake
+  never falls back to plaintext. Backend certificates may be self-signed or expired, as on
+  AWS ALB. This trust setting applies only to the target clients and health checks.
+- Backend connection and TLS handshake errors return 502 for HTTP requests and WebSocket
+  upgrades. Connection and handshake timeouts use ten-second deadlines and return 504.
+- HTTP and HTTPS health checks use their own configured protocol and port, independently
+  of the target's application protocol. HTTPS health checks require a TLS handshake,
+  preserve the configured success-code matcher, and do not follow redirects.
+- One health-check deadline covers connection, TLS handshake and response headers.
+  Partial bytes do not renew it. Expiry closes the probe and counts toward `Target.Timeout`.
+- Health probes connect directly without JVM proxy settings. A timed-out lookup keeps
+  its target and shared worker slot until the underlying work actually exits. This bounds
+  background work even when name resolution ignores interruption.
+- Backend TLS uses the runtime's supported protocols and ciphers. Floci does not reproduce
+  AWS ALB's backend security-policy selection from the frontend listener policy.
+- ALB listeners share the emulator's network address. Stored subnet and security-group
+  associations do not create a load-balancer VPC network boundary or enforce frontend
+  ingress and backend egress rules. These listeners cannot yet reproduce NAT allowlisting failures.
+- TCP listeners relay bytes bidirectionally without parsing HTTP or terminating TLS. TLS passthrough requires a TCP listener, with certificates configured at the target, not at the listener. Targets are selected per connection using round-robin among healthy targets, falling back to registered targets when none are healthy. The default TCP idle timeout is 350 seconds, configurable via the `tcp.idle_timeout.seconds` listener attribute (60 to 6000 seconds).
+- TCP listeners require a dedicated local port. Floci still shares its address across load balancers, so a second listener on an in-use TCP port registers successfully and logs a warning, but serves no traffic until the listener holding the port is deleted or moved, and ports reserved by Floci remain unavailable. Address isolation and TLS-terminating NLB listeners are not provided by the TCP proxy.
+- An asynchronous socket-bind failure retains the admitted listeners and retries while they
+  remain configured. Retry delays grow from 100 milliseconds to five seconds; a successful
+  bind resets the delay. Deleting the last listener or stopping Floci cancels its retry.
+  An external process holding the port must still release it before Floci can serve traffic.
 - HTTPS listeners terminate TLS using the configured ACM or IAM server certificates, with SNI certificate selection. When several load balancers share one local HTTPS port, clients must send SNI to identify the certificate they need; a connection without SNI cannot identify a particular load balancer before the TLS handshake.
-- ACM certificates must be issued before attaching them. Reimporting an attached ACM certificate refreshes subsequent TLS connections; existing connections keep their negotiated certificate. ACM deletion and revocation are refused while a listener still references the certificate.
+- ACM certificates must be issued before attaching them. Reimporting an attached ACM certificate refreshes subsequent full TLS handshakes; existing connections keep their negotiated certificate. Reload does not invalidate TLS session caches: a resumed session can retain its previously authenticated certificate after replacement or removal until the session expires or is invalidated. ACM deletion and revocation are refused while a listener still references the certificate.
+- Certificate replacement keeps the previous key material available to new handshakes while the replacement loads. A failed reload leaves the previous certificate active.
 - Unusable saved listeners are retained for correction and logged individually so other saved listeners can start.
-- Listeners sharing a local port must use the same protocol. Requests select a load balancer by its DNS name, a hostname declared by its rules, or a certificate hostname; ambiguous hostnames return 502.
+- HTTP or HTTPS listeners sharing a local port must use the same protocol. Requests select a load balancer by its DNS name, a hostname declared by its rules, or a certificate hostname; ambiguous hostnames return 502. TCP never serves a port alongside either protocol; see the TCP note above.
 - Load balancer, target group, listener, rule, and tag state is persisted through Floci storage and rebuilt on service startup.
 - Load balancers are created in `active` state.
 - `CreateLoadBalancer` takes `Subnets` or `SubnetMappings` for every load balancer type, and both together are refused with `ValidationError`. An Application Load Balancer takes at least two: with one or none it returns `ValidationError` `At least two subnets in two different Availability Zones must be specified` and creates nothing. The count comes before any subnet is looked up, as on AWS, so one subnet that does not exist gets that error too. A Network or Gateway Load Balancer with neither returns `ValidationError` `At least one subnet must be specified`. CloudFormation refuses such an `AWS::ElasticLoadBalancingV2::LoadBalancer` the same way when it creates or replaces the balancer; an update that keeps the balancer and names no subnets leaves it on its subnets.
 - `SetSubnets`, like `CreateLoadBalancer`, takes `Subnets` or `SubnetMappings`, and both together are refused with `ValidationError`. With neither it returns the same `ValidationError` as `CreateLoadBalancer` for the balancer's type, `At least two subnets in two different Availability Zones must be specified` for an Application Load Balancer and `At least one subnet must be specified` for a Network or Gateway Load Balancer, and leaves the balancer on its subnets. A `SetSubnets` that names subnets is counted as `CreateLoadBalancer` counts them, following the two-zone rule its API reference states: one subnet for an Application Load Balancer, in `Subnets` or `SubnetMappings`, returns `ValidationError` `At least two subnets in two different Availability Zones must be specified` before any subnet is looked up, and leaves the balancer on its subnets. AWS does not document the error for this case, so Floci gives `CreateLoadBalancer`'s error, in the same order. A CloudFormation update that keeps an Application Load Balancer and names one subnet fails with that error and rolls back. A Network Load Balancer can be set onto one subnet. The `SetSubnets` API reference requires a Gateway Load Balancer's `Subnets` to include every subnet it is already on; Floci does not enforce that.
 - EC2 refuses deletion of subnets and VPCs still referenced by load balancers with `DependencyViolation`. These account- and region-scoped dependencies follow persisted load balancer state; changing subnets or deleting the load balancer releases its old references. A CloudFormation update that names other subnets in `Subnets` or `SubnetMappings` moves the load balancer the way `SetSubnets` does, and a rolled-back update moves it back. An independent target group does not prevent subnet or VPC deletion.
 - HTTP listener sockets are preserved when listener actions change and are restarted only when socket-level settings such as port change.
+- Gateway listeners require `Protocol` and `Port` to be omitted on create and modify. Their control-plane response reports `GENEVE` without a port. CloudFormation preserves omitted gateway listener settings on create and update; other load balancer types retain their existing `HTTP` and port 80 defaults.
 - Instance targets are resolved through EC2 instance private addresses so local load balancer traffic can reach containers.
 - Target health starts in `initial` state with reason `Elb.RegistrationInProgress` and is updated by Floci's health checker when monitoring is active.
+- A newly registered Application Load Balancer target (HTTP/HTTPS target group or Lambda target) becomes healthy after its first successful check. Network and Gateway target groups retain `HealthyThresholdCount` for initial admission. The threshold applies to every group when recovering from `unhealthy`.
 - Health checks probe the target group's `HealthCheckPort` when it is a port number, and each target's own port when it is `traffic-port` (the default).
 - Each `CreateListener` automatically creates an immutable default rule (`priority=default`, `isDefault=true`). This rule cannot be deleted; use `ModifyListener` to change its action.
 - Rule priorities are unique per listener: `CreateRule` and `SetRulePriorities` only reject a priority held by another rule on the same listener. `SetRulePriorities` is atomic: all priority assignments are validated before any change is committed.
@@ -134,7 +182,15 @@ HTTPS listeners require a default certificate. Supply one when creating a listen
   Restarting Floci invalidates existing bindings. Application-cookie stickiness,
   weighted target-group affinity, and NLB stickiness are not implemented. Cookie
   stickiness is not applied with target-group cross-zone balancing disabled or `weighted_random` routing.
-- `routing.http.preserve_host_header.enabled` (default `false`) controls whether the original client Host header is forwarded to targets unchanged, or replaced with the target's `host:port`.
+- `routing.http.preserve_host_header.enabled` (default `false`) controls Host normalization for HTTP,
+  WebSocket and Lambda targets. By default the client host is retained: listener ports 80 and 443
+  remove an incoming port; other listener ports are appended only when the client supplied none.
+  An absolute HTTP(S) request target supplies the authority instead of the Host header. When enabled,
+  the original Host headers are preserved, including repeated values. These are the
+  [ALB Host header rules](https://docs.aws.amazon.com/elasticloadbalancing/latest/application/edit-load-balancer-attributes.html#host-header-preservation);
+  the backend address is never substituted for the client authority.
+- `routing.http.xff_header_processing.mode` (default `append`) controls `X-Forwarded-For` for HTTP, WebSocket and Lambda targets. `append` adds the client address to any value the client sent, `preserve` forwards the client's header unchanged, and `remove` drops it. `routing.http.xff_client_port.enabled` (default `false`) adds the client port as `ip:port` or `[ipv6]:port`, in `append` mode only. `ModifyLoadBalancerAttributes` answers `InvalidConfigurationRequest` for any other value of either attribute.
+- `X-Forwarded-Proto` and `X-Forwarded-Port` are always set from the client's connection to the listener, replacing any value the client sent.
 - Trust stores become `ACTIVE` as soon as the S3 CA bundle is readable and contains at least one `BEGIN CERTIFICATE` block. Floci does not asynchronously validate X.509 v3 constraints.
 - `GetTrustStoreCaCertificatesBundle` returns a synthetic `https://s3.{region}.amazonaws.com/{bucket}/{key}` location (Alchemy only asserts the `https://` prefix).
 - `ModifyCapacityReservation` persists `MinimumLoadBalancerCapacity` on the load balancer. `ResetCapacityReservation=true` clears it.
@@ -143,6 +199,61 @@ HTTPS listeners require a default certificate. Supply one when creating a listen
 - Region maps reloaded from storage can be immutable (`Map.of()` / Jackson empty objects). ElbV2 copies them into a `ConcurrentHashMap` before mutation; otherwise `UnsupportedOperationException` (null message) leaked as `InternalFailure: Unexpected error: null`.
 - `DescribeListenerCertificates` marks the CreateListener/ModifyListener certificate as `IsDefault=true` and AddListenerCertificates entries as `IsDefault=false`. `ModifyListener` does not wipe SNI extras.
 - `RegisterTargets` rejects link-local and cloud instance-metadata addresses (`169.254.0.0/16`, `fe80::/10`, `fd00:ec2::254`) with `InvalidTarget`, and the load balancer and its health checks refuse to connect to them. Loopback and private addresses stay reachable so a load balancer can front a neighbouring container.
+- Requests forwarded to a target carry `X-Amzn-Trace-Id`. A request without the header gets a new `Root` field, a request with a `Root` field gets a new `Self` field, and an existing `Self` field is updated. Other fields are kept. Above 7 KB of request headers the header is rewritten to a new `Root` field. Floci does not send these traces to X-Ray.
+
+## Forwarding and network-security boundaries
+
+An accepted NLB, listener, or target-group declaration confirms control-plane storage.
+It does not establish that the declared transport is implemented. ELBv2 supports local
+HTTP, HTTPS, and TCP listener sockets; other declared listener protocols and target
+types remain control-plane only.
+
+| Declared listener protocol | Local forwarding behavior | Target types and transport |
+|---|---|---|
+| `HTTP` | Parses and forwards HTTP requests; supports WebSocket upgrades. | `instance` resolves an EC2 private address; `ip` uses the registered address. The target-group protocol selects HTTP or HTTPS to the backend. `lambda` invokes the registered function with an ALB event. |
+| `HTTPS` | Terminates TLS with an ACM or IAM certificate, then handles HTTP as above. | Same targets and backend protocol selection as HTTP. |
+| `TCP` | Relays bytes bidirectionally without HTTP parsing or TLS termination (enabling TLS pass-through to the target). Requires a dedicated local port. | `instance` resolves an EC2 private address; `ip` uses the registered address. Selected round-robin per connection. |
+| `TLS` | Stored; certificate references are checked, but only `HTTPS` enables TLS on the local socket. TLS termination for NLB `TLS` listeners is unsupported (use a `TCP` listener for TLS pass-through). | No NLB TLS backend transport is implemented. |
+| `UDP`, `TCP_UDP` | Stored declarations do not create UDP sockets or UDP forwarding. | Datagram targets are unsupported. |
+| Gateway `GENEVE` | Portless control-plane metadata only. | No GENEVE packet forwarding. |
+
+`alb` target-type declarations do not implement NLB-to-ALB chaining. Use the HTTP, HTTPS,
+or TCP rows for local routing. Do not use a successful registration alone as evidence of
+TLS, UDP, or NLB target-type compatibility. Unsupported transports are not consistently
+rejected by the management API: clients can instead see failed TLS handshakes or timeouts
+on the listener socket.
+
+### Health checks
+
+For non-Lambda targets, the checker sends an HTTP or HTTPS GET to `HealthCheckPath`
+on `HealthCheckPort`, or the target's traffic port when configured as `traffic-port`.
+`HealthCheckProtocol` selects TLS independently of the target's application protocol.
+The response-code matcher and healthy/unhealthy thresholds affect target health.
+`HealthCheckProtocol=TCP` does not perform a TCP-only probe.
+Lambda targets are not actively probed. In ELBv2 mock mode, sockets
+and active monitoring are disabled. The proxy can route to initial targets and fails
+open to registered targets when none are healthy, so a successful request alone does
+not prove that a health check passed.
+
+### Security groups and PrivateLink
+
+Load-balancer security-group IDs are stored and returned by `CreateLoadBalancer`,
+`DescribeLoadBalancers`, and `SetSecurityGroups`. The ELBv2 proxy and health checker do
+not evaluate security-group ingress or egress rules, target security-group references,
+network ACLs, or VPC/subnet routing. An `internal` scheme does not create a private
+network boundary on the host. These declarations do not isolate reachable targets.
+
+`EnforceSecurityGroupInboundRulesOnPrivateLinkTraffic` is not handled by
+`SetSecurityGroups`, is not returned as an enforcement setting, and does not filter
+traffic. PrivateLink endpoint declarations do not add a separate ELBv2 ingress path
+or apply the AWS client-IP-based filtering contract. On AWS, security groups filter
+both client and target traffic, and the PrivateLink setting controls inbound-rule
+application; see [NLB security groups](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/load-balancer-security-groups.html).
+
+No allowed/denied traffic checks are claimed for these unimplemented controls.
+Use host firewalls, Docker network isolation, and published-port restrictions to
+control access to the emulator. Test AWS security-group and PrivateLink enforcement
+against AWS when that behavior is part of the application contract.
 
 ## ARN Format
 
