@@ -251,7 +251,10 @@ public class EmrServerlessIntegrationTest {
             .patch("/applications/" + applicationId)
         .then()
             .statusCode(200)
-            .body("applicationId", equalTo(applicationId));
+            .body("applicationId", equalTo(applicationId))
+            // As on AWS, the response carries the updated application.
+            .body("application.applicationId", equalTo(applicationId))
+            .body("application.releaseLabel", equalTo("emr-6.7.0"));
             
         // Verify releaseLabel and new configurations updated
         givenReq()
