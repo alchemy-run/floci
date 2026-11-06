@@ -830,12 +830,17 @@ Route table ids follow the live API's own inconsistency: an id that does not exi
 | CreateNatGateway | Creates a NAT gateway record. |
 | DescribeNatGateways | Lists or returns stored NAT gateways. |
 | DeleteNatGateway | Deletes a NAT gateway record. |
+| AssociateNatGatewayAddress | Associates Elastic IPs with a regional NAT gateway in one zone. |
+| DisassociateNatGatewayAddress | Disassociates Elastic IPs from a regional NAT gateway. |
 
-Every NAT gateway Floci creates is zonal: it sits in the subnet it was created in, and responses
-report `availabilityMode` as `zonal`. Regional NAT gateways are not supported: `CreateNatGateway` with
-`AvailabilityMode=regional` fails with `UnsupportedOperation`, and an `AWS::EC2::NatGateway` whose
-`AvailabilityMode` is `regional` fails with the reason `NAT gateways with AvailabilityMode regional
-are not supported.`
+A zonal NAT gateway sits in the subnet it was created in. A regional one, created with
+`AvailabilityMode=regional` and a `VpcId`, spans its VPC: with no `AvailabilityZoneAddresses` it reports
+`autoProvisionZones` as `enabled`, and with them each Elastic IP serves the zone it names and
+`autoProvisionZones` is `disabled`. `AssociateNatGatewayAddress` and `DisassociateNatGatewayAddress` add
+and remove a regional gateway's zone addresses in place; a disassociated address leaves at once, as
+Floci has no connections to drain. A regional request that names a `SubnetId` fails with
+`InvalidParameterCombination`. These two actions are not yet supported on zonal gateways, and an
+`AWS::EC2::NatGateway` whose `AvailabilityMode` is `regional` fails with `UnsupportedOperation`.
 
 `PrivateIpAddress` gives the gateway's interface that address instead of the next free one, on
 `CreateNatGateway` and on `AWS::EC2::NatGateway`, and `DescribeNetworkInterfaces` and

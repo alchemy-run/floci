@@ -315,6 +315,8 @@ public class Ec2QueryHandler {
                 case "DescribeInstanceConnectEndpoints" -> handleDescribeInstanceConnectEndpoints(params, region);
                 case "DeleteInstanceConnectEndpoint" -> handleDeleteInstanceConnectEndpoint(params, region);
                 case "DeleteNatGateway" -> handleDeleteNatGateway(params, region);
+                case "AssociateNatGatewayAddress" -> handleAssociateNatGatewayAddress(params, region);
+                case "DisassociateNatGatewayAddress" -> handleDisassociateNatGatewayAddress(params, region);
                 // Capacity Reservations
                 case "CreateCapacityReservation" -> handleCreateCapacityReservation(params, region);
                 case "DescribeCapacityReservations" -> handleDescribeCapacityReservations(params, region);
@@ -4646,7 +4648,13 @@ public class Ec2QueryHandler {
 
     private Response handleCreateNatGateway(MultivaluedMap<String, String> p, String region) {
         Ec2Service.requireZonalNatGateway(p.getFirst("AvailabilityMode"));
-        NatGateway natGateway = service.createNatGateway(
+        if ("regional".equals(p.getFirst("AvailabilityMode"))) {
+            Ec2Service.requireRegionalNatGatewayShape(p.getFirst("SubnetId"));
+        }
+        NatGateway natGateway = "regional".equals(p.getFirst("AvailabilityMode"))
+                ? service.createRegionalNatGateway(region, p.getFirst("VpcId"), natGatewayZoneAddresses(p),
+                        parseTagsForResource(p, "natgateway"))
+                : service.createNatGateway(
                 region,
                 p.getFirst("SubnetId"),
                 p.getFirst("AllocationId"),
@@ -4661,6 +4669,47 @@ public class Ec2QueryHandler {
                 .elem("requestId", UUID.randomUUID().toString())
                 .start("natGateway").raw(natGatewayXml(natGateway)).end("natGateway")
                 .end("CreateNatGatewayResponse");
+        return xmlResponse(xml.build());
+    }
+
+    /** AvailabilityZoneAddress.N.{AvailabilityZone,AvailabilityZoneId,AllocationId.M} of a regional CreateNatGateway. */
+    private static List<Ec2Service.NatGatewayZoneAddresses> natGatewayZoneAddresses(MultivaluedMap<String, String> p) {
+        List<Ec2Service.NatGatewayZoneAddresses> zones = new ArrayList<>();
+        for (int i = 1; ; i++) {
+            String prefix = "AvailabilityZoneAddress." + i;
+            String zone = p.getFirst(prefix + ".AvailabilityZone");
+            String zoneId = p.getFirst(prefix + ".AvailabilityZoneId");
+            List<String> allocationIds = getList(p, prefix + ".AllocationId");
+            if (zone == null && zoneId == null && allocationIds.isEmpty()) {
+                return zones;
+            }
+            zones.add(new Ec2Service.NatGatewayZoneAddresses(zone, zoneId, allocationIds));
+        }
+    }
+
+    private Response handleAssociateNatGatewayAddress(MultivaluedMap<String, String> p, String region) {
+        NatGateway natGateway = service.associateRegionalNatGatewayAddresses(region, p.getFirst("NatGatewayId"),
+                new Ec2Service.NatGatewayZoneAddresses(p.getFirst("AvailabilityZone"),
+                        p.getFirst("AvailabilityZoneId"), getList(p, "AllocationId")));
+        return natGatewayAddressesResponse("AssociateNatGatewayAddressResponse", natGateway);
+    }
+
+    private Response handleDisassociateNatGatewayAddress(MultivaluedMap<String, String> p, String region) {
+        NatGateway natGateway = service.disassociateNatGatewayAddresses(region, p.getFirst("NatGatewayId"),
+                getList(p, "AssociationId"));
+        return natGatewayAddressesResponse("DisassociateNatGatewayAddressResponse", natGateway);
+    }
+
+    private Response natGatewayAddressesResponse(String root, NatGateway natGateway) {
+        XmlBuilder xml = new XmlBuilder()
+                .start(root, AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .elem("natGatewayId", natGateway.getNatGatewayId())
+                .start("natGatewayAddressSet");
+        for (NatGatewayAddress address : natGateway.getNatGatewayAddresses()) {
+            xml.start("item").raw(natGatewayAddressXml(address)).end("item");
+        }
+        xml.end("natGatewayAddressSet").end(root);
         return xmlResponse(xml.build());
     }
 
@@ -5914,29 +5963,18 @@ public class Ec2QueryHandler {
                 .elem("failureCode", natGateway.getFailureCode())
                 .elem("failureMessage", natGateway.getFailureMessage())
                 .elem("connectivityType", natGateway.getConnectivityType())
-                // Every gateway Floci creates sits in one subnet. The Terraform AWS provider reads
-                // network_interface_id, private_ip and public_ip only from a gateway reported as zonal.
-                .elem("availabilityMode", "zonal");
+                // The Terraform AWS provider reads network_interface_id, private_ip and public_ip only
+                // from a gateway reported as zonal, which every gateway in one subnet is.
+                .elem("availabilityMode", natGateway.isRegional() ? "regional" : "zonal");
+        if (natGateway.getAutoProvisionZones() != null) {
+            xml.elem("autoProvisionZones", natGateway.getAutoProvisionZones());
+        }
         if (natGateway.getCreateTime() != null) {
             xml.elem("createTime", ISO_FMT.format(natGateway.getCreateTime()));
         }
         xml.start("natGatewayAddressSet");
         for (NatGatewayAddress address : natGateway.getNatGatewayAddresses()) {
-            xml.start("item");
-            if (address.getAllocationId() != null) {
-                xml.elem("allocationId", address.getAllocationId());
-            }
-            if (address.getAssociationId() != null) {
-                xml.elem("associationId", address.getAssociationId());
-            }
-            xml.elem("networkInterfaceId", address.getNetworkInterfaceId())
-                    .elem("privateIp", address.getPrivateIp());
-            if (address.getPublicIp() != null) {
-                xml.elem("publicIp", address.getPublicIp());
-            }
-            xml.elem("isPrimary", String.valueOf(address.isPrimary()))
-                    .elem("status", address.getStatus())
-                    .end("item");
+            xml.start("item").raw(natGatewayAddressXml(address)).end("item");
         }
         // A gateway restored from a store written before addresses were modelled has none, but
         // still knows its allocation id, report what it does know rather than an empty set.
@@ -5948,6 +5986,31 @@ public class Ec2QueryHandler {
         xml.end("natGatewayAddressSet");
         xml.raw(tagSetXml(natGateway.getTags()));
         return xml.build();
+    }
+
+    private String natGatewayAddressXml(NatGatewayAddress address) {
+        XmlBuilder xml = new XmlBuilder();
+        if (address.getAllocationId() != null) {
+            xml.elem("allocationId", address.getAllocationId());
+        }
+        if (address.getAssociationId() != null) {
+            xml.elem("associationId", address.getAssociationId());
+        }
+        if (address.getNetworkInterfaceId() != null) {
+            xml.elem("networkInterfaceId", address.getNetworkInterfaceId());
+        }
+        if (address.getPrivateIp() != null) {
+            xml.elem("privateIp", address.getPrivateIp());
+        }
+        if (address.getPublicIp() != null) {
+            xml.elem("publicIp", address.getPublicIp());
+        }
+        if (address.getAvailabilityZone() != null) {
+            xml.elem("availabilityZone", address.getAvailabilityZone());
+        }
+        return xml.elem("isPrimary", String.valueOf(address.isPrimary()))
+                .elem("status", address.getStatus())
+                .build();
     }
 
     private String launchTemplateXml(LaunchTemplate launchTemplate) {

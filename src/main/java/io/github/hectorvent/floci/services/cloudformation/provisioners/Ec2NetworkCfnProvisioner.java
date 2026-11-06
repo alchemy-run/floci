@@ -650,7 +650,13 @@ public class Ec2NetworkCfnProvisioner implements CfnResourceProvisioner {
     }
 
     private void provisionNatGateway(StackResource r, JsonNode props, ProvisionContext ctx) {
-        Ec2Service.requireZonalNatGateway(ctx.resolveOptional(props, "AvailabilityMode"));
+        String availabilityMode = ctx.resolveOptional(props, "AvailabilityMode");
+        Ec2Service.requireZonalNatGateway(availabilityMode);
+        if ("regional".equals(availabilityMode)) {
+            // The provisioner builds zonal gateways only; a regional template must not get one quietly.
+            throw new AwsException("UnsupportedOperation",
+                    "AWS::EC2::NatGateway with AvailabilityMode regional is not supported.", 400);
+        }
         List<String> secondaryAllocationIds = ctx.resolveStringList(props, "SecondaryAllocationIds");
         List<String> secondaryPrivateIps = ctx.resolveStringList(props, "SecondaryPrivateIpAddresses");
         String secondaryCount = ctx.resolveOptional(props, "SecondaryPrivateIpAddressCount");

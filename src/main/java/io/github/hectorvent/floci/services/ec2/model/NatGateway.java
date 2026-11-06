@@ -21,6 +21,8 @@ public class NatGateway {
     private String failureMessage;
     private Instant createTime;
     private String region;
+    private String availabilityMode;  // null or "zonal" for a gateway in one subnet, "regional" for one spanning its VPC
+    private String autoProvisionZones; // regional only: "enabled" when AWS picks the zones, "disabled" when the request named them
     private List<NatGatewayAddress> natGatewayAddresses = new ArrayList<>();
     private List<Tag> tags = new ArrayList<>();
 
@@ -61,4 +63,13 @@ public class NatGateway {
 
     public List<Tag> getTags() { return tags; }
     public void setTags(List<Tag> tags) { this.tags = tags; }
+
+    public String getAvailabilityMode() { return availabilityMode; }
+    public void setAvailabilityMode(String availabilityMode) { this.availabilityMode = availabilityMode; }
+
+    public String getAutoProvisionZones() { return autoProvisionZones; }
+    public void setAutoProvisionZones(String autoProvisionZones) { this.autoProvisionZones = autoProvisionZones; }
+
+    /** Whether the gateway spans its VPC rather than sitting in one subnet. */
+    public boolean isRegional() { return "regional".equals(availabilityMode); }
 }

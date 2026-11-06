@@ -12595,10 +12595,137 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     public static void requireZonalNatGateway(String availabilityMode) {
         requireParameterValue("AvailabilityMode", isSet(availabilityMode) ? availabilityMode : null,
                 "zonal", "regional");
-        if ("regional".equals(availabilityMode)) {
-            throw new AwsException("UnsupportedOperation",
-                    "NAT gateways with AvailabilityMode regional are not supported.", 400);
+    }
+
+    /** A regional gateway names its VPC, never a subnet; a zonal one is the other way round. */
+    public static void requireRegionalNatGatewayShape(String subnetId) {
+        if (isSet(subnetId)) {
+            throw new AwsException("InvalidParameterCombination",
+                    "SubnetId cannot be specified for a NAT gateway with AvailabilityMode regional.", 400);
         }
+    }
+
+    /** One AvailabilityZoneAddresses entry of a regional CreateNatGateway or AssociateNatGatewayAddress. */
+    public record NatGatewayZoneAddresses(String availabilityZone, String availabilityZoneId,
+                                          List<String> allocationIds) {}
+
+    /**
+     * Creates a regional NAT gateway, which spans its VPC instead of sitting in one subnet. With no
+     * zone addresses AWS provisions the zones itself ({@code AutoProvisionZones} enabled); with
+     * them, each named Elastic IP serves its zone. The VPC needs an attached internet gateway.
+     */
+    public NatGateway createRegionalNatGateway(String region, String vpcId, List<NatGatewayZoneAddresses> zones,
+                                               List<Tag> natGatewayTags) {
+        ensureDefaultResources(region);
+        if (!isSet(vpcId)) {
+            throw new AwsException("MissingParameter", "The request must contain the parameter VpcId", 400);
+        }
+        getRequiredVpc(region, vpcId);
+        List<NatGatewayZoneAddresses> requested = zones == null ? List.of() : zones;
+        NatGateway natGateway = new NatGateway();
+        natGateway.setNatGatewayId("nat-" + randomHex(17));
+        natGateway.setVpcId(vpcId);
+        natGateway.setConnectivityType("public");
+        natGateway.setAvailabilityMode("regional");
+        natGateway.setAutoProvisionZones(requested.isEmpty() ? "enabled" : "disabled");
+        natGateway.setCreateTime(Instant.now());
+        natGateway.setRegion(region);
+        synchronized (privateIpAllocationLock) {
+            List<NatGatewayAddress> addresses = regionalNatGatewayAddresses(region, natGateway, requested);
+            natGateway.getNatGatewayAddresses().addAll(addresses);
+            if (!natGateway.getNatGatewayAddresses().isEmpty()) {
+                natGateway.getNatGatewayAddresses().getFirst().setPrimary(true);
+            }
+            natGateway.getNatGatewayAddresses().forEach(a -> holdNatGatewayEip(region, a));
+            if (natGatewayTags != null && !natGatewayTags.isEmpty()) {
+                natGateway.setTags(new ArrayList<>(natGatewayTags));
+                putTags(region, natGateway.getNatGatewayId(), new ArrayList<>(natGatewayTags));
+            }
+            natGateways.put(key(region, natGateway.getNatGatewayId()), natGateway);
+        }
+        return natGateway;
+    }
+
+    /** AssociateNatGatewayAddress on a regional gateway: the Elastic IPs serve {@code zone} from now on. */
+    public NatGateway associateRegionalNatGatewayAddresses(String region, String natGatewayId,
+                                                           NatGatewayZoneAddresses zone) {
+        ensureDefaultResources(region);
+        synchronized (privateIpAllocationLock) {
+            NatGateway natGateway = requireRegionalNatGateway(region, natGatewayId);
+            natGateway.setAutoProvisionZones("disabled");
+            List<NatGatewayAddress> added = regionalNatGatewayAddresses(region, natGateway, List.of(zone));
+            added.forEach(a -> a.setPrimary(false));
+            natGateway.getNatGatewayAddresses().addAll(added);
+            added.forEach(a -> holdNatGatewayEip(region, a));
+            natGateways.put(key(region, natGatewayId), natGateway);
+            return natGateway;
+        }
+    }
+
+    /**
+     * DisassociateNatGatewayAddress: hands back the Elastic IPs the associations name. Floci has no
+     * connections to drain, so the addresses leave at once, whatever MaxDrainDurationSeconds says.
+     */
+    public NatGateway disassociateNatGatewayAddresses(String region, String natGatewayId, List<String> associationIds) {
+        ensureDefaultResources(region);
+        synchronized (privateIpAllocationLock) {
+            NatGateway natGateway = requireRegionalNatGateway(region, natGatewayId);
+            Set<String> ids = new HashSet<>(nullToEmpty(associationIds));
+            for (String id : ids) {
+                if (natGateway.getNatGatewayAddresses().stream().noneMatch(a -> id.equals(a.getAssociationId()))) {
+                    throw new AwsException("InvalidAssociationID.NotFound",
+                            "The association ID '" + id + "' does not exist", 400);
+                }
+            }
+            List<NatGatewayAddress> leaving = natGateway.getNatGatewayAddresses().stream()
+                    .filter(a -> a.getAssociationId() != null && ids.contains(a.getAssociationId()))
+                    .toList();
+            leaving.forEach(a -> releaseNatGatewayEip(region, a));
+            natGateway.getNatGatewayAddresses().removeAll(leaving);
+            natGateways.put(key(region, natGatewayId), natGateway);
+            return natGateway;
+        }
+    }
+
+    private NatGateway requireRegionalNatGateway(String region, String natGatewayId) {
+        NatGateway natGateway = getRequiredNatGateway(region, natGatewayId);
+        if (!natGateway.isRegional()) {
+            // A zonal gateway's addresses carry private addresses and interfaces of its subnet,
+            // which these calls do not model yet.
+            throw new AwsException("UnsupportedOperation",
+                    "Associating and disassociating addresses is supported only on regional NAT gateways.", 400);
+        }
+        return natGateway;
+    }
+
+    /**
+     * The addresses of the zones a regional gateway's request names, each Elastic IP checked free
+     * as a zonal gateway's is. Callers must hold {@link #privateIpAllocationLock}.
+     */
+    private List<NatGatewayAddress> regionalNatGatewayAddresses(String region, NatGateway natGateway,
+                                                                List<NatGatewayZoneAddresses> zones) {
+        List<NatGatewayAddress> result = new ArrayList<>();
+        Set<String> seen = new HashSet<>();
+        for (NatGatewayZoneAddresses zone : zones) {
+            String availabilityZone = isSet(zone.availabilityZone()) ? zone.availabilityZone()
+                    : zoneNameForZoneId(region, zone.availabilityZoneId());
+            for (String allocationId : nullToEmpty(zone.allocationIds())) {
+                Address eip = getRequiredAddress(region, allocationId);
+                if (!seen.add(allocationId) || isElasticIpTaken(region, allocationId)) {
+                    throw new AwsException("Resource.AlreadyAssociated",
+                            "Elastic IP address " + allocationId + " is already associated", 400);
+                }
+                NatGatewayAddress address = new NatGatewayAddress();
+                address.setAllocationId(allocationId);
+                address.setAssociationId("eipassoc-" + randomHex(17));
+                address.setPublicIp(eip.getPublicIp());
+                address.setAvailabilityZone(availabilityZone);
+                address.setPrimary(false);
+                address.setStatus("succeeded");
+                result.add(address);
+            }
+        }
+        return result;
     }
 
     public synchronized NatGateway createNatGateway(String region, String subnetId, String allocationId,
@@ -13169,7 +13296,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             // can carry is either a stale lease DeleteNetworkInterface left behind, which should go,
             // or a failed launch's, given back once its container is detached; giving that back
             // sooner matters only if the allocator wraps around to it in between.
-            if (!"deleted".equals(natGateway.getState())) {
+            if (!"deleted".equals(natGateway.getState()) && natGateway.getSubnetId() != null) {
                 releasePrivateIps(region, natGateway.getSubnetId(), natGateway.getNatGatewayAddresses().stream()
                         .map(NatGatewayAddress::getPrivateIp).toList());
             }

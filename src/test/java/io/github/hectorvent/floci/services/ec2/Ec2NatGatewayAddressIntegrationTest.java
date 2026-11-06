@@ -165,21 +165,16 @@ class Ec2NatGatewayAddressIntegrationTest {
     }
 
     /**
-     * Every gateway Floci creates is zonal. A regional request names its VPC and no subnet, and
-     * is refused rather than failing on the missing subnet; one that names a subnet as well is
-     * refused rather than created as zonal. AWS's enum is exact-case, so a value that is neither
-     * mode is invalid rather than zonal.
+     * A regional request names its VPC and no subnet; one that names a subnet as well is refused
+     * rather than created as zonal. AWS's enum is exact-case, so a value that is neither mode is
+     * invalid rather than zonal.
      */
     @Test
-    void aRegionalOrUnknownAvailabilityModeIsRefused() {
-        createNat(Map.of("AvailabilityMode", "regional", "VpcId", "vpc-0123456789abcdef0")).then()
-            .statusCode(400)
-            .body("Response.Errors.Error.Code", equalTo("UnsupportedOperation"));
-
+    void aRegionalGatewayNamingASubnetOrAnUnknownAvailabilityModeIsRefused() {
         String subnetId = subnetId();
         createNat(Map.of("AvailabilityMode", "regional", "SubnetId", subnetId, "AllocationId", allocate())).then()
             .statusCode(400)
-            .body("Response.Errors.Error.Code", equalTo("UnsupportedOperation"));
+            .body("Response.Errors.Error.Code", equalTo("InvalidParameterCombination"));
         createNat(Map.of("AvailabilityMode", "Regional", "SubnetId", subnetId, "ConnectivityType", "private")).then()
             .statusCode(400)
             .body("Response.Errors.Error.Code", equalTo("InvalidParameterValue"));
@@ -480,5 +475,60 @@ class Ec2NatGatewayAddressIntegrationTest {
         .then().statusCode(200);
         ec2("ReleaseAddress", ACCOUNT_ID, REGION).formParam("AllocationId", allocationId).post("/")
         .then().statusCode(200);
+    }
+
+    /**
+     * A regional gateway spans its VPC: with no zone addresses AWS provisions the zones, and with
+     * them each Elastic IP serves its zone. Addresses are associated and disassociated in place,
+     * and deleting the gateway hands every Elastic IP back.
+     */
+    @Test
+    void aRegionalGatewayAssociatesAndDisassociatesAddressesPerZone() {
+        String vpcId = ec2("CreateVpc", ACCOUNT_ID, REGION).formParam("CidrBlock", "10.95.0.0/16").post("/")
+            .then().statusCode(200).extract().path("CreateVpcResponse.vpc.vpcId");
+
+        String autoId = createNat(Map.of("AvailabilityMode", "regional", "VpcId", vpcId)).then()
+            .statusCode(200)
+            .body("CreateNatGatewayResponse.natGateway.availabilityMode", equalTo("regional"))
+            .body("CreateNatGatewayResponse.natGateway.autoProvisionZones", equalTo("enabled"))
+            .body("CreateNatGatewayResponse.natGateway.vpcId", equalTo(vpcId))
+            .extract().path("CreateNatGatewayResponse.natGateway.natGatewayId");
+
+        String first = allocate();
+        String second = allocate();
+        String manualId = createNat(Map.of("AvailabilityMode", "regional", "VpcId", vpcId,
+                "AvailabilityZoneAddress.1.AvailabilityZone", REGION + "a",
+                "AvailabilityZoneAddress.1.AllocationId.1", first)).then()
+            .statusCode(200)
+            .body("CreateNatGatewayResponse.natGateway.autoProvisionZones", equalTo("disabled"))
+            .body("CreateNatGatewayResponse.natGateway.natGatewayAddressSet.item.availabilityZone",
+                    equalTo(REGION + "a"))
+            .extract().path("CreateNatGatewayResponse.natGateway.natGatewayId");
+
+        ec2("AssociateNatGatewayAddress", ACCOUNT_ID, REGION).formParam("NatGatewayId", manualId)
+            .formParam("AvailabilityZone", REGION + "b").formParam("AllocationId.1", second).post("/")
+            .then().statusCode(200);
+        Response described = ec2("DescribeNatGateways", ACCOUNT_ID, REGION).formParam("NatGatewayId.1", manualId)
+            .post("/").then().statusCode(200).extract().response();
+        List<String> zones = described.xmlPath().getList(
+                "DescribeNatGatewaysResponse.natGatewaySet.item.natGatewayAddressSet.item.availabilityZone", String.class);
+        assertEquals(List.of(REGION + "a", REGION + "b"), zones);
+
+        String addressSet = "DescribeNatGatewaysResponse.natGatewaySet.item.natGatewayAddressSet.item.";
+        List<String> allocationIds = described.xmlPath().getList(addressSet + "allocationId", String.class);
+        String secondAssociation = described.xmlPath().getList(addressSet + "associationId", String.class)
+                .get(allocationIds.indexOf(second));
+        ec2("DisassociateNatGatewayAddress", ACCOUNT_ID, REGION).formParam("NatGatewayId", manualId)
+            .formParam("AssociationId.1", secondAssociation).post("/")
+            .then().statusCode(200);
+        ec2("DescribeAddresses", ACCOUNT_ID, REGION).formParam("AllocationId.1", second).post("/")
+            .then().statusCode(200)
+            .body(not(containsString("<associationId>")));
+
+        ec2("DeleteNatGateway", ACCOUNT_ID, REGION).formParam("NatGatewayId", manualId).post("/").then().statusCode(200);
+        ec2("DeleteNatGateway", ACCOUNT_ID, REGION).formParam("NatGatewayId", autoId).post("/").then().statusCode(200);
+        ec2("DescribeAddresses", ACCOUNT_ID, REGION).formParam("AllocationId.1", first).post("/")
+            .then().statusCode(200)
+            .body(not(containsString("<associationId>")));
     }
 }

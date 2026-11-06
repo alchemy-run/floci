@@ -19,6 +19,7 @@ public class NatGatewayAddress {
     private String publicIp;
     private boolean primary = true;
     private String status = "succeeded";
+    private String availabilityZone;   // regional gateways: the zone the address serves
 
     public NatGatewayAddress() {}
 
@@ -42,4 +43,7 @@ public class NatGatewayAddress {
 
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+
+    public String getAvailabilityZone() { return availabilityZone; }
+    public void setAvailabilityZone(String availabilityZone) { this.availabilityZone = availabilityZone; }
 }
