@@ -1,24 +1,24 @@
 [
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.ReturnDirective",
+    "name": "io.floci.aws.services.appsync.graphql.ReturnDirective",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.apigateway.VtlTemplateEngine$InputVariable",
+    "name": "io.floci.aws.services.apigateway.VtlTemplateEngine$InputVariable",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.apigateway.VtlTemplateEngine$UtilVariable",
+    "name": "io.floci.aws.services.apigateway.VtlTemplateEngine$UtilVariable",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.apigateway.VtlTemplateEngine$ResponseOverride",
+    "name": "io.floci.aws.services.apigateway.VtlTemplateEngine$ResponseOverride",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
@@ -36,7 +36,7 @@
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.apigateway.SandboxedForeach",
+    "name": "io.floci.aws.services.apigateway.SandboxedForeach",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
@@ -2421,67 +2421,67 @@
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.AppSyncVtlEngine",
+    "name": "io.floci.aws.services.appsync.graphql.AppSyncVtlEngine",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.AppSyncVtlContext",
+    "name": "io.floci.aws.services.appsync.graphql.AppSyncVtlContext",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.ReturnDirective",
+    "name": "io.floci.aws.services.appsync.graphql.ReturnDirective",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.util.AppSyncUtil",
+    "name": "io.floci.aws.services.appsync.graphql.util.AppSyncUtil",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.util.StrUtil",
+    "name": "io.floci.aws.services.appsync.graphql.util.StrUtil",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.util.TimeUtil",
+    "name": "io.floci.aws.services.appsync.graphql.util.TimeUtil",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.util.MathUtil",
+    "name": "io.floci.aws.services.appsync.graphql.util.MathUtil",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.util.DynamoDbUtil",
+    "name": "io.floci.aws.services.appsync.graphql.util.DynamoDbUtil",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.util.TransformUtil",
+    "name": "io.floci.aws.services.appsync.graphql.util.TransformUtil",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.util.ListUtil",
+    "name": "io.floci.aws.services.appsync.graphql.util.ListUtil",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
   },
   {
-    "name": "io.github.hectorvent.floci.services.appsync.graphql.util.MapUtil",
+    "name": "io.floci.aws.services.appsync.graphql.util.MapUtil",
     "allDeclaredConstructors": true,
     "allDeclaredMethods": true,
     "allDeclaredFields": true
