@@ -48,7 +48,7 @@ class PartitionCrossServiceSmokeIntegrationTest {
             "ecs", "efs", "eks", "elasticache", "elasticbeanstalk", "elb", "elbv2", "emr", "emrserverless",
             "eventbridge", "eventbridgev2", "firehose", "fis", "glue", "iot", "kinesis", "kinesisanalytics",
             "lambda", "lambdaweb", "memorydb", "msk", "mwaa", "oam", "opensearch", "organizations",
-            "paymentcryptography", "pipes", "ram", "rds", "redshift", "resourceexplorer2", "resourcegroups",
+            "paymentcryptography", "pipes", "quicksight", "ram", "rds", "redshift", "resourceexplorer2", "resourcegroups",
             "s3tables", "s3vectors", "scheduler", "secretsmanager", "ses", "sns", "sqs", "stepfunctions",
             "timestreaminfluxdb", "transfer", "verifiedpermissions", "wafv2");
 
@@ -62,6 +62,19 @@ class PartitionCrossServiceSmokeIntegrationTest {
     @BeforeAll
     static void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void quickSightDashboardArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "quicksight");
+        String id = unique("smoke-dashboard", partitionCase);
+        String path = "/accounts/000000000000/dashboards/" + id;
+        String arn = signed(region, "quicksight").contentType(JSON)
+                .body("{\"Name\":\"Smoke dashboard\",\"Definition\":{}}")
+                .post(path).then().statusCode(202).extract().jsonPath().getString("Arn");
+        cleanup.register(() -> signed(region, "quicksight").delete(path));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
     @ParameterizedTest

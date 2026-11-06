@@ -607,6 +607,9 @@ floci:
       enabled: true
     codeartifact:
       enabled: true
+    quicksight:
+      enabled: true
+      embed-base-url: ${floci.base-url}
     marketplace:
       enabled: true
     dms:

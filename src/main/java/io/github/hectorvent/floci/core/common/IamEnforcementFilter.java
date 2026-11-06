@@ -1653,7 +1653,7 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
      * default account when neither resolves.
      */
     private String resolveCredentialAccountId(String akid, String authorizationHeader) {
-        if (akid != null && !akid.matches("\\d{12}")) {
+        if (akid != null && !AccountResolver.isAccountId(akid)) {
             Optional<String> credentialAccount = sessionAccountLookup.resolveAccountId(akid);
             if (credentialAccount.isPresent()) {
                 return credentialAccount.get();
@@ -1898,7 +1898,7 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
     }
 
     /**
-     * Builds a 403 Access Denied response in the wire format the calling SDK
+     * Builds an Access Denied response in the wire format the calling SDK
      * expects. AWS SDKs hard-fail when they receive the wrong shape: an XML
      * parser blows up on a leading {@code {}, and a JSON parser blows up on
      * {@code <}. Pick the shape from request signals:
@@ -1908,7 +1908,7 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
      *   <li>{@code application/x-www-form-urlencoded} body → AWS Query
      *       {@code <ErrorResponse>...</ErrorResponse>} (IAM/STS/EC2/SQS/SNS/...), with the code
      *       {@link #queryAccessDeniedCode} gives the service that serves the request</li>
-     *   <li>JSON 1.x: JSON with HTTP 400; REST-JSON: JSON with HTTP 403</li>
+     *   <li>JSON 1.x: JSON with HTTP 400; REST-JSON: JSON with its modelled denial status, defaulting to HTTP 403</li>
      *   <li>CBOR: the request's own encoding with HTTP 403, from {@link #accessDeniedForRequest},
      *       which has the request to read it from</li>
      * </ul>
@@ -1967,7 +1967,8 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
         if (restXml || protocol == WireProtocol.AWS_QUERY || isFormEncoded(requestMediaType)) {
             return queryXmlError(queryAccessDeniedCode(credentialScope), message);
         }
-        int status = protocol == WireProtocol.AWS_JSON_1_0 || protocol == WireProtocol.AWS_JSON_1_1 ? 400 : 403;
+        int status = protocol == WireProtocol.AWS_JSON_1_0 || protocol == WireProtocol.AWS_JSON_1_1
+                ? 400 : IamActionRegistry.accessDeniedStatus(credentialScope, 403);
         return jsonAccessDenied(message, status);
     }
 
@@ -2099,10 +2100,13 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
 
     /**
      * The response for a session whose temporary credentials have expired. S3's error list names it
-     * {@code ExpiredToken}, 400. The other services' common errors name it
+     * {@code ExpiredToken}, 400. EC2 names it {@code RequestExpired}. The other services' common errors name it
      * {@code ExpiredTokenException}, 403, under the same name for Query services as for JSON ones.
      */
     static Response expiredTokenResponse(String credentialScope, ContainerRequestContext ctx) {
+        if ("ec2".equals(credentialScope)) {
+            return Ec2ErrorResponses.of("RequestExpired", EXPIRED_TOKEN, 400);
+        }
         if ("s3".equals(credentialScope)) {
             return s3XmlError("ExpiredToken", S3_EXPIRED_TOKEN, 400);
         }
@@ -2129,6 +2133,9 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
      */
     static Response incompleteSignatureResponse(String credentialScope, ContainerRequestContext ctx,
                                                 String message) {
+        if ("ec2".equals(credentialScope) || Ec2ErrorResponses.isEc2QueryRequest(ctx)) {
+            return Ec2ErrorResponses.of("IncompleteSignature", message, 400);
+        }
         if ("s3".equals(credentialScope)) {
             String header = ctx.getHeaderString("Authorization");
             if (header == null || header.isBlank()) {
@@ -2198,6 +2205,9 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
      * returns for the same failure on its own path.
      */
     static Response missingAuthenticationTokenResponse(WireProtocol protocol, ContainerRequestContext ctx) {
+        if (protocol == WireProtocol.AWS_QUERY && Ec2ErrorResponses.isEc2QueryRequest(ctx)) {
+            return Ec2ErrorResponses.of("MissingAuthenticationToken", MISSING_AUTHENTICATION_TOKEN, 403);
+        }
         return protocolError(protocol, ctx, "MissingAuthenticationToken", "MissingAuthenticationTokenException",
                 MISSING_AUTHENTICATION_TOKEN, 403);
     }
