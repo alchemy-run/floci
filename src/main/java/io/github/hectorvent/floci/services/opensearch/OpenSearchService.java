@@ -695,10 +695,6 @@ public class OpenSearchService implements ResourceProvider {
         if (domain.getEndpoint() == null || domain.getEndpoint().isBlank()) {
             return "";
         }
-        if (!domain.getEndpoint().startsWith("http://")) {
-            // No container serves the domain, so it keeps the AWS-shaped endpoint it was given.
-            return domain.getEndpoint();
-        }
         return OpenSearchDataPlaneEndpoint.publicEndpoint(domain.getDomainName(), regionOf(domain), baseUrl());
     }
 

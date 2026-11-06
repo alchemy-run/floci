@@ -82,7 +82,8 @@ class OpenSearchVpcEndpointIntegrationTest {
                 .body("{\"DomainName\":\"" + PUBLIC_DOMAIN + "\",\"EngineVersion\":\"OpenSearch_2.19\"}")
                 .when().post("/2021-01-01/opensearch/domain")
                 .then().statusCode(200)
-                .body("DomainStatus.Endpoint", startsWith("search-" + PUBLIC_DOMAIN + "-"))
+                // A public domain reports Floci's data-plane gateway, which serves it as given.
+                .body("DomainStatus.Endpoint", startsWith(PUBLIC_DOMAIN + ".us-east-1.es."))
                 .body("DomainStatus.Endpoints", nullValue());
     }
 
