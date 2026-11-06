@@ -13,7 +13,6 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.rds.RdsClient;
 import software.amazon.awssdk.services.rds.model.CreateDbInstanceRequest;
-import software.amazon.awssdk.services.rds.model.CreateDbInstanceResponse;
 import software.amazon.awssdk.services.rds.model.DeleteDbInstanceRequest;
 import software.amazon.awssdk.services.rds.model.GenerateAuthenticationTokenRequest;
 
@@ -44,9 +43,8 @@ class RdsIamTokenCompatTest {
 
     private static final StaticCredentialsProvider CREDENTIALS =
             StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test"));
-    private static final Region REGION = TestFixtures.region();
+    private static final Region REGION = Region.US_EAST_1;
     private static final String USERNAME = "admin";
-    private static final String IAM_USERNAME = "iam_user";
     private static final String PASSWORD = "secret-pass-123";
     private static final String DATABASE = "appdb";
 
@@ -57,12 +55,11 @@ class RdsIamTokenCompatTest {
     private static boolean instanceReady;
 
     @BeforeAll
-    static void setup() throws Exception {
-        Assumptions.assumeFalse(TestFixtures.isRealAws(), "Local PostgreSQL role fixtures");
+    static void setup() {
         rds = TestFixtures.rdsClient();
         instanceId = TestFixtures.uniqueName("rds-iam");
         try {
-            CreateDbInstanceResponse response = rds.createDBInstance(CreateDbInstanceRequest.builder()
+            var response = rds.createDBInstance(CreateDbInstanceRequest.builder()
                     .dbInstanceIdentifier(instanceId)
                     .dbInstanceClass("db.t3.micro")
                     .engine("postgres")
@@ -77,13 +74,6 @@ class RdsIamTokenCompatTest {
             instanceReady = true;
         } catch (Exception e) {
             instanceReady = false;
-        }
-        if (instanceReady) {
-            try (Connection admin = awaitPostgresConnection(USERNAME, PASSWORD);
-                 Statement statement = admin.createStatement()) {
-                statement.execute("CREATE ROLE " + IAM_USERNAME + " LOGIN");
-                statement.execute("GRANT rds_iam TO " + IAM_USERNAME);
-            }
         }
     }
 
@@ -111,12 +101,12 @@ class RdsIamTokenCompatTest {
                 GenerateAuthenticationTokenRequest.builder()
                         .hostname(endpointAddress)
                         .port(proxyPort)
-                        .username(IAM_USERNAME)
+                        .username(USERNAME)
                         .region(REGION)
                         .credentialsProvider(CREDENTIALS)
                         .build());
 
-        Connection conn = awaitPostgresConnection(IAM_USERNAME, token);
+        Connection conn = awaitPostgresConnection(USERNAME, token);
         try {
             assertThat(selectOne(conn)).isEqualTo(1);
         } finally {
@@ -139,7 +129,7 @@ class RdsIamTokenCompatTest {
                         .credentialsProvider(CREDENTIALS)
                         .build());
 
-        assertThatThrownBy(() -> openPostgresConnection(IAM_USERNAME, token))
+        assertThatThrownBy(() -> openPostgresConnection(USERNAME, token))
                 .isInstanceOf(SQLException.class)
                 .hasMessageContaining("password authentication failed");
     }
@@ -154,7 +144,7 @@ class RdsIamTokenCompatTest {
                 GenerateAuthenticationTokenRequest.builder()
                         .hostname(endpointAddress)
                         .port(proxyPort)
-                        .username(IAM_USERNAME)
+                        .username(USERNAME)
                         .region(REGION)
                         .credentialsProvider(CREDENTIALS)
                         .build());
@@ -162,7 +152,7 @@ class RdsIamTokenCompatTest {
         String tampered = token.substring(0, token.length() - 1)
                 + (token.endsWith("a") ? "b" : "a");
 
-        assertThatThrownBy(() -> openPostgresConnection(IAM_USERNAME, tampered))
+        assertThatThrownBy(() -> openPostgresConnection(USERNAME, tampered))
                 .isInstanceOf(SQLException.class)
                 .hasMessageContaining("password authentication failed");
     }
@@ -177,14 +167,14 @@ class RdsIamTokenCompatTest {
                 GenerateAuthenticationTokenRequest.builder()
                         .hostname(endpointAddress)
                         .port(proxyPort)
-                        .username(IAM_USERNAME)
+                        .username(USERNAME)
                         .region(REGION)
                         .credentialsProvider(CREDENTIALS)
                         .build());
 
         String withoutSignature = token.replaceFirst("&X-Amz-Signature=[0-9a-f]+", "");
 
-        assertThatThrownBy(() -> openPostgresConnection(IAM_USERNAME, withoutSignature))
+        assertThatThrownBy(() -> openPostgresConnection(USERNAME, withoutSignature))
                 .isInstanceOf(SQLException.class)
                 .hasMessageContaining("password authentication failed");
     }

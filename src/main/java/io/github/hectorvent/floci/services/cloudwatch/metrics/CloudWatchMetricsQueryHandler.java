@@ -66,6 +66,12 @@ public class CloudWatchMetricsQueryHandler {
                 "ListManagedInsightRules").contains(normalizedAction)) {
             return CloudWatchQueryCodec.handle(jsonHandler, normalizedAction, params, region);
         }
+        // Insight rules live in the JSON handler, and so do their tags.
+        String resourceArn = params.getFirst("ResourceARN");
+        if (jsonHandler != null && resourceArn != null && resourceArn.contains(":insight-rule/")
+                && java.util.Set.of("TagResource", "UntagResource", "ListTagsForResource").contains(normalizedAction)) {
+            return CloudWatchQueryCodec.handle(jsonHandler, normalizedAction, params, region);
+        }
         return switch (normalizedAction) {
             case "PutMetricData" -> handlePutMetricData(params, region);
             case "ListMetrics" -> handleListMetrics(params, region);

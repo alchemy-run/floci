@@ -172,6 +172,10 @@ AWS::Scheduler::Schedule	SchedulerScheduleCfnProvisioner
 AWS::Scheduler::ScheduleGroup	SchedulerScheduleGroupCfnProvisioner
 AWS::SecretsManager::Secret	SecretsManagerCfnProvisioner
 AWS::SecretsManager::SecretTargetAttachment	SecretTargetAttachmentCfnProvisioner
+AWS::ServiceDiscovery::HttpNamespace	CloudMapCfnProvisioner
+AWS::ServiceDiscovery::PrivateDnsNamespace	CloudMapCfnProvisioner
+AWS::ServiceDiscovery::PublicDnsNamespace	CloudMapCfnProvisioner
+AWS::ServiceDiscovery::Service	CloudMapCfnProvisioner
 AWS::Signer::SigningProfile	SignerCfnProvisioner
 AWS::StepFunctions::StateMachine	StepFunctionsCfnProvisioner
 AWS::WAFv2::WebACL	WafV2CfnProvisioner

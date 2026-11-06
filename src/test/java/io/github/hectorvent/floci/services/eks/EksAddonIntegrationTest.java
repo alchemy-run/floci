@@ -288,7 +288,8 @@ class EksAddonIntegrationTest {
         String name = "addon-k8s-" + UUID.randomUUID().toString().substring(0, 8);
         String basePath = "/clusters/" + name + "/addons";
 
-        createCluster(account, name, "1.35");
+        // Newer than every version the catalog and the k3s map cover; this test runs EKS in mock mode.
+        createCluster(account, name, "1.40");
         try {
             // Create with no version resolves default version on cluster outside catalog range
             given().header("Authorization", auth(account, "eks"))

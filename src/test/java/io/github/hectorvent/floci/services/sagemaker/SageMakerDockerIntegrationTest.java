@@ -115,7 +115,7 @@ class SageMakerDockerIntegrationTest {
                 """.formatted(job, bucket)).then().statusCode(200);
         // Wait for the container to actually be running, blocked on an empty pipe, so the stop
         // races a real running container rather than one still being staged.
-        awaitContainerRunning("floci-sagemaker-training-" + job);
+        awaitContainerRunning("floci-aws-sagemaker-training-" + job);
         post("SageMaker.StopTrainingJob", "{\"TrainingJobName\":\"%s\"}".formatted(job)).then().statusCode(200);
         post("SageMaker.DescribeTrainingJob", "{\"TrainingJobName\":\"%s\"}".formatted(job))
                 .then().statusCode(200).body("TrainingJobStatus", equalTo("Stopped"));
@@ -148,7 +148,7 @@ class SageMakerDockerIntegrationTest {
         // Let the superseded start worker finish (it should discard its result, not persist it).
         // Discarding it tears down the container it brought up, so the container appearing and
         // then disappearing marks the point where the worker has decided.
-        String containerName = "floci-sagemaker-endpoint-" + endpoint;
+        String containerName = "floci-aws-sagemaker-endpoint-" + endpoint;
         AtomicBoolean containerSeen = new AtomicBoolean();
         await("the superseded start to discard its container").atMost(Duration.ofSeconds(30))
                 .pollInterval(Duration.ofMillis(100)).until(() -> {

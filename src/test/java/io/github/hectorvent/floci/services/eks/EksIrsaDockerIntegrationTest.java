@@ -58,6 +58,9 @@ class EksIrsaDockerIntegrationTest {
         }
     }
 
+    // Enforcement refuses an unsigned management call, so the IAM setup calls sign as the root user.
+    private static final String IAM_AUTH = "AWS4-HMAC-SHA256 Credential=test/20260101/us-east-1/iam/aws4_request";
+
     @Inject
     DockerClient dockerClient;
 
@@ -296,6 +299,7 @@ class EksIrsaDockerIntegrationTest {
     private String createRole(String name, String trustPolicy) {
         return given()
             .contentType(FORM)
+            .header("Authorization", IAM_AUTH)
             .formParam("Action", "CreateRole")
             .formParam("Version", "2010-05-08")
             .formParam("RoleName", name)
@@ -311,6 +315,7 @@ class EksIrsaDockerIntegrationTest {
         try {
             given()
                 .contentType(FORM)
+                .header("Authorization", IAM_AUTH)
                 .formParam("Action", "DeleteRole")
                 .formParam("Version", "2010-05-08")
                 .formParam("RoleName", name)

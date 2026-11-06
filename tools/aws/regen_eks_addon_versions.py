@@ -40,6 +40,8 @@ ADDONS = [
     "eks-pod-identity-agent",
     "aws-ebs-csi-driver",
     "amazon-cloudwatch-observability",
+    # A community add-on, which Alchemy's EKS suite installs.
+    "metrics-server",
 ]
 # Each field the catalog keeps and the JSON type Java reads it as; STRINGS is a list of strings.
 STRINGS = "list of strings"

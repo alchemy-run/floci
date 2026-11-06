@@ -1025,8 +1025,8 @@ class IotIntegrationTest {
             .body("version", equalTo(5));
 
         given().when().delete("/things/update-semantics-thing").then().statusCode(200);
+        // AWS only deletes a thing type five minutes after it was deprecated.
         given().when().post("/thing-types/update-semantics-type/deprecate").then().statusCode(200);
-        given().when().delete("/thing-types/update-semantics-type").then().statusCode(200);
     }
 
     @Test

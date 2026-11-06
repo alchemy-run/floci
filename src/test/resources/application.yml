@@ -485,6 +485,10 @@ floci:
     cloudfront:
       enabled: true
       function-runtime-command: node
+      # Every distribution takes an edge port, and the suite creates far more than the default
+      # twenty without deleting them all.
+      edge-base-port: 13000
+      edge-max-port: 13999
       allowed-private-origin-hosts: []
     appsync:
       enabled: true

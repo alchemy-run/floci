@@ -532,6 +532,9 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
             tagStore.delete(existing.getArn());
         }
         tagStore.delete("distribution/" + id);
+        if (edgePorts != null) {
+            edgePorts.release(id);
+        }
     }
 
     public List<Distribution> listDistributions(String marker, int maxItems) {

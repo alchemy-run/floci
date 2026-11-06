@@ -4276,7 +4276,9 @@ public class NativeDynamoDbJsonHandler {
             DynamoDbService.TransactWriteResult result = dynamoDbService.transactWriteItems(transactItems, region,
                     request.path("ClientRequestToken").asText(null), request);
             ObjectNode resp = objectMapper.createObjectNode();
-            resp.set("Responses", objectMapper.createArrayNode());
+            // AWS answers a write transaction with one empty ItemResponse per statement.
+            ArrayNode responses = resp.putArray("Responses");
+            statements.forEach(statement -> responses.addObject());
             addTransactWriteConsumedCapacity(resp, request, result);
             return Response.ok(resp).build();
         } catch (TransactionCanceledException e) {

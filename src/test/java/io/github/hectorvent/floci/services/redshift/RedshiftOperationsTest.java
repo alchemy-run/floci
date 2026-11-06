@@ -189,7 +189,7 @@ public class RedshiftOperationsTest {
         query("Action", "DescribeClusterSnapshots", "SnapshotIdentifier", "missing-copy-target")
                 .then().statusCode(404).body(containsString("<Code>ClusterSnapshotNotFound</Code>"));
         query("Action", "DescribeClusterSubnetGroups", "ClusterSubnetGroupName", "missing-subnet-group")
-                .then().statusCode(404).body(containsString("<Code>ClusterSubnetGroupNotFoundFault</Code>"));
+                .then().statusCode(400).body(containsString("<Code>ClusterSubnetGroupNotFoundFault</Code>"));
         query("Action", "ResetClusterParameterGroup", "ParameterGroupName", "missing-reset-group",
                 "ResetAllParameters", "true")
                 .then().statusCode(404).body(containsString("<Code>ClusterParameterGroupNotFound</Code>"));

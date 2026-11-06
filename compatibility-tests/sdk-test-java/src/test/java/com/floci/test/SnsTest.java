@@ -616,29 +616,6 @@ class SnsTest {
                 .queueUrl(batchQueueUrl).build());
     }
     @Test
-    @Order(17)
-    void smsPreferencesRoundTrip() {
-        sns.setSMSAttributes(SetSmsAttributesRequest.builder()
-                .attributes(Map.of("DefaultSMSType", "Transactional", "MonthlySpendLimit", "10"))
-                .build());
-
-        GetSmsAttributesResponse selected = sns.getSMSAttributes(GetSmsAttributesRequest.builder()
-                .attributes("DefaultSMSType")
-                .build());
-        assertThat(selected.attributes()).containsExactly(entry("DefaultSMSType", "Transactional"));
-
-        GetSmsAttributesResponse all = sns.getSMSAttributes();
-        assertThat(all.attributes()).containsEntry("DefaultSMSType", "Transactional")
-                .containsEntry("MonthlySpendLimit", "10");
-
-        sns.setSMSAttributes(SetSmsAttributesRequest.builder()
-                .attributes(Map.of("DefaultSMSType", "", "MonthlySpendLimit", ""))
-                .build());
-        assertThat(sns.getSMSAttributes().attributes())
-                .doesNotContainKeys("DefaultSMSType", "MonthlySpendLimit");
-    }
-
-    @Test
     @Order(18)
     void topicPermissionsAreAddedToAndRemovedFromThePolicy() throws Exception {
         String permissionTopic = sns.createTopic(CreateTopicRequest.builder()

@@ -146,6 +146,18 @@ class RedshiftClusterCfnIntegrationTest {
         String template = """
             {
               "Resources": {
+                "Vpc": {
+                  "Type": "AWS::EC2::VPC",
+                  "Properties": {"CidrBlock": "10.42.0.0/16"}
+                },
+                "SubnetA": {
+                  "Type": "AWS::EC2::Subnet",
+                  "Properties": {"VpcId": {"Ref": "Vpc"}, "CidrBlock": "10.42.1.0/24"}
+                },
+                "SubnetB": {
+                  "Type": "AWS::EC2::Subnet",
+                  "Properties": {"VpcId": {"Ref": "Vpc"}, "CidrBlock": "10.42.2.0/24"}
+                },
                 "ParamGroup": {
                   "Type": "AWS::Redshift::ClusterParameterGroup",
                   "Properties": {
@@ -159,7 +171,7 @@ class RedshiftClusterCfnIntegrationTest {
                   "Properties": {
                     "ClusterSubnetGroupName": "%s",
                     "Description": "Test subnet group for CFN integration",
-                    "SubnetIds": ["subnet-12345678", "subnet-87654321"]
+                    "SubnetIds": [{"Ref": "SubnetA"}, {"Ref": "SubnetB"}]
                   }
                 },
                 "SecurityGroup": {

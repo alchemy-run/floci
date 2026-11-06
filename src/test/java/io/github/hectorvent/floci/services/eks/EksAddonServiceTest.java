@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.eks;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.github.hectorvent.floci.core.common.AwsException;
 import io.github.hectorvent.floci.core.storage.InMemoryStorage;
@@ -15,7 +16,11 @@ import io.github.hectorvent.floci.services.iam.IamService;
 import io.github.hectorvent.floci.services.iam.model.IamRole;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -90,7 +95,7 @@ class EksAddonServiceTest {
         );
 
         Addon created = fixture.service.create(fixture.cluster, request);
-        assertEquals("v1.18.1-eksbuild.1", created.addonVersion());
+        assertEquals(catalogDefault("vpc-cni", "1.29"), created.addonVersion());
     }
 
     @Test
@@ -334,7 +339,7 @@ class EksAddonServiceTest {
         Addon addon = fixture.service.create(fixture.cluster,
                 new CreateAddonRequest("metrics-server", null, null, null, null, null, null, null));
         assertEquals("metrics-server", addon.addonName());
-        assertEquals("v0.7.2-eksbuild.3", addon.addonVersion());
+        assertEquals(catalogDefault("metrics-server", "1.29"), addon.addonVersion());
         assertEquals("ACTIVE", addon.status());
         assertEquals("community", addon.owner());
         assertEquals("eks", addon.publisher());
@@ -449,9 +454,9 @@ class EksAddonServiceTest {
         Fixture fixture = fixture();
         fixture.cluster.setVersion("1.29");
 
-        // v1.16.0-eksbuild.1 is only compatible with k8s 1.28
+        // v1.14.0-eksbuild.3 is only compatible with k8s 1.28
         CreateAddonRequest reqIncompatible = new CreateAddonRequest(
-                "vpc-cni", "v1.16.0-eksbuild.1", null, null, null, null, null, null);
+                "vpc-cni", "v1.14.0-eksbuild.3", null, null, null, null, null, null);
         AwsException exCreate = assertThrows(AwsException.class, () ->
                 fixture.service.create(fixture.cluster, reqIncompatible));
         assertEquals("InvalidParameterException", exCreate.getErrorCode());
@@ -465,7 +470,7 @@ class EksAddonServiceTest {
 
         // Updating to incompatible version fails
         UpdateAddonRequest updateIncompatible = new UpdateAddonRequest(
-                "v1.16.0-eksbuild.1", null, null, null, null, null);
+                "v1.14.0-eksbuild.3", null, null, null, null, null);
         AwsException exUpdate = assertThrows(AwsException.class, () ->
                 fixture.service.update(fixture.cluster, "vpc-cni", updateIncompatible));
         assertEquals("InvalidParameterException", exUpdate.getErrorCode());
@@ -475,7 +480,7 @@ class EksAddonServiceTest {
     @Test
     void clusterVersionOutsideCatalogRangeAllowsCatalogVersionsAndResolvesDefault() {
         Fixture fixture = fixture();
-        fixture.cluster.setVersion("1.35");
+        fixture.cluster.setVersion("1.40");
 
         // Create with no version resolves a default version from the catalog without error
         CreateAddonRequest reqDefault = new CreateAddonRequest(
@@ -508,11 +513,11 @@ class EksAddonServiceTest {
         CreateAddonRequest reqKubeProxy = new CreateAddonRequest(
                 "kube-proxy", null, null, null, null, null, null, null);
         Addon created = fixture.service.create(fixture.cluster, reqKubeProxy);
-        assertEquals("v1.32.0-eksbuild.1", created.addonVersion());
+        assertEquals(catalogDefault("kube-proxy", "1.32"), created.addonVersion());
 
-        // Incompatible version (v1.16.0 only compatible with 1.28) is rejected
+        // Incompatible version (v1.14.0 only compatible with 1.28) is rejected
         CreateAddonRequest reqIncompatible = new CreateAddonRequest(
-                "vpc-cni", "v1.16.0-eksbuild.1", null, null, null, null, null, null);
+                "vpc-cni", "v1.14.0-eksbuild.3", null, null, null, null, null, null);
         AwsException ex = assertThrows(AwsException.class, () ->
                 fixture.service.create(fixture.cluster, reqIncompatible));
         assertEquals("InvalidParameterException", ex.getErrorCode());
@@ -604,6 +609,34 @@ class EksAddonServiceTest {
         assertTrue(fixture.service.listUpdateIds(fixture.cluster, null).isEmpty());
         assertEquals(List.of("vpc-cni"), fixture.service.clusterAddons(fixture.cluster).stream()
                 .map(Addon::addonName).toList());
+    }
+
+    // Expectations read the vendored catalog directly, so a regeneration does not rewrite these tests.
+    private static JsonNode catalogAddon(String addon) {
+        try (InputStream in = EksAddonServiceTest.class.getResourceAsStream("/eks/addon-versions.json")) {
+            for (JsonNode node : new ObjectMapper().readTree(in).path("addons")) {
+                if (addon.equals(node.path("addonName").asText())) {
+                    return node;
+                }
+            }
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
+        throw new AssertionError("no " + addon + " in the vendored catalog");
+    }
+
+    static String catalogDefault(String addon, String clusterVersion) {
+        List<String> defaults = new ArrayList<>();
+        for (JsonNode version : catalogAddon(addon).path("addonVersions")) {
+            for (JsonNode compatibility : version.path("compatibilities")) {
+                if (clusterVersion.equals(compatibility.path("clusterVersion").asText())
+                        && compatibility.path("defaultVersion").asBoolean()) {
+                    defaults.add(version.path("addonVersion").asText());
+                }
+            }
+        }
+        assertEquals(1, defaults.size(), addon + " defaults for " + clusterVersion);
+        return defaults.getFirst();
     }
 
     private static Fixture fixture() {

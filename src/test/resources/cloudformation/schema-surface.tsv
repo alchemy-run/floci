@@ -171,6 +171,10 @@ AWS::Scheduler::Schedule	Arn	Description,EndDate,FlexibleTimeWindow,GroupName,Km
 AWS::Scheduler::ScheduleGroup	Arn,CreationDate,LastModificationDate,State	Name,Tags
 AWS::SecretsManager::Secret	Id	Description,GenerateSecretString,KmsKeyId,Name,ReplicaRegions,SecretString,Tags,Type
 AWS::SecretsManager::SecretTargetAttachment	Id	SecretId,TargetId,TargetType
+AWS::ServiceDiscovery::HttpNamespace	Arn,Id	Description,Name,Tags
+AWS::ServiceDiscovery::PrivateDnsNamespace	Arn,HostedZoneId,Id	Description,Name,Properties,Tags,Vpc
+AWS::ServiceDiscovery::PublicDnsNamespace	Arn,HostedZoneId,Id	Description,Name,Properties,Tags
+AWS::ServiceDiscovery::Service	Arn,Id	Description,DnsConfig,HealthCheckConfig,HealthCheckCustomConfig,Name,NamespaceId,ServiceAttributes,Tags,Type
 AWS::Signer::SigningProfile	Arn,ProfileName,ProfileVersion,ProfileVersionArn	PlatformId,SignatureValidityPeriod,Tags
 AWS::StepFunctions::StateMachine	Arn,Name,StateMachineRevisionId	Definition,DefinitionS3Location,DefinitionString,DefinitionSubstitutions,EncryptionConfiguration,LoggingConfiguration,RoleArn,StateMachineName,StateMachineType,Tags,TracingConfiguration
 AWS::WAFv2::WebACL	Arn,Capacity,Id,LabelNamespace	ApplicationConfig,AssociationConfig,CaptchaConfig,ChallengeConfig,CustomResponseBodies,DataProtectionConfig,DefaultAction,Description,MonetizationConfig,Name,OnSourceDDoSProtectionConfig,Rules,Scope,Tags,TokenDomains,VisibilityConfig

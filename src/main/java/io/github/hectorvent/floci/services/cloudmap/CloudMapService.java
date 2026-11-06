@@ -232,6 +232,13 @@ public class CloudMapService {
                 "ListNamespaces", region, null);
     }
 
+    /** Sets a namespace's description whatever its type, as CloudFormation updates it in place. */
+    public void updateNamespace(String id, String description) {
+        Namespace ns = requireNamespace(id);
+        ns.setDescription(description);
+        namespaceStore.put(ns.getId(), ns);
+    }
+
     public Operation updateHttpNamespace(String id, String description, String region) {
         Namespace ns = requireNamespace(id);
         if (!"HTTP".equals(ns.getType())) {

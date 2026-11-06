@@ -115,7 +115,9 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
         run: |
           if [ "$EVENT_NAME" = pull_request ]; then
-            make iam-data-verify CHANGED="$(git diff --name-only HEAD^1 HEAD | tr '\n' ' ')"
+            # Only the paths the checks can cover: a sync from upstream changes thousands of files,
+            # which overflows the argument list.
+            make iam-data-verify CHANGED="$(git diff --name-only HEAD^1 HEAD -- src/main/resources/aws tools/aws | tr '\n' ' ')"
           else
             make iam-data-verify
           fi

@@ -126,7 +126,6 @@ dns-suffix	src/main/java/io/github/hectorvent/floci/services/bedrockagentcorecon
 dns-suffix	src/main/java/io/github/hectorvent/floci/services/bedrockagentcorecontrol/BedrockAgentCoreGatewayService.java	1
 dns-suffix	src/main/java/io/github/hectorvent/floci/services/cloudfront/CloudFrontService.java	1
 dns-suffix	src/main/java/io/github/hectorvent/floci/services/cloudfront/edge/CloudFrontEdgeController.java	1
-dns-suffix	src/main/java/io/github/hectorvent/floci/services/cloudfront/edge/CloudFrontEdgeRoutingFilter.java	1
 dns-suffix	src/main/java/io/github/hectorvent/floci/services/cloudtrail/CloudTrailEventService.java	1
 dns-suffix	src/main/java/io/github/hectorvent/floci/services/cloudtrail/CloudTrailLakeQueryGenerator.java	1
 dns-suffix	src/main/java/io/github/hectorvent/floci/services/cloudtrail/CloudTrailLogWriter.java	1

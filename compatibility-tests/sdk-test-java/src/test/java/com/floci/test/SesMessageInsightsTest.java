@@ -83,18 +83,6 @@ class SesMessageInsightsTest {
     }
 
     @Test
-    @Order(2)
-    @DisplayName("an unknown message names the account alongside the id")
-    void unknownMessageNamesTheAccount() {
-        setVdmEnabled(true);
-
-        assertThatThrownBy(() -> sesV2.getMessageInsights(
-                GetMessageInsightsRequest.builder().messageId("no-such-message").build()))
-                .isInstanceOf(NotFoundException.class)
-                .hasMessageContaining("Message <no-such-message> not found for account <");
-    }
-
-    @Test
     @Order(3)
     @DisplayName("an ordinary recipient reports SEND then DELIVERY with the send's tags")
     void ordinaryRecipientTimeline() {

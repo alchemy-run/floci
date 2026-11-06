@@ -1592,7 +1592,7 @@ public class RedshiftService {
     public List<ClusterSubnetGroup> describeClusterSubnetGroups(String name) {
         if (name != null && !name.isBlank()) {
             ClusterSubnetGroup group = subnetGroups.get(name)
-                    .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFoundFault", "Cluster subnet group " + name + " not found", 404));
+                    .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFoundFault", "Cluster subnet group " + name + " not found", 400));
             return List.of(group);
         }
         return subnetGroups.scan(k -> true);
@@ -1600,7 +1600,7 @@ public class RedshiftService {
 
     public synchronized ClusterSubnetGroup modifyClusterSubnetGroup(String name, String description, List<String> subnetIds) {
         ClusterSubnetGroup group = subnetGroups.get(name)
-                .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFoundFault", "Cluster subnet group " + name + " not found", 404));
+                .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFoundFault", "Cluster subnet group " + name + " not found", 400));
         String observedVpc = subnetVpc(subnetIds);
         if (group.getVpcId() != null && !group.getVpcId().equals(observedVpc)) {
             throw new AwsException("InvalidSubnet", "Subnets must remain in the subnet group's VPC.", 400);
@@ -1617,7 +1617,7 @@ public class RedshiftService {
 
     public ClusterSubnetGroup deleteClusterSubnetGroup(String name) {
         ClusterSubnetGroup group = subnetGroups.get(name)
-                .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFoundFault", "Cluster subnet group " + name + " not found", 404));
+                .orElseThrow(() -> new AwsException("ClusterSubnetGroupNotFoundFault", "Cluster subnet group " + name + " not found", 400));
         subnetGroups.delete(name);
         subnetGroups.flush();
         return group;

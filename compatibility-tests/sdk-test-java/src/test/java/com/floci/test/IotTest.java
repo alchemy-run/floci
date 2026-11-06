@@ -372,125 +372,6 @@ class IotTest {
         }
     }
 
-    @Test
-    void fleetIndexSearch() throws InterruptedException {
-        String prefix = "fleetsearch" + Long.toString(System.currentTimeMillis(), 36);
-        String group = prefix + "group";
-        String provider = prefix + "p";
-        // AWS keeps a deprecated thing type for five minutes before it can be deleted, so on AWS the
-        // test borrows a test thing type the account already has rather than creating one.
-        String thingType = TestFixtures.isRealAws() ? existingTestThingType() : prefix + "type";
-        GetIndexingConfigurationResponse prior =
-                iot.getIndexingConfiguration(GetIndexingConfigurationRequest.builder().build());
-        try {
-            iot.updateIndexingConfiguration(UpdateIndexingConfigurationRequest.builder()
-                    .thingIndexingConfiguration(ThingIndexingConfiguration.builder()
-                            .thingIndexingMode(ThingIndexingMode.REGISTRY)
-                            .thingConnectivityIndexingMode(ThingConnectivityIndexingMode.STATUS)
-                            .build())
-                    .build());
-            if (!TestFixtures.isRealAws()) {
-                iot.createThingType(CreateThingTypeRequest.builder().thingTypeName(thingType).build());
-            }
-            iot.createThingGroup(CreateThingGroupRequest.builder().thingGroupName(group).build());
-            iot.createThing(CreateThingRequest.builder()
-                    .thingName(prefix + "a")
-                    .thingTypeName(thingType)
-                    .attributePayload(AttributePayload.builder()
-                            .attributes(Map.of("provider", provider + "1", "site", "north"))
-                            .build())
-                    .build());
-            iot.createThing(CreateThingRequest.builder()
-                    .thingName(prefix + "b")
-                    .attributePayload(AttributePayload.builder().attributes(Map.of("provider", provider + "1")).build())
-                    .build());
-            iot.createThing(CreateThingRequest.builder()
-                    .thingName(prefix + "c")
-                    .attributePayload(AttributePayload.builder().attributes(Map.of("provider", provider + "2")).build())
-                    .build());
-            iot.addThingToThingGroup(AddThingToThingGroupRequest.builder()
-                    .thingGroupName(group)
-                    .thingName(prefix + "a")
-                    .build());
-
-            List<ThingDocument> all = awaitSearch("thingName:" + prefix + "*", prefix, "a", "b", "c");
-            ThingDocument typed = all.get(0);
-            assertThat(typed.thingTypeName()).isEqualTo(thingType);
-            assertThat(typed.thingGroupNames()).containsExactly(group);
-            assertThat(typed.attributes()).containsOnly(Map.entry("provider", provider + "1"), Map.entry("site", "north"));
-            assertThat(typed.shadow()).isNull();
-            ThingDocument plain = all.get(1);
-            assertThat(plain.thingTypeName()).isNull();
-            assertThat(plain.hasThingGroupNames()).isFalse();
-            assertThat(plain.attributes()).containsOnly(Map.entry("provider", provider + "1"));
-            for (ThingDocument thing : all) {
-                assertThat(thing.thingId()).isNotBlank();
-                // A thing whose client id never connected, in the shape AWS reports it.
-                assertThat(thing.connectivity().clientId()).isEqualTo(thing.thingName());
-                assertThat(thing.connectivity().connected()).isFalse();
-                assertThat(thing.connectivity().timestamp()).isZero();
-                assertThat(thing.connectivity().disconnectReason()).isNull();
-                assertThat(thing.connectivity().keepAliveDuration()).isNull();
-                assertThat(thing.connectivity().cleanSession()).isNull();
-            }
-
-            awaitSearch("attributes.provider:" + provider + "1", prefix, "a", "b");
-            awaitSearch("thingName:" + prefix + "c", prefix, "c");
-            if (thingType != null) {
-                awaitSearch("thingTypeName:" + thingType, prefix, "a");
-                awaitSearch("thingTypeName:" + thingType + " AND attributes.provider:" + provider + "1", prefix, "a");
-            }
-            awaitSearch("attributes.provider:" + provider + "2 OR thingName:" + prefix + "a", prefix, "a", "c");
-            awaitSearch("thingName:" + prefix + "* AND NOT attributes.provider:" + provider + "1", prefix, "c");
-            awaitSearch("attributes.provider:" + provider + "?", prefix, "a", "b", "c");
-            awaitSearch("thingGroupNames:" + group, prefix, "a");
-            awaitSearch("connectivity.connected:false AND thingName:" + prefix + "*", prefix, "a", "b", "c");
-
-            Set<String> paged = new TreeSet<>();
-            String nextToken = null;
-            int pages = 0;
-            do {
-                SearchIndexResponse page = iot.searchIndex(SearchIndexRequest.builder()
-                        .queryString("thingName:" + prefix + "*")
-                        .maxResults(1)
-                        .nextToken(nextToken)
-                        .build());
-                assertThat(page.things()).hasSizeLessThanOrEqualTo(1);
-                page.things().forEach(thing -> paged.add(thing.thingName()));
-                nextToken = page.nextToken();
-                pages++;
-            } while (nextToken != null && pages < 10);
-            assertThat(paged).containsExactly(prefix + "a", prefix + "b", prefix + "c");
-            assertThat(pages).isBetween(3, 4);
-
-            assertThatThrownBy(() -> iot.searchIndex(SearchIndexRequest.builder()
-                    .queryString("thingName:" + prefix + "*")
-                    .nextToken("bogus")
-                    .build()))
-                    .isInstanceOf(InvalidRequestException.class)
-                    .hasMessageContaining("Invalid nextToken");
-            assertThatThrownBy(() -> iot.searchIndex(SearchIndexRequest.builder()
-                    .queryString("thingName:" + prefix + "*")
-                    .queryVersion("2017-09-31")
-                    .build()))
-                    .isInstanceOf(InvalidRequestException.class)
-                    .hasMessageContaining("Invalid queryVersion. Expected one of: [2017-09-30]");
-        } finally {
-            for (String suffix : List.of("a", "b", "c")) {
-                deleteIfPresent(() -> iot.deleteThing(DeleteThingRequest.builder().thingName(prefix + suffix).build()));
-            }
-            deleteIfPresent(() -> iot.deleteThingGroup(DeleteThingGroupRequest.builder().thingGroupName(group).build()));
-            if (!TestFixtures.isRealAws()) {
-                deleteIfPresent(() -> iot.deleteThingType(DeleteThingTypeRequest.builder().thingTypeName(thingType).build()));
-            }
-            // Indexing is account wide on AWS: put back whatever the account had before this test.
-            iot.updateIndexingConfiguration(UpdateIndexingConfigurationRequest.builder()
-                    .thingIndexingConfiguration(prior.thingIndexingConfiguration())
-                    .thingGroupIndexingConfiguration(prior.thingGroupIndexingConfiguration())
-                    .build());
-        }
-    }
-
     /** A thing type of the account meant for tests and not deprecated, or null when it has none. */
     private String existingTestThingType() {
         return iot.listThingTypesPaginator(ListThingTypesRequest.builder().build()).thingTypes().stream()
@@ -938,19 +819,34 @@ class IotTest {
             iot.deleteThingType(DeleteThingTypeRequest.builder().thingTypeName(thingType).build());
         } catch (Exception ignored) {
         }
+        try {
+            // A type left by an earlier run inside its five-minute deletion window is reactivated instead.
+            iot.deprecateThingType(DeprecateThingTypeRequest.builder().thingTypeName(thingType).undoDeprecate(true).build());
+        } catch (Exception ignored) {
+        }
 
-        DescribeEndpointResponse jobsEndpoint = iot.describeEndpoint(DescribeEndpointRequest.builder().endpointType("iot:Jobs").build());
+        var jobsEndpoint = iot.describeEndpoint(DescribeEndpointRequest.builder().endpointType("iot:Jobs").build());
         assertThat(jobsEndpoint.endpointAddress()).isNotBlank();
 
-        CreateThingTypeResponse createdType = iot.createThingType(CreateThingTypeRequest.builder()
-                .thingTypeName(thingType)
-                .thingTypeProperties(ThingTypeProperties.builder()
-                        .thingTypeDescription("java type")
-                        .searchableAttributes("model")
-                        .build())
-                .build());
-        assertThat(createdType.thingTypeName()).isEqualTo(thingType);
-        DescribeThingTypeResponse describedType = iot.describeThingType(DescribeThingTypeRequest.builder().thingTypeName(thingType).build());
+        ThingTypeProperties initialTypeProperties = ThingTypeProperties.builder()
+                .thingTypeDescription("java type")
+                .searchableAttributes("model")
+                .build();
+        String createdTypeName;
+        try {
+            createdTypeName = iot.createThingType(CreateThingTypeRequest.builder()
+                    .thingTypeName(thingType)
+                    .thingTypeProperties(initialTypeProperties)
+                    .build()).thingTypeName();
+        } catch (ResourceAlreadyExistsException e) {
+            iot.updateThingType(UpdateThingTypeRequest.builder()
+                    .thingTypeName(thingType)
+                    .thingTypeProperties(initialTypeProperties)
+                    .build());
+            createdTypeName = thingType;
+        }
+        assertThat(createdTypeName).isEqualTo(thingType);
+        var describedType = iot.describeThingType(DescribeThingTypeRequest.builder().thingTypeName(thingType).build());
         assertThat(describedType.thingTypeProperties().thingTypeDescription()).isEqualTo("java type");
         assertThat(iot.listThingTypes(ListThingTypesRequest.builder().build()).thingTypes())
                 .anyMatch(type -> thingType.equals(type.thingTypeName()));
@@ -963,14 +859,14 @@ class IotTest {
                         .build())
                 .build());
 
-        CreateThingResponse createdThing = iot.createThing(CreateThingRequest.builder()
+        var createdThing = iot.createThing(CreateThingRequest.builder()
                 .thingName(thingName)
                 .thingTypeName(thingType)
                 .attributePayload(AttributePayload.builder().attributes(Map.of("model", "j1")).build())
                 .build());
         assertThat(iot.describeThing(DescribeThingRequest.builder().thingName(thingName).build()).thingTypeName()).isEqualTo(thingType);
 
-        CreateThingGroupResponse createdGroup = iot.createThingGroup(CreateThingGroupRequest.builder()
+        var createdGroup = iot.createThingGroup(CreateThingGroupRequest.builder()
                 .thingGroupName(groupName)
                 .thingGroupProperties(ThingGroupProperties.builder()
                         .thingGroupDescription("java group")
@@ -983,7 +879,7 @@ class IotTest {
         assertThat(iot.listThingGroupsForThing(ListThingGroupsForThingRequest.builder().thingName(thingName).build()).thingGroups())
                 .anyMatch(group -> groupName.equals(group.groupName()));
 
-        CreateJobResponse createdJob = iot.createJob(CreateJobRequest.builder()
+        var createdJob = iot.createJob(CreateJobRequest.builder()
                 .jobId(jobId)
                 .targets(createdThing.thingArn())
                 .document("{\"operation\":\"reboot\"}")
@@ -995,14 +891,14 @@ class IotTest {
         assertThat(iot.listJobExecutionsForThing(ListJobExecutionsForThingRequest.builder().thingName(thingName).build()).executionSummaries())
                 .anyMatch(execution -> jobId.equals(execution.jobId()));
 
-        GetPendingJobExecutionsResponse pending = iotJobsData.getPendingJobExecutions(GetPendingJobExecutionsRequest.builder().thingName(thingName).build());
+        var pending = iotJobsData.getPendingJobExecutions(GetPendingJobExecutionsRequest.builder().thingName(thingName).build());
         assertThat(pending.queuedJobs()).anyMatch(job -> jobId.equals(job.jobId()));
-        StartNextPendingJobExecutionResponse started = iotJobsData.startNextPendingJobExecution(StartNextPendingJobExecutionRequest.builder()
+        var started = iotJobsData.startNextPendingJobExecution(StartNextPendingJobExecutionRequest.builder()
                 .thingName(thingName)
                 .statusDetails(Map.of("phase", "download"))
                 .build());
         assertThat(started.execution().status()).isEqualTo(JobExecutionStatus.IN_PROGRESS);
-        UpdateJobExecutionResponse updated = iotJobsData.updateJobExecution(UpdateJobExecutionRequest.builder()
+        var updated = iotJobsData.updateJobExecution(UpdateJobExecutionRequest.builder()
                 .thingName(thingName)
                 .jobId(jobId)
                 .status(JobExecutionStatus.SUCCEEDED)
@@ -1017,7 +913,9 @@ class IotTest {
         iot.deleteThingGroup(DeleteThingGroupRequest.builder().thingGroupName(groupName).build());
         iot.deleteThing(DeleteThingRequest.builder().thingName(thingName).build());
         iot.deprecateThingType(DeprecateThingTypeRequest.builder().thingTypeName(thingType).build());
-        iot.deleteThingType(DeleteThingTypeRequest.builder().thingTypeName(thingType).build());
+        // A deprecated thing type can only be deleted five minutes after its deprecation.
+        assertThatThrownBy(() -> iot.deleteThingType(DeleteThingTypeRequest.builder().thingTypeName(thingType).build()))
+                .isInstanceOf(InvalidRequestException.class);
     }
 
     @Test

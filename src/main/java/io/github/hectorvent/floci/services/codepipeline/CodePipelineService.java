@@ -897,7 +897,18 @@ public class CodePipelineService {
 
         CodePipelinePipeline pipeline = requirePipeline(account, region, pipelineName);
         JsonNode stage = stageByName(pipeline, stageName);
-        CodePipelineExecution execution = requireExecution(account, region, pipelineName, executionId);
+        CodePipelineExecution execution;
+        try {
+            execution = requireExecution(account, region, pipelineName, executionId);
+        } catch (AwsException e) {
+            // RetryStageExecution models no PipelineExecutionNotFoundException: AWS answers an execution
+            // it does not know as not the latest one.
+            if (!"PipelineExecutionNotFoundException".equals(e.getErrorCode())) {
+                throw e;
+            }
+            throw new AwsException("NotLatestPipelineExecutionException",
+                    "Pipeline execution " + executionId + " is not the latest execution", 400);
+        }
         Map<String, String> latestStatuses = startLocks.withLock(lockKey(execution),
                 () -> admitRetry(pipeline, execution, stageName, retryMode));
         try {

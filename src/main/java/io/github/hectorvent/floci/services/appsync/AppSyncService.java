@@ -935,7 +935,8 @@ public class AppSyncService {
         String certId = slash >= 0 ? certificateArn.substring(slash + 1) : certificateArn;
         // Emulator integration tests use short placeholder ids (`certificate/123`).
         // Real ACM ARNs use a UUID — those must exist.
-        if (!certId.contains("-")) {
+        // Anything other than an ACM certificate ARN is accepted as given.
+        if (!certId.contains("-") || !AwsArnUtils.isArnFor(certificateArn, "acm")) {
             return;
         }
         if (acmService != null && !acmService.isUnsatisfied()) {

@@ -221,7 +221,8 @@ class AppSyncIntegrationTest {
             .get("/v1/apis/" + apiId + "/schema")
         .then()
             .statusCode(200)
-            .body("schema.definition", containsString("type Query"));
+            // AWS returns the schema itself as the payload, not a JSON wrapper.
+            .body(containsString("type Query"));
     }
 
     // ── API Keys ─────────────────────────────────────────────────────────────
@@ -2422,7 +2423,8 @@ class AppSyncIntegrationTest {
             .get("/v1/apis/" + apiId + "/schema")
         .then()
             .statusCode(200)
-            .body("schema.definition", containsString("type Query"));
+            // AWS returns the schema itself as the payload, not a JSON wrapper.
+            .body(containsString("type Query"));
     }
 
     // ── Phase 2: Domain Names ────────────────────────────────────────────────

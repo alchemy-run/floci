@@ -14604,10 +14604,9 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         vol.setSize(size > 0 ? size : 8);
         // With encryption by default on, AWS encrypts every new volume and the Encrypted parameter
         // cannot opt out of it.
-        boolean hasKey = kmsKeyId != null && !kmsKeyId.isBlank();
-        vol.setEncrypted(encrypted || hasKey || ebsEncryptionByDefault(region));
+        vol.setEncrypted(encrypted || ebsEncryptionByDefault(region));
         if (vol.isEncrypted()) {
-            vol.setKmsKeyId(hasKey ? kmsKeyId : ebsDefaultKmsKeyId(region));
+            vol.setKmsKeyId(kmsKeyId != null && !kmsKeyId.isBlank() ? kmsKeyId : ebsDefaultKmsKeyId(region));
         }
         vol.setIops(iops > 0 ? iops : (volumeType != null && volumeType.startsWith("io") ? iops : 0));
         // Throughput is a gp3-only attribute; AWS reports 125 MiB/s by default for gp3.

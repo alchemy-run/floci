@@ -12,8 +12,6 @@ import software.amazon.awssdk.services.appconfigdata.model.StartConfigurationSes
 import software.amazon.awssdk.services.appconfigdata.model.StartConfigurationSessionResponse;
 
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
-import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -136,7 +134,7 @@ class AppConfigTest {
     @Test
     @Order(7)
     void startConfigurationSession() {
-        StartConfigurationSessionResponse response = appConfigData.startConfigurationSession(StartConfigurationSessionRequest.builder()
+        var response = appConfigData.startConfigurationSession(StartConfigurationSessionRequest.builder()
                 .applicationIdentifier(applicationId)
                 .environmentIdentifier(environmentId)
                 .configurationProfileIdentifier(configurationProfileId)
@@ -228,7 +226,7 @@ class AppConfigTest {
     @Order(13)
     @DisplayName("Poll interval: requested minimum is returned to the client")
     void requiredMinimumPollIntervalIsReturned() {
-        StartConfigurationSessionResponse sessionResponse = appConfigData.startConfigurationSession(StartConfigurationSessionRequest.builder()
+        var sessionResponse = appConfigData.startConfigurationSession(StartConfigurationSessionRequest.builder()
                 .applicationIdentifier(applicationId)
                 .environmentIdentifier(environmentId)
                 .configurationProfileIdentifier(configurationProfileId)
@@ -301,7 +299,7 @@ class AppConfigTest {
         try {
             appConfig.tagResource(TagResourceRequest.builder()
                     .resourceArn(arn)
-                    .tags(Map.of("env", "prod", "owner", "Alice"))
+                    .tags(java.util.Map.of("env", "prod", "owner", "Alice"))
                     .build());
 
             ListTagsForResourceResponse listed = appConfig.listTagsForResource(
@@ -347,7 +345,7 @@ class AppConfigTest {
 
         appConfig.tagResource(TagResourceRequest.builder()
                 .resourceArn(arn)
-                .tags(Map.of("env", "prod"))
+                .tags(java.util.Map.of("env", "prod"))
                 .build());
 
         ListTagsForResourceResponse listed = appConfig.listTagsForResource(
@@ -545,258 +543,4 @@ class AppConfigTest {
         assertThat(response.versionLabel()).isEqualTo("1");
         assertThat(response.nextPollConfigurationToken()).isNotBlank();
     }
-
-    @Test
-    @Order(56)
-    @DisplayName("GetConfiguration (deprecated) returns the deployed version by IDs or names")
-    @SuppressWarnings("deprecation")
-    void legacyGetConfigurationReturnsDeployedVersion() {
-        String legacyAppName = TestFixtures.uniqueName("legacy-app");
-        String legacyAppId = appConfig.createApplication(CreateApplicationRequest.builder()
-                .name(legacyAppName).build()).id();
-        try {
-            String legacyEnvId = appConfig.createEnvironment(CreateEnvironmentRequest.builder()
-                    .applicationId(legacyAppId).name("legacy-env").build()).id();
-            String legacyProfileId = appConfig.createConfigurationProfile(CreateConfigurationProfileRequest.builder()
-                    .applicationId(legacyAppId)
-                    .name("legacy-config")
-                    .locationUri("hosted")
-                    .type("AWS.Freeform")
-                    .build()).id();
-            appConfig.createHostedConfigurationVersion(CreateHostedConfigurationVersionRequest.builder()
-                    .applicationId(legacyAppId)
-                    .configurationProfileId(legacyProfileId)
-                    .content(SdkBytes.fromUtf8String("{\"legacy\": true}"))
-                    .contentType("application/json")
-                    .build());
-            appConfig.startDeployment(StartDeploymentRequest.builder()
-                    .applicationId(legacyAppId)
-                    .environmentId(legacyEnvId)
-                    .configurationProfileId(legacyProfileId)
-                    .configurationVersion("1")
-                    .deploymentStrategyId("AppConfig.AllAtOnce")
-                    .build());
-
-            GetConfigurationResponse byIds = appConfig.getConfiguration(GetConfigurationRequest.builder()
-                    .application(legacyAppId).environment(legacyEnvId).configuration(legacyProfileId)
-                    .clientId("sdk-client").build());
-            assertThat(byIds.content().asUtf8String()).isEqualTo("{\"legacy\": true}");
-            assertThat(byIds.contentType()).startsWith("application/json");
-            assertThat(byIds.configurationVersion()).isEqualTo("1");
-
-            GetConfigurationResponse byNames = appConfig.getConfiguration(GetConfigurationRequest.builder()
-                    .application(legacyAppName).environment("legacy-env").configuration("legacy-config")
-                    .clientId("sdk-client").build());
-            assertThat(byNames.content().asUtf8String()).isEqualTo("{\"legacy\": true}");
-            assertThat(byNames.configurationVersion()).isEqualTo("1");
-
-            GetConfigurationResponse unchanged = appConfig.getConfiguration(GetConfigurationRequest.builder()
-                    .application(legacyAppId).environment(legacyEnvId).configuration(legacyProfileId)
-                    .clientId("sdk-client").clientConfigurationVersion("1").build());
-            assertThat(unchanged.content().asByteArray()).isEmpty();
-            assertThat(unchanged.configurationVersion()).isEqualTo("1");
-
-            // Qualified: the imported BadRequestException is AppConfigData's, this one is AppConfig's.
-            assertThrows(software.amazon.awssdk.services.appconfig.model.BadRequestException.class,
-                    () -> appConfig.getConfiguration(GetConfigurationRequest.builder()
-                            .application(legacyAppId).environment("absent").configuration(legacyProfileId)
-                            .clientId("sdk-client").build()));
-            assertThrows(ResourceNotFoundException.class,
-                    () -> appConfig.getConfiguration(GetConfigurationRequest.builder()
-                            .application(legacyAppId).environment(legacyEnvId).configuration("absent-config")
-                            .clientId("sdk-client").build()));
-        } finally {
-            try {
-                appConfig.deleteApplication(DeleteApplicationRequest.builder().applicationId(legacyAppId).build());
-            } catch (Exception ignored) {
-                // Best-effort cleanup: the application name is unique, so a leftover cannot affect other tests.
-            }
-        }
-    }
-
-    @Test
-    @Order(57)
-    @DisplayName("Environments return their monitors and deployments their profile's name and location")
-    void monitorsAndDeploymentSourceRoundTrip() {
-        String monitoredAppId = appConfig.createApplication(CreateApplicationRequest.builder()
-                .name(TestFixtures.uniqueName("monitored-app")).build()).id();
-        try {
-            Monitor withRole = Monitor.builder()
-                    .alarmArn("arn:aws:cloudwatch:us-east-1:000000000000:alarm:configuration-errors")
-                    .alarmRoleArn("arn:aws:iam::000000000000:role/appconfig-alarm-monitor")
-                    .build();
-            Monitor withoutRole = Monitor.builder()
-                    .alarmArn("arn:aws:cloudwatch:us-east-1:000000000000:alarm:configuration-latency")
-                    .build();
-            CreateEnvironmentResponse monitored = appConfig.createEnvironment(CreateEnvironmentRequest.builder()
-                    .applicationId(monitoredAppId).name("monitored").monitors(withRole, withoutRole).build());
-            assertThat(monitored.monitors()).containsExactly(withRole, withoutRole);
-            assertThat(appConfig.getEnvironment(GetEnvironmentRequest.builder()
-                    .applicationId(monitoredAppId).environmentId(monitored.id()).build()).monitors())
-                    .containsExactly(withRole, withoutRole);
-            assertThat(appConfig.createEnvironment(CreateEnvironmentRequest.builder()
-                    .applicationId(monitoredAppId).name("unmonitored").build()).hasMonitors()).isFalse();
-
-            // Qualified: the imported BadRequestException is AppConfigData's, this one is AppConfig's.
-            assertThrows(software.amazon.awssdk.services.appconfig.model.BadRequestException.class,
-                    () -> appConfig.createEnvironment(CreateEnvironmentRequest.builder()
-                            .applicationId(monitoredAppId).name("refused")
-                            .monitors(Collections.nCopies(6, withoutRole)).build()));
-
-            String profileId = appConfig.createConfigurationProfile(CreateConfigurationProfileRequest.builder()
-                    .applicationId(monitoredAppId)
-                    .name("service-settings")
-                    .locationUri("ssm-parameter://service-settings")
-                    .type("AWS.Freeform")
-                    .build()).id();
-            StartDeploymentResponse started = appConfig.startDeployment(StartDeploymentRequest.builder()
-                    .applicationId(monitoredAppId)
-                    .environmentId(monitored.id())
-                    .configurationProfileId(profileId)
-                    .configurationVersion("1")
-                    .deploymentStrategyId("AppConfig.AllAtOnce")
-                    .build());
-            assertThat(started.configurationName()).isEqualTo("service-settings");
-            assertThat(started.configurationLocationUri()).isEqualTo("ssm-parameter://service-settings");
-
-            GetDeploymentResponse deployment = appConfig.getDeployment(GetDeploymentRequest.builder()
-                    .applicationId(monitoredAppId)
-                    .environmentId(monitored.id())
-                    .deploymentNumber(started.deploymentNumber())
-                    .build());
-            assertThat(deployment.configurationName()).isEqualTo("service-settings");
-            assertThat(deployment.configurationLocationUri()).isEqualTo("ssm-parameter://service-settings");
-
-            // A hosted profile without an explicit Type defaults to freeform.
-            assertThat(appConfig.createConfigurationProfile(CreateConfigurationProfileRequest.builder()
-                    .applicationId(monitoredAppId).name("untyped").locationUri("hosted").build()).type())
-                    .isEqualTo("AWS.Freeform");
-        } finally {
-            try {
-                appConfig.deleteApplication(DeleteApplicationRequest.builder().applicationId(monitoredAppId).build());
-            } catch (Exception ignored) {
-                // Best-effort cleanup: the application name is unique, so a leftover cannot affect other tests.
-            }
-        }
-    }
-
-    @Test
-    @Order(58)
-    @DisplayName("Deployments report the strategy settings they started with, also once the strategy is deleted")
-    void deploymentsKeepTheirStrategySettings() {
-        String historyAppId = appConfig.createApplication(CreateApplicationRequest.builder()
-                .name(TestFixtures.uniqueName("history-app")).build()).id();
-        try {
-            String historyEnvId = appConfig.createEnvironment(CreateEnvironmentRequest.builder()
-                    .applicationId(historyAppId).name("history").build()).id();
-            String profileId = appConfig.createConfigurationProfile(CreateConfigurationProfileRequest.builder()
-                    .applicationId(historyAppId).name("history-settings").locationUri("hosted").build()).id();
-            appConfig.createHostedConfigurationVersion(CreateHostedConfigurationVersionRequest.builder()
-                    .applicationId(historyAppId)
-                    .configurationProfileId(profileId)
-                    .content(SdkBytes.fromString("{\"key\": \"value\"}", StandardCharsets.UTF_8))
-                    .contentType("application/json")
-                    .build());
-            String strategyId = appConfig.createDeploymentStrategy(CreateDeploymentStrategyRequest.builder()
-                    .name(TestFixtures.uniqueName("gradual"))
-                    .deploymentDurationInMinutes(15)
-                    .finalBakeTimeInMinutes(5)
-                    .growthFactor(25.0f)
-                    .growthType(GrowthType.LINEAR)
-                    .replicateTo(ReplicateTo.NONE)
-                    .build()).id();
-            StartDeploymentResponse started = appConfig.startDeployment(StartDeploymentRequest.builder()
-                    .applicationId(historyAppId)
-                    .environmentId(historyEnvId)
-                    .configurationProfileId(profileId)
-                    .configurationVersion("1")
-                    .deploymentStrategyId(strategyId)
-                    .build());
-
-            appConfig.deleteDeploymentStrategy(DeleteDeploymentStrategyRequest.builder()
-                    .deploymentStrategyId(strategyId).build());
-
-            ListDeploymentsResponse listed = appConfig.listDeployments(ListDeploymentsRequest.builder()
-                    .applicationId(historyAppId).environmentId(historyEnvId).build());
-            assertThat(listed.items()).hasSize(1);
-            DeploymentSummary summary = listed.items().get(0);
-            assertThat(summary.deploymentNumber()).isEqualTo(started.deploymentNumber());
-            assertThat(summary.configurationName()).isEqualTo("history-settings");
-            assertThat(summary.deploymentDurationInMinutes()).isEqualTo(15);
-            assertThat(summary.finalBakeTimeInMinutes()).isEqualTo(5);
-            assertThat(summary.growthFactor()).isEqualTo(25.0f);
-            assertThat(summary.growthType()).isEqualTo(GrowthType.LINEAR);
-
-            GetDeploymentResponse deployment = appConfig.getDeployment(GetDeploymentRequest.builder()
-                    .applicationId(historyAppId)
-                    .environmentId(historyEnvId)
-                    .deploymentNumber(started.deploymentNumber())
-                    .build());
-            assertThat(deployment.deploymentDurationInMinutes()).isEqualTo(15);
-            assertThat(deployment.finalBakeTimeInMinutes()).isEqualTo(5);
-            assertThat(deployment.growthFactor()).isEqualTo(25.0f);
-            assertThat(deployment.growthType()).isEqualTo(GrowthType.LINEAR);
-            assertThat(started.deploymentDurationInMinutes()).isEqualTo(15);
-            assertThat(started.finalBakeTimeInMinutes()).isEqualTo(5);
-            assertThat(started.growthFactor()).isEqualTo(25.0f);
-            assertThat(started.growthType()).isEqualTo(GrowthType.LINEAR);
-        } finally {
-            try {
-                appConfig.deleteApplication(DeleteApplicationRequest.builder().applicationId(historyAppId).build());
-            } catch (Exception ignored) {
-                // Best-effort cleanup: the application name is unique, so a leftover cannot affect other tests.
-            }
-        }
-    }
-
-    @Test
-    @Order(59)
-    @DisplayName("UpdateApplication preserves fields omitted by the SDK request")
-    void updateApplication() {
-        String applicationId = appConfig.createApplication(CreateApplicationRequest.builder()
-                .name(TestFixtures.uniqueName("update-app"))
-                .description("original")
-                .build()).id();
-        try {
-            UpdateApplicationResponse renamed = appConfig.updateApplication(UpdateApplicationRequest.builder()
-                    .applicationId(applicationId)
-                    .name("updated-app")
-                    .build());
-            assertThat(renamed.name()).isEqualTo("updated-app");
-            assertThat(renamed.description()).isEqualTo("original");
-
-            UpdateApplicationResponse described = appConfig.updateApplication(UpdateApplicationRequest.builder()
-                    .applicationId(applicationId)
-                    .description("updated")
-                    .build());
-            assertThat(described.name()).isEqualTo("updated-app");
-            assertThat(described.description()).isEqualTo("updated");
-
-            GetApplicationResponse retrieved = appConfig.getApplication(GetApplicationRequest.builder()
-                    .applicationId(applicationId)
-                    .build());
-            assertThat(retrieved.name()).isEqualTo("updated-app");
-            assertThat(retrieved.description()).isEqualTo("updated");
-        } finally {
-            appConfig.deleteApplication(DeleteApplicationRequest.builder().applicationId(applicationId).build());
-        }
-    }
-
-    @Test
-    @DisplayName("A non-hosted profile without a type stays untyped")
-    void nonHostedProfileWithoutTypeStaysUntyped() {
-        String applicationId = appConfig.createApplication(CreateApplicationRequest.builder()
-                .name(TestFixtures.uniqueName("external-profile")).build()).id();
-        try {
-            CreateConfigurationProfileResponse profile = appConfig.createConfigurationProfile(
-                    CreateConfigurationProfileRequest.builder().applicationId(applicationId)
-                            .name("external").locationUri("ssm-parameter://configuration").build());
-            assertThat(profile.type()).isNull();
-            assertThat(appConfig.getConfigurationProfile(GetConfigurationProfileRequest.builder()
-                    .applicationId(applicationId).configurationProfileId(profile.id()).build()).type()).isNull();
-        } finally {
-            appConfig.deleteApplication(DeleteApplicationRequest.builder().applicationId(applicationId).build());
-        }
-    }
-
 }

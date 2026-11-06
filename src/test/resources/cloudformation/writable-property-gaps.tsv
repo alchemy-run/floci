@@ -66,7 +66,6 @@ AWS::ApiGatewayV2::Stage	DeploymentId	accepted and ignored
 AWS::ApiGatewayV2::Stage	Description	accepted and ignored
 AWS::ApiGatewayV2::Stage	RouteSettings	accepted and ignored
 AWS::ApiGatewayV2::Stage	Tags	accepted and ignored
-AWS::ApplicationAutoScaling::ScalingPolicy	PredictiveScalingPolicyConfiguration	accepted and ignored
 AWS::AutoScaling::AutoScalingGroup	AvailabilityZoneIds	accepted and ignored
 AWS::AutoScaling::AutoScalingGroup	AvailabilityZoneImpairmentPolicy	accepted and ignored
 AWS::AutoScaling::AutoScalingGroup	Context	accepted and ignored
@@ -111,16 +110,6 @@ AWS::Batch::JobDefinition	SchedulingPriority	accepted and ignored
 AWS::Batch::JobQueue	JobStateTimeLimitActions	accepted and ignored
 AWS::Batch::JobQueue	SchedulingPolicyArn	accepted and ignored
 AWS::Batch::JobQueue	ServiceEnvironmentOrder	accepted and ignored
-AWS::BedrockAgentCore::Memory	IndexedKeys	accepted and not stored, a warning is logged
-AWS::BedrockAgentCore::Memory	MemoryStrategies	accepted and not stored, a warning is logged
-AWS::BedrockAgentCore::Memory	NamespaceKeys	accepted and not stored, a warning is logged
-AWS::BedrockAgentCore::Memory	StreamDeliveryResources	accepted and not stored, a warning is logged
-AWS::BedrockAgentCore::Runtime	CapacityProviderConfiguration	accepted and not stored, a warning is logged
-AWS::BedrockAgentCore::Runtime	FilesystemConfigurations	accepted and not stored, a warning is logged
-AWS::BedrockAgentCore::Runtime	LifecycleConfiguration	accepted and not stored, a warning is logged
-AWS::BedrockAgentCore::Runtime	PlatformVersion	accepted and not stored, a warning is logged
-AWS::BedrockAgentCore::Runtime	RequestHeaderConfiguration	accepted and not stored, a warning is logged
-AWS::BedrockAgentCore::RuntimeEndpoint	Tags	accepted and not stored, a warning is logged
 AWS::CertificateManager::Certificate	CertificateAuthorityArn	accepted and ignored
 AWS::CertificateManager::Certificate	DomainValidationOptions	accepted and ignored, as the AcmCfnProvisioner javadoc records
 AWS::CloudFormation::CustomResource	ServiceTimeout	accepted and ignored
@@ -323,15 +312,6 @@ AWS::EKS::Nodegroup	Taints	accepted and ignored
 AWS::EKS::Nodegroup	UpdateConfig	accepted and ignored
 AWS::EKS::Nodegroup	Version	accepted and ignored
 AWS::EKS::Nodegroup	WarmPoolConfig	accepted and ignored
-AWS::ElastiCache::CacheCluster	AZMode	accepted and ignored, a warning is logged
-AWS::ElastiCache::CacheCluster	AutoMinorVersionUpgrade	accepted and ignored
-AWS::ElastiCache::CacheCluster	LogDeliveryConfigurations	accepted and ignored, a warning is logged
-AWS::ElastiCache::CacheCluster	NotificationTopicArn	accepted and ignored, a warning is logged
-AWS::ElastiCache::CacheCluster	PreferredAvailabilityZones	accepted and ignored, a warning is logged
-AWS::ElastiCache::CacheCluster	SnapshotArns	accepted and ignored, a warning is logged
-AWS::ElastiCache::CacheCluster	SnapshotName	accepted and ignored, a warning is logged
-AWS::ElastiCache::CacheCluster	TransitEncryptionEnabled	accepted and ignored
-AWS::ElastiCache::ServerlessCache	FinalSnapshotName	accepted and ignored
 AWS::ElasticLoadBalancingV2::Listener	AlpnPolicy	accepted and ignored
 AWS::ElasticLoadBalancingV2::Listener	ListenerAttributes	accepted and ignored
 AWS::ElasticLoadBalancingV2::Listener	MutualAuthentication	accepted and ignored
@@ -414,6 +394,7 @@ AWS::Lambda::MicrovmImage	CpuConfigurations	accepted and ignored
 AWS::Lambda::MicrovmImage	EgressNetworkConnectors	accepted and ignored
 AWS::Lambda::MicrovmImage	EnvironmentVariables	accepted and ignored
 AWS::Lambda::MicrovmImage	Hooks	accepted and ignored
+AWS::Lambda::MicrovmImage	KmsKeyIdentifier	accepted and ignored by the provisioner this fork keeps
 AWS::Lambda::MicrovmImage	Logging	accepted and ignored
 AWS::Lambda::MicrovmImage	Resources	accepted and ignored
 AWS::Lambda::MicrovmImage	Tags	accepted and ignored
@@ -433,6 +414,7 @@ AWS::Organizations::Account	RoleName	accepted and ignored
 AWS::Pipes::Pipe	KmsKeyIdentifier	accepted and ignored
 AWS::Pipes::Pipe	LogConfiguration	accepted and ignored
 AWS::RDS::DBCluster	AllocatedStorage	accepted and ignored
+AWS::RDS::DBCluster	AssociatedRoles	accepted and ignored by the provisioner this fork keeps
 AWS::RDS::DBCluster	AutoMinorVersionUpgrade	accepted and ignored
 AWS::RDS::DBCluster	AvailabilityZones	accepted and ignored
 AWS::RDS::DBCluster	BacktrackWindow	accepted and ignored
@@ -447,6 +429,7 @@ AWS::RDS::DBCluster	Domain	accepted and ignored
 AWS::RDS::DBCluster	DomainIAMRoleName	accepted and ignored
 AWS::RDS::DBCluster	EnableCloudwatchLogsExports	accepted and ignored
 AWS::RDS::DBCluster	EnableGlobalWriteForwarding	accepted and ignored
+AWS::RDS::DBCluster	EnableHttpEndpoint	accepted and ignored by the provisioner this fork keeps
 AWS::RDS::DBCluster	EnableLocalWriteForwarding	accepted and ignored
 AWS::RDS::DBCluster	EngineLifecycleSupport	accepted and ignored
 AWS::RDS::DBCluster	GlobalClusterIdentifier	accepted and ignored
@@ -474,6 +457,7 @@ AWS::RDS::DBClusterParameterGroup	Tags	accepted and ignored
 AWS::RDS::DBInstance	AdditionalStorageVolumes	accepted and ignored
 AWS::RDS::DBInstance	AllowMajorVersionUpgrade	accepted and ignored
 AWS::RDS::DBInstance	ApplyImmediately	accepted and ignored
+AWS::RDS::DBInstance	AssociatedRoles	accepted and ignored by the provisioner this fork keeps
 AWS::RDS::DBInstance	AutoMinorVersionUpgrade	accepted and ignored
 AWS::RDS::DBInstance	AutomaticBackupReplicationKmsKeyId	accepted and ignored
 AWS::RDS::DBInstance	AutomaticBackupReplicationRegion	accepted and ignored
@@ -481,6 +465,7 @@ AWS::RDS::DBInstance	AutomaticBackupReplicationRetentionPeriod	accepted and igno
 AWS::RDS::DBInstance	AvailabilityZone	accepted and ignored
 AWS::RDS::DBInstance	BackupRetentionPeriod	accepted and ignored
 AWS::RDS::DBInstance	BackupTarget	accepted and ignored
+AWS::RDS::DBInstance	CACertificateIdentifier	accepted and ignored by the provisioner this fork keeps
 AWS::RDS::DBInstance	CertificateRotationRestart	accepted and ignored
 AWS::RDS::DBInstance	CharacterSetName	accepted and ignored
 AWS::RDS::DBInstance	CopyTagsToSnapshot	accepted and ignored
@@ -580,26 +565,21 @@ AWS::Redshift::Cluster	SnapshotClusterIdentifier	accepted and ignored
 AWS::Redshift::Cluster	SnapshotCopyGrantName	accepted and ignored
 AWS::Redshift::Cluster	SnapshotCopyManual	accepted and ignored
 AWS::Redshift::Cluster	SnapshotCopyRetentionPeriod	accepted and ignored
+AWS::Redshift::Cluster	SnapshotIdentifier	accepted and ignored by the provisioner this fork keeps
 AWS::Redshift::ClusterSecurityGroup	Description	accepted and ignored
 AWS::Redshift::ClusterSecurityGroup	Tags	accepted and ignored
 AWS::Redshift::ClusterSubnetGroup	Tags	accepted and ignored
-AWS::RedshiftServerless::Namespace	FinalSnapshotName	accepted and ignored
-AWS::RedshiftServerless::Namespace	FinalSnapshotRetentionPeriod	accepted and ignored
-AWS::RedshiftServerless::Namespace	NamespaceResourcePolicy	accepted and ignored
-AWS::RedshiftServerless::Namespace	RedshiftIdcApplicationArn	accepted and ignored
-AWS::RedshiftServerless::Namespace	SnapshotCopyConfigurations	accepted and ignored
-AWS::RedshiftServerless::Workgroup	RecoveryPointId	documented as ignored (docs/services/cloudformation.md, Redshift Serverless)
-AWS::RedshiftServerless::Workgroup	SnapshotArn	documented as ignored (docs/services/cloudformation.md, Redshift Serverless)
-AWS::RedshiftServerless::Workgroup	SnapshotName	documented as ignored (docs/services/cloudformation.md, Redshift Serverless)
-AWS::RedshiftServerless::Workgroup	SnapshotOwnerAccount	documented as ignored (docs/services/cloudformation.md, Redshift Serverless)
-AWS::RedshiftServerless::Workgroup	Workgroup	accepted and ignored
 AWS::Route53::HostedZone	DelegationSetId	accepted and ignored
 AWS::Route53::HostedZone	HostedZoneFeatures	accepted and ignored
 AWS::Route53::HostedZone	QueryLoggingConfig	accepted and ignored
 AWS::Route53::RecordSet	CidrRoutingConfig	accepted and ignored
 AWS::Route53::RecordSet	Comment	accepted and ignored
+AWS::Route53::RecordSet	Failover	accepted and ignored by the provisioner this fork keeps
 AWS::Route53::RecordSet	GeoLocation	accepted and ignored
+AWS::Route53::RecordSet	HealthCheckId	accepted and ignored by the provisioner this fork keeps
 AWS::Route53::RecordSet	MultiValueAnswer	accepted and ignored
+AWS::Route53::RecordSet	Region	accepted and ignored by the provisioner this fork keeps
+AWS::Route53::RecordSet	Weight	accepted and ignored by the provisioner this fork keeps
 AWS::S3::Bucket	AbacStatus	accepted and ignored
 AWS::S3::Bucket	AccelerateConfiguration	silently dropped, as the S3CfnProvisioner javadoc records
 AWS::S3::Bucket	AccessControl	silently dropped, as the S3CfnProvisioner javadoc records
@@ -641,19 +621,6 @@ AWS::ServiceDiscovery::PrivateDnsNamespace	Properties	accepted and ignored
 AWS::ServiceDiscovery::PublicDnsNamespace	Properties	accepted and ignored
 AWS::ServiceDiscovery::Service	ServiceAttributes	accepted and ignored
 AWS::Signer::SigningProfile	Tags	accepted and ignored: Floci has no Signer API to tag
-AWS::Transfer::Server	Certificate	rejected with a ValidationError, not supported by Floci
-AWS::Transfer::Server	CreateWithHostKey	rejected with a ValidationError, not supported by Floci
-AWS::Transfer::Server	IpAddressType	rejected with a ValidationError, not supported by Floci
-AWS::Transfer::Server	PostAuthenticationLoginBanner	rejected with a ValidationError, not supported by Floci
-AWS::Transfer::Server	PreAuthenticationLoginBanner	rejected with a ValidationError, not supported by Floci
-AWS::Transfer::Server	ProtocolDetails	rejected with a ValidationError, not supported by Floci
-AWS::Transfer::Server	S3StorageOptions	rejected with a ValidationError, not supported by Floci
-AWS::Transfer::Server	StructuredLogDestinations	rejected with a ValidationError, not supported by Floci
-AWS::Transfer::Server	WorkflowDetails	rejected with a ValidationError, not supported by Floci
-AWS::Transfer::User	Policy	rejected with a ValidationError, not supported by Floci (docs/services/cloudformation.md, Transfer Family)
-AWS::Transfer::User	PosixProfile	rejected with a ValidationError, not supported by Floci (docs/services/cloudformation.md, Transfer Family)
-AWS::WAFv2::LoggingConfiguration	LoggingFilter	accepted and ignored
-AWS::WAFv2::LoggingConfiguration	RedactedFields	accepted and ignored
 AWS::WAFv2::WebACL	ApplicationConfig	accepted and ignored
 AWS::WAFv2::WebACL	MonetizationConfig	accepted and ignored
 AWS::WAFv2::WebACL	OnSourceDDoSProtectionConfig	accepted and ignored

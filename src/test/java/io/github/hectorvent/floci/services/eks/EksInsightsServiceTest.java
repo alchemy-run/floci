@@ -73,13 +73,16 @@ class EksInsightsServiceTest {
     void addonCompatibilityReflectsTheCatalogForTheNextVersion() {
         Fixture fixture = fixture(null);
         Addon compatible = addon("vpc-cni", "v1.18.1-eksbuild.1");
-        Addon incompatible = addon("vpc-cni", "v1.16.0-eksbuild.1");
+        // Compatible with 1.28 only, so not with the 1.30 the 1.29 cluster upgrades to.
+        Addon incompatible = addon("vpc-cni", "v1.14.0-eksbuild.3");
         Insight passing = byName(fixture.service.evaluate(state(fixture.cluster, List.of(compatible), List.of()),
                 null, null, Instant.now()), "Amazon EKS add-on version compatibility");
         assertEquals("PASSING", passing.insightStatus().status());
         assertTrue(passing.resources().isEmpty());
-        assertEquals(List.of("v1.18.5-eksbuild.1", "v1.18.1-eksbuild.1"),
-                passing.categorySpecificSummary().addonCompatibilityDetails().getFirst().compatibleVersions());
+        List<String> compatibleVersions =
+                passing.categorySpecificSummary().addonCompatibilityDetails().getFirst().compatibleVersions();
+        assertTrue(compatibleVersions.contains("v1.18.1-eksbuild.1"));
+        assertFalse(compatibleVersions.contains("v1.14.0-eksbuild.3"));
 
         Insight failing = byName(fixture.service.evaluate(state(fixture.cluster, List.of(incompatible), List.of()),
                 null, null, Instant.now()), "Amazon EKS add-on version compatibility");

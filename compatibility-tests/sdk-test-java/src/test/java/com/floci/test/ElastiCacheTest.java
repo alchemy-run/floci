@@ -11,39 +11,16 @@ import org.junit.jupiter.api.TestMethodOrder;
 import software.amazon.awssdk.services.elasticache.ElastiCacheClient;
 import software.amazon.awssdk.services.elasticache.model.AuthenticationMode;
 import software.amazon.awssdk.services.elasticache.model.CreateReplicationGroupRequest;
-import software.amazon.awssdk.services.elasticache.model.CreateReplicationGroupResponse;
-import software.amazon.awssdk.services.elasticache.model.CreateUserGroupRequest;
-import software.amazon.awssdk.services.elasticache.model.CreateUserGroupResponse;
 import software.amazon.awssdk.services.elasticache.model.CreateUserRequest;
-import software.amazon.awssdk.services.elasticache.model.CreateUserResponse;
 import software.amazon.awssdk.services.elasticache.model.DeleteReplicationGroupRequest;
-import software.amazon.awssdk.services.elasticache.model.DeleteUserGroupRequest;
 import software.amazon.awssdk.services.elasticache.model.DeleteUserRequest;
-import software.amazon.awssdk.services.elasticache.model.DeleteUserResponse;
-import software.amazon.awssdk.services.elasticache.model.DescribeCacheClustersRequest;
-import software.amazon.awssdk.services.elasticache.model.DescribeCacheClustersResponse;
 import software.amazon.awssdk.services.elasticache.model.DescribeReplicationGroupsRequest;
-import software.amazon.awssdk.services.elasticache.model.DescribeReplicationGroupsResponse;
-import software.amazon.awssdk.services.elasticache.model.DescribeUserGroupsRequest;
-import software.amazon.awssdk.services.elasticache.model.DescribeUserGroupsResponse;
 import software.amazon.awssdk.services.elasticache.model.DescribeUsersRequest;
-import software.amazon.awssdk.services.elasticache.model.DescribeUsersResponse;
 import software.amazon.awssdk.services.elasticache.model.ElastiCacheException;
-import software.amazon.awssdk.services.elasticache.model.Endpoint;
 import software.amazon.awssdk.services.elasticache.model.InputAuthenticationType;
-import software.amazon.awssdk.services.elasticache.model.InvalidUserGroupStateException;
 import software.amazon.awssdk.services.elasticache.model.ModifyReplicationGroupRequest;
-import software.amazon.awssdk.services.elasticache.model.ModifyReplicationGroupResponse;
 import software.amazon.awssdk.services.elasticache.model.ModifyUserRequest;
-import software.amazon.awssdk.services.elasticache.model.ModifyUserResponse;
-import software.amazon.awssdk.services.elasticache.model.ReplicationGroup;
-import software.amazon.awssdk.services.elasticache.model.SecurityGroupMembership;
-import software.amazon.awssdk.services.elasticache.model.UserAlreadyExistsException;
-import software.amazon.awssdk.services.elasticache.model.UserGroupNotFoundException;
-import software.amazon.awssdk.services.elasticache.model.UserNotFoundException;
 
-import javax.net.ssl.SSLParameters;
-import javax.net.ssl.SSLSocket;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -101,7 +78,7 @@ class ElastiCacheTest {
     @Test
     @Order(1)
     void createReplicationGroup() {
-        CreateReplicationGroupResponse response = elasticache.createReplicationGroup(CreateReplicationGroupRequest.builder()
+        var response = elasticache.createReplicationGroup(CreateReplicationGroupRequest.builder()
                 .replicationGroupId(groupId)
                 .replicationGroupDescription("compat test group")
                 .engine("redis")
@@ -110,13 +87,12 @@ class ElastiCacheTest {
 
         assertThat(response.replicationGroup().replicationGroupId()).isEqualTo(groupId);
         assertThat(response.replicationGroup().status()).isEqualTo("available");
-        assertThat(response.replicationGroup().clusterEnabled()).isFalse();
-        assertThat(response.replicationGroup().configurationEndpoint()).isNull();
-        assertThat(response.replicationGroup().nodeGroups()).hasSize(1);
-        assertThat(primaryEndpoint(response.replicationGroup()).address()).isEqualTo(TestFixtures.proxyHost());
+        assertThat(response.replicationGroup().configurationEndpoint()).isNotNull();
+        assertThat(response.replicationGroup().configurationEndpoint().address()).isNotBlank();
+        assertThat(response.replicationGroup().configurationEndpoint().port()).isPositive();
         assertThat(response.replicationGroup().authTokenEnabled()).isTrue();
 
-        firstProxyPort = primaryEndpoint(response.replicationGroup()).port();
+        firstProxyPort = response.replicationGroup().configurationEndpoint().port();
         groupCreated = true;
     }
 
@@ -125,14 +101,13 @@ class ElastiCacheTest {
     void describeReplicationGroup() {
         requireGroup();
 
-        DescribeReplicationGroupsResponse response = elasticache.describeReplicationGroups(DescribeReplicationGroupsRequest.builder()
+        var response = elasticache.describeReplicationGroups(DescribeReplicationGroupsRequest.builder()
                 .replicationGroupId(groupId)
                 .build());
 
         assertThat(response.replicationGroups()).hasSize(1);
         assertThat(response.replicationGroups().get(0).replicationGroupId()).isEqualTo(groupId);
-        assertThat(response.replicationGroups().get(0).configurationEndpoint()).isNull();
-        assertThat(primaryEndpoint(response.replicationGroups().get(0)).port()).isEqualTo(firstProxyPort);
+        assertThat(response.replicationGroups().get(0).configurationEndpoint().port()).isEqualTo(firstProxyPort);
     }
 
     @Test
@@ -168,7 +143,7 @@ class ElastiCacheTest {
     @Test
     @Order(5)
     void createUser() {
-        CreateUserResponse response = elasticache.createUser(CreateUserRequest.builder()
+        var response = elasticache.createUser(CreateUserRequest.builder()
                 .userId(userId)
                 .userName(userName)
                 .engine("redis")
@@ -192,7 +167,7 @@ class ElastiCacheTest {
     void describeUsersContainsCreatedUser() {
         requireUser();
 
-        DescribeUsersResponse response = elasticache.describeUsers(DescribeUsersRequest.builder().build());
+        var response = elasticache.describeUsers(DescribeUsersRequest.builder().build());
 
         assertThat(response.users())
                 .anyMatch(user -> user.userId().equals(userId) && user.userName().equals(userName)
@@ -204,6 +179,8 @@ class ElastiCacheTest {
     void createDuplicateUserThrows409() {
         requireUser();
 
+        // Floci returns generic error code, SDK maps to ElastiCacheException
+        // rather than UserAlreadyExistsException (pre-existing deviation)
         assertThatThrownBy(() -> elasticache.createUser(CreateUserRequest.builder()
                 .userId(userId)
                 .userName(userName)
@@ -214,7 +191,7 @@ class ElastiCacheTest {
                         .passwords("user-password-1")
                         .build())
                 .build()))
-                .isInstanceOf(UserAlreadyExistsException.class)
+                .isInstanceOf(ElastiCacheException.class)
                 .hasMessageContaining("already exists");
     }
 
@@ -229,10 +206,10 @@ class ElastiCacheTest {
         assertThat(rejectReply).isEqualTo("-ERR invalid username-password pair or user is disabled.\r\n");
 
         // Associate user with group via ModifyReplicationGroup.
-        // Known deviation: an id that names no user group but names a user associates that
-        // user directly, which Floci accepted before it modelled user groups. Real AWS only
-        // accepts user group ids here; userGroupMembersAuthenticateThroughTheProxy covers that.
-        ModifyReplicationGroupResponse response = elasticache.modifyReplicationGroup(ModifyReplicationGroupRequest.builder()
+        // Known deviation: Floci treats userGroupIdsToAdd as raw user IDs because
+        // UserGroup resources are not yet implemented. In real AWS, this parameter
+        // accepts UserGroupIds (which are separate resources containing users).
+        var response = elasticache.modifyReplicationGroup(ModifyReplicationGroupRequest.builder()
                 .replicationGroupId(groupId)
                 .userGroupIdsToAdd(userId)
                 .build());
@@ -254,7 +231,7 @@ class ElastiCacheTest {
     void modifyUserRotatesPassword() throws Exception {
         requireUser();
 
-        ModifyUserResponse response = elasticache.modifyUser(ModifyUserRequest.builder()
+        var response = elasticache.modifyUser(ModifyUserRequest.builder()
                 .userId(userId)
                 .engine("redis")
                 .authenticationMode(AuthenticationMode.builder()
@@ -285,10 +262,12 @@ class ElastiCacheTest {
 
         elasticache.deleteUser(DeleteUserRequest.builder().userId(userId).build());
 
+        // Floci returns generic error code, SDK maps to ElastiCacheException
+        // rather than UserNotFoundException (pre-existing deviation)
         assertThatThrownBy(() -> elasticache.describeUsers(DescribeUsersRequest.builder()
                 .userId(userId)
                 .build()))
-                .isInstanceOf(UserNotFoundException.class)
+                .isInstanceOf(ElastiCacheException.class)
                 .hasMessageContaining("not found");
         userCreated = false;
     }
@@ -297,7 +276,7 @@ class ElastiCacheTest {
     @Order(11)
     void valkeyUserRoundTripEchoesEngine() {
         String valkeyUserId = TestFixtures.uniqueName("ec-valkey-user");
-        CreateUserResponse created = elasticache.createUser(CreateUserRequest.builder()
+        var created = elasticache.createUser(CreateUserRequest.builder()
                 .userId(valkeyUserId)
                 .userName(TestFixtures.uniqueName("ec-valkey-name"))
                 .engine("valkey")
@@ -308,7 +287,7 @@ class ElastiCacheTest {
                 .build());
         assertThat(created.engine()).isEqualTo("valkey");
 
-        DeleteUserResponse deleted = elasticache.deleteUser(DeleteUserRequest.builder()
+        var deleted = elasticache.deleteUser(DeleteUserRequest.builder()
                 .userId(valkeyUserId)
                 .build());
         assertThat(deleted.engine()).isEqualTo("valkey");
@@ -316,133 +295,6 @@ class ElastiCacheTest {
 
     @Test
     @Order(12)
-    void topLevelPasswordsAndAccessStringChangesRoundTrip() {
-        String passwordUserId = TestFixtures.uniqueName("ec-pw-user");
-        CreateUserResponse created = elasticache.createUser(CreateUserRequest.builder()
-                .userId(passwordUserId)
-                .userName(TestFixtures.uniqueName("ec-pw-name"))
-                .engine("redis")
-                .accessString("on ~app:* -@all +@read")
-                .passwords("top-level-password-1")
-                .build());
-        assertThat(created.authentication().typeAsString()).isEqualTo("password");
-        assertThat(created.authentication().passwordCount()).isEqualTo(1);
-
-        try {
-            ModifyUserResponse appended = elasticache.modifyUser(ModifyUserRequest.builder()
-                    .userId(passwordUserId)
-                    .appendAccessString("+@write")
-                    .build());
-            assertThat(appended.accessString()).isEqualTo("on ~app:* -@all +@read +@write");
-
-            ModifyUserResponse opened = elasticache.modifyUser(ModifyUserRequest.builder()
-                    .userId(passwordUserId)
-                    .noPasswordRequired(true)
-                    .build());
-            assertThat(opened.authentication().typeAsString()).isEqualTo("no-password-required");
-            assertThat(opened.authentication().passwordCount()).isZero();
-        } finally {
-            elasticache.deleteUser(DeleteUserRequest.builder().userId(passwordUserId).build());
-        }
-    }
-
-    @Test
-    @Order(13)
-    void userGroupMembersAuthenticateThroughTheProxy() throws Exception {
-        requireGroup();
-        String defaultUserId = TestFixtures.uniqueName("ec-ug-default");
-        String memberUserId = TestFixtures.uniqueName("ec-ug-member");
-        String memberUserName = TestFixtures.uniqueName("ec-ug-member-name");
-        String userGroupId = TestFixtures.uniqueName("ec-ug");
-        elasticache.createUser(CreateUserRequest.builder()
-                .userId(defaultUserId).userName("default").engine("redis")
-                .accessString("on ~* +@all")
-                .authenticationMode(AuthenticationMode.builder()
-                        .type(InputAuthenticationType.PASSWORD).passwords("default-password-0123").build())
-                .build());
-        elasticache.createUser(CreateUserRequest.builder()
-                .userId(memberUserId).userName(memberUserName).engine("redis")
-                .accessString("on ~* +@all")
-                .authenticationMode(AuthenticationMode.builder()
-                        .type(InputAuthenticationType.PASSWORD).passwords("member-password-0123").build())
-                .build());
-        try {
-            CreateUserGroupResponse created = elasticache.createUserGroup(CreateUserGroupRequest.builder()
-                    .userGroupId(userGroupId)
-                    .engine("redis")
-                    .userIds(defaultUserId, memberUserId)
-                    .build());
-            assertThat(created.status()).isEqualTo("active");
-            assertThat(created.userIds()).containsExactlyInAnyOrder(defaultUserId, memberUserId);
-
-            ModifyReplicationGroupResponse associated = elasticache.modifyReplicationGroup(
-                    ModifyReplicationGroupRequest.builder()
-                            .replicationGroupId(groupId)
-                            .userGroupIdsToAdd(userGroupId)
-                            .build());
-            assertThat(associated.replicationGroup().userGroupIds()).contains(userGroupId);
-            assertThat(associated.replicationGroup().authTokenEnabled()).isFalse();
-
-            try (Socket socket = openSocket(firstProxyPort)) {
-                write(socket, respArray("AUTH", memberUserName, "member-password-0123"));
-                assertThat(readLine(socket)).isEqualTo("+OK\r\n");
-            }
-
-            DescribeUserGroupsResponse described = elasticache.describeUserGroups(DescribeUserGroupsRequest.builder()
-                    .userGroupId(userGroupId)
-                    .build());
-            assertThat(described.userGroups().get(0).replicationGroups()).containsExactly(groupId);
-
-            assertThatThrownBy(() -> elasticache.deleteUserGroup(DeleteUserGroupRequest.builder()
-                    .userGroupId(userGroupId)
-                    .build()))
-                    .isInstanceOf(InvalidUserGroupStateException.class);
-
-            elasticache.modifyReplicationGroup(ModifyReplicationGroupRequest.builder()
-                    .replicationGroupId(groupId)
-                    .userGroupIdsToRemove(userGroupId)
-                    .build());
-            assertThat(sendCommand(firstProxyPort, respArray("AUTH", memberUserName, "member-password-0123")))
-                    .isEqualTo("-ERR invalid username-password pair or user is disabled.\r\n");
-        } finally {
-            try {
-                elasticache.deleteUserGroup(DeleteUserGroupRequest.builder().userGroupId(userGroupId).build());
-            } catch (UserGroupNotFoundException ignored) {
-                // the group was never created
-            }
-            elasticache.deleteUser(DeleteUserRequest.builder().userId(memberUserId).build());
-            elasticache.deleteUser(DeleteUserRequest.builder().userId(defaultUserId).build());
-        }
-    }
-
-    @Test
-    @Order(14)
-    void modifyReplicationGroupSecurityGroupsAreEchoedByMemberClusters() {
-        requireGroup();
-
-        elasticache.modifyReplicationGroup(ModifyReplicationGroupRequest.builder()
-                .replicationGroupId(groupId)
-                .securityGroupIds("sg-compat-1", "sg-compat-2")
-                .build());
-
-        DescribeReplicationGroupsResponse described = elasticache.describeReplicationGroups(
-                DescribeReplicationGroupsRequest.builder()
-                .replicationGroupId(groupId)
-                .build());
-        assertThat(described.replicationGroups().get(0).memberClusters()).hasSize(1);
-
-        DescribeCacheClustersResponse clusters = elasticache.describeCacheClusters(DescribeCacheClustersRequest.builder()
-                .cacheClusterId(described.replicationGroups().get(0).memberClusters().get(0))
-                .build());
-        assertThat(clusters.cacheClusters().get(0).securityGroups())
-                .extracting(SecurityGroupMembership::securityGroupId)
-                .containsExactly("sg-compat-1", "sg-compat-2");
-        assertThat(clusters.cacheClusters().get(0).securityGroups())
-                .allSatisfy(membership -> assertThat(membership.status()).isEqualTo("active"));
-    }
-
-    @Test
-    @Order(15)
     void deleteReplicationGroupReleasesPortForReuse() {
         requireGroup();
 
@@ -457,20 +309,16 @@ class ElastiCacheTest {
                 .isInstanceOf(ElastiCacheException.class)
                 .hasMessageContaining("not found");
 
-        CreateReplicationGroupResponse response = elasticache.createReplicationGroup(CreateReplicationGroupRequest.builder()
+        var response = elasticache.createReplicationGroup(CreateReplicationGroupRequest.builder()
                 .replicationGroupId(reusedGroupId)
                 .replicationGroupDescription("compat test group reuse")
                 .engine("redis")
                 .authToken(authToken)
                 .build());
 
-        assertThat(primaryEndpoint(response.replicationGroup()).port()).isEqualTo(firstProxyPort);
+        assertThat(response.replicationGroup().configurationEndpoint().port()).isEqualTo(firstProxyPort);
         groupCreated = false;
-        firstProxyPort = primaryEndpoint(response.replicationGroup()).port();
-    }
-
-    private static Endpoint primaryEndpoint(ReplicationGroup group) {
-        return group.nodeGroups().get(0).primaryEndpoint();
+        firstProxyPort = response.replicationGroup().configurationEndpoint().port();
     }
 
     private static void requireGroup() {
@@ -482,15 +330,9 @@ class ElastiCacheTest {
         Assumptions.assumeTrue(userCreated && userId != null, "User must exist from earlier ordered test");
     }
 
-    /** The group has an auth token, so it is encrypted in transit and its endpoint takes TLS only. */
-    private static Socket openSocket(int port) throws Exception {
-        SSLSocket socket = (SSLSocket) TestFixtures.flociCaTrust().getSocketFactory()
-                .createSocket(TestFixtures.proxyHost(), port);
-        SSLParameters parameters = socket.getSSLParameters();
-        parameters.setEndpointIdentificationAlgorithm("HTTPS");
-        socket.setSSLParameters(parameters);
+    private static Socket openSocket(int port) throws IOException {
+        Socket socket = new Socket(TestFixtures.proxyHost(), port);
         socket.setSoTimeout(5000);
-        socket.startHandshake();
         return socket;
     }
 

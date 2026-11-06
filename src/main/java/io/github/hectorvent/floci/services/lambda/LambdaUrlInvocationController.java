@@ -17,9 +17,11 @@ import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
 import io.github.hectorvent.floci.services.lambda.model.LambdaUrlConfig;
 import io.github.hectorvent.floci.services.lambda.model.StreamingPayload;
 import io.quarkus.arc.Arc;
+import io.quarkus.arc.ArcContainer;
 import io.quarkus.arc.InjectableContext;
 import io.quarkus.arc.ManagedContext;
 import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
+import io.smallrye.common.annotation.Blocking;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.ext.web.RoutingContext;
 import jakarta.inject.Inject;
@@ -95,8 +97,11 @@ public class LambdaUrlInvocationController {
         return invoke("GET", urlId, proxy, headers, uriInfo, null);
     }
 
+    // Reading a body is blocking, so the handlers that take one start on a worker; the invocation
+    // itself still runs on INVOKE_POOL and releases the worker as soon as the body is read.
     @POST
     @Path("/{proxy: .*}")
+    @Blocking
     public CompletionStage<Response> handlePost(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                                @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
         return invoke("POST", urlId, proxy, headers, uriInfo, body);
@@ -104,6 +109,7 @@ public class LambdaUrlInvocationController {
 
     @PUT
     @Path("/{proxy: .*}")
+    @Blocking
     public CompletionStage<Response> handlePut(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                               @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
         return invoke("PUT", urlId, proxy, headers, uriInfo, body);
@@ -111,6 +117,7 @@ public class LambdaUrlInvocationController {
 
     @DELETE
     @Path("/{proxy: .*}")
+    @Blocking
     public CompletionStage<Response> handleDelete(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                                  @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
         // AWS Function URLs forward DELETE request bodies to the event.
@@ -119,6 +126,7 @@ public class LambdaUrlInvocationController {
 
     @PATCH
     @Path("/{proxy: .*}")
+    @Blocking
     public CompletionStage<Response> handlePatch(@PathParam("urlId") String urlId, @PathParam("proxy") String proxy,
                                 @Context HttpHeaders headers, @Context UriInfo uriInfo, byte[] body) {
         return invoke("PATCH", urlId, proxy, headers, uriInfo, body);
@@ -175,10 +183,15 @@ public class LambdaUrlInvocationController {
         byte[] eventBytes = event.getBytes(StandardCharsets.UTF_8);
         // The invocation runs on the pool, off the event loop, but in this request's scope: what it
         // reads from RequestContext is the account and Region set above.
-        ManagedContext requestScope = Arc.container().requestContext();
-        InjectableContext.ContextState requestState = requestScope.getState();
+        // Outside a container (a plain unit test) there is no scope to carry.
+        ArcContainer container = Arc.container();
+        ManagedContext requestScope = container == null ? null : container.requestContext();
+        InjectableContext.ContextState requestState =
+                requestScope != null && requestScope.isActive() ? requestScope.getState() : null;
         return CompletableFuture.supplyAsync(() -> {
-            requestScope.activate(requestState);
+            if (requestState != null) {
+                requestScope.activate(requestState);
+            }
             try {
                 InvokeResult result = lambdaService.invokeArn(functionArn, eventBytes, InvocationType.RequestResponse);
                 if (result.isStreaming()) {
@@ -188,7 +201,9 @@ public class LambdaUrlInvocationController {
             } catch (AwsException e) {
                 return Response.status(e.getHttpStatus()).entity(e.getMessage()).build();
             } finally {
-                requestScope.deactivate();
+                if (requestState != null) {
+                    requestScope.deactivate();
+                }
             }
         }, INVOKE_POOL);
     }
