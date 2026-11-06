@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.cloudformation;
 
+import io.github.hectorvent.floci.testing.CfnStackWaits;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.Test;
 
@@ -86,6 +87,7 @@ class CloudFormationBatchIntegrationTest {
         .then()
             .statusCode(200)
             .body(containsString("<StackId>"));
+        CfnStackWaits.awaitTerminal(stackName);
 
         given()
             .contentType("application/x-www-form-urlencoded")
@@ -168,6 +170,7 @@ class CloudFormationBatchIntegrationTest {
             .post("/")
         .then()
             .statusCode(200);
+        CfnStackWaits.awaitTerminal(stackName);
 
         given()
             .contentType("application/x-www-form-urlencoded")
@@ -241,6 +244,7 @@ class CloudFormationBatchIntegrationTest {
             .post("/")
         .then()
             .statusCode(200);
+        CfnStackWaits.awaitTerminal(stackName);
 
         // The update changes only updatable properties, so the entities must be mutated, not
         // replaced: the physical ids the outputs carry have to survive it.
@@ -352,6 +356,7 @@ class CloudFormationBatchIntegrationTest {
             .post("/")
         .then()
             .statusCode(200);
+        CfnStackWaits.awaitTerminal(stackName);
     }
 
     private static String queueTemplate(String computeName, String queueName, int priority,
@@ -383,6 +388,8 @@ class CloudFormationBatchIntegrationTest {
     }
 
     private static void assertStackStatus(String stackName, String status) {
+        // Stacks provision asynchronously; read the status once the stack has settled.
+        CfnStackWaits.awaitTerminal(stackName);
         given()
             .contentType("application/x-www-form-urlencoded")
             .formParam("Action", "DescribeStacks")
