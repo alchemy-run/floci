@@ -4038,6 +4038,24 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             }
         }
 
+        // As on AWS, a launch retried with a ClientToken this account already used returns the
+        // instances that first launch started, terminated ones included, instead of starting more.
+        if (!dryRun && clientToken != null && !clientToken.isBlank()) {
+            String owner = callerAccountId();
+            List<Instance> launched = instances.scan(k -> k.startsWith(region + "::")).stream()
+                    .filter(existing -> clientToken.equals(existing.getClientToken()))
+                    .filter(existing -> existing.getOwnerId() == null || owner.equals(existing.getOwnerId()))
+                    .sorted(Comparator.comparingInt(Instance::getAmiLaunchIndex))
+                    .toList();
+            if (!launched.isEmpty()) {
+                Reservation earlier = new Reservation();
+                earlier.setReservationId("r-" + randomHex(17));
+                earlier.setOwnerId(owner);
+                earlier.getInstances().addAll(launched);
+                return earlier;
+            }
+        }
+
         String reservationId = "r-" + randomHex(17);
         Reservation reservation = new Reservation();
         reservation.setReservationId(reservationId);
