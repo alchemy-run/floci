@@ -595,6 +595,11 @@ public class Ec2ContainerManager {
 
                 refreshMetadataAddresses(instance, containerId);
 
+                // Catalog images have no systemd: Alchemy's hosted user data writes units and runs
+                // systemctl, which the shim serves, before the instance reports running.
+                prepareGuestFilesystem(containerId, instanceId);
+                installSystemctlShim(containerId, instanceId);
+
                 // Set public-facing addresses only for instances due one, by the rule mock instances
                 // follow too, or holding an Elastic IP their interface carries, which RunInstances
                 // recorded. Private-subnet instances have no public IP/DNS, matching real EC2.
@@ -1681,10 +1686,58 @@ public class Ec2ContainerManager {
             try {
                 dockerClient.restartContainerCmd(containerId).exec();
                 LOG.infov("Rebooted EC2 container {0}", containerId);
+                restartGuestServices(instance, containerId);
             } catch (Exception e) {
                 LOG.warnv("Error rebooting EC2 container {0}: {1}", containerId, e.getMessage());
             }
         });
+    }
+
+    /**
+     * Post-reboot guest bring-up. On a real instance systemd restarts enabled units at boot, which
+     * for Alchemy's hosted guests re-downloads the bundle and env file. The systemctl shim's
+     * processes die with the container and nothing in the guest re-runs them, so this mirrors the
+     * launch: wait for the container, re-register its (possibly changed) bridge address with IMDS,
+     * restart the metadata proxy, re-run the stored user data (idempotent for hosted guests: it
+     * rewrites the same units and {@code systemctl enable --now}s them), and re-point the
+     * published ports at the new address. A private-namespace instance is brought up by its
+     * namespace and is left alone.
+     */
+    private void restartGuestServices(Instance instance, String containerId) {
+        if (needsPrivateNamespace(instance)) {
+            return;
+        }
+        try {
+            String instanceId = instance.getInstanceId();
+            boolean running = false;
+            for (int i = 0; i < 30 && !running; i++) {
+                running = lifecycleManager.isContainerRunning(containerId);
+                if (!running) {
+                    Thread.sleep(500);
+                }
+            }
+            if (!running) {
+                LOG.warnv("EC2 container {0} did not come back after reboot", containerId);
+                return;
+            }
+            String containerIp = waitForContainerBridgeIp(containerId, instanceId);
+            if (containerIp != null && !containerIp.isBlank()) {
+                instance.setContainerBridgeIp(containerIp);
+                metadataServer.registerContainer(containerIp, instanceId, instance);
+                refreshMetadataAddresses(instance, containerId);
+            }
+            configureLinkLocalMetadataEndpoint(containerId, instanceId, dockerHostResolver.resolve(),
+                    config.services().ec2().imdsPort());
+            String userData = instance.getUserData();
+            if (userData != null && !userData.isBlank()) {
+                executeUserData(containerId, instanceId, userData, instance.getRegion());
+            }
+            portForwardManager.restore(instance);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            LOG.warnv("Post-reboot bring-up failed for EC2 container {0}: {1}", containerId, e.getMessage());
+        }
     }
 
     public boolean isContainerRunning(Instance instance) {
@@ -2196,6 +2249,32 @@ public class Ec2ContainerManager {
     static String[] prepareGuestFilesystemCommand() {
         return new String[]{"sh", "-c",
                 "mkdir -p /etc/systemd/system /lib/systemd/system /usr/local/bin /usr/local/sbin /var/log /var/run"};
+    }
+
+    private void prepareGuestFilesystem(String containerId, String instanceId) {
+        try {
+            ContainerExec.Result result = execInContainerForResult(containerId, prepareGuestFilesystemCommand(), 10);
+            if (result.exitCode() != 0) {
+                LOG.warnv("Could not prepare guest filesystem for EC2 instance {0}: {1}",
+                        instanceId, result.summary());
+            }
+        } catch (Exception e) {
+            LOG.warnv("Could not prepare guest filesystem for EC2 instance {0}: {1}",
+                    instanceId, e.getMessage());
+        }
+    }
+
+    private void installSystemctlShim(String containerId, String instanceId) {
+        try {
+            ContainerExec.Result result = execInContainerForResult(containerId, systemctlShimInstallCommand(), 15);
+            if (result.exitCode() != 0) {
+                LOG.warnv("Could not install systemctl shim for EC2 instance {0}: {1}",
+                        instanceId, result.summary());
+            }
+        } catch (Exception e) {
+            LOG.warnv("Could not install systemctl shim for EC2 instance {0}: {1}",
+                    instanceId, e.getMessage());
+        }
     }
 
     /**
