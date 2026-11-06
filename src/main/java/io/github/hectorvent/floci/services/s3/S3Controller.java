@@ -885,7 +885,7 @@ public class S3Controller {
                 s3Service.authorizeObjectWrite(bucket, key, versionId, "s3:PutObjectTagging", authorization,
                         S3ObjectActions.taggingBodyConditions(new String(tags, StandardCharsets.UTF_8)));
                 String objectKey = key;
-                return concealingMisses(bucket, httpHeaders, authorization, true,
+                return concealingMisses(bucket, httpHeaders, authorization, true, versionId, "PUT",
                         () -> handlePutObjectTagging(bucket, objectKey, versionId, tags));
             }
             if (params.has("retention")) {
@@ -903,7 +903,7 @@ public class S3Controller {
                 }
                 boolean effectiveBypass = effectiveBypass(bypass, overrides);
                 String objectKey = key;
-                return concealingMisses(bucket, httpHeaders, authorization, true,
+                return concealingMisses(bucket, httpHeaders, authorization, true, versionId, "PUT",
                         () -> handlePutObjectRetention(bucket, objectKey, versionId, retention, effectiveBypass));
             }
             if (params.has("legal-hold")) {
@@ -913,7 +913,7 @@ public class S3Controller {
                         S3ObjectActions.legalHoldBodyConditions(
                                 new String(legalHold, StandardCharsets.UTF_8), clock.instant()));
                 String objectKey = key;
-                return concealingMisses(bucket, httpHeaders, authorization, true,
+                return concealingMisses(bucket, httpHeaders, authorization, true, versionId, "PUT",
                         () -> handlePutObjectLegalHold(bucket, objectKey, versionId, legalHold));
             }
             if (params.has("acl")) {
@@ -1602,7 +1602,7 @@ public class S3Controller {
                 checkVersionId(bucket, params.first("versionId"));
                 s3Service.authorizeObjectWrite(bucket, key, versionId, "s3:DeleteObjectTagging", authorization, null);
                 String objectKey = key;
-                return concealingMisses(bucket, httpHeaders, authorization, true,
+                return concealingMisses(bucket, httpHeaders, authorization, true, versionId, "DELETE",
                         () -> withVersionId(Response.noContent(), s3Service.deleteObjectTagging(bucket, objectKey, versionId))
                                 .build());
             }
@@ -1761,7 +1761,7 @@ public class S3Controller {
                 String objectKey = key;
                 // RestoreObject reports a selected delete marker as 405 even to a caller that
                 // cannot list the bucket; only a missing key or version is concealed.
-                return concealingMisses(bucket, httpHeaders, authorization, false, () -> {
+                return concealingMisses(bucket, httpHeaders, authorization, false, versionId, "POST", () -> {
                     boolean alreadyRestored = s3Service.restoreObject(bucket, objectKey, versionId,
                             new String(body, StandardCharsets.UTF_8));
                     return (alreadyRestored ? Response.ok() : Response.accepted()).build();
@@ -5305,12 +5305,14 @@ public class S3Controller {
     /** Runs an object operation whose not-found answers are subject to {@link #concealUnlistableMiss}. */
     private Response concealingMisses(String bucket, HttpHeaders httpHeaders,
                                       S3Service.RequestAuthorization authorization,
-                                      boolean concealDeleteMarkerVersion, java.util.function.Supplier<Response> operation) {
+                                      boolean concealDeleteMarkerVersion, String versionId, String method,
+                                      java.util.function.Supplier<Response> operation) {
         try {
             return operation.get();
         } catch (AwsException e) {
-            return xmlErrorResponse(concealUnlistableMiss(e, bucket, httpHeaders, authorization,
-                    concealDeleteMarkerVersion), bucket);
+            // A request that names a delete marker by its version id is refused as MethodNotAllowed.
+            return xmlErrorResponse(concealUnlistableMiss(deleteMarkerRefusal(e, versionId, method), bucket,
+                    httpHeaders, authorization, concealDeleteMarkerVersion), bucket);
         }
     }
 

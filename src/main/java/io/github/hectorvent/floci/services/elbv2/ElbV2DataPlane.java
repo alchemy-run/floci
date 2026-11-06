@@ -1146,7 +1146,7 @@ public class ElbV2DataPlane {
                 return;
             }
             String functionArn = targets.get(0).getId();
-            invokeLambdaTarget(req, tg, functionArn, region);
+            invokeLambdaTarget(req, tg, functionArn, region, forwarded, hostHeader);
             return;
         }
 
@@ -2059,9 +2059,9 @@ public class ElbV2DataPlane {
     }
 
     private void invokeLambdaTarget(io.vertx.core.http.HttpServerRequest req, TargetGroup tg, String functionArn,
-                                    String region) {
+                                    String region, ElbV2ForwardedHeaders forwarded, String hostHeader) {
         if (req.isEnded()) {
-            invokeLambdaWithBody(req, tg, functionArn, region, Buffer.buffer());
+            invokeLambdaWithBody(req, tg, functionArn, region, forwarded, hostHeader, Buffer.buffer());
             return;
         }
         ByteArrayOutputStream body = new ByteArrayOutputStream();
@@ -2086,15 +2086,25 @@ public class ElbV2DataPlane {
             if (rejected.get()) {
                 return;
             }
-            invokeLambdaWithBody(req, tg, functionArn, region, Buffer.buffer(body.toByteArray()));
+            invokeLambdaWithBody(req, tg, functionArn, region, forwarded, hostHeader,
+                    Buffer.buffer(body.toByteArray()));
         });
     }
 
     private void invokeLambdaWithBody(io.vertx.core.http.HttpServerRequest req, TargetGroup tg, String functionArn,
-                                      String region, Buffer body) {
+                                      String region, ElbV2ForwardedHeaders forwarded, String hostHeader,
+                                      Buffer body) {
         boolean multiValueHeaders = multiValueHeadersEnabled(tg);
+        // The load balancer's X-Forwarded-* and Host rules apply to Lambda targets as to HTTP ones.
+        MultiMap eventHeaders = MultiMap.caseInsensitiveMultiMap().addAll(req.headers());
+        if (forwarded != null) {
+            forwarded.applyTo(req.headers(), eventHeaders);
+        }
+        if (hostHeader != null) {
+            eventHeaders.set("Host", hostHeader);
+        }
         List<Map.Entry<String, String>> requestHeaders = new ArrayList<>();
-        for (Map.Entry<String, String> header : req.headers()) {
+        for (Map.Entry<String, String> header : eventHeaders) {
             requestHeaders.add(header);
         }
         Map<String, Object> event = buildAlbEvent(req.method().name(), req.path(), req.query(), requestHeaders,

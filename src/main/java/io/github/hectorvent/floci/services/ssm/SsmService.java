@@ -348,10 +348,9 @@ public class SsmService implements ResourceProvider {
         parameter.setVersion(version);
         parameter.setDescription(description);
         if ("SecureString".equals(parameter.getType())) {
-            // An unnamed key is the account's AWS managed SSM key, created on first use as AWS does;
-            // an overwrite keeps the key the parameter already had.
-            String resolvedKeyId = keyId != null ? keyId
-                    : (existing != null && existing.getKeyId() != null ? existing.getKeyId() : AWS_MANAGED_SSM_ALIAS);
+            // An unnamed key is the account's AWS managed SSM key, created on first use as AWS does,
+            // on an overwrite too: AWS does not carry the previous version's key forward.
+            String resolvedKeyId = keyId != null ? keyId : AWS_MANAGED_SSM_ALIAS;
             parameter.setKeyId(resolvedKeyId);
             ensureAwsManagedSsmKey(resolvedKeyId, region);
         }

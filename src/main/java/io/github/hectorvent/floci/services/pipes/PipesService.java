@@ -482,6 +482,8 @@ public class PipesService implements TagHandler, ResourceProvider {
         if (!clearUnsetProperties) {
             validateSourceConfiguration(pipe.getSource(),
                     sourceParameters != null ? sourceParameters : pipe.getSourceParameters());
+            validateTargetConfiguration(target != null ? target : pipe.getTarget(),
+                    targetParameters != null ? targetParameters : pipe.getTargetParameters());
         }
 
         writeProperty(target, clearUnsetProperties, pipe::setTarget);

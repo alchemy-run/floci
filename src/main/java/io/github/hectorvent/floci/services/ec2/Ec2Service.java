@@ -7827,9 +7827,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
      */
     public Vpc requireSecurityGroupVpc(String region, String vpcId) {
         ensureDefaultResources(region);
-        return vpcId != null && !vpcId.isEmpty()
-                ? resolveVpcForCreate(region, vpcId)
-                : getRequiredVpc(region, resolveDefaultVpcId(region));
+        return getRequiredVpc(region, vpcId != null && !vpcId.isEmpty() ? vpcId : resolveDefaultVpcId(region));
     }
 
     public SecurityGroup createSecurityGroup(String region, String groupName, String description, String vpcId) {

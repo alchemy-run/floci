@@ -152,7 +152,8 @@ public class CloudWatchMetadataService {
     public void setActions(List<String> names, boolean enabled, String region) {
         if (names.isEmpty()) throw invalid("AlarmNames is required");
         for (String name : names) {
-            if (!isComposite(name, region) && metrics.describeAlarms(List.of(name), null, region).isEmpty()) {
+            if (!isComposite(name, region) && metrics.describeAlarms(List.of(name), null, region).isEmpty()
+                    && metrics.describeCompositeAlarms(List.of(name), null, region).isEmpty()) {
                 throw notFound(name);
             }
         }
@@ -164,7 +165,9 @@ public class CloudWatchMetadataService {
                 history(name, "CompositeAlarm", "ConfigurationUpdate", "Actions enabled: " + enabled, alarm, region);
             } else {
                 metrics.setAlarmActions(name, enabled, region);
-                history(name, "MetricAlarm", "ConfigurationUpdate", "Actions enabled: " + enabled,
+                String alarmType = metrics.describeCompositeAlarms(List.of(name), null, region).isEmpty()
+                        ? "MetricAlarm" : "CompositeAlarm";
+                history(name, alarmType, "ConfigurationUpdate", "Actions enabled: " + enabled,
                         mapper.createObjectNode().put("ActionsEnabled", enabled), region);
             }
         }

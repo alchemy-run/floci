@@ -669,6 +669,7 @@ public class EcrRegistryManager {
         portAllocator.release(hostPort);
         containerId = null;
         registryAddress = null;
+        registryInternalHost = null;
         logStream = null;
         started = false;
         reconciled = false;
@@ -721,6 +722,7 @@ public class EcrRegistryManager {
             LOG.warnv("Failed to adopt existing ECR registry container: {0}", e.getMessage());
             this.containerId = null;
             this.registryAddress = null;
+            this.registryInternalHost = null;
         }
     }
 
