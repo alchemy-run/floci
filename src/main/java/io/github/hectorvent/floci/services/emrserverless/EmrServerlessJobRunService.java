@@ -44,6 +44,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Executor;
@@ -479,7 +480,8 @@ public class EmrServerlessJobRunService implements Resettable {
         record.setJobRun(run);
         record.setClientToken(request.getClientToken());
         record.setRequest(original);
-        record.setApplicationType(app.getType());
+        // A job run reports the engine in capitals (SPARK, HIVE); the application spells it Spark or Hive.
+        record.setApplicationType(app.getType() == null ? null : app.getType().toUpperCase(Locale.ROOT));
         record.setContainerRun(sparkRunner != null);
         store.put(jobRunId, record);
         return record;

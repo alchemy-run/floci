@@ -1,5 +1,6 @@
 package io.github.hectorvent.floci.services.emrserverless;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.services.emrserverless.model.Application;
@@ -37,6 +38,7 @@ import jakarta.ws.rs.QueryParam;
 import jakarta.ws.rs.core.MediaType;
 
 import java.util.List;
+import java.util.Map;
 
 @Path("/_emrserverless/applications")
 @ApplicationScoped
@@ -126,6 +128,30 @@ public class EmrServerlessController {
         service.stopApplication(applicationId);
         StopApplicationResponse response = new StopApplicationResponse();
         return response;
+    }
+
+    @GET
+    @Path("/{applicationId}/sessions")
+    public Map<String, Object> listSessions(@PathParam("applicationId") String applicationId,
+                                                    @QueryParam("maxResults") String maxResults,
+                                                    @QueryParam("nextToken") String nextToken) {
+        return Map.of("sessions", service.listSessions(applicationId,
+                Pagination.parseMaxResults(maxResults, "ValidationException"), nextToken));
+    }
+
+    @POST
+    @Path("/{applicationId}/sessions")
+    public void startSession(@PathParam("applicationId") String applicationId,
+                             JsonNode request) {
+        service.startSession(applicationId, request);
+    }
+
+    @GET
+    @Path("/{applicationId}/dashboard")
+    public void getResourceDashboard(@PathParam("applicationId") String applicationId,
+                                     @QueryParam("resourceId") String resourceId,
+                                     @QueryParam("resourceType") String resourceType) {
+        service.getResourceDashboard(resourceId, resourceType);
     }
 
     @POST

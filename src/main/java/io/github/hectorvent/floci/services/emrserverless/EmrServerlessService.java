@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.emrserverless;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
@@ -84,6 +85,15 @@ public class EmrServerlessService {
         if (request.getType() == null || request.getType().isBlank()) {
             throw new AwsException("ValidationException", "type is required", 400);
         }
+        // The engine is matched without regard to case and echoed as AWS spells it, "Spark" or "Hive".
+        String type;
+        if ("SPARK".equalsIgnoreCase(request.getType())) {
+            type = "Spark";
+        } else if ("HIVE".equalsIgnoreCase(request.getType())) {
+            type = "Hive";
+        } else {
+            throw new AwsException("ValidationException", "type must be SPARK or HIVE", 400);
+        }
         if (request.getClientToken() == null || request.getClientToken().isBlank()) {
             throw new AwsException("ValidationException", "clientToken is required", 400);
         }
@@ -108,7 +118,7 @@ public class EmrServerlessService {
         app.setArn(arn);
         app.setName(request.getName());
         app.setReleaseLabel(request.getReleaseLabel());
-        app.setType(request.getType());
+        app.setType(type);
         app.setState("CREATED");
         app.setStateDetails("");
         app.setCreatedAt(createdAt);
@@ -264,6 +274,50 @@ public class EmrServerlessService {
         app.setState("STARTED");
         app.setUpdatedAt(now());
         storage.put(applicationId, app);
+    }
+
+    /** ListSessions: the application's interactive sessions. Floci runs none, so the list is empty. */
+    public List<Map<String, Object>> listSessions(String applicationId, Integer maxResults, String nextToken) {
+        getApplication(applicationId);
+        return Pagination.paginate(List.<Map<String, Object>>of(), item -> "",
+                maxResults, nextToken, 50, "ValidationException").items();
+    }
+
+    /**
+     * StartSession: checked as AWS checks it — a request with a client token and execution role, on
+     * an application whose interactive configuration enables sessions — then refused, as Floci does
+     * not run sessions.
+     */
+    public void startSession(String applicationId, JsonNode request) {
+        Application app = getApplication(applicationId);
+        if (request == null || !request.isObject()) {
+            throw new AwsException("ValidationException", "A request body is required", 400);
+        }
+        for (String field : List.of("clientToken", "executionRoleArn")) {
+            if (!request.path(field).isTextual() || request.path(field).textValue().isBlank()) {
+                throw new AwsException("ValidationException", field + " is required", 400);
+            }
+        }
+        if (app.getInteractiveConfiguration() == null
+                || !Boolean.TRUE.equals(app.getInteractiveConfiguration().getProperties().get("sessionEnabled"))) {
+            throw new AwsException("ValidationException",
+                    "Sessions must be enabled in the application's interactiveConfiguration.", 400);
+        }
+        throw new AwsException("UnsupportedOperationException", "EMR Serverless session execution is not implemented.", 501);
+    }
+
+    /**
+     * GetResourceDashboard: AWS denies it to every caller, administrators included, before any
+     * resource lookup, and the message names no resource.
+     */
+    public void getResourceDashboard(String resourceId, String resourceType) {
+        if (resourceId == null || resourceId.isBlank() || resourceType == null || resourceType.isBlank()) {
+            throw new AwsException("ValidationException", "resourceId and resourceType are required", 400);
+        }
+        String accountId = requestContext != null && requestContext.getAccountId() != null
+                ? requestContext.getAccountId() : config.defaultAccountId();
+        throw new AwsException("AccessDeniedException", "User: arn:aws:iam::" + accountId
+                + ":root is not authorized to perform: emr-serverless:GetResourceDashboard", 403);
     }
 
     public synchronized void stopApplication(String applicationId) {
