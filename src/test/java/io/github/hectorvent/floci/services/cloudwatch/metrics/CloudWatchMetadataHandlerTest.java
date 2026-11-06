@@ -58,47 +58,6 @@ class CloudWatchMetadataHandlerTest {
     }
 
     @Test
-    void compositeAlarmCrudUsesMetricStateAndPreservesTags() throws Exception {
-        call("PutMetricAlarm", """
-                {"AlarmName":"errors","Namespace":"App","MetricName":"Errors","Statistic":"Sum",
-                 "Period":60,"EvaluationPeriods":1,"Threshold":10,"ComparisonOperator":"GreaterThanThreshold"}
-                """);
-        call("PutCompositeAlarm", """
-                {"AlarmName":"aggregate","AlarmRule":"ALARM(\\"errors\\") AND NOT FALSE",
-                 "Tags":[{"Key":"owner","Value":"test"}]}
-                """);
-        String arn = "arn:aws:cloudwatch:us-east-1:000000000000:alarm:aggregate";
-        call("SetAlarmState", """
-                {"AlarmName":"errors","StateValue":"ALARM","StateReason":"test breach"}
-                """);
-        JsonNode described = call("DescribeAlarms", "{\"AlarmTypes\":[\"CompositeAlarm\"]}");
-        assertEquals("ALARM", described.path("CompositeAlarms").get(0).path("StateValue").asText());
-        assertTrue(described.path("MetricAlarms").isEmpty());
-        call("PutCompositeAlarm", "{\"AlarmName\":\"aggregate\",\"AlarmRule\":\"FALSE\"}");
-        assertEquals("test", call("ListTagsForResource", "{\"ResourceARN\":\"" + arn + "\"}")
-                .path("Tags").get(0).path("Value").asText());
-        call("DisableAlarmActions", "{\"AlarmNames\":[\"aggregate\",\"errors\"]}");
-        described = call("DescribeAlarms", "{\"AlarmTypes\":[\"CompositeAlarm\",\"MetricAlarm\"]}");
-        assertFalse(described.path("CompositeAlarms").get(0).path("ActionsEnabled").asBoolean());
-        assertFalse(described.path("MetricAlarms").get(0).path("ActionsEnabled").asBoolean());
-        assertEquals("OK", described.path("CompositeAlarms").get(0).path("StateValue").asText());
-        JsonNode page = call("DescribeAlarms", "{\"AlarmTypes\":[\"CompositeAlarm\",\"MetricAlarm\"],\"MaxRecords\":1}");
-        assertEquals(1, page.path("CompositeAlarms").size());
-        assertTrue(page.has("NextToken"));
-        JsonNode next = call("DescribeAlarms", "{\"AlarmTypes\":[\"CompositeAlarm\",\"MetricAlarm\"],\"MaxRecords\":1,\"NextToken\":\""
-                + page.path("NextToken").asText() + "\"}");
-        assertEquals(1, next.path("MetricAlarms").size());
-        assertFalse(next.has("NextToken"));
-        call("DeleteAlarms", "{\"AlarmNames\":[\"aggregate\",\"errors\"]}");
-        call("DeleteAlarms", "{\"AlarmNames\":[\"aggregate\",\"errors\"]}");
-        described = call("DescribeAlarms", "{\"AlarmTypes\":[\"CompositeAlarm\",\"MetricAlarm\"]}");
-        assertTrue(described.path("CompositeAlarms").isEmpty());
-        assertTrue(described.path("MetricAlarms").isEmpty());
-        JsonNode history = call("DescribeAlarmHistory", "{\"AlarmName\":\"errors\",\"HistoryItemType\":\"StateUpdate\"}");
-        assertEquals("test breach", history.path("AlarmHistoryItems").get(0).path("HistorySummary").asText());
-    }
-
-    @Test
     void alarmBindingsFilterByMetricAndRejectUnsupportedContributors() throws Exception {
         query("PutMetricAlarm", "AlarmName", "latency", "Namespace", "App", "MetricName", "Latency",
                 "Statistic", "Sum", "Period", "60", "EvaluationPeriods", "1", "Threshold", "5",

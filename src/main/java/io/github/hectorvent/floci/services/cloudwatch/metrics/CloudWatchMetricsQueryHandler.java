@@ -58,14 +58,12 @@ public class CloudWatchMetricsQueryHandler {
     public Response handle(String action, MultivaluedMap<String, String> params, String region) {
         String normalizedAction = action.substring(0, 1).toUpperCase() + action.substring(1);
         if (jsonHandler != null && java.util.Set.of(
-                "PutMetricAlarm", "DescribeAlarms", "DeleteAlarms", "SetAlarmState",
-                "ListTagsForResource", "TagResource", "UntagResource", "PutCompositeAlarm",
                 "PutAnomalyDetector", "DescribeAnomalyDetectors", "DeleteAnomalyDetector",
                 "PutAlarmMuteRule", "GetAlarmMuteRule", "ListAlarmMuteRules", "DeleteAlarmMuteRule",
-                "DescribeAlarmsForMetric", "DescribeAlarmHistory", "DescribeAlarmContributors",
-                "EnableAlarmActions", "DisableAlarmActions", "GetMetricWidgetImage",
-                "PutInsightRule", "DescribeInsightRules", "DeleteInsightRules", "EnableInsightRules",
-                "DisableInsightRules", "GetInsightRuleReport", "ListManagedInsightRules").contains(normalizedAction)) {
+                "DescribeAlarmsForMetric", "DescribeAlarmContributors", "EnableAlarmActions",
+                "DisableAlarmActions", "GetMetricWidgetImage", "PutInsightRule", "DescribeInsightRules",
+                "DeleteInsightRules", "EnableInsightRules", "DisableInsightRules", "GetInsightRuleReport",
+                "ListManagedInsightRules").contains(normalizedAction)) {
             return CloudWatchQueryCodec.handle(jsonHandler, normalizedAction, params, region);
         }
         return switch (normalizedAction) {

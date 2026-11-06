@@ -814,17 +814,19 @@ public class ElbV2QueryHandler {
 
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeListenerCertificatesResponse", AwsNamespaces.ELB_V2)
-                .start("DescribeListenerCertificatesResult")
-                  .start("Certificates");
-        for (int i = 0; i < certs.size(); i++) {
-            xml.start("member")
-               .elem("CertificateArn", certs.get(i))
-               .elem("IsDefault", i == 0)
-               .end("member");
+                .start("DescribeListenerCertificatesResult");
+        // A listener without certificates has no list at all, as the SDKs read it.
+        if (!certs.isEmpty()) {
+            xml.start("Certificates");
+            for (int i = 0; i < certs.size(); i++) {
+                xml.start("member")
+                   .elem("CertificateArn", certs.get(i))
+                   .elem("IsDefault", i == 0)
+                   .end("member");
+            }
+            xml.end("Certificates");
         }
-        xml.end("Certificates")
-           .elem("NextMarker", "")
-           .end("DescribeListenerCertificatesResult")
+        xml.end("DescribeListenerCertificatesResult")
            .raw(AwsQueryResponse.responseMetadata())
            .end("DescribeListenerCertificatesResponse");
         return Response.ok(xml.build()).type(MediaType.APPLICATION_XML).build();
@@ -1591,7 +1593,6 @@ public class ElbV2QueryHandler {
             xml.start("member").raw(trustStoreXml(ts)).end("member");
         }
         xml.end("TrustStores")
-           .elem("NextMarker", "")
            .end("DescribeTrustStoresResult")
            .raw(AwsQueryResponse.responseMetadata())
            .end("DescribeTrustStoresResponse");

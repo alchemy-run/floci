@@ -129,7 +129,7 @@ class AppSyncIntegrationTest {
             .body("graphqlApi.name", equalTo("my-api"))
             .body("graphqlApi.authenticationType", equalTo("API_KEY"))
             .body("graphqlApi.arn", containsString("arn:aws:appsync:"))
-            .body("graphqlApi.uris.GRAPHQL", containsString("/v1/apis/"))
+            .body("graphqlApi.uris.GRAPHQL", containsString("appsync-api"))
             .body("graphqlApi.tags.env", equalTo("test"))
             .extract().path("graphqlApi.apiId");
     }

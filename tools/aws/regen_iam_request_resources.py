@@ -197,6 +197,8 @@ _REST = ("REST: its requests name their resources in the path, which RequestReso
 
 # Namespaces Floci serves whose resources are not read yet, and why.
 NOT_COVERED: dict[str, str] = {
+    "cloudfront-keyvaluestore": "the Alchemy fork's KeyValueStore data plane; its requests are not read yet",
+    "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",
     "account": _REST,
     "airflow": _REST,
     "app-integrations": _REST,

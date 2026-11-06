@@ -44,14 +44,13 @@ class PartitionCrossServiceSmokeIntegrationTest {
             "accessanalyzer", "acm", "amazonmq", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
-            "configservice", "connect", "controlcatalog", "controltower", "datasync", "dlm", "dms", "dsql", "dynamodb", "ec2",
-            "ecr", "ecs", "efs", "eks", "elasticache", "elasticbeanstalk", "elb", "elbv2", "emr", "emrserverless",
-            "eventbridge", "eventbridgev2", "firehose", "fis", "glue", "guardduty", "iot", "kinesis", "kinesisanalytics", "lambda",
-            "lambdamicrovms", "lambdaweb", "memorydb", "msk", "mwaa", "networkfirewall", "oam", "opensearch", "organizations",
-            "paymentcryptography", "pipes", "ram", "rds", "redshift", "redshiftserverless",
-            "resourceexplorer2", "resourcegroups", "route53resolver",
-            "s3tables", "s3vectors", "sagemaker", "scheduler", "secretsmanager", "servicequotas", "ses", "sns", "sqs",
-            "stepfunctions", "timestreaminfluxdb", "transfer", "verifiedpermissions", "wafv2");
+            "configservice", "connect", "controlcatalog", "datasync", "dlm", "dms", "dsql", "dynamodb", "ec2", "ecr",
+            "ecs", "efs", "eks", "elasticache", "elasticbeanstalk", "elb", "elbv2", "emr", "emrserverless",
+            "eventbridge", "eventbridgev2", "firehose", "fis", "glue", "iot", "kinesis", "kinesisanalytics",
+            "lambda", "lambdaweb", "memorydb", "msk", "mwaa", "oam", "opensearch", "organizations",
+            "paymentcryptography", "pipes", "ram", "rds", "redshift", "resourceexplorer2", "resourcegroups",
+            "s3tables", "s3vectors", "scheduler", "secretsmanager", "ses", "sns", "sqs", "stepfunctions",
+            "timestreaminfluxdb", "transfer", "verifiedpermissions", "wafv2");
 
     private static final String JSON_1_0 = "application/x-amz-json-1.0";
     private static final String JSON_1_1 = "application/x-amz-json-1.1";

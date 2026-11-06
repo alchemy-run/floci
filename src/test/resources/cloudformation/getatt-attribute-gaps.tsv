@@ -1,4 +1,3 @@
-AWS::AppConfig::ConfigurationProfile	KmsKeyArn	Floci's AppConfig keeps no KMS key on a profile, so KmsKeyIdentifier is accepted and not stored
 AWS::BedrockAgentCore::Runtime	WorkloadIdentityDetails	the dotted WorkloadIdentityDetails.WorkloadIdentityArn is set instead, the form AWS's GetAtt exposes for the nested object
 AWS::CodePipeline::CustomActionType	Id	schema gives no description; the custom action has no separate id in Floci
 AWS::CodePipeline::Webhook	Id	schema gives no description; Floci keys webhooks by name

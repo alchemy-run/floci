@@ -728,22 +728,38 @@ public class EcrService implements ResourceProvider {
         String namespace = "ListImages:" + region + ":" + effectiveAccount(registryId) + ":" + repositoryName;
         Repository repo = requireRepo(repositoryName, registryId, region);
         requireRegistry();
+        // Tags first, digests only for the page returned: each digest is a registry round trip.
+        RegistryHttpClient http = null;
+        List<String> names = registryLookupNames(repo, region, repositoryName);
         List<ImageIdentifier> out = new ArrayList<>();
         try {
-            RegistryHttpClient http = registryManager.httpClient();
-            List<String> names = registryLookupNames(repo, region, repositoryName);
+            http = registryManager.httpClient();
             for (String tag : listTagsFromRegistry(http, names)) {
-                out.add(new ImageIdentifier(tag, headManifestDigest(http, names, tag)));
+                out.add(new ImageIdentifier(tag, null));
             }
         } catch (Exception e) {
             LOG.warnv("ListImages registry query failed for {0}: {1}", repositoryName, e.getMessage());
             out.clear();
         }
         mergeLocalImageIds(out, region, repo.getRegistryId(), repositoryName);
-        return Pagination.paginate(out,
+        PaginatedResult<ImageIdentifier> page = Pagination.paginate(out,
                 id -> id.getImageTag() != null ? id.getImageTag() : id.getImageDigest(),
                 limit, nextToken, namespace,
                 token -> new AwsException("InvalidParameterException", "Invalid nextToken", 400));
+        List<ImageIdentifier> items = new ArrayList<>();
+        for (ImageIdentifier id : page.items()) {
+            String digest = id.getImageDigest();
+            if (digest == null && http != null) {
+                try {
+                    digest = headManifestDigest(http, names, id.getImageTag());
+                } catch (Exception e) {
+                    LOG.warnv("ListImages could not read the digest of {0}:{1}: {2}",
+                            repositoryName, id.getImageTag(), e.getMessage());
+                }
+            }
+            items.add(new ImageIdentifier(id.getImageTag(), digest));
+        }
+        return new PaginatedResult<>(items, page.nextToken());
     }
 
     private static List<ImageIdentifier> imageIdentifiers(RegistryHttpClient http, String internal, List<String> tags)
@@ -916,32 +932,41 @@ public class EcrService implements ResourceProvider {
         List<ImageIdentifier> deleted = new ArrayList<>();
         List<ImageFailure> failures = new ArrayList<>();
         if (imageIds == null) imageIds = List.of();
+        String internal = names.getFirst();
         for (ImageIdentifier id : imageIds) {
+            int deletedBefore = deleted.size();
+            int failuresBefore = failures.size();
             try {
-                String tag = id.getImageTag();
-                String digest = id.getImageDigest();
-                if (digest == null && tag != null) {
-                    digest = headManifestDigest(http, names, tag);
+                lockRepositoryWrites(internal);
+                try {
+                    if (id.getImageDigest() == null && id.getImageTag() != null) {
+                        deleteImageTag(repo, repositoryName, internal, http, id, region, deleted, failures);
+                    } else {
+                        deleteImageDigest(repo, repositoryName, internal, http, id, region, deleted, failures);
+                    }
+                } finally {
+                    unlockRepositoryWrites(internal);
                 }
-                LocalImage local = findLocalImage(region, repo.getRegistryId(), repositoryName, tag, digest);
-                if (digest == null && local != null) {
-                    digest = local.digest;
-                }
-                if (digest == null) {
-                    failures.add(new ImageFailure(id, "ImageNotFound", "Image not found"));
-                    continue;
-                }
-                boolean registryDeleted = deleteManifestFromRegistry(http, names, digest);
-                evictLocalImage(region, repo.getRegistryId(), repositoryName, digest, tag);
-                imageMetaStore.delete(imageMetaKey(region, repo.getRegistryId(), repositoryName, digest));
-                if (!registryDeleted && local == null) {
-                    failures.add(new ImageFailure(id, "ImageNotFound", "Image not found"));
-                    continue;
-                }
-                deleted.add(new ImageIdentifier(tag, digest));
-                publishImageAction("DELETE", repo, repositoryName, region, digest, tag, null);
             } catch (Exception e) {
                 failures.add(new ImageFailure(id, "ImageNotFound", e.getMessage()));
+            }
+            // Images Floci holds locally (built for MicroVM artifacts) are not in the backing registry:
+            // the registry reports them missing, and the local copy is what the delete removes.
+            if (deleted.size() == deletedBefore && failures.size() == failuresBefore + 1
+                    && "ImageNotFound".equals(failures.getLast().getFailureCode())) {
+                LocalImage local = findLocalImage(region, repo.getRegistryId(), repositoryName,
+                        id.getImageTag(), id.getImageDigest());
+                if (local != null) {
+                    failures.removeLast();
+                    deleted.add(new ImageIdentifier(id.getImageTag(), local.digest));
+                    imageMetaStore.delete(imageMetaKey(region, repo.getRegistryId(), repositoryName, local.digest));
+                }
+            }
+            for (ImageIdentifier removed : deleted.subList(deletedBefore, deleted.size())) {
+                evictLocalImage(region, repo.getRegistryId(), repositoryName, removed.getImageDigest(),
+                        removed.getImageTag());
+                publishImageAction("DELETE", repo, repositoryName, region, removed.getImageDigest(),
+                        removed.getImageTag(), null);
             }
         }
         return new BatchDeleteImageResult(deleted, failures);
@@ -2302,20 +2327,6 @@ public class EcrService implements ResourceProvider {
     }
 
     private static final String AUTH_PASSWORD = "floci-" + "0".repeat(96);
-
-    private boolean deleteManifestFromRegistry(RegistryHttpClient http, List<String> names, String digest) {
-        boolean deleted = false;
-        for (String name : names) {
-            try {
-                if (http.deleteManifest(name, digest)) {
-                    deleted = true;
-                }
-            } catch (Exception e) {
-                LOG.debugv("Registry DELETE manifest {0}/{1} failed: {2}", name, digest, e.getMessage());
-            }
-        }
-        return deleted;
-    }
 
     private void evictLocalImage(String region, String account, String repoName, String digest, String tag) {
         if (digest != null) {

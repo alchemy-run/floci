@@ -16,6 +16,9 @@ import io.github.hectorvent.floci.services.lambda.model.LambdaAlias;
 import io.github.hectorvent.floci.services.lambda.model.LambdaFunction;
 import io.github.hectorvent.floci.services.lambda.model.LambdaUrlConfig;
 import io.github.hectorvent.floci.services.lambda.model.StreamingPayload;
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.InjectableContext;
+import io.quarkus.arc.ManagedContext;
 import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
 import io.vertx.core.http.HttpServerRequest;
 import io.vertx.ext.web.RoutingContext;
@@ -170,7 +173,12 @@ public class LambdaUrlInvocationController {
 
         boolean responseStream = urlConfig != null && "RESPONSE_STREAM".equals(urlConfig.getInvokeMode());
         byte[] eventBytes = event.getBytes(StandardCharsets.UTF_8);
+        // The invocation runs on the pool, off the event loop, but in this request's scope: what it
+        // reads from RequestContext is the account and Region set above.
+        ManagedContext requestScope = Arc.container().requestContext();
+        InjectableContext.ContextState requestState = requestScope.getState();
         return CompletableFuture.supplyAsync(() -> {
+            requestScope.activate(requestState);
             try {
                 InvokeResult result = lambdaService.invokeArn(functionArn, eventBytes, InvocationType.RequestResponse);
                 if (result.isStreaming()) {
@@ -179,6 +187,8 @@ public class LambdaUrlInvocationController {
                 return buildResponse(result);
             } catch (AwsException e) {
                 return Response.status(e.getHttpStatus()).entity(e.getMessage()).build();
+            } finally {
+                requestScope.deactivate();
             }
         }, INVOKE_POOL);
     }

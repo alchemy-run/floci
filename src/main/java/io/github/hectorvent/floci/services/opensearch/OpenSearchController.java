@@ -655,7 +655,9 @@ public class OpenSearchController {
         node.put("Created", !domain.isProcessing());
         node.put("Processing", domain.isProcessing());
         node.put("Deleted", domain.isDeleted());
-        String endpoint = service.publicEndpoint(domain);
+        // A public domain is reached through Floci's data plane; a VPC domain keeps its AWS-shaped
+        // address, which its VPC endpoints report too.
+        String endpoint = domain.getVpcOptions() == null ? service.publicEndpoint(domain) : domain.getEndpoint();
         if (domain.getVpcOptions() == null) {
             node.put("Endpoint", endpoint != null ? endpoint : "");
         } else if (endpoint != null && !endpoint.isEmpty()) {

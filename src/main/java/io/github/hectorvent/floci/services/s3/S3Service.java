@@ -2264,7 +2264,10 @@ public class S3Service implements Resettable, ResourceProvider {
         S3Object object = findStoredObject(ownedBucket, bucketName, key, versionId)
                 .orElseThrow(() -> versionId != null ? noSuchVersion(key, versionId) : noSuchKey(key));
         if (object.isDeleteMarker()) {
-            throw new S3DeleteMarkerException(object);
+            // A marker named by its version id is refused as MethodNotAllowed; a current one reads as a
+            // missing key. GET and HEAD rename the method in S3Controller.deleteMarkerRefusal.
+            S3DeleteMarkerException current = new S3DeleteMarkerException(object);
+            throw versionId != null ? current.named("GET") : current;
         }
         return object;
     }

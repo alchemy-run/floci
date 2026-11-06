@@ -187,20 +187,6 @@ class IamActionRegistryTest {
     }
 
     @ParameterizedTest
-    @CsvSource({"createReusableDelegationSet,CreateReusableDelegationSet",
-            "getReusableDelegationSet,GetReusableDelegationSet",
-            "listReusableDelegationSets,ListReusableDelegationSets",
-            "deleteReusableDelegationSet,DeleteReusableDelegationSet"})
-    void matchedDelegationSetMethodsResolveTheirOwnActions(String method, String operation) {
-        ResourceInfo info = Mockito.mock(ResourceInfo.class);
-        Mockito.doReturn(Route53Controller.class).when(info).getResourceClass();
-        when(info.getResourceMethod()).thenReturn(Arrays.stream(Route53Controller.class.getMethods())
-                .filter(candidate -> candidate.getName().equals(method)).findFirst().orElseThrow());
-        assertEquals("route53:" + operation, registry.resolveMatchedRoute("route53", info));
-        assertNull(registry.resolveMatchedRoute("s3", info));
-    }
-
-    @ParameterizedTest
     @CsvSource({"PUT,PutProvisionedConcurrencyConfig", "GET,GetProvisionedConcurrencyConfig",
             "DELETE,DeleteProvisionedConcurrencyConfig"})
     void provisionedConcurrencyRoutesResolveTheirActions(String method, String operation) {

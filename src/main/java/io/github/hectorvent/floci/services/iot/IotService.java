@@ -1311,7 +1311,7 @@ public class IotService {
                     "Thing type " + thingTypeName + " must be deprecated before it can be deleted.", 400);
         }
         Instant deprecatedAt = type.getDeprecatedDate() != null ? type.getDeprecatedDate() : type.getCreationDate();
-        if (deprecatedAt != null && clock.instant().isBefore(deprecatedAt.plus(THING_TYPE_DELETION_DELAY))) {
+        if (deprecatedAt != null && now().isBefore(deprecatedAt.plus(THING_TYPE_DELETION_DELAY))) {
             throw new AwsException("InvalidRequestException",
                     "Thing type " + thingTypeName + " cannot be deleted until 5 minutes after it was deprecated.", 400);
         }
@@ -2431,6 +2431,11 @@ public class IotService {
     @Inject
     Clock clock;
 
+    /** The injected clock, or the system's for a service a unit test builds without CDI. */
+    private Instant now() {
+        return clock != null ? clock.instant() : Instant.now();
+    }
+
 
 
 
@@ -2446,7 +2451,7 @@ public class IotService {
             type.setDeprecatedDate(null);
         } else if (!type.isDeprecated()) {
             type.setDeprecated(true);
-            type.setDeprecatedDate(clock.instant());
+            type.setDeprecatedDate(now());
         }
         thingTypeStore.put(thingTypeKey(region, thingTypeName), type);
     }

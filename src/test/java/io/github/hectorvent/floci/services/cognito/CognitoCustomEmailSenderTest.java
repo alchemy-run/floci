@@ -121,8 +121,10 @@ class CognitoCustomEmailSenderTest {
                 "phone_number", "+12025550100", "phone_number_verified", "true", "name", "Original"), null);
         service.adminSetUserPassword(pool.getId(), "alice", "Passw0rd!", true);
         if (pending) {
+            // UpdateUserPool resets an omitted LambdaConfig, so the sender is sent again.
             service.updateUserPool(Map.of("UserPoolId", pool.getId(), "UserAttributeUpdateSettings",
-                    Map.of("AttributesRequireVerificationBeforeUpdate", List.of("email", "phone_number"))), REGION);
+                    Map.of("AttributesRequireVerificationBeforeUpdate", List.of("email", "phone_number")),
+                    "LambdaConfig", Map.of("KMSKeyID", keyArn, "CustomEmailSender", sender())), REGION);
         }
         if (invocationFailure) {
             when(lambda.invoke(eq(REGION), eq(SENDER), any(byte[].class), any()))
@@ -467,8 +469,10 @@ class CognitoCustomEmailSenderTest {
         UserPool pool = pool(Map.of("KMSKeyID", keyArn, "CustomEmailSender", sender()),
                 List.of("email", "phone_number"));
         if (requiresVerification) {
+            // UpdateUserPool resets an omitted LambdaConfig, so the sender is sent again.
             service.updateUserPool(Map.of("UserPoolId", pool.getId(), "UserAttributeUpdateSettings",
-                    Map.of("AttributesRequireVerificationBeforeUpdate", List.of("phone_number"))), REGION);
+                    Map.of("AttributesRequireVerificationBeforeUpdate", List.of("phone_number")),
+                    "LambdaConfig", Map.of("KMSKeyID", keyArn, "CustomEmailSender", sender())), REGION);
         }
         UserPoolClient client = client(pool);
         service.adminCreateUser(pool.getId(), "alice", Map.of(

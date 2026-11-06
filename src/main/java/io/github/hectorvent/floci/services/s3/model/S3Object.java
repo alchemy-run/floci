@@ -123,6 +123,7 @@ public class S3Object {
         this.ownerAccountId = source.ownerAccountId;
         this.dataGeneration = source.dataGeneration;
         this.eventSequencer = source.eventSequencer;
+        this.restoreExpiryDate = source.restoreExpiryDate;
     }
 
     public String getBucketName() { return bucketName; }

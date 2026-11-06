@@ -7633,11 +7633,15 @@ public class Ec2QueryHandler {
         if (kmsKeyId == null || kmsKeyId.isBlank()) {
             return null;
         }
+        if (kmsService == null) {
+            return kmsKeyId;
+        }
         try {
             return kmsService.describeKey(kmsKeyId, region).getArn();
         } catch (AwsException e) {
-            throw new AwsException("InvalidParameterValue",
-                    "The KMS key " + kmsKeyId + " does not exist, is disabled, or is not usable.", 400);
+            // AWS accepts a key it cannot resolve yet and checks it only after answering, so the key
+            // is kept as the caller gave it.
+            return kmsKeyId;
         }
     }
 }

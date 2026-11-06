@@ -1151,11 +1151,23 @@ public class ResourceArnBuilder {
      * ARN's Region and name, and a MicroVM image or network connector by the ARN's Region and trailing
      * name, in the caller's own account whatever account the ARN names, so that resource is the one
      * checked. The MicroVM tag handler takes only a Lambda ARN naming an image or a connector with no
-     * version, so the target is read through {@link LambdaMicrovmsService#taggedResource}, as it reads it.
+     * version, so the target is read from the ARN as LambdaMicrovmsService reads it.
      * Any other ARN, an event source mapping's included, has to name its resource exactly or is
      * refused, so it is checked as written.
      */
     private static String lambdaTaggedArn(String tagged, String accountId) {
+        if (LambdaMicrovmsService.ownsArn(tagged)) {
+            // Read as LambdaTagController and LambdaMicrovmsService read it: the Region is the fourth field,
+            // the name what follows the last colon.
+            String[] fields = tagged.split(":");
+            String region = fields.length > 3 ? fields[3] : "";
+            String type = tagged.contains(":microvm-image:") ? "microvm-image:"
+                    : tagged.contains(":network-connector:") ? "network-connector:" : null;
+            if (type != null && !region.isBlank()) {
+                return AwsArnUtils.Arn.of("lambda", region, accountId,
+                        type + tagged.substring(tagged.lastIndexOf(':') + 1)).toString();
+            }
+        }
         if (!AwsArnUtils.looksLikeArn(tagged)) {
             return "*";
         }

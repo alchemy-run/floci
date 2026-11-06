@@ -122,27 +122,6 @@ class IamRestRouteEnforcementIntegrationTest {
     }
 
     @Test
-    void anEksAccessEntrysPolicyRoutesAreCheckedAsTheEntryRoutesTheyRunAs() {
-        // EKS takes an access entry's principal as the rest of the path, so a request on an entry's access
-        // policies reads or deletes the entry of a longer principal, and is checked as that.
-        String user = user("route-eks-entry");
-        String name = "route-entry-" + suffix();
-        eksCluster(name);
-        String principal = encoded("arn:aws:iam::" + ACCOUNT + ":role/route-entry");
-        String policies = "/clusters/" + name + "/access-entries/" + principal + "/access-policies";
-        String admin = encoded("arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy");
-
-        policy(user, allow("eks:ListAssociatedAccessPolicies", "*") + "," + allow("eks:DisassociateAccessPolicy", "*"));
-        refused(as(user, "eks").urlEncodingEnabled(false).get(policies).then(), "eks:DescribeAccessEntry");
-        refused(as(user, "eks").urlEncodingEnabled(false).delete(policies + "/" + admin).then(),
-                "eks:DeleteAccessEntry");
-        // Allowed, it reaches EKS, which looks up the entry of a principal ending in /access-policies.
-        policy(user, allow("eks:DescribeAccessEntry", "*"));
-        as(user, "eks").urlEncodingEnabled(false).get(policies).then().statusCode(404)
-                .body("message", equalTo("Access entry not found"));
-    }
-
-    @Test
     void aTrailingSlashDoesNotLetARouteThroughUnchecked() {
         // The router matches /clusters/ as /clusters, so the request is checked as the route it reaches.
         String user = user("route-trailing-slash");

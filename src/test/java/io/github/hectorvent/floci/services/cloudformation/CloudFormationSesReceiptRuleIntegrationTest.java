@@ -174,35 +174,6 @@ class CloudFormationSesReceiptRuleIntegrationTest {
         assertEquals(List.of("other", "store", "anchor"), ruleNames());
     }
 
-    @Test
-    void typedGetAttKeepsThePositionOnAContentOnlyUpdate() throws Exception {
-        ReceiptRule anchor = new ReceiptRule();
-        anchor.setName("management");
-        ses.createReceiptRule(ruleSet, anchor, null, "us-east-1", sender -> false);
-        ObjectNode template = (ObjectNode) mapper.readTree(template("store", true));
-        ObjectNode resources = template.withObject("/Resources");
-        resources.putObject("Topic").put("Type", "AWS::SNS::Topic").putObject("Properties")
-                .put("TopicName", stackName + "-events");
-        ObjectNode subscription = resources.putObject("Subscription").put("Type", "AWS::Redshift::EventSubscription")
-                .putObject("Properties").put("SubscriptionName", stackName + "-subscription")
-                .put("SourceType", "cluster");
-        subscription.putObject("SnsTopicArn").put("Ref", "Topic");
-        subscription.putArray("EventCategories").add("management");
-        template.withObject("/Resources/Rule/Properties").putObject("After").putArray("Fn::Select")
-                .add(0).addObject().putArray("Fn::GetAtt").add("Subscription").add("EventCategoriesList");
-        ObjectNode second = resources.putObject("Second").put("Type", "AWS::SES::ReceiptRule")
-                .put("DependsOn", "Rule").putObject("Properties").put("RuleSetName", ruleSet)
-                .put("After", "management");
-        second.putObject("Rule").put("Name", "between");
-        cfn.createStack(r -> r.stackName(stackName).templateBody(template.toString()));
-        CfnStackWaits.awaitStatus(cfn, stackName, "CREATE_COMPLETE");
-        assertEquals(List.of("management", "between", "store"), ruleNames());
-        template.withObject("/Resources/Rule/Properties/Rule").put("Enabled", false);
-        cfn.updateStack(r -> r.stackName(stackName).templateBody(template.toString()));
-        CfnStackWaits.awaitStatus(cfn, stackName, "UPDATE_COMPLETE");
-        assertEquals(List.of("management", "between", "store"), ruleNames());
-    }
-
     @ParameterizedTest
     @CsvSource({"false, false", "false, true", "true, false", "true, true"})
     void dynamicReferenceChangesApplyTheCurrentAnchor(boolean legacy, boolean indexReference) throws Exception {

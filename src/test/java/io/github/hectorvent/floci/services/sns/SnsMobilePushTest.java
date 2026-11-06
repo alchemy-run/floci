@@ -362,7 +362,8 @@ class SnsMobilePushTest {
 
     @Test
     void publish_logsEachPushAndSmsBelowInfo() {
-        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM", Map.of(), REGION);
+        PlatformApplication app = snsService.createPlatformApplication("android-app", "GCM",
+                Map.of("PlatformCredential", GCM_SERVER_KEY), REGION);
         PlatformEndpoint endpoint = snsService.createPlatformEndpoint(app.getArn(), "fcm-token", null, Map.of(), REGION);
         String topicArn = snsService.createTopic("market-alerts", null, null, REGION).getTopicArn();
         snsService.subscribe(topicArn, "application", endpoint.getArn(), REGION, Map.of());

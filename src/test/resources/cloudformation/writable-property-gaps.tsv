@@ -66,12 +66,6 @@ AWS::ApiGatewayV2::Stage	DeploymentId	accepted and ignored
 AWS::ApiGatewayV2::Stage	Description	accepted and ignored
 AWS::ApiGatewayV2::Stage	RouteSettings	accepted and ignored
 AWS::ApiGatewayV2::Stage	Tags	accepted and ignored
-AWS::AppConfig::ConfigurationProfile	KmsKeyIdentifier	accepted and not stored, as the AppConfigCfnProvisioner javadoc records
-AWS::AppConfig::ConfigurationProfile	RetrievalRoleArn	accepted and not stored, as the AppConfigCfnProvisioner javadoc records
-AWS::AppConfig::ConfigurationProfile	Tags	accepted and not stored, as the AppConfigCfnProvisioner javadoc records
-AWS::AppConfig::ConfigurationProfile	Validators	accepted and not stored, as the AppConfigCfnProvisioner javadoc records
-AWS::AppConfig::DeploymentStrategy	Tags	accepted and not stored, as the AppConfigCfnProvisioner javadoc records
-AWS::AppConfig::Environment	Tags	accepted and not stored, as the AppConfigCfnProvisioner javadoc records
 AWS::ApplicationAutoScaling::ScalingPolicy	PredictiveScalingPolicyConfiguration	accepted and ignored
 AWS::AutoScaling::AutoScalingGroup	AvailabilityZoneIds	accepted and ignored
 AWS::AutoScaling::AutoScalingGroup	AvailabilityZoneImpairmentPolicy	accepted and ignored

@@ -88,12 +88,10 @@ public class CloudFrontEdgeRoutingFilter implements ContainerRequestFilter {
                         behavior.getFunctionAssociations() != null && !behavior.getFunctionAssociations().isEmpty())) {
             return true;
         }
+        // Custom origins that are endpoints of this Floci (execute-api, Web Functions, its own
+        // listener) are served in-process by CloudFrontServingController without the edge.
         return distribution.getConfig().getOrigins() != null
-                && distribution.getConfig().getOrigins().stream().anyMatch(origin ->
-                        origin.getVpcOriginConfig() != null || (origin.getCustomOriginConfig() != null
-                                && origin.getDomainName() != null
-                                && (origin.getDomainName().endsWith(".amazonaws.com")
-                                        || origin.getDomainName().endsWith(".amazonaws.com.cn"))));
+                && distribution.getConfig().getOrigins().stream().anyMatch(origin -> origin.getVpcOriginConfig() != null);
     }
 
     /** HTTP/1.1 {@code Host}, else the request URI authority (HTTP/2 {@code :authority}). */

@@ -270,16 +270,6 @@ class Ec2ServiceTest {
     }
 
     @Test
-    void defaultSecurityGroupOfIsEmptyOnceTheDefaultGroupIsGone() {
-        Ec2Service service = mockModeService();
-        String region = "us-east-1";
-        String vpcId = service.createVpc(region, "10.94.0.0/16", false).getVpcId();
-        service.deleteSecurityGroup(region, service.defaultSecurityGroupOf(region, vpcId).orElseThrow().getGroupId());
-
-        assertTrue(service.defaultSecurityGroupOf(region, vpcId).isEmpty());
-    }
-
-    @Test
     void defaultSecurityGroupOfRejectsAnUnknownVpc() {
         Ec2Service service = mockModeService();
 

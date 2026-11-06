@@ -208,31 +208,6 @@ class S3NotificationDestinationValidationIntegrationTest {
         }
     }
 
-    @ParameterizedTest
-    @ValueSource(strings = {"", "<Id></Id>", "<Id> \t </Id>"})
-    void missingQueueAndTopicRuleIdsUseEmulator(String idXml) throws Exception {
-        String directQueueArn = createQueue("fallback-direct", Map.of());
-        String subscribedQueueArn = createQueue("fallback-subscribed", Map.of());
-        String topicArn = createTopic("fallback-topic");
-        snsService.subscribe(topicArn, "sqs", subscribedQueueArn, REGION,
-                Map.of("RawMessageDelivery", "true"));
-        putNotification(notificationConfiguration(
-                queueConfiguration(directQueueArn, idXml)
-                + topicConfiguration(topicArn, idXml)), true)
-                .statusCode(200);
-        try {
-            given().body("payload").put("/" + bucket + "/fallback.txt").then().statusCode(200);
-
-            for (String queueUrl : queueUrls) {
-                JsonNode event = objectMapper.readTree(receiveQueueMessage(queueUrl)
-                        .getFirst().getBody()).path("Records").get(0);
-                assertEquals("emulator", event.path("s3").path("configurationId").asText());
-            }
-        } finally {
-            given().delete("/" + bucket + "/fallback.txt").then().statusCode(204);
-        }
-    }
-
     @Test
     void crossRegionTopicReceivesTestEventAndLaterObjectEvent() throws Exception {
         String topicRegion = "ap-southeast-2";

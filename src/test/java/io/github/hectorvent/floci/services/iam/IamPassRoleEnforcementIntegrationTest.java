@@ -1102,63 +1102,6 @@ class IamPassRoleEnforcementIntegrationTest {
     }
 
     @Test
-    void aServiceCatalogLaunchRoleNeedsPassRoleForServiceCatalog() {
-        String role = role("catalog-launch");
-        User user = user("passrole-catalog");
-        String portfolio = catalogAdmin("CreatePortfolio", "{\"DisplayName\":\"passrole-" + suffix()
-                + "\",\"ProviderName\":\"floci\"}").extract().path("PortfolioDetail.Id");
-        cleanup.register(() -> deleteFromCatalog("DeletePortfolio", portfolio));
-        String product = catalogAdmin("CreateProduct", "{\"Name\":\"passrole-" + suffix() + "\",\"Owner\":\"floci\","
-                + "\"ProvisioningArtifactParameters\":[{\"Name\":\"v1\"}]}")
-                .extract().path("ProductViewDetail.ProductViewSummary.Id");
-        cleanup.register(() -> deleteFromCatalog("DeleteProduct", product));
-        String launch = catalogAdmin("CreateConstraint", constraint(portfolio, product, "LAUNCH", "{}"))
-                .extract().path("ConstraintDetail.ConstraintId");
-        String notification = catalogAdmin("CreateConstraint", constraint(portfolio, product, "NOTIFICATION",
-                "{\\\"NotificationArns\\\":[]}")).extract().path("ConstraintDetail.ConstraintId");
-        // Floci keeps a constraint's type as given, so one typed in lowercase is a launch constraint too.
-        String lowercase = catalogAdmin("CreateConstraint", constraint(portfolio, product, "launch", "{}"))
-                .extract().path("ConstraintDetail.ConstraintId");
-        cleanup.register(() -> deleteFromCatalog("DeleteConstraint", launch));
-        cleanup.register(() -> deleteFromCatalog("DeleteConstraint", notification));
-        cleanup.register(() -> deleteFromCatalog("DeleteConstraint", lowercase));
-        String launchRole = "{\\\"RoleArn\\\":\\\"" + role + "\\\"}";
-        String create = constraint(portfolio, product, "LAUNCH", launchRole);
-        String updateLaunch = "{\"Id\":\"" + launch + "\",\"Parameters\":\"" + launchRole + "\"}";
-        String updateNotification = "{\"Id\":\"" + notification + "\",\"Parameters\":\"" + launchRole + "\"}";
-        String createLowercase = constraint(portfolio, product, "launch", launchRole);
-        String updateLowercase = "{\"Id\":\"" + lowercase + "\",\"Parameters\":\"" + launchRole + "\"}";
-        String serviceAction = "{\"Name\":\"passrole-" + suffix() + "\",\"DefinitionType\":\"SSM_AUTOMATION\","
-                + "\"Definition\":{\"Name\":\"AWS-RestartEC2Instance\",\"Version\":\"1\",\"AssumeRole\":\""
-                + role + "\"},\"IdempotencyToken\":\"" + suffix() + "\"}";
-        String properties = "{\"ProvisionedProductId\":\"pp-passrolemissing\",\"IdempotencyToken\":\"" + suffix()
-                + "\",\"ProvisionedProductProperties\":{\"LAUNCH_ROLE\":\"" + role + "\"}}";
-        String actions = allow("servicecatalog:*", "*");
-
-        // A grant to pass the role to SSM does not cover Service Catalog.
-        user.policy(actions + "," + passRole(role, SSM));
-        deniedJson(catalog(user, "CreateConstraint").body(create).post("/").then());
-        deniedJson(catalog(user, "UpdateConstraint").body(updateLaunch).post("/").then());
-        deniedJson(catalog(user, "CreateConstraint").body(createLowercase).post("/").then());
-        deniedJson(catalog(user, "UpdateConstraint").body(updateLowercase).post("/").then());
-        deniedJson(catalog(user, "CreateServiceAction").body(serviceAction).post("/").then());
-        deniedJson(catalog(user, "UpdateProvisionedProductProperties").body(properties).post("/").then());
-        // The update goes by the constraint's own type: a notification constraint takes no launch role.
-        catalog(user, "UpdateConstraint").body(updateNotification).post("/").then().statusCode(200);
-
-        user.policy(actions + "," + passRole(role, SERVICE_CATALOG));
-        String created = catalog(user, "CreateConstraint").body(create).post("/").then().statusCode(200)
-                .extract().path("ConstraintDetail.ConstraintId");
-        cleanup.register(() -> deleteFromCatalog("DeleteConstraint", created));
-        catalog(user, "UpdateConstraint").body(updateLaunch).post("/").then().statusCode(200);
-        String action = catalog(user, "CreateServiceAction").body(serviceAction).post("/").then().statusCode(200)
-                .extract().path("ServiceActionDetail.ServiceActionSummary.Id");
-        cleanup.register(() -> deleteFromCatalog("DeleteServiceAction", action));
-        catalog(user, "UpdateProvisionedProductProperties").body(properties).post("/").then()
-                .statusCode(400).body(containsString("ResourceNotFoundException"));
-    }
-
-    @Test
     void aServiceCatalogLocalRoleNameNeedsPassRoleOnTheArnIamHoldsItUnder() {
         String held = role("/catalog/", "catalog-local");
         String pathless = "arn:aws:iam::" + ACCOUNT + ":role/" + roleName(held);

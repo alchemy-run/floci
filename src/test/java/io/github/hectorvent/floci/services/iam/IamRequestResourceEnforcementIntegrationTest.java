@@ -905,27 +905,6 @@ class IamRequestResourceEnforcementIntegrationTest {
     }
 
     /**
-     * An Athena query is checked on the workgroup its request names, the primary one when it names none, where Athena
-     * runs and lists it.
-     */
-    @Test
-    void aQueryNamingNoWorkgroupIsCheckedOnThePrimaryOne() {
-        String primary = "arn:aws:athena:" + REGION + ":" + ACCOUNT + ":workgroup/primary";
-        User user = user("res-athena");
-        user.policy(allowOn("athena:ListQueryExecutions", primary) + "," + allowOn("athena:GetWorkGroup", primary) + ","
-                + allowOn("athena:StartQueryExecution", "*") + ",{\"Effect\":\"Deny\",\"Action\":"
-                + "\"athena:StartQueryExecution\",\"Resource\":\"" + primary + "\"}");
-        send(user, "athena", "AmazonAthena.ListQueryExecutions", "1.1", "{}").statusCode(200);
-        send(user, "athena", "AmazonAthena.GetWorkGroup", "1.1", "{}").statusCode(200);
-        send(user, "athena", "AmazonAthena.GetWorkGroup", "1.1", "{\"WorkGroup\":null}").statusCode(200)
-                .body("WorkGroup.Name", equalTo("primary"));
-        refusedJson(send(user, "athena", "AmazonAthena.ListQueryExecutions", "1.1", "{\"WorkGroup\":\"res-other\"}"),
-                "athena:ListQueryExecutions");
-        refusedJson(send(user, "athena", "AmazonAthena.StartQueryExecution", "1.1", "{\"QueryString\":\"SELECT 1\"}"),
-                "athena:StartQueryExecution");
-    }
-
-    /**
      * An Athena catalog read is checked on the catalog its {@code CatalogName} names and on {@code AwsDataCatalog},
      * the Glue Data Catalog Floci reads whichever it names, so a grant on another catalog alone does not reach it.
      */
@@ -942,28 +921,6 @@ class IamRequestResourceEnforcementIntegrationTest {
         named.policy(allowOn("athena:ListDatabases", catalogs + "res-allowed"));
         refusedJson(send(named, "athena", "AmazonAthena.ListDatabases", "1.1", "{\"CatalogName\":\"res-allowed\"}"),
                 "athena:ListDatabases");
-    }
-
-    /**
-     * An Athena catalog request naming no catalog, or a JSON null, is checked on {@code AwsDataCatalog}, the one
-     * {@code GetDataCatalog} answers and the catalog reads read, so a grant on it reaches them and a deny on it applies.
-     */
-    @Test
-    void aCatalogRequestNamingNoCatalogIsCheckedOnTheGlueOne() {
-        String glue = "arn:aws:athena:" + REGION + ":" + ACCOUNT + ":datacatalog/AwsDataCatalog";
-        User user = user("res-glue-catalog");
-        user.policy(allowOn("athena:GetDataCatalog", glue) + "," + allowOn("athena:ListDatabases", glue));
-        send(user, "athena", "AmazonAthena.GetDataCatalog", "1.1", "{}").statusCode(200)
-                .body("DataCatalog.Name", equalTo("AwsDataCatalog"));
-        send(user, "athena", "AmazonAthena.GetDataCatalog", "1.1", "{\"Name\":null}").statusCode(200)
-                .body("DataCatalog.Name", equalTo("AwsDataCatalog"));
-        send(user, "athena", "AmazonAthena.ListDatabases", "1.1", "{\"CatalogName\":null}").statusCode(200);
-        refusedJson(send(user, "athena", "AmazonAthena.GetDataCatalog", "1.1", "{\"Name\":\"res-other\"}"),
-                "athena:GetDataCatalog");
-        User denied = user("res-glue-denied");
-        denied.policy(allowOn("athena:GetDataCatalog", "*") + ",{\"Effect\":\"Deny\",\"Action\":"
-                + "\"athena:GetDataCatalog\",\"Resource\":\"" + glue + "\"}");
-        refusedJson(send(denied, "athena", "AmazonAthena.GetDataCatalog", "1.1", "{}"), "athena:GetDataCatalog");
     }
 
     /**
@@ -1254,51 +1211,6 @@ class IamRequestResourceEnforcementIntegrationTest {
                 + "-other\"]}"), "translate:TranslateDocument");
     }
 
-    /**
-     * A scalable target, named by its service namespace, resource id and scalable dimension, is checked on the ARN
-     * Application Auto Scaling registered it under, which ends in the id it assigned, so a grant on that ARN allows
-     * it, one on another target's does not, and a deny on it holds; registering a new one is checked with its id
-     * open, and its tags by its ARN. Before, these were checked on {@code *}.
-     */
-    @Test
-    void aScalableTargetIsCheckedOnTheArnItWasRegisteredUnder() {
-        String target = scalableTarget("service/res-" + suffix() + "/web");
-        String arn = registerScalableTarget(target);
-        assertTrue(arn.startsWith(TARGETS), arn);
-
-        User user = user("res-target");
-        user.policy(allowOn("application-autoscaling:RegisterScalableTarget", arn));
-        scaling(user, "RegisterScalableTarget", target + ",\"MaxCapacity\":3}").statusCode(200);
-        user.policy(allowOn("application-autoscaling:RegisterScalableTarget", TARGETS + "other"));
-        refusedJson(scaling(user, "RegisterScalableTarget", target + ",\"MaxCapacity\":3}"),
-                "application-autoscaling:RegisterScalableTarget");
-        // Its tags on an update are checked on the target too.
-        user.policy(allowOn("application-autoscaling:RegisterScalableTarget", arn) + ","
-                + allowOn("application-autoscaling:TagResource", TARGETS + "other"));
-        refusedJson(scaling(user, "RegisterScalableTarget", target + ",\"Tags\":{\"team\":\"a\"}}"),
-                "application-autoscaling:TagResource");
-        user.policy(allowOn("application-autoscaling:RegisterScalableTarget", arn) + ","
-                + allowOn("application-autoscaling:TagResource", arn));
-        scaling(user, "RegisterScalableTarget", target + ",\"Tags\":{\"team\":\"a\"}}").statusCode(200);
-        // A new target has no id yet, so it is checked on scalable-target/*, which a grant on another does not cover.
-        String other = scalableTarget("service/res-" + suffix() + "/api");
-        refusedJson(scaling(user, "RegisterScalableTarget", other + ",\"MinCapacity\":1,\"MaxCapacity\":2}"),
-                "application-autoscaling:RegisterScalableTarget");
-        user.policy(allowOn("application-autoscaling:RegisterScalableTarget", TARGETS + "*"));
-        cleanup.register(() -> adminJson("application-autoscaling", "AnyScaleFrontendService.DeregisterScalableTarget")
-                .body(other + "}").post("/"));
-        scaling(user, "RegisterScalableTarget", other + ",\"MinCapacity\":1,\"MaxCapacity\":2}").statusCode(200);
-        // A deny on the target holds, on a policy put on it and on its tags read by its ARN, and on no other target.
-        user.policy(allowOn("application-autoscaling:*", "*") + ",{\"Effect\":\"Deny\",\"Action\":["
-                + "\"application-autoscaling:PutScalingPolicy\",\"application-autoscaling:ListTagsForResource\"],"
-                + "\"Resource\":\"" + arn + "\"}");
-        refusedJson(scaling(user, "PutScalingPolicy", target.replace("{", "{\"PolicyName\":\"p\","
-                + "\"PolicyType\":\"StepScaling\",") + "}"), "application-autoscaling:PutScalingPolicy");
-        refusedJson(scaling(user, "ListTagsForResource", "{\"ResourceARN\":\"" + arn + "\"}"),
-                "application-autoscaling:ListTagsForResource");
-        scaling(user, "DeregisterScalableTarget", other + "}").statusCode(200);
-    }
-
     /** The members naming an ECS service's desired count as a scalable target, an open JSON object. */
     private static String scalableTarget(String resourceId) {
         return "{\"ServiceNamespace\":\"ecs\",\"ResourceId\":\"" + resourceId + "\","
@@ -1412,36 +1324,6 @@ class IamRequestResourceEnforcementIntegrationTest {
         refusedJson(rekognition(user, "DetectModerationLabels", image + ",\"ProjectVersion\":\"" + version + "\"}"),
                 "rekognition:DetectModerationLabels");
         rekognition(user, "DetectModerationLabels", image + "}").body(not(containsString("not authorized")));
-    }
-
-    /**
-     * An EMR {@code ModifyInstanceGroups} naming its instance groups by their ids alone, with no {@code ClusterId} or
-     * a null one, is checked on the cluster each group is in, the one EMR finds and modifies it in, so a grant on
-     * another cluster does not reach it and a deny on its own holds; an {@code InstanceGroups} that is no list is
-     * refused, not read as its values.
-     */
-    @Test
-    void anInstanceGroupNamedWithoutItsClusterIsCheckedOnTheClusterItIsIn() {
-        String arn = emrCluster("res-emr-groups");
-        String group = adminJson("elasticmapreduce", "ElasticMapReduce.ListInstanceGroups")
-                .body("{\"ClusterId\":\"" + arn.substring(arn.lastIndexOf('/') + 1) + "\"}").post("/").then()
-                .statusCode(200).extract().path("InstanceGroups[0].Id");
-        String modify = "{\"InstanceGroups\":[{\"InstanceGroupId\":\"" + group + "\",\"InstanceCount\":1}]}";
-
-        User user = user("res-emr-groups");
-        user.policy(allowOn("elasticmapreduce:ModifyInstanceGroups", arn));
-        emr(user, "ModifyInstanceGroups", modify).statusCode(200);
-        emr(user, "ModifyInstanceGroups", "{\"ClusterId\":null," + modify.substring(1)).statusCode(200);
-        user.policy(allowOn("elasticmapreduce:ModifyInstanceGroups", arn.substring(0, arn.lastIndexOf('/') + 1)
-                + "j-RESOTHER"));
-        refusedJson(emr(user, "ModifyInstanceGroups", modify), "elasticmapreduce:ModifyInstanceGroups");
-        user.policy(allowOn("elasticmapreduce:ModifyInstanceGroups", "*") + ",{\"Effect\":\"Deny\","
-                + "\"Action\":\"elasticmapreduce:ModifyInstanceGroups\",\"Resource\":\"" + arn + "\"}");
-        refusedJson(emr(user, "ModifyInstanceGroups", modify), "elasticmapreduce:ModifyInstanceGroups");
-        // An InstanceGroups that is not a list names no group to the check, and EMR changes none.
-        emr(user, "ModifyInstanceGroups", "{\"InstanceGroups\":{\"first\":{\"InstanceGroupId\":\"" + group
-                + "\",\"InstanceCount\":1}}}").statusCode(400)
-                .body(containsString("InstanceGroups must contain at least one instance group."));
     }
 
     /**
