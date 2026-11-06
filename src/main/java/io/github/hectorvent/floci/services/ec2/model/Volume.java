@@ -24,6 +24,7 @@ public class Volume {
     private Instant createTime;
     private Boolean multiAttachEnabled;
     private String region;
+    private String clientToken;       // the CreateVolume ClientToken, so a retry returns this volume
     private List<Tag> tags = new ArrayList<>();
     private List<VolumeAttachment> attachments = new ArrayList<>();
 
@@ -67,6 +68,9 @@ public class Volume {
 
     public String getRegion() { return region; }
     public void setRegion(String region) { this.region = region; }
+
+    public String getClientToken() { return clientToken; }
+    public void setClientToken(String clientToken) { this.clientToken = clientToken; }
 
     public List<Tag> getTags() { return tags; }
     public void setTags(List<Tag> tags) { this.tags = tags; }

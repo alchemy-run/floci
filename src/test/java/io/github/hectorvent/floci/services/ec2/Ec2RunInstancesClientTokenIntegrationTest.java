@@ -11,8 +11,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 /**
- * RunInstances with a ClientToken is idempotent, as on AWS: a launch retried after its reply was
- * lost returns the instances the first one started instead of starting more.
+ * RunInstances and CreateVolume with a ClientToken are idempotent, as on AWS: a call retried after
+ * its reply was lost returns what the first one made instead of making more.
  */
 @QuarkusTest
 class Ec2RunInstancesClientTokenIntegrationTest {
@@ -73,5 +73,18 @@ class Ec2RunInstancesClientTokenIntegrationTest {
         ec2("TerminateInstances", "InstanceId.1", instanceId).when().post("/").then().statusCode(200);
 
         assertEquals(List.of(instanceId), launch("retry-token-d", 1));
+    }
+
+    @Test
+    void aRetriedCreateVolumeReturnsTheFirstVolume() {
+        String first = createVolume("volume-token-a");
+        assertEquals(first, createVolume("volume-token-a"));
+        assertNotEquals(first, createVolume("volume-token-b"));
+    }
+
+    private static String createVolume(String clientToken) {
+        return ec2("CreateVolume", "AvailabilityZone", REGION + "a", "Size", "1", "ClientToken", clientToken)
+                .when().post("/").then().statusCode(200)
+                .extract().path("CreateVolumeResponse.volumeId");
     }
 }

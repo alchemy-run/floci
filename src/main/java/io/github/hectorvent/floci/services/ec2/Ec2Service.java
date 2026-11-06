@@ -14590,6 +14590,25 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     public Volume createVolume(String region, String availabilityZone, String volumeType,
                                int size, boolean encrypted, String kmsKeyId, int iops, Integer throughput,
                                String snapshotId, List<Tag> volumeTags) {
+        return createVolume(region, availabilityZone, volumeType, size, encrypted, kmsKeyId, iops, throughput,
+                snapshotId, volumeTags, null);
+    }
+
+    /**
+     * As above, idempotent on {@code clientToken} as on AWS: a create retried with a token this
+     * account already used returns the volume that create made instead of making another.
+     */
+    public Volume createVolume(String region, String availabilityZone, String volumeType,
+                               int size, boolean encrypted, String kmsKeyId, int iops, Integer throughput,
+                               String snapshotId, List<Tag> volumeTags, String clientToken) {
+        if (clientToken != null && !clientToken.isBlank()) {
+            Optional<Volume> earlier = volumes.scan(k -> k.startsWith(region + "::")).stream()
+                    .filter(existing -> clientToken.equals(existing.getClientToken()))
+                    .findFirst();
+            if (earlier.isPresent()) {
+                return earlier.get();
+            }
+        }
         ensureDefaultResources(region);
         Volume vol = newVolume(region, availabilityZone, volumeType, size, encrypted, kmsKeyId, iops, throughput,
                 snapshotId);
@@ -14598,6 +14617,9 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             vol.setTags(new ArrayList<>(volumeTags));
             // Tags on create are tags like any other: DescribeTags lists them in this region.
             putTags(region, vol.getVolumeId(), new ArrayList<>(volumeTags));
+        }
+        if (clientToken != null && !clientToken.isBlank()) {
+            vol.setClientToken(clientToken);
         }
         volumes.put(key(region, volumeId), vol);
         if (volumeBlockDeviceManager != null) {
