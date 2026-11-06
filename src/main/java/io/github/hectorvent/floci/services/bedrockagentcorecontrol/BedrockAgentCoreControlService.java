@@ -190,6 +190,27 @@ public class BedrockAgentCoreControlService {
         return runtime;
     }
 
+    /**
+     * Records the platform version and lifecycle configuration a create or update named. A field
+     * the request leaves out keeps its value: dropping {@code platformVersion} does not move a
+     * runtime back to the earlier platform.
+     */
+    public AgentRuntime applyRuntimeSettings(String id, String platformVersion, JsonNode lifecycleConfiguration,
+                                             String region) {
+        if (platformVersion == null && (lifecycleConfiguration == null || lifecycleConfiguration.isNull())) {
+            return getAgentRuntime(id, region);
+        }
+        AgentRuntime runtime = getAgentRuntime(id, region);
+        if (platformVersion != null) {
+            runtime.setPlatformVersion(platformVersion);
+        }
+        if (lifecycleConfiguration != null && !lifecycleConfiguration.isNull()) {
+            runtime.setLifecycleConfiguration(lifecycleConfiguration);
+        }
+        storage.put(key(region, id), runtime);
+        return runtime;
+    }
+
     public AgentRuntime deleteAgentRuntime(String id, String clientToken, String region) {
         Optional<AgentRuntime> found = storage.get(key(region, id));
         if (found.isEmpty()) {

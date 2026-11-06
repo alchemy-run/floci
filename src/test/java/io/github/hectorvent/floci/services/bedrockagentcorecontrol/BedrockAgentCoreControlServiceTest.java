@@ -308,4 +308,20 @@ class BedrockAgentCoreControlServiceTest {
         assertEquals(409, assertThrows(AwsException.class,
                 () -> service.createEndpoint(id, "DEFAULT", null, null, null, REGION)).getHttpStatus());
     }
+
+    @Test
+    void platformVersionAndLifecycleStayWhenAnUpdateLeavesThemOut() {
+        AgentRuntime rt = create("platform_agent");
+        assertNull(service.getAgentRuntime(rt.getAgentRuntimeId(), REGION).getPlatformVersion());
+
+        ObjectNode lifecycle = mapper.createObjectNode().put("idleRuntimeSessionTimeout", 600).put("maxLifetime", 7200);
+        service.applyRuntimeSettings(rt.getAgentRuntimeId(), "V2", lifecycle, REGION);
+        service.updateAgentRuntime(rt.getAgentRuntimeId(), artifact(), network(),
+                "arn:aws:iam::000000000000:role/agent", "updated", null, null, null, REGION);
+        service.applyRuntimeSettings(rt.getAgentRuntimeId(), null, null, REGION);
+
+        AgentRuntime after = service.getAgentRuntime(rt.getAgentRuntimeId(), REGION);
+        assertEquals("V2", after.getPlatformVersion());
+        assertEquals(600, after.getLifecycleConfiguration().path("idleRuntimeSessionTimeout").asInt());
+    }
 }

@@ -38,6 +38,8 @@ public class AgentRuntime {
     private JsonNode networkConfiguration;
     private JsonNode authorizerConfiguration;
     private JsonNode protocolConfiguration;
+    private String platformVersion;
+    private JsonNode lifecycleConfiguration;
     private Map<String, String> environmentVariables = new HashMap<>();
     private Map<String, String> tags = new HashMap<>();
     private List<AgentRuntimeVersion> versions = new ArrayList<>();
@@ -202,4 +204,10 @@ public class AgentRuntime {
     public void setEndpoints(List<AgentRuntimeEndpoint> endpoints) {
         this.endpoints = endpoints;
     }
+
+    public String getPlatformVersion() { return platformVersion; }
+    public void setPlatformVersion(String platformVersion) { this.platformVersion = platformVersion; }
+
+    public JsonNode getLifecycleConfiguration() { return lifecycleConfiguration; }
+    public void setLifecycleConfiguration(JsonNode lifecycleConfiguration) { this.lifecycleConfiguration = lifecycleConfiguration; }
 }
