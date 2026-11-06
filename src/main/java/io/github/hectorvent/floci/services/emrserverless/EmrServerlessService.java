@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.github.hectorvent.floci.config.EmulatorConfig;
 import io.github.hectorvent.floci.core.common.AwsArnUtils;
 import io.github.hectorvent.floci.core.common.AwsException;
+import io.github.hectorvent.floci.core.common.AwsRegions;
 import io.github.hectorvent.floci.core.common.PaginatedResult;
 import io.github.hectorvent.floci.core.common.Pagination;
 import io.github.hectorvent.floci.core.common.RegionResolver;
@@ -316,8 +317,10 @@ public class EmrServerlessService {
         }
         String accountId = requestContext != null && requestContext.getAccountId() != null
                 ? requestContext.getAccountId() : config.defaultAccountId();
-        throw new AwsException("AccessDeniedException", "User: arn:aws:iam::" + accountId
-                + ":root is not authorized to perform: emr-serverless:GetResourceDashboard", 403);
+        String partition = AwsRegions.partitionFor(regionResolver.getRegion());
+        String caller = AwsArnUtils.Arn.global(partition, "iam", accountId, "root").toString();
+        throw new AwsException("AccessDeniedException", "User: " + caller
+                + " is not authorized to perform: emr-serverless:GetResourceDashboard", 403);
     }
 
     public synchronized void stopApplication(String applicationId) {
