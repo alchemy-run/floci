@@ -1557,7 +1557,9 @@ public class Ec2ContainerManager {
         if (instance == null || privateIp == null || privateIp.isBlank()) {
             return;
         }
-        if (awsFaithful || instance.getLogicalPrivateIpAddress() != null) {
+        // An address the launch asked for is the instance's, as on AWS; only a picked one gives
+        // way to the reachable bridge address.
+        if (awsFaithful || instance.getLogicalPrivateIpAddress() != null || instance.isRequestedPrivateIp()) {
             return;
         }
 

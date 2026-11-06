@@ -4203,6 +4203,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                         inst.setLaunchTime(Instant.now());
                         inst.setAmiLaunchIndex(i);
                         inst.setClientToken(clientToken);
+                        inst.setRequestedPrivateIp(privateIpAddress != null);
                         inst.setRegion(region);
                         inst.setUserData(userData);
                         inst.setEncodedUserData(encodedUserData);
@@ -5982,6 +5983,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         copy.setVpcId(source.getVpcId());
         copy.setPrivateIpAddress(source.getPrivateIpAddress());
         copy.setLogicalPrivateIpAddress(source.getLogicalPrivateIpAddress());
+        copy.setRequestedPrivateIp(source.isRequestedPrivateIp());
         copy.setPublicIpAddress(source.getPublicIpAddress());
         copy.setPrivateDnsName(source.getPrivateDnsName());
         copy.setPublicDnsName(source.getPublicDnsName());

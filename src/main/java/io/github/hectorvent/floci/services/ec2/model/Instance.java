@@ -29,6 +29,7 @@ public class Instance {
     private String vpcId;
     private String privateIpAddress;
     private String logicalPrivateIpAddress;
+    private boolean requestedPrivateIp;
     private String publicIpAddress;
     private String privateDnsName;
     private String publicDnsName;
@@ -155,6 +156,10 @@ public class Instance {
 
     public String getPrivateIpAddress() { return privateIpAddress; }
     public void setPrivateIpAddress(String privateIpAddress) { this.privateIpAddress = privateIpAddress; }
+    /** Whether RunInstances named the primary private address, which then stays the one reported. */
+    public boolean isRequestedPrivateIp() { return requestedPrivateIp; }
+    public void setRequestedPrivateIp(boolean requestedPrivateIp) { this.requestedPrivateIp = requestedPrivateIp; }
+
     public String getLogicalPrivateIpAddress() { return logicalPrivateIpAddress; }
     public void setLogicalPrivateIpAddress(String logicalPrivateIpAddress) {
         this.logicalPrivateIpAddress = logicalPrivateIpAddress;

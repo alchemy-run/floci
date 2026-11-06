@@ -188,6 +188,19 @@ class Ec2ContainerManagerTest {
     }
 
     @Test
+    void exposeReachablePrivateAddressKeepsAnAddressTheLaunchRequested() {
+        // RunInstances named PrivateIpAddress: the instance keeps it, as on AWS, and callers that
+        // compare it with what they asked for (a fixed-IP replacement) see the same address.
+        Instance instance = new Instance();
+        instance.setPrivateIpAddress("10.0.1.10");
+        instance.setRequestedPrivateIp(true);
+
+        Ec2ContainerManager.exposeReachablePrivateAddress(instance, "192.168.215.21");
+
+        assertEquals("10.0.1.10", instance.getPrivateIpAddress());
+    }
+
+    @Test
     void exposeReachablePrivateAddressPreservesAllocatedIpWhenAwsFaithful() {
         // #1983: with awsFaithfulPrivateIp=true, the CFN/subnet-allocated private
         // IP set at launch is left untouched — the container bridge IP is not
