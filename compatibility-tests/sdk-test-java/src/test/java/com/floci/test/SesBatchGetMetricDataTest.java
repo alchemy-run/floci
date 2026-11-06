@@ -92,6 +92,7 @@ class SesBatchGetMetricDataTest {
     @Order(5)
     @DisplayName("a duplicate query identifier is rejected by the service")
     void duplicateIdentifierIsRejected() {
+        setVdmEnabled(true);
         assertThatThrownBy(() -> sesV2.batchGetMetricData(
                 request(query("same", Metric.SEND), query("same", Metric.DELIVERY))))
                 .isInstanceOf(SesV2Exception.class)
@@ -102,6 +103,7 @@ class SesBatchGetMetricDataTest {
     @Order(6)
     @DisplayName("an interval longer than sixty days is rejected")
     void intervalCapIsEnforced() {
+        setVdmEnabled(true);
         BatchGetMetricDataQuery wide = BatchGetMetricDataQuery.builder()
                 .id("wide")
                 .namespace(MetricNamespace.VDM)

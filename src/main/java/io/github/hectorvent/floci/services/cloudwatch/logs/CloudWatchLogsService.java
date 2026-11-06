@@ -601,6 +601,14 @@ public class CloudWatchLogsService implements ResourceProvider {
 
     public record DescribeLogStreamsResult(List<LogStream> logStreams, String nextToken) {}
 
+    /** The bytes a log group holds: the sum of its streams' stored bytes. */
+    public long getStoredBytesForLogGroup(String groupName, String region) {
+        String storagePrefix = streamKeyPrefix(region, groupName);
+        return streamStore.scan(k -> k.startsWith(storagePrefix)).stream()
+                .mapToLong(LogStream::getStoredBytes)
+                .sum();
+    }
+
     public List<LogStream> describeLogStreams(String groupName, String prefix, String region) {
         return describeLogStreams(groupName, prefix, null, false, 0, null, region).logStreams();
     }
@@ -1043,7 +1051,7 @@ public class CloudWatchLogsService implements ResourceProvider {
         List<FilteredEvent> matches = all.stream()
                 .filter(f -> (startTime == null || f.event().getTimestamp() >= startTime)
                         && (endTime == null || f.event().getTimestamp() <= endTime))
-                .filter(f -> matchesFilterPattern(f.event().getMessage(), filterPattern))
+                .filter(f -> pattern == null || pattern.match(f.event().getMessage()).matched())
                 .sorted(Comparator.comparing(FilteredEvent::event, EVENT_ORDER))
                 .toList();
 
@@ -1648,27 +1656,6 @@ public class CloudWatchLogsService implements ResourceProvider {
         return idx >= 0 ? arn.substring(idx + marker.length()) : arn;
     }
 
-    static boolean matchesFilterPattern(String message, String filterPattern) {
-        if (filterPattern == null || filterPattern.isBlank()) {
-            return true;
-        }
-        String haystack = message != null ? message : "";
-        String pattern = filterPattern.trim();
-        if (pattern.length() >= 2 && pattern.startsWith("\"") && pattern.endsWith("\"")) {
-            return haystack.contains(pattern.substring(1, pattern.length() - 1));
-        }
-        if (pattern.startsWith("?")) {
-            for (String token : pattern.split("\\s+")) {
-                String term = token.startsWith("?") ? token.substring(1) : token;
-                if (!term.isBlank() && haystack.contains(term)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        return haystack.contains(pattern);
-    }
-
     private Map<String, String> toLogRecord(LogEvent event) {
         Map<String, String> record = new LinkedHashMap<>();
         record.put("@ptr", event.getEventId());
@@ -1695,8 +1682,13 @@ public class CloudWatchLogsService implements ResourceProvider {
             return;
         }
         for (SubscriptionFilter filter : filters) {
+            // The same pattern grammar FilterLogEvents and metric filters use; PutSubscriptionFilter
+            // has already refused an invalid one.
+            String filterPattern = filter.getFilterPattern();
+            FilterPattern pattern = filterPattern == null || filterPattern.isBlank()
+                    ? null : requireFilterPattern(filterPattern);
             List<LogEvent> matched = ingested.stream()
-                    .filter(e -> matchesFilterPattern(e.getMessage(), filter.getFilterPattern()))
+                    .filter(e -> pattern == null || pattern.match(e.getMessage()).matched())
                     .toList();
             if (matched.isEmpty()) {
                 continue;

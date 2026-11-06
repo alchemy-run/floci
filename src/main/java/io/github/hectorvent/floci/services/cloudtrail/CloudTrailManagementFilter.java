@@ -24,9 +24,11 @@ import jakarta.ws.rs.ext.Provider;
 import org.jboss.logging.Logger;
 
 import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.SequenceInputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -39,7 +41,14 @@ public class CloudTrailManagementFilter implements ContainerRequestFilter, Conta
     private static final String CAPTURE = CloudTrailManagementFilter.class.getName();
     private static final Pattern SCOPE = Pattern.compile("Credential=([^/]+)/[0-9]{8}/([^/]+)/([^/]+)/aws4_request");
     private static final Set<String> CONTROL_SERVICES = Set.of("cloudtrail", "ssm", "ec2", "iam", "sts",
-            "cloudformation", "rds", "elasticloadbalancing", "autoscaling", "organizations", "config");
+            "cloudformation", "rds", "elasticloadbalancing", "autoscaling", "organizations", "config",
+            "secretsmanager");
+    /**
+     * The response members a Secrets Manager event carries, as CloudTrail records them: the secret's
+     * identity and version, never its value.
+     */
+    private static final Map<String, String> SECRETS_MANAGER_RESPONSE_ELEMENTS = Map.of(
+            "ARN", "arn", "Name", "name", "VersionId", "versionId");
     private static final Set<String> PARAMETER_NAMES = Set.of("Name", "Names", "TrailName", "ResourceId",
             "EventDataStore", "Bucket", "Type", "Overwrite", "FunctionName", "TableName", "QueueName",
             "RoleName", "UserName", "StackName", "DBInstanceIdentifier", "InstanceId");
@@ -153,12 +162,30 @@ public class CloudTrailManagementFilter implements ContainerRequestFilter, Conta
                 // Do not label an unparsed failure as a successful API call.
                 if (code == null) code = "HTTP" + response.getStatus();
             }
+            ObjectNode responseElements = code == null && "secretsmanager".equals(capture.service())
+                    ? secretsManagerResponseElements(response.getEntity()) : null;
             events.record(capture.service(), capture.operation(), capture.region(), capture.accessKey(),
-                    capture.readOnly(), capture.parameters(), capture.sourceIp(), request.getHeaderString("User-Agent"),
-                    response.getHeaderString("x-amzn-requestid"), code, message);
+                    capture.readOnly(), capture.parameters(), responseElements, capture.sourceIp(),
+                    request.getHeaderString("User-Agent"), response.getHeaderString("x-amzn-requestid"), code, message);
         } catch (Exception e) {
             LOG.warn("CloudTrail could not record management response", e);
         }
+    }
+
+    private ObjectNode secretsManagerResponseElements(Object entity) throws IOException {
+        JsonNode body = entity instanceof String text
+                ? (text.stripLeading().startsWith("{") ? mapper.readTree(text) : null)
+                : entity == null ? null : mapper.valueToTree(entity);
+        if (body == null || !body.isObject()) {
+            return null;
+        }
+        ObjectNode elements = mapper.createObjectNode();
+        SECRETS_MANAGER_RESPONSE_ELEMENTS.forEach((member, element) -> {
+            if (body.path(member).isTextual()) {
+                elements.put(element, body.path(member).asText());
+            }
+        });
+        return elements.isEmpty() ? null : elements;
     }
 
     private record Capture(String service, String operation, String region, String accessKey,

@@ -7,6 +7,7 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.services.cloudformation.CloudFormationClient;
 import software.amazon.awssdk.services.cloudformation.model.CreateStackRequest;
 import software.amazon.awssdk.services.cloudformation.model.DeleteStackRequest;
@@ -34,6 +35,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @DisplayName("CloudFormation RDS credential dynamic references")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+// RDS and DSQL both serve PostgreSQL on 5432, one at a time.
+@ResourceLock("port-5432")
 class CloudFormationRdsDynamicReferenceTest {
 
     private static final String USERNAME = "viewer";

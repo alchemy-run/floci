@@ -141,7 +141,7 @@ public class DsqlEndpoint {
     }
 
     /** Serves {@code cluster} from {@code backend}, opening the endpoint's port on first use. */
-    public void register(DsqlCluster cluster, DsqlDatabases.Backend backend) throws IOException {
+    public synchronized void register(DsqlCluster cluster, DsqlDatabases.Backend backend) throws IOException {
         listen();
         String host = cluster.getEndpoint().toLowerCase(Locale.ROOT);
         routes.put(host, new Route(host, cluster.getArn(), cluster.getRegion(), cluster.getAccountId(), backend));
@@ -155,6 +155,21 @@ public class DsqlEndpoint {
         if (open != null) {
             open.forEach(DsqlEndpoint::closeQuietly);
         }
+        closeIfIdle();
+    }
+
+    /**
+     * Gives the port back once no cluster is left, as the RDS endpoint router does, so the two
+     * PostgreSQL endpoints that default to 5432 can take turns on it.
+     */
+    private synchronized void closeIfIdle() {
+        if (!routes.isEmpty() || server == null) {
+            return;
+        }
+        ServerSocket listening = server;
+        server = null;
+        closeQuietly(listening);
+        LOG.infov("DSQL endpoint closed port {0}: no cluster left", String.valueOf(listening.getLocalPort()));
     }
 
     /** The port the endpoint listens on, once it does: the configured one, or the one picked for 0. */

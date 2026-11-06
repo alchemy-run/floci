@@ -364,10 +364,9 @@ jobs:
           DOCKER_GID=$(stat -c '%g' /var/run/docker.sock)
           # sdk-test-java's HTTP Task regression calls a MOCK API on http://floci:4566; every
           # other leg keeps the default rejection of plaintext http:invoke endpoints.
-          # The Alchemy fork defaults ACM DNS validation, the ECS steady-state window and EMR
-          # Serverless run duration to what Alchemy's suites expect; these suites expect upstream's.
-          # Only sdk-test-java's CloudFormation certificates need issuing without a DNS record. RDS
-          # gets no endpoint host override: the fork's RDS names each instance's own host.
+          # The Alchemy fork defaults the ECS steady-state window and EMR Serverless run duration to
+          # what Alchemy's suites expect; these suites expect upstream's. RDS gets no endpoint host
+          # override: the fork's RDS names each instance's own host.
           docker run -d --name floci --network compat-net \
             -p 4566:4566 \
             -v /var/run/docker.sock:/var/run/docker.sock \
@@ -380,7 +379,6 @@ jobs:
             -e FLOCI_TLS_ENABLED=true \
             -e FLOCI_SERVICES_STEPFUNCTIONS_ALLOW_PLAINTEXT_HTTP=${{ matrix.test == 'sdk-test-java' }} \
             -e FLOCI_SERVICES_EC2_MOCK=true \
-            -e FLOCI_SERVICES_ACM_DNS_VALIDATION_REQUIRES_RECORD=${{ matrix.test != 'sdk-test-java' }} \
             -e FLOCI_SERVICES_ECS_STEADY_STATE_WINDOW_SECONDS=0 \
             -e FLOCI_SERVICES_EMRSERVERLESS_JOB_RUN_DURATION_SECONDS=0 \
             -e FLOCI_SERVICES_REDSHIFT_ENDPOINT_HOST=floci \

@@ -1134,6 +1134,11 @@ public class CodePipelineService {
         }
         CodePipelinePipeline pipeline = requirePipeline(account, region, pipelineName);
         JsonNode stage = stageByName(pipeline, stageName);
+        // A stage without the condition has nothing to override, whichever execution is named.
+        String conditionField = "BEFORE_ENTRY".equals(conditionType) ? "beforeEntry" : "onSuccess";
+        if (stage != null && stage.path(conditionField).path("conditions").isEmpty()) {
+            throw new AwsException("ConditionNotOverridableException", "The stage has no condition to override", 400);
+        }
         CodePipelineExecution execution = requireExecution(
                 account, region, pipelineName, text(request, "pipelineExecutionId"));
         if (!Objects.equals(execution.getPipelineVersion(), pipeline.getVersion())) {

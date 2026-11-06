@@ -106,6 +106,7 @@ class CloudFormationAcmCertificateTest {
         assertThatThrownBy(() -> describe(replacement)).isInstanceOf(ResourceNotFoundException.class);
     }
 
+    // Email validation, so the certificate is issued without a published DNS record.
     private static String template() {
         return """
                 {
@@ -118,7 +119,7 @@ class CloudFormationAcmCertificateTest {
                       "Type": "AWS::CertificateManager::Certificate",
                       "Properties": {
                         "DomainName": "%s",
-                        "ValidationMethod": "DNS",
+                        "ValidationMethod": "EMAIL",
                         "CertificateExport": {"Ref": "Export"},
                         "CertificateTransparencyLoggingPreference": {"Ref": "TransparencyLogging"}
                       }

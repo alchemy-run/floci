@@ -49,6 +49,14 @@ public class CloudTrailEventService {
     public void record(String service, String operation, String region, String accessKey, boolean readOnly,
                        ObjectNode parameters, String sourceIp, String userAgent, String requestId,
                        String errorCode, String errorMessage) {
+        record(service, operation, region, accessKey, readOnly, parameters, null, sourceIp, userAgent, requestId,
+                errorCode, errorMessage);
+    }
+
+    /** As above, with the {@code responseElements} the call returned, or null for none. */
+    public void record(String service, String operation, String region, String accessKey, boolean readOnly,
+                       ObjectNode parameters, ObjectNode responseElements, String sourceIp, String userAgent,
+                       String requestId, String errorCode, String errorMessage) {
         ObjectNode record = mapper.createObjectNode();
         record.put("eventVersion", "1.11").put("eventID", UUID.randomUUID().toString())
                 .put("eventTime", Instant.now().toString()).put("eventSource", service + ".amazonaws.com")
@@ -74,7 +82,11 @@ public class CloudTrailEventService {
             identity.put("type", "AWSAccount");
         }
         record.set("requestParameters", parameters.deepCopy());
-        record.putNull("responseElements");
+        if (responseElements == null) {
+            record.putNull("responseElements");
+        } else {
+            record.set("responseElements", responseElements.deepCopy());
+        }
         if (errorCode != null) record.put("errorCode", errorCode);
         if (errorMessage != null) record.put("errorMessage", errorMessage);
         if ("s3".equals(service) && parameters.has("bucketName")) {

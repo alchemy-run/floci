@@ -86,6 +86,7 @@ class SesMessageInsightsTest {
     @Order(3)
     @DisplayName("an ordinary recipient reports SEND then DELIVERY with the send's tags")
     void ordinaryRecipientTimeline() {
+        setVdmEnabled(true);
         String messageId = send("user@example.com", "compat-ordinary");
 
         GetMessageInsightsResponse insights = sesV2.getMessageInsights(
@@ -113,6 +114,7 @@ class SesMessageInsightsTest {
     @Order(4)
     @DisplayName("the bounce simulator carries the bounce details")
     void bounceSimulatorTimeline() {
+        setVdmEnabled(true);
         String messageId = send("bounce@simulator.amazonses.com", "compat-bounce");
 
         GetMessageInsightsResponse insights = sesV2.getMessageInsights(
@@ -129,6 +131,7 @@ class SesMessageInsightsTest {
     @Order(5)
     @DisplayName("Floci reports one timeline per recipient where AWS records nothing at all")
     void multipleRecipientsGetOneTimelineEach() {
+        setVdmEnabled(true);
         String messageId = sesV2.sendEmail(SendEmailRequest.builder()
                 .fromEmailAddress(SENDER)
                 .destination(Destination.builder()

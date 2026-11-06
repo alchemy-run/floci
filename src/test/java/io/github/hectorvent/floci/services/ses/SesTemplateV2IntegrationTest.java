@@ -183,6 +183,11 @@ class SesTemplateV2IntegrationTest {
     @Test
     @Order(9)
     void sendEmail_withTemplate_substitutesVariables() {
+        // Another test class in the same application may have created the address already.
+        given()
+            .header("Authorization", AUTH_HEADER)
+        .when()
+            .delete("/v2/email/identities/sender@example.com");
         given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
