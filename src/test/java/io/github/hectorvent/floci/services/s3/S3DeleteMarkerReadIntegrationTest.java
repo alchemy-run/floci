@@ -1,6 +1,7 @@
 package io.github.hectorvent.floci.services.s3;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.http.Headers;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -15,6 +16,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.nullValue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @QuarkusTest
 class S3DeleteMarkerReadIntegrationTest {
@@ -79,11 +81,16 @@ class S3DeleteMarkerReadIntegrationTest {
                         containsString("<Method>GET</Method>"),
                         containsString("<ResourceType>DeleteMarker</ResourceType>"),
                         not(containsString("<Key>"))));
-        given().when().head(path).then().statusCode(405)
+        Headers headHeaders = given().when().head(path).then().statusCode(405)
                 .header("x-amz-delete-marker", "true")
                 .header("x-amz-version-id", versionId)
                 .header("Last-Modified", lastModified)
-                .header("Allow", "DELETE");
+                .header("Allow", "DELETE")
+                .extract().headers();
+        // Each header goes out once: SDKs join repeated values, and a doubled Last-Modified no longer parses.
+        for (String name : List.of("x-amz-delete-marker", "x-amz-version-id", "Last-Modified", "Allow")) {
+            assertEquals(1, headHeaders.getValues(name).size(), name);
+        }
         given().when().get(path + "&partNumber=1").then().statusCode(405)
                 .header("x-amz-version-id", versionId);
     }

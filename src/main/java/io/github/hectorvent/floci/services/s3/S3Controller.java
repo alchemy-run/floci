@@ -4025,15 +4025,21 @@ public class S3Controller {
         if (!(e instanceof S3DeleteMarkerException marker)) {
             return response;
         }
-        Response.ResponseBuilder builder = Response.fromResponse(response)
-                .header("x-amz-version-id", marker.versionId());
+        // xmlErrorResponse may have sent these already; each header goes out once.
+        Response.ResponseBuilder builder = Response.fromResponse(response);
+        java.util.function.BiConsumer<String, String> once = (name, value) -> {
+            if (value != null && response.getHeaderString(name) == null) {
+                builder.header(name, value);
+            }
+        };
+        once.accept("x-amz-version-id", marker.versionId());
         if (e.getHttpStatus() == 405) {
-            // xmlErrorResponse already sends x-amz-delete-marker for this refusal.
-            return builder.header("Last-Modified", RFC_822.format(marker.lastModified()))
-                    .header("Allow", "DELETE")
-                    .build();
+            once.accept("Last-Modified", marker.lastModified() == null ? null : RFC_822.format(marker.lastModified()));
+            once.accept("Allow", "DELETE");
+            return builder.build();
         }
-        return builder.header("x-amz-delete-marker", "true").build();
+        once.accept("x-amz-delete-marker", "true");
+        return builder.build();
     }
 
     private Response checkPreconditions(S3Object obj, String ifMatch, String ifNoneMatch,
