@@ -248,6 +248,7 @@ public class RdsQueryHandler {
         String engineVersion = params.getFirst("EngineVersion");
         String masterUsername = params.getFirst("MasterUsername");
         String masterPassword = params.getFirst("MasterUserPassword");
+        validateMasterUserPassword(masterPassword);
         String dbName = params.getFirst("DBName");
         String dbInstanceClass = params.getFirst("DBInstanceClass");
         String allocatedStorageStr = params.getFirst("AllocatedStorage");
@@ -802,6 +803,7 @@ public class RdsQueryHandler {
             return AwsQueryResponse.error("InvalidParameterValue", "DBInstanceIdentifier is required.", AwsNamespaces.RDS, 400);
         }
         String newPassword = params.getFirst("MasterUserPassword");
+        validateMasterUserPassword(newPassword);
         Boolean iamEnabled;
         String dbSubnetGroupName = params.getFirst("DBSubnetGroupName");
         String optionGroupName = params.getFirst("OptionGroupName");
@@ -882,6 +884,24 @@ public class RdsQueryHandler {
      * response member is EnabledCloudwatchLogsExports, so the two never line up on the wire.
      * An absent list is null (leave it alone) rather than empty (clear it).
      */
+    /**
+     * AWS rejects {@code /}, {@code "}, {@code @}, space, and non-printable characters in
+     * {@code MasterUserPassword} before provisioning anything.
+     */
+    private static void validateMasterUserPassword(String password) {
+        if (password == null || password.isBlank()) {
+            return;
+        }
+        for (int i = 0; i < password.length(); i++) {
+            char c = password.charAt(i);
+            if (c == '/' || c == '"' || c == '@' || c == ' ' || c < 0x20 || c > 0x7E) {
+                throw new AwsException("InvalidParameterValue",
+                        "The parameter MasterUserPassword is not a valid password. Only printable ASCII "
+                                + "characters besides '/', '@', '\"', ' ' may be used.", 400);
+            }
+        }
+    }
+
     private static List<String> cloudwatchLogsExports(MultivaluedMap<String, String> params) {
         List<String> types = memberList(params, "EnableCloudwatchLogsExports");
         return types.isEmpty() ? null : types;
@@ -1302,6 +1322,7 @@ public class RdsQueryHandler {
         String engineVersion = params.getFirst("EngineVersion");
         String masterUsername = params.getFirst("MasterUsername");
         String masterPassword = params.getFirst("MasterUserPassword");
+        validateMasterUserPassword(masterPassword);
         String databaseName = params.getFirst("DatabaseName");
         boolean iamEnabled = "true".equalsIgnoreCase(params.getFirst("EnableIAMDatabaseAuthentication"));
         String paramGroupName = params.getFirst("DBClusterParameterGroupName");
@@ -1386,6 +1407,10 @@ public class RdsQueryHandler {
             }
             if (backupRetentionPeriodParam != null) {
                 cluster = service.setBackupRetentionPeriod(region, id, backupRetentionPeriod);
+            }
+            List<String> logExports = cloudwatchLogsExports(params);
+            if (logExports != null) {
+                cluster = service.setClusterLogExports(region, id, new LogExportChanges(logExports, null));
             }
             String result = dbClusterXml(cluster);
             return Response.ok(AwsQueryResponse.envelope("CreateDBCluster", AwsNamespaces.RDS, result)).build();
@@ -1486,6 +1511,7 @@ public class RdsQueryHandler {
             return AwsQueryResponse.error("InvalidParameterValue", "DBClusterIdentifier is required.", AwsNamespaces.RDS, 400);
         }
         String newPassword = params.getFirst("MasterUserPassword");
+        validateMasterUserPassword(newPassword);
         String iamStr = params.getFirst("EnableIAMDatabaseAuthentication");
         Boolean iamEnabled = iamStr != null ? Boolean.parseBoolean(iamStr) : null;
         String manageStr = params.getFirst("ManageMasterUserPassword");
@@ -1515,6 +1541,10 @@ public class RdsQueryHandler {
             }
             if (modifyBackupRetentionPeriod != null) {
                 cluster = service.setBackupRetentionPeriod(region, id, modifyBackupRetentionPeriod);
+            }
+            LogExportChanges logExportChanges = cloudwatchLogsExportChanges(params);
+            if (logExportChanges != null) {
+                cluster = service.setClusterLogExports(region, id, logExportChanges);
             }
             String result = dbClusterXml(cluster);
             return Response.ok(AwsQueryResponse.envelope("ModifyDBCluster", AwsNamespaces.RDS, result)).build();
@@ -3500,6 +3530,15 @@ public class RdsQueryHandler {
         return new XmlBuilder().start("DBCluster").raw(dbClusterInnerXml(c)).end("DBCluster").build();
     }
 
+    private static String enabledLogExportsXml(List<String> types) {
+        if (types == null || types.isEmpty()) {
+            return "";
+        }
+        XmlBuilder xml = new XmlBuilder().start("EnabledCloudwatchLogsExports");
+        types.forEach(type -> xml.elem("member", type));
+        return xml.end("EnabledCloudwatchLogsExports").build();
+    }
+
     private String dbClusterInnerXml(DbCluster c) {
         DbEndpoint ep = c.getEndpoint();
         DbEndpoint readerEp = c.getReaderEndpoint();
@@ -3510,6 +3549,7 @@ public class RdsQueryHandler {
 
         XmlBuilder xml = new XmlBuilder()
                 .elem("DBClusterIdentifier", c.getDbClusterIdentifier())
+                .raw(enabledLogExportsXml(c.getEnabledCloudwatchLogsExports()))
                 .elem("Status", statusStr)
                 .elem("Engine", engineStr.toLowerCase())
                 .elem("EngineVersion", c.getEngineVersion())

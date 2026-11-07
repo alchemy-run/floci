@@ -109,19 +109,21 @@ public class RedshiftQueryHandler {
             Integer automatedRetention = parseOptionalInteger(params, "AutomatedSnapshotRetentionPeriod");
             Cluster cluster;
             if (manageMasterPassword) {
-                cluster = automatedRetention == null
+                cluster = automatedRetention == null && params.getFirst("DBName") == null
                         ? service.createClusterWithManagedMasterPassword(identifier, nodeType, masterUsername,
                                 clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns,
                                 params.getFirst("MasterPasswordSecretKmsKeyId"), region, defaultIamRoleArn)
                         : service.createClusterWithManagedMasterPassword(identifier, nodeType, masterUsername,
                                 clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns,
-                                params.getFirst("MasterPasswordSecretKmsKeyId"), region, defaultIamRoleArn, automatedRetention);
+                                params.getFirst("MasterPasswordSecretKmsKeyId"), region, defaultIamRoleArn, automatedRetention,
+                                params.getFirst("DBName"));
             } else {
-                cluster = automatedRetention == null
+                cluster = automatedRetention == null && params.getFirst("DBName") == null
                         ? service.createCluster(identifier, nodeType, masterUsername, masterUserPassword,
                                 clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns, defaultIamRoleArn)
                         : service.createCluster(identifier, nodeType, masterUsername, masterUserPassword,
-                                clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns, defaultIamRoleArn, automatedRetention);
+                                clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns, defaultIamRoleArn, automatedRetention,
+                                params.getFirst("DBName"));
             }
             String parameterGroupName = params.getFirst("ClusterParameterGroupName");
             String multiAz = params.getFirst("MultiAZ");
@@ -179,6 +181,22 @@ public class RedshiftQueryHandler {
                         .elem("RequestId", "test-req-id")
                       .end("ResponseMetadata")
                     .end("DeleteClusterResponse")
+                    .build();
+            return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
+        }
+        case "CopyClusterSnapshot" -> {
+            Snapshot snapshot = service.copyClusterSnapshot(requireParam(params, "SourceSnapshotIdentifier"),
+                    params.getFirst("SourceSnapshotClusterIdentifier"), requireParam(params, "TargetSnapshotIdentifier"),
+                    intParam(params, "ManualSnapshotRetentionPeriod"));
+            String xml = new XmlBuilder()
+                    .start("CopyClusterSnapshotResponse")
+                      .start("CopyClusterSnapshotResult")
+                        .raw(buildSnapshotXml(snapshot))
+                      .end("CopyClusterSnapshotResult")
+                      .start("ResponseMetadata")
+                        .elem("RequestId", "test-req-id")
+                      .end("ResponseMetadata")
+                    .end("CopyClusterSnapshotResponse")
                     .build();
             return Response.ok(xml).type(MediaType.APPLICATION_XML).build();
         }
@@ -266,7 +284,10 @@ public class RedshiftQueryHandler {
             String parameterGroupName = params.getFirst("ParameterGroupName");
             String parameterGroupFamily = params.getFirst("ParameterGroupFamily");
             String description = params.getFirst("Description");
-            ClusterParameterGroup group = service.createClusterParameterGroup(parameterGroupName, parameterGroupFamily, description);
+            Map<String, String> tags = parseTags(params);
+            ClusterParameterGroup group = tags.isEmpty()
+                    ? service.createClusterParameterGroup(parameterGroupName, parameterGroupFamily, description)
+                    : service.createClusterParameterGroup(parameterGroupName, parameterGroupFamily, description, tags);
             String xml = new XmlBuilder()
                     .start("CreateClusterParameterGroupResponse")
                       .start("CreateClusterParameterGroupResult")
@@ -1126,6 +1147,7 @@ public class RedshiftQueryHandler {
             .elem("ClusterIdentifier", cluster.getClusterIdentifier())
             .elem("NodeType", cluster.getNodeType())
             .elem("MasterUsername", cluster.getMasterUsername())
+            .elem("DBName", cluster.getDbName() != null && !cluster.getDbName().isBlank() ? cluster.getDbName() : "dev")
             .elem("ClusterStatus", cluster.getClusterStatus())
             .elem("AutomatedSnapshotRetentionPeriod", String.valueOf(cluster.getAutomatedSnapshotRetentionPeriod()))
             .elem("ClusterAvailabilityStatus", availabilityStatus(cluster.getClusterStatus()))
@@ -1412,9 +1434,13 @@ public class RedshiftQueryHandler {
             .start("ClusterParameterGroup")
             .elem("ParameterGroupName", group.getParameterGroupName())
             .elem("ParameterGroupFamily", group.getParameterGroupFamily())
-            .elem("Description", group.getDescription());
-        
-        return builder.end("ClusterParameterGroup").build();
+            .elem("Description", group.getDescription())
+            .start("Tags");
+        Map<String, String> tags = group.getTags() == null ? Map.of() : group.getTags();
+        for (Map.Entry<String, String> tag : tags.entrySet()) {
+            builder.start("Tag").elem("Key", tag.getKey()).elem("Value", tag.getValue()).end("Tag");
+        }
+        return builder.end("Tags").end("ClusterParameterGroup").build();
     }
 
     private String buildClusterSubnetGroupXml(ClusterSubnetGroup group) {

@@ -37,6 +37,7 @@ import io.floci.aws.services.rds.container.RdsContainerManager;
 import io.floci.aws.services.rds.export.SnapshotExportSource;
 import io.floci.aws.services.rds.model.DatabaseEngine;
 import io.floci.aws.services.rds.model.DbCluster;
+import io.floci.aws.services.rds.model.LogExportChanges;
 import io.floci.aws.services.rds.model.DbClusterAutomatedBackup;
 import io.floci.aws.services.rds.model.DbClusterEndpoint;
 import io.floci.aws.services.rds.model.DbClusterParameterGroup;
@@ -11664,6 +11665,21 @@ public class RdsService implements Resettable, ResourceProvider {
                 cluster.getDbClusterIdentifier());
         return RESPONSE_COPIER.convertValue(cluster, DbCluster.class);
     }
+
+    /**
+     * The log types a cluster exports to CloudWatch Logs: CreateDBCluster names the whole set in
+     * {@code EnableCloudwatchLogsExports}, ModifyDBCluster turns types on and off with
+     * {@code CloudwatchLogsExportConfiguration}, and DescribeDBClusters reports the result as
+     * {@code EnabledCloudwatchLogsExports}.
+     */
+    public synchronized DbCluster setClusterLogExports(String region, String clusterId, LogExportChanges changes) {
+        String effectiveRegion = effectiveRegion(region);
+        DbCluster cluster = getDbCluster(clusterId, effectiveRegion);
+        cluster.setEnabledCloudwatchLogsExports(changes.applyTo(cluster.getEnabledCloudwatchLogsExports()));
+        putClusterForScope(currentAccountId(), effectiveRegion, cluster.getDbClusterIdentifier(), cluster);
+        return RESPONSE_COPIER.convertValue(cluster, DbCluster.class);
+    }
+
     private static final Set<String> DATA_API_ENGINES = Set.of("aurora-postgresql", "aurora-mysql");
 
     /**

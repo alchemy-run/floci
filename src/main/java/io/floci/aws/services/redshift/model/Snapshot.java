@@ -15,6 +15,7 @@ public class Snapshot {
     private String status;
     private int port;
     private String masterUsername;
+    private String dbName;
     private String masterPassword;
     private String sqlDump;
     private String snapshotArn;
@@ -127,6 +128,10 @@ public class Snapshot {
     public void setPort(int port) {
         this.port = port;
     }
+
+    /** CreateCluster DBName; null on records written before it was kept, which mean "dev". */
+    public String getDbName() { return dbName; }
+    public void setDbName(String dbName) { this.dbName = dbName; }
 
     public String getMasterUsername() {
         return masterUsername;

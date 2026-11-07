@@ -43,6 +43,7 @@ public class DbCluster {
     private Instant createdAt;
     private int proxyPort;
     private int listenerPort;
+    private List<String> enabledCloudwatchLogsExports = new ArrayList<>();
     private Map<String, String> tags = new LinkedHashMap<>();
     private List<DbRoleAssociation> associatedRoles = new ArrayList<>();
     private String engineMode;
@@ -186,6 +187,12 @@ public class DbCluster {
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    public List<String> getEnabledCloudwatchLogsExports() { return enabledCloudwatchLogsExports; }
+    public void setEnabledCloudwatchLogsExports(List<String> enabledCloudwatchLogsExports) {
+        this.enabledCloudwatchLogsExports = enabledCloudwatchLogsExports != null
+                ? new ArrayList<>(enabledCloudwatchLogsExports) : new ArrayList<>();
+    }
 
     /** The port the endpoint listens on when endpoints are routed by name; 0 until assigned. */
     public int getListenerPort() { return listenerPort; }

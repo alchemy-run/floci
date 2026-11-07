@@ -311,7 +311,7 @@ public class RedshiftService implements ManagedSecretRotator {
                 LOG.infov("Recovering container for persisted cluster: {0}", cluster.getClusterIdentifier());
                 RedshiftContainerHandle handle = containerManager.adoptOrStart(
                         entry.accountId(), cluster.getClusterIdentifier(), cluster.getMasterUsername(), password,
-                        CLUSTER_DB_NAME, cluster.getNodeType());
+                        dbNameOf(cluster), cluster.getNodeType());
 
                 // A cluster persisted before the auth proxy existed has proxyPort == 0. Allocate one
                 // now; its endpoint changes exactly once after this upgrade. Existing clusters keep
@@ -323,7 +323,7 @@ public class RedshiftService implements ManagedSecretRotator {
                 proxyManager.startProxy(
                         relayKey(entry.accountId(), cluster.getClusterIdentifier()), proxyPort,
                         handle.getHost(), handle.getPort(), endpoint.getAddress(),
-                        cluster.getMasterUsername(), password, CLUSTER_DB_NAME,
+                        cluster.getMasterUsername(), password, dbNameOf(cluster),
                         passwordValidatorFor(entry.accountId(), cluster.getClusterIdentifier()),
                         cluster.getIamRoleArns(), cluster.getDefaultIamRoleArn());
                 cluster.setContainerHost(handle.getHost());
@@ -378,11 +378,22 @@ public class RedshiftService implements ManagedSecretRotator {
     public Cluster createCluster(String identifier, String nodeType, String username, String password,
                                  String clusterSubnetGroupName, List<String> vpcSecurityGroupIds,
                                  List<String> iamRoleArns, String defaultIamRoleArn, Integer automatedRetention) {
+        return createCluster(identifier, nodeType, username, password, clusterSubnetGroupName,
+                vpcSecurityGroupIds, iamRoleArns, defaultIamRoleArn, automatedRetention, null);
+    }
+
+    /** CreateCluster with its {@code DBName}, the database the cluster is created with ("dev" when omitted). */
+    public Cluster createCluster(String identifier, String nodeType, String username, String password,
+                                 String clusterSubnetGroupName, List<String> vpcSecurityGroupIds,
+                                 List<String> iamRoleArns, String defaultIamRoleArn, Integer automatedRetention,
+                                 String dbName) {
         validateAutomatedRetention(nodeType, automatedRetention == null ? 1 : automatedRetention);
+        String validatedDbName = validateDbName(dbName);
         // The event is recorded under the cluster lock so a queued delete or reboot cannot log first.
         return mutateCluster(identifier, () -> {
             Cluster cluster = createClusterLocked(identifier, nodeType, username, password,
-                    clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns, defaultIamRoleArn, automatedRetention);
+                    clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns, defaultIamRoleArn, automatedRetention,
+                    validatedDbName);
             emitClusterCreated(identifier);
             return cluster;
         });
@@ -396,7 +407,7 @@ public class RedshiftService implements ManagedSecretRotator {
     private Cluster createClusterLocked(String identifier, String nodeType, String username, String password,
                                                String clusterSubnetGroupName, List<String> vpcSecurityGroupIds,
                                                List<String> iamRoleArns, String defaultIamRoleArn,
-                                               Integer automatedRetention) {
+                                               Integer automatedRetention, String dbName) {
         if (clusters.get(identifier).isPresent()) {
             throw new AwsException("ClusterAlreadyExists", "Cluster " + identifier + " already exists", 400);
         }
@@ -415,6 +426,7 @@ public class RedshiftService implements ManagedSecretRotator {
         cluster.setSnapshotRegion(regionResolver.getRegion());
         cluster.setMasterUsername(username);
         cluster.setMasterPassword(password);
+        cluster.setDbName(dbName);
         cluster.setClusterSubnetGroupName(clusterSubnetGroupName);
         cluster.setVpcSecurityGroupIds(vpcSecurityGroupIds != null ? vpcSecurityGroupIds : List.of());
         cluster.setIamRoleArns(roles);
@@ -433,13 +445,13 @@ public class RedshiftService implements ManagedSecretRotator {
         try {
             String accountId = clusters.accountId();
             RedshiftContainerHandle handle = containerManager.start(
-                    accountId, identifier, username, password, CLUSTER_DB_NAME, cluster.getNodeType());
+                    accountId, identifier, username, password, dbNameOf(cluster), cluster.getNodeType());
             proxyPort = allocateProxyPort();
             Endpoint endpoint = clusterEndpoint(accountId, identifier, proxyPort);
             cluster.setProxyPort(proxyPort);
             proxyManager.startProxy(relayKey(accountId, identifier), proxyPort,
                     handle.getHost(), handle.getPort(), endpoint.getAddress(),
-                    username, password, CLUSTER_DB_NAME,
+                    username, password, dbNameOf(cluster),
                     passwordValidatorFor(accountId, identifier), cluster.getIamRoleArns(), cluster.getDefaultIamRoleArn());
             cluster.setContainerHost(handle.getHost());
             cluster.setContainerPort(handle.getPort());
@@ -496,21 +508,32 @@ public class RedshiftService implements ManagedSecretRotator {
             String identifier, String nodeType, String username, String clusterSubnetGroupName,
             List<String> vpcSecurityGroupIds, List<String> iamRoleArns,
             String kmsKeyId, String region, String defaultIamRoleArn, Integer automatedRetention) {
+        return createClusterWithManagedMasterPassword(identifier, nodeType, username, clusterSubnetGroupName,
+                vpcSecurityGroupIds, iamRoleArns, kmsKeyId, region, defaultIamRoleArn, automatedRetention, null);
+    }
+
+    /** As above, with the CreateCluster {@code DBName} ("dev" when null). */
+    public Cluster createClusterWithManagedMasterPassword(
+            String identifier, String nodeType, String username, String clusterSubnetGroupName,
+            List<String> vpcSecurityGroupIds, List<String> iamRoleArns,
+            String kmsKeyId, String region, String defaultIamRoleArn, Integer automatedRetention, String dbName) {
         validateAutomatedRetention(nodeType, automatedRetention == null ? 1 : automatedRetention);
+        String validatedDbName = validateDbName(dbName);
         return mutateCluster(identifier, () -> createClusterWithManagedMasterPasswordLocked(identifier,
                 nodeType, username, clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns, kmsKeyId, region,
-                defaultIamRoleArn, automatedRetention));
+                defaultIamRoleArn, automatedRetention, validatedDbName));
     }
 
     private Cluster createClusterWithManagedMasterPasswordLocked(
             String identifier, String nodeType, String username, String clusterSubnetGroupName,
             List<String> vpcSecurityGroupIds, List<String> iamRoleArns,
-            String kmsKeyId, String region, String defaultIamRoleArn, Integer automatedRetention) {
+            String kmsKeyId, String region, String defaultIamRoleArn, Integer automatedRetention, String dbName) {
         requireSecretsManager();
         String password = RandomPasswordGenerator.generate(objectMapper.createObjectNode());
         // Runs under the cluster lock taken by the caller, which also covers the event recorded below.
         Cluster cluster = createClusterLocked(identifier, nodeType, username, password,
-                clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns, defaultIamRoleArn, automatedRetention);
+                clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns, defaultIamRoleArn, automatedRetention,
+                dbName);
         if (region != null) {
             cluster.setSnapshotRegion(region);
         }
@@ -1359,7 +1382,7 @@ public class RedshiftService implements ManagedSecretRotator {
                     .put("password", password)
                     .put("host", cluster.getEndpoint() == null ? "" : cluster.getEndpoint().getAddress())
                     .put("port", cluster.getEndpoint() == null ? 0 : cluster.getEndpoint().getPort())
-                    .put("dbname", CLUSTER_DB_NAME)
+                    .put("dbname", dbNameOf(cluster))
                     .toString();
         } catch (RuntimeException e) {
             throw new AwsException("InternalFailure", "Failed to encode managed master secret", 500);
@@ -1553,7 +1576,7 @@ public class RedshiftService implements ManagedSecretRotator {
                 boolean restored = false;
                 try {
                     RedshiftContainerHandle handle = containerManager.resume(accountId, clusterIdentifier,
-                            cluster.getMasterUsername(), CLUSTER_DB_NAME);
+                            cluster.getMasterUsername(), dbNameOf(cluster));
                     startResumedProxy(accountId, cluster, handle);
                     cluster.setClusterStatus("available");
                     restored = true;
@@ -1578,7 +1601,7 @@ public class RedshiftService implements ManagedSecretRotator {
             String accountId = clusters.accountId();
             try {
                 RedshiftContainerHandle handle = containerManager.resume(accountId, clusterIdentifier,
-                        cluster.getMasterUsername(), CLUSTER_DB_NAME);
+                        cluster.getMasterUsername(), dbNameOf(cluster));
                 startResumedProxy(accountId, cluster, handle);
                 cluster.setClusterStatus("available");
                 clusters.put(clusterIdentifier, cluster);
@@ -1642,7 +1665,7 @@ public class RedshiftService implements ManagedSecretRotator {
         String password = cluster.getMasterPassword() != null ? cluster.getMasterPassword() : "admin";
         proxyManager.startProxy(relayKey(accountId, cluster.getClusterIdentifier()), port,
                 handle.getHost(), handle.getPort(), endpoint.getAddress(), cluster.getMasterUsername(), password,
-                CLUSTER_DB_NAME, passwordValidatorFor(accountId, cluster.getClusterIdentifier()),
+                dbNameOf(cluster), passwordValidatorFor(accountId, cluster.getClusterIdentifier()),
                 cluster.getIamRoleArns(), cluster.getDefaultIamRoleArn());
         cluster.setContainerHost(handle.getHost());
         cluster.setContainerPort(handle.getPort());
@@ -1679,7 +1702,7 @@ public class RedshiftService implements ManagedSecretRotator {
             String accountId = clusters.accountId();
             String key = relayKey(accountId, clusterIdentifier);
 
-            containerManager.takeSnapshot(accountId, clusterIdentifier, cluster.getMasterUsername(), tempDump);
+            takeSnapshot(accountId, clusterIdentifier, cluster, tempDump);
             teardownStarted = true;
             proxyManager.stopProxy(key);
             containerTeardownStarted = true;
@@ -1688,7 +1711,7 @@ public class RedshiftService implements ManagedSecretRotator {
             String password = cluster.getMasterPassword() != null ? cluster.getMasterPassword() : "admin";
             RedshiftContainerHandle handle = containerManager.start(
                     accountId, clusterIdentifier, cluster.getMasterUsername(), password,
-                    CLUSTER_DB_NAME, cluster.getNodeType());
+                    dbNameOf(cluster), cluster.getNodeType());
 
             // Reuse the stored proxy port so the advertised endpoint is unchanged by a reboot.
             if (proxyPort < 0) {
@@ -1698,13 +1721,13 @@ public class RedshiftService implements ManagedSecretRotator {
             Endpoint endpoint = clusterEndpoint(accountId, clusterIdentifier, proxyPort);
             cluster.setProxyPort(proxyPort);
             proxyManager.startProxy(key, proxyPort, handle.getHost(), handle.getPort(),
-                    endpoint.getAddress(), cluster.getMasterUsername(), password, CLUSTER_DB_NAME,
+                    endpoint.getAddress(), cluster.getMasterUsername(), password, dbNameOf(cluster),
                     passwordValidatorFor(accountId, clusterIdentifier), cluster.getIamRoleArns(), cluster.getDefaultIamRoleArn());
             cluster.setContainerHost(handle.getHost());
             cluster.setContainerPort(handle.getPort());
             cluster.setEndpoint(endpoint);
 
-            containerManager.restoreSnapshot(accountId, clusterIdentifier, cluster.getMasterUsername(), tempDump);
+            restoreSnapshot(accountId, clusterIdentifier, cluster.getMasterUsername(), cluster, tempDump);
             cluster.setClusterStatus("available");
             rebooted = true;
         } catch (AwsException e) {
@@ -1792,6 +1815,79 @@ public class RedshiftService implements ManagedSecretRotator {
         return Paths.get(storedPath).toAbsolutePath().normalize().startsWith(dir);
     }
 
+    /**
+     * CopyClusterSnapshot: a manual snapshot of the same cluster under {@code targetIdentifier},
+     * with its own copy of the source's data, so deleting either leaves the other restorable.
+     */
+    public Snapshot copyClusterSnapshot(String sourceIdentifier, String sourceClusterIdentifier,
+                                        String targetIdentifier, Integer retentionPeriod) {
+        return withResourceLock("snapshot", targetIdentifier,
+                () -> copyClusterSnapshotLocked(sourceIdentifier, sourceClusterIdentifier, targetIdentifier,
+                        retentionPeriod));
+    }
+
+    private Snapshot copyClusterSnapshotLocked(String sourceIdentifier, String sourceClusterIdentifier,
+                                               String targetIdentifier, Integer retentionPeriod) {
+        validateSnapshotIdentifier(sourceIdentifier);
+        validateSnapshotIdentifier(targetIdentifier);
+        Snapshot source = snapshots.get(sourceIdentifier)
+                .filter(snapshot -> sourceClusterIdentifier == null
+                        || sourceClusterIdentifier.equals(snapshot.getClusterIdentifier()))
+                .orElseThrow(() -> new AwsException("ClusterSnapshotNotFound",
+                        "Snapshot " + sourceIdentifier + " not found", 404));
+        if (snapshots.get(targetIdentifier).isPresent()) {
+            throw new AwsException("ClusterSnapshotAlreadyExists", "Snapshot " + targetIdentifier + " already exists", 400);
+        }
+        if (!"available".equals(source.getStatus())) {
+            throw new AwsException("InvalidClusterSnapshotState", "Source snapshot is not available.", 400);
+        }
+        int retention = retentionPeriod == null ? -1 : retentionPeriod;
+        if (retention != -1 && (retention < 1 || retention > 3653)) {
+            throw new AwsException("InvalidParameterValue",
+                    "ManualSnapshotRetentionPeriod must be -1 or between 1 and 3653.", 400);
+        }
+        if (!isTrustedDumpPath(source.getSqlDump()) || !Files.isRegularFile(Path.of(source.getSqlDump()))) {
+            throw new AwsException("InvalidClusterSnapshotState", "Source snapshot data is unavailable.", 400);
+        }
+        Path dumpDir = accountDumpDir();
+        Path target = dumpDir.resolve(targetIdentifier + ".sql").normalize();
+        Path temporary = null;
+        try {
+            Files.createDirectories(dumpDir);
+            temporary = Files.createTempFile(dumpDir, "snapshot-copy-", ".sql");
+            Files.copy(Path.of(source.getSqlDump()), temporary, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException e) {
+            throw new AwsException("InternalFailure", "Failed to copy snapshot data: " + e.getMessage(), 500);
+        } finally {
+            if (temporary != null) {
+                try {
+                    Files.deleteIfExists(temporary);
+                } catch (IOException e) {
+                    LOG.warnv(e, "Failed to clean up temporary snapshot copy {0}", temporary);
+                }
+            }
+        }
+        Snapshot copy = new Snapshot();
+        copy.setSnapshotIdentifier(targetIdentifier);
+        copy.setClusterIdentifier(source.getClusterIdentifier());
+        copy.setStatus("available");
+        copy.setMasterUsername(source.getMasterUsername());
+        copy.setMasterPassword(source.getMasterPassword());
+        copy.setDbName(source.getDbName());
+        copy.setSnapshotArn(snapshotArn(source.getClusterIdentifier(), targetIdentifier));
+        copy.setSnapshotCreateTime(Instant.now());
+        copy.setSnapshotType("manual");
+        copy.setManualSnapshotRetentionPeriod(retention);
+        copy.setClusterGeneration(source.getClusterGeneration());
+        copy.setPort(source.getPort());
+        copy.setTags(source.getTags() == null ? new LinkedHashMap<>() : new LinkedHashMap<>(source.getTags()));
+        copy.setSqlDump(target.toString());
+        snapshots.put(targetIdentifier, copy);
+        snapshots.flush();
+        return copy;
+    }
+
     public Snapshot createSnapshot(String snapshotIdentifier, String clusterIdentifier) {
         return withResourceLock("cluster", clusterIdentifier, () -> withResourceLock("snapshot", snapshotIdentifier,
                 () -> createSnapshot(snapshotIdentifier, clusterIdentifier, null)));
@@ -1825,6 +1921,7 @@ public class RedshiftService implements ManagedSecretRotator {
         snapshot.setStatus("available");
         snapshot.setMasterUsername(cluster.getMasterUsername());
         snapshot.setMasterPassword(cluster.getMasterPassword());
+        snapshot.setDbName(cluster.getDbName());
         snapshot.setSnapshotArn(scheduledTime == null ? snapshotArn(clusterIdentifier, snapshotIdentifier)
                 : AwsArnUtils.Arn.of("redshift", snapshotRegion(cluster), accountId,
                         "snapshot:" + clusterIdentifier + "/" + snapshotIdentifier).toString());
@@ -1858,7 +1955,7 @@ public class RedshiftService implements ManagedSecretRotator {
         boolean committed = false;
         try {
             Files.createDirectories(dumpDir);
-            containerManager.takeSnapshot(accountId, clusterIdentifier, cluster.getMasterUsername(), dumpFile);
+            takeSnapshot(accountId, clusterIdentifier, cluster, dumpFile);
             snapshot.setSqlDump(dumpFile.toString());
             if (scheduledTime == null) {
                 snapshots.putAllAtomically(Map.of(snapshotIdentifier, snapshot));
@@ -2105,6 +2202,7 @@ public class RedshiftService implements ManagedSecretRotator {
         cluster.setSnapshotRegion(regionResolver.getRegion());
         cluster.setMasterUsername(username);
         cluster.setMasterPassword(password);
+        cluster.setDbName(snapshot.getDbName());
         cluster.setClusterParameterGroupName(DEFAULT_PARAMETER_GROUP_NAME);
         cluster.setUserActivityLoggingEnabled(userActivityLoggingEnabled(DEFAULT_PARAMETER_GROUP_NAME));
         cluster.setClusterStatus("creating");
@@ -2118,20 +2216,20 @@ public class RedshiftService implements ManagedSecretRotator {
         try {
             String accountId = clusters.accountId();
             RedshiftContainerHandle handle = containerManager.start(
-                    accountId, clusterIdentifier, username, password, CLUSTER_DB_NAME, cluster.getNodeType());
+                    accountId, clusterIdentifier, username, password, dbNameOf(cluster), cluster.getNodeType());
             proxyPort = allocateProxyPort();
             Endpoint endpoint = clusterEndpoint(accountId, clusterIdentifier, proxyPort);
             cluster.setProxyPort(proxyPort);
             proxyManager.startProxy(relayKey(accountId, clusterIdentifier), proxyPort,
                     handle.getHost(), handle.getPort(), endpoint.getAddress(),
-                    username, password, CLUSTER_DB_NAME,
+                    username, password, dbNameOf(cluster),
                     passwordValidatorFor(accountId, clusterIdentifier), cluster.getIamRoleArns(), cluster.getDefaultIamRoleArn());
             cluster.setContainerHost(handle.getHost());
             cluster.setContainerPort(handle.getPort());
             cluster.setEndpoint(endpoint);
 
             if (hasDump) {
-                containerManager.restoreSnapshot(clusters.accountId(), clusterIdentifier, username, Paths.get(sqlDump));
+                restoreSnapshot(clusters.accountId(), clusterIdentifier, username, cluster, Paths.get(sqlDump));
             }
 
             cluster.setClusterStatus("available");
@@ -2155,6 +2253,12 @@ public class RedshiftService implements ManagedSecretRotator {
     // ── Parameter Group Operations ───────────────────────────────────────────
 
     public ClusterParameterGroup createClusterParameterGroup(String parameterGroupName, String parameterGroupFamily, String description) {
+        return createClusterParameterGroup(parameterGroupName, parameterGroupFamily, description, Map.of());
+    }
+
+    /** CreateClusterParameterGroup with the request's {@code Tags}. */
+    public ClusterParameterGroup createClusterParameterGroup(String parameterGroupName, String parameterGroupFamily,
+                                                             String description, Map<String, String> tags) {
         if (DEFAULT_PARAMETER_GROUP_NAME.equals(parameterGroupName)) {
             throw new AwsException("InvalidParameterValue", "The default parameter group name is reserved.", 400);
         }
@@ -2163,6 +2267,9 @@ public class RedshiftService implements ManagedSecretRotator {
         }
 
         ClusterParameterGroup group = new ClusterParameterGroup(parameterGroupName, parameterGroupFamily, description);
+        if (tags != null && !tags.isEmpty()) {
+            group.setTags(new LinkedHashMap<>(tags));
+        }
         parameterGroups.put(parameterGroupName, group);
         parameterGroups.flush();
         emitEvent(RedshiftEventCatalog.PARAMETER_GROUP_CREATED, parameterGroupName,
@@ -3556,7 +3663,46 @@ public class RedshiftService implements ManagedSecretRotator {
 
     // ── Proxy Helpers (shared with modify/reboot/restore) ────────────────────
 
-    private static final String CLUSTER_DB_NAME = "dev";
+    private static final String DEFAULT_DB_NAME = "dev";
+    // CreateCluster DBName: 1 to 64 lowercase letters, digits, underscores or dollar signs, starting
+    // with a letter or underscore, and not a reserved word.
+    private static final java.util.regex.Pattern DB_NAME = java.util.regex.Pattern.compile("[a-z_][a-z0-9_$]{0,63}");
+    private static final Set<String> RESERVED_DB_NAMES = Set.of("padb_harvest", "template0", "template1", "postgres");
+
+    /** Dumps the cluster's own database: "dev" unless CreateCluster named another. */
+    private void takeSnapshot(String accountId, String clusterIdentifier, Cluster cluster, Path dumpFile) {
+        if (cluster.getDbName() == null) {
+            containerManager.takeSnapshot(accountId, clusterIdentifier, cluster.getMasterUsername(), dumpFile);
+        } else {
+            containerManager.takeSnapshot(accountId, clusterIdentifier, cluster.getMasterUsername(),
+                    cluster.getDbName(), dumpFile);
+        }
+    }
+
+    private void restoreSnapshot(String accountId, String clusterIdentifier, String username, Cluster cluster,
+                                 Path dumpFile) {
+        if (cluster.getDbName() == null) {
+            containerManager.restoreSnapshot(accountId, clusterIdentifier, username, dumpFile);
+        } else {
+            containerManager.restoreSnapshot(accountId, clusterIdentifier, username, cluster.getDbName(), dumpFile);
+        }
+    }
+
+    private static String dbNameOf(Cluster cluster) {
+        String dbName = cluster == null ? null : cluster.getDbName();
+        return dbName != null && !dbName.isBlank() ? dbName : DEFAULT_DB_NAME;
+    }
+
+    private static String validateDbName(String dbName) {
+        if (dbName == null || dbName.isEmpty()) {
+            return null;
+        }
+        if (!DB_NAME.matcher(dbName).matches() || RESERVED_DB_NAMES.contains(dbName)) {
+            throw new AwsException("InvalidParameterValue",
+                    "DBName must contain 1 to 64 lowercase alphanumeric characters and must not be a reserved word.", 400);
+        }
+        return dbName;
+    }
 
     private int allocateProxyPort() {
         int base = config.services().redshift().proxyBasePort();

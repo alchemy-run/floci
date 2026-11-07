@@ -13,6 +13,7 @@ public class Cluster {
     private String clusterIdentifier;
     private String nodeType;
     private String masterUsername;
+    private String dbName;
     private String masterPassword;
     private String masterPasswordSecretArn;
     private String masterPasswordSecretKmsKeyId;
@@ -28,6 +29,10 @@ public class Cluster {
     public void setClusterIdentifier(String clusterIdentifier) { this.clusterIdentifier = clusterIdentifier; }
     public String getNodeType() { return nodeType; }
     public void setNodeType(String nodeType) { this.nodeType = nodeType; }
+    /** CreateCluster DBName; null on records written before it was kept, which mean "dev". */
+    public String getDbName() { return dbName; }
+    public void setDbName(String dbName) { this.dbName = dbName; }
+
     public String getMasterUsername() { return masterUsername; }
     public void setMasterUsername(String masterUsername) { this.masterUsername = masterUsername; }
     public String getMasterPassword() { return masterPassword; }
