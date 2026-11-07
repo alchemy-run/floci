@@ -840,6 +840,11 @@ public class RdsQueryHandler {
             DbInstanceSettings settings = instanceSettings(params, false);
             DbInstanceScalingChanges scaling = scalingChanges(params);
             List<String> vpcSecurityGroupIds = vpcSecurityGroupIds(params);
+            // The rename applies at once whatever ApplyImmediately says, after the rest of the request.
+            String newId = params.getFirst("NewDBInstanceIdentifier");
+            if (newId != null && !newId.isBlank()) {
+                service.validateDbInstanceRename(id, newId, region);
+            }
             boolean storageChange = params.getFirst("Iops") != null || params.getFirst("StorageThroughput") != null
                     || params.getFirst("StorageType") != null || params.getFirst("AllocatedStorage") != null;
             RdsInstanceStorage.Storage before = storageChange ? service.instanceStorage(region, id) : null;
@@ -864,6 +869,12 @@ public class RdsQueryHandler {
                         before);
                 if (withStorage != null) {
                     instance = withStorage;
+                }
+            }
+            if (newId != null && !newId.isBlank()) {
+                DbInstance renamed = service.renameDbInstance(id, newId, region);
+                if (renamed != null) {
+                    instance = renamed;
                 }
             }
             String result = dbInstanceXml(instance);

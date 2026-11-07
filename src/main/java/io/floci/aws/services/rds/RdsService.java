@@ -4931,6 +4931,88 @@ public class RdsService implements Resettable, ResourceProvider {
         return instance;
     }
 
+    private static final Pattern DB_INSTANCE_IDENTIFIER_PATTERN =
+            Pattern.compile("[a-zA-Z](?:-?[a-zA-Z0-9]+)*");
+
+    /** Checks a ModifyDBInstance NewDBInstanceIdentifier before any part of the request applies. */
+    public synchronized void validateDbInstanceRename(String id, String newId, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        DbInstance instance = getDbInstance(id, effectiveRegion);
+        if (newId == null || newId.isBlank() || newId.equals(id)) {
+            return;
+        }
+        if (newId.length() > 63 || !DB_INSTANCE_IDENTIFIER_PATTERN.matcher(newId).matches()) {
+            throw new AwsException("InvalidParameterValue",
+                    "The parameter NewDBInstanceIdentifier is not a valid identifier. Identifiers must begin "
+                            + "with a letter; must contain only ASCII letters, digits, and hyphens; and must not end "
+                            + "with a hyphen or contain two consecutive hyphens.", 400);
+        }
+        if (findInstanceForScope(currentAccountId(), effectiveRegion, newId) != null) {
+            throw new AwsException("DBInstanceAlreadyExists", "DB instance " + newId + " already exists.", 400);
+        }
+        if (instance.getStatus() != DbInstanceStatus.AVAILABLE) {
+            throw new AwsException("InvalidDBInstanceState",
+                    "DB instance " + id + " is not in available state.", 400);
+        }
+    }
+
+    /**
+     * ModifyDBInstance NewDBInstanceIdentifier: the instance takes the new identifier, ARN and
+     * endpoint name, and keeps its DbiResourceId, data, storage and tags. RDS reboots an instance
+     * it renames, and so does Floci: the database restarts on the same volume under the new ARN.
+     */
+    public DbInstance renameDbInstance(String id, String newId, String region) {
+        String effectiveRegion = effectiveRegion(region);
+        if (newId == null || newId.isBlank() || newId.equals(id)) {
+            return getDbInstance(id, effectiveRegion);
+        }
+        doRenameDbInstance(id, newId, effectiveRegion);
+        return config.services().rds().mock()
+                ? getDbInstance(newId, effectiveRegion)
+                : ensureInstanceBackend(newId, effectiveRegion);
+    }
+
+    private synchronized void doRenameDbInstance(String id, String newId, String effectiveRegion) {
+        validateDbInstanceRename(id, newId, effectiveRegion);
+        String accountId = currentAccountId();
+        DbInstance instance = getDbInstance(id, effectiveRegion);
+        String clusterId = instance.getDbClusterIdentifier();
+        boolean clusterMember = clusterId != null && !clusterId.isBlank();
+        if (!config.services().rds().mock()) {
+            proxyManager.stopProxy(rdsResourceRelayKey(instance.getDbInstanceArn(), id));
+            if (!clusterMember && instance.getContainerId() != null) {
+                containerManager.stop(buildHandle(instance));
+            }
+        }
+        // The volume keeps the name it was created with, so the restarted database finds its data.
+        instance.setContainerStorageResourceId(resolvedInstanceStorageResourceId(instance));
+        instance.setDockerVolumeName(resolvedInstanceDockerVolumeName(instance));
+        instance.setContainerId(null);
+        instance.setContainerHost(null);
+        instance.setContainerPort(0);
+        instance.setDbInstanceIdentifier(newId);
+        instance.setDbInstanceArn(regionResolver.buildArn("rds", effectiveRegion, "db:" + newId));
+        instance.setEndpoint(instanceEndpoint(instance, instance.getProxyPort()));
+        deleteInstanceForScope(accountId, effectiveRegion, id);
+        putInstanceForScope(accountId, effectiveRegion, newId, instance);
+        if (clusterMember) {
+            DbCluster cluster = findClusterForScope(accountId, effectiveRegion, clusterId);
+            if (cluster != null) {
+                List<String> members = cluster.getDbClusterMembers();
+                int index = members.indexOf(id);
+                if (index >= 0) {
+                    members.set(index, newId);
+                }
+                if (id.equals(cluster.getClusterWriterIdentifier())) {
+                    cluster.setClusterWriterIdentifier(newId);
+                }
+                putClusterForScope(accountId, effectiveRegion, clusterId, cluster);
+            }
+        }
+        recordInstanceEvent(instance, "Renamed instance from " + id + " to " + newId, "notification");
+        LOG.infov("DB instance {0} renamed to {1}", id, newId);
+    }
+
     /** The available cluster whose writer {@code instance} is, or null. */
     private DbCluster availableClusterWrittenBy(DbInstance instance, String id, String effectiveRegion) {
         String clusterId = instance.getDbClusterIdentifier();
