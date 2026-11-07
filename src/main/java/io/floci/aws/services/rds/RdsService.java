@@ -11677,6 +11677,56 @@ public class RdsService implements Resettable, ResourceProvider {
      * {@code CloudwatchLogsExportConfiguration}, and DescribeDBClusters reports the result as
      * {@code EnabledCloudwatchLogsExports}.
      */
+    /**
+     * The IOPS and throughput an instance's storage carries, as RDS resolves them: the request's
+     * {@code Iops} and {@code StorageThroughput} where it gives them, otherwise the baseline the
+     * storage type and size imply (gp3 below 400 GiB is fixed at 3000 IOPS and 125 MiBps). Runs
+     * after the allocation and storage type are applied, so a resize or type change moves the
+     * baseline the way AWS does.
+     */
+    public synchronized DbInstance resolveInstanceStoragePerformance(String region, String instanceId, boolean create,
+                                                                     Integer iops, Integer storageThroughput) {
+        return resolveInstanceStoragePerformance(region, instanceId, create, iops, storageThroughput, null);
+    }
+
+    /**
+     * As above for a ModifyDBInstance, given the instance as it was before the modify applied its
+     * allocation and storage type, so the IOPS and throughput move from that storage to the new one.
+     */
+    public synchronized DbInstance resolveInstanceStoragePerformance(String region, String instanceId, boolean create,
+                                                                     Integer iops, Integer storageThroughput,
+                                                                     RdsInstanceStorage.Storage before) {
+        String effectiveRegion = effectiveRegion(region);
+        DbInstance instance = getDbInstance(instanceId, effectiveRegion);
+        String engine = instance.getEngineIdentifier() != null ? instance.getEngineIdentifier()
+                : instance.getEngine() != null ? instance.getEngine().name().toLowerCase(Locale.ROOT) : "postgres";
+        if (RdsInstanceStorage.isAurora(engine) || (instance.getDbClusterIdentifier() != null
+                && !instance.getDbClusterIdentifier().isBlank())) {
+            return instance;
+        }
+        RdsInstanceStorage.Storage target = create
+                ? RdsInstanceStorage.forCreate(engine, instance.getAllocatedStorage(), instance.getStorageType(),
+                        iops, storageThroughput)
+                : RdsInstanceStorage.forModify(engine,
+                        before != null ? before : RdsInstanceStorage.current(instance, engine),
+                        new RdsInstanceStorage.Request(instance.getAllocatedStorage(), instance.getStorageType(),
+                                iops, storageThroughput));
+        instance.setStorageType(target.storageType());
+        instance.setIops(target.iops());
+        instance.setStorageThroughput(target.storageThroughput());
+        putInstanceForScope(accountIdFromArn(instance.getDbInstanceArn()), effectiveRegion,
+                instance.getDbInstanceIdentifier(), instance);
+        return RESPONSE_COPIER.convertValue(instance, DbInstance.class);
+    }
+
+    /** The instance's storage as it stands, captured before a ModifyDBInstance changes it. */
+    public synchronized RdsInstanceStorage.Storage instanceStorage(String region, String instanceId) {
+        DbInstance instance = getDbInstance(instanceId, effectiveRegion(region));
+        String engine = instance.getEngineIdentifier() != null ? instance.getEngineIdentifier()
+                : instance.getEngine() != null ? instance.getEngine().name().toLowerCase(Locale.ROOT) : "postgres";
+        return RdsInstanceStorage.current(instance, engine);
+    }
+
     /** CreateDBInstance/ModifyDBInstance NetworkType. */
     public synchronized DbInstance setInstanceNetworkType(String region, String instanceId, String networkType) {
         validateNetworkType(networkType);

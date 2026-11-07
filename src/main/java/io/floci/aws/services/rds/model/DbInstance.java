@@ -76,6 +76,8 @@ public class DbInstance {
     private Instant createdAt;
     private int proxyPort;
     private int listenerPort;
+    private Integer iops;
+    private Integer storageThroughput;
     private String networkType;
     // Read replication links, kept on both ends the way DescribeDBInstances reports them: a
     // replica names its source, a source lists its replicas, by identifier within a Region and
@@ -288,6 +290,14 @@ public class DbInstance {
     /** The create or modify request's NetworkType, IPV4 or DUAL; null on older records, reported as IPV4. */
     public String getNetworkType() { return networkType; }
     public void setNetworkType(String networkType) { this.networkType = networkType; }
+
+    /** Provisioned IOPS: set on gp3, io1 and io2 storage, null on gp2 and magnetic. */
+    public Integer getIops() { return iops; }
+    public void setIops(Integer iops) { this.iops = iops; }
+
+    /** Provisioned throughput in MiBps: set on gp3 storage only. */
+    public Integer getStorageThroughput() { return storageThroughput; }
+    public void setStorageThroughput(Integer storageThroughput) { this.storageThroughput = storageThroughput; }
 
     /** The port the endpoint listens on when endpoints are routed by name; 0 until assigned. */
     public int getListenerPort() { return listenerPort; }

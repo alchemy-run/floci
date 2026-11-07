@@ -300,6 +300,11 @@ public class RdsQueryHandler {
             if (params.getFirst("NetworkType") != null) {
                 instance = service.setInstanceNetworkType(region, id, params.getFirst("NetworkType"));
             }
+            DbInstance withStorage = service.resolveInstanceStoragePerformance(region, id, true,
+                    optionalInt(params.getFirst("Iops")), optionalInt(params.getFirst("StorageThroughput")));
+            if (withStorage != null) {
+                instance = withStorage;
+            }
             String result = dbInstanceXml(instance);
             return Response.ok(AwsQueryResponse.envelope("CreateDBInstance", AwsNamespaces.RDS, result)).build();
         } catch (AwsException e) {
@@ -828,6 +833,9 @@ public class RdsQueryHandler {
             DbInstanceSettings settings = instanceSettings(params, false);
             DbInstanceScalingChanges scaling = scalingChanges(params);
             List<String> vpcSecurityGroupIds = vpcSecurityGroupIds(params);
+            boolean storageChange = params.getFirst("Iops") != null || params.getFirst("StorageThroughput") != null
+                    || params.getFirst("StorageType") != null || params.getFirst("AllocatedStorage") != null;
+            RdsInstanceStorage.Storage before = storageChange ? service.instanceStorage(region, id) : null;
             DbInstance instance = service.modifyDbInstance(
                     id, newPassword, iamEnabled, dbSubnetGroupName,
                     vpcSecurityGroupIds, optionGroupName, region, autoMinorVersionUpgrade,
@@ -835,6 +843,14 @@ public class RdsQueryHandler {
                     params.getFirst("DBParameterGroupName"));
             if (params.getFirst("NetworkType") != null) {
                 instance = service.setInstanceNetworkType(region, id, params.getFirst("NetworkType"));
+            }
+            if (storageChange) {
+                DbInstance withStorage = service.resolveInstanceStoragePerformance(region, id, false,
+                        optionalInt(params.getFirst("Iops")), optionalInt(params.getFirst("StorageThroughput")),
+                        before);
+                if (withStorage != null) {
+                    instance = withStorage;
+                }
             }
             String result = dbInstanceXml(instance);
             return Response.ok(AwsQueryResponse.envelope("ModifyDBInstance", AwsNamespaces.RDS, result)).build();
@@ -3348,6 +3364,8 @@ public class RdsQueryHandler {
            .elem("MultiAZ", i.isMultiAz())
            .elem("AutoMinorVersionUpgrade", i.isAutoMinorVersionUpgrade())
            .elem("StorageType", i.getStorageType())
+           .elem("Iops", i.getIops() == null ? null : String.valueOf(i.getIops()))
+           .elem("StorageThroughput", i.getStorageThroughput() == null ? null : String.valueOf(i.getStorageThroughput()))
            .elem("PubliclyAccessible", i.isPubliclyAccessible())
            .elem("AvailabilityZone", i.getAvailabilityZone() != null ? i.getAvailabilityZone() : config.defaultAvailabilityZone())
            .elem("PreferredMaintenanceWindow", i.getPreferredMaintenanceWindow() != null
