@@ -598,3 +598,21 @@ If behavior is unclear:
 3. Then compatibility test expectations
 
 If a task would require broad architectural changes, stop and surface the tradeoffs instead of refactoring across services blindly.
+
+---
+
+## Alchemy Fork
+
+`alchemy-run/floci` is Alchemy's fork of `floci-io/floci` (remote `upstream`). These rules keep upstream merges cheap.
+
+### Merging upstream
+
+- Merge `upstream/main` into a branch with a merge commit, and merge that PR with **Create a merge commit**. Never squash or rebase a PR that contains an upstream merge: squashing drops upstream's ancestry, so the next upstream merge conflicts on every file again. Update a PR branch by merging `main` into it, not by rebasing.
+- Prefer upstream's code. Where the fork rewrote a service, replace it with upstream's and rebuild only the gaps Alchemy's floci suites reveal (`node scripts/test-aws-floci.ts` in alchemy), one commit per gap so each one can go upstream.
+- Put fork-only behavior behind opt-in configuration (for example `floci.services.rds.endpoint-domain`) or in new files. `src/main/resources/application.yml` turns it on for Alchemy's image; `src/test/resources/application.yml` keeps upstream's defaults so upstream's tests run unchanged. The compatibility workflow runs upstream's defaults too.
+- After adopting upstream code, refresh the fork-only gates: `make partition-baseline`, `make docs-sync` (and the Service Matrix counts in `docs/services/index.md`), `make cfn-schema-surface-sync`, the gap files under `src/test/resources/cloudformation/`, and `src/test/resources/partition/smoke-exemptions.tsv`.
+- The PR hygiene check fails on unsigned commits. That is not a code problem and does not block a merge.
+
+### Releasing Alchemy's image
+
+Tag the merged `main` as `<upstream-version>-alchemy.<N>` (the upstream version is `pom.xml`'s; `N` restarts at 1 for each upstream version). `alchemy-release.yml` publishes `ghcr.io/alchemy-run/floci:<tag>`, which alchemy pins as `DEFAULT_FLOCI_IMAGE` in `packages/aws/src/Local/Floci.ts`.

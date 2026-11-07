@@ -63,6 +63,14 @@ class TlsCertificateHostnameTest {
     // ==================== Custom Hostname Tests ====================
 
     @Test
+    void webFunctionEndpointHostsAreCoveredByDefault() {
+        // A wildcard covers one label, so the shard and Region labels need entries of their own.
+        assertTrue(TlsConfigSource.DEFAULT_SAN_HOSTNAMES.contains("*.001.lambda-web.us-east-1.localhost"));
+        assertTrue(TlsConfigSource.DEFAULT_SAN_HOSTNAMES.contains("*.001.lambda-web.eu-west-1.localhost.floci.io"));
+        assertTrue(TlsConfigSource.DEFAULT_SAN_HOSTNAMES.contains("*.lambda-web.global.localhost"));
+    }
+
+    @Test
     void testFlociHostnameIncludedInCertificateSans() throws Exception {
         // Arrange
         System.setProperty("floci.hostname", "floci");

@@ -84,11 +84,16 @@ public class TlsConfigSource implements ConfigSource {
                 "*.execute-api.us-east-1.amazonaws.com",
                 "*.iot.us-east-1.amazonaws.com", "*.credentials.iot.us-east-1.amazonaws.com",
                 "*.jobs.iot.us-east-1.amazonaws.com",
-                "*.lambda-microvm.us-east-1.localhost.floci.io"));
+                "*.lambda-microvm.us-east-1.localhost.floci.io",
+                // Multi-Region Web Function endpoints, {id}.lambda-web.global.{host} (LambdaWebService).
+                "*.lambda-web.global.localhost", "*.lambda-web.global.localhost.floci.io"));
         for (String region : AwsRegions.KNOWN_IDS.stream().sorted().toList()) {
             sans.add("*.dkr.ecr." + region + ".localhost.floci.io");
             // AppSync advertises https://{apiId}.appsync-api.{region}.localhost.floci.io (AppSyncService).
             sans.add("*.appsync-api." + region + ".localhost.floci.io");
+            // Web Function endpoints, {id}.001.lambda-web.{region}.{host} (LambdaWebService).
+            sans.add("*.001.lambda-web." + region + ".localhost");
+            sans.add("*.001.lambda-web." + region + ".localhost.floci.io");
         }
         return List.copyOf(sans);
     }
