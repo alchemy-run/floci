@@ -553,6 +553,33 @@ public class RedshiftService implements ManagedSecretRotator {
         }
     }
 
+    /**
+     * The CreateCluster/ModifyCluster members Floci records as metadata: PubliclyAccessible,
+     * Encrypted and KmsKeyId. A null argument is one the request left out. AWS turns encryption
+     * on for a cluster it is off for, and does not turn it off once on except on request.
+     */
+    public Cluster applyClusterSettings(String clusterIdentifier, Boolean publiclyAccessible, Boolean encrypted,
+                                        String kmsKeyId) {
+        return mutateCluster(clusterIdentifier, () -> {
+            Cluster cluster = requireCluster(clusterIdentifier);
+            if (publiclyAccessible != null) {
+                cluster.setPubliclyAccessible(publiclyAccessible);
+            }
+            if (kmsKeyId != null && !kmsKeyId.isBlank()) {
+                cluster.setKmsKeyId(kmsKeyId);
+                cluster.setEncrypted(true);
+            }
+            if (encrypted != null) {
+                cluster.setEncrypted(encrypted);
+                if (!encrypted) {
+                    cluster.setKmsKeyId(null);
+                }
+            }
+            storeCluster(cluster);
+            return cluster;
+        });
+    }
+
     private void storeCluster(Cluster cluster) {
         mutate(() -> {
             clusters.put(cluster.getClusterIdentifier(), cluster);

@@ -76,6 +76,7 @@ public class DbInstance {
     private Instant createdAt;
     private int proxyPort;
     private int listenerPort;
+    private String networkType;
     // Read replication links, kept on both ends the way DescribeDBInstances reports them: a
     // replica names its source, a source lists its replicas, by identifier within a Region and
     // by ARN across Regions. Null and empty on a standalone. The status is the "read
@@ -283,6 +284,10 @@ public class DbInstance {
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    /** The create or modify request's NetworkType, IPV4 or DUAL; null on older records, reported as IPV4. */
+    public String getNetworkType() { return networkType; }
+    public void setNetworkType(String networkType) { this.networkType = networkType; }
 
     /** The port the endpoint listens on when endpoints are routed by name; 0 until assigned. */
     public int getListenerPort() { return listenerPort; }

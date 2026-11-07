@@ -14,6 +14,9 @@ public class Cluster {
     private String nodeType;
     private String masterUsername;
     private String dbName;
+    private Boolean publiclyAccessible;
+    private boolean encrypted;
+    private String kmsKeyId;
     private String masterPassword;
     private String masterPasswordSecretArn;
     private String masterPasswordSecretKmsKeyId;
@@ -29,6 +32,16 @@ public class Cluster {
     public void setClusterIdentifier(String clusterIdentifier) { this.clusterIdentifier = clusterIdentifier; }
     public String getNodeType() { return nodeType; }
     public void setNodeType(String nodeType) { this.nodeType = nodeType; }
+    /** CreateCluster/ModifyCluster PubliclyAccessible; null on older records, reported as false. */
+    public Boolean getPubliclyAccessible() { return publiclyAccessible; }
+    public void setPubliclyAccessible(Boolean publiclyAccessible) { this.publiclyAccessible = publiclyAccessible; }
+
+    public boolean isEncrypted() { return encrypted; }
+    public void setEncrypted(boolean encrypted) { this.encrypted = encrypted; }
+
+    public String getKmsKeyId() { return kmsKeyId; }
+    public void setKmsKeyId(String kmsKeyId) { this.kmsKeyId = kmsKeyId; }
+
     /** CreateCluster DBName; null on records written before it was kept, which mean "dev". */
     public String getDbName() { return dbName; }
     public void setDbName(String dbName) { this.dbName = dbName; }

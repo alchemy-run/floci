@@ -297,6 +297,9 @@ public class RdsQueryHandler {
                     manageMasterUserPassword, masterUserSecretKmsKeyId, tags, vpcSecurityGroupIds,
                     optionGroupName, region, autoMinorVersionUpgrade, settings, publiclyAccessible,
                     requestedPort, deletionProtection);
+            if (params.getFirst("NetworkType") != null) {
+                instance = service.setInstanceNetworkType(region, id, params.getFirst("NetworkType"));
+            }
             String result = dbInstanceXml(instance);
             return Response.ok(AwsQueryResponse.envelope("CreateDBInstance", AwsNamespaces.RDS, result)).build();
         } catch (AwsException e) {
@@ -830,6 +833,9 @@ public class RdsQueryHandler {
                     vpcSecurityGroupIds, optionGroupName, region, autoMinorVersionUpgrade,
                     settings, publiclyAccessible, scaling, deletionProtection,
                     params.getFirst("DBParameterGroupName"));
+            if (params.getFirst("NetworkType") != null) {
+                instance = service.setInstanceNetworkType(region, id, params.getFirst("NetworkType"));
+            }
             String result = dbInstanceXml(instance);
             return Response.ok(AwsQueryResponse.envelope("ModifyDBInstance", AwsNamespaces.RDS, result)).build();
         } catch (AwsException e) {
@@ -1412,6 +1418,13 @@ public class RdsQueryHandler {
             if (logExports != null) {
                 cluster = service.setClusterLogExports(region, id, new LogExportChanges(logExports, null));
             }
+            Boolean deletionProtection = parseOptionalBoolean(params, "DeletionProtection");
+            if (deletionProtection != null) {
+                cluster = service.setClusterDeletionProtection(region, id, deletionProtection);
+            }
+            if (params.getFirst("NetworkType") != null) {
+                cluster = service.setClusterNetworkType(region, id, params.getFirst("NetworkType"));
+            }
             String result = dbClusterXml(cluster);
             return Response.ok(AwsQueryResponse.envelope("CreateDBCluster", AwsNamespaces.RDS, result)).build();
         } catch (AwsException e) {
@@ -1545,6 +1558,13 @@ public class RdsQueryHandler {
             LogExportChanges logExportChanges = cloudwatchLogsExportChanges(params);
             if (logExportChanges != null) {
                 cluster = service.setClusterLogExports(region, id, logExportChanges);
+            }
+            Boolean deletionProtection = parseOptionalBoolean(params, "DeletionProtection");
+            if (deletionProtection != null) {
+                cluster = service.setClusterDeletionProtection(region, id, deletionProtection);
+            }
+            if (params.getFirst("NetworkType") != null) {
+                cluster = service.setClusterNetworkType(region, id, params.getFirst("NetworkType"));
             }
             String result = dbClusterXml(cluster);
             return Response.ok(AwsQueryResponse.envelope("ModifyDBCluster", AwsNamespaces.RDS, result)).build();
@@ -3338,6 +3358,7 @@ public class RdsQueryHandler {
            .elem("StorageEncrypted", i.isStorageEncrypted())
            .elem("CopyTagsToSnapshot", i.isCopyTagsToSnapshot())
            .elem("DeletionProtection", i.isDeletionProtection())
+           .elem("NetworkType", i.getNetworkType() != null ? i.getNetworkType() : "IPV4")
            .raw(vpcSecurityGroupsXml(i))
            .raw(dbParameterGroupsXml(i))
            .raw(optionGroupMembershipsXml(i))
@@ -3550,6 +3571,8 @@ public class RdsQueryHandler {
         XmlBuilder xml = new XmlBuilder()
                 .elem("DBClusterIdentifier", c.getDbClusterIdentifier())
                 .raw(enabledLogExportsXml(c.getEnabledCloudwatchLogsExports()))
+                .elem("DeletionProtection", c.isDeletionProtection())
+                .elem("NetworkType", c.getNetworkType() != null ? c.getNetworkType() : "IPV4")
                 .elem("Status", statusStr)
                 .elem("Engine", engineStr.toLowerCase())
                 .elem("EngineVersion", c.getEngineVersion())

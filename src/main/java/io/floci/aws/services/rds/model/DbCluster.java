@@ -43,6 +43,8 @@ public class DbCluster {
     private Instant createdAt;
     private int proxyPort;
     private int listenerPort;
+    private String networkType;
+    private boolean deletionProtection;
     private List<String> enabledCloudwatchLogsExports = new ArrayList<>();
     private Map<String, String> tags = new LinkedHashMap<>();
     private List<DbRoleAssociation> associatedRoles = new ArrayList<>();
@@ -188,11 +190,18 @@ public class DbCluster {
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
+    public boolean isDeletionProtection() { return deletionProtection; }
+    public void setDeletionProtection(boolean deletionProtection) { this.deletionProtection = deletionProtection; }
+
     public List<String> getEnabledCloudwatchLogsExports() { return enabledCloudwatchLogsExports; }
     public void setEnabledCloudwatchLogsExports(List<String> enabledCloudwatchLogsExports) {
         this.enabledCloudwatchLogsExports = enabledCloudwatchLogsExports != null
                 ? new ArrayList<>(enabledCloudwatchLogsExports) : new ArrayList<>();
     }
+
+    /** The create or modify request's NetworkType, IPV4 or DUAL; null on older records, reported as IPV4. */
+    public String getNetworkType() { return networkType; }
+    public void setNetworkType(String networkType) { this.networkType = networkType; }
 
     /** The port the endpoint listens on when endpoints are routed by name; 0 until assigned. */
     public int getListenerPort() { return listenerPort; }

@@ -125,6 +125,7 @@ public class RedshiftQueryHandler {
                                 clusterSubnetGroupName, vpcSecurityGroupIds, iamRoleArns, defaultIamRoleArn, automatedRetention,
                                 params.getFirst("DBName"));
             }
+            cluster = applyClusterSettings(identifier, params, cluster);
             String parameterGroupName = params.getFirst("ClusterParameterGroupName");
             String multiAz = params.getFirst("MultiAZ");
             boolean hasParameterGroup = parameterGroupName != null && !parameterGroupName.isBlank();
@@ -870,6 +871,7 @@ public class RedshiftQueryHandler {
                     : service.modifyCluster(clusterIdentifier, nodeType, numberOfNodes,
                             masterUserPassword, clusterParameterGroupName, vpcSecurityGroupIds,
                             multiAz == null ? null : Boolean.parseBoolean(multiAz), automatedRetention);
+            cluster = applyClusterSettings(clusterIdentifier, params, cluster);
             String xml = new XmlBuilder()
                     .start("ModifyClusterResponse")
                       .start("ModifyClusterResult")
@@ -1141,6 +1143,18 @@ public class RedshiftQueryHandler {
                 .build();
     }
 
+    private Cluster applyClusterSettings(String identifier, MultivaluedMap<String, String> params, Cluster cluster) {
+        String publiclyAccessible = params.getFirst("PubliclyAccessible");
+        String encrypted = params.getFirst("Encrypted");
+        String kmsKeyId = params.getFirst("KmsKeyId");
+        if (publiclyAccessible == null && encrypted == null && kmsKeyId == null) {
+            return cluster;
+        }
+        return service.applyClusterSettings(identifier,
+                publiclyAccessible == null ? null : Boolean.parseBoolean(publiclyAccessible),
+                encrypted == null ? null : Boolean.parseBoolean(encrypted), kmsKeyId);
+    }
+
     private String buildClusterXml(Cluster cluster) {
         XmlBuilder builder = new XmlBuilder()
             .start("Cluster")
@@ -1154,7 +1168,12 @@ public class RedshiftQueryHandler {
             .elem("AvailabilityZoneRelocationStatus", "disabled")
             // AWS always returns "enabled" or "disabled" here, never blank.
             .elem("MultiAZ", cluster.isMultiAZ() ? "enabled" : "disabled")
-            .elem("ClusterSubnetGroupName", cluster.getClusterSubnetGroupName());
+            .elem("ClusterSubnetGroupName", cluster.getClusterSubnetGroupName())
+            .elem("PubliclyAccessible", String.valueOf(Boolean.TRUE.equals(cluster.getPubliclyAccessible())))
+            .elem("Encrypted", String.valueOf(cluster.isEncrypted()));
+        if (cluster.getKmsKeyId() != null) {
+            builder.elem("KmsKeyId", cluster.getKmsKeyId());
+        }
 
         if (cluster.getMasterPasswordSecretArn() != null) {
             builder.elem("MasterPasswordSecretArn", cluster.getMasterPasswordSecretArn())

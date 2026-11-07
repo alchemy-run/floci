@@ -6120,6 +6120,11 @@ public class RdsService implements Resettable, ResourceProvider {
                     if (findClusterForScope(currentAccountId(), effectiveRegion, id) != cluster) {
                         continue;
                     }
+                    if (cluster.isDeletionProtection()) {
+                        throw new AwsException("InvalidParameterCombination",
+                                "Cannot delete protected Cluster, please disable deletion protection and try again.",
+                                400);
+                    }
                     doDeleteDbCluster(id, region, deleteAutomatedBackups);
                     return;
                 }
@@ -11672,6 +11677,42 @@ public class RdsService implements Resettable, ResourceProvider {
      * {@code CloudwatchLogsExportConfiguration}, and DescribeDBClusters reports the result as
      * {@code EnabledCloudwatchLogsExports}.
      */
+    /** CreateDBInstance/ModifyDBInstance NetworkType. */
+    public synchronized DbInstance setInstanceNetworkType(String region, String instanceId, String networkType) {
+        validateNetworkType(networkType);
+        String effectiveRegion = effectiveRegion(region);
+        DbInstance instance = getDbInstance(instanceId, effectiveRegion);
+        instance.setNetworkType(networkType);
+        putInstanceForScope(accountIdFromArn(instance.getDbInstanceArn()), effectiveRegion,
+                instance.getDbInstanceIdentifier(), instance);
+        return RESPONSE_COPIER.convertValue(instance, DbInstance.class);
+    }
+
+    /** CreateDBCluster/ModifyDBCluster NetworkType. */
+    public synchronized DbCluster setClusterNetworkType(String region, String clusterId, String networkType) {
+        validateNetworkType(networkType);
+        String effectiveRegion = effectiveRegion(region);
+        DbCluster cluster = getDbCluster(clusterId, effectiveRegion);
+        cluster.setNetworkType(networkType);
+        putClusterForScope(currentAccountId(), effectiveRegion, cluster.getDbClusterIdentifier(), cluster);
+        return RESPONSE_COPIER.convertValue(cluster, DbCluster.class);
+    }
+
+    private static void validateNetworkType(String networkType) {
+        if (!"IPV4".equals(networkType) && !"DUAL".equals(networkType)) {
+            throw new AwsException("InvalidParameterValue", "NetworkType must be IPV4 or DUAL.", 400);
+        }
+    }
+
+    /** CreateDBCluster/ModifyDBCluster DeletionProtection; a protected cluster cannot be deleted. */
+    public synchronized DbCluster setClusterDeletionProtection(String region, String clusterId, boolean enabled) {
+        String effectiveRegion = effectiveRegion(region);
+        DbCluster cluster = getDbCluster(clusterId, effectiveRegion);
+        cluster.setDeletionProtection(enabled);
+        putClusterForScope(currentAccountId(), effectiveRegion, cluster.getDbClusterIdentifier(), cluster);
+        return RESPONSE_COPIER.convertValue(cluster, DbCluster.class);
+    }
+
     public synchronized DbCluster setClusterLogExports(String region, String clusterId, LogExportChanges changes) {
         String effectiveRegion = effectiveRegion(region);
         DbCluster cluster = getDbCluster(clusterId, effectiveRegion);
