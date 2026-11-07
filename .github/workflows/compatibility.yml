@@ -365,8 +365,9 @@ jobs:
           # sdk-test-java's HTTP Task regression calls a MOCK API on http://floci:4566; every
           # other leg keeps the default rejection of plaintext http:invoke endpoints.
           # The Alchemy fork defaults the ECS steady-state window and EMR Serverless run duration to
-          # what Alchemy's suites expect; these suites expect upstream's. RDS gets no endpoint host
-          # override: the fork's RDS names each instance's own host.
+          # what Alchemy's suites expect; these suites expect upstream's. The image's routed RDS and
+          # Redshift endpoint names resolve to the host's loopback, which this network can't reach,
+          # so the suites use upstream's endpoints on the floci host.
           docker run -d --name floci --network compat-net \
             -p 4566:4566 \
             -v /var/run/docker.sock:/var/run/docker.sock \
@@ -382,6 +383,10 @@ jobs:
             -e FLOCI_SERVICES_ECS_STEADY_STATE_WINDOW_SECONDS=0 \
             -e FLOCI_SERVICES_EMRSERVERLESS_JOB_RUN_DURATION_SECONDS=0 \
             -e FLOCI_SERVICES_REDSHIFT_ENDPOINT_HOST=floci \
+            -e FLOCI_SERVICES_RDS_ENDPOINT_HOST=floci \
+            -e FLOCI_SERVICES_RDS_ENDPOINT_DOMAIN= \
+            -e FLOCI_SERVICES_RDS_CREATING_STATUS_MILLIS=0 \
+            -e FLOCI_SERVICES_REDSHIFT_ENDPOINT_DOMAIN= \
             -e FLOCI_SERVICES_SSOOIDC_LOCAL_PRINCIPAL_ID=11111111-2222-3333-4444-555555555555 \
             floci:test-native
 
