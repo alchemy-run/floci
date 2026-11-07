@@ -47,6 +47,7 @@ AWS::CloudFront::PublicKey	CloudFrontCfnProvisioner
 AWS::CloudFront::ResponseHeadersPolicy	CloudFrontCfnProvisioner
 AWS::CloudTrail::Trail	CloudTrailCfnProvisioner
 AWS::CloudWatch::Alarm	CloudWatchCfnProvisioner
+AWS::CloudWatch::CompositeAlarm	CloudWatchCompositeAlarmCfnProvisioner
 AWS::CloudWatch::Dashboard	CloudWatchDashboardCfnProvisioner
 AWS::CodeBuild::Project	CodeBuildCfnProvisioner
 AWS::CodePipeline::CustomActionType	CodePipelineCfnProvisioner
@@ -56,6 +57,7 @@ AWS::Cognito::UserPool	CognitoCfnProvisioner
 AWS::Cognito::UserPoolClient	CognitoCfnProvisioner
 AWS::Cognito::UserPoolDomain	CognitoCfnProvisioner
 AWS::Cognito::UserPoolGroup	CognitoUserPoolGroupCfnProvisioner
+AWS::Cognito::UserPoolIdentityProvider	CognitoIdentityProviderCfnProvisioner
 AWS::Cognito::UserPoolResourceServer	CognitoResourceServerCfnProvisioner
 AWS::Cognito::UserPoolUser	CognitoUserPoolUserCfnProvisioner
 AWS::Cognito::UserPoolUserToGroupAttachment	CognitoUserPoolUserToGroupAttachmentCfnProvisioner
@@ -67,10 +69,12 @@ AWS::EC2::EIP	Ec2NetworkCfnProvisioner
 AWS::EC2::FlowLog	Ec2FlowLogCfnProvisioner
 AWS::EC2::Instance	Ec2InstanceCfnProvisioner
 AWS::EC2::InternetGateway	Ec2NetworkCfnProvisioner
+AWS::EC2::KeyPair	Ec2KeyPairCfnProvisioner
 AWS::EC2::LaunchTemplate	Ec2LaunchTemplateCfnProvisioner
 AWS::EC2::NatGateway	Ec2NetworkCfnProvisioner
 AWS::EC2::NetworkAcl	Ec2NetworkAclCfnProvisioner
 AWS::EC2::NetworkAclEntry	Ec2NetworkAclCfnProvisioner
+AWS::EC2::PrefixList	Ec2NetworkCfnProvisioner
 AWS::EC2::Route	Ec2NetworkCfnProvisioner
 AWS::EC2::RouteTable	Ec2NetworkCfnProvisioner
 AWS::EC2::SecurityGroup	Ec2SecurityGroupCfnProvisioner
@@ -99,6 +103,8 @@ AWS::Events::Archive	EventsArchiveCfnProvisioner
 AWS::Events::EventBus	EventsCfnProvisioner
 AWS::Events::EventBusPolicy	EventsCfnProvisioner
 AWS::Events::Rule	EventsCfnProvisioner
+AWS::EventsV2::EventBus	EventsV2CfnProvisioner
+AWS::EventsV2::Subscriber	EventsV2CfnProvisioner
 AWS::IAM::AccessKey	IamAccessKeyCfnProvisioner
 AWS::IAM::InstanceProfile	IamInstanceProfileCfnProvisioner
 AWS::IAM::ManagedPolicy	IamManagedPolicyCfnProvisioner
@@ -115,6 +121,7 @@ AWS::KMS::Key	KmsCfnProvisioner
 AWS::Kinesis::Stream	KinesisCfnProvisioner
 AWS::KinesisFirehose::DeliveryStream	FirehoseCfnProvisioner
 AWS::Lambda::Alias	LambdaVersionAliasCfnProvisioner
+AWS::Lambda::CodeSigningConfig	LambdaCodeSigningConfigCfnProvisioner
 AWS::Lambda::EventInvokeConfig	LambdaEventInvokeConfigCfnProvisioner
 AWS::Lambda::EventSourceMapping	LambdaEventSourceMappingCfnProvisioner
 AWS::Lambda::Function	LambdaCfnProvisioner
@@ -154,6 +161,7 @@ AWS::S3::BucketPolicy	S3CfnProvisioner
 AWS::S3Vectors::Index	S3VectorsCfnProvisioner
 AWS::S3Vectors::VectorBucket	S3VectorsCfnProvisioner
 AWS::SES::EmailIdentity	SesCfnProvisioner
+AWS::SES::ReceiptRule	SesReceiptRuleCfnProvisioner
 AWS::SNS::Subscription	SnsCfnProvisioner
 AWS::SNS::Topic	SnsCfnProvisioner
 AWS::SNS::TopicPolicy	SnsCfnProvisioner
@@ -164,6 +172,11 @@ AWS::Scheduler::Schedule	SchedulerScheduleCfnProvisioner
 AWS::Scheduler::ScheduleGroup	SchedulerScheduleGroupCfnProvisioner
 AWS::SecretsManager::Secret	SecretsManagerCfnProvisioner
 AWS::SecretsManager::SecretTargetAttachment	SecretTargetAttachmentCfnProvisioner
+AWS::ServiceDiscovery::HttpNamespace	CloudMapCfnProvisioner
+AWS::ServiceDiscovery::PrivateDnsNamespace	CloudMapCfnProvisioner
+AWS::ServiceDiscovery::PublicDnsNamespace	CloudMapCfnProvisioner
+AWS::ServiceDiscovery::Service	CloudMapCfnProvisioner
+AWS::Signer::SigningProfile	SignerCfnProvisioner
 AWS::StepFunctions::StateMachine	StepFunctionsCfnProvisioner
 AWS::WAFv2::WebACL	WafV2CfnProvisioner
 Custom::DynamoDBReplica	DynamoDbCfnProvisioner

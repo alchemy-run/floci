@@ -43,6 +43,8 @@ A request identifies its target cluster or serverless workgroup one of three way
 
 A statement run against a workgroup reports `WorkgroupName` and omits `ClusterIdentifier`, and the reverse holds for a cluster statement. `ListDatabases`, `ListSchemas`, `ListTables` and `DescribeTable` accept `WorkgroupName` the same way.
 
+Under IAM enforcement, `ExecuteStatement`, `BatchExecuteStatement`, `ListDatabases`, `ListSchemas`, `ListTables` and `DescribeTable` are checked on the cluster's ARN, or on the ARN of the workgroup `WorkgroupName` names, `workgroup/<id>`, whichever form it takes; a workgroup that does not exist is checked on `workgroup/*`. `ExecuteStatement` and `BatchExecuteStatement` naming a `SessionId` are checked on the cluster or workgroup the caller's session runs on, so a grant or a deny on that target covers every statement in the session, and on `*` when the caller has no such session. AWS does not document which resource such a request is authorized on, so the session's target is Floci's inference: a session runs on the cluster or workgroup named by the statement that opened it.
+
 ## Session reuse
 
 `ExecuteStatement` and `BatchExecuteStatement` accept `SessionKeepAliveSeconds`, an integer from
@@ -60,6 +62,13 @@ the block, rolling back its changes. A batch remains a transaction boundary: its
 connection and its failure rolls it back, including any transaction opened by earlier Execute
 calls on that session. Transaction-control modifiers beyond optional `WORK` or `TRANSACTION`
 are rejected before execution. These cross-call transaction details have not been verified against live AWS.
+
+Batch audit records track successful user changes through transaction boundaries and savepoints.
+`ROLLBACK TO` discards changes after the named savepoint, while `RELEASE` keeps them pending until
+commit. A full rollback discards pending changes; changes committed earlier in the batch retain
+their audit records if a later statement fails. Batch entries support transaction-control commands
+and multiple SQL statements. Audit state advances after each successful command, while an entry's
+result metadata preserves its first command's result and its original SQL text.
 
 An omitted keep-alive on a reuse request preserves the previous idle timeout. A supplied value
 replaces it after successful admission, and the idle deadline starts when the query completes.
@@ -84,12 +93,42 @@ Session ids appear in Execute, Batch, DescribeStatement and ListStatements respo
 is saved with statement metadata and idempotency receipts, but live connections are runtime-only:
 reset and shutdown close them, and restarting Floci never reopens a session. A session request
 with an existing receipt can still replay its original response after the connection expires or
-after restart, subject to the normal receipt lifetime and caller ownership. `ListSessions` is
-not implemented.
+after restart, subject to the normal receipt lifetime and caller ownership.
+
+### Listing sessions
+
+`ListSessions` returns session metadata created in the last 24 hours. It defaults to
+`AVAILABLE` and `BUSY` sessions; `Status=CLOSED` includes retained metadata for sessions
+closed explicitly, expired or retired after a connection failure. `SessionId` retrieves
+one visible session regardless of status and cannot be combined with `Status`,
+`ClusterIdentifier`, `WorkgroupName` or `Database`. A missing or foreign session id
+returns `ResourceNotFoundException`.
+
+Filter by `ClusterIdentifier` or `WorkgroupName` (name or ARN), optionally with
+`Database`. Cluster and workgroup filters are mutually exclusive. `MaxResults` accepts
+0 through 100; omitted or zero uses 100. Continue with `NextToken` and the same filters
+and ownership scope. Results are ordered by creation timestamp and session id; this
+ordering and the default page size are Floci choices, not claims about AWS.
+
+Sessions remain isolated by account and Region. `RoleLevel` defaults to true and
+lists sessions for the caller's IAM role across assumed-role sessions. False limits
+results to the current caller session. Unresolved credentials are isolated by access
+key; Floci does not model Identity Center identity-enhanced session restrictions.
+
+`CreatedAt`, `UpdatedAt` and `SessionTtl` are epoch-second timestamps with the same
+millisecond precision as statement timestamps.
+`CurrentStatementId` appears only while the session is `BUSY`, including admitted
+work waiting for a worker. `SessionAliveSeconds` reports the selected keep-alive.
+Closed history contains metadata only, does not consume the 500-live-session quota,
+and expires 24 hours after session creation. History is runtime-only: reset, shutdown
+and restart remove it even when statement persistence is enabled. Failed admissions
+do not create session history. The exact queued-state reporting and lifecycle timestamp
+choices have not been compared with live AWS.
 
 Unexpected synchronous connection-cleanup failures are reported to the affected operation.
 Reset still attempts to close the remaining sessions and clear statement and receipt state before
-reporting cleanup errors. Background expiration failures are logged without stopping later sweeps.
+reporting cleanup errors. Opportunistic expiration during `ListSessions` logs cleanup failures
+without failing the listing. Background expiration failures are logged without stopping later sweeps.
 An already-closed connection (`SQLSTATE 08003`) is a benign cleanup outcome.
 
 ```python
@@ -116,6 +155,7 @@ for the idle timeout, 24-hour lifetime and single-query constraints.
 - **`GetStatementResult` and `GetStatementResultV2`** return the typed `Records` shape. `GetStatementResultV2` also returns `ResultFormat`, and when the statement was run with `ResultFormat=CSV` it returns `Records` as `CSVRecords` strings. A statement that produced no result set (an `INSERT`, `UPDATE`, `DELETE`, or DDL statement) returns `ValidationException` with the message `Statement has no result set`.
 - **Paging.** The page size is 1000 rows. `NextToken` is an opaque base64 row offset; there is no server-side cursor.
 - **`SqlParameters` / `Parameters`** are bound into a `PreparedStatement`. Named `:placeholder` markers are rewritten to positional JDBC bind parameters. Colons inside string literals, quoted identifiers, comments, PostgreSQL `::` casts, and dollar-quoted strings are left untouched. Redshift Data API parameter values are always strings on the wire; PostgreSQL coerces each bound value to the column type.
+- **Batch `Parameters`** are shared by every entry in `Sqls`. Each statement can use a subset of the supplied parameters, and every supplied parameter must be referenced by at least one statement. Missing, unused, duplicate or malformed parameters are rejected with `ValidationException` before executing the batch. Parameter names can contain letters, digits and underscores, including names consisting only of digits. Values must be non-empty strings. `DescribeStatement` and `ListStatements` return the original batch parameters in `QueryParameters`; SQL text retains its named placeholders.
 - **`CancelStatement`** returns `{ "Status": true }` when cancellation is accepted for queued or running work. Running transactional SQL receives JDBC cancellation and rolls back before reaching `ABORTED`; cancelling a batch rolls back its earlier writes. Cancelling a statement that is already terminal returns `ValidationException` ("Could not cancel a query that is already in ABORTED state with ID: <id>"), as AWS does. Repeated cancellation and statements that already own commit return `false` in Floci. Commands requiring auto-commit, including Spectrum external DDL and `VACUUM`, own completion before performing irreversible work and reject cancellation during that work. An unknown statement id returns `ResourceNotFoundException`.
 - **`WithEvent=true`** publishes one terminal status event per parent statement to the default EventBridge bus in the captured account and region. Batch children do not emit events. False or omitted `WithEvent` emits none. Delivery occurs after terminal metadata is stored, on a separate bounded pool; disabled EventBridge, rejected delivery or target failures do not change the SQL outcome. Delivery is best effort, with no durable outbox or restart replay.
 - **`ExecuteSql` and `BatchExecuteSql`** (the deprecated pre-2020 operations) return `ValidationException`.
@@ -173,7 +213,9 @@ use source `aws.redshift-data` and detail type `Redshift Data Statement Status C
 `redshiftQueryId`, `state`, `rows` and `expireAt` in epoch seconds. Query ids match
 `DescribeStatement`; Floci derives them from statement ids rather than backend query ids.
 `resources` contains the cluster ARN, or the workgroup ARN for Floci's Serverless support.
-EventBridge rules can route these events to SQS, Lambda or other supported targets.
+EventBridge rules can route these events to SQS, Lambda or other supported targets. Rules can also
+submit SQL to a Redshift cluster or Serverless workgroup through native Redshift Data API targets;
+see [EventBridge Redshift Data API targets](eventbridge.md#redshift-data-api-targets).
 
 ## Spectrum relational queries
 

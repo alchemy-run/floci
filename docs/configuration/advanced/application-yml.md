@@ -172,6 +172,7 @@ floci:
       poll-interval-ms: 1000
       async-retry-delay-seconds: 60           # Wait before the first retry of a failed Event invocation; the second waits twice this
       container-idle-timeout-seconds: 300     # Remove idle containers after this
+      init-timeout-seconds: 10                # Time a cold runtime has to request its first invocation; the function's Timeout wins when longer
       # warm-pool-max-per-function:           # Idle containers kept per function (default max(4, cpus))
       warm-pool-max-total: 0                  # Idle containers kept across all functions; 0 = unbounded
       region-concurrency-limit: 1000          # Concurrent executions ceiling per region
@@ -181,6 +182,9 @@ floci:
         # allowed-paths:                      # Optional allowlist of host paths that may be bind-mounted
         #   - /home/user/projects
         #   - /tmp
+      reactive-s3-sync:
+        enabled: true                         # Re-deploy a function when the S3 object it was deployed from is overwritten
+        async: false                          # true = re-deploy in the background so the upload does not wait
 
     apigateway:
       enabled: true
@@ -414,10 +418,10 @@ Floci ships with `quarkus.log.min-level: TRACE`, so raising a single category to
 
 ```bash
 # SQS: log SendMessage/ReceiveMessage/DeleteMessage bodies and attributes
-QUARKUS_LOG_CATEGORY__IO_GITHUB_HECTORVENT_FLOCI_SERVICES_SQS__LEVEL=TRACE
+QUARKUS_LOG_CATEGORY__IO_FLOCI_AWS_SERVICES_SQS__LEVEL=TRACE
 
 # DynamoDB: log PutItem/GetItem/UpdateItem/DeleteItem items, Query/Scan counts
-QUARKUS_LOG_CATEGORY__IO_GITHUB_HECTORVENT_FLOCI_SERVICES_DYNAMODB__LEVEL=TRACE
+QUARKUS_LOG_CATEGORY__IO_FLOCI_AWS_SERVICES_DYNAMODB__LEVEL=TRACE
 ```
 
 **Or in `application.yml`:**
@@ -426,9 +430,9 @@ QUARKUS_LOG_CATEGORY__IO_GITHUB_HECTORVENT_FLOCI_SERVICES_DYNAMODB__LEVEL=TRACE
 quarkus:
   log:
     category:
-      "io.github.hectorvent.floci.services.sqs":
+      "io.floci.aws.services.sqs":
         level: TRACE
-      "io.github.hectorvent.floci.services.dynamodb":
+      "io.floci.aws.services.dynamodb":
         level: TRACE
 ```
 
@@ -437,7 +441,7 @@ quarkus:
 ```java
 new GenericContainer<>("floci/floci:latest")
     .withExposedPorts(4566)
-    .withEnv("QUARKUS_LOG_CATEGORY__IO_GITHUB_HECTORVENT_FLOCI_SERVICES_SQS__LEVEL", "TRACE");
+    .withEnv("QUARKUS_LOG_CATEGORY__IO_FLOCI_AWS_SERVICES_SQS__LEVEL", "TRACE");
 ```
 
 TRACE output includes the payload alongside the existing DEBUG line:

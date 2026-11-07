@@ -35,7 +35,6 @@ below for what's simplified.
 | `DeletePermissionVersion` | - |
 | `DeletePermission` | - |
 | `ListPrincipals` | Lists principals associated with visible shares (`POST /listprincipals`) |
-| `ListResourceSharePermissions` | Lists the permissions associated with a share: one default AWS managed permission (`AWSRAMDefaultPermission<Type>`, `AWS_MANAGED`) per distinct resource type in the share; unknown share ARN is `UnknownResourceException` (`POST /listresourcesharepermissions`) |
 | `TagResource` | Adds/overwrites tags on a resource share (`POST /tagresource`) |
 | `UntagResource` | Removes tags by key from a resource share (`POST /untagresource`) |
 | `GetResourceShareInvitations` | Lists invitations received by the caller, filterable by `resourceShareArns`/`resourceShareInvitationArns`. Empty for organization/OU-principal shares, which never get one (`POST /getresourceshareinvitations`) |

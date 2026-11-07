@@ -266,6 +266,7 @@ further divergences, both deliberate:
 |--------|-------------|
 | AdminCreateUser | Creates a user and sends the invitation, or with `MessageAction` `RESEND` gives an existing `FORCE_CHANGE_PASSWORD` user a new temporary password and sends the invitation again. See [AdminCreateUser invitations](#admincreateuser-invitations). Creating a user invokes the pre sign-up trigger with triggerSource `PreSignUp_AdminCreateUser`, the request's `ValidationData` and `ClientMetadata`, and `callerContext.clientId` `CLIENT_ID_NOT_APPLICABLE`. A trigger error refuses the user with `UserLambdaValidationException`, and its `autoConfirmUser`, `autoVerifyEmail` and `autoVerifyPhone` are ignored, as on AWS. |
 | AdminGetUser | Returns a user's stored attributes and status, and the MFA settings (`UserMFASettingList`, `PreferredMfaSetting`) once any is turned on. |
+| AdminListUserAuthEvents | Lists a user's recorded sign-in events, newest first, `MaxResults` 0 to 60 (0 or absent means 60) with an opaque `NextToken`. Requires threat protection as AWS does: a pool with `UserPoolTier` `PLUS` and `UserPoolAddOns.AdvancedSecurityMode` `AUDIT` or `ENFORCED`, otherwise `UserPoolAddOnNotEnabledException`. Floci stores `AdvancedSecurityMode` on any pool, and does not reject it on a non-`PLUS` pool at `CreateUserPool` or `UpdateUserPool`; such a pool just has no events. Only sign-ins made while the pool qualifies are recorded, for a user that exists, through `InitiateAuth` or `AdminInitiateAuth` with `USER_PASSWORD_AUTH`, `ADMIN_USER_PASSWORD_AUTH`, `ADMIN_NO_SRP_AUTH` or `USER_SRP_AUTH`. `CUSTOM_AUTH`, `USER_AUTH`, refresh, managed login, federated sign-in and passwordless sign-in record nothing. Every event has `EventType` `SignIn`. A wrong password (or SRP proof) is `Fail` with `Password` `Failure`. A right password that gets tokens at once is `Pass` with `Password` `Success`. A right password followed by a challenge (`NEW_PASSWORD_REQUIRED`, `SMS_MFA`, `EMAIL_OTP`, `SOFTWARE_TOKEN_MFA`, `SELECT_MFA_TYPE`, `MFA_SETUP`) is `InProgress`, and becomes `Pass` when the challenges end in tokens, with `Mfa` `Success` added when an MFA code was verified. A wrong MFA code leaves the event `InProgress`, as does an abandoned challenge. Floci does no risk evaluation and captures no device or location data, so `EventRisk`, `EventContextData` and `EventFeedback` are never returned. `SignUp`, `ForgotPassword`, `PasswordChange` and `ResendCode` events are not recorded. Events are removed with the user (`AdminDeleteUser`, `DeleteUser`) or the pool. |
 | AdminDeleteUser | Deletes a user from a user pool. An API Gateway Cognito authorizer rejects the user's existing tokens afterwards. |
 | AdminSetUserPassword | Sets a user's password and permanent-password status. |
 | AdminUpdateUserAttributes | Updates attributes for a user in a user pool. |
@@ -381,6 +382,10 @@ requires a fresh code in `SOFTWARE_TOKEN_MFA_CODE`. Its `ChallengeParameters` ca
 `USER_ID_FOR_SRP`, the user's actual username rather than an alias (the `sub` in a pool
 with `UsernameAttributes`), to send back as `USERNAME` and to compute `SECRET_HASH` from,
 plus `FRIENDLY_DEVICE_NAME` when `VerifySoftwareToken` was given a `FriendlyDeviceName`.
+As on AWS, a code is accepted for one `SOFTWARE_TOKEN_MFA` challenge only: answering
+another with a code from the same 30-second step, or an earlier one, fails with
+`ExpiredCodeException` (`Your software token has already been used once.`) until the
+authenticator shows its next code. The code given to `VerifySoftwareToken` is not counted.
 Both token-management actions also accept an access token for an already authenticated
 user. Sessions expire with the app client's `AuthSessionValidity` and cannot be replayed
 after completion.
@@ -540,6 +545,15 @@ shortcut is not implemented yet.
 
 Any other `AuthFlow` value is rejected with `InvalidParameterException` and no tokens are issued.
 
+`CUSTOM_AUTH` can start with `CHALLENGE_NAME=SRP_A` and `SRP_A`. Floci seeds the
+DefineAuthChallenge history with `SRP_A=true`, issues a real `PASSWORD_VERIFIER` challenge,
+and verifies the SRP proof before returning to the trigger's custom challenges. Temporary-password
+users complete `NEW_PASSWORD_REQUIRED` within the same custom sequence. Each response must match
+the issued session's client, user and challenge; sessions are consumed once. Plain custom
+challenges remain supported. `RESET_REQUIRED` still requires password recovery first because
+Floci clears the SRP verifier when an administrator resets the password.
+See [AWS's custom SRP sequence](https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-challenge.html#user-pool-lambda-challenge-srp-authentication).
+
 The challenge `Session` of a `USER_SRP_AUTH`, `CUSTOM_AUTH` or `USER_AUTH` sign-in is valid for 3 minutes
 from when it was issued, the AWS default for the client's `AuthSessionValidity`. Answering the challenge with
 an older session fails with `NotAuthorizedException` (`Invalid session for the user, session is expired.`)
@@ -556,6 +570,19 @@ empty list, matching AWS. It is enforced as if it had `ALLOW_REFRESH_TOKEN_AUTH`
 `ALLOW_CUSTOM_AUTH`, the default AWS documents for such a client: only the enforcement uses that default, not
 the stored or returned value. A client that signs in with `USER_PASSWORD_AUTH`, `ADMIN_USER_PASSWORD_AUTH` or
 `USER_AUTH` must list the matching `ALLOW_` value.
+
+## Custom Message Trigger
+
+`CustomMessage` requests include the `{####}` code placeholder, the `{##Click Here##}`
+link placeholder, and the user's current `cognito:user_status` in `userAttributes`.
+`usernameParameter` is `null` except for an AdminCreateUser invitation, where it is
+`{username}`. The initial `response` contains `emailMessage`, `emailSubject`, and
+`smsMessage`, each set to `null` for the function to customize.
+
+`CustomMessage` events omit `request.clientMetadata` when metadata is absent or empty,
+including `CustomMessage_Authentication`, which does not forward `InitiateAuth`
+metadata. Custom Email Sender events retain the key with `null` when
+there is no metadata; their event shape is distinct.
 
 ## Custom Email Sender Trigger
 
@@ -612,6 +639,17 @@ attribute to `true`.
 
 Without the setting, `UpdateUserAttributes` replaces the value immediately and
 sets the matching `*_verified` attribute to `false` until verification succeeds.
+A failed hand-over of its code to `CustomEmailSender` still keeps the complete
+attribute update, including other attributes in the same request. The request
+returns the delivery error, and the undelivered code is withdrawn so another
+verification code can be requested after the sender is working again.
+Codes issued for earlier destinations of changed contacts are also withdrawn,
+including when the replacement is pending. Codes for unchanged contacts that
+the failed delivery did not reach remain usable.
+`AdminUpdateUserAttributes` uses the same contact update and failed-sender handling.
+It skips verification delivery when the request sets the matching `*_verified`
+attribute to `true`. Otherwise, retrying an identical admin update sends a new
+code if the previous delivery failed and left no usable code.
 A verification code is still sent to the replacement value, but Cognito no
 longer retains or exposes the old value. For alias attributes, the old alias is
 removed immediately and the replacement becomes usable for sign-in only after
@@ -762,14 +800,15 @@ client-credentials flow:
 
 ### Managed login
 
-Managed login signs in the pool's own users with authorization code and, optionally, PKCE.
-The client needs `COGNITO` in `SupportedIdentityProviders`, `AllowedOAuthFlows=["code"]` and
+Managed login offers the client's identity providers with authorization code and, optionally, PKCE.
+Native sign-in needs `COGNITO` in `SupportedIdentityProviders`; a federated-only client gets provider
+links without a native sign-in form. The client needs `AllowedOAuthFlows=["code"]` and
 the callback in `CallbackURLs`. No domain is needed; on a custom domain the same flow runs at
 `/oauth2/authorize`, `/login` and `/logout`.
 
 1. `GET /cognito-idp/oauth2/authorize` redirects to `/cognito-idp/login` with the request's
    parameters, `login_hint` included. If the browser already has a managed login session in the
-   pool, it skips the form and redirects straight to the callback with a code, as AWS does; the
+   pool and the client allows `COGNITO`, it skips the form and redirects straight to the callback with a code; the
    code's tokens carry the `auth_time` of the session's sign-in, not of this request. A
    `scope` the client's `AllowedOAuthScopes` does not include is refused first, as on AWS, with a
    redirect to the callback carrying `error=invalid_request`, `error_description=invalid_scope`
@@ -777,7 +816,9 @@ the callback in `CallbackURLs`. No domain is needed; on a custom domain the same
 2. `GET /cognito-idp/login` renders a plain username and password form, with the username filled
    in from `login_hint` when the request has one. The form carries the request in hidden fields and
    a CSRF token that must match the `XSRF-TOKEN` cookie set with it. With choice-based sign-in
-   (below), it asks for the username alone.
+   (below), it asks for the username alone. Links for the client's external providers retain the
+   authorization request, including state, nonce and PKCE. A client without `COGNITO` gets only
+   these links; native credential submission and explicit `identity_provider=COGNITO` are refused.
 3. `POST /cognito-idp/login` checks the password as `USER_PASSWORD_AUTH` does, including
    sign-in aliases and the pre and post authentication and user migration triggers, but
    without the client's `ExplicitAuthFlows`. On success it sets a `cognito` session cookie

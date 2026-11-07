@@ -8,6 +8,7 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.services.athena.AthenaClient;
 import software.amazon.awssdk.services.athena.model.Datum;
@@ -54,6 +55,7 @@ import software.amazon.awssdk.services.s3.model.S3Object;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 
@@ -76,6 +78,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @DisplayName("Firehose data format conversion delivery (JSON to Parquet)")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@ResourceLock("floci-duck")
 class FirehoseParquetDeliveryTest {
 
     private static final int BUFFERING_INTERVAL_SECONDS = 5;
@@ -276,10 +279,10 @@ class FirehoseParquetDeliveryTest {
         byte[] body = s3.getObject(GetObjectRequest.builder().bucket(bucket).key(key).build())
                 .readAllBytes();
         assertThat(body.length).isGreaterThan(PARQUET_MAGIC.length * 2);
-        assertThat(java.util.Arrays.copyOfRange(body, 0, PARQUET_MAGIC.length))
+        assertThat(Arrays.copyOfRange(body, 0, PARQUET_MAGIC.length))
                 .as("delivered object must start with the Parquet magic")
                 .isEqualTo(PARQUET_MAGIC);
-        assertThat(java.util.Arrays.copyOfRange(body, body.length - PARQUET_MAGIC.length, body.length))
+        assertThat(Arrays.copyOfRange(body, body.length - PARQUET_MAGIC.length, body.length))
                 .as("delivered object must end with the Parquet magic")
                 .isEqualTo(PARQUET_MAGIC);
     }

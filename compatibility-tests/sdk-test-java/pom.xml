@@ -74,6 +74,10 @@
     <dependencies>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
+            <artifactId>quicksight</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
             <artifactId>servicequotas</artifactId>
         </dependency>
         <dependency>
@@ -151,6 +155,10 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>kms</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>paymentcryptography</artifactId>
         </dependency>
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
@@ -256,6 +264,11 @@
         <dependency>
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>eventbridge</artifactId>
+        </dependency>
+        <!-- EventBridge V2 client -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>eventbridgev2</artifactId>
         </dependency>
         <!-- CloudHSM v2 client -->
         <dependency>
@@ -644,6 +657,11 @@
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
             <version>42.7.11</version>
+        </dependency>
+        <dependency>
+            <groupId>software.amazon.jdbc</groupId>
+            <artifactId>aws-advanced-jdbc-wrapper</artifactId>
+            <version>4.5.0</version>
         </dependency>
         <dependency>
             <groupId>com.mysql</groupId>

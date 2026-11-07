@@ -14,6 +14,11 @@ setup() {
         '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}' \
         >/dev/null 2>&1 || true
     aws_cmd s3api create-bucket --bucket "$BUCKET" >/dev/null 2>&1 || true
+    # AWS takes code only from a versioned bucket that lets Lambda read it.
+    aws_cmd s3api put-bucket-versioning --bucket "$BUCKET" --versioning-configuration Status=Enabled >/dev/null
+    aws_cmd s3api put-bucket-policy --bucket "$BUCKET" --policy \
+        "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":{\"Service\":\"lambda.amazonaws.com\"},\"Action\":[\"s3:GetObject\",\"s3:GetObjectVersion\"],\"Resource\":\"arn:aws:s3:::$BUCKET/*\"}]}" \
+        >/dev/null
     # A revision whose code is not a zip fails. python3 ships in the CLI image.
     python3 -c 'import sys, zipfile
 with zipfile.ZipFile(sys.argv[1], "w") as z:
@@ -27,7 +32,10 @@ teardown() {
         aws_cmd iam delete-role-policy --role-name "awscli-lambdaweb-$FUNCTION_NAME" --policy-name awscli-lambdaweb-logs >/dev/null 2>&1 || true
         aws_cmd iam delete-role --role-name "awscli-lambdaweb-$FUNCTION_NAME" >/dev/null 2>&1 || true
     fi
-    aws_cmd s3 rb "s3://$BUCKET" --force >/dev/null 2>&1 || true
+    for version in $(aws_cmd s3api list-object-versions --bucket "$BUCKET" --query 'Versions[].VersionId' --output text 2>/dev/null); do
+        aws_cmd s3api delete-object --bucket "$BUCKET" --key app.zip --version-id "$version" >/dev/null 2>&1 || true
+    done
+    aws_cmd s3api delete-bucket --bucket "$BUCKET" >/dev/null 2>&1 || true
     aws_cmd iam delete-role --role-name "$ROLE_NAME" >/dev/null 2>&1 || true
 }
 

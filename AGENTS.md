@@ -71,11 +71,11 @@ Floci follows a layered design:
 
 ## Package Layout
 
-- `io.github.hectorvent.floci.config`
-- `io.github.hectorvent.floci.core.common`
-- `io.github.hectorvent.floci.core.storage`
-- `io.github.hectorvent.floci.lifecycle`
-- `io.github.hectorvent.floci.services.<service>`
+- `io.floci.aws.config`
+- `io.floci.aws.core.common`
+- `io.floci.aws.core.storage`
+- `io.floci.aws.lifecycle`
+- `io.floci.aws.services.<service>`
 
 Typical service structure:
 
@@ -123,13 +123,19 @@ Floci serves every AWS partition, not only the commercial one, so a literal that
 prints correctly in `us-east-1`. `make partition-check` (CI: Partition Literals) inventories
 `src/main/java` for `arn:aws:` prefixes, `amazonaws.com` hosts, Route 53 hosted-zone ids,
 hand-rolled `arn:aws[a-z-]*:` regexes, `Arn.of(...)` calls with a blank region and comparisons
-with the literal `"aws"` against `tools/partition/baseline.tsv`, per file. The baseline is empty, so any new one fails.
+with the literal `"aws"` against `tools/partition/baseline.tsv`, per file. It also inventories
+ARNs handled by hand: `"arn:" + ...` concatenation (`arn-concat`, except a pattern built from
+`PARTITION_REGEX`), `startsWith("arn:")` checks (`arn-probe`) and `split(":")` on a value named
+`*arn*`/`*Arn*` (`arn-split`). Every category's baseline is empty, so any new site fails.
 A literal in a new file fails, growth in an existing file fails, and a drop fails until you
 run `make partition-baseline` and commit the smaller baseline.
 
 - Mint ARNs through `AwsArnUtils.Arn.of(...)` / `RegionResolver.buildArn(...)`, recognise
-  them with `AwsArnUtils.isArn` / `PARTITION_REGEX`, and derive hosts from the region's
-  DNS suffix (`AwsRegions.dnsSuffixFor`).
+  them with `AwsArnUtils.isArn` / `PARTITION_REGEX`, read their fields with
+  `AwsArnUtils.parse(...)`, and derive hosts from the region's
+  DNS suffix (`AwsRegions.dnsSuffixFor`). A parameter that takes a name or an ARN, where AWS
+  answers a malformed ARN with its own error, tells the two apart with
+  `AwsArnUtils.looksLikeArn` (any value starting `arn:`); `isArn` would treat that value as a name.
 - A regionless ARN (IAM, STS, CloudFront, Organizations, an S3 bucket) never goes through
   `Arn.of(service, "", ...)`, which silently means `aws`: use `RegionResolver.buildGlobalArn`
   for the request's partition, or `Arn.global(partition, ...)` with the resource's own
@@ -309,7 +315,8 @@ When adding functionality:
    value, while strict SDKs (Go, Java) reject the whole response. `javap -c` on the SDK
    model class shows the traits on each `SdkField`
 9. Add `<Svc>ServiceTest` and `<Svc>IntegrationTest`
-10. If the service mints ARNs or AWS hosts (`buildArn`, `Arn.of`, `new AwsArnUtils.Arn`, `dnsSuffixFor`, `AwsEndpoints`),
+10. If the service mints ARNs or AWS hosts (`buildArn`, `Arn.of`, `new AwsArnUtils.Arn`, `dnsSuffixFor`, `AwsEndpoints`,
+   or a `"arn:" + ...` concatenation),
    add a case to `PartitionCrossServiceSmokeIntegrationTest` and its `COVERED_PACKAGES`, or a row
    with a reason to `src/test/resources/partition/smoke-exemptions.tsv`;
    `PartitionSmokeInventoryTest` fails until one of the two exists
@@ -368,6 +375,10 @@ the registry and stubs what nothing serves; never add type-specific code to it.
 10. A schema `readOnlyProperties` entry you cannot set goes in
     `src/test/resources/cloudformation/getatt-attribute-gaps.tsv` with a reason;
     `CfnSchemaCoverageTest` requires every unset attribute to be fixed or recorded.
+    A new type also needs its row in `schema-surface.tsv` (same directory): run
+    `make cfn-schema-surface-sync`. A writable property the provisioner never reads goes in
+    `writable-property-gaps.tsv`. A provisioner arm that calls `droppedProperties` records, for each
+    writable property it reads, what a drop does in `drop-policy.tsv` (same directory).
 
 References: `SqsCfnProvisioner` (smallest), `Ec2LaunchTemplateCfnProvisioner`
 (update-in-place and replacement), `LogsCfnProvisioner` (reconcile-vs-replace update).
@@ -457,7 +468,7 @@ not a precedent.
 - JBoss Logging, in a field named `LOG`, using the parameterized `...v()` form.
   No string concatenation in log calls.
 - No `printStackTrace`, anywhere. No `System.out` or `System.err` in `src/main`; the
-  one exception is the CLI entry point `io.github.hectorvent.floci.tools.ami.AmiImageTool`,
+  one exception is the CLI entry point `io.floci.aws.tools.ami.AmiImageTool`,
   where stdout is the program's output. A few tests print a failure repro just before
   failing, which is the only good reason to print from a test: an assertion message
   usually says it better.

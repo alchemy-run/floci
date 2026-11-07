@@ -27,8 +27,6 @@ RUN mvn package -DskipTests -q
 # Stage 2: Runtime
 FROM eclipse-temurin:25-jre-noble
 
-ARG VERSION=latest
-ENV FLOCI_VERSION=${VERSION}
 ENV FLOCI_STORAGE_PERSISTENT_PATH=/app/data
 # Alchemy Lambda StartSyncExecution targets https://sync-states.{region}.amazonaws.com:443
 # (Smithy hostPrefix "sync-"). TLS + the TlsProxyServer 443 bind + CA mount in
@@ -71,6 +69,9 @@ RUN chown -R 1001:root /app/quarkus-app
 
 COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 COPY --chmod=755 docker/healthcheck.sh /usr/local/bin/
+
+ARG VERSION=latest
+ENV FLOCI_VERSION=${VERSION}
 
 VOLUME /app/data
 

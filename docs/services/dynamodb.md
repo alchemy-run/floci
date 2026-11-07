@@ -3,6 +3,21 @@
 **Protocol:** JSON 1.0 (`X-Amz-Target: DynamoDB_20120810.*`)
 **Endpoint:** `POST http://localhost:4566/`
 
+## ListTables authorization
+
+With IAM enforcement enabled, `ListTables` evaluates the regional table collection
+`arn:<partition>:dynamodb:<region>:<account>:table/*`. A matching allow permits listing;
+a matching explicit deny overrides it. A grant for one table or a table-name prefix
+does not permit listing, and a grant in another account or Region does not apply.
+The listing is not filtered to the caller's individually authorized tables.
+
+This resource matching was checked against live AWS with isolated role sessions.
+Pagination and ignored table selectors do not change the collection being authorized.
+Other DynamoDB operations retain their own authorization resources.
+The generated IAM request-resource table records `ListTables` as a measured correction to
+the Service Reference. Other DynamoDB operations keep their existing resource builders,
+including batch, transaction and PartiQL table extraction.
+
 ## Supported Actions
 
 | Action | Description |
@@ -30,6 +45,9 @@
 | `ListTagsOfResource` | List tags |
 | `DescribeContinuousBackups` | Get the point-in-time recovery status and restore window |
 | `UpdateContinuousBackups` | Enable or disable point-in-time recovery |
+| `UpdateContributorInsights` | Enable or disable CloudWatch Contributor Insights on a table or global secondary index |
+| `DescribeContributorInsights` | Get the Contributor Insights status, mode and rule names of a table or global secondary index |
+| `ListContributorInsights` | List the tables and global secondary indexes with Contributor Insights enabled |
 | `RestoreTableToPointInTime` | Create a new table from a table as it was at a point in time |
 | `CreateBackup` | Take an on-demand backup of a table |
 | `DescribeBackup` | Get a backup and the table it was taken from |
@@ -39,7 +57,7 @@
 | `DescribeKinesisStreamingDestination` | List Kinesis streaming destinations |
 | `EnableKinesisStreamingDestination` | Enable Kinesis streaming for a table |
 | `DisableKinesisStreamingDestination` | Disable Kinesis streaming for a table |
-| `ExportTableToPointInTime` | Export table data to S3 as gzip NDJSON |
+| `ExportTableToPointInTime` | Export table data, or the changes of a period, to S3 |
 | `CreateGlobalTable` | Make an existing table a global table (2017.11.29) |
 | `DescribeGlobalTable` | Read a global table's replication group |
 | `UpdateGlobalTable` | Add or remove replica regions |
@@ -80,6 +98,20 @@ the AWS [2011-12-05 DescribeTable](https://docs.aws.amazon.com/amazondynamodb/la
 and [BatchWriteItem](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/API_BatchWriteItem_v20111205.html)
 documentation.
 
+## Query and Scan IAM selection
+
+With IAM enforcement enabled, `dynamodb:Select` includes the effective selection
+for `Query` and `Scan`: `ALL_ATTRIBUTES` for an unprojected table read,
+`ALL_PROJECTED_ATTRIBUTES` for an unprojected index read, and
+`SPECIFIC_ATTRIBUTES` when a nonblank projection expression or a nonempty
+attribute list is supplied. Blank expressions and empty lists retain the table or
+index default for IAM evaluation. An explicit `Select` value
+is preserved. Legacy Query uses `Count` and `AttributesToGet` for the same purpose.
+
+`dynamodb:Attributes` still describes attributes named in the request, not all
+attributes returned. An attributes-only condition does not require a projection;
+use a `dynamodb:Select` condition when the policy must require specific attributes.
+
 ## Legacy conditional requests
 
 The native backend accepts `KeyConditions` together with `FilterExpression`.
@@ -113,7 +145,7 @@ DynamoDB Streams are supported via a separate target (`DynamoDBStreams_20120810`
 | `GetRecords` | Read stream records from a shard |
 
 Redshift zero-ETL integrations can consume these stream records directly. See the
-[Redshift DynamoDB zero-ETL](redshift.md#dynamodb-zero-etl) section for the supported target,
+[Redshift DynamoDB zero-ETL](redshift.md#dynamodb-zero-etl) section for the supported sources and targets,
 landing table, checkpoint, and retry behavior.
 
 Stream records are held in memory. `POST /_floci/state/reset` removes every stream along with the
@@ -262,7 +294,9 @@ For write-heavy workloads under persistent setups, configuring `FLOCI_STORAGE_SE
 
 ### Item layout on disk
 
-With the default `single-file` layout, every table's items live in one `dynamodb-items.json`, and any item write saves all of them: `persistent` rewrites the file on the write, `hybrid` on the next flush, and `wal` appends the whole table to its log and rewrites the whole snapshot on compaction. A small table that changes often, such as a heartbeat table, then keeps rewriting every large table beside it.
+In `memory` mode, item writes update the live concurrent table map without copying the table, with either layout.
+
+With the default `single-file` layout and a durable storage mode, every table's items live in one `dynamodb-items.json`, and any item write saves all of them: `persistent` rewrites the file on the write, `hybrid` on the next flush, and `wal` appends the whole table to its log and rewrites the whole snapshot on compaction. A small table that changes often, such as a heartbeat table, then keeps rewriting every large table beside it.
 
 `FLOCI_STORAGE_SERVICES_DYNAMODB_ITEM_LAYOUT=per-table` stores items under `dynamodb-items/` instead, as `FLOCI_STORAGE_SERVICES_DYNAMODB_ITEM_SHARDS` files per table (one by default). An item belongs to the file chosen by a hash of its key, and a write saves only the items it touched:
 
@@ -421,7 +455,7 @@ Deviations from AWS:
 
 ## Export to S3
 
-Export table data to an S3 bucket as gzip-compressed NDJSON (DynamoDB JSON format). As on AWS, the table needs point-in-time recovery:
+Export table data to an S3 bucket as gzip-compressed lines of DynamoDB JSON (`DYNAMODB_JSON`, the default) or Amazon Ion text (`ION`). As on AWS, the table needs point-in-time recovery:
 
 ```bash
 # Create a bucket to receive the export
@@ -452,9 +486,22 @@ aws dynamodb list-exports \
   --endpoint-url $AWS_ENDPOINT_URL
 ```
 
-The export writes to `s3://<bucket>/<prefix>/AWSDynamoDB/<exportId>/data/` as one or more `.json.gz` files, along with `manifest-summary.json` and `manifest-files.json`, the same layout as real AWS DynamoDB exports.
+The export writes `_started`, `manifest-summary.json`, `manifest-files.json` and an `.md5` file for each manifest to `s3://<bucket>/<prefix>/AWSDynamoDB/<exportId>/`, and the items to a `.json.gz` or `.ion.gz` file in its `data/` folder, the layout AWS uses. AWS writes one data file per partition. Floci writes one. An Ion line is `$ion_1_0 {Item:{...}}`, with sets annotated as `$dynamodb_SS`, `$dynamodb_NS` and `$dynamodb_BS`, and numbers as Ion decimals. As on AWS, every file is a multipart upload of one part, so its ETag ends in `-1`. As on AWS, an `S3Prefix` shorter than 3 characters or longer than 948 UTF-8 bytes is refused, and no slash is added after a prefix that ends with one.
 
 The export holds the items as they were at `ExportTime`, or at the request time when `ExportTime` is not set. As on AWS, `ExportTime` must not be before `EarliestRestorableDateTime` or the table creation, and must not be in the future. A time after `LatestRestorableDateTime` is accepted.
+
+An incremental export writes the items that changed in a period:
+
+```bash
+aws dynamodb export-table-to-point-in-time \
+  --table-arn arn:aws:dynamodb:us-east-1:000000000000:table/Users \
+  --s3-bucket my-exports \
+  --export-type INCREMENTAL_EXPORT \
+  --incremental-export-specification ExportFromTime=2026-01-01T00:00:00Z,ExportToTime=2026-01-01T01:00:00Z,ExportViewType=NEW_AND_OLD_IMAGES \
+  --endpoint-url $AWS_ENDPOINT_URL
+```
+
+The period starts at `ExportFromTime` and ends just before `ExportToTime`, or at the request time when `ExportToTime` is not set. Each line is a record with `Metadata.WriteTimestampMicros`, `Keys`, and the `OldImage` and `NewImage` of the item. `ExportViewType` `NEW_IMAGE` leaves out `OldImage`. An item that ends the period as it started it, such as one inserted and then deleted, gets no record. As on AWS, the images list attribute names and set members in sorted order, and the data files go to the shared `<prefix>/AWSDynamoDB/data/` folder. As on AWS, the period must be at least 15 minutes and at most 24 hours, must not start before the table creation or `EarliestRestorableDateTime`, and must not end in the future. Floci keeps the time of a write in milliseconds, so `WriteTimestampMicros` always ends in `000`.
 
 ## Import from S3
 
@@ -522,6 +569,21 @@ Deleting a table with point-in-time recovery enabled leaves a `SYSTEM` backup na
 
 Deviations from AWS: enabling point-in-time recovery right after `CreateTable` is accepted at once. AWS sometimes refuses it for a few seconds with `ContinuousBackupsUnavailableException`. `EarliestRestorableDateTime` is rounded down to the second, as on AWS. A restore or an export at that time on AWS leaves out the writes made earlier in that second, before point-in-time recovery was enabled. Floci keeps changes only from the moment it is enabled, so it includes those writes.
 
+
+## Contributor Insights
+
+`UpdateContributorInsights` turns CloudWatch Contributor Insights on or off for a table or one of its global secondary indexes. `ContributorInsightsMode` is `ACCESSED_AND_THROTTLED_KEYS` (the default) or `THROTTLED_KEYS`. The setting is kept with the table, so it is gone when the table or the index is deleted, and a restored table starts without it.
+
+```bash
+aws dynamodb update-contributor-insights --table-name Users \
+  --contributor-insights-action ENABLE --endpoint-url $AWS_ENDPOINT_URL
+
+aws dynamodb describe-contributor-insights --table-name Users --endpoint-url $AWS_ENDPOINT_URL
+```
+
+`DescribeContributorInsights` lists the rule names AWS would create, in the form `DynamoDBContributorInsights-<kind>-<resource>-<creation time in ms>`, where the resource is the table name, or `<table>-<index>` for an index. The kinds are `PKC` and `PKT`, plus `SKC` and `SKT` when the table or index has a sort key. `THROTTLED_KEYS` mode has only the throttled-key rules (`PKT`, `SKT`). A table or index that never had Contributor Insights enabled reads `DISABLED`. `ListContributorInsights` returns the enabled tables and indexes, at most 100 per page.
+
+Deviations from AWS: `UpdateContributorInsights` answers `ENABLING` or `DISABLING` as on AWS, but the change applies at once, so the next `DescribeContributorInsights` reads `ENABLED` or `DISABLED`. Floci creates no CloudWatch rules and collects no key statistics, and the status is never `FAILED`.
 
 ## Kinesis change data capture (CDC)
 

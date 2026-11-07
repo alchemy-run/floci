@@ -33,14 +33,44 @@ each exclusion is deliberate:
 - **A tagging action alone.** EC2 lists `CreateCapacityReservationDateChangeQuote` as authorized by
   `ec2:CreateTags` only, the tag-on-create permission with the operation's own action missing.
 
+Two kinds of listed action do not count towards "exactly one":
+
+- **A Billing console permission.** Budgets lists `CreateNotification` as authorized by
+  `budgets:ModifyBudget` and `aws-portal:ModifyBilling`, and `DescribeBudgets` by
+  `budgets:ViewBudget` and `aws-portal:ViewBilling`. The `aws-portal` actions gate the Billing
+  console: the Service Authorization Reference has `aws-portal:UpdateConsoleActionSetEnforced`
+  choosing "whether existing or fine-grained IAM actions will be used to control authorization to
+  Billing, Cost Management, and Account consoles", and the Billing and Cost Management user guide
+  says the `aws-portal` namespace "reached the end of standard support on July 2023" and that
+  "Programmatic requests to AWS Cost Explorer, AWS Cost and Usage Reports, and AWS Budgets remains
+  unaffected".
+- **A tagging action beside one other.** Budgets lists `CreateBudget` as authorized by
+  `budgets:ModifyBudget` and `budgets:TagResource`, and the tagging action is the tag-on-create
+  permission: the Service Authorization Reference has `ModifyBudget` "Grants permission to create
+  and modify budgets", adding "Creating a budget with tags also requires the 'budgets:TagResource'
+  permission".
+
+The file also lists, for each credential scope whose REST routes `rest-routes.json` reads (the
+scopes it leaves to the registry's rules, `handRouted`, aside), the actions of that namespace the
+reference gives no resource type, from its `Actions`. A REST request no rule of `IamActionRegistry`
+maps is checked as the operation whose route it matches only when that operation's action is one of
+them. Floci checks a REST request on `*` until it reads the resources in its path, and AWS authorizes
+such an action on `*` too, so the check is the one AWS makes. An action AWS authorizes on a resource
+stays unchecked instead: checked on `*`, a grant scoped to its resource would be refused. These are
+read from `Actions`, not `Operations`, because the reference lists the operations of one SDK client
+per namespace: OpenSearch's are the `es` client's alone, none of the `opensearch` client's, whose
+operations are named after `es` actions all the same.
+
 The endpoint is live rather than a pinned dependency, so a fresh generation is not byte-identical.
 As with `regen_iam_action_resources.py`, what must hold is that nothing here is invented:
 
 - `--check` is offline and structural: sorted, every name usable, every action in its own
-  namespace and differing from the operation, and the anchor cases still present.
+  namespace and differing from the operation, and the anchor cases still present; and the actions
+  without resource types are listed for exactly the scopes `rest-routes.json` reads routes for.
 - `--verify` is the real gate and needs the network. Every vendored entry must still be what AWS
-  publishes for that operation. An entry AWS has added is reported without failing: being behind
-  leaves that operation authorized as its own name, which is where it was before this existed.
+  publishes for that operation, and every action listed without resource types must still have
+  none. An entry AWS has added is reported without failing: being behind leaves that operation
+  authorized as its own name, or that route unchecked, which is where it was before this existed.
 
 Run from anywhere in the repo:
     python3 tools/aws/regen_iam_authorized_actions.py           # rewrite the vendored file in place
@@ -61,6 +91,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 OUTPUT = REPO_ROOT / "src/main/resources/aws/iam-authorized-actions.json"
+ROUTES = REPO_ROOT / "src/main/resources/aws/rest-routes.json"
 INDEX_URL = "https://servicereference.us-east-1.amazonaws.com/"
 FETCH_TIMEOUT_SECONDS = 30
 FETCH_WORKERS = 8
@@ -73,14 +104,21 @@ NAME_RE = re.compile(r"^[A-Za-z][A-Za-z0-9]{0,127}$")
 TAGGING_ACTION_RE = re.compile(r"^(CreateTags|DeleteTags|TagResource|UntagResource|CreateOrUpdateTags"
                                r"|AddTags\w*|RemoveTags\w*)$")
 
+# The namespaces of console permissions, which an operation's authorized actions may list beside
+# the action its API call is authorized as.
+CONSOLE_NAMESPACES = {"aws-portal"}
+
 # The cases that justify vendoring this: batch operations authorized as their single-item action,
-# none of them an IAM action of its own.
+# and Budgets operations authorized as ModifyBudget or ViewBudget, none of them an IAM action of
+# its own.
 ANCHORS = {
     ("sqs", "SendMessageBatch"): "sqs:SendMessage",
     ("sqs", "DeleteMessageBatch"): "sqs:DeleteMessage",
     ("sqs", "ChangeMessageVisibilityBatch"): "sqs:ChangeMessageVisibility",
     ("sns", "PublishBatch"): "sns:Publish",
     ("dynamodb", "TransactGetItems"): "dynamodb:GetItem",
+    ("budgets", "CreateBudget"): "budgets:ModifyBudget",
+    ("budgets", "DescribeBudgets"): "budgets:ViewBudget",
 }
 
 
@@ -129,7 +167,7 @@ def authorized_actions_from(documents: list[dict]) -> dict[str, dict[str, str]]:
             name = operation.get("Name") if isinstance(operation, dict) else None
             if not isinstance(name, str) or not NAME_RE.match(name):
                 raise ValueError(f"{namespace}: operation entry without a usable 'Name': {operation!r}")
-            authorized = _authorized_actions(namespace, operation)
+            authorized = _counted_actions(namespace, _authorized_actions(namespace, operation))
             mapped = None
             if len(authorized) == 1 and len(_sdk_clients(namespace, operation)) <= 1:
                 service, action = authorized[0]
@@ -156,6 +194,15 @@ def _authorized_actions(namespace: str, operation: dict) -> list[tuple[str, str]
     return [(entry["Service"], entry["Name"]) for entry in authorized]
 
 
+def _counted_actions(namespace: str, authorized: list[tuple[str, str]]) -> list[tuple[str, str]]:
+    """The authorized actions that count towards the operation's one action: none of a console's,
+    and, beside one other action, none of the namespace's tagging actions."""
+    counted = [(service, action) for service, action in authorized if service not in CONSOLE_NAMESPACES]
+    untagged = [(service, action) for service, action in counted
+                if service != namespace or not TAGGING_ACTION_RE.match(action)]
+    return untagged if len(untagged) == 1 else counted
+
+
 def _sdk_clients(namespace: str, operation: dict) -> set[str]:
     """The SDK clients the operation is listed for."""
     sdks = operation.get("SDK") or []
@@ -166,7 +213,31 @@ def _sdk_clients(namespace: str, operation: dict) -> set[str]:
     return {sdk["Name"] for sdk in sdks}
 
 
-def build(documents: list[dict], provenance: str) -> dict:
+def routed_namespaces(routes: dict) -> list[str]:
+    """The credential scopes whose REST routes the vendored routes read: every model's but those the registry's
+    rules authorize alone."""
+    hand_routed = routes.get("handRouted") or {}
+    return sorted({model["credentialScope"] for model in (routes.get("models") or {}).values()
+                   if model["credentialScope"] not in hand_routed})
+
+
+def actions_without_resource_types(documents: list[dict], namespaces: list[str]) -> dict[str, list[str]]:
+    """Each of the namespaces' actions the reference gives no resource type, sorted."""
+    by_name = {document.get("Name"): document for document in documents}
+    missing = [namespace for namespace in namespaces if namespace not in by_name]
+    if missing:
+        raise ValueError(f"the Service Reference has no namespace {', '.join(missing)}, whose REST routes "
+                         f"rest-routes.json reads")
+    found = {}
+    for namespace in namespaces:
+        actions = by_name[namespace].get("Actions") or []
+        if not all(isinstance(action, dict) and isinstance(action.get("Name"), str) for action in actions):
+            raise ValueError(f"{namespace}: 'Actions' is not a list of objects with a string 'Name'")
+        found[namespace] = sorted(action["Name"] for action in actions if not action.get("Resources"))
+    return found
+
+
+def build(documents: list[dict], provenance: str, routed: list[str]) -> dict:
     return {
         "_source": {
             "generator": "tools/aws/regen_iam_authorized_actions.py",
@@ -175,6 +246,7 @@ def build(documents: list[dict], provenance: str) -> dict:
             "note": "make iam-authorized-actions-verify checks every entry against AWS.",
         },
         "authorizedActions": authorized_actions_from(documents),
+        "actionsWithoutResourceTypes": actions_without_resource_types(documents, routed),
     }
 
 
@@ -182,9 +254,9 @@ def render(document: dict) -> str:
     return json.dumps(document, indent=2) + "\n"
 
 
-def validate(document: dict) -> list[str]:
+def validate(document: dict, routed: list[str]) -> list[str]:
     """Problems that make the vendored file unusable, rather than merely out of date."""
-    problems: list[str] = []
+    problems = _unscoped_problems(document.get("actionsWithoutResourceTypes"), routed)
     namespaces = document.get("authorizedActions")
     if not isinstance(namespaces, dict) or not namespaces:
         return ["authorizedActions is missing or empty"]
@@ -215,6 +287,24 @@ def validate(document: dict) -> list[str]:
     return problems
 
 
+def _unscoped_problems(unscoped: object, routed: list[str]) -> list[str]:
+    """Problems with the actions without resource types: one sorted list of usable names for each scope whose
+    routes are read, and for no other."""
+    if not isinstance(unscoped, dict):
+        return ["actionsWithoutResourceTypes is missing"]
+    problems = []
+    if list(unscoped) != routed:
+        problems.append(f"actionsWithoutResourceTypes lists {list(unscoped)}, not the scopes rest-routes.json reads "
+                        f"routes for, {routed}")
+    for namespace, actions in unscoped.items():
+        if not isinstance(actions, list) or not all(isinstance(action, str) and NAME_RE.match(action)
+                                                    for action in actions):
+            problems.append(f"actionsWithoutResourceTypes.{namespace} is not a list of action names")
+        elif actions != sorted(set(actions)):
+            problems.append(f"actionsWithoutResourceTypes.{namespace} is not sorted, or repeats an action")
+    return problems
+
+
 def verify_against(vendored: dict[str, dict[str, str]],
                    upstream: dict[str, dict[str, str]]) -> tuple[list[str], list[str]]:
     """What the vendored file claims and AWS does not, and what AWS has since added.
@@ -237,6 +327,34 @@ def verify_against(vendored: dict[str, dict[str, str]],
     return untrue, sorted(added)
 
 
+def verify_unscoped_against(vendored: dict[str, list[str]],
+                            upstream: dict[str, list[str]]) -> tuple[list[str], list[str]]:
+    """The actions the vendored file lists without resource types that AWS gives one or no longer has, and those
+    AWS has since added without one.
+
+    A listed action AWS gives a resource type is a failure: a request would be checked on `*` where AWS checks
+    the resource. One AWS has added only leaves its route unchecked until the next sync.
+    """
+    untrue = [f"AWS gives {namespace}:{action} a resource type, or no longer has it"
+              for namespace, actions in vendored.items() for action in actions
+              if action not in upstream.get(namespace, [])]
+    added = sorted(f"{namespace}:{action}" for namespace, actions in upstream.items() for action in actions
+                   if action not in vendored.get(namespace, []))
+    return untrue, added
+
+
+def _unscoped_count(document: dict) -> str:
+    """How many actions without resource types the document lists, over how many scopes."""
+    unscoped = document["actionsWithoutResourceTypes"]
+    return (f"{sum(len(actions) for actions in unscoped.values())} actions without resource types over "
+            f"{len(unscoped)} routed scopes")
+
+
+def _routed(routes: Path) -> list[str]:
+    """The scopes the vendored REST routes read routes for."""
+    return routed_namespaces(json.loads(routes.read_text(encoding="utf-8")))
+
+
 def _shown(path: Path) -> Path:
     """The path relative to the repository when it is inside it, as the messages print it."""
     try:
@@ -255,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--source-dir", type=Path, default=None,
                         help="read saved <service>.json reference files instead of fetching them")
     parser.add_argument("--output", type=Path, default=OUTPUT, help=argparse.SUPPRESS)
+    parser.add_argument("--routes", type=Path, default=ROUTES, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     if args.check:
@@ -262,36 +381,44 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: {args.output} does not exist", file=sys.stderr)
             return 1
         document = json.loads(args.output.read_text(encoding="utf-8"))
-        problems = validate(document)
+        problems = validate(document, _routed(args.routes))
         for problem in problems:
             print(f"error: {problem}", file=sys.stderr)
         if problems:
             return 1
         entries = sum(len(operations) for operations in document["authorizedActions"].values())
         print(f"{_shown(args.output)} is well-formed "
-              f"({entries} operations over {len(document['authorizedActions'])} namespaces)")
+              f"({entries} operations over {len(document['authorizedActions'])} namespaces, "
+              f"{_unscoped_count(document)})")
         return 0
 
     if args.verify:
         if not args.output.exists():
             print(f"error: {args.output} does not exist", file=sys.stderr)
             return 1
-        vendored = json.loads(args.output.read_text(encoding="utf-8"))["authorizedActions"]
+        vendored_document = json.loads(args.output.read_text(encoding="utf-8"))
+        vendored = vendored_document["authorizedActions"]
+        unscoped = vendored_document.get("actionsWithoutResourceTypes") or {}
         try:
             documents, provenance = fetch_references(args.source_dir)
             upstream = authorized_actions_from(documents)
+            upstream_unscoped = actions_without_resource_types(documents, list(unscoped))
         except (OSError, ValueError) as e:
             # The gate could not run, which CI has to tell apart from having found something
             # invented. ValueError covers a malformed or truncated response as well.
             print(f"error: could not read the Service Reference ({e})", file=sys.stderr)
             return 2
         untrue, added = verify_against(vendored, upstream)
+        untrue_unscoped, added_unscoped = verify_unscoped_against(unscoped, upstream_unscoped)
+        untrue += untrue_unscoped
+        added += added_unscoped
         for claim in untrue:
             print(f"error: {claim}", file=sys.stderr)
         entries = sum(len(operations) for operations in vendored.values())
         if untrue:
             print(f"error: {len(untrue)} vendored claim(s) do not hold upstream; those operations "
-                  f"would be authorized as an action AWS does not check.", file=sys.stderr)
+                  f"would be authorized as an action AWS does not check, or on a resource it does not.",
+                  file=sys.stderr)
             return 1
         if added:
             print(f"{_shown(args.output)}: all {entries} entries verified. AWS has "
@@ -304,11 +431,12 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         documents, provenance = fetch_references(args.source_dir)
-        document = build(documents, provenance)
+        routed = _routed(args.routes)
+        document = build(documents, provenance, routed)
     except (OSError, ValueError) as e:
         print(f"error: could not read the Service Reference ({e})", file=sys.stderr)
         return 2
-    problems = validate(document)
+    problems = validate(document, routed)
     for problem in problems:
         print(f"error: {problem}", file=sys.stderr)
     if problems:
@@ -316,7 +444,7 @@ def main(argv: list[str] | None = None) -> int:
     args.output.write_text(render(document), encoding="utf-8")
     entries = sum(len(operations) for operations in document["authorizedActions"].values())
     print(f"wrote {_shown(args.output)} ({entries} operations over "
-          f"{len(document['authorizedActions'])} namespaces, from {provenance})")
+          f"{len(document['authorizedActions'])} namespaces, {_unscoped_count(document)}, from {provenance})")
     return 0
 
 

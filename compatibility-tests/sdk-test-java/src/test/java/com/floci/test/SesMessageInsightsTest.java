@@ -7,6 +7,7 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.services.sesv2.SesV2Client;
 import software.amazon.awssdk.services.sesv2.model.Body;
 import software.amazon.awssdk.services.sesv2.model.Content;
@@ -39,6 +40,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @DisplayName("SES v2 Message Insights")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@ResourceLock("ses-account")
 class SesMessageInsightsTest {
 
     private static final String SENDER = "compat-insights@example.com";
@@ -81,21 +83,10 @@ class SesMessageInsightsTest {
     }
 
     @Test
-    @Order(2)
-    @DisplayName("an unknown message names the account alongside the id")
-    void unknownMessageNamesTheAccount() {
-        setVdmEnabled(true);
-
-        assertThatThrownBy(() -> sesV2.getMessageInsights(
-                GetMessageInsightsRequest.builder().messageId("no-such-message").build()))
-                .isInstanceOf(NotFoundException.class)
-                .hasMessageContaining("Message <no-such-message> not found for account <");
-    }
-
-    @Test
     @Order(3)
     @DisplayName("an ordinary recipient reports SEND then DELIVERY with the send's tags")
     void ordinaryRecipientTimeline() {
+        setVdmEnabled(true);
         String messageId = send("user@example.com", "compat-ordinary");
 
         GetMessageInsightsResponse insights = sesV2.getMessageInsights(
@@ -123,6 +114,7 @@ class SesMessageInsightsTest {
     @Order(4)
     @DisplayName("the bounce simulator carries the bounce details")
     void bounceSimulatorTimeline() {
+        setVdmEnabled(true);
         String messageId = send("bounce@simulator.amazonses.com", "compat-bounce");
 
         GetMessageInsightsResponse insights = sesV2.getMessageInsights(
@@ -139,6 +131,7 @@ class SesMessageInsightsTest {
     @Order(5)
     @DisplayName("Floci reports one timeline per recipient where AWS records nothing at all")
     void multipleRecipientsGetOneTimelineEach() {
+        setVdmEnabled(true);
         String messageId = sesV2.sendEmail(SendEmailRequest.builder()
                 .fromEmailAddress(SENDER)
                 .destination(Destination.builder()

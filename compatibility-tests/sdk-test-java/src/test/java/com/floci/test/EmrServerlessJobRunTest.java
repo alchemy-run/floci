@@ -29,7 +29,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 @DisplayName("EMR Serverless job runs")
 class EmrServerlessJobRunTest {
 
-    private static final String ROLE = "arn:aws:iam::000000000000:role/emr-serverless-job";
+    private static final String ROLE = TestFixtures.globalArn("iam", "000000000000", "role/emr-serverless-job");
 
     private static EmrServerlessClient emr;
     private static String applicationId;
@@ -91,7 +91,7 @@ class EmrServerlessJobRunTest {
         assertThat(run.state()).isEqualTo(JobRunState.SUCCESS);
         assertThat(run.executionRole()).isEqualTo(ROLE);
         assertThat(run.releaseLabel()).isEqualTo("emr-7.5.0");
-        assertThat(run.createdBy()).startsWith("arn:aws:");
+        assertThat(run.createdBy()).startsWith("arn:" + TestFixtures.partition() + ":");
         assertThat(run.createdAt()).isBetween(before, after);
         assertThat(run.jobDriver().sparkSubmit().entryPoint()).isEqualTo("s3://bucket/jobs/app.jar");
         assertThat(run.tags()).containsEntry("team", "data");

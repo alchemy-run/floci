@@ -235,7 +235,8 @@ by ARN. Mutations require `If-Match` with the store's current ETag and bump it.
 - Viewer requests addressed to an enabled distribution's generated domain or alias are routed to the
   matching S3 or custom origin when the matched cache behavior's `AllowedMethods` includes the
   method; any other method returns 403 `Invalid method.`. A behavior without `AllowedMethods` allows
-  GET and HEAD. Origin forwarding preserves the raw path; custom-origin redirects are not followed.
+  GET and HEAD. Origin forwarding preserves the raw path, including `%25` for a literal percent
+  sign, on generated domains and aliases. Custom-origin redirects are not followed.
 - POST, PUT, PATCH and DELETE are forwarded to custom origins with the viewer request body and its
   `Content-Type`. The body is streamed to the origin with the viewer's `Content-Length`, or chunked
   when the viewer sent it chunked or, as HTTP/2 allows, with no length, so it is never held in
@@ -304,16 +305,31 @@ by ARN. Mutations require `If-Match` with the store's current ETag and bump it.
   them). Device-type, geolocation, TLS, JA3/JA4 and header-order headers are not generated.
 - The eight AWS managed origin request policies are available by their AWS IDs through
   `GetOriginRequestPolicy` and `ListOriginRequestPolicies` (`Type` is `managed` or `custom`), and
-  cannot be updated or deleted. AWS managed cache policies are not modeled: a behavior that
-  references one forwards nothing on its account, which matches `CachingDisabled`,
-  `CachingOptimized` and `CachingOptimizedForUncompressedObjects` but not `Amplify`,
-  `Elemental-MediaPackage` or the `UseOriginCacheControlHeaders` policies.
+  cannot be updated or deleted. The seven AWS managed cache policies with published settings
+  (`Managed-Amplify`, `Managed-CachingDisabled`, `Managed-CachingOptimized`,
+  `Managed-CachingOptimizedForUncompressedObjects`, `Managed-Elemental-MediaPackage`,
+  `Managed-UseOriginCacheControlHeaders` and `Managed-UseOriginCacheControlHeaders-QueryStrings`)
+  are available by their AWS IDs through `GetCachePolicy`, `GetCachePolicyConfig` and
+  `ListCachePolicies` (`Type` is `managed` or `custom`), and cannot be updated or deleted. A
+  behavior that references one forwards what its settings select. The four Amplify-only managed
+  cache policies (`Amplify-Default`, `Amplify-DefaultNoCookies`, `Amplify-ImageOptimization` and
+  `Amplify-StaticContent`) are not modeled: a behavior that references one forwards nothing.
 - In-process S3 origins do not apply forwarding settings: viewer query strings, cookies and headers
   do not change the S3 read, apart from the viewer's `Range` and `If-Range` on a GET or HEAD.
 - Origin responses are streamed to the viewer, from in-process S3 origins and custom origins alike,
   so a large object is never held in memory. A custom origin's `Content-Length` is passed on, and a
   response it sends chunked stays chunked. Floci does not cache, so it serves objects larger than
   50 GB the way CloudFront does with caching disabled; with caching enabled, CloudFront refuses them.
+- WebSocket connections to custom origins are tunneled on every distribution, with no setting, as on
+  AWS. An HTTP/1.1 GET with `Upgrade: websocket` and `Connection: Upgrade` goes to the origin the
+  matched behavior selects with its `Upgrade` and `Connection` fields, and once the origin answers
+  `101 Switching Protocols` the viewer and origin connections are joined. Any other origin answer is
+  relayed as an ordinary response, without custom error responses or a response headers policy,
+  within the origin's response and response completion timeouts. The
+  `Sec-WebSocket-*` fields follow the behavior's forwarding settings as any other header does, so the
+  behavior must forward all viewer headers (the `AllViewer` origin request policy, or legacy cache
+  settings) or at least `Sec-WebSocket-Key` and `Sec-WebSocket-Version`. A WebSocket handshake to an
+  S3 origin is served as an ordinary GET.
 - Range GETs: an S3 origin serves the one byte range a viewer's `Range` asks for as 206 with its
   `Content-Range`, and answers 416 when the range starts past the end of the object. Any other
   `Range` gets the whole object: one CloudFront does not accept (ranges out of order or overlapping,
@@ -327,7 +343,36 @@ by ARN. Mutations require `If-Match` with the store's current ETag and bump it.
   whole. A custom error page is served whole, whatever the `Range` of the request it replaces.
 - Origin `Set-Cookie` headers always reach the viewer. With legacy `Forward=none`, AWS strips them
   from the response; Floci does not.
+- Custom-origin requests honor the origin's connection settings. `Origin.ConnectionAttempts` (1 to 3,
+  default 3) is how many times CloudFront tries to reach the origin, and `Origin.ConnectionTimeout`
+  (1 to 10 seconds, default 10) how long it waits for the connection. `CustomOriginConfig.OriginReadTimeout`
+  (1 to 120 seconds, default 30) bounds the wait for the origin's response, and a read timeout on a
+  GET or HEAD is retried up to the connection attempts, as CloudFront does, while a POST, PUT, PATCH
+  or DELETE is not retried. `Origin.ResponseCompletionTimeout` bounds the time the origin takes,
+  connecting, answering and streaming the body included, over every attempt, and ends the connection
+  when it expires; unset, or 0, leaves the origin as long as it wants to take, and a set value must
+  be at least the read timeout. The time a slow viewer takes to read what the origin already sent is
+  not part of it: the origin answered in time, so the response is not expired.
+  `CustomOriginConfig.OriginKeepaliveTimeout` (1 to 300 seconds, default 5) is how long CloudFront
+  keeps a connection to the origin after the last packet of a response. An origin that does not
+  answer in time is answered 504, "The origin didn't respond before the request expired", as on AWS.
 - Custom origins that resolve to loopback, private, link-local, carrier-grade NAT, or other non-routable addresses are rejected by default. Development-only private origins must be explicitly allowlisted by exact hostname.
+  A refused origin is logged with the host and the setting that allows it.
+- A custom origin that names this Floci itself, as `localhost`, `127.0.0.1`, `::1` or the configured
+  `floci.hostname`, on a port Floci listens on (its own port, or `floci.tls.aws-https-port` with TLS on)
+  for the protocol the request uses, is served by Floci itself, so neither DNS nor the private address check applies. This is the usual local setup for a
+  single-page app: a path-style S3 bucket as the origin path, fronted by the distribution's custom error
+  responses. The request reaches Floci with the origin's domain as its `Host`, and dot segments cannot
+  leave the origin path. A forwarded viewer `Host` is a 502, since it would route the request back to the
+  distribution. The same hosts on any other port are still refused unless allowlisted.
+- A custom origin whose domain is an execute-api endpoint (`{apiId}.execute-api.{region}.amazonaws.com`) of an
+  HTTP or REST API that exists in this Floci is served by Floci itself, at the address the viewer reached,
+  through the same host routing as a direct call. The origin path names the stage, as on AWS. Neither DNS nor
+  the private address check applies. A forwarded viewer `Host` is a 502, so use an origin request policy
+  such as `Managed-AllViewerExceptHostHeader`. An execute-api domain of an API that does not exist in this
+  Floci is fetched like any other custom origin. A request that the host routing would not send to the API
+  (a WebSocket API, a disabled endpoint, a missing stage, or a region other than the API's) is answered 404
+  `{"message":"Not Found"}` and never reaches Floci's other endpoints.
 - A custom origin whose domain is a [Lambda Web Function](lambda-web-functions.md) endpoint of this Floci is
   served by Floci itself, at the address the viewer reached. The origin names the endpoint's
   `domainName` with or without its port, and its protocol and ports do not matter, so neither DNS nor
@@ -356,6 +401,9 @@ by ARN. Mutations require `If-Match` with the store's current ETag and bump it.
 - `ViewerCertificate.IAMCertificateId` must be the `ServerCertificateId` of an uploaded IAM server
   certificate: distribution create and update reject an unknown one with `InvalidViewerCertificate`,
   and `DeleteServerCertificate` returns `DeleteConflict` while a distribution references it.
+- `ViewerCertificate.ACMCertificateArn` must name an existing ACM certificate: distribution create and
+  update reject an unknown one with `InvalidViewerCertificate`. ACM lists the distribution's ARN under
+  `InUseBy`, and `DeleteCertificate` returns `ResourceInUseException` while a distribution references it.
 - Up to 20 custom response headers policies can be created, and one policy can be associated with
   up to 100 distributions.
 - The five AWS managed response headers policy IDs are available and can be selected with
@@ -371,6 +419,9 @@ by ARN. Mutations require `If-Match` with the store's current ETag and bump it.
 | `floci.services.cloudfront.allowed-private-origin-hosts` | `FLOCI_SERVICES_CLOUDFRONT_ALLOWED_PRIVATE_ORIGIN_HOSTS` | `[]` | Exact custom-origin hosts permitted to resolve to private/non-routable addresses (comma-separated in the environment variable) |
 
 ## CLI Examples
+
+For an executable OAC example with direct-S3 and unrelated-distribution negative
+checks, see [Private S3 origin example](cloudfront-private-origin.md).
 
 ```bash
 export AWS_ENDPOINT_URL=http://localhost:4566

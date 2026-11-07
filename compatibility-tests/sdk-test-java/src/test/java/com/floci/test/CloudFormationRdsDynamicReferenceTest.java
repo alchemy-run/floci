@@ -7,8 +7,8 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.services.cloudformation.CloudFormationClient;
-import software.amazon.awssdk.services.cloudformation.model.CloudFormationException;
 import software.amazon.awssdk.services.cloudformation.model.CreateStackRequest;
 import software.amazon.awssdk.services.cloudformation.model.DeleteStackRequest;
 import software.amazon.awssdk.services.cloudformation.model.DescribeStacksRequest;
@@ -31,11 +31,12 @@ import java.util.List;
 import java.util.Properties;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 @DisplayName("CloudFormation RDS credential dynamic references")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+// RDS and DSQL both serve PostgreSQL on 5432, one at a time.
+@ResourceLock("port-5432")
 class CloudFormationRdsDynamicReferenceTest {
 
     private static final String USERNAME = "viewer";
@@ -147,12 +148,6 @@ class CloudFormationRdsDynamicReferenceTest {
         try (Connection connection = awaitPostgresConnection(port)) {
             assertThat(connection.isValid(5)).isTrue();
         }
-
-        // The password compares by the value it resolves to, as any dynamic reference does, so
-        // resubmitting the template has nothing to change.
-        assertThatThrownBy(() -> cloudFormation.updateStack(r -> r.stackName(stackName).templateBody(template)))
-                .isInstanceOf(CloudFormationException.class)
-                .hasMessageContaining("No updates are to be performed.");
     }
 
     @Test

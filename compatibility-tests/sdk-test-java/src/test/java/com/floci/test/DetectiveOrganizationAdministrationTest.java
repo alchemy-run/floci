@@ -2,10 +2,12 @@ package com.floci.test;
 
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.services.detective.DetectiveClient;
 import software.amazon.awssdk.services.detective.model.Account;
 import software.amazon.awssdk.services.detective.model.CreateMembersResponse;
 import software.amazon.awssdk.services.organizations.OrganizationsClient;
+import software.amazon.awssdk.services.organizations.model.AwsOrganizationsNotInUseException;
 
 import java.util.List;
 
@@ -14,6 +16,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeFalse;
 
 @DisplayName("Detective organization administration")
+@ResourceLock("organizations")
 class DetectiveOrganizationAdministrationTest {
     private static final String MANAGEMENT_ACCOUNT = "222222222222";
     private static final String ADMIN_ACCOUNT = MANAGEMENT_ACCOUNT;
@@ -29,7 +32,7 @@ class DetectiveOrganizationAdministrationTest {
              DetectiveClient administrator = TestFixtures.detectiveClient(ADMIN_ACCOUNT)) {
             try {
                 organizations.describeOrganization();
-            } catch (software.amazon.awssdk.services.organizations.model.AwsOrganizationsNotInUseException e) {
+            } catch (AwsOrganizationsNotInUseException e) {
                 organizations.createOrganization();
             }
 

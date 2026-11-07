@@ -7,6 +7,7 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.parallel.Isolated;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.services.ecr.EcrClient;
 import software.amazon.awssdk.services.ecr.model.*;
@@ -23,6 +24,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("ECR Container Registry")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@Isolated
 class EcrTest {
 
     private static EcrClient ecr;
@@ -138,6 +140,34 @@ class EcrTest {
         BatchGetRepositoryScanningConfigurationResponse disabledReadback =
                 ecr.batchGetRepositoryScanningConfiguration(builder -> builder.repositoryNames(REPO_NAME));
         assertThat(disabledReadback.scanningConfigurations().get(0).scanOnPush()).isFalse();
+    }
+
+    @Test
+    @Order(8)
+    @DisplayName("Batch scanning configuration returns valid results alongside missing repositories")
+    void scanningBatchReportsMissingRepositories() {
+        String missing = "floci-it/missing-scan-config";
+        BatchGetRepositoryScanningConfigurationResponse mixed =
+                ecr.batchGetRepositoryScanningConfiguration(b -> b.repositoryNames(missing, REPO_NAME));
+
+        assertThat(mixed.scanningConfigurations()).hasSize(1);
+        RepositoryScanningConfiguration config = mixed.scanningConfigurations().get(0);
+        assertThat(config.repositoryName()).isEqualTo(REPO_NAME);
+        assertThat(config.scanOnPush()).isFalse();
+        assertThat(config.scanFrequency()).isEqualTo(ScanFrequency.MANUAL);
+        assertThat(config.appliedScanFilters()).isEmpty();
+        assertThat(mixed.failures()).hasSize(1);
+        RepositoryScanningConfigurationFailure failure = mixed.failures().get(0);
+        assertThat(failure.repositoryName()).isEqualTo(missing);
+        assertThat(failure.failureCode()).isEqualTo(ScanningConfigurationFailureCode.REPOSITORY_NOT_FOUND);
+        assertThat(failure.failureReason()).contains(missing);
+
+        BatchGetRepositoryScanningConfigurationResponse absent =
+                ecr.batchGetRepositoryScanningConfiguration(b -> b.repositoryNames(missing));
+        assertThat(absent.scanningConfigurations()).isEmpty();
+        assertThat(absent.failures()).hasSize(1);
+        assertThat(absent.failures().get(0).failureCode())
+                .isEqualTo(ScanningConfigurationFailureCode.REPOSITORY_NOT_FOUND);
     }
 
     @Test
@@ -283,6 +313,56 @@ class EcrTest {
         assertThat(url).endsWith("/v2/" + repo + "/blobs/" + layerDigest);
     }
 
+    @Test
+    @Order(15)
+    @DisplayName("BatchDeleteImage removes only the named tag while another tag shares the manifest")
+    void batchDeleteImageRemovesOnlyTheNamedTag() throws Exception {
+        String repo = "floci-it/batch-delete-" + System.nanoTime();
+        ecr.createRepository(b -> b.repositoryName(repo));
+        reposToCleanup.add(repo);
+
+        String config = "{\"architecture\":\"amd64\",\"os\":\"linux\"}";
+        String layer = "floci batch delete layer bytes";
+        String configDigest = uploadLayer(repo, config.getBytes(StandardCharsets.UTF_8));
+        String layerDigest = uploadLayer(repo, layer.getBytes(StandardCharsets.UTF_8));
+        String manifest = "{\"schemaVersion\":2,\"mediaType\":\"application/vnd.oci.image.manifest.v1+json\","
+                + "\"config\":{\"mediaType\":\"application/vnd.oci.image.config.v1+json\",\"size\":"
+                + config.length() + ",\"digest\":\"" + configDigest + "\"},"
+                + "\"layers\":[{\"mediaType\":\"application/vnd.oci.image.layer.v1.tar\",\"size\":"
+                + layer.length() + ",\"digest\":\"" + layerDigest + "\"}]}";
+        String manifestDigest = sha256(manifest.getBytes(StandardCharsets.UTF_8));
+
+        ecr.putImage(b -> b.repositoryName(repo).imageTag("release").imageManifest(manifest));
+        ecr.putImage(b -> b.repositoryName(repo).imageTag("stable").imageManifest(manifest));
+
+        BatchDeleteImageResponse first = ecr.batchDeleteImage(b -> b.repositoryName(repo)
+                .imageIds(ImageIdentifier.builder().imageTag("release").build(),
+                        ImageIdentifier.builder().imageTag("missing").build()));
+        assertThat(first.imageIds()).hasSize(1);
+        assertThat(first.imageIds().get(0).imageTag()).isEqualTo("release");
+        assertThat(first.imageIds().get(0).imageDigest()).isEqualTo(manifestDigest);
+        assertThat(first.failures()).hasSize(1);
+        assertThat(first.failures().get(0).imageId().imageTag()).isEqualTo("missing");
+        assertThat(first.failures().get(0).failureCodeAsString()).isEqualTo("ImageNotFound");
+
+        BatchGetImageResponse survivor = ecr.batchGetImage(b -> b.repositoryName(repo)
+                .imageIds(ImageIdentifier.builder().imageTag("stable").build()));
+        assertThat(survivor.images()).hasSize(1);
+        assertThat(survivor.images().get(0).imageId().imageDigest()).isEqualTo(manifestDigest);
+
+        BatchDeleteImageResponse second = ecr.batchDeleteImage(b -> b.repositoryName(repo)
+                .imageIds(ImageIdentifier.builder().imageTag("stable").build()));
+        assertThat(second.imageIds()).hasSize(1);
+        assertThat(second.imageIds().get(0).imageTag()).isEqualTo("stable");
+        assertThat(second.imageIds().get(0).imageDigest()).isEqualTo(manifestDigest);
+
+        BatchGetImageResponse gone = ecr.batchGetImage(b -> b.repositoryName(repo)
+                .imageIds(ImageIdentifier.builder().imageTag("stable").build()));
+        assertThat(gone.images()).isEmpty();
+        assertThat(gone.failures()).hasSize(1);
+        assertThat(gone.failures().get(0).failureCodeAsString()).isEqualTo("ImageNotFound");
+    }
+
     private static String uploadLayer(String repo, byte[] bytes) throws Exception {
         String uploadId = ecr.initiateLayerUpload(b -> b.repositoryName(repo)).uploadId();
         UploadLayerPartResponse part = ecr.uploadLayerPart(b -> b.repositoryName(repo).uploadId(uploadId)
@@ -344,6 +424,52 @@ class EcrTest {
             }
             ecr.putReplicationConfiguration(b -> b.replicationConfiguration(c -> c.rules(List.of())));
             ecr.putRegistryScanningConfiguration(b -> b.scanType(ScanType.BASIC).rules(List.of()));
+        }
+    }
+
+    @Test
+    @Order(15)
+    @DisplayName("Repository creation templates create, update, describe and delete")
+    void repositoryCreationTemplateLifecycle() {
+        String prefix = "floci-sdk-" + System.currentTimeMillis();
+        try {
+            CreateRepositoryCreationTemplateResponse created = ecr.createRepositoryCreationTemplate(b -> b
+                    .prefix(prefix)
+                    .description("sdk template")
+                    .appliedFor(RCTAppliedFor.PULL_THROUGH_CACHE, RCTAppliedFor.REPLICATION)
+                    .resourceTags(Tag.builder().key("team").value("platform").build())
+                    .imageTagMutability(ImageTagMutability.IMMUTABLE));
+            assertThat(created.registryId()).isEqualTo("000000000000");
+            assertThat(created.repositoryCreationTemplate().prefix()).isEqualTo(prefix);
+            assertThat(created.repositoryCreationTemplate().encryptionConfiguration().encryptionType())
+                    .isEqualTo(EncryptionType.AES256);
+            assertThat(created.repositoryCreationTemplate().createdAt()).isNotNull();
+            assertThatThrownBy(() -> ecr.createRepositoryCreationTemplate(b -> b
+                    .prefix(prefix).appliedFor(RCTAppliedFor.REPLICATION)))
+                    .isInstanceOf(TemplateAlreadyExistsException.class);
+
+            UpdateRepositoryCreationTemplateResponse updated = ecr.updateRepositoryCreationTemplate(b -> b
+                    .prefix(prefix)
+                    .appliedFor(RCTAppliedFor.CREATE_ON_PUSH));
+            assertThat(updated.repositoryCreationTemplate().appliedFor()).containsExactly(RCTAppliedFor.CREATE_ON_PUSH);
+            assertThat(updated.repositoryCreationTemplate().description()).isEqualTo("sdk template");
+
+            DescribeRepositoryCreationTemplatesResponse described =
+                    ecr.describeRepositoryCreationTemplates(b -> b.prefixes(prefix));
+            assertThat(described.repositoryCreationTemplates()).hasSize(1);
+            assertThat(described.repositoryCreationTemplates().get(0).resourceTags())
+                    .containsExactly(Tag.builder().key("team").value("platform").build());
+
+            assertThat(ecr.deleteRepositoryCreationTemplate(b -> b.prefix(prefix))
+                    .repositoryCreationTemplate().prefix()).isEqualTo(prefix);
+            assertThatThrownBy(() -> ecr.deleteRepositoryCreationTemplate(b -> b.prefix(prefix)))
+                    .isInstanceOf(TemplateNotFoundException.class);
+        } finally {
+            try {
+                ecr.deleteRepositoryCreationTemplate(b -> b.prefix(prefix));
+            } catch (TemplateNotFoundException expected) {
+                // Already deleted by the lifecycle assertion.
+            }
         }
     }
 }

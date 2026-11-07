@@ -16,7 +16,10 @@ on:
     paths:
       - 'src/main/java/**'
       - 'src/main/resources/aws/**'
+      - 'src/main/resources/eks/addon-versions.json'
       - 'tools/partition/**'
+      - 'tools/java_sources.py'
+      - 'tools/rename/**'
       - 'tools/aws/**'
       - 'tools/slr/**'
       - 'src/main/resources/iam/service-linked-roles.tsv'
@@ -31,7 +34,10 @@ on:
     paths:
       - 'src/main/java/**'
       - 'src/main/resources/aws/**'
+      - 'src/main/resources/eks/addon-versions.json'
       - 'tools/partition/**'
+      - 'tools/java_sources.py'
+      - 'tools/rename/**'
       - 'tools/aws/**'
       - 'tools/slr/**'
       - 'src/main/resources/iam/service-linked-roles.tsv'
@@ -40,6 +46,10 @@ on:
       - 'src/main/resources/iam/managed-policy-versions.json'
       - 'Makefile'
       - '.github/workflows/partition-literals.yml'
+  # Runs each merge queue entry against main plus the PRs queued ahead of it. paths does not
+  # apply to merge_group, so a queued PR is always checked.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -58,7 +68,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.x"
 
@@ -67,6 +77,9 @@ jobs:
 
       - name: Run partition tooling tests
         run: make partition-test
+
+      - name: Run package rename tool tests
+        run: make rename-test
 
       - name: Check partition literals against the baseline
         run: make partition-check
@@ -83,7 +96,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Set up Python
-        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.x"
 
@@ -92,6 +105,17 @@ jobs:
 
       - name: Run generator tests
         run: make aws-data-test
+
+      - name: Check DynamoDB condition request members
+        run: make dynamodb-condition-keys-check
+
+      - name: Check IAM condition key request members
+        run: make iam-condition-keys-check
+      - name: Check S3 Control tag condition request members
+        run: make s3control-tag-condition-keys-check
+
+      - name: Check request condition key members
+        run: make request-condition-keys-check
 
       - name: Check partitions.json against a fresh generation
         run: make aws-data-check

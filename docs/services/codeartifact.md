@@ -22,7 +22,6 @@ behind them yet.
 | `DeleteDomain` | Deletes a domain; fails with `ConflictException` while it still contains repositories, and with `ResourceNotFoundException` for a missing domain (as AWS does, although the API reference does not list it). |
 | `DescribeDomain` | Returns a domain's full description, including its repository count and the total size of its assets (generic, Maven, npm, pypi, and NuGet; see Known limitations). |
 | `ListDomains` | Lists domain summaries for the account and Region, paginated. |
-| `GetAuthorizationToken` | Issues a bearer token scoped to a domain, valid for 0 (12 hours) or 900-43200 seconds, required by the `maven` repository endpoint. |
 | `GetAuthorizationToken` | Issues a bearer token scoped to a domain, valid for 0 (12 hours) or 900-43200 seconds, required by the `maven`, `npm`, `pypi`, and `nuget` repository endpoints. |
 | `PutDomainPermissionsPolicy` | Attaches or replaces a domain's resource policy, versioned by `policyRevision`. |
 | `GetDomainPermissionsPolicy` | Returns a domain's current resource policy and revision. |
@@ -40,28 +39,19 @@ behind them yet.
 | `AssociateExternalConnection` | Attaches a fixed-catalog public upstream (e.g. `public:npmjs`) to a repository; mutually exclusive with repository upstreams. |
 | `DisassociateExternalConnection` | Removes a repository's external connection. |
 | `PublishPackageVersion` | Uploads a generic-format asset, creating or extending a package version; requires `x-amz-content-sha256` and verifies it against the real hash of the bytes received. |
-| `DescribePackage` | - |
-| `DeletePackage` | - |
-| `PutPackageOriginConfiguration` | - |
-| `DescribePackageVersion` | Returns a package version's status, revision, and origin. |
-| `ListPackages` | - |
-| `ListPackageVersions` | - |
-| `ListPackageVersionAssets` | - |
-| `GetPackageVersionAsset` | Downloads one asset from a package version by name, optionally pinned to a specific revision. |
-| `GetPackageVersionReadme` | - |
-| `ListPackageVersionDependencies` | - |
-| `UpdatePackageVersionsStatus` | - |
-| `DisposePackageVersions` | - |
-| `DeletePackageVersions` | - |
-| `CopyPackageVersions` | - |
 | `DescribePackage` | Returns a package's format, namespace, name, and origin controls (`publish` and `upstream` restrictions). |
 | `DeletePackage` | Deletes a package and every one of its versions; `ResourceNotFoundException` for one that does not exist. |
 | `PutPackageOriginConfiguration` | Sets a package's `publish`/`upstream` origin-control restrictions; can create the package (with no versions) if it doesn't exist yet. |
 | `DescribePackageVersion` | Returns a package version's status, revision, and origin. |
-| `GetPackageVersionAsset` | Downloads one asset from a package version by name, optionally pinned to a specific revision. |
-| `ListPackageVersionAssets` | Lists the assets of a package version, with size and hashes. |
+| `ListPackages` | - |
 | `ListPackageVersions` | Lists a package's versions with status, revision, and origin, paginated and sorted most recently published first; `defaultDisplayVersion` is `dist-tags.latest` for npm, the most recently published version otherwise. |
+| `ListPackageVersionAssets` | Lists the assets of a package version, with size and hashes. |
+| `GetPackageVersionAsset` | Downloads one asset from a package version by name, optionally pinned to a specific revision. |
 | `GetPackageVersionReadme` | Returns the readme text for a package version; `npm`, `pypi`, and `nuget` only, matching AWS's own restriction for this action. |
+| `ListPackageVersionDependencies` | - |
+| `UpdatePackageVersionsStatus` | - |
+| `DisposePackageVersions` | - |
+| `DeletePackageVersions` | - |
 | `CopyPackageVersions` | Copies one or more versions of a package from one repository to another in the same domain. |
 | `TagResource` | Adds or updates tags on a domain or repository ARN. |
 | `UntagResource` | Removes tags by key from a domain or repository ARN. |

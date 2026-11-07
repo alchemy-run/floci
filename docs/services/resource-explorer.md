@@ -85,6 +85,7 @@ map as empty.
 | ACM | `acm:certificate` |
 | Amazon MQ | `mq:broker` |
 | API Gateway | `apigateway:restapis`, `apigateway:restapis/stages`, `apigateway:apikeys`, `apigateway:usageplans`, `apigateway:domainnames` |
+| Bedrock | `bedrock:guardrail` |
 | CloudFormation | `cloudformation:stack` |
 | CloudWatch Logs | `logs:log-group` |
 | Cognito | `cognito-idp:userpool` |
@@ -113,6 +114,11 @@ map as empty.
 | SQS | `sqs:queue` |
 | SSM | `ssm:parameter` |
 | Step Functions | `states:statemachine` |
+
+Lambda MicroVM images (`lambda:microvm-image`) and network connectors
+(`lambda:network-connector`) are discoverable through `Search`, `ListResources` and the Resource
+Groups Tagging API, but `ListSupportedResourceTypes` does not list them, because AWS does not
+advertise them.
 
 API Gateway ARNs carry no account; its resources report the calling account as their owner.
 Route 53 is not discoverable yet: `Route53Service` resolves no account id, and a hosted zone's ARN

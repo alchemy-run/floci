@@ -5,6 +5,22 @@
 
 Floci emulates the AWS Glue Data Catalog (databases, tables, partitions, functions, connections) and Glue Schema Registry, allowing you to manage local data lake metadata and schema-version workflows.
 
+Table and partition column-statistics reads fill omitted required numeric members with `0` for
+string, binary, long, double, decimal, date, and boolean statistics. Supplied values and stored
+records are preserved; optional minimum and maximum values remain absent when omitted.
+
+Table and partition reads (`GetTable`, `GetTables`, `SearchTables`, `GetTableVersion`, `GetTableVersions`,
+`GetPartition`, `GetPartitions`, `BatchGetPartition`) return a table's `Retention` as `0`, and a storage
+descriptor's `Compressed`, `NumberOfBuckets`, `SortColumns` and `StoredAsSubDirectories` as `false`, `0`, `[]`
+and `false`, when they were written without them, as Glue does. A table's `IsRegisteredWithLakeFormation` is
+`false`: Floci does not tie a table to a location registered with Lake Formation. The Glue Data Catalog client
+that Hive and Spark use on EMR reads each of them. Stored records keep what was written, and a storage
+descriptor keeps the `AdditionalLocations`, `BucketColumns`, `SortColumns`, `SkewedInfo` and
+`StoredAsSubDirectories` it was given. A `SortColumns` entry that is null, lacks its required `Column` or
+`SortOrder`, or has a `SortOrder` other than `0` or `1` fails the whole `CreateTable`, `UpdateTable`,
+`CreatePartition`, `UpdatePartition`, `BatchCreatePartition` or `BatchUpdatePartition` with a
+`ValidationException`, before anything is stored.
+
 ## Supported Actions
 
 ### Jobs
@@ -74,7 +90,7 @@ Catalog metadata, connections, resource policies, and encryption settings are is
 |--------|-------------|
 | CreatePartition | Creates a partition for a Data Catalog table (`AlreadyExistsException` on duplicate). |
 | GetPartition | Returns a stored partition. |
-| GetPartitions | Lists partitions stored for a Data Catalog table. |
+| GetPartitions | Lists partitions stored for a Data Catalog table. With a `Segment`, returns that segment's share of them: each partition is in exactly one of `TotalSegments` (1 to 10) segments; a `Segment` member that is not an integer is a `SerializationException`. AWS documents `SegmentNumber` values from 0 through `TotalSegments` minus 1 and not what a larger one returns, so a `SegmentNumber` of `TotalSegments` or more returning no partitions is Floci's reading. |
 | UpdatePartition | Updates a stored partition. |
 | DeletePartition | Deletes a stored partition. |
 | BatchCreatePartition | Creates partitions and reports per-item `AlreadyExistsException` errors. |
@@ -170,7 +186,7 @@ retroactively.
 |--------|-------------|
 | CreateSecurityConfiguration | Creates a named security configuration. |
 | GetSecurityConfiguration | Returns a named security configuration. |
-| GetSecurityConfigurations | Lists stored security configurations. `MaxResults` and `NextToken` are currently ignored, so the complete list is returned. |
+| GetSecurityConfigurations | Lists stored security configurations with `MaxResults` (1 to 200) and `NextToken` pagination, scoped to the account and region. |
 | DeleteSecurityConfiguration | Deletes a named security configuration. |
 
 #### Jobs
@@ -305,6 +321,21 @@ Blueprints are not emulated.
 | GetClassifiers | Lists classifiers, paged by `MaxResults` and `NextToken`. |
 | UpdateClassifier | Partially updates a classifier without changing its type. |
 | DeleteClassifier | Deletes a classifier by name. |
+
+#### Data quality rulesets
+
+| Action | Description |
+|--------|-------------|
+| CreateDataQualityRuleset | Stores a named DQDL ruleset, optionally with a `TargetTable` and tags. |
+| GetDataQualityRuleset | Returns a ruleset with its `CreatedOn` and `LastModifiedOn`. |
+| UpdateDataQualityRuleset | Replaces the `Description` or `Ruleset` the request sets and keeps the rest. |
+| DeleteDataQualityRuleset | Deletes a ruleset and its tags. |
+| ListDataQualityRulesets | Lists rulesets in name order with `RuleCount`, filtered by `Filter` (name, description, target table, created and last modified times) and `Tags`, paged by `MaxResults` (1 to 1000) and `NextToken`. |
+
+Rulesets are stored, not evaluated: there are no recommendation or evaluation runs, so
+`RecommendationRunId` is never set. `RuleCount` is the number of entries in the ruleset's
+top level `Rules = [ ... ]` list, with a composite rule counted once. Rulesets are tagged by
+ARN `arn:aws:glue:<region>:<account>:dataQualityRuleset/<name>`.
 
 ### Schema Registry
 

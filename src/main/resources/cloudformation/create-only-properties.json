@@ -73,6 +73,19 @@
     "SecurityGroupIds",
     "SubnetIds"
   ],
+  "AWS::AppConfig::Application": [],
+  "AWS::AppConfig::ConfigurationProfile": [
+    "ApplicationId",
+    "LocationUri",
+    "Type"
+  ],
+  "AWS::AppConfig::DeploymentStrategy": [
+    "Name",
+    "ReplicateTo"
+  ],
+  "AWS::AppConfig::Environment": [
+    "ApplicationId"
+  ],
   "AWS::AppSync::ApiKey": [
     "ApiId"
   ],
@@ -205,6 +218,11 @@
     "UserPoolId",
     "GroupName"
   ],
+  "AWS::Cognito::UserPoolIdentityProvider": [
+    "ProviderName",
+    "ProviderType",
+    "UserPoolId"
+  ],
   "AWS::Cognito::UserPoolResourceServer": [
     "Identifier",
     "UserPoolId"
@@ -260,6 +278,13 @@
     "SubnetId"
   ],
   "AWS::EC2::InternetGateway": [],
+  "AWS::EC2::KeyPair": [
+    "KeyName",
+    "KeyType",
+    "KeyFormat",
+    "PublicKeyMaterial",
+    "Tags"
+  ],
   "AWS::EC2::LaunchTemplate": [
     "LaunchTemplateName"
   ],
@@ -279,6 +304,7 @@
     "RuleNumber",
     "NetworkAclId"
   ],
+  "AWS::EC2::PrefixList": [],
   "AWS::EC2::Route": [
     "RouteTableId",
     "DestinationCidrBlock",
@@ -456,6 +482,17 @@
   ],
   "AWS::Events::Rule": [
     "Name"
+  ],
+  "AWS::EventsV2::EventBus": [
+    "Name"
+  ],
+  "AWS::EventsV2::Subscriber": [
+    "Name",
+    "EventBusArn",
+    "InvokeConfiguration/TargetArn",
+    "Type",
+    "StartingPosition",
+    "PointInTimeConfiguration"
   ],
   "AWS::GuardDuty::MalwareProtectionPlan": [],
   "AWS::IAM::AccessKey": [
@@ -710,6 +747,10 @@
     "HostedZoneName",
     "HostedZoneId"
   ],
+  "AWS::Route53::RecordSetGroup": [
+    "HostedZoneName",
+    "HostedZoneId"
+  ],
   "AWS::S3::Bucket": [
     "BucketName",
     "BucketNamePrefix",
@@ -743,6 +784,11 @@
   ],
   "AWS::SecretsManager::SecretTargetAttachment": [
     "SecretId"
+  ],
+  "AWS::Signer::SigningProfile": [
+    "ProfileName",
+    "PlatformId",
+    "SignatureValidityPeriod"
   ],
   "AWS::SNS::Subscription": [
     "Endpoint",

@@ -6,6 +6,70 @@
 
 Floci manages real Valkey/Redis Docker containers and proxies TCP connections to them. This means any Redis client works : including IAM authentication.
 
+## Encrypted cache connections
+
+Redis/Valkey replication groups with transit encryption enabled take TLS at the advertised
+proxy endpoint. This includes groups using an AUTH token or IAM authentication, and a group
+remains encrypted when its last user group is removed. With `TransitEncryptionMode` set to
+`preferred`, the endpoint takes both TLS and unencrypted connections so clients can move to
+TLS; any other encrypted group takes TLS only. A modify that moves a `preferred` group to
+`required` closes its open unencrypted connections, as AWS does, and its TLS connections carry
+on. AWS adds new TLS endpoints while a group is `preferred`; Floci serves both kinds on the one
+endpoint. Serverless Redis/Valkey endpoints take TLS only. Unencrypted caches and Memcached
+retain their existing transport.
+
+The cache listener uses a server certificate issued by Floci's shared local CA, including
+the default Floci endpoint names, IPv4 and IPv6 loopback, `host.docker.internal`,
+the `floci.base-url` host, and the configured Floci and cluster-announce hostnames.
+The listener renews its leaf certificate a minute before it expires, never past the CA's own
+expiry, while retaining the same trusted CA.
+Trust `{persistent-path}/tls/floci-root-ca.crt` or the CA from `GET /_floci/ca.pem`.
+The main HTTP listener's TLS setting does not disable cache transit encryption.
+
+```bash
+valkey-cli --tls --cacert ./floci-root-ca.crt -h localhost -p "$CACHE_PORT" \
+  --user "$CACHE_USER" --askpass PING
+```
+
+TLS terminates in Floci's cache proxy; the Docker backend hop retains its existing
+transport. This does not add Memcached transit encryption.
+
+## User access strings
+
+For non-cluster-mode Redis/Valkey replication groups and serverless caches, the auth
+proxy applies each associated user's `AccessString` to a private backend ACL identity.
+Valkey enforces command, key and Pub/Sub channel permissions. Authenticating a
+subscribe-only user does not grant `SET` or `FLUSHALL`. The backend default account
+is disabled once RBAC is used, so another `AUTH` or `HELLO AUTH` cannot regain its
+unrestricted permissions.
+
+Backend passwords are generated in memory separately from frontend passwords and IAM
+tokens. Even `+@all` users cannot manage ACLs or backend configuration, load modules,
+reconfigure replication, shut down the engine, or observe administrative commands through
+`MONITOR` or `SLOWLOG`. `SYNC` and `PSYNC` are also denied: replication streams can expose
+keys outside a user's permitted key patterns. `SAVE`, `BGSAVE`, `BGREWRITEAOF`, and `MIGRATE`
+are denied as well, preventing backend persistence operations and outbound key migrations.
+These restrictions protect private backend credentials and key boundaries. AWS lists these among its
+[restricted cache commands](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/SupportedCommands.html).
+
+`ModifyUser` with `AccessString` or `AppendAccessString` is installed on the backend at once
+for every replication group and serverless cache that holds the user, so it applies to connections
+that are already open. A change that cannot be installed, such as one with a selector, is logged and
+the open sessions keep their old permissions until the user authenticates again. Other
+changes, such as adding a user to a group or associating a user group with a cache, are
+installed on the next successful authentication; reconnect to apply them promptly.
+Re-authentication on an already relayed connection uses the backend protocol directly, so
+reconnect through the proxy with frontend credentials.
+Revoked members' existing sessions are not proactively disconnected by this change.
+ACL selectors are rejected before backend changes: a selector can grant permissions
+independently of the root rules used to protect private backend credentials. Read-only
+`ACL` commands are also unavailable through these sessions.
+
+**Known limitation:** cluster-mode RBAC fails closed. Configuring replication credentials
+across all nodes is still required before disabling their default accounts. Such connections
+are rejected rather than being relayed with unrestricted permissions. Cluster-mode caches
+without user associations retain their existing behavior.
+
 ## Supported Management Actions
 
 <!-- floci:actions:start -->
@@ -20,31 +84,39 @@ Floci manages real Valkey/Redis Docker containers and proxies TCP connections to
 | `DescribeUsers` | List ElastiCache users |
 | `ModifyUser` | Change a user's passwords and authentication mode, replace its access string with `AccessString` or add to it with `AppendAccessString` |
 | `DeleteUser` | Remove an ElastiCache user |
-| `CreateUserGroup` | Create a user group; a `redis` group must contain a user named `default`, a `valkey` group need not |
-| `DescribeUserGroups` | List user groups with their users and the replication groups and serverless caches using them |
-| `ModifyUserGroup` | Add or remove users, or change the engine; membership changes apply to authentication at once |
-| `DeleteUserGroup` | Remove a user group that no replication group or serverless cache uses |
 | `CreateCacheCluster` | Start a Memcached cluster, or a single-node Redis/Valkey one (`NumCacheNodes` must be 1) |
-| `CreateServerlessCache` | Create a local Valkey, Redis or Memcached runtime with serverless metadata |
-| `DescribeServerlessCaches` | List serverless caches, settings and endpoints |
-| `ModifyServerlessCache` | Update metadata and user-group association while retaining cache data |
-| `DeleteServerlessCache` | Delete serverless metadata and its backing runtime |
 | `DescribeCacheClusters` | List cache clusters: Memcached, single-node Redis/Valkey, and replication group members |
+| `DescribeCacheEngineVersions` | - |
+| `ModifyCacheCluster` | - |
 | `DeleteCacheCluster` | Stop and remove a cache cluster |
 | `CreateCacheSubnetGroup` | Create a cache subnet group |
 | `DescribeCacheSubnetGroups` | List cache subnet groups |
 | `ModifyCacheSubnetGroup` | Replace a group's description or subnets |
 | `DeleteCacheSubnetGroup` | Delete a cache subnet group |
-| `CreateCacheParameterGroup` | Create a cache parameter group |
+| `IncreaseReplicaCount` | - |
+| `DecreaseReplicaCount` | - |
+| `ModifyReplicationGroupShardConfiguration` | - |
+| `TestFailover` | - |
+| `DescribeSnapshots` | - |
+| `DeleteSnapshot` | - |
+| `ListTagsForResource` | Read stored tags for supported ElastiCache resource ARNs |
+| `AddTagsToResource` | - |
+| `RemoveTagsFromResource` | - |
 | `DescribeCacheParameterGroups` | List parameter groups, including the AWS defaults |
 | `DescribeEvents` | Empty list (events are not recorded) |
 | `CreateCacheParameterGroup` | Create a cache parameter group |
 | `ModifyCacheParameterGroup` | Set parameters on a group |
 | `DescribeCacheParameters` | List the parameters set on a group |
 | `DeleteCacheParameterGroup` | Delete a cache parameter group |
-| `AddTagsToResource` | - |
-| `RemoveTagsFromResource` | - |
-| `ListTagsForResource` | Read stored tags for supported ElastiCache resource ARNs |
+| `CreateServerlessCache` | Create a local Valkey, Redis or Memcached runtime with serverless metadata |
+| `DescribeServerlessCaches` | List serverless caches, settings and endpoints |
+| `ModifyServerlessCache` | Update metadata and user-group association while retaining cache data |
+| `DeleteServerlessCache` | Delete serverless metadata and its backing runtime |
+| `CreateServerlessCacheSnapshot` | - |
+| `DescribeServerlessCacheSnapshots` | - |
+| `DeleteServerlessCacheSnapshot` | - |
+| `CopyServerlessCacheSnapshot` | - |
+| `ExportServerlessCacheSnapshot` | - |
 <!-- floci:actions:end -->
 
 ### Serverless caches and user groups
@@ -55,6 +127,8 @@ existing single-node Valkey container and shared proxy port range. Memcached cac
 existing Memcached container runtime. Their internal backing clusters are hidden from ordinary
 cluster management APIs. `Endpoint` and `ReaderEndpoint` identify the same local runtime.
 
+Every account has a built-in user with id and name `default` (no password, `on ~* +@all`) that
+cannot be modified or deleted; a custom user named `default` can take its place in a group.
 User groups support create, describe, modify and delete. Redis groups require a `default` user;
 Valkey groups can be empty and accept authenticated Redis or Valkey users. Caches read the current
 group membership and user credentials on each authentication. An attached empty group still
@@ -157,8 +231,9 @@ request may send them, and the describe will not report them back.
 `SecurityGroupIds` supplied to `CreateReplicationGroup` are stored with the group and returned
 on every member by `DescribeCacheClusters` as `SecurityGroups` memberships with `Status=active`.
 This includes shards and replicas in cluster mode. Groups without stored IDs return no memberships.
-The IDs are control-plane
-metadata, not network rules applied to the backing cache containers.
+`ModifyReplicationGroup` accepts `SecurityGroupIds` and replaces the whole stored list, on the
+group and every member; a modify that names none leaves the memberships untouched. The IDs are
+control-plane metadata, not network rules applied to the backing cache containers.
 
 `CreateReplicationGroup` provisions a real sharded Valkey cluster when the request asks for one:
 `NumNodeGroups` greater than 1, a `default.*.cluster.on` parameter group, a custom parameter group
@@ -302,6 +377,33 @@ deleted: `DeleteCacheParameterGroup` answers `InvalidCacheParameterGroupState` u
 replication group is gone. The reference counts from the moment `CreateReplicationGroup` accepts
 the name, not from when the group is stored, so a delete that lands while that create is still
 provisioning its container is refused too.
+
+## Engine version and backend image
+
+`EngineVersion` is control-plane metadata. For Redis/Valkey replication groups and
+standalone cache clusters, Floci starts the image configured by
+`floci.services.elasticache.default-image` (`FLOCI_SERVICES_ELASTICACHE_DEFAULT_IMAGE`),
+whose default is `valkey/valkey:8`. The requested version does not select the image.
+For example, a request with `Engine=valkey` and `EngineVersion=7.2` can describe itself
+as 7.2 while `HELLO 2` or `INFO server` reports the Valkey 8 version in that image.
+Redis compatibility version fields can differ from the native Valkey version.
+
+To test with Valkey 7.2, configure the backend image before creating the cache:
+
+```bash
+FLOCI_SERVICES_ELASTICACHE_DEFAULT_IMAGE=valkey/valkey:7.2
+```
+
+This setting applies to every Redis/Valkey cache in that Floci process, including
+cluster-mode nodes. Restoring persisted runtimes after a Floci restart uses the
+current image setting too. Use separate Floci instances when tests require different
+backend versions, and select a patch tag or digest when an exact build is required.
+Changing `EngineVersion` alone does not upgrade or downgrade a running backend.
+Check `INFO server` (including `valkey_version` for Valkey) to verify the running build;
+describe responses report the stored request metadata.
+
+Memcached uses the separate `floci.services.elasticache.default-memcached-image`
+(`FLOCI_SERVICES_ELASTICACHE_DEFAULT_MEMCACHED_IMAGE`) setting, default `memcached:1.6`.
 
 ## Configuration
 

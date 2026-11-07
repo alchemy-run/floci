@@ -32,6 +32,7 @@ import software.amazon.awssdk.services.lambdaweb.model.ServiceConfig;
 import software.amazon.awssdk.services.lambdaweb.model.UpdateWebFunctionEndpointResponse;
 import software.amazon.awssdk.services.lambdaweb.model.ValidationException;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.BucketVersioningStatus;
 import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 
 import java.util.Map;
@@ -46,12 +47,16 @@ class LambdaWebTest {
     private static final String FUNCTION_NAME = "sdk-test-web-fn";
     private static final String LAMBDA_TRUST = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
             + "\"Principal\":{\"Service\":\"lambda.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+    private static final String LAMBDA_READ = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\","
+            + "\"Principal\":{\"Service\":\"lambda.amazonaws.com\"},"
+            + "\"Action\":[\"s3:GetObject\",\"s3:GetObjectVersion\"],\"Resource\":\"arn:aws:s3:::%s/*\"}]}";
     private static LambdaWebClient lambdaWeb;
     private static IamClient iam;
     private static String roleName;
     private static String role;
     private static S3Client s3;
     private static String bucket;
+    private static String codeVersion;
     private static String functionArn;
     private static String firstRevisionId;
     private static String secondRevisionId;
@@ -65,7 +70,12 @@ class LambdaWebTest {
         role = iam.createRole(r -> r.roleName(roleName).assumeRolePolicyDocument(LAMBDA_TRUST)).role().arn();
         bucket = TestFixtures.uniqueName("sdk-test-web-code");
         s3.createBucket(r -> r.bucket(bucket));
-        s3.putObject(r -> r.bucket(bucket).key("app.zip"), RequestBody.fromBytes(LambdaUtils.minimalZip()));
+        // AWS takes code only from a versioned bucket that lets Lambda read it.
+        s3.putBucketVersioning(r -> r.bucket(bucket)
+                .versioningConfiguration(v -> v.status(BucketVersioningStatus.ENABLED)));
+        s3.putBucketPolicy(r -> r.bucket(bucket).policy(LAMBDA_READ.formatted(bucket)));
+        codeVersion = s3.putObject(r -> r.bucket(bucket).key("app.zip"),
+                RequestBody.fromBytes(LambdaUtils.minimalZip())).versionId();
     }
 
     /** Only "already gone" is tolerated; any other failure to clean up fails the run. */
@@ -81,7 +91,7 @@ class LambdaWebTest {
         }
         if (s3 != null) {
             try {
-                s3.deleteObject(r -> r.bucket(bucket).key("app.zip"));
+                s3.deleteObject(r -> r.bucket(bucket).key("app.zip").versionId(codeVersion));
                 s3.deleteBucket(r -> r.bucket(bucket));
             } catch (NoSuchBucketException expected) {
                 // Setup did not get as far as creating the bucket.
@@ -146,10 +156,11 @@ class LambdaWebTest {
                 .extracting(f -> f.functionName()).contains(FUNCTION_NAME);
         assertThat(lambdaWeb.getWebAccountSettings(r -> {}).accountQuotas().maxEndpointsPerFunction()).isEqualTo(10);
 
-        String foreignRegion = functionArn.replace(":" + TestFixtures.region().id() + ":", ":eu-west-1:");
+        String otherRegion = "eu-west-1".equals(TestFixtures.region().id()) ? "us-west-2" : "eu-west-1";
+        String foreignRegion = functionArn.replace(":" + TestFixtures.region().id() + ":", ":" + otherRegion + ":");
         assertThatThrownBy(() -> lambdaWeb.getWebFunction(r -> r.functionName(foreignRegion)))
                 .isInstanceOf(ValidationException.class)
-                .hasMessageContaining("The operation is only allowed in the function's home region eu-west-1.");
+                .hasMessageContaining("The operation is only allowed in the function's home region " + otherRegion + ".");
         assertThatThrownBy(() -> lambdaWeb.getWebFunction(r -> r.functionName("sdk-test-no-such-web-fn")))
                 .isInstanceOf(ResourceNotFoundException.class)
                 .hasMessageContaining("does not exist.");
@@ -258,7 +269,8 @@ class LambdaWebTest {
                 .hasMessageContaining("Policy has syntax errors.");
 
         String policy = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
-                + "{\"AWS\":\"arn:aws:iam::000000000000:root\"},\"Action\":\"lambda:InvokeWebFunctionEndpoint\","
+                + "{\"AWS\":\"" + TestFixtures.globalArn("iam", "000000000000", "root")
+                + "\"},\"Action\":\"lambda:InvokeWebFunctionEndpoint\","
                 + "\"Resource\":\"" + functionArn + "/endpoint/*\"}]}";
         PutResourcePolicyResponse put = lambdaWeb.putResourcePolicy(r -> r.resourceArn(functionArn).policy(policy));
         assertThat(put.policy()).isEqualTo(policy);

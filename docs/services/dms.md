@@ -16,25 +16,38 @@ those subnets actually have. No data is migrated: the resources are control-plan
 | Action | Description |
 | --- | --- |
 | `CreateReplicationSubnetGroup` | Creates a replication subnet group from existing EC2 subnets. |
+| `ModifyReplicationSubnetGroup` | - |
 | `DescribeReplicationSubnetGroups` | Lists replication subnet groups, optionally filtered by identifier. |
 | `DeleteReplicationSubnetGroup` | Deletes the specified replication subnet group. |
+| `CreateEndpoint` | Creates a source or target endpoint; secret members are accepted and never returned. |
+| `ModifyEndpoint` | Updates an endpoint; settings structures merge unless `ExactSettings` is true. |
+| `DeleteEndpoint` | Deletes an endpoint that no replication task uses. |
+| `DescribeEndpoints` | Lists endpoints, filtered by `endpoint-arn`, `endpoint-type`, `endpoint-id` or `engine-name`. |
+| `DescribeEndpointSettings` | - |
+| `CreateReplicationInstance` | Creates a replication instance, `available` immediately. |
+| `ModifyReplicationInstance` | Updates a replication instance, applied immediately. |
+| `RebootReplicationInstance` | - |
+| `DeleteReplicationInstance` | Deletes a replication instance that no replication task uses. |
+| `DescribeReplicationInstances` | Lists replication instances, filtered by `replication-instance-arn`, `replication-instance-id`, `replication-instance-class` or `engine-version`. |
+| `DescribeReplicationInstanceTaskLogs` | - |
+| `DescribeOrderableReplicationInstances` | - |
+| `TestConnection` | - |
+| `DescribeConnections` | - |
+| `RefreshSchemas` | - |
+| `DescribeRefreshSchemasStatus` | - |
+| `DescribeSchemas` | - |
+| `DescribeReplicationTasks` | Lists replication tasks, filtered by `replication-task-arn`, `replication-task-id`, `migration-type`, `endpoint-arn` or `replication-instance-arn`. |
+| `StartReplicationTask` | Moves a task to `running`. |
+| `StopReplicationTask` | Moves a running task to `stopped`. |
+| `DescribeTableStatistics` | - |
+| `ReloadTables` | - |
+| `DescribeReplications` | - |
+| `StartReplication` | - |
+| `StopReplication` | - |
+| `DescribeEvents` | - |
 | `ListTagsForResource` | Lists the tags on one or more DMS resource ARNs. |
 | `AddTagsToResource` | Merges tags into the resource, overwriting by key. |
 | `RemoveTagsFromResource` | Removes the named tag keys from the resource. |
-| `CreateEndpoint` | Creates a source or target endpoint; secret members are accepted and never returned. |
-| `DescribeEndpoints` | Lists endpoints, filtered by `endpoint-arn`, `endpoint-type`, `endpoint-id` or `engine-name`. |
-| `ModifyEndpoint` | Updates an endpoint; settings structures merge unless `ExactSettings` is true. |
-| `DeleteEndpoint` | Deletes an endpoint that no replication task uses. |
-| `CreateReplicationInstance` | Creates a replication instance, `available` immediately. |
-| `DescribeReplicationInstances` | Lists replication instances, filtered by `replication-instance-arn`, `replication-instance-id`, `replication-instance-class` or `engine-version`. |
-| `ModifyReplicationInstance` | Updates a replication instance, applied immediately. |
-| `DeleteReplicationInstance` | Deletes a replication instance that no replication task uses. |
-| `CreateReplicationTask` | Creates a replication task between two existing endpoints on an existing instance, `ready` immediately. |
-| `DescribeReplicationTasks` | Lists replication tasks, filtered by `replication-task-arn`, `replication-task-id`, `migration-type`, `endpoint-arn` or `replication-instance-arn`. |
-| `ModifyReplicationTask` | Updates a replication task that is not running. |
-| `DeleteReplicationTask` | Deletes a replication task that is not running. |
-| `StartReplicationTask` | Moves a task to `running`. |
-| `StopReplicationTask` | Moves a running task to `stopped`. |
 <!-- floci:actions:end -->
 
 ## Behaviour
