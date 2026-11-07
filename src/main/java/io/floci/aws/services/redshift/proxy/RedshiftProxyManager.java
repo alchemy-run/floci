@@ -3,6 +3,7 @@ package io.floci.aws.services.redshift.proxy;
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.services.iam.IamService;
 import io.floci.aws.services.rds.proxy.PasswordValidator;
+import io.floci.aws.services.rds.proxy.RdsProxyManager;
 import io.floci.aws.services.rds.proxy.RdsProxyTlsCertificates;
 import io.floci.aws.services.rds.proxy.RdsSigV4Validator;
 import io.floci.aws.services.redshift.RedshiftAuditLogPublisher;
@@ -45,6 +46,13 @@ public class RedshiftProxyManager {
      * caller leaves the port reserved rather than handing it out to another cluster.
      */
     private final ConcurrentHashMap<String, RedshiftAuthProxy> unclosableProxies = new ConcurrentHashMap<>();
+
+    /**
+     * Serves cluster endpoints named under {@code endpoint-domain} on the shared listeners the RDS
+     * endpoint router owns, routed by TLS server name. Null where the manager is built by hand.
+     */
+    @Inject
+    RdsProxyManager endpointRouter;
 
     public RedshiftProxyManager(RdsSigV4Validator sigV4Validator, RdsProxyTlsCertificates tlsCertificates,
                                 S3Service s3Service, IamService iamService, EmulatorConfig config) {
@@ -129,6 +137,24 @@ public class RedshiftProxyManager {
                 throw failure;
             }
         }
+        routeEndpoint(relayKey, advertisedHost, proxyPort);
+    }
+
+    private void routeEndpoint(String relayKey, String advertisedHost, int proxyPort) {
+        String domain = config.services().redshift().endpointDomain().filter(d -> !d.isBlank()).orElse(null);
+        if (endpointRouter == null || domain == null || advertisedHost == null
+                || !advertisedHost.endsWith("." + domain)) {
+            return;
+        }
+        int port = config.services().redshift().defaultPort();
+        if (!endpointRouter.routePostgresEndpoint(routeKey(relayKey), List.of(advertisedHost), port, proxyPort)) {
+            LOG.warnv("Redshift endpoint {0} cannot listen on port {1}; it is reachable on proxy port {2} only",
+                    advertisedHost, String.valueOf(port), String.valueOf(proxyPort));
+        }
+    }
+
+    private static String routeKey(String relayKey) {
+        return "redshift:" + relayKey;
     }
 
     public synchronized void updateMasterPassword(String relayKey, String newPassword) {
@@ -161,6 +187,9 @@ public class RedshiftProxyManager {
     }
 
     public synchronized void stopProxy(String relayKey) {
+        if (endpointRouter != null) {
+            endpointRouter.unroutePostgresEndpoint(routeKey(relayKey));
+        }
         // Retry any listener a previous failed start/replace could not close. If it still
         // cannot be closed this throws, and the entry stays for the next retry.
         RedshiftAuthProxy unclosable = unclosableProxies.get(relayKey);

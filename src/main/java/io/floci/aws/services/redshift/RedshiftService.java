@@ -318,7 +318,7 @@ public class RedshiftService implements ManagedSecretRotator {
                 // their stored port so the endpoint is stable across restarts.
                 int proxyPort = cluster.getProxyPort() > 0 ? cluster.getProxyPort() : allocateProxyPort();
                 usedPorts.add(proxyPort);
-                Endpoint endpoint = proxyEndpoint(proxyPort);
+                Endpoint endpoint = clusterEndpoint(entry.accountId(), cluster.getClusterIdentifier(), proxyPort);
                 cluster.setProxyPort(proxyPort);
                 proxyManager.startProxy(
                         relayKey(entry.accountId(), cluster.getClusterIdentifier()), proxyPort,
@@ -435,7 +435,7 @@ public class RedshiftService implements ManagedSecretRotator {
             RedshiftContainerHandle handle = containerManager.start(
                     accountId, identifier, username, password, CLUSTER_DB_NAME, cluster.getNodeType());
             proxyPort = allocateProxyPort();
-            Endpoint endpoint = proxyEndpoint(proxyPort);
+            Endpoint endpoint = clusterEndpoint(accountId, identifier, proxyPort);
             cluster.setProxyPort(proxyPort);
             proxyManager.startProxy(relayKey(accountId, identifier), proxyPort,
                     handle.getHost(), handle.getPort(), endpoint.getAddress(),
@@ -1638,7 +1638,7 @@ public class RedshiftService implements ManagedSecretRotator {
         int port = cluster.getProxyPort() > 0 ? cluster.getProxyPort() : allocateProxyPort();
         usedPorts.add(port);
         cluster.setProxyPort(port);
-        Endpoint endpoint = cluster.getEndpoint() != null ? cluster.getEndpoint() : proxyEndpoint(port);
+        Endpoint endpoint = cluster.getEndpoint() != null ? cluster.getEndpoint() : clusterEndpoint(accountId, cluster.getClusterIdentifier(), port);
         String password = cluster.getMasterPassword() != null ? cluster.getMasterPassword() : "admin";
         proxyManager.startProxy(relayKey(accountId, cluster.getClusterIdentifier()), port,
                 handle.getHost(), handle.getPort(), endpoint.getAddress(), cluster.getMasterUsername(), password,
@@ -1695,7 +1695,7 @@ public class RedshiftService implements ManagedSecretRotator {
                 proxyPort = allocateProxyPort();
             }
             usedPorts.add(proxyPort);
-            Endpoint endpoint = proxyEndpoint(proxyPort);
+            Endpoint endpoint = clusterEndpoint(accountId, clusterIdentifier, proxyPort);
             cluster.setProxyPort(proxyPort);
             proxyManager.startProxy(key, proxyPort, handle.getHost(), handle.getPort(),
                     endpoint.getAddress(), cluster.getMasterUsername(), password, CLUSTER_DB_NAME,
@@ -2120,7 +2120,7 @@ public class RedshiftService implements ManagedSecretRotator {
             RedshiftContainerHandle handle = containerManager.start(
                     accountId, clusterIdentifier, username, password, CLUSTER_DB_NAME, cluster.getNodeType());
             proxyPort = allocateProxyPort();
-            Endpoint endpoint = proxyEndpoint(proxyPort);
+            Endpoint endpoint = clusterEndpoint(accountId, clusterIdentifier, proxyPort);
             cluster.setProxyPort(proxyPort);
             proxyManager.startProxy(relayKey(accountId, clusterIdentifier), proxyPort,
                     handle.getHost(), handle.getPort(), endpoint.getAddress(),
@@ -3630,6 +3630,34 @@ public class RedshiftService implements ManagedSecretRotator {
     /** The address and port clients use to reach a proxy bound to {@code proxyPort}. */
     public Endpoint advertisedEndpoint(int proxyPort) {
         return proxyEndpoint(proxyPort);
+    }
+
+    /**
+     * A cluster's endpoint. Under {@code endpoint-domain} it is the AWS shape
+     * {@code <cluster>.<token>.<region>.<domain>} on the default port, which every cluster shares;
+     * otherwise the proxy's own address and port.
+     */
+    private Endpoint clusterEndpoint(String accountId, String clusterIdentifier, int proxyPort) {
+        Optional<String> domain = config.services().redshift().endpointDomain().filter(d -> !d.isBlank());
+        if (domain.isEmpty()) {
+            return proxyEndpoint(proxyPort);
+        }
+        String region = regionResolver.getRegion();
+        return new Endpoint(clusterIdentifier.toLowerCase(java.util.Locale.ROOT) + "."
+                + endpointToken(accountId, region) + "." + region + "." + domain.get(),
+                config.services().redshift().defaultPort());
+    }
+
+    // AWS gives every account and region a stable 12-character endpoint label.
+    private static String endpointToken(String accountId, String region) {
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(("redshift:" + accountId + ":" + region)
+                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            return java.util.HexFormat.of().formatHex(digest).substring(0, 12);
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is unavailable", e);
+        }
     }
 
     private Endpoint proxyEndpoint(int proxyPort) {

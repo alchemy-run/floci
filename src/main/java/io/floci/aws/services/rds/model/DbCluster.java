@@ -42,6 +42,7 @@ public class DbCluster {
     private String masterUserSecretKmsKeyId;
     private Instant createdAt;
     private int proxyPort;
+    private int listenerPort;
     private Map<String, String> tags = new LinkedHashMap<>();
     private List<DbRoleAssociation> associatedRoles = new ArrayList<>();
     private String engineMode;
@@ -185,6 +186,10 @@ public class DbCluster {
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
+
+    /** The port the endpoint listens on when endpoints are routed by name; 0 until assigned. */
+    public int getListenerPort() { return listenerPort; }
+    public void setListenerPort(int listenerPort) { this.listenerPort = listenerPort; }
 
     public int getProxyPort() { return proxyPort; }
     public void setProxyPort(int proxyPort) { this.proxyPort = proxyPort; }

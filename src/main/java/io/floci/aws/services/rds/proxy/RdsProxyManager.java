@@ -11,6 +11,7 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -30,6 +31,11 @@ public class RdsProxyManager {
     private final RdsContainerManager containerManager;
     private final ConcurrentHashMap<String, RdsAuthProxy> proxies = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<String, RdsAuthProxy> pendingFailedStarts = new ConcurrentHashMap<>();
+    /** The internal port and engine of each running proxy, which the endpoint router relays to. */
+    private final ConcurrentHashMap<String, ProxyTarget> targets = new ConcurrentHashMap<>();
+    private final RdsEndpointRouter router;
+
+    private record ProxyTarget(int port, DatabaseEngine engine) {}
 
     @Inject
     public RdsProxyManager(RdsSigV4Validator sigV4Validator, RdsProxyTlsCertificates tlsCertificates,
@@ -40,6 +46,66 @@ public class RdsProxyManager {
         this.config = config;
         this.backendGate = backendGate;
         this.containerManager = containerManager;
+        EmulatorConfig.RdsServiceConfig rdsConfig = config.services().rds();
+        this.router = new RdsEndpointRouter(rdsConfig.proxyHandshakeTimeoutMillis(),
+                rdsConfig.proxyBackendConnectTimeoutMillis(), rdsConfig.proxyMaxConnections());
+    }
+
+    /**
+     * Serves a started proxy on its advertised endpoint: {@code hostnames} (the endpoint address
+     * and any alias, such as a cluster's reader endpoint) on the endpoint's {@code port}, which
+     * many resources can share. AWS gives every instance and cluster a host name of its own, so
+     * they all listen on the engine's port; the router hands each connection to the proxy its TLS
+     * server name selects, or to the only one on the port. A no-op when no proxy runs under
+     * {@code instanceId}.
+     *
+     * @return false when the port could not be bound on this host
+     */
+    public synchronized boolean advertise(String instanceId, List<String> hostnames, int port) {
+        ProxyTarget target = targets.get(instanceId);
+        if (target == null || hostnames == null || hostnames.isEmpty()) {
+            return true;
+        }
+        for (String hostname : hostnames) {
+            tlsCertificates.ensureHost(hostname);
+        }
+        return router.register(instanceId, port, hostnames, target.port(), target.engine());
+    }
+
+    /**
+     * Routes another service's PostgreSQL-protocol endpoint (a Redshift cluster) through the same
+     * shared listeners: {@code hostnames} on {@code port} go to the listener on {@code targetPort}.
+     *
+     * @return false when the port could not be bound on this host
+     */
+    public synchronized boolean routePostgresEndpoint(String key, List<String> hostnames, int port, int targetPort) {
+        for (String hostname : hostnames) {
+            tlsCertificates.ensureHost(hostname);
+        }
+        return router.register(key, port, hostnames, targetPort, DatabaseEngine.POSTGRES);
+    }
+
+    /**
+     * Serves a proxy whose endpoint has a name of its own under {@code endpoint-domain} on that
+     * endpoint's port. Other endpoints (RDS Proxy, an operator-set endpoint host) are served on
+     * the proxy's own port, as before.
+     */
+    private void routeEndpoint(String instanceId, RdsProxyBinding binding, int proxyPort, DatabaseEngine engine) {
+        String domain = config.services().rds().endpointDomain().filter(d -> !d.isBlank()).orElse(null);
+        if (domain == null || binding == null || binding.advertisedHost() == null
+                || !binding.advertisedHost().endsWith("." + domain) || binding.publishedPort() <= 0) {
+            return;
+        }
+        tlsCertificates.ensureHost(binding.advertisedHost());
+        if (!router.register(instanceId, binding.publishedPort(), List.of(binding.advertisedHost()),
+                proxyPort, engine)) {
+            LOG.warnv("RDS endpoint {0} cannot listen on port {1}; it is reachable on proxy port {2} only",
+                    binding.advertisedHost(), String.valueOf(binding.publishedPort()), String.valueOf(proxyPort));
+        }
+    }
+
+    public synchronized void unroutePostgresEndpoint(String key) {
+        router.unregister(key);
     }
 
     public synchronized void startProxy(String instanceId, String backendRuntimeId,
@@ -129,6 +195,8 @@ public class RdsProxyManager {
         RdsAuthProxy previous;
         try {
             previous = proxies.put(instanceId, proxy);
+            targets.put(instanceId, new ProxyTarget(proxyPort, engine));
+            routeEndpoint(instanceId, binding, proxyPort, engine);
         } catch (RuntimeException e) {
             RuntimeException failure = new RuntimeException(
                     "Failed to register RDS proxy for instance " + instanceId
@@ -169,6 +237,8 @@ public class RdsProxyManager {
     }
 
     public synchronized void stopProxy(String instanceId) {
+        router.unregister(instanceId);
+        targets.remove(instanceId);
         Throwable failure = null;
         RdsAuthProxy pending = pendingFailedStarts.get(instanceId);
         if (pending != null) {
@@ -212,6 +282,7 @@ public class RdsProxyManager {
                         instanceId);
             }
         });
+        router.closeAll();
         LOG.info("Stopped all RDS proxies");
     }
 

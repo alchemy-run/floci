@@ -1868,6 +1868,14 @@ public interface EmulatorConfig {
         // DockerHostResolver (falls back to "localhost").
         Optional<String> endpointHost();
 
+        /**
+         * Domain under which every cluster gets an endpoint name of its own, in the AWS shape
+         * {@code <cluster>.<token>.<region>.<domain>}, served on {@link #defaultPort()} which
+         * any number of clusters share, routed by TLS server name. Unset, each endpoint is
+         * {@link #endpointHost()} (or the Docker host) on the cluster's proxy port.
+         */
+        Optional<String> endpointDomain();
+
         // Default lifetime for GetClusterCredentials / GetClusterCredentialsWithIAM when
         // DurationSeconds is omitted. AWS allows 900 to 3600.
         @WithDefault("900")
@@ -1929,6 +1937,15 @@ public interface EmulatorConfig {
 
         /** Hostname advertised for RDS endpoints. Uses published Docker ports when configured. */
         Optional<String> endpointHost();
+
+        /**
+         * Domain under which every instance and cluster gets an endpoint name of its own, in the
+         * AWS shape {@code <id>.<token>.<region>.<domain>}, served on the engine's port (5432,
+         * 3306, ...) that any number of resources share. A shared listener hands each connection
+         * to the resource its TLS server name selects, or to the only one on the port. Unset, each
+         * endpoint is {@link #endpointHost()} (or the Docker host) on the resource's proxy port.
+         */
+        Optional<String> endpointDomain();
 
         /** Whether a PostgreSQL IAM auth token must have been generated for the endpoint the
          *  instance publishes (hostname, port and region), as on RDS. On by default; turn it off
