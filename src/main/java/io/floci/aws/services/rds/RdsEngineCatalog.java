@@ -34,6 +34,7 @@ final class RdsEngineCatalog {
             postgres("14.17", "14", false, List.of()),
             postgres("15.12", "15", false, List.of()),
             postgres("16.3", "16", true, List.of("db.t3.micro", "db.t4g.micro", "db.t4g.small", "db.t4g.medium")),
+            postgres("16.13", "16", false, List.of("db.t3.micro", "db.t4g.small")),
             postgres("16.14", "16", false, List.of("db.t3.micro", "db.t4g.small")),
             postgres("17.4", "17", false, List.of()),
             postgres("18.1", "18", false, List.of("db.t3.micro", "db.m8g.large")),

@@ -4881,7 +4881,7 @@ class RdsServiceTest {
     void engineVersionsSortNumericallyForUpgradeTargets() {
         RdsEngineCatalog.EngineVersion pg163 = RdsEngineCatalog.VERSIONS.stream()
                 .filter(v -> v.engine().equals("postgres") && v.version().equals("16.3")).findFirst().orElseThrow();
-        assertEquals(List.of("16.14", "17.4", "18.1", "18.4"),
+        assertEquals(List.of("16.13", "16.14", "17.4", "18.1", "18.4"),
                 RdsEngineCatalog.upgradeTargets(pg163).stream().map(RdsEngineCatalog.EngineVersion::version).toList());
     }
 
@@ -11249,12 +11249,12 @@ class RdsServiceTest {
                 new DbInstanceSettings(null, null, null, null, "mon:00:00-wed:00:00", null)));
         assertEquals("Maintenance window must be less than 24 hours.", tooLong.getMessage());
 
-        // AWS accepted a 40-day retention period, so it is not range-checked here
+        // 35 days is the documented maximum, and it is accepted
         rdsService.createDbInstance("mydb", "postgres", "13", "admin", "password", "dbname",
                 "db.t3.micro", 20, false, null, null, null, null, false, false, null,
                 Map.of(), List.of(), null, null, true,
-                new DbInstanceSettings(null, null, 40, "02:00-02:30", "tue:03:00-tue:03:30", null));
-        assertEquals(40, rdsService.getDbInstance("mydb").getBackupRetentionPeriod());
+                new DbInstanceSettings(null, null, 35, "02:00-02:30", "tue:03:00-tue:03:30", null));
+        assertEquals(35, rdsService.getDbInstance("mydb").getBackupRetentionPeriod());
     }
 
     @Test

@@ -111,6 +111,12 @@ public record DbInstanceSettings(Boolean storageEncrypted,
             throw new AwsException("InvalidParameterCombination",
                     "You must enable StorageEncrypted when you specify KmsKeyId", 400);
         }
+        // RDS keeps automated backups for 0 (off) to 35 days.
+        if (backupRetentionPeriod != null && (backupRetentionPeriod < 0 || backupRetentionPeriod > 35)) {
+            throw new AwsException("InvalidParameterValue",
+                    "Invalid backup retention period: " + backupRetentionPeriod
+                            + ". The backup retention period must be between 0 and 35 days.", 400);
+        }
         if (preferredBackupWindow != null) {
             BackupWindows.parseBackupWindow(preferredBackupWindow);
         }
@@ -221,6 +227,15 @@ public record DbInstanceSettings(Boolean storageEncrypted,
 
     public DbInstanceSettings withKmsKeyId(String resolvedKmsKeyId) {
         return new DbInstanceSettings(storageEncrypted, resolvedKmsKeyId, backupRetentionPeriod,
+                preferredBackupWindow, preferredMaintenanceWindow, copyTagsToSnapshot,
+                monitoringInterval, monitoringRoleArn, performanceInsightsEnabled,
+                performanceInsightsRetentionPeriod, engineLifecycleSupport,
+                enabledCloudwatchLogsExports, logExportChanges, maxAllocatedStorage, storageType,
+                caCertificateIdentifier, licenseModel);
+    }
+
+    public DbInstanceSettings withBackupRetentionPeriod(Integer retention) {
+        return new DbInstanceSettings(storageEncrypted, kmsKeyId, retention,
                 preferredBackupWindow, preferredMaintenanceWindow, copyTagsToSnapshot,
                 monitoringInterval, monitoringRoleArn, performanceInsightsEnabled,
                 performanceInsightsRetentionPeriod, engineLifecycleSupport,

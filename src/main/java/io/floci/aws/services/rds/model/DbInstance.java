@@ -74,6 +74,16 @@ public class DbInstance {
     private Map<String, String> tags = new LinkedHashMap<>();
     private List<DbRoleAssociation> associatedRoles = new ArrayList<>();
     private Instant createdAt;
+    /** Changes a ModifyDBInstance queued for the maintenance window, or null. */
+    private DbInstancePendingModifiedValues pendingModifiedValues;
+    // Floci completes operations at once; an available instance reports transitionalStatus
+    // ("creating", "modifying") until transitionalStatusUntil, and a storage change reports
+    // "storage-optimization" until storageOptimizationUntil.
+    private String transitionalStatus;
+    private Instant transitionalStatusUntil;
+    /** Whether a DescribeDBInstances has reported the transitional status yet. */
+    private boolean transitionalStatusReported;
+    private Instant storageOptimizationUntil;
     private int proxyPort;
     private int listenerPort;
     private Integer iops;
@@ -365,5 +375,28 @@ public class DbInstance {
     public Integer getMaxAllocatedStorage() { return maxAllocatedStorage; }
     public void setMaxAllocatedStorage(Integer maxAllocatedStorage) {
         this.maxAllocatedStorage = maxAllocatedStorage;
+    }
+
+    public DbInstancePendingModifiedValues getPendingModifiedValues() { return pendingModifiedValues; }
+    public void setPendingModifiedValues(DbInstancePendingModifiedValues pendingModifiedValues) {
+        this.pendingModifiedValues = pendingModifiedValues;
+    }
+
+    public String getTransitionalStatus() { return transitionalStatus; }
+    public void setTransitionalStatus(String transitionalStatus) { this.transitionalStatus = transitionalStatus; }
+
+    public boolean isTransitionalStatusReported() { return transitionalStatusReported; }
+    public void setTransitionalStatusReported(boolean transitionalStatusReported) {
+        this.transitionalStatusReported = transitionalStatusReported;
+    }
+
+    public Instant getTransitionalStatusUntil() { return transitionalStatusUntil; }
+    public void setTransitionalStatusUntil(Instant transitionalStatusUntil) {
+        this.transitionalStatusUntil = transitionalStatusUntil;
+    }
+
+    public Instant getStorageOptimizationUntil() { return storageOptimizationUntil; }
+    public void setStorageOptimizationUntil(Instant storageOptimizationUntil) {
+        this.storageOptimizationUntil = storageOptimizationUntil;
     }
 }
