@@ -24,6 +24,7 @@ import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
 import static org.awaitility.Awaitility.await;
+import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.not;
@@ -344,6 +345,8 @@ class LambdaMicrovmsIntegrationTest {
                 .then()
                 .statusCode(202)
                 .body("Configuration.VpcEgressConfiguration.NetworkProtocol", equalTo("IPv4"))
+                .body("Version", equalTo(1))
+                .body("VersionArn", endsWith(":1"))
                 .extract().path("Id");
 
         given()
@@ -364,13 +367,17 @@ class LambdaMicrovmsIntegrationTest {
                 .then()
                 .statusCode(202)
                 .body("LastUpdateStatus", equalTo("Successful"))
-                .body("Configuration.VpcEgressConfiguration.NetworkProtocol", equalTo("DualStack"));
+                .body("Configuration.VpcEgressConfiguration.NetworkProtocol", equalTo("DualStack"))
+                // A configuration change makes a new connector version.
+                .body("Version", equalTo(2));
 
         given()
                 .when()
                 .get(CORE + "/network-connectors/" + id)
                 .then()
                 .statusCode(200)
+                .body("LatestVersion", equalTo(2))
+                .body("LatestVersionArn", endsWith(":network-connector:" + id + ":2"))
                 .body("OperatorRole", equalTo("arn:aws:iam::000000000000:role/microvm-connector-operator-2"))
                 .body("Configuration.VpcEgressConfiguration.NetworkProtocol", equalTo("DualStack"))
                 .body("Configuration.VpcEgressConfiguration.SubnetIds[0]", equalTo("subnet-0000000000000up02"))

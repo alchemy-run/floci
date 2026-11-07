@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.RegionResolver;
+import io.floci.aws.services.lambda.LambdaArnUtils;
 import io.floci.aws.services.lambdamicrovms.LambdaMicrovmsService.NetworkConnector;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
@@ -136,6 +137,14 @@ public class LambdaNetworkConnectorsController {
         node.put("Id", connector.id);
         node.put("Name", connector.name);
         node.put("Arn", connector.arn);
+        if (shape == ConnectorShape.GET) {
+            node.put("LatestVersionArn",
+                    LambdaArnUtils.networkConnectorVersionArn(connector.arn, connector.latestVersion));
+            node.put("LatestVersion", connector.latestVersion);
+        } else if (shape != ConnectorShape.DELETE) {
+            node.put("VersionArn", LambdaArnUtils.networkConnectorVersionArn(connector.arn, connector.latestVersion));
+            node.put("Version", connector.latestVersion);
+        }
         node.put("State", shape == ConnectorShape.CREATE ? "PENDING" : connector.state);
         if (connector.operatorRole == null) {
             node.putNull("OperatorRole");
@@ -181,6 +190,8 @@ public class LambdaNetworkConnectorsController {
         node.put("Type", "VPC_EGRESS");
         node.put("State", connector.state);
         node.put("LastModified", iso(connector.lastModified));
+        node.put("LatestVersionArn", LambdaArnUtils.networkConnectorVersionArn(connector.arn, connector.latestVersion));
+        node.put("LatestVersion", connector.latestVersion);
         return node;
     }
 
