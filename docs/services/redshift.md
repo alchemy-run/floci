@@ -126,6 +126,7 @@ The attributes follow the [CloudFormation resource schema](https://docs.aws.amaz
 | `CreateCluster` | Create a cluster and start a PostgreSQL container for it |
 | `DescribeClusters` | List clusters and their connection details |
 | `DeleteCluster` | Create the requested final snapshot, then remove the cluster; accepts `SkipFinalClusterSnapshot` to delete without a backup |
+| `CopyClusterSnapshot` | Copy a cluster snapshot, with its stored dump |
 | `CreateClusterSnapshot` | Back up a cluster to a SQL dump via `pg_dump` |
 | `DescribeClusterSnapshots` | List snapshots, optionally filtered by snapshot or cluster identifier and SnapshotType (manual or automated) |
 | `DeleteClusterSnapshot` | Remove a snapshot and its stored dump |

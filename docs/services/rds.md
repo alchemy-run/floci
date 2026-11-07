@@ -165,6 +165,8 @@ RDS endpoints return the us-east-1 hosted zone ID `Z2R2ITUGPM61AM` in all region
 | `FailoverGlobalCluster` | Promote a secondary to primary (failover with `AllowDataLoss`, or switchover) |
 | `SwitchoverGlobalCluster` | Promote a secondary to primary and demote the current primary to a secondary |
 | `FailoverDBCluster` | Move a DB cluster's writer role to a reader instance, the named one or the first |
+| `DescribePendingMaintenanceActions` | List the maintenance actions pending for instances and clusters |
+| `ApplyPendingMaintenanceAction` | Apply or schedule a pending maintenance action |
 | `AddTagsToResource` | Add tags to a DB resource |
 | `ListTagsForResource` | List tags for a DB resource |
 | `RemoveTagsFromResource` | Remove tags from a DB resource |
