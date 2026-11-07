@@ -157,10 +157,10 @@ class RdsPostgresIamRoleIntegrationTest {
             pamRefused(port, password);
             assertUser(port, token(port, "app_user"), "app_user");
             rds("ModifyDBInstance").formParam("DBInstanceIdentifier", id)
-                    .formParam("EnableIAMDatabaseAuthentication", false).post("/").then().statusCode(200);
+                    .formParam("EnableIAMDatabaseAuthentication", false).formParam("ApplyImmediately", true).post("/").then().statusCode(200);
             assertUser(port, password, "app_user");
             rds("ModifyDBInstance").formParam("DBInstanceIdentifier", id)
-                    .formParam("EnableIAMDatabaseAuthentication", true).post("/").then().statusCode(200);
+                    .formParam("EnableIAMDatabaseAuthentication", true).formParam("ApplyImmediately", true).post("/").then().statusCode(200);
             pamRefused(port, password);
             asMaster(port, "REVOKE rds_iam FROM app_user");
             assertUser(port, password, "app_user");
