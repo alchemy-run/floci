@@ -3912,6 +3912,14 @@ public interface EmulatorConfig {
 
         @WithDefault("false")
         boolean mock();
+
+        /** Reuse backend HTTP/1.x connections between ordinary forwarded requests. */
+        @WithDefault("true")
+        boolean backendKeepAlive();
+
+        /** Default idle-pool timeout in seconds; zero disables expiry. Target Keep-Alive may override it. */
+        @WithDefault("60")
+        int backendKeepAliveTimeoutSeconds();
     }
 
     interface EksServiceConfig {

@@ -1488,8 +1488,13 @@ public class IamEnforcementFilter implements ContainerRequestFilter {
      * query credential names.
      */
     public void authorizePostObject(String authorizationHeader, String resource, String region) {
+        authorizePostObject(authorizationHeader, resource, region, null);
+    }
+
+    public void authorizePostObject(String authorizationHeader, String resource, String region,
+                                    Map<String, List<String>> requestConditions) {
         authorizeAdditionalResource(authorizationHeader, "s3:PutObject", resource, null, null,
-                new DeniedEvent("PostObject", region), null, false);
+                new DeniedEvent("PostObject", region), requestConditions, false);
     }
 
     /** A CloudTrail record to write when IAM refuses a request: its event name and its Region. */

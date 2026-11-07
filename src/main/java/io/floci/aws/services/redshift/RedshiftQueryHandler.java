@@ -474,7 +474,7 @@ public class RedshiftQueryHandler {
                     encryptionContextMap(params),
                     tagMap(params),
                     regionResolver.resolveRegionFromAuth(authorizationHeader));
-            if (zeroEtlConsumer != null) {
+            if (zeroEtlConsumer != null && integration.isPollingEnabled()) {
                 zeroEtlConsumer.startPolling(integration);
             }
             String xml = new XmlBuilder()
@@ -1087,6 +1087,9 @@ public class RedshiftQueryHandler {
                   .elem("TargetArn", integration.getTargetArn())
                   .elem("Status", integration.getStatus())
                   .elem("CreateTime", integration.getCreateTime());
+        if (integration.getSourceType() != null) {
+            builder.elem("SourceType", integration.getSourceType());
+        }
         if (integration.getDescription() != null) {
             builder.elem("Description", integration.getDescription());
         }

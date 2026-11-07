@@ -58,6 +58,15 @@ class CredentialScopeAliasTest {
     }
 
     @Test
+    void paymentCryptographyDataAliasNormalisesToPaymentCryptography() {
+        // The Payment Cryptography data plane signs as payment-cryptography-data, but its actions
+        // live under the payment-cryptography: namespace (payment-cryptography:EncryptData and
+        // peers in the Service Authorization Reference), so enforcement has to resolve it there
+        // rather than invent payment-cryptography-data:.
+        assertEquals("payment-cryptography", catalog.canonicalCredentialScope("payment-cryptography-data"));
+    }
+
+    @Test
     void canonicalScopeIsUnchanged() {
         assertEquals("s3", catalog.canonicalCredentialScope("s3"));
         assertEquals("dynamodb", catalog.canonicalCredentialScope("dynamodb"));
@@ -90,7 +99,8 @@ class CredentialScopeAliasTest {
                 .collect(Collectors.toMap(scope -> scope, catalog::canonicalCredentialScope));
 
         // The fork adds email for SES v2, signed as "email" by the SDK.
-        assertEquals(Map.of("s3express", "s3", "iot-jobs-data", "iot", "awsssoportal", "sso", "monitoring", "cloudwatch",
+        assertEquals(Map.of("s3express", "s3", "iot-jobs-data", "iot", "awsssoportal", "sso",
+                "monitoring", "cloudwatch", "payment-cryptography-data", "payment-cryptography",
                 "email", "ses"), rewritten);
     }
 
