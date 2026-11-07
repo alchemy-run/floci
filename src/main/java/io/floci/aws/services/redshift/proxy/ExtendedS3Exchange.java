@@ -225,7 +225,7 @@ final class ExtendedS3Exchange {
                 forward(client, message);
                 continue;
             }
-            if (type == '1' || type == '2' || type == 'T' || type == 't' || type == 'n') {
+            if (type == '1' || type == '2' || type == '3' || type == 'T' || type == 't' || type == 'n') {
                 coordinator.onBackendFrame(type, message.body());
                 forward(client, message);
                 continue;

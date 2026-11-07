@@ -248,9 +248,16 @@ final class BackendResponseCoordinator {
         return false;
     }
 
+    /**
+     * Messages that may still await their reply when an intercepted Execute takes the backend.
+     * PostgreSQL holds these replies until the client's Sync, which the client sends after the
+     * Execute, so waiting for them here would deadlock. pgjdbc sends a Close ahead of the next
+     * query for each statement it has garbage-collected, so a Close can precede any Execute.
+     */
     private static boolean isExtendedExecutePreamble(Operation operation) {
         return operation == Operation.PARSE
                 || operation == Operation.BIND
+                || operation == Operation.CLOSE
                 || operation == Operation.DESCRIBE_STATEMENT
                 || operation == Operation.DESCRIBE_PORTAL;
     }

@@ -89,6 +89,48 @@ class ExtendedS3ExchangeTest {
     }
 
     @Test
+    void copyInForwardsTheCloseCompleteOfAnEarlierClose() throws Exception {
+        when(s3.objectExists("b", "in/data")).thenReturn(true);
+        when(s3.getObject("b", "in/data")).thenReturn(
+                new S3Object("b", "in/data", "1|a\n".getBytes(StandardCharsets.US_ASCII), "text/plain"));
+        CopyStatementParser.S3CopyFrom copy = new CopyStatementParser.S3CopyFrom(
+                "t", List.of(), "b", "in/data", "|", 0, false, false, null, null);
+        BackendResponseCoordinator coordinator = new BackendResponseCoordinator(new ExtendedQuerySession());
+        coordinator.register(BackendResponseCoordinator.Operation.CLOSE, null);
+        BackendResponseCoordinator.Ticket ticket = coordinator.register(
+                BackendResponseCoordinator.Operation.EXECUTE, null);
+        ByteArrayOutputStream copied = new ByteArrayOutputStream();
+        writeSync();
+        Thread backend = backendThread(() -> {
+            PostgresWireDecoder decoder = new PostgresWireDecoder(testBackend.getInputStream());
+            assertEquals('E', decoder.nextMessage().type());
+            writeFrame(testBackend.getOutputStream(), '3', new byte[0]);
+            testBackend.getOutputStream().write(new byte[]{'G', 0, 0, 0, 7, 0, 0, 0});
+            testBackend.getOutputStream().flush();
+            while (true) {
+                PostgresWireDecoder.FrontendMessage message = decoder.nextMessage();
+                if (message.type() == 'd') {
+                    copied.write(message.body());
+                } else if (message.type() == 'c') {
+                    break;
+                }
+            }
+            assertEquals('S', decoder.nextMessage().type());
+            writeCommandComplete();
+        });
+
+        ExtendedS3Exchange.execute(simClient, simBackend, executeFrame(), copy, s3, iamService, coordinator, ticket);
+        joinBackend(backend);
+
+        PostgresWireDecoder clientDecoder = new PostgresWireDecoder(testClient.getInputStream());
+        assertEquals('3', clientDecoder.nextMessage().type());
+        assertEquals('C', clientDecoder.nextMessage().type());
+        assertEquals("1|a\n", copied.toString(StandardCharsets.US_ASCII));
+        coordinator.onBackendFrame('Z', new byte[]{'I'});
+        assertTrue(coordinator.awaitIdle(1, TimeUnit.SECONDS));
+    }
+
+    @Test
     void copyOutWritesS3AndForwardsOnlyCommandComplete() throws Exception {
         Map<String, byte[]> written = new ConcurrentHashMap<>();
         when(s3.putObject(eq("b"), any(), any(), any(), any())).thenAnswer(invocation -> {

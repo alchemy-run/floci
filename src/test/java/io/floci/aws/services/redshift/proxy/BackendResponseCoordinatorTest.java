@@ -35,6 +35,28 @@ class BackendResponseCoordinatorTest {
     }
 
     @Test
+    void anInterceptedExecuteDoesNotWaitForAPendingClose() throws Exception {
+        ExtendedQuerySession session = new ExtendedQuerySession();
+        BackendResponseCoordinator coordinator = new BackendResponseCoordinator(session);
+
+        coordinator.register(BackendResponseCoordinator.Operation.CLOSE, session.stageClose('S', "S_2"));
+        coordinator.register(BackendResponseCoordinator.Operation.BIND, null);
+        BackendResponseCoordinator.Ticket execute = coordinator.register(
+                BackendResponseCoordinator.Operation.EXECUTE, null);
+
+        // PostgreSQL holds CloseComplete and BindComplete until the client's Sync, which follows
+        // the Execute, so the Execute must be able to take the backend with both still pending.
+        assertEquals(BackendResponseCoordinator.GateResult.READY,
+                CompletableFuture.supplyAsync(() -> {
+                    try {
+                        return coordinator.awaitExtendedExecuteTurn(execute);
+                    } catch (InterruptedException e) {
+                        throw new IllegalStateException(e);
+                    }
+                }).get(5, TimeUnit.SECONDS));
+    }
+
+    @Test
     void statementDescribeWaitsPastParameterDescription() throws InterruptedException {
         ExtendedQuerySession session = new ExtendedQuerySession();
         BackendResponseCoordinator coordinator = new BackendResponseCoordinator(session);
