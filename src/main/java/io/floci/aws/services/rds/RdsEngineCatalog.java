@@ -182,6 +182,13 @@ final class RdsEngineCatalog {
         return 0;
     }
 
+    /** The parameter group families the catalogue's versions use. */
+    static java.util.Set<String> families() {
+        java.util.Set<String> families = new java.util.LinkedHashSet<>();
+        VERSIONS.forEach(version -> families.add(version.family()));
+        return families;
+    }
+
     /** Whether a parameter group family is one the catalogue's versions use. */
     static boolean knowsFamily(String family) {
         return family != null && VERSIONS.stream().anyMatch(v -> v.family().equalsIgnoreCase(family));

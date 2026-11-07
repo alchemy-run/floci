@@ -1469,8 +1469,10 @@ class RdsQueryHandlerTest {
         pEngineDefault.add("DBParameterGroupName", "pg1");
         pEngineDefault.add("Source", "engine-default");
         String bodyEngineDefault = (String) handler.handle("DescribeDBParameters", pEngineDefault).getEntity();
-        assertFalse(bodyEngineDefault.contains("<Parameter>"),
-                "Source=engine-default must filter out all rows (unmodelled)");
+        assertTrue(bodyEngineDefault.contains("<ParameterName>work_mem</ParameterName>"),
+                "Source=engine-default must list the family's defaults");
+        assertFalse(bodyEngineDefault.contains("<ParameterValue>250</ParameterValue>"),
+                "Source=engine-default must not list a user override");
     }
 
     @Test
@@ -3840,5 +3842,25 @@ class RdsQueryHandlerTest {
         assertTrue(body.contains("<Type>Receiver</Type>"), body);
         assertTrue(body.contains("<Code>InternalFailure</Code>"), body);
         assertTrue(body.contains("<Message>Unexpected error: Docker daemon connection failed</Message>"), body);
+    }
+
+    @Test
+    void applyPendingMaintenanceAction_missingResourceReturnsResourceNotFoundFault() {
+        when(service.applyPendingMaintenanceAction(
+                "arn:aws:rds:us-east-1:000000000000:cluster:alchemy-nonexistent-rds-cluster-probe"))
+                .thenThrow(new AwsException("ResourceNotFoundFault",
+                        "The resource identified by ResourceIdentifier arn:aws:rds:us-east-1:000000000000:cluster:alchemy-nonexistent-rds-cluster-probe does not exist.",
+                        404));
+
+        MultivaluedMap<String, String> p = params();
+        p.add("ResourceIdentifier",
+                "arn:aws:rds:us-east-1:000000000000:cluster:alchemy-nonexistent-rds-cluster-probe");
+        p.add("ApplyAction", "system-update");
+        p.add("OptInType", "next-maintenance");
+        Response response = handler.handle("ApplyPendingMaintenanceAction", p);
+
+        assertEquals(404, response.getStatus());
+        String body = (String) response.getEntity();
+        assertTrue(body.contains("<Code>ResourceNotFoundFault</Code>"), body);
     }
 }

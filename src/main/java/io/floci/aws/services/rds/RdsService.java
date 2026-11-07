@@ -90,6 +90,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
@@ -143,6 +144,14 @@ public class RdsService implements Resettable, ResourceProvider {
             managedDefault("docdb4.0"),
             managedDefault("docdb5.0"),
             managedDefault("docdb8.0"));
+
+    /**
+     * The {@code default.<family>} DB parameter groups AWS provides for every engine family. AWS
+     * creates one in an account and region the first time it is needed, so Floci does the same:
+     * the first reference by name persists it in the caller's account and region, after which it
+     * is listed like any other group.
+     */
+    private static final Set<String> MANAGED_DB_PARAMETER_GROUP_FAMILIES = managedDbParameterGroupFamilies();
 
     /**
      * Engines AWS accepts for {@code EngineName} on an option group. Floci can only run
@@ -1170,6 +1179,66 @@ public class RdsService implements Resettable, ResourceProvider {
             }
         }
         return cleanupComplete;
+    }
+
+    /**
+     * Apply a pending maintenance action. Floci has no real maintenance window,
+     * so an existing resource is a no-op that echoes the identifier. A missing
+     * ARN is {@code ResourceNotFoundFault} — the typed tag Alchemy bindings
+     * decode for {@code ApplyPendingMaintenanceAction}.
+     */
+    public String applyPendingMaintenanceAction(String resourceIdentifier) {
+        if (resourceIdentifier == null || resourceIdentifier.isBlank()) {
+            throw new AwsException("InvalidParameterValue", "ResourceIdentifier is required.", 400);
+        }
+        if (!resourceExists(resourceIdentifier)) {
+            throw new AwsException("ResourceNotFoundFault",
+                    "The resource identified by ResourceIdentifier " + resourceIdentifier + " does not exist.",
+                    404);
+        }
+        return resourceIdentifier;
+    }
+
+    private boolean resourceExists(String resourceName) {
+        String type = "db";
+        String id = resourceName;
+        String region = regionResolver.getRegion();
+        if (resourceName.startsWith("arn:")) {
+            AwsArnUtils.Arn arn;
+            try {
+                arn = AwsArnUtils.parse(resourceName);
+            } catch (IllegalArgumentException malformed) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            if (!"rds".equals(arn.service())) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            if (!currentAccountId().equals(arn.accountId())) {
+                return false;
+            }
+            region = arn.region();
+            String resource = arn.resource();
+            int sep = resource.indexOf(':');
+            if (sep < 0) {
+                throw new AwsException("InvalidParameterValue",
+                        "Invalid resource identifier: " + resourceName, 400);
+            }
+            type = resource.substring(0, sep);
+            id = resource.substring(sep + 1);
+        }
+        return switch (type) {
+            case "db" -> findInstanceForScope(currentAccountId(), region, id) != null;
+            case "cluster" -> findClusterForScope(currentAccountId(), region, id) != null;
+            case "subgrp" -> findSubnetGroupForScope(currentAccountId(), region, id) != null;
+            case "pg" -> findParameterGroupForRegion(id, region) != null;
+            case "cluster-pg" -> findClusterParameterGroupForRegion(id, region) != null;
+            case "cluster-endpoint" -> clusterEndpoints.get(clusterEndpointKey(region, id)).isPresent();
+            case "snapshot" -> findSnapshotForScope(currentAccountId(), region, id) != null;
+            case "cluster-snapshot" -> findClusterSnapshotForScope(currentAccountId(), region, id) != null;
+            default -> false;
+        };
     }
 
     public DbSnapshot createDbSnapshot(String snapshotId, String instanceId) {
@@ -7846,7 +7915,8 @@ public class RdsService implements Resettable, ResourceProvider {
     public DbParameterGroup createDbParameterGroup(
             String name, String family, String description, String region) {
         String effectiveRegion = effectiveRegion(region);
-        if (findParameterGroupForRegion(name, effectiveRegion) != null
+        if (isManagedDbParameterGroup(name)
+                || findParameterGroupForRegion(name, effectiveRegion) != null
                 || scopedKeyExists(parameterGroups, currentAccountId(),
                 dbResourceKey(effectiveRegion, name))) {
             throw new AwsException("DBParameterGroupAlreadyExists",
@@ -7864,7 +7934,11 @@ public class RdsService implements Resettable, ResourceProvider {
     }
 
     public DbParameterGroup getDbParameterGroup(String name, String region) {
-        DbParameterGroup group = findParameterGroupForRegion(name, effectiveRegion(region));
+        String effectiveRegion = effectiveRegion(region);
+        DbParameterGroup group = findParameterGroupForRegion(name, effectiveRegion);
+        if (group == null) {
+            group = materializeManagedDbParameterGroup(name, effectiveRegion);
+        }
         if (group == null) {
             throw new AwsException("DBParameterGroupNotFound",
                     "DBParameterGroupName doesn't refer to an existing DB parameter group.", 404);
@@ -7911,6 +7985,10 @@ public class RdsService implements Resettable, ResourceProvider {
 
     public void deleteDbParameterGroup(String name, String region) {
         String effectiveRegion = effectiveRegion(region);
+        if (isManagedDbParameterGroup(name)) {
+            throw new AwsException("InvalidDBParameterGroupState",
+                    "Default DBParameterGroup cannot be deleted: " + name, 400);
+        }
         if (findParameterGroupForRegion(name, effectiveRegion) == null) {
             throw new AwsException("DBParameterGroupNotFound",
                     "DBParameterGroupName doesn't refer to an existing DB parameter group.", 404);
@@ -7927,11 +8005,21 @@ public class RdsService implements Resettable, ResourceProvider {
     public DbParameterGroup modifyDbParameterGroup(
             String name, Map<String, String> parameters, Map<String, String> applyMethods, String region) {
         String effectiveRegion = effectiveRegion(region);
+        rejectManagedDbParameterGroupChange(name);
         DbParameterGroup group = getDbParameterGroup(name, effectiveRegion);
         if (parameters != null) {
+            Map<String, String> methods = new LinkedHashMap<>();
+            parameters.forEach((parameter, value) -> {
+                String defaultMethod = RdsParameterCatalog.defaultApplyMethod(
+                        group.getDbParameterGroupFamily(), parameter);
+                String method = applyMethods == null ? defaultMethod : applyMethods.getOrDefault(parameter, defaultMethod);
+                if (!"immediate".equals(method) && !"pending-reboot".equals(method)) {
+                    throw new AwsException("InvalidParameterValue", "Invalid ApplyMethod: " + method, 400);
+                }
+                methods.put(parameter, method);
+            });
             group.getParameters().putAll(parameters);
-            parameters.keySet().forEach(k -> group.getApplyMethods().put(
-                    k, applyMethods == null ? "immediate" : applyMethods.getOrDefault(k, "immediate")));
+            group.getApplyMethods().putAll(methods);
         }
         putParameterGroupForRegion(name, effectiveRegion, group);
         return group;
@@ -7965,11 +8053,59 @@ public class RdsService implements Resettable, ResourceProvider {
     public DbParameterGroup resetDbParameterGroup(
             String name, boolean resetAllParameters, List<String> parameterNames, String region) {
         String effectiveRegion = effectiveRegion(region);
+        rejectManagedDbParameterGroupChange(name);
         DbParameterGroup group = getDbParameterGroup(name, effectiveRegion);
         resetParameters(group.getParameters(), resetAllParameters, parameterNames);
         resetParameters(group.getApplyMethods(), resetAllParameters, parameterNames);
         putParameterGroupForRegion(name, effectiveRegion, group);
         return group;
+    }
+
+    private static Set<String> managedDbParameterGroupFamilies() {
+        Set<String> families = new TreeSet<>(RdsEngineCatalog.families());
+        for (ManagedClusterParameterGroup group : MANAGED_CLUSTER_PARAMETER_GROUPS) {
+            // DocumentDB has cluster parameter groups only.
+            if (!group.family().startsWith("docdb")) {
+                families.add(group.family());
+            }
+        }
+        return Set.copyOf(families);
+    }
+
+    /** Whether a name is one of the default DB parameter groups the service itself provides. */
+    public boolean isManagedDbParameterGroup(String name) {
+        return managedDbParameterGroupFamily(name) != null;
+    }
+
+    private static String managedDbParameterGroupFamily(String name) {
+        if (name == null || !name.startsWith("default.")) {
+            return null;
+        }
+        String family = name.substring("default.".length());
+        return MANAGED_DB_PARAMETER_GROUP_FAMILIES.contains(family) ? family : null;
+    }
+
+    private synchronized DbParameterGroup materializeManagedDbParameterGroup(String name, String region) {
+        String family = managedDbParameterGroupFamily(name);
+        if (family == null) {
+            return null;
+        }
+        DbParameterGroup existing = findParameterGroupForRegion(name, region);
+        if (existing != null) {
+            return existing;
+        }
+        DbParameterGroup group = new DbParameterGroup(name, family, "Default parameter group for " + family);
+        group.setRegion(region);
+        group.setDbParameterGroupArn(regionResolver.buildArn("rds", region, "pg:" + name));
+        putParameterGroupForRegion(name, region, group);
+        return group;
+    }
+
+    private void rejectManagedDbParameterGroupChange(String name) {
+        if (isManagedDbParameterGroup(name)) {
+            throw new AwsException("InvalidDBParameterGroupState",
+                    "Default parameter groups cannot be modified: " + name, 400);
+        }
     }
 
     /**

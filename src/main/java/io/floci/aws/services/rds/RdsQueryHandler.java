@@ -218,6 +218,8 @@ public class RdsQueryHandler {
                 case "FailoverGlobalCluster" -> handleFailoverGlobalCluster(params, region);
                 case "SwitchoverGlobalCluster" -> handleSwitchoverGlobalCluster(params, region);
                 case "FailoverDBCluster" -> handleFailoverDbCluster(params, region);
+                case "DescribePendingMaintenanceActions" -> handleDescribePendingMaintenanceActions();
+                case "ApplyPendingMaintenanceAction" -> handleApplyPendingMaintenanceAction(params);
                 case "AddTagsToResource" -> handleAddTagsToResource(params, region);
                 case "ListTagsForResource" -> handleListTagsForResource(params, region);
                 case "RemoveTagsFromResource" -> handleRemoveTagsFromResource(params, region);
@@ -1725,9 +1727,22 @@ public class RdsQueryHandler {
             return AwsQueryResponse.error("InvalidParameterValue", "DBParameterGroupName is required.", AwsNamespaces.RDS, 400);
         }
         try {
-            DbParameterGroup group = service.getDbParameterGroup(name, region);
             XmlBuilder xml = new XmlBuilder().start("Parameters");
-            writeParameterRows(xml, group.getParameters(), group.getApplyMethods(), params.getFirst("Source"));
+            DbParameterGroup group = service.getDbParameterGroup(name, region);
+            for (RdsParameterCatalog.Parameter parameter
+                    : RdsParameterCatalog.describe(group, params.getFirst("Source"))) {
+                xml.start("Parameter")
+                   .elem("ParameterName", parameter.name())
+                   .elem("ParameterValue", parameter.value())
+                   .elem("Description", parameter.description())
+                   .elem("Source", parameter.source())
+                   .elem("ApplyType", parameter.applyType())
+                   .elem("ApplyMethod", parameter.applyMethod())
+                   .elem("DataType", parameter.dataType())
+                   .elem("AllowedValues", parameter.allowedValues())
+                   .elem("IsModifiable", true)
+                   .end("Parameter");
+            }
             xml.end("Parameters").start("Marker").end("Marker");
             return Response.ok(AwsQueryResponse.envelope("DescribeDBParameters", AwsNamespaces.RDS, xml.build())).build();
         } catch (AwsException e) {
@@ -2430,6 +2445,29 @@ public class RdsQueryHandler {
         service.deregisterDbProxyTargets(params.getFirst("DBProxyName"), targetGroupName,
                 memberList(params, "DBClusterIdentifiers"), memberList(params, "DBInstanceIdentifiers"), region);
         return Response.ok(AwsQueryResponse.envelope("DeregisterDBProxyTargets", AwsNamespaces.RDS, "")).build();
+    }
+
+    private Response handleApplyPendingMaintenanceAction(MultivaluedMap<String, String> params) {
+        try {
+            String resourceIdentifier = service.applyPendingMaintenanceAction(
+                    params.getFirst("ResourceIdentifier"));
+            String result = new XmlBuilder()
+                    .start("ResourcePendingMaintenanceActions")
+                    .elem("ResourceIdentifier", resourceIdentifier)
+                    .start("PendingMaintenanceActionDetails")
+                    .end("PendingMaintenanceActionDetails")
+                    .end("ResourcePendingMaintenanceActions")
+                    .build();
+            return Response.ok(AwsQueryResponse.envelope(
+                    "ApplyPendingMaintenanceAction", AwsNamespaces.RDS, result)).build();
+        } catch (AwsException e) {
+            return AwsQueryResponse.error(e.getErrorCode(), e.getMessage(), AwsNamespaces.RDS, e.getHttpStatus());
+        }
+    }
+
+    private Response handleDescribePendingMaintenanceActions() {
+        String result = new XmlBuilder().start("PendingMaintenanceActions").end("PendingMaintenanceActions").build();
+        return Response.ok(AwsQueryResponse.envelope("DescribePendingMaintenanceActions", AwsNamespaces.RDS, result)).build();
     }
 
     private Response handleDescribeDbProxyTargetGroups(

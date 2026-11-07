@@ -208,6 +208,7 @@ class RdsParameterGroupCopyResetIntegrationTest {
 
         query("DescribeDBParameters")
                 .formParam("DBParameterGroupName", TARGET_PG)
+                .formParam("Source", "user")
         .when().post("/")
         .then()
             .statusCode(200)
@@ -223,6 +224,7 @@ class RdsParameterGroupCopyResetIntegrationTest {
 
         query("DescribeDBParameters")
                 .formParam("DBParameterGroupName", TARGET_PG)
+                .formParam("Source", "user")
         .when().post("/")
         .then()
             .statusCode(200)
