@@ -1,25 +1,45 @@
 package io.floci.aws.services.redshiftdata;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.aws.core.common.AwsException;
+import io.floci.aws.services.redshift.spectrum.SpectrumQueryPreparation;
+import io.floci.aws.services.redshift.spectrum.SpectrumReadException;
+import io.floci.aws.services.redshift.spectrum.SpectrumSession;
+import org.awaitility.Awaitility;
 import org.h2.Driver;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
+import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Clock;
+import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 class RedshiftDataServiceTest {
@@ -33,6 +53,9 @@ class RedshiftDataServiceTest {
     private final ObjectMapper om = new ObjectMapper();
     private String jdbcUrl;
     private RedshiftDataService service;
+    private SpectrumQueryPreparation preparation;
+    private RedshiftDataExecutor executor;
+    private RedshiftDataConnectionFactory factory;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -40,17 +63,25 @@ class RedshiftDataServiceTest {
 
         RedshiftDataResourceResolver resolver = mock(RedshiftDataResourceResolver.class);
         when(resolver.resolve(any(), any())).thenReturn(new RedshiftDataResourceResolver.DatabaseTarget(
-                "arn:aws:redshift:us-east-1:000000000000:cluster:wh", "127.0.0.1", 5439, "dev", "admin", "x"));
+                "arn:aws:redshift:us-east-1:000000000000:cluster:wh", "127.0.0.1", 5439, "dev", "admin", "x",
+                new SpectrumSession("000000000000", "000000000000:wh", "dev", List.of(), false)));
 
-        RedshiftDataConnectionFactory factory = mock(RedshiftDataConnectionFactory.class);
+        factory = mock(RedshiftDataConnectionFactory.class);
         when(factory.open(any())).thenAnswer(inv -> DriverManager.getConnection(jdbcUrl, "sa", ""));
 
+        preparation = mock(SpectrumQueryPreparation.class);
+        executor = new RedshiftDataExecutor(2, 100, 1);
         service = new RedshiftDataService(resolver, factory,
-                new RedshiftDataStatementStore(24, Clock.systemUTC()), om);
+                new RedshiftDataStatementStore(24, Clock.systemUTC()), om, preparation, executor, null);
+    }
+
+    @AfterEach
+    void stopExecutor() {
+        executor.close();
     }
 
     private ObjectNode req(String sql) {
-        ObjectNode r = om.createObjectNode();
+        ObjectNode r = om.createObjectNode().put("WaitTimeSeconds", 5);
         r.put("Sql", sql);
         r.put("ClusterIdentifier", "wh");
         r.put("DbUser", "admin");
@@ -60,6 +91,128 @@ class RedshiftDataServiceTest {
 
     private ObjectNode idOf(String id) {
         return om.createObjectNode().put("Id", id);
+    }
+
+    @Test
+    void redshiftTableDdlIsRewrittenThroughTheDataApi() {
+        String id = service.executeStatement(req("CREATE TABLE events (id int) DISTSTYLE ALL"), REGION)
+                .path("Id").asText();
+        assertEquals("FINISHED", service.describeStatement(idOf(id)).path("Status").asText());
+        String queryId = service.executeStatement(req("SELECT count(*) FROM events"), REGION).path("Id").asText();
+        assertEquals("FINISHED", service.describeStatement(idOf(queryId)).path("Status").asText());
+        assertEquals(0, service.getStatementResult(idOf(queryId)).path("Records").get(0).get(0)
+                .path("longValue").asLong());
+    }
+
+    @Test
+    void copyJobListAndShowReadTheCatalogThroughTheDataApi() throws SQLException {
+        try (Connection connection = DriverManager.getConnection(jdbcUrl, "sa", "");
+                Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE pg_catalog.sys_copy_job (job_id bigint, job_name varchar(128))");
+            statement.execute("INSERT INTO pg_catalog.sys_copy_job VALUES (1, 'saved_job')");
+        }
+        for (String sql : List.of("COPY JOB LIST", "COPY JOB SHOW saved_job")) {
+            String id = service.executeStatement(req(sql), REGION).path("Id").asText();
+            assertEquals("FINISHED", service.describeStatement(idOf(id)).path("Status").asText());
+            ObjectNode result = service.getStatementResult(idOf(id));
+            assertEquals("saved_job", result.path("Records").get(0).get(1).path("stringValue").asText());
+        }
+    }
+
+    @Test
+    void rolledBackBatchDoesNotExposeChildResults() {
+        ObjectNode request = req("unused");
+        request.putArray("Sqls").add("SELECT 1").add("SELECT * FROM nonexistent_batch_table");
+        String id = service.batchExecuteStatement(request, REGION).path("Id").asText();
+        assertEquals("FAILED", service.describeStatement(idOf(id)).path("Status").asText());
+        assertThrows(AwsException.class, () -> service.getStatementResult(idOf(id + ":1")));
+    }
+
+    @Test
+    void spectrumDdlOwnsCompletionBeforeAutoCommittedWrites() throws Exception {
+        String sql = "CREATE EXTERNAL SCHEMA lake";
+        when(preparation.handlesDdl(eq(sql), any())).thenReturn(true);
+        CountDownLatch writing = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        when(preparation.prepare(eq(sql), any(), any())).thenAnswer(invocation -> {
+            writing.countDown();
+            assertTrue(release.await(5, TimeUnit.SECONDS));
+            return true;
+        });
+        ObjectNode request = req(sql);
+        request.remove("WaitTimeSeconds");
+        String id = service.executeStatement(request, REGION).path("Id").asText();
+        assertTrue(writing.await(5, TimeUnit.SECONDS));
+        try {
+            assertFalse(service.cancelStatement(idOf(id)).path("Status").asBoolean(),
+                    "auto-committed external writes must not be reported as aborted");
+        } finally {
+            release.countDown();
+        }
+        Awaitility.await().atMost(Duration.ofSeconds(5)).untilAsserted(() ->
+                assertEquals("FINISHED", service.describeStatement(idOf(id)).path("Status").asText()));
+    }
+
+    @Test
+    void preparationFailureIsStoredAsFailedStatement() {
+        doThrow(new SpectrumReadException("42501", "S3 access denied")).when(preparation)
+                .prepare(eq("SELECT * FROM lake.events"), any(), any());
+        ObjectNode executed = service.executeStatement(req("SELECT * FROM lake.events"), REGION);
+        ObjectNode described = service.describeStatement(idOf(executed.path("Id").asText()));
+        assertEquals("FAILED", described.path("Status").asText());
+        assertEquals("S3 access denied", described.path("Error").asText());
+    }
+
+    @Test
+    void batchPreparationUsesTransactionContext() {
+        ObjectNode request = req("unused");
+        request.putArray("Sqls").add("SELECT 1");
+        service.batchExecuteStatement(request, REGION);
+        verify(preparation).prepare(eq("SELECT 1"), argThat(SpectrumSession::inTransaction), any());
+    }
+
+    @Test
+    void aWorkgroupStatementNamesItsWorkgroupAndOmitsTheClusterIdentifier() {
+        ObjectNode request = om.createObjectNode().put("WaitTimeSeconds", 5);
+        request.put("Sql", "select 1");
+        request.put("WorkgroupName", "wg-1");
+        request.put("Database", "dev");
+
+        ObjectNode executed = service.executeStatement(request, REGION);
+
+        assertEquals("wg-1", executed.get("WorkgroupName").asText());
+        assertFalse(executed.has("ClusterIdentifier"),
+                "AWS does not return ClusterIdentifier when connecting to a serverless workgroup");
+        ObjectNode described = service.describeStatement(idOf(executed.get("Id").asText()));
+        assertEquals("wg-1", described.get("WorkgroupName").asText());
+        assertFalse(described.has("ClusterIdentifier"));
+    }
+
+    @Test
+    void aClusterStatementKeepsItsNullWorkgroupName() {
+        ObjectNode executed = service.executeStatement(req("select 1"), REGION);
+
+        assertEquals("wh", executed.get("ClusterIdentifier").asText());
+        assertTrue(executed.get("WorkgroupName").isNull());
+        ObjectNode described = service.describeStatement(idOf(executed.get("Id").asText()));
+        assertEquals("wh", described.get("ClusterIdentifier").asText());
+        assertTrue(described.get("WorkgroupName").isNull());
+    }
+
+    @Test
+    void aWorkgroupBatchPassesItsWorkgroupToEverySubStatement() {
+        ObjectNode request = om.createObjectNode().put("WaitTimeSeconds", 5);
+        request.putArray("Sqls").add("select 1").add("select 2");
+        request.put("WorkgroupName", "wg-1");
+        request.put("Database", "dev");
+
+        ObjectNode executed = service.batchExecuteStatement(request, REGION);
+
+        ObjectNode described = service.describeStatement(idOf(executed.get("Id").asText()));
+        assertEquals("wg-1", described.get("WorkgroupName").asText());
+        for (JsonNode sub : described.get("SubStatements")) {
+            assertFalse(sub.has("ClusterIdentifier"));
+        }
     }
 
     /**
@@ -152,7 +305,7 @@ class RedshiftDataServiceTest {
     }
 
     private ObjectNode batchReq(String... sqls) {
-        ObjectNode r = om.createObjectNode();
+        ObjectNode r = om.createObjectNode().put("WaitTimeSeconds", 5);
         r.put("ClusterIdentifier", "wh");
         r.put("DbUser", "admin");
         r.put("Database", "dev");
@@ -161,6 +314,102 @@ class RedshiftDataServiceTest {
             array.add(sql);
         }
         return r;
+    }
+
+    @Test
+    void batchBindsSharedParametersAndReportsOriginalValues() {
+        service.executeStatement(req("CREATE TABLE batch_parameters(id integer, payload varchar(100))"), REGION);
+        ObjectNode request = batchReq("INSERT INTO batch_parameters VALUES (:id, :value)",
+                "UPDATE batch_parameters SET payload = :updated WHERE id = :id",
+                "SELECT payload FROM batch_parameters WHERE id = :id OR id = :id");
+        ArrayNode parameters = request.putArray("Parameters");
+        parameters.addObject().put("name", "id").put("value", "42");
+        parameters.addObject().put("name", "value").put("value", "first");
+        parameters.addObject().put("name", "updated").put("value", "Robert'); DROP TABLE batch_parameters; --");
+
+        String id = service.batchExecuteStatement(request, REGION).path("Id").asText();
+
+        ObjectNode description = service.describeStatement(idOf(id));
+        assertEquals("FINISHED", description.path("Status").asText(), description.toString());
+        assertEquals(parameters, description.path("QueryParameters"));
+        assertEquals(request.path("Sqls").get(0).asText(), description.path("SubStatements").get(0).path("QueryString").asText());
+        assertEquals("Robert'); DROP TABLE batch_parameters; --",
+                service.getStatementResult(idOf(id)).path("Records").get(0).get(0).path("stringValue").asText());
+        assertEquals(parameters, service.listStatements(om.createObjectNode()).path("Statements").get(0).path("QueryParameters"));
+    }
+
+    @Test
+    void batchParametersBindAcrossCommandsAndSavepointsInOneEntry() {
+        service.executeStatement(req("CREATE TABLE batch_savepoint (id INT)"), REGION);
+        ObjectNode request = batchReq("INSERT INTO batch_savepoint VALUES (:id); SAVEPOINT s; "
+                        + "INSERT INTO batch_savepoint VALUES (:discarded); ROLLBACK TO SAVEPOINT s; COMMIT",
+                "SELECT id FROM batch_savepoint WHERE id = :id");
+        request.putArray("Parameters").addObject().put("name", "id").put("value", "42");
+        request.withArray("Parameters").addObject().put("name", "discarded").put("value", "99");
+
+        String id = service.batchExecuteStatement(request, REGION).path("Id").asText();
+
+        ObjectNode description = service.describeStatement(idOf(id));
+        assertEquals("FINISHED", description.path("Status").asText(), description.toString());
+        assertEquals(42, service.getStatementResult(idOf(id)).path("Records").get(0).get(0).path("longValue").asInt());
+        String count = service.executeStatement(req("SELECT COUNT(*) FROM batch_savepoint"), REGION).path("Id").asText();
+        assertEquals(1, service.getStatementResult(idOf(count)).path("Records").get(0).get(0).path("longValue").asInt());
+    }
+
+    @Test
+    void batchParametersRollBackEarlierWritesWhenALaterStatementFails() {
+        service.executeStatement(req("CREATE TABLE batch_rollback(id integer)"), REGION);
+        ObjectNode request = batchReq("INSERT INTO batch_rollback VALUES (:id)", "INSERT INTO nonexistent VALUES (:id)");
+        request.putArray("Parameters").addObject().put("name", "id").put("value", "42");
+        String id = service.batchExecuteStatement(request, REGION).path("Id").asText();
+        assertEquals("FAILED", service.describeStatement(idOf(id)).path("Status").asText());
+        String count = service.executeStatement(req("SELECT COUNT(*) FROM batch_rollback"), REGION).path("Id").asText();
+        assertEquals(0, service.getStatementResult(idOf(count)).path("Records").get(0).get(0).path("longValue").asInt());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "[]", "{}", "[{}]", "[{\"name\":\"id\"}]", "[{\"name\":\"id\",\"value\":null}]",
+            "[{\"name\":\"id\",\"value\":42}]", "[{\"name\":42,\"value\":\"42\"}]",
+            "[{\"name\":\"id\",\"value\":\"\"}]", "[{\"name\":\"bad-name\",\"value\":\"42\"}]",
+            "[{\"name\":\"id\",\"value\":\"1\"},{\"name\":\"id\",\"value\":\"2\"}]"
+    })
+    void invalidBatchParameterObjectsAreRejectedBeforeExecution(String json) throws Exception {
+        ObjectNode request = batchReq("SELECT 1", "SELECT :id");
+        request.set("Parameters", om.readTree(json));
+        AwsException error = assertThrows(AwsException.class, () -> service.batchExecuteStatement(request, REGION));
+        assertEquals("ValidationException", error.getErrorCode());
+        verifyNoInteractions(factory);
+    }
+
+    @Test
+    void missingBatchParameterIsRejectedBeforeAnyStatementRuns() {
+        AwsException error = assertThrows(AwsException.class,
+                () -> service.batchExecuteStatement(batchReq("SELECT 1", "SELECT :missing"), REGION));
+        assertEquals("ValidationException", error.getErrorCode());
+        verifyNoInteractions(factory);
+    }
+
+    @Test
+    void parameterMentionedOnlyInLiteralsAndCommentsIsUnused() {
+        ObjectNode request = batchReq("SELECT ':unused' /* :unused */ -- :unused\n", "SELECT $tag$:unused$tag$");
+        request.putArray("Parameters").addObject().put("name", "unused").put("value", "42");
+        AwsException error = assertThrows(AwsException.class, () -> service.batchExecuteStatement(request, REGION));
+        assertEquals("ValidationException", error.getErrorCode());
+        verifyNoInteractions(factory);
+    }
+
+    @Test
+    void batchAcceptsNumericParameterNamesAndDoesNotReexecuteClientTokenRetries() {
+        service.executeStatement(req("CREATE TABLE numeric_batch(id integer)"), REGION);
+        ObjectNode request = batchReq("INSERT INTO numeric_batch VALUES (:1)", "SELECT id FROM numeric_batch WHERE id = :1");
+        request.put("ClientToken", "numeric-batch");
+        request.putArray("Parameters").addObject().put("name", "1").put("value", "42");
+        String id = service.batchExecuteStatement(request, REGION).path("Id").asText();
+        assertEquals("FINISHED", service.describeStatement(idOf(id)).path("Status").asText());
+        assertEquals(id, service.batchExecuteStatement(request, REGION).path("Id").asText());
+        String count = service.executeStatement(req("SELECT COUNT(*) FROM numeric_batch"), REGION).path("Id").asText();
+        assertEquals(1, service.getStatementResult(idOf(count)).path("Records").get(0).get(0).path("longValue").asInt());
     }
 
     @Test
@@ -209,10 +458,12 @@ class RedshiftDataServiceTest {
     }
 
     @Test
-    void cancelOnFinishedStatementReturnsTrueWithoutChangingIt() {
+    void cancelOnFinishedStatementIsRejectedWithoutChangingIt() {
         service.executeStatement(req("create table cf (id int)"), REGION);
         String id = service.executeStatement(req("select id from cf"), REGION).get("Id").asText();
-        assertTrue(service.cancelStatement(idOf(id)).get("Status").asBoolean());
+        AwsException rejected = assertThrows(AwsException.class, () -> service.cancelStatement(idOf(id)));
+        assertEquals("ValidationException", rejected.getErrorCode());
+        assertEquals("Could not cancel a query that is already in FINISHED state with ID: " + id, rejected.getMessage());
         assertEquals("FINISHED", service.describeStatement(idOf(id)).get("Status").asText());
     }
 
@@ -223,7 +474,7 @@ class RedshiftDataServiceTest {
     }
 
     private ObjectNode targetReq() {
-        ObjectNode r = om.createObjectNode();
+        ObjectNode r = om.createObjectNode().put("WaitTimeSeconds", 5);
         r.put("ClusterIdentifier", "wh");
         r.put("DbUser", "admin");
         r.put("Database", "dev");
@@ -301,10 +552,11 @@ class RedshiftDataServiceTest {
     }
 
     @Test
-    void cancelOnFailedStatementLeavesItFailed() {
+    void cancelOnFailedStatementIsRejectedAndLeavesItFailed() {
         String id = service.executeStatement(req("select * from missing_table"), REGION).get("Id").asText();
         assertEquals("FAILED", service.describeStatement(idOf(id)).get("Status").asText());
-        assertTrue(service.cancelStatement(idOf(id)).get("Status").asBoolean());
+        AwsException rejected = assertThrows(AwsException.class, () -> service.cancelStatement(idOf(id)));
+        assertEquals("Could not cancel a query that is already in FAILED state with ID: " + id, rejected.getMessage());
         assertEquals("FAILED", service.describeStatement(idOf(id)).get("Status").asText());
     }
 
@@ -325,6 +577,37 @@ class RedshiftDataServiceTest {
     }
 
     @Test
+    void executeStatementStoresAndReturnsQueryParameters() {
+        ObjectNode request = req("select CAST(:value AS INTEGER) + 1 as res");
+        ArrayNode params = request.putArray("Parameters");
+        params.addObject().put("name", "value").put("value", "41");
+        String id = service.executeStatement(request, REGION).get("Id").asText();
+
+        ObjectNode described = service.describeStatement(idOf(id));
+        assertEquals("FINISHED", described.get("Status").asText());
+        assertTrue(described.has("QueryParameters"));
+        ArrayNode queryParams = (ArrayNode) described.get("QueryParameters");
+        assertEquals(1, queryParams.size());
+        assertEquals("value", queryParams.get(0).get("name").asText());
+        assertEquals("41", queryParams.get(0).get("value").asText());
+
+        ObjectNode listed = service.listStatements(om.createObjectNode());
+        JsonNode listedStatement = null;
+        for (JsonNode s : listed.get("Statements")) {
+            if (id.equals(s.path("Id").asText())) {
+                listedStatement = s;
+                break;
+            }
+        }
+        assertNotNull(listedStatement);
+        assertTrue(listedStatement.has("QueryParameters"));
+        ArrayNode listedParams = (ArrayNode) listedStatement.get("QueryParameters");
+        assertEquals(1, listedParams.size());
+        assertEquals("value", listedParams.get(0).get("name").asText());
+        assertEquals("41", listedParams.get(0).get("value").asText());
+    }
+
+    @Test
     void describeTableMatchesTheExactNameNotAPattern() {
         service.executeStatement(req("create table a_b (x int)"), REGION);
         service.executeStatement(req("create table axb (y int, z int)"), REGION);
@@ -334,5 +617,21 @@ class RedshiftDataServiceTest {
         ObjectNode described = service.describeTable(descReq, REGION);
         assertEquals(1, described.get("ColumnList").size());
         assertEquals("x", described.get("ColumnList").get(0).get("name").asText().toLowerCase());
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "VACUUM t", "  -- note\n create database d", "CREATE INDEX CONCURRENTLY i ON t (c)",
+            "create unique index concurrently i on t (c)", "DROP INDEX CONCURRENTLY i",
+            "REINDEX TABLE CONCURRENTLY t", "ALTER SYSTEM SET work_mem = '8MB'"})
+    void transactionIncompatibleCommandsRunOutsideATransaction(String sql) {
+        assertTrue(RedshiftDataService.AUTO_COMMIT_SQL.matcher(sql).find(), sql);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {
+            "CREATE INDEX i ON t (c)", "REINDEX TABLE t", "select 'vacuum'", "CREATE TABLE concurrently (a int)"})
+    void ordinaryCommandsStayInsideATransaction(String sql) {
+        assertFalse(RedshiftDataService.AUTO_COMMIT_SQL.matcher(sql).find(), sql);
     }
 }

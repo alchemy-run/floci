@@ -1,33 +1,27 @@
 package io.floci.aws.services.redshift.container;
 
-import com.github.dockerjava.api.async.ResultCallback;
+import com.github.dockerjava.api.exception.NotModifiedException;
 import com.github.dockerjava.api.model.Container;
-import com.github.dockerjava.api.model.Frame;
-import com.github.dockerjava.api.model.StreamType;
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.docker.ContainerBuilder;
 import io.floci.aws.core.common.docker.ContainerDetector;
+import io.floci.aws.core.common.docker.ContainerExec;
 import io.floci.aws.core.common.docker.ContainerLifecycleManager;
 import io.floci.aws.core.common.docker.ContainerLifecycleManager.ContainerInfo;
 import io.floci.aws.core.common.docker.ContainerLifecycleManager.EndpointInfo;
 import io.floci.aws.core.common.docker.ContainerLogStreamer;
 import io.floci.aws.core.common.docker.ContainerSpec;
+import io.floci.aws.core.common.docker.ContainerStorageHelper;
+import io.floci.aws.core.common.docker.RetryingTarCopier;
 import io.floci.aws.services.redshift.model.Cluster;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
-import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream;
 import org.jboss.logging.Logger;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
-import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -35,20 +29,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 @ApplicationScoped
 public class RedshiftContainerManager {
 
     private static final Logger LOG = Logger.getLogger(RedshiftContainerManager.class);
+    private static final String DEFAULT_DATABASE = "dev";
+    static final int DEFAULT_MAX_CONNECTIONS = 500;
+    static final int LARGE_CLUSTER_MAX_CONNECTIONS = 2000;
 
     private final ContainerBuilder containerBuilder;
     private final ContainerLifecycleManager lifecycleManager;
     private final ContainerLogStreamer logStreamer;
     private final ContainerDetector containerDetector;
     private final EmulatorConfig config;
+    private final long retryBackoffMillis;
     private final Map<String, RedshiftContainerHandle> containers = new ConcurrentHashMap<>();
+    private final Map<String, String> adoptedContainers = new ConcurrentHashMap<>();
 
     @Inject
     public RedshiftContainerManager(ContainerBuilder containerBuilder,
@@ -56,35 +54,52 @@ public class RedshiftContainerManager {
                                     ContainerLogStreamer logStreamer,
                                     ContainerDetector containerDetector,
                                     EmulatorConfig config) {
+        this(containerBuilder, lifecycleManager, logStreamer, containerDetector, config,
+                RetryingTarCopier.DEFAULT_BACKOFF_MS);
+    }
+
+    RedshiftContainerManager(ContainerBuilder containerBuilder,
+                             ContainerLifecycleManager lifecycleManager,
+                             ContainerLogStreamer logStreamer,
+                             ContainerDetector containerDetector,
+                             EmulatorConfig config, long retryBackoffMillis) {
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.logStreamer = logStreamer;
         this.containerDetector = containerDetector;
         this.config = config;
+        this.retryBackoffMillis = retryBackoffMillis;
     }
 
-    /**
-     * Starts a fresh container for the cluster. Every caller is creating a cluster or replacing
-     * its container, so a container still holding this cluster's name belongs to no live cluster:
-     * one left behind by an earlier Floci process whose state was not kept (in-memory storage), or
-     * by a create that failed half way. It is removed first; creating over it would fail on the
-     * name.
-     */
     public RedshiftContainerHandle start(String accountId, String clusterIdentifier, String masterUsername, String masterPassword) {
+        return start(accountId, clusterIdentifier, masterUsername, masterPassword, DEFAULT_DATABASE, null);
+    }
+
+    /** Starts the container with {@code databaseName} as its one database, instead of the default {@code dev}. */
+    public RedshiftContainerHandle start(String accountId, String clusterIdentifier, String masterUsername,
+                                         String masterPassword, String databaseName) {
+        return start(accountId, clusterIdentifier, masterUsername, masterPassword, databaseName, null);
+    }
+
+    public RedshiftContainerHandle start(String accountId, String clusterIdentifier, String masterUsername,
+                                         String masterPassword, String databaseName, String nodeType) {
         String image = config.services().redshift().imageVersion();
         String containerName = containerName(accountId, clusterIdentifier);
-        lifecycleManager.removeIfExistsStrict(containerName);
+        // Only the current name: adoptOrStart does not look for legacy-named survivors.
+        stop(accountId, clusterIdentifier);
 
+        String effectiveDb = (databaseName != null && !databaseName.isBlank()) ? databaseName : DEFAULT_DATABASE;
         List<String> envVars = List.of(
                 "POSTGRES_USER=" + masterUsername,
                 "POSTGRES_PASSWORD=" + masterPassword,
-                "POSTGRES_DB=dev"
+                "POSTGRES_DB=" + effectiveDb
         );
 
+        int maxConnections = maxConnections(clusterIdentifier, nodeType);
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(image)
                 .withName(containerName)
                 .withEnv(envVars)
-                .withCmd(List.of("postgres", "-c", "allow_system_table_mods=on"))
+                .withCmd(List.of("postgres", "-c", "allow_system_table_mods=on", "-c", "max_connections=" + maxConnections))
                 .withDockerNetwork(config.services().redshift().dockerNetwork())
                 .withLogRotation();
 
@@ -96,34 +111,100 @@ public class RedshiftContainerManager {
         }
 
         ContainerSpec spec = specBuilder.build();
-        ContainerInfo info = lifecycleManager.createAndStart(spec);
-        return initializeAndRegisterHandle(info, accountId, clusterIdentifier, masterUsername, containerName, enginePort);
+        ContainerInfo info = lifecycleManager.createAndStartEphemeral(spec);
+        return initializeAndRegisterHandle(info, accountId, clusterIdentifier, masterUsername, containerName, enginePort,
+                effectiveDb, true);
     }
 
     /**
      * Starts a cluster's container the same way {@link #start}, except that a container
      * already running under this cluster's name (e.g. Floci's own process restarted but
-     * Docker did not) is adopted instead of destroyed and recreated. The container has no
-     * persistent volume, so a blind recreate would silently discard the cluster's data;
+     * Docker did not) is adopted instead of destroyed and recreated. The image's anonymous
+     * volume is not reattached on recreation, so a blind recreate would discard the cluster's data;
      * adopting preserves it whenever the physical container survived. If no such container
      * exists (first start, or the container itself was removed), this falls back to
-     * {@link #start} — in that case the previous data is unrecoverable, matching this
-     * project's decision not to back Redshift containers with a Docker volume.
+     * {@link #start}, and in that case the previous data is unrecoverable, matching this
+     * project's decision not to provision reusable named volumes for Redshift containers.
      */
     public RedshiftContainerHandle adoptOrStart(String accountId, String clusterIdentifier, String masterUsername, String masterPassword) {
+        return adoptOrStart(accountId, clusterIdentifier, masterUsername, masterPassword, DEFAULT_DATABASE, null);
+    }
+
+    /** As {@link #adoptOrStart(String, String, String, String)} for a container whose database is not {@code dev}. */
+    public RedshiftContainerHandle adoptOrStart(String accountId, String clusterIdentifier, String masterUsername,
+                                                String masterPassword, String databaseName) {
+        return adoptOrStart(accountId, clusterIdentifier, masterUsername, masterPassword, databaseName, null);
+    }
+
+    public RedshiftContainerHandle adoptOrStart(String accountId, String clusterIdentifier, String masterUsername,
+                                                String masterPassword, String databaseName, String nodeType) {
         String containerName = containerName(accountId, clusterIdentifier);
         Optional<Container> existing = lifecycleManager.findByName(containerName);
         if (existing.isEmpty()) {
-            LOG.warnv("No surviving container for cluster {0}; starting a fresh empty one — the previous"
-                    + " contents are not recoverable (no Docker volume backs Redshift containers)", clusterIdentifier);
-            return start(accountId, clusterIdentifier, masterUsername, masterPassword);
+            LOG.warnv("No surviving container for cluster {0}; starting a fresh empty one: the previous"
+                    + " contents are not recoverable (no reusable named volume backs Redshift containers)", clusterIdentifier);
+            return start(accountId, clusterIdentifier, masterUsername, masterPassword, databaseName, nodeType);
         }
 
+        return adoptExisting(accountId, clusterIdentifier, masterUsername, databaseName, existing.get(), true);
+    }
+
+    /** Stops PostgreSQL without removing its container or data volume. Docker failures propagate. */
+    public void pause(String accountId, String clusterIdentifier) {
+        String key = containerKey(accountId, clusterIdentifier);
+        RedshiftContainerHandle handle = containers.get(key);
+        String id = handle == null ? containerName(accountId, clusterIdentifier) : handle.getContainerId();
+        try {
+            lifecycleManager.getDockerClient().stopContainerCmd(id).withTimeout(30).exec();
+        } catch (NotModifiedException alreadyStopped) {
+            LOG.debugv("Redshift container {0} was already stopped", id);
+        }
+        if (handle != null && handle.getLogStream() != null) {
+            lifecycleManager.closeLogStreamAfterContainerStop(handle.getLogStream());
+            handle.setLogStream(null);
+        }
+        containers.remove(key);
+    }
+
+    /** Resumes only the existing data-bearing container; never creates an empty replacement. */
+    public RedshiftContainerHandle resume(String accountId, String clusterIdentifier,
+                                           String masterUsername, String databaseName) {
+        Container existing = lifecycleManager.findByName(containerName(accountId, clusterIdentifier))
+                .orElseThrow(() -> new AwsException("InvalidClusterState",
+                        "The paused container for cluster " + clusterIdentifier + " no longer exists", 400));
+        return adoptExisting(accountId, clusterIdentifier, masterUsername, databaseName, existing, false);
+    }
+
+    private RedshiftContainerHandle adoptExisting(String accountId, String clusterIdentifier,
+                                                   String masterUsername, String databaseName, Container existing,
+                                                   boolean bootstrap) {
+        String containerName = containerName(accountId, clusterIdentifier);
+        String effectiveDb = (databaseName != null && !databaseName.isBlank()) ? databaseName : DEFAULT_DATABASE;
+        adoptedContainers.put(containerKey(accountId, clusterIdentifier), existing.getId());
         LOG.infov("Adopting existing container {0} for cluster {1} to avoid discarding its data",
                 containerName, clusterIdentifier);
         int enginePort = 5432;
-        ContainerInfo info = lifecycleManager.adopt(existing.get().getId(), List.of(enginePort));
-        return initializeAndRegisterHandle(info, accountId, clusterIdentifier, masterUsername, containerName, enginePort);
+        ContainerInfo info = lifecycleManager.adopt(existing.getId(), List.of(enginePort),
+                containerBuilder.resolveDockerNetwork(config.services().redshift().dockerNetwork()));
+        return initializeAndRegisterHandle(info, accountId, clusterIdentifier, masterUsername, containerName, enginePort,
+                effectiveDb, bootstrap);
+    }
+
+    static int maxConnections(String clusterIdentifier, String nodeType) {
+        return maxConnectionsForNodeType(nodeType);
+    }
+
+    static int maxConnectionsForNodeType(String nodeType) {
+        if (nodeType == null || nodeType.isBlank()) {
+            return DEFAULT_MAX_CONNECTIONS;
+        }
+        String normalized = nodeType.toLowerCase().trim();
+        if (normalized.startsWith("ra3") || normalized.startsWith("rg")
+                || normalized.endsWith("8xlarge") || normalized.endsWith("16xlarge")
+                || normalized.equals("serverless")) {
+            return LARGE_CLUSTER_MAX_CONNECTIONS;
+        }
+        return DEFAULT_MAX_CONNECTIONS;
     }
 
     private RedshiftContainerHandle initializeAndRegisterHandle(
@@ -132,7 +213,8 @@ public class RedshiftContainerManager {
             String clusterIdentifier,
             String masterUsername,
             String containerName,
-            int enginePort) {
+            int enginePort,
+            String databaseName, boolean bootstrap) {
         EndpointInfo endpoint = info.getEndpoint(enginePort);
         RedshiftContainerHandle handle = new RedshiftContainerHandle(
                 info.containerId(), clusterIdentifier, endpoint.host(), endpoint.port());
@@ -142,23 +224,65 @@ public class RedshiftContainerManager {
                     info.containerId(),
                     "/floci/redshift",
                     clusterIdentifier,
-                    "us-east-1",
+                    config.defaultRegion(),
                     "redshift:" + clusterIdentifier);
             handle.setLogStream(stream);
         } catch (Exception e) {
             LOG.warnv("Failed to stream logs for {0}", containerName);
         }
 
-        waitForReady(containerName, info.containerId(), masterUsername, "dev");
-        bootstrapCatalog(info.containerId(), masterUsername, "dev");
-
+        try {
+            waitForReady(containerName, info.containerId(), masterUsername, databaseName);
+            if (bootstrap) {
+                bootstrapCatalog(info.containerId(), masterUsername, databaseName);
+            }
+        } catch (RuntimeException e) {
+            containers.put(containerKey(accountId, clusterIdentifier), handle);
+            throw e;
+        }
         containers.put(containerKey(accountId, clusterIdentifier), handle);
         return handle;
     }
 
     public void stop(String accountId, String clusterIdentifier) {
-        containers.remove(containerKey(accountId, clusterIdentifier));
-        lifecycleManager.removeIfExists(containerName(accountId, clusterIdentifier));
+        String key = containerKey(accountId, clusterIdentifier);
+        RedshiftContainerHandle handle = containers.get(key);
+        String adoptedId = adoptedContainers.get(key);
+        String containerId = handle == null
+                ? adoptedContainers.getOrDefault(key, containerName(accountId, clusterIdentifier)) : handle.getContainerId();
+        lifecycleManager.removeIfExistsStrict(containerId, true);
+        releaseHandle(key, handle);
+        if (containerId.equals(adoptedId)) {
+            adoptedContainers.remove(key, adoptedId);
+        }
+    }
+
+    /** Rolls back startup without destroying a container that survived an earlier process. */
+    public void rollbackStartup(String accountId, String clusterIdentifier) {
+        String key = containerKey(accountId, clusterIdentifier);
+        String adoptedId = adoptedContainers.get(key);
+        if (adoptedId == null) {
+            stop(accountId, clusterIdentifier);
+            return;
+        }
+        RedshiftContainerHandle handle = containers.get(key);
+        if (handle != null && adoptedId.equals(handle.getContainerId())) {
+            releaseHandle(key, handle);
+        }
+    }
+
+    private void releaseHandle(String key, RedshiftContainerHandle handle) {
+        if (handle != null) {
+            Closeable stream = handle.getLogStream();
+            if (stream != null) {
+                try {
+                    stream.close();
+                } catch (Exception e) {
+                    throw new IllegalStateException("Failed to close logs for Redshift container " + handle.getContainerId(), e);
+                }
+            }
+            containers.remove(key, handle);
+        }
     }
 
     public Optional<RedshiftContainerHandle> getContainer(String accountId, String clusterIdentifier) {
@@ -170,70 +294,50 @@ public class RedshiftContainerManager {
         return accountId + "/" + clusterIdentifier;
     }
 
-    private static String containerName(String accountId, String clusterIdentifier) {
-        return "floci-redshift-" + accountId + "-" + clusterIdentifier;
+    private String containerName(String accountId, String clusterIdentifier) {
+        return ContainerStorageHelper.dockerName(config, "redshift-" + accountId + "-" + clusterIdentifier);
+    }
+
+    private RedshiftContainerHandle requireHandle(String accountId, String clusterIdentifier) {
+        RedshiftContainerHandle handle = containers.get(containerKey(accountId, clusterIdentifier));
+        if (handle == null) {
+            throw new AwsException("ClusterNotFound", "Cluster container for " + clusterIdentifier + " not found", 404);
+        }
+        return handle;
+    }
+
+    private static String userOrDefault(String username) {
+        return (username != null && !username.isBlank()) ? username : "postgres";
+    }
+
+    private static String databaseOrDefault(String dbname) {
+        return (dbname != null && !dbname.isBlank()) ? dbname : DEFAULT_DATABASE;
+    }
+
+    /** Schema {@code bootstrap-catalog.sql} owns; the catalog views read it, so snapshots leave it alone. */
+    public static final String BOOTSTRAP_SCHEMA = "floci_internal";
+
+    public void takeSnapshot(String accountId, String clusterIdentifier, String username, String dbname, Path outputFile) {
+        takeSnapshot(accountId, clusterIdentifier, username, dbname, outputFile, false);
     }
 
     /**
-     * Creates the cluster's CreateCluster DBName database in the backing engine when it is not
-     * the bootstrap "dev" database. Idempotent: an existing database (an adopted container, or
-     * a retried create) is left as is. The new database is cloned from template1, which
-     * already carries the Redshift catalog views, so it needs no separate bootstrap.
+     * Dumps the database with pg_dump. With {@code skipBootstrapSchema} the {@link #BOOTSTRAP_SCHEMA}
+     * is left out, which a dump meant to be replayed into a live, already bootstrapped container needs.
      */
-    public void ensureDatabase(String accountId, String clusterIdentifier, String username, String dbName) {
-        if (dbName == null || dbName.isBlank() || "dev".equals(dbName)) {
-            return;
-        }
-        if (!dbName.matches("^[a-z_][a-z0-9_$]{0,63}$")) {
-            throw new AwsException("InvalidParameterValue", "DBName " + dbName + " is not a valid database name", 400);
-        }
-        RedshiftContainerHandle handle = containers.get(containerKey(accountId, clusterIdentifier));
-        if (handle == null) {
-            throw new AwsException("ClusterNotFound", "Cluster container for " + clusterIdentifier + " not found", 404);
-        }
-        String effectiveUser = (username != null && !username.isBlank()) ? username : "postgres";
-        String[] exists = new String[]{
-                "psql", "-h", "127.0.0.1", "-U", effectiveUser, "-d", "dev", "-tA",
-                "-c", "SELECT 1 FROM pg_database WHERE datname = '" + dbName + "'"
-        };
-        String[] create = new String[]{
-                "psql", "-h", "127.0.0.1", "-v", "ON_ERROR_STOP=1", "-U", effectiveUser, "-d", "dev",
-                "-c", "CREATE DATABASE \"" + dbName + "\""
-        };
+    public void takeSnapshot(String accountId, String clusterIdentifier, String username, String dbname,
+                             Path outputFile, boolean skipBootstrapSchema) {
+        RedshiftContainerHandle handle = requireHandle(accountId, clusterIdentifier);
+
+        String effectiveUser = userOrDefault(username);
+        String effectiveDb = databaseOrDefault(dbname);
+
+        String[] cmd = skipBootstrapSchema
+                ? new String[]{"pg_dump", "-U", effectiveUser, "--exclude-schema=" + BOOTSTRAP_SCHEMA, effectiveDb,
+                        "-f", "/tmp/dump.sql"}
+                : new String[]{"pg_dump", "-U", effectiveUser, effectiveDb, "-f", "/tmp/dump.sql"};
         try {
-            ExecResult probe = execInContainer(handle.getContainerId(), exists, 15);
-            if (probe.exitCode() == 0 && "1".equals(probe.stdout().trim())) {
-                return;
-            }
-            ExecResult result = execInContainer(handle.getContainerId(), create, 30);
-            if (result.exitCode() != 0) {
-                LOG.warnv("CREATE DATABASE {0} failed for cluster {1} (exit {2}): {3}",
-                        dbName, clusterIdentifier, result.exitCode(), result.stderr());
-                throw new AwsException("InternalFailure",
-                        "Failed to create database " + dbName + " for cluster " + clusterIdentifier, 500);
-            }
-            LOG.infov("Created database {0} for Redshift cluster {1}", dbName, clusterIdentifier);
-        } catch (AwsException e) {
-            throw e;
-        } catch (Exception e) {
-            LOG.errorv(e, "Error creating database {0} for cluster {1}", dbName, clusterIdentifier);
-            throw new AwsException("InternalFailure",
-                    "Failed to create database " + dbName + " for cluster " + clusterIdentifier + ": " + e.getMessage(), 500);
-        }
-    }
-
-    public void takeSnapshot(String accountId, String clusterIdentifier, String username, String dbname, Path outputFile) {
-        RedshiftContainerHandle handle = containers.get(containerKey(accountId, clusterIdentifier));
-        if (handle == null) {
-            throw new AwsException("ClusterNotFound", "Cluster container for " + clusterIdentifier + " not found", 404);
-        }
-
-        String effectiveUser = (username != null && !username.isBlank()) ? username : "postgres";
-        String effectiveDb = (dbname != null && !dbname.isBlank()) ? dbname : "dev";
-
-        String[] cmd = new String[]{"pg_dump", "-U", effectiveUser, effectiveDb, "-f", "/tmp/dump.sql"};
-        try {
-            ExecResult result = execInContainer(handle.getContainerId(), cmd, 30);
+            ContainerExec.Result result = execInContainer(handle.getContainerId(), cmd, 30);
             if (result.exitCode() != 0) {
                 LOG.warnv("pg_dump failed for cluster {0} (exit {1}): {2}", clusterIdentifier, result.exitCode(), result.stderr());
                 throw new AwsException("InternalFailure", "Failed to create snapshot for cluster " + clusterIdentifier + ": " + result.stderr(), 500);
@@ -257,11 +361,14 @@ public class RedshiftContainerManager {
     }
 
     public void alterUserPassword(String accountId, String clusterIdentifier, String username, String newPassword) {
-        RedshiftContainerHandle handle = containers.get(containerKey(accountId, clusterIdentifier));
-        if (handle == null) {
-            throw new AwsException("ClusterNotFound", "Cluster container for " + clusterIdentifier + " not found", 404);
-        }
-        String effectiveUser = (username != null && !username.isBlank()) ? username : "postgres";
+        alterUserPassword(accountId, clusterIdentifier, username, newPassword, DEFAULT_DATABASE);
+    }
+
+    /** As the four-argument form, connecting to {@code databaseName} instead of {@code dev}. */
+    public void alterUserPassword(String accountId, String clusterIdentifier, String username, String newPassword,
+                                  String databaseName) {
+        RedshiftContainerHandle handle = requireHandle(accountId, clusterIdentifier);
+        String effectiveUser = userOrDefault(username);
         // Validate effectiveUser against safe SQL identifier pattern to prevent SQL injection.
         // psql -c sends the query string to Postgres, which allows multiple ;-separated statements,
         // so even argv-escaping doesn't protect against a username like "postgres; DROP TABLE ..."
@@ -269,10 +376,10 @@ public class RedshiftContainerManager {
             throw new AwsException("InvalidParameterValue", "Username must be a valid SQL identifier", 400);
         }
         // AWS ModifyCluster rejects ', ", \, / and @ in MasterUserPassword and enforces an
-        // 8-64 length plus at least one uppercase, one lowercase and one digit — we enforce
+        // 8-64 length plus at least one uppercase, one lowercase and one digit, and we enforce
         // the same set for parity. The single-quote rejection is doubly load-bearing: the
         // password is spliced into a psql -c SQL literal here, so ' would also break that
-        // literal — but it is AWS-correct regardless, so do not "fix" it away by escaping.
+        // literal, but it is AWS-correct regardless, so do not "fix" it away by escaping.
         if (newPassword != null) {
             for (char forbidden : new char[]{'\'', '"', '\\', '/', '@'}) {
                 if (newPassword.indexOf(forbidden) >= 0) {
@@ -291,9 +398,9 @@ public class RedshiftContainerManager {
             }
         }
         String sql = "ALTER USER " + effectiveUser + " PASSWORD '" + newPassword + "'";
-        String[] cmd = new String[]{"psql", "-U", effectiveUser, "-d", "dev", "-c", sql};
+        String[] cmd = new String[]{"psql", "-U", effectiveUser, "-d", databaseName, "-c", sql};
         try {
-            ExecResult result = execInContainer(handle.getContainerId(), cmd, 15);
+            ContainerExec.Result result = execInContainer(handle.getContainerId(), cmd, 15);
             if (result.exitCode() != 0) {
                 // Deliberately omit result.stderr() from the log and the exception: psql echoes
                 // the failing ALTER USER statement, which contains the password literal.
@@ -316,28 +423,35 @@ public class RedshiftContainerManager {
     }
 
     public void restoreSnapshot(String accountId, String clusterIdentifier, String username, String dbname, Path sqlDumpFile) {
-        RedshiftContainerHandle handle = containers.get(containerKey(accountId, clusterIdentifier));
-        if (handle == null) {
-            throw new AwsException("ClusterNotFound", "Cluster container for " + clusterIdentifier + " not found", 404);
-        }
+        restoreSnapshot(accountId, clusterIdentifier, username, dbname, sqlDumpFile, false);
+    }
+
+    /**
+     * Replays the dump with psql. With {@code stopOnError} the first failing statement aborts the
+     * replay and fails the call, instead of psql skipping it and exiting successfully.
+     */
+    public void restoreSnapshot(String accountId, String clusterIdentifier, String username, String dbname,
+                                Path sqlDumpFile, boolean stopOnError) {
+        RedshiftContainerHandle handle = requireHandle(accountId, clusterIdentifier);
 
         if (sqlDumpFile == null || !Files.exists(sqlDumpFile)) {
             LOG.infov("Empty snapshot dump for cluster {0}, skipping restore", clusterIdentifier);
             return;
         }
 
-        String effectiveUser = (username != null && !username.isBlank()) ? username : "postgres";
-        String effectiveDb = (dbname != null && !dbname.isBlank()) ? dbname : "dev";
+        String effectiveUser = userOrDefault(username);
+        String effectiveDb = databaseOrDefault(dbname);
         String fileName = sqlDumpFile.getFileName().toString();
 
         try {
-            lifecycleManager.getDockerClient().copyArchiveToContainerCmd(handle.getContainerId())
-                    .withHostResource(sqlDumpFile.toString())
-                    .withRemotePath("/tmp")
-                    .exec();
+            RetryingTarCopier.copyHostResource(lifecycleManager.getDockerClient(), handle.getContainerId(),
+                    "/tmp", sqlDumpFile.toString(), RetryingTarCopier.DEFAULT_MAX_ATTEMPTS, retryBackoffMillis);
 
-            String[] cmd = new String[]{"psql", "-U", effectiveUser, "-d", effectiveDb, "-f", "/tmp/" + fileName};
-            ExecResult result = execInContainer(handle.getContainerId(), cmd, 60);
+            String[] cmd = stopOnError
+                    ? new String[]{"psql", "-U", effectiveUser, "-d", effectiveDb, "-v", "ON_ERROR_STOP=1",
+                            "-f", "/tmp/" + fileName}
+                    : new String[]{"psql", "-U", effectiveUser, "-d", effectiveDb, "-f", "/tmp/" + fileName};
+            ContainerExec.Result result = execInContainer(handle.getContainerId(), cmd, 60);
             if (result.exitCode() != 0) {
                 LOG.warnv("psql restore failed for cluster {0} (exit {1}): {2}", clusterIdentifier, result.exitCode(), result.stderr());
                 throw new AwsException("InternalFailure", "Failed to restore snapshot for cluster " + clusterIdentifier + ": " + result.stderr(), 500);
@@ -347,6 +461,40 @@ public class RedshiftContainerManager {
         } catch (Exception e) {
             LOG.errorv(e, "Error restoring snapshot for cluster {0}", clusterIdentifier);
             throw new AwsException("InternalFailure", "Failed to restore snapshot for cluster " + clusterIdentifier + ": " + e.getMessage(), 500);
+        }
+    }
+
+    private static final String DROP_USER_SCHEMAS_SQL = "DO $$ DECLARE s text; BEGIN "
+            + "PERFORM lo_unlink(oid) FROM pg_largeobject_metadata; "
+            + "FOR s IN SELECT nspname FROM pg_namespace WHERE nspname NOT IN ('pg_catalog', 'information_schema') "
+            + "AND nspname <> '" + BOOTSTRAP_SCHEMA + "' AND nspname NOT LIKE 'pg\\_%' LOOP EXECUTE format('DROP SCHEMA %I CASCADE', s); END LOOP; "
+            + "CREATE SCHEMA public; END $$;";
+
+    /**
+     * Drops every large object and every user schema except the bootstrap one, and recreates an
+     * empty {@code public} one, so a following {@link #restoreSnapshot} replays into a clean
+     * database rather than appending to what is already there.
+     */
+    public void resetUserSchemas(String accountId, String clusterIdentifier, String username, String dbname) {
+        RedshiftContainerHandle handle = requireHandle(accountId, clusterIdentifier);
+        String effectiveUser = userOrDefault(username);
+        String effectiveDb = databaseOrDefault(dbname);
+        String[] cmd = new String[]{"psql", "-U", effectiveUser, "-d", effectiveDb, "-c",
+                DROP_USER_SCHEMAS_SQL};
+        try {
+            ContainerExec.Result result = execInContainer(handle.getContainerId(), cmd, 30);
+            if (result.exitCode() != 0) {
+                LOG.warnv("Schema reset failed for cluster {0} (exit {1}): {2}", clusterIdentifier,
+                        result.exitCode(), result.stderr());
+                throw new AwsException("InternalFailure", "Failed to reset the database of " + clusterIdentifier
+                        + ": " + result.stderr(), 500);
+            }
+        } catch (AwsException e) {
+            throw e;
+        } catch (Exception e) {
+            LOG.errorv(e, "Error resetting the database of cluster {0}", clusterIdentifier);
+            throw new AwsException("InternalFailure", "Failed to reset the database of " + clusterIdentifier
+                    + ": " + e.getMessage(), 500);
         }
     }
 
@@ -361,85 +509,12 @@ public class RedshiftContainerManager {
         restoreSnapshot(accountId, cluster.getClusterIdentifier(), cluster.getMasterUsername(), "dev", sqlDumpFile);
     }
 
-    private ExecResult execInContainer(String containerId, String[] cmd, int timeoutSeconds) throws Exception {
-        ByteArrayOutputStream stdout = new ByteArrayOutputStream();
-        ExecResult res = execInContainer(containerId, cmd, timeoutSeconds, stdout);
-        return new ExecResult(res.exitCode(), stdout.toString(StandardCharsets.UTF_8), res.stderr());
+    private ContainerExec.Result execInContainer(String containerId, String[] cmd, int timeoutSeconds) {
+        return ContainerExec.run(lifecycleManager.getDockerClient(), containerId, cmd, timeoutSeconds);
     }
 
-    private ExecResult execInContainer(String containerId, String[] cmd, int timeoutSeconds, OutputStream out) throws Exception {
-        String execId = lifecycleManager.getDockerClient().execCreateCmd(containerId)
-                .withCmd(cmd)
-                .withAttachStdout(true)
-                .withAttachStderr(true)
-                .exec()
-                .getId();
-
-        CountDownLatch latch = new CountDownLatch(1);
-        ByteArrayOutputStream stderr = new ByteArrayOutputStream();
-
-        Closeable callback = lifecycleManager.getDockerClient().execStartCmd(execId).exec(new ResultCallback.Adapter<Frame>() {
-            @Override
-            public void onNext(Frame frame) {
-                byte[] payload = frame.getPayload();
-                if (payload == null) {
-                    return;
-                }
-                try {
-                    if (frame.getStreamType() == StreamType.STDERR) {
-                        stderr.write(payload);
-                    } else {
-                        out.write(payload);
-                    }
-                } catch (IOException ignored) {
-                }
-            }
-
-            @Override
-            public void onComplete() {
-                latch.countDown();
-            }
-
-            @Override
-            public void onError(Throwable t) {
-                LOG.warnv(t, "Container exec {0} failed", execId);
-                latch.countDown();
-            }
-        });
-
-        try {
-            boolean completed = latch.await(timeoutSeconds, TimeUnit.SECONDS);
-            if (!completed) {
-                return new ExecResult(-1, "", "Timed out after " + timeoutSeconds + "s");
-            }
-            Long exitCode = lifecycleManager.getDockerClient().inspectExecCmd(execId).exec().getExitCodeLong();
-            return new ExecResult(
-                    exitCode != null ? exitCode : -1,
-                    "",
-                    stderr.toString(StandardCharsets.UTF_8));
-        } finally {
-            try {
-                callback.close();
-            } catch (IOException ignored) {
-            }
-        }
-    }
-
-    private byte[] buildSingleFileTar(String filename, byte[] content, int mode) throws IOException {
-        ByteArrayOutputStream bos = new ByteArrayOutputStream();
-        try (TarArchiveOutputStream tar = new TarArchiveOutputStream(bos)) {
-            tar.setLongFileMode(TarArchiveOutputStream.LONGFILE_GNU);
-            TarArchiveEntry entry = new TarArchiveEntry(filename);
-            entry.setSize(content.length);
-            entry.setMode(mode);
-            tar.putArchiveEntry(entry);
-            tar.write(content);
-            tar.closeArchiveEntry();
-        }
-        return bos.toByteArray();
-    }
     private void waitForReady(String containerName, String containerId, String username, String dbName) {
-        String effectiveUser = (username != null && !username.isBlank()) ? username : "postgres";
+        String effectiveUser = userOrDefault(username);
         String[] cmd = {
                 "psql",
                 "-h", "127.0.0.1",
@@ -455,7 +530,7 @@ public class RedshiftContainerManager {
         String lastOutput = "";
         for (int attempt = 1; attempt <= 60; attempt++) {
             try {
-                ExecResult result = execInContainer(containerId, cmd, 5);
+                ContainerExec.Result result = execInContainer(containerId, cmd, 5);
                 lastOutput = result.stderr();
                 if (result.exitCode() == 0) {
                     LOG.infov("Initialized {0} in Redshift container {1}", description, containerName);
@@ -479,7 +554,7 @@ public class RedshiftContainerManager {
      * and migration tooling can inspect metadata without relation-does-not-exist errors.
      */
     void bootstrapCatalog(String containerId, String username, String dbName) {
-        String effectiveUser = (username != null && !username.isBlank()) ? username : "postgres";
+        String effectiveUser = userOrDefault(username);
         String effectiveDb = (dbName != null && !dbName.isBlank()) ? dbName : "dev";
         try (InputStream in = getClass().getResourceAsStream("/redshift/bootstrap-catalog.sql")) {
             if (in == null) {
@@ -487,11 +562,9 @@ public class RedshiftContainerManager {
                 return;
             }
             byte[] sqlBytes = in.readAllBytes();
-            byte[] tarBytes = buildSingleFileTar("bootstrap-catalog.sql", sqlBytes, 0644);
-            lifecycleManager.getDockerClient().copyArchiveToContainerCmd(containerId)
-                    .withTarInputStream(new ByteArrayInputStream(tarBytes))
-                    .withRemotePath("/tmp")
-                    .exec();
+            RetryingTarCopier.copyBytes(lifecycleManager.getDockerClient(), containerId, "/tmp",
+                    "bootstrap-catalog.sql", sqlBytes, 0644,
+                    RetryingTarCopier.DEFAULT_MAX_ATTEMPTS, retryBackoffMillis);
 
             List<String> targetDbs = effectiveDb.equals("template1")
                     ? List.of("template1")
@@ -505,7 +578,7 @@ public class RedshiftContainerManager {
                         "-d", db,
                         "-f", "/tmp/bootstrap-catalog.sql"
                 };
-                ExecResult result = execInContainer(containerId, cmd, 30);
+                ContainerExec.Result result = execInContainer(containerId, cmd, 30);
                 if (result.exitCode() != 0) {
                     LOG.warnv("Redshift catalog bootstrap for {0} exited with code {1}: {2}", db, result.exitCode(), result.stderr());
                 } else {
@@ -517,5 +590,4 @@ public class RedshiftContainerManager {
         }
     }
 
-    public record ExecResult(long exitCode, String stdout, String stderr) {}
 }

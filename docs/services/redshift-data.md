@@ -25,6 +25,7 @@ For the upstream API shape, see the AWS documentation:
 | `GetStatementResult` | Page through a finished statement's rows as typed `Records` |
 | `GetStatementResultV2` | Same rows in the V2 envelope, with `CSVRecords` when the statement used `ResultFormat=CSV` |
 | `ListStatements` | List stored statements newest first, filtered by `StatementName` or `Status` |
+| `ListSessions` | List caller-owned session metadata, with lifecycle status, target filters and pagination |
 | `CancelStatement` | Cancel queued or running SQL; returns whether cancellation was accepted, and rejects terminal statements |
 | `ListDatabases` | List databases on the cluster (`pg_database`) |
 | `ListSchemas` | List schemas, optionally filtered by `SchemaPattern` |

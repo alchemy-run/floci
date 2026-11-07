@@ -24,20 +24,6 @@ public class Parameter {
         this.dataType = dataType;
     }
 
-    public String getSource() {
-        if (source != null) {
-            return source;
-        }
-        // Older persisted parameters have no source field.
-        return ClusterParameterGroup.defaultParameters().stream().anyMatch(parameter ->
-                parameter.getParameterName().equals(parameterName)
-                        && parameter.getParameterValue().equals(parameterValue)) ? "engine-default" : "user";
-    }
-
-    public void setSource(String source) {
-        this.source = source;
-    }
-
     public String getParameterName() {
         return parameterName;
     }
@@ -68,5 +54,13 @@ public class Parameter {
 
     public void setDataType(String dataType) {
         this.dataType = dataType;
+    }
+
+    public String getSource() {
+        return source;
+    }
+
+    public void setSource(String source) {
+        this.source = source;
     }
 }

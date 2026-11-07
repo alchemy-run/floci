@@ -2,6 +2,7 @@ package io.floci.aws.services.redshift.model;
 
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -21,22 +22,7 @@ public class Cluster {
     private String clusterParameterGroupName;
     private List<String> vpcSecurityGroupIds = new ArrayList<>();
     private List<String> iamRoleArns = new ArrayList<>();
-
-    // CreateCluster DBName. Null on clusters persisted before it was recorded; those were
-    // always created with the default "dev" database.
-    private String dbName;
-    private int numberOfNodes = 1;
-    private boolean publiclyAccessible;
-    private boolean encrypted;
-
-    public String getDbName() { return dbName; }
-    public void setDbName(String dbName) { this.dbName = dbName; }
-    public int getNumberOfNodes() { return numberOfNodes; }
-    public void setNumberOfNodes(int numberOfNodes) { this.numberOfNodes = numberOfNodes; }
-    public boolean isPubliclyAccessible() { return publiclyAccessible; }
-    public void setPubliclyAccessible(boolean publiclyAccessible) { this.publiclyAccessible = publiclyAccessible; }
-    public boolean isEncrypted() { return encrypted; }
-    public void setEncrypted(boolean encrypted) { this.encrypted = encrypted; }
+    private String defaultIamRoleArn;
 
     public String getClusterIdentifier() { return clusterIdentifier; }
     public void setClusterIdentifier(String clusterIdentifier) { this.clusterIdentifier = clusterIdentifier; }
@@ -62,6 +48,85 @@ public class Cluster {
     public void setVpcSecurityGroupIds(List<String> vpcSecurityGroupIds) { this.vpcSecurityGroupIds = vpcSecurityGroupIds; }
     public List<String> getIamRoleArns() { return iamRoleArns; }
     public void setIamRoleArns(List<String> iamRoleArns) { this.iamRoleArns = iamRoleArns; }
+    public String getDefaultIamRoleArn() { return defaultIamRoleArn; }
+    public void setDefaultIamRoleArn(String defaultIamRoleArn) { this.defaultIamRoleArn = defaultIamRoleArn; }
+
+    // Audit logging configuration set by EnableLogging.
+    private boolean loggingEnabled = false;
+    private String loggingBucketName;
+    private String loggingS3KeyPrefix;
+
+    public boolean isLoggingEnabled() { return loggingEnabled; }
+    public void setLoggingEnabled(boolean loggingEnabled) { this.loggingEnabled = loggingEnabled; }
+    public String getLoggingBucketName() { return loggingBucketName; }
+    public void setLoggingBucketName(String loggingBucketName) { this.loggingBucketName = loggingBucketName; }
+    public String getLoggingS3KeyPrefix() { return loggingS3KeyPrefix; }
+    public void setLoggingS3KeyPrefix(String loggingS3KeyPrefix) { this.loggingS3KeyPrefix = loggingS3KeyPrefix; }
+
+    private String loggingDestinationType;
+    private String loggingRegion;
+    private List<String> loggingExports;
+    private boolean userActivityLoggingEnabled;
+    private String loggingS3TableKmsKeyId;
+    private String loggingS3TableGranularity;
+
+    public String getLoggingDestinationType() { return loggingDestinationType; }
+    public void setLoggingDestinationType(String loggingDestinationType) { this.loggingDestinationType = loggingDestinationType; }
+    public String getLoggingRegion() { return loggingRegion; }
+    public void setLoggingRegion(String loggingRegion) { this.loggingRegion = loggingRegion; }
+    public List<String> getLoggingExports() { return loggingExports; }
+    public void setLoggingExports(List<String> loggingExports) { this.loggingExports = loggingExports; }
+    public boolean isUserActivityLoggingEnabled() { return userActivityLoggingEnabled; }
+    public void setUserActivityLoggingEnabled(boolean userActivityLoggingEnabled) {
+        this.userActivityLoggingEnabled = userActivityLoggingEnabled;
+    }
+    public String getLoggingS3TableKmsKeyId() { return loggingS3TableKmsKeyId; }
+    public void setLoggingS3TableKmsKeyId(String loggingS3TableKmsKeyId) { this.loggingS3TableKmsKeyId = loggingS3TableKmsKeyId; }
+    public String getLoggingS3TableGranularity() { return loggingS3TableGranularity; }
+    public void setLoggingS3TableGranularity(String loggingS3TableGranularity) { this.loggingS3TableGranularity = loggingS3TableGranularity; }
+
+    // Cross-region snapshot copy (EnableSnapshotCopy). Enabled exactly when the destination is set.
+    private String snapshotCopyDestinationRegion;
+    private Integer snapshotCopyRetentionPeriod;
+    private Integer snapshotCopyManualRetentionPeriod;
+    private String snapshotCopyGrantName;
+    // Only snapshots taken after this instant are copied, as AWS copies from the moment copy is enabled.
+    private Instant snapshotCopyEnabledAt;
+    private String snapshotScheduleIdentifier;
+    private Instant automatedSnapshotAnchor;
+    private String snapshotRegion;
+    private Integer automatedSnapshotRetentionPeriod;
+    private String snapshotGeneration;
+
+    public String getSnapshotGeneration() { return snapshotGeneration; }
+    public void setSnapshotGeneration(String value) { snapshotGeneration = value; }
+
+    public Instant getAutomatedSnapshotAnchor() { return automatedSnapshotAnchor; }
+    public void setAutomatedSnapshotAnchor(Instant value) { automatedSnapshotAnchor = value; }
+    public String getSnapshotRegion() { return snapshotRegion; }
+    public void setSnapshotRegion(String value) { snapshotRegion = value; }
+    public int getAutomatedSnapshotRetentionPeriod() {
+        return automatedSnapshotRetentionPeriod == null ? 1 : automatedSnapshotRetentionPeriod;
+    }
+    public void setAutomatedSnapshotRetentionPeriod(Integer value) { automatedSnapshotRetentionPeriod = value; }
+
+    public String getSnapshotCopyDestinationRegion() { return snapshotCopyDestinationRegion; }
+    public void setSnapshotCopyDestinationRegion(String snapshotCopyDestinationRegion) { this.snapshotCopyDestinationRegion = snapshotCopyDestinationRegion; }
+    public Integer getSnapshotCopyRetentionPeriod() { return snapshotCopyRetentionPeriod; }
+    public void setSnapshotCopyRetentionPeriod(Integer snapshotCopyRetentionPeriod) { this.snapshotCopyRetentionPeriod = snapshotCopyRetentionPeriod; }
+    public Integer getSnapshotCopyManualRetentionPeriod() { return snapshotCopyManualRetentionPeriod; }
+    public void setSnapshotCopyManualRetentionPeriod(Integer snapshotCopyManualRetentionPeriod) { this.snapshotCopyManualRetentionPeriod = snapshotCopyManualRetentionPeriod; }
+    public Instant getSnapshotCopyEnabledAt() { return snapshotCopyEnabledAt; }
+    public void setSnapshotCopyEnabledAt(Instant snapshotCopyEnabledAt) { this.snapshotCopyEnabledAt = snapshotCopyEnabledAt; }
+    public String getSnapshotCopyGrantName() { return snapshotCopyGrantName; }
+    public void setSnapshotCopyGrantName(String snapshotCopyGrantName) { this.snapshotCopyGrantName = snapshotCopyGrantName; }
+    public String getSnapshotScheduleIdentifier() { return snapshotScheduleIdentifier; }
+    public void setSnapshotScheduleIdentifier(String snapshotScheduleIdentifier) { this.snapshotScheduleIdentifier = snapshotScheduleIdentifier; }
+
+    private boolean multiAZ = false;
+
+    public boolean isMultiAZ() { return multiAZ; }
+    public void setMultiAZ(boolean multiAZ) { this.multiAZ = multiAZ; }
 
     // Real backend address of this cluster's PostgreSQL container. `endpoint` now points at the
     // auth proxy, not the container, so the container address is kept here for proxy wiring and
@@ -80,15 +145,14 @@ public class Cluster {
     public int getProxyPort() { return proxyPort; }
     public void setProxyPort(int proxyPort) { this.proxyPort = proxyPort; }
 
-    // Port the cluster was created with (CreateCluster Port, 5439 by default). Its endpoint
-    // advertises this port; 0 for a cluster persisted before it was recorded.
-    private int port = 0;
-
-    public int getPort() { return port; }
-    public void setPort(int port) { this.port = port; }
-
     private Map<String, String> tags = new LinkedHashMap<>();
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags; }
+
+    /** The resource policy {@code PutResourcePolicy} set, kept with the cluster so it goes with it. */
+    private String resourcePolicy;
+
+    public String getResourcePolicy() { return resourcePolicy; }
+    public void setResourcePolicy(String resourcePolicy) { this.resourcePolicy = resourcePolicy; }
 }

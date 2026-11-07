@@ -1,6 +1,7 @@
 package io.floci.aws.services.docdb.proxy;
 
 import io.floci.aws.config.EmulatorConfig;
+import io.floci.aws.config.FlociCertificateAuthority;
 import io.floci.aws.core.common.dns.ContainerEndpoints;
 import io.floci.aws.services.acm.CertificateGenerator;
 import io.floci.aws.services.rds.proxy.RdsProxyTlsCertificates;
@@ -233,11 +234,8 @@ class DocDbProxyTest {
     }
 
     private RdsProxyTlsCertificates certificates() {
-        EmulatorConfig.StorageConfig storage = mock(EmulatorConfig.StorageConfig.class);
-        when(storage.persistentPath()).thenReturn(tempDir.toString());
-        EmulatorConfig config = mock(EmulatorConfig.class);
-        when(config.storage()).thenReturn(storage);
-        return new RdsProxyTlsCertificates(config, new CertificateGenerator());
+        return new RdsProxyTlsCertificates(FlociCertificateAuthority.loadOrCreate(tempDir.resolve("tls")),
+                new CertificateGenerator());
     }
 
     /** A TLS client that trusts Floci's RDS CA and names {@code serverName} in its ClientHello. */

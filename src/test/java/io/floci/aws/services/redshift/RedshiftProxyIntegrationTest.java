@@ -36,7 +36,9 @@ class RedshiftProxyIntegrationTest {
     }
 
     private static String jdbcUrl(Cluster c) {
-        return RedshiftEndpoints.jdbcUrl(c.getEndpoint().getAddress(), c.getEndpoint().getPort(), "dev");
+        // Use 127.0.0.1 explicitly instead of c.getEndpoint().getAddress() to avoid UnknownHostException
+        // in CI environments where floci.emulator.hostname is set to host.docker.internal.
+        return "jdbc:postgresql://127.0.0.1:" + c.getEndpoint().getPort() + "/dev";
     }
 
     private static Connection waitForConnection(Cluster cluster, String username, String password) throws SQLException {
@@ -66,6 +68,38 @@ class RedshiftProxyIntegrationTest {
                 assertEquals(1, rs.getInt(1));
             }
         }
+    }
+
+    @Test
+    void pauseResumePreservesSqlAndProxyAuthentication() throws SQLException {
+        clusterId = "it-pause-resume";
+        Cluster cluster = service.createCluster(clusterId, "dc2.large", "admin", "Secret123");
+        int port = cluster.getEndpoint().getPort();
+        try (Connection connection = waitForConnection(cluster, "admin", "Secret123");
+             Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE pause_data (value integer)");
+            statement.execute("INSERT INTO pause_data VALUES (42)");
+            statement.execute("CREATE VIEW pause_catalog_view AS SELECT * FROM pg_table_def");
+            assertEquals("paused", service.pauseCluster(clusterId).getClusterStatus());
+            assertThrows(SQLException.class, () -> statement.executeQuery("SELECT 1"));
+        }
+        assertThrows(SQLException.class,
+                () -> DriverManager.getConnection(jdbcUrl(cluster), "admin", "Secret123"));
+        assertEquals("available", service.resumeCluster(clusterId).getClusterStatus());
+        assertEquals(port, cluster.getEndpoint().getPort());
+        try (Connection connection = waitForConnection(cluster, "admin", "Secret123");
+             Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery("SELECT value FROM pause_data")) {
+            assertTrue(result.next());
+            assertEquals(42, result.getInt(1));
+        }
+        try (Connection connection = waitForConnection(cluster, "admin", "Secret123");
+             Statement statement = connection.createStatement();
+             ResultSet result = statement.executeQuery("SELECT count(*) FROM pause_catalog_view")) {
+            assertTrue(result.next());
+        }
+        assertThrows(SQLException.class,
+                () -> DriverManager.getConnection(jdbcUrl(cluster), "admin", "wrong-password"));
     }
 
     @Test

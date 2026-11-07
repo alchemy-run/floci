@@ -4,15 +4,25 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
+import io.floci.aws.core.common.DatabaseSecretCredentials;
 import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.services.redshift.RedshiftCredentialBroker;
 import io.floci.aws.services.redshift.RedshiftService;
 import io.floci.aws.services.redshift.model.Cluster;
+import io.floci.aws.services.redshift.proxy.CopyStatementParser;
+import io.floci.aws.services.redshift.spectrum.SpectrumSession;
+import io.floci.aws.services.redshiftserverless.RedshiftServerlessRuntime;
+import io.floci.aws.services.redshiftserverless.RedshiftServerlessService;
+import io.floci.aws.services.redshiftserverless.model.Workgroup;
 import io.floci.aws.services.secretsmanager.SecretsManagerService;
+import io.floci.aws.services.secretsmanager.model.Secret;
 import io.floci.aws.services.secretsmanager.model.SecretVersion;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
+
+import java.util.List;
+import java.util.Optional;
 
 @ApplicationScoped
 class RedshiftDataResourceResolver {
@@ -24,34 +34,106 @@ class RedshiftDataResourceResolver {
     private final ObjectMapper objectMapper;
     private final RedshiftCredentialBroker credentialBroker;
     private final RegionResolver regionResolver;
+    private final RedshiftServerlessService serverlessService;
 
     @Inject
     RedshiftDataResourceResolver(RedshiftService redshiftService,
                                  SecretsManagerService secretsManagerService,
                                  ObjectMapper objectMapper,
                                  RedshiftCredentialBroker credentialBroker,
-                                 RegionResolver regionResolver) {
+                                 RegionResolver regionResolver,
+                                 RedshiftServerlessService serverlessService) {
         this.redshiftService = redshiftService;
         this.secretsManagerService = secretsManagerService;
         this.objectMapper = objectMapper;
         this.credentialBroker = credentialBroker;
         this.regionResolver = regionResolver;
+        this.serverlessService = serverlessService;
+    }
+
+    /** The ARN of the serverless workgroup a request names by its name or ARN, as {@link #resolve} reads it. */
+    Optional<String> find(String type, List<String> names, String region) {
+        if (!"workgroup".equals(type) || names.size() != 1) {
+            return Optional.empty();
+        }
+        return serverlessService.findWorkgroupByNameOrArn(names.getFirst(), region).map(Workgroup::getWorkgroupArn);
     }
 
     DatabaseTarget resolve(JsonNode request, String region) {
-        if (hasText(request, "WorkgroupName")) {
-            throw validation("Redshift Serverless (WorkgroupName) is not emulated by Floci.");
-        }
         String database = requiredText(request, "Database");
+        boolean needsProxy = needsProxy(request);
+        if (hasText(request, "WorkgroupName")) {
+            return resolveWorkgroup(request, region, database, needsProxy);
+        }
 
         if (hasText(request, "SecretArn")) {
-            return resolveViaSecret(request, region, database);
+            return resolveViaSecret(request, region, database, needsProxy);
         }
-        return resolveViaDbUser(request, database);
+        return resolveViaDbUser(request, region, database, needsProxy);
     }
 
-    private DatabaseTarget resolveViaSecret(JsonNode request, String region, String database) {
+    /**
+     * A workgroup is reached either with a secret holding credentials, or as an IAM identity whose
+     * database user AWS derives from the signing identity. Floci connects the IAM path as the
+     * namespace admin, the same stand-in GetClusterCredentialsWithIAM uses for a cluster.
+     */
+    private DatabaseTarget resolveWorkgroup(JsonNode request, String region, String database, boolean needsProxy) {
+        if (hasText(request, "ClusterIdentifier")) {
+            throw validation("ClusterIdentifier and WorkgroupName cannot both be specified.");
+        }
+        RedshiftServerlessService.WorkgroupTarget workgroup =
+                serverlessService.getWorkgroupTarget(request.get("WorkgroupName").asText(), region);
+        String accountId = AwsArnUtils.parse(workgroup.arn()).accountId();
+        SpectrumSession spectrum = new SpectrumSession(accountId,
+                accountId + ":" + RedshiftServerlessRuntime.backendId(region, workgroup.workgroupName()), database,
+                workgroup.iamRoleArns(), false);
+        if (!database.equals(workgroup.database())) {
+            throw validation("Database " + database + " does not exist in workgroup " + workgroup.workgroupName()
+                    + "; the only database is " + workgroup.database() + ".");
+        }
+        int proxyPort = workgroup.endpoint() != null ? workgroup.endpoint().getPort() : 0;
+        boolean hasProxy = needsProxy && proxyPort > 0;
+        String host = hasProxy ? "127.0.0.1" : workgroup.host();
+        int port = hasProxy ? proxyPort : workgroup.port();
+        if (!hasText(request, "SecretArn")) {
+            return new DatabaseTarget(workgroup.arn(), host, port, database,
+                    workgroup.masterUsername(), workgroup.masterPassword(), spectrum, null,
+                    workgroup.masterUsername(), workgroup.workgroupName());
+        }
         String secretArn = request.get("SecretArn").asText();
+        DatabaseSecretCredentials creds = secretCredentials(secretArn, region);
+        String user = creds.username();
+        if (isManagedAdminSecret(secretArn, workgroup.adminPasswordSecretArn(), region)) {
+            user = workgroup.masterUsername();
+        }
+        return new DatabaseTarget(workgroup.arn(), host, port, database,
+                user, creds.password(), spectrum, null, user, workgroup.workgroupName());
+    }
+
+    private boolean isManagedAdminSecret(String secretArn, String managedSecretArn, String region) {
+        if (managedSecretArn == null) {
+            return false;
+        }
+        if (managedSecretArn.equals(secretArn)) {
+            return true;
+        }
+        Secret resolvedSecret = secretsManagerService.describeSecret(secretArn, region);
+        return resolvedSecret != null && managedSecretArn.equals(resolvedSecret.getArn());
+    }
+
+    private DatabaseSecretCredentials secretCredentials(String secretArn, String region) {
+        validateSecretRegion(secretArn, region);
+        SecretVersion secret;
+        try {
+            secret = secretsManagerService.getSecretValue(secretArn, null, null, region);
+        } catch (AwsException e) {
+            throw validation("SecretArn does not resolve to a local secret: " + secretArn);
+        }
+        return DatabaseSecretCredentials.parse(objectMapper, secret.getSecretString())
+                .orElseThrow(() -> validation("Secret " + secretArn + " does not contain username and password fields."));
+    }
+
+    private static void validateSecretRegion(String secretArn, String region) {
         try {
             AwsArnUtils.Arn arn = AwsArnUtils.parse(secretArn);
             if (region != null && !region.isBlank() && !region.equals(arn.region())) {
@@ -60,36 +142,34 @@ class RedshiftDataResourceResolver {
         } catch (IllegalArgumentException e) {
             throw validation("SecretArn is not a valid ARN: " + secretArn);
         }
-        String clusterId = requiredText(request, "ClusterIdentifier");
-        Cluster cluster = cluster(clusterId);
-        SecretVersion secret;
-        try {
-            secret = secretsManagerService.getSecretValue(secretArn, null, null, region);
-        } catch (AwsException e) {
-            throw validation("SecretArn does not resolve to a local secret: " + secretArn);
-        }
-        Credentials creds = parseCredentials(secret.getSecretString());
-        if (creds == null) {
-            throw validation("Secret " + secretArn + " does not contain username and password fields.");
-        }
-        return target(clusterArn(clusterId, region), cluster, database, creds.username(), creds.password());
     }
 
-    private DatabaseTarget resolveViaDbUser(JsonNode request, String database) {
+    private DatabaseTarget resolveViaSecret(JsonNode request, String region, String database, boolean needsProxy) {
+        String secretArn = request.get("SecretArn").asText();
+        validateSecretRegion(secretArn, region);
+        String clusterId = requiredText(request, "ClusterIdentifier");
+        Cluster cluster = cluster(clusterId);
+        DatabaseSecretCredentials creds = secretCredentials(secretArn, region);
+        return target(clusterArn(clusterId, region), cluster, database, creds.username(), creds.password(), needsProxy);
+    }
+
+    private DatabaseTarget resolveViaDbUser(JsonNode request, String region, String database, boolean needsProxy) {
         String clusterId = requiredText(request, "ClusterIdentifier");
         String dbUser = requiredText(request, "DbUser");
         Cluster cluster = cluster(clusterId);
 
         if (dbUser.equals(cluster.getMasterUsername())) {
-            return target(clusterArn(clusterId, null), cluster, database, dbUser, cluster.getMasterPassword());
+            return target(clusterArn(clusterId, region), cluster, database, dbUser, cluster.getMasterPassword(), needsProxy);
         }
         boolean liveCredential = credentialBroker
                 .resolve(regionResolver.getAccountId(), clusterId, dbUser)
                 .isPresent();
         if (liveCredential) {
             // The minted DbUser is nominal: connect as the cluster master.
-            return target(clusterArn(clusterId, null), cluster, database,
-                    cluster.getMasterUsername(), cluster.getMasterPassword());
+            DatabaseTarget backend = target(clusterArn(clusterId, region), cluster, database,
+                    cluster.getMasterUsername(), cluster.getMasterPassword(), needsProxy);
+            return new DatabaseTarget(backend.arn(), backend.host(), backend.port(), backend.database(), backend.user(),
+                    backend.password(), backend.spectrum(), cluster, dbUser);
         }
         throw validation("DbUser " + dbUser + " has no active credentials; call GetClusterCredentials first.");
     }
@@ -102,38 +182,52 @@ class RedshiftDataResourceResolver {
         }
     }
 
-    private static DatabaseTarget target(String arn, Cluster cluster, String database, String user, String password) {
-        String host = cluster.getContainerHost();
-        int port = cluster.getContainerPort();
+    private static DatabaseTarget target(String arn, Cluster cluster, String database, String user, String password,
+                                         boolean needsProxy) {
+        int proxyPort = cluster.getProxyPort();
+        boolean hasProxy = needsProxy && proxyPort > 0;
+        String host = hasProxy ? "127.0.0.1" : cluster.getContainerHost();
+        int port = hasProxy ? proxyPort : cluster.getContainerPort();
         if (host == null || host.isBlank() || port <= 0) {
             throw validation("Cluster runtime is not available for Data API execution.");
         }
-        return new DatabaseTarget(arn, host, port, database, user, password);
+        String accountId = AwsArnUtils.parse(arn).accountId();
+        SpectrumSession spectrum = new SpectrumSession(accountId, accountId + ":" + cluster.getClusterIdentifier(),
+                database, cluster.getIamRoleArns(), false);
+        return new DatabaseTarget(arn, host, port, database, user, password, spectrum, cluster);
     }
 
-    private Credentials parseCredentials(String secretString) {
-        if (secretString == null || secretString.isBlank()) {
-            return null;
+    private static boolean needsProxy(JsonNode request) {
+        if (request == null) {
+            return false;
         }
-        try {
-            JsonNode node = objectMapper.readTree(secretString);
-            String username = text(node, "username");
-            if (username == null) {
-                username = text(node, "user");
-            }
-            String password = text(node, "password");
-            if (username != null && password != null) {
-                return new Credentials(username, password);
-            }
-        } catch (Exception e) {
-            LOG.debugv("Could not parse Redshift Data API secret: {0}", e.getMessage());
+        if (request.has("SessionId") || request.path("SessionKeepAliveSeconds").asInt() > 0) {
+            return true;
         }
-        return null;
+        if (hasText(request, "Sql") && isS3CopyOrUnload(request.get("Sql").asText())) {
+            return true;
+        }
+        JsonNode sqls = request.get("Sqls");
+        if (sqls != null && sqls.isArray()) {
+            for (JsonNode item : sqls) {
+                if (item.isTextual() && isS3CopyOrUnload(item.asText())) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
-    private static String clusterArn(String clusterId, String region) {
-        String r = (region == null || region.isBlank()) ? "us-east-1" : region;
-        return "arn:aws:redshift:" + r + ":000000000000:cluster:" + clusterId;
+    private static boolean isS3CopyOrUnload(String sql) {
+        if (sql == null || sql.isBlank()) {
+            return false;
+        }
+        return CopyStatementParser.parse(sql) != null;
+    }
+
+    private String clusterArn(String clusterId, String region) {
+        String r = (region == null || region.isBlank()) ? regionResolver.getDefaultRegion() : region;
+        return AwsArnUtils.Arn.of("redshift", r, regionResolver.getAccountId(), "cluster:" + clusterId).toString();
     }
 
     private static AwsException validation(String message) {
@@ -158,9 +252,25 @@ class RedshiftDataResourceResolver {
         return value == null || value.isNull() ? null : value.asText();
     }
 
-    record DatabaseTarget(String arn, String host, int port, String database, String user, String password) {
+    record DatabaseTarget(String arn, String host, int port, String database, String user, String password,
+                          SpectrumSession spectrum, Cluster cluster, String auditUser, String workgroupName) {
+        DatabaseTarget(String arn, String host, int port, String database, String user, String password,
+                       SpectrumSession spectrum, Cluster cluster, String auditUser) {
+            this(arn, host, port, database, user, password, spectrum, cluster, auditUser, null);
+        }
+
+        DatabaseTarget(String arn, String host, int port, String database, String user, String password,
+                       SpectrumSession spectrum, Cluster cluster) {
+            this(arn, host, port, database, user, password, spectrum, cluster, user);
+        }
+        DatabaseTarget(String arn, String host, int port, String database, String user, String password) {
+            this(arn, host, port, database, user, password, null, null);
+        }
+
+        DatabaseTarget(String arn, String host, int port, String database, String user, String password,
+                       SpectrumSession spectrum) {
+            this(arn, host, port, database, user, password, spectrum, null);
+        }
     }
 
-    private record Credentials(String username, String password) {
-    }
 }

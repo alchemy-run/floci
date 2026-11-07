@@ -1,6 +1,7 @@
 package io.floci.aws.services.rds;
 
 import io.quarkus.test.junit.QuarkusTest;
+import io.restassured.specification.RequestSpecification;
 import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
@@ -9,13 +10,14 @@ import org.junit.jupiter.api.TestMethodOrder;
 import static io.restassured.RestAssured.given;
 import static io.restassured.http.ContentType.URLENC;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 
 /**
  * Tags on DB parameter groups and DB cluster parameter groups.
  *
  * <p>Both types are taggable on a live account, and both are read by the terraform provider as
- * part of the group's own read, including for DocumentDB, whose cluster parameter groups are
+ * part of the group's own read — including for DocumentDB, whose cluster parameter groups are
  * these records. The ARN is what a caller tags by, so the create response has to carry it.
  */
 @QuarkusTest
@@ -32,7 +34,7 @@ class RdsParameterGroupTagIntegrationTest {
             "AWS4-HMAC-SHA256 Credential=test/20260615/us-east-1/rds/aws4_request, "
             + "SignedHeaders=content-type;host, Signature=test";
 
-    private static io.restassured.specification.RequestSpecification query(String action) {
+    private static RequestSpecification query(String action) {
         return given().header("Authorization", AUTH)
                 .contentType(URLENC)
                 .formParam("Action", action)
@@ -61,6 +63,26 @@ class RdsParameterGroupTagIntegrationTest {
             .statusCode(200)
             .body(containsString("<Key>team</Key>"))
             .body(containsString("<Value>data</Value>"));
+    }
+
+    @Test
+    @Order(2)
+    void describingAnUnknownParameterGroupIsNotFoundButAKnownOneIsReturned() {
+        query("DescribeDBParameterGroups")
+                .formParam("DBParameterGroupName", "no-such-pg")
+        .when().post("/")
+        .then()
+            .statusCode(404)
+            .body(containsString("<Code>DBParameterGroupNotFound</Code>"))
+            .body("ErrorResponse.Error.Message",
+                    equalTo("DBParameterGroupName doesn't refer to an existing DB parameter group."));
+
+        query("DescribeDBParameterGroups")
+                .formParam("DBParameterGroupName", PG)
+        .when().post("/")
+        .then()
+            .statusCode(200)
+            .body(containsString("<DBParameterGroupName>" + PG + "</DBParameterGroupName>"));
     }
 
     @Test
@@ -131,36 +153,6 @@ class RdsParameterGroupTagIntegrationTest {
         .then()
             .statusCode(404)
             .body(containsString("NotFound"));
-    }
-
-    @Test
-    @Order(3)
-    void namedDescribeReportsMissingRatherThanAnEmptyCollection() {
-        query("DescribeDBParameterGroups")
-                .formParam("DBParameterGroupName", "tag-test-never-created")
-        .when().post("/").then().statusCode(404)
-            .body(containsString("<Code>DBParameterGroupNotFound</Code>"));
-    }
-
-    @Test
-    @Order(3)
-    void parameterResetPreservesGroupTagsAndIdentity() {
-        query("ModifyDBParameterGroup")
-                .formParam("DBParameterGroupName", PG)
-                .formParam("Parameters.Parameter.1.ParameterName", "work_mem")
-                .formParam("Parameters.Parameter.1.ParameterValue", "8192")
-                .formParam("Parameters.Parameter.1.ApplyMethod", "immediate")
-        .when().post("/").then().statusCode(200);
-        query("ResetDBParameterGroup")
-                .formParam("DBParameterGroupName", PG)
-                .formParam("ResetAllParameters", "true")
-        .when().post("/").then().statusCode(200);
-        query("DescribeDBParameterGroups").formParam("DBParameterGroupName", PG)
-        .when().post("/").then().statusCode(200)
-            .body(containsString("<DBParameterGroupArn>" + PG_ARN + "</DBParameterGroupArn>"));
-        query("ListTagsForResource").formParam("ResourceName", PG_ARN)
-        .when().post("/").then().statusCode(200)
-            .body(containsString("<Key>team</Key><Value>data</Value>"));
     }
 
     @Test

@@ -1,14 +1,19 @@
 package io.floci.aws.services.rds.proxy;
 
 import io.floci.aws.config.EmulatorConfig;
+import io.floci.aws.core.common.docker.ContainerLifecycleManager.EndpointInfo;
+import io.floci.aws.services.rds.container.RdsBackendGate;
+import io.floci.aws.services.rds.container.RdsContainerManager;
 import io.floci.aws.services.rds.model.DatabaseEngine;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
-import java.util.List;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Registry of all active RDS auth proxies. One proxy per DB instance or cluster.
@@ -21,95 +26,105 @@ public class RdsProxyManager {
     private final RdsSigV4Validator sigV4Validator;
     private final RdsProxyTlsCertificates tlsCertificates;
     private final EmulatorConfig config;
+    private final RdsBackendGate backendGate;
+    private final RdsContainerManager containerManager;
     private final ConcurrentHashMap<String, RdsAuthProxy> proxies = new ConcurrentHashMap<>();
-    private final RdsEndpointRouter router;
+    private final ConcurrentHashMap<String, RdsAuthProxy> pendingFailedStarts = new ConcurrentHashMap<>();
 
     @Inject
     public RdsProxyManager(RdsSigV4Validator sigV4Validator, RdsProxyTlsCertificates tlsCertificates,
-                           EmulatorConfig config) {
+                           EmulatorConfig config, RdsBackendGate backendGate,
+                           RdsContainerManager containerManager) {
         this.sigV4Validator = sigV4Validator;
         this.tlsCertificates = tlsCertificates;
         this.config = config;
-        EmulatorConfig.RdsServiceConfig rdsConfig = config.services().rds();
-        this.router = new RdsEndpointRouter(rdsConfig.proxyHandshakeTimeoutMillis(),
-                rdsConfig.proxyBackendConnectTimeoutMillis(), rdsConfig.proxyMaxConnections());
+        this.backendGate = backendGate;
+        this.containerManager = containerManager;
     }
 
-    /**
-     * Serves a started proxy on its advertised endpoint: {@code hostnames} (the endpoint address
-     * and any alias, such as a cluster's reader endpoint) on the endpoint's configured
-     * {@code port}, which many resources can share. The TLS certificate covers every name, and
-     * MySQL IAM tokens are checked against the advertised host and port rather than the internal
-     * one. A no-op when no proxy runs under {@code relayKey}.
-     *
-     * @return false when the port could not be bound on this host
-     */
-    public synchronized boolean advertise(String relayKey, List<String> hostnames, int port) {
-        RdsAuthProxy proxy = proxies.get(relayKey);
-        if (proxy == null || hostnames == null || hostnames.isEmpty()) {
-            return true;
-        }
-        for (String hostname : hostnames) {
-            tlsCertificates.ensureHost(hostname);
-        }
-        proxy.updateMysqlBinding(new RdsMysqlBinding(hostnames.get(0), port, regionFromRelayKey(relayKey)));
-        return router.register(relayKey, port, hostnames, proxy.getPort(), proxy.getEngine());
-    }
-
-    /**
-     * Routes another service's PostgreSQL-protocol endpoint (a Redshift cluster) through the same
-     * shared listeners: {@code hostnames} on {@code port} go to the listener on {@code targetPort}.
-     *
-     * @return false when the port could not be bound on this host
-     */
-    public synchronized boolean routePostgresEndpoint(String key, List<String> hostnames, int port, int targetPort) {
-        for (String hostname : hostnames) {
-            tlsCertificates.ensureHost(hostname);
-        }
-        return router.register(key, port, hostnames, targetPort, DatabaseEngine.POSTGRES);
-    }
-
-    public synchronized void unroutePostgresEndpoint(String key) {
-        router.unregister(key);
-    }
-
-    public synchronized void startProxy(String instanceId, DatabaseEngine engine, boolean iamEnabled,
-                                        int proxyPort, String backendHost, int backendPort,
-                                        String advertisedHost,
-                                        String masterUsername, String masterPassword, String dbName,
-                                        RdsAuthProxy.MasterPasswordCheck passwordValidator) {
-        startProxy(instanceId, engine, iamEnabled, proxyPort, backendHost, backendPort,
-                advertisedHost, masterUsername, masterPassword, dbName, passwordValidator,
-                new RdsMysqlBinding(advertisedHost, proxyPort, regionFromRelayKey(instanceId)));
-    }
-
-    public synchronized void startProxy(String instanceId, DatabaseEngine engine, boolean iamEnabled,
+    public synchronized void startProxy(String instanceId, String backendRuntimeId,
+                                        DatabaseEngine engine, boolean iamEnabled,
                                         int proxyPort, String backendHost, int backendPort,
                                         String advertisedHost,
                                         String masterUsername, String masterPassword, String dbName,
                                         RdsAuthProxy.MasterPasswordCheck passwordValidator,
-                                        RdsMysqlBinding mysqlBinding) {
+                                        RdsProxyBinding binding) {
+        startProxy(instanceId, backendRuntimeId, engine, iamEnabled, proxyPort, backendHost,
+                backendPort, advertisedHost, masterUsername, masterPassword, dbName,
+                passwordValidator, binding, RdsAuthProxy.EndpointKind.DATABASE);
+    }
+
+    public synchronized void startProxy(String instanceId, String backendRuntimeId,
+                                        DatabaseEngine engine, boolean iamEnabled,
+                                        int proxyPort, String backendHost, int backendPort,
+                                        String advertisedHost,
+                                        String masterUsername, String masterPassword, String dbName,
+                                        RdsAuthProxy.MasterPasswordCheck passwordValidator,
+                                        RdsProxyBinding binding, RdsAuthProxy.EndpointKind endpointKind) {
+        if (containerManager == null) {
+            throw new IllegalStateException("RDS container manager is required for dynamic backend resolution");
+        }
+        AtomicBoolean endpointFailureLogged = new AtomicBoolean();
+        RdsAuthProxy.BackendEndpointResolver endpointResolver = () -> {
+            try {
+                EndpointInfo endpoint = containerManager.resolveBackendEndpoint(backendRuntimeId, engine);
+                endpointFailureLogged.set(false);
+                return new RdsAuthProxy.BackendEndpoint(endpoint.host(), endpoint.port());
+            } catch (RuntimeException e) {
+                if (endpointFailureLogged.compareAndSet(false, true)) {
+                    LOG.warnv(e, "Could not resolve backend endpoint for RDS runtime {0}",
+                            backendRuntimeId);
+                }
+                throw new IOException(
+                        "Could not resolve backend endpoint for RDS runtime " + backendRuntimeId, e);
+            }
+        };
+        startProxy(instanceId, backendRuntimeId, engine, iamEnabled, proxyPort,
+                backendHost, backendPort, endpointResolver, advertisedHost, masterUsername,
+                masterPassword, dbName, passwordValidator, binding, endpointKind);
+    }
+
+    private void startProxy(String instanceId, String backendRuntimeId,
+                            DatabaseEngine engine, boolean iamEnabled,
+                            int proxyPort, String backendHost, int backendPort,
+                            RdsAuthProxy.BackendEndpointResolver endpointResolver,
+                            String advertisedHost,
+                            String masterUsername, String masterPassword, String dbName,
+                            RdsAuthProxy.MasterPasswordCheck passwordValidator,
+                            RdsProxyBinding binding, RdsAuthProxy.EndpointKind endpointKind) {
+        if (instanceId == null) {
+            throw new IllegalArgumentException("RDS proxy instance ID is required");
+        }
+        RdsAuthProxy pending = pendingFailedStarts.get(instanceId);
+        if (pending != null) {
+            pending.stop();
+            pendingFailedStarts.remove(instanceId, pending);
+        }
         tlsCertificates.ensureHost(advertisedHost);
         EmulatorConfig.RdsServiceConfig rdsConfig = config.services().rds();
         RdsAuthProxy proxy = new RdsAuthProxy(
-                instanceId, backendHost, backendPort, engine, iamEnabled,
-                masterUsername, masterPassword, dbName, sigV4Validator, tlsCertificates, passwordValidator,
-                rdsConfig.proxyHandshakeTimeoutMillis(), rdsConfig.proxyBackendConnectTimeoutMillis(),
-                rdsConfig.proxyMaxConnections(), mysqlBinding);
+                instanceId, backendHost, backendPort, endpointResolver, backendRuntimeId,
+                engine, iamEnabled, masterUsername, masterPassword, dbName, sigV4Validator,
+                tlsCertificates, passwordValidator, rdsConfig.proxyHandshakeTimeoutMillis(),
+                rdsConfig.proxyBackendConnectTimeoutMillis(), rdsConfig.proxyMaxConnections(),
+                binding, username -> binding != null, backendGate, endpointKind);
         try {
             proxy.start(proxyPort);
         } catch (IOException e) {
             RuntimeException failure = new RuntimeException(
                     "Failed to start RDS proxy for instance " + instanceId
                             + " on port " + proxyPort, e);
-            cleanupFailedStart(proxy, failure);
+            cleanupFailedStart(instanceId, proxy, failure);
             throw failure;
         } catch (RuntimeException e) {
             RuntimeException failure = new RuntimeException(
                     "Failed to register RDS proxy for instance " + instanceId
                             + " on port " + proxyPort, e);
-            cleanupFailedStart(proxy, failure);
+            cleanupFailedStart(instanceId, proxy, failure);
             throw failure;
+        } catch (Error e) {
+            cleanupFailedStart(instanceId, proxy, e);
+            throw e;
         }
         RdsAuthProxy previous;
         try {
@@ -118,31 +133,23 @@ public class RdsProxyManager {
             RuntimeException failure = new RuntimeException(
                     "Failed to register RDS proxy for instance " + instanceId
                             + " on port " + proxyPort, e);
-            cleanupFailedStart(proxy, failure);
+            cleanupFailedStart(instanceId, proxy, failure);
             throw failure;
+        } catch (Error e) {
+            cleanupFailedStart(instanceId, proxy, e);
+            throw e;
         }
         if (previous != null) {
             try {
                 previous.stop();
-            } catch (RuntimeException e) {
+            } catch (RuntimeException | Error e) {
                 proxies.put(instanceId, previous);
                 RuntimeException failure = new RuntimeException(
                         "Failed to replace RDS proxy for instance " + instanceId, e);
-                cleanupFailedStart(proxy, failure);
+                cleanupFailedStart(instanceId, proxy, failure);
                 throw failure;
             }
         }
-    }
-
-    private String regionFromRelayKey(String relayKey) {
-        int arnStart = relayKey.indexOf("arn:");
-        if (arnStart >= 0) {
-            String[] parts = relayKey.substring(arnStart).split(":", 6);
-            if (parts.length > 3 && !parts[3].isBlank()) {
-                return parts[3];
-            }
-        }
-        return config.defaultRegion();
     }
 
     public synchronized void updateMasterPassword(String instanceId, String newPassword) {
@@ -162,22 +169,45 @@ public class RdsProxyManager {
     }
 
     public synchronized void stopProxy(String instanceId) {
-        router.unregister(instanceId);
+        Throwable failure = null;
+        RdsAuthProxy pending = pendingFailedStarts.get(instanceId);
+        if (pending != null) {
+            try {
+                pending.stop();
+                pendingFailedStarts.remove(instanceId, pending);
+            } catch (RuntimeException | Error e) {
+                failure = e;
+            }
+        }
         RdsAuthProxy proxy = proxies.get(instanceId);
         if (proxy != null) {
-            proxy.stop();
-            proxies.remove(instanceId, proxy);
-            LOG.infov("Stopped RDS proxy for instance {0}", instanceId);
+            try {
+                proxy.stop();
+                proxies.remove(instanceId, proxy);
+                LOG.infov("Stopped RDS proxy for instance {0}", instanceId);
+            } catch (RuntimeException | Error e) {
+                if (failure == null) {
+                    failure = e;
+                } else if (failure != e) {
+                    failure.addSuppressed(e);
+                }
+            }
+        }
+        if (failure instanceof RuntimeException runtimeFailure) {
+            throw runtimeFailure;
+        }
+        if (failure instanceof Error error) {
+            throw error;
         }
     }
 
     public synchronized void stopAll() {
-        router.closeAll();
-        proxies.forEach((instanceId, proxy) -> {
+        Set<String> instanceIds = new HashSet<>(proxies.keySet());
+        instanceIds.addAll(pendingFailedStarts.keySet());
+        instanceIds.forEach(instanceId -> {
             try {
-                proxy.stop();
-                proxies.remove(instanceId, proxy);
-            } catch (RuntimeException e) {
+                stopProxy(instanceId);
+            } catch (RuntimeException | Error e) {
                 LOG.warnv(e, "Failed to stop RDS proxy for instance {0} during shutdown",
                         instanceId);
             }
@@ -185,11 +215,14 @@ public class RdsProxyManager {
         LOG.info("Stopped all RDS proxies");
     }
 
-    private void cleanupFailedStart(RdsAuthProxy proxy, RuntimeException failure) {
+    private void cleanupFailedStart(String instanceId, RdsAuthProxy proxy, Throwable failure) {
         try {
             proxy.stop();
-        } catch (RuntimeException cleanupFailure) {
-            failure.addSuppressed(cleanupFailure);
+        } catch (RuntimeException | Error cleanupFailure) {
+            if (cleanupFailure != failure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            pendingFailedStarts.put(instanceId, proxy);
         }
     }
 }

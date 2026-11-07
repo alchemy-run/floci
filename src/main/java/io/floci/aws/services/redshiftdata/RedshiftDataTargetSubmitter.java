@@ -89,10 +89,10 @@ public class RedshiftDataTargetSubmitter {
 
         if (batch) {
             RequestScopes.callAs(account, region,
-                    () -> redshiftDataService.batchExecuteStatement(request, region));
+                    () -> redshiftDataService.batchExecuteStatement(request, region, roleArn));
         } else {
             RequestScopes.callAs(account, region,
-                    () -> redshiftDataService.executeStatement(request, region));
+                    () -> redshiftDataService.executeStatement(request, region, roleArn));
         }
         LOG.debugv("Submitted SQL to Redshift Data API: {0}", targetArn);
     }
