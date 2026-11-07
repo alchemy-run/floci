@@ -550,7 +550,9 @@ class RdsControlPlaneTest {
                     .dbInstanceIdentifier(instanceName)
                     .dbInstanceClass("db.t3.large")
                     .allocatedStorage(100)
-                    .engineVersion("16.4")).dbInstance();
+                    .engineVersion("16.4")
+                    // Without it RDS queues the class change for the maintenance window.
+                    .applyImmediately(true)).dbInstance();
 
             assertThat(modified.dbInstanceClass()).isEqualTo("db.t3.large");
             assertThat(modified.allocatedStorage()).isEqualTo(100);
