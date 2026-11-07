@@ -51,10 +51,10 @@ class RdsCatalogueReadIntegrationTest {
                 .body(VERSIONS + ".DBEngineDescription", equalTo("PostgreSQL"))
                 .body(VERSIONS + ".Status", equalTo("available"))
                 .body(VERSIONS + ".SupportedEngineModes.member", equalTo("provisioned"))
-                .body(VERSIONS + ".ValidUpgradeTarget.UpgradeTarget.size()", equalTo(4))
-                .body(VERSIONS + ".ValidUpgradeTarget.UpgradeTarget[0].EngineVersion", equalTo("16.14"))
+                .body(VERSIONS + ".ValidUpgradeTarget.UpgradeTarget.size()", equalTo(5))
+                .body(VERSIONS + ".ValidUpgradeTarget.UpgradeTarget[0].EngineVersion", equalTo("16.13"))
                 .body(VERSIONS + ".ValidUpgradeTarget.UpgradeTarget[0].IsMajorVersionUpgrade", equalTo("false"))
-                .body(VERSIONS + ".ValidUpgradeTarget.UpgradeTarget[1].IsMajorVersionUpgrade", equalTo("true"));
+                .body(VERSIONS + ".ValidUpgradeTarget.UpgradeTarget[2].IsMajorVersionUpgrade", equalTo("true"));
 
         // A major version names every version in it; DefaultOnly then keeps that major's default.
         query("DescribeDBEngineVersions").formParam("Engine", "postgres").formParam("EngineVersion", "18")
@@ -79,7 +79,7 @@ class RdsCatalogueReadIntegrationTest {
                 .body(not(containsString("<DBEngineVersion>")));
         query("DescribeDBEngineVersions").formParam("MaxRecords", "20")
         .when().post("/").then().statusCode(200)
-                .body(VERSIONS + ".size()", equalTo(19))
+                .body(VERSIONS + ".size()", equalTo(20))
                 .body(not(containsString("<Marker>")));
     }
 
@@ -113,7 +113,7 @@ class RdsCatalogueReadIntegrationTest {
     void engineVersionsPageByOffset() {
         query("DescribeDBEngineVersions").formParam("Marker", "15")
         .when().post("/").then().statusCode(200)
-                .body(VERSIONS + ".size()", equalTo(4))
+                .body(VERSIONS + ".size()", equalTo(5))
                 .body(not(containsString("<Marker>")));
         query("DescribeDBEngineVersions").formParam("Marker", "next")
         .when().post("/").then().statusCode(400)

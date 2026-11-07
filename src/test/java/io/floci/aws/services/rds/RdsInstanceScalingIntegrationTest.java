@@ -61,6 +61,8 @@ class RdsInstanceScalingIntegrationTest {
                 .formParam("DBInstanceClass", "db.t3.large")
                 .formParam("AllocatedStorage", "100")
                 .formParam("EngineVersion", "13.7")
+                // Without it RDS queues the class change for the maintenance window.
+                .formParam("ApplyImmediately", "true")
                 .when().post("/").then().statusCode(200)
                 .body(containsString("<DBInstanceClass>db.t3.large</DBInstanceClass>"))
                 .body(containsString("<AllocatedStorage>100</AllocatedStorage>"))

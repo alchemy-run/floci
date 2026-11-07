@@ -88,8 +88,7 @@ class CloudFormationSecretTargetAttachmentIntegrationTest {
             assertEquals("initial-password", attached.path("password").asText());
             assertEquals("keep", attached.path("custom").asText());
             assertEquals("postgres", attached.path("engine").asText());
-            // The instance's endpoint address, which the fork's RDS names under rds.localhost.floci.io.
-            assertTrue(attached.path("host").asText().endsWith(".rds.localhost.floci.io"), attached.toString());
+            assertEquals("localhost", attached.path("host").asText());
             assertTrue(attached.path("port").asInt() > 0);
             assertEquals("appdb", attached.path("dbname").asText());
             assertEquals(databaseId, attached.path("dbInstanceIdentifier").asText());

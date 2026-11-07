@@ -53,14 +53,17 @@ class RdsStorageTypeIntegrationTest {
 
     @ParameterizedTest
     @ValueSource(strings = {"io1", "io2"})
-    void provisionedTypesRoundTripOnCreateAndModifyWithoutIops(String storageType) {
+    void provisionedTypesRoundTripOnCreateAndModify(String storageType) {
         String createdId = "storage-provisioned-new-" + storageType;
         String changedId = "storage-provisioned-change-" + storageType;
         try {
             create(changedId).formParam("StorageType", "gp2").post("/").then().statusCode(200);
-            Response created = create(createdId).formParam("StorageType", storageType).post("/");
+            // RDS requires Iops with io1 and io2.
+            Response created = create(createdId).formParam("StorageType", storageType)
+                    .formParam("Iops", "1000").post("/");
             Response changed = query("ModifyDBInstance").formParam("DBInstanceIdentifier", changedId)
-                    .formParam("StorageType", storageType).post("/");
+                    .formParam("StorageType", storageType).formParam("Iops", "1000")
+                    .formParam("ApplyImmediately", "true").post("/");
             assertAll(() -> assertEquals(200, created.statusCode(), created.asString()),
                     () -> assertEquals(storageType, type(created, "CreateDBInstance")),
                     () -> assertEquals(200, changed.statusCode(), changed.asString()),
@@ -73,7 +76,7 @@ class RdsStorageTypeIntegrationTest {
                 String path = "DescribeDBInstancesResponse.DescribeDBInstancesResult.DBInstances.DBInstance.";
                 assertEquals(200, read.statusCode());
                 assertEquals(storageType, read.xmlPath().getString(path + "StorageType"));
-                assertTrue(read.xmlPath().getList(path + "Iops").isEmpty());
+                assertEquals("1000", read.xmlPath().getString(path + "Iops"));
             }
         } finally {
             delete(createdId);
@@ -148,8 +151,12 @@ class RdsStorageTypeIntegrationTest {
         String replica = "storage-type-replica";
         String pitr = "storage-type-pitr";
         try {
-            create(source).formParam("StorageType", storageType).formParam("BackupRetentionPeriod", "2")
-                    .post("/").then().statusCode(200);
+            var createSource = create(source).formParam("StorageType", storageType)
+                    .formParam("BackupRetentionPeriod", "2");
+            if (storageType.startsWith("io")) {
+                createSource.formParam("Iops", "1000");
+            }
+            createSource.post("/").then().statusCode(200);
             Response taken = query("CreateDBSnapshot").formParam("DBSnapshotIdentifier", snapshot)
                     .formParam("DBInstanceIdentifier", source).post("/");
             assertEquals(storageType, taken.xmlPath().getString(
