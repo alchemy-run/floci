@@ -68,7 +68,7 @@ final class RdsParameterCatalog {
         group.getParameters().forEach((name, value) -> {
             Parameter definition = parameters.getOrDefault(name,
                     parameter(name, null, null, "dynamic", "string", null));
-            String method = group.getParameterApplyMethods().getOrDefault(name, definition.applyMethod());
+            String method = group.getApplyMethods().getOrDefault(name, definition.applyMethod());
             parameters.put(name, definition.withOverride(value, method));
         });
         return parameters.values().stream()

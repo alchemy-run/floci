@@ -39,10 +39,6 @@ arn-literal	src/main/java/io/floci/aws/services/macie2/MacieService.java	6
 arn-literal	src/main/java/io/floci/aws/services/networkfirewall/NetworkFirewallService.java	1
 arn-literal	src/main/java/io/floci/aws/services/ram/RamManagedPermissionCatalog.java	1
 arn-literal	src/main/java/io/floci/aws/services/ram/RamService.java	2
-arn-literal	src/main/java/io/floci/aws/services/rds/RdsService.java	1
-arn-literal	src/main/java/io/floci/aws/services/redshift/RedshiftService.java	1
-arn-literal	src/main/java/io/floci/aws/services/redshift/proxy/S3CopySimulator.java	2
-arn-literal	src/main/java/io/floci/aws/services/redshiftdata/RedshiftDataResourceResolver.java	1
 arn-literal	src/main/java/io/floci/aws/services/route53resolver/Route53ResolverService.java	5
 arn-literal	src/main/java/io/floci/aws/services/sagemaker/SageMakerFeatureStoreService.java	1
 arn-literal	src/main/java/io/floci/aws/services/sagemaker/SageMakerHyperPodService.java	1
@@ -66,8 +62,7 @@ arn-probe	src/main/java/io/floci/aws/services/lambda/microvm/MicrovmImageService
 arn-probe	src/main/java/io/floci/aws/services/lambda/microvm/MicrovmImageStore.java	2
 arn-probe	src/main/java/io/floci/aws/services/lambda/microvm/MicrovmRuntimeService.java	1
 arn-probe	src/main/java/io/floci/aws/services/lambdamicrovms/LambdaMicrovmsService.java	2
-arn-probe	src/main/java/io/floci/aws/services/rds/RdsService.java	14
-arn-probe	src/main/java/io/floci/aws/services/redshift/RedshiftService.java	1
+arn-probe	src/main/java/io/floci/aws/services/rds/RdsService.java	1
 arn-probe	src/main/java/io/floci/aws/services/s3tables/S3TablesService.java	1
 arn-probe	src/main/java/io/floci/aws/services/sagemaker/SageMakerFeatureStoreService.java	1
 arn-probe	src/main/java/io/floci/aws/services/sagemaker/SageMakerHyperPodService.java	1
@@ -102,8 +97,6 @@ arn-split	src/main/java/io/floci/aws/services/kinesisanalytics/container/FlinkCo
 arn-split	src/main/java/io/floci/aws/services/lambda/LambdaTagController.java	2
 arn-split	src/main/java/io/floci/aws/services/opensearch/OpenSearchDataPlaneAuth.java	1
 arn-split	src/main/java/io/floci/aws/services/ram/RamService.java	2
-arn-split	src/main/java/io/floci/aws/services/rds/RdsQueryHandler.java	2
-arn-split	src/main/java/io/floci/aws/services/redshift/RedshiftService.java	1
 arn-split	src/main/java/io/floci/aws/services/route53resolver/Route53ResolverService.java	1
 arn-split	src/main/java/io/floci/aws/services/s3tables/S3TablesController.java	2
 arn-split	src/main/java/io/floci/aws/services/sagemaker/SageMakerFeatureStoreService.java	2
@@ -113,7 +106,6 @@ arn-split	src/main/java/io/floci/aws/services/sagemaker/SageMakerStateSupport.ja
 arn-split	src/main/java/io/floci/aws/services/servicecatalog/ServiceCatalogService.java	1
 aws-partition-compare	src/main/java/io/floci/aws/services/elasticache/ElastiCacheQueryHandler.java	1
 aws-partition-compare	src/main/java/io/floci/aws/services/ram/RamService.java	1
-aws-partition-compare	src/main/java/io/floci/aws/services/rds/RdsService.java	4
 dns-suffix	src/main/java/io/floci/aws/config/EmulatorConfig.java	1
 dns-suffix	src/main/java/io/floci/aws/config/TlsConfigSource.java	8
 dns-suffix	src/main/java/io/floci/aws/core/common/dns/EmbeddedDnsServer.java	5
@@ -148,8 +140,6 @@ dns-suffix	src/main/java/io/floci/aws/services/lambda/microvm/MicrovmBuildServic
 dns-suffix	src/main/java/io/floci/aws/services/macie2/MacieController.java	1
 dns-suffix	src/main/java/io/floci/aws/services/opensearch/OpenSearchDataPlaneEndpoint.java	1
 dns-suffix	src/main/java/io/floci/aws/services/ram/RamController.java	2
-dns-suffix	src/main/java/io/floci/aws/services/rds/RdsService.java	2
-dns-suffix	src/main/java/io/floci/aws/services/redshift/proxy/S3CopySimulator.java	2
 dns-suffix	src/main/java/io/floci/aws/services/sagemaker/SageMakerHyperPodService.java	1
 dns-suffix	src/main/java/io/floci/aws/services/sqs/SqsService.java	1
 dns-suffix	src/main/java/io/floci/aws/services/transfer/TransferIdentityProviderTester.java	1
@@ -165,8 +155,6 @@ region-literal	src/main/java/io/floci/aws/services/elasticache/ElastiCacheMemcac
 region-literal	src/main/java/io/floci/aws/services/macie2/MacieService.java	1
 region-literal	src/main/java/io/floci/aws/services/memorydb/MemoryDbService.java	1
 region-literal	src/main/java/io/floci/aws/services/mwaa/MwaaEnvironmentManager.java	1
-region-literal	src/main/java/io/floci/aws/services/redshift/container/RedshiftContainerManager.java	1
-region-literal	src/main/java/io/floci/aws/services/redshiftdata/RedshiftDataResourceResolver.java	1
 region-literal	src/main/java/io/floci/aws/services/route53/Route53Controller.java	48
 region-literal	src/main/java/io/floci/aws/services/route53/Route53Service.java	1
 region-literal	src/main/java/io/floci/aws/services/wafv2/WafV2Service.java	1

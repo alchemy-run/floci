@@ -69,6 +69,7 @@ import io.floci.aws.services.mwaa.MwaaController;
 import io.floci.aws.services.oam.OamController;
 import io.floci.aws.services.opensearch.ElasticsearchController;
 import io.floci.aws.services.opensearch.OpenSearchController;
+import io.floci.aws.services.paymentcryptography.PaymentCryptographyCryptoController;
 import io.floci.aws.services.pipes.PipesController;
 import io.floci.aws.services.quicksight.QuickSightController;
 import io.floci.aws.services.quicksight.QuickSightEmbedController;
@@ -126,7 +127,11 @@ public class ResolvedServiceCatalog {
      * remain {@code s3}; the IoT Jobs Data Plane signs as {@code iot-jobs-data} while its actions
      * are {@code iot:} ({@code iot:DescribeJobExecution} and peers in the Service Authorization
      * Reference); SES v1 signs as {@code email} and SES v2 as {@code sesv2} while IAM actions
-     * remain {@code ses:}. Keep this minimal: every entry suppresses a distinct IAM namespace.
+     * remain {@code ses:}; the Payment Cryptography data plane's model signs as
+     * {@code payment-cryptography}, the service the control plane signs for as well, while a
+     * client that signs under the data plane's own name {@code payment-cryptography-data} is
+     * served as that same namespace, whose actions are {@code payment-cryptography:}. Keep
+     * this minimal: every entry suppresses a distinct IAM namespace.
      */
     private static final Map<String, String> CREDENTIAL_SCOPE_ALIASES =
             Map.of(
@@ -136,7 +141,8 @@ public class ResolvedServiceCatalog {
                     "sesv2", "ses",
                     "monitoring", "cloudwatch",
                     "awsssoportal", "sso",
-                    "eventsv2", "events");
+                    "eventsv2", "events",
+                    "payment-cryptography-data", "payment-cryptography");
 
     private final ServiceCatalog catalog;
 
@@ -311,6 +317,19 @@ public class ResolvedServiceCatalog {
                         protocols(ServiceProtocol.JSON),
                         Set.of("PaymentCryptographyControlPlane."), Set.of("payment-cryptography"),
                         Set.of(), Set.of()),
+                descriptor("payment-cryptography-data", "paymentcryptography",
+                        config.services().paymentcryptography().enabled(), true,
+                        "paymentcryptography",
+                        storageMode(config.storage().services().paymentcryptography().mode(),
+                                config.storage().mode()),
+                        config.storage().services().paymentcryptography().flushIntervalMs(), null,
+                        ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        // The data plane is a rest-json service of its own, and its client
+                        // signs for the service, which is one scope for both of its planes; the
+                        // scope its own plane is named by is an alias of that one.
+                        Set.of(), Set.of("payment-cryptography", "payment-cryptography-data"), Set.of(),
+                        Set.of(PaymentCryptographyCryptoController.class)),
                 descriptor("secretsmanager", "secretsmanager", config.services().secretsmanager().enabled(), true,
                         "secretsmanager", storageMode(config.storage().services().secretsmanager().mode(), config.storage().mode()),
                         config.storage().services().secretsmanager().flushIntervalMs(), null, ServiceProtocol.JSON,

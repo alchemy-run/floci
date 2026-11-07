@@ -11,6 +11,9 @@ import java.util.Map;
 @RegisterForReflection
 public class DbInstance {
 
+    /** The fallback for existing records and requests that do not name a storage type. */
+    public static final String DEFAULT_STORAGE_TYPE = "gp2";
+
     private String dbInstanceIdentifier;
     private DatabaseEngine engine;
     // the engine name the request gave (aurora-postgresql, postgres, ...): the enum collapses the
@@ -22,6 +25,11 @@ public class DbInstance {
     private String dbName;
     private String dbInstanceClass;
     private int allocatedStorage;
+    private String storageType;
+    /** The RDS certificate authority for the instance; null on one stored before it was recorded. */
+    private String caCertificateIdentifier;
+    /** The license model the request named; null means the engine's default. */
+    private String licenseModel;
     private DbInstanceStatus status;
     private DbEndpoint endpoint;
     private boolean iamDatabaseAuthenticationEnabled;
@@ -44,6 +52,7 @@ public class DbInstance {
     private String preferredBackupWindow;
     private String preferredMaintenanceWindow;
     private boolean copyTagsToSnapshot;
+    private boolean deletionProtection;
     private boolean publiclyAccessible;
     /** MonitoringInterval documents 0 as its default. */
     private int monitoringInterval;
@@ -56,40 +65,30 @@ public class DbInstance {
     private List<String> enabledCloudwatchLogsExports = new ArrayList<>();
     /** Absent unless storage autoscaling is on, which is how AWS reports it. */
     private Integer maxAllocatedStorage;
-    // Null on a record persisted before storage was modelled, which reads as gp2 with no
-    // provisioned performance, what Floci used to report for every instance.
-    private String storageType;
-    private Integer iops;
-    private Integer storageThroughput;
-    private boolean deletionProtection;
-    /** Null on a record persisted before it was modelled, which reads as IPV4. */
-    private String networkType;
-    private DbInstancePendingModifiedValues pendingModifiedValues;
-    /** Null while the parameter group is in-sync; pending-reboot after an association change. */
-    private String parameterApplyStatus;
-    // An operation Floci completes at once still reports the status AWS shows while it runs
-    // ("creating", "modifying") until transitionalStatusUntil, and a storage change reports
-    // "storage-optimization" until storageOptimizationUntil.
-    private String transitionalStatus;
-    private Instant transitionalStatusUntil;
-    /** Whether a DescribeDBInstances aimed at this instance has reported its "creating" status. */
-    private boolean transitionalStatusReported;
-    private Instant storageOptimizationUntil;
     private Map<String, String> subnetAvailabilityZones = new LinkedHashMap<>();
     private String dbiResourceId;
     private String dbInstanceArn;
-    /** The runtime identity the backing container is tracked under when it is not the ARN. */
-    private String containerRuntimeId;
     private String masterUserSecretArn;
     private String masterUserSecretStatus;
     private String masterUserSecretKmsKeyId;
     private Map<String, String> tags = new LinkedHashMap<>();
+    private List<DbRoleAssociation> associatedRoles = new ArrayList<>();
     private Instant createdAt;
+    /** Changes a ModifyDBInstance queued for the maintenance window, or null. */
+    private DbInstancePendingModifiedValues pendingModifiedValues;
+    // Floci completes operations at once; an available instance reports transitionalStatus
+    // ("creating", "modifying") until transitionalStatusUntil, and a storage change reports
+    // "storage-optimization" until storageOptimizationUntil.
+    private String transitionalStatus;
+    private Instant transitionalStatusUntil;
+    /** Whether a DescribeDBInstances has reported the transitional status yet. */
+    private boolean transitionalStatusReported;
+    private Instant storageOptimizationUntil;
     private int proxyPort;
-    // The listener port clients connect to (CreateDBInstance Port / ModifyDBInstance
-    // DBPortNumber, or the cluster's port for a member). 0 on a record persisted before it was
-    // modelled, which reads as the engine default.
-    private int port;
+    private int listenerPort;
+    private Integer iops;
+    private Integer storageThroughput;
+    private String networkType;
     // Read replication links, kept on both ends the way DescribeDBInstances reports them: a
     // replica names its source, a source lists its replicas, by identifier within a Region and
     // by ARN across Regions. Null and empty on a standalone. The status is the "read
@@ -97,11 +96,15 @@ public class DbInstance {
     // gone.
     private String readReplicaSourceDbInstanceIdentifier;
     private List<String> readReplicaDbInstanceIdentifiers = new ArrayList<>();
+    /** The ARNs of this instance's automated backups replicated to other Regions. */
+    private List<String> automatedBackupReplicationArns = new ArrayList<>();
     private String readReplicationStatus;
 
     private String dockerVolumeName;
     private String volumeId;
     private String containerStorageResourceId;
+    private boolean backendCleanupRequired;
+    private boolean managedSecretCleanupRequired;
 
     private transient String containerId;
     private transient String containerHost;
@@ -152,6 +155,16 @@ public class DbInstance {
 
     public String getDbInstanceClass() { return dbInstanceClass; }
     public void setDbInstanceClass(String dbInstanceClass) { this.dbInstanceClass = dbInstanceClass; }
+
+    public String getStorageType() { return storageType != null ? storageType : DEFAULT_STORAGE_TYPE; }
+    public void setStorageType(String storageType) { this.storageType = storageType; }
+
+    public String getLicenseModel() { return licenseModel; }
+    public void setLicenseModel(String licenseModel) { this.licenseModel = licenseModel; }
+    public String getCaCertificateIdentifier() { return caCertificateIdentifier; }
+    public void setCaCertificateIdentifier(String caCertificateIdentifier) {
+        this.caCertificateIdentifier = caCertificateIdentifier;
+    }
 
     public int getAllocatedStorage() { return allocatedStorage; }
     public void setAllocatedStorage(int allocatedStorage) { this.allocatedStorage = allocatedStorage; }
@@ -241,12 +254,21 @@ public class DbInstance {
     public boolean isCopyTagsToSnapshot() { return copyTagsToSnapshot; }
     public void setCopyTagsToSnapshot(boolean copyTagsToSnapshot) { this.copyTagsToSnapshot = copyTagsToSnapshot; }
 
+    public boolean isDeletionProtection() { return deletionProtection; }
+    public void setDeletionProtection(boolean deletionProtection) { this.deletionProtection = deletionProtection; }
+
     public String getMasterUserSecretKmsKeyId() { return masterUserSecretKmsKeyId; }
     public void setMasterUserSecretKmsKeyId(String masterUserSecretKmsKeyId) { this.masterUserSecretKmsKeyId = masterUserSecretKmsKeyId; }
 
     public String getReadReplicaSourceDbInstanceIdentifier() { return readReplicaSourceDbInstanceIdentifier; }
     public void setReadReplicaSourceDbInstanceIdentifier(String readReplicaSourceDbInstanceIdentifier) {
         this.readReplicaSourceDbInstanceIdentifier = readReplicaSourceDbInstanceIdentifier;
+    }
+
+    public List<String> getAutomatedBackupReplicationArns() { return automatedBackupReplicationArns; }
+    public void setAutomatedBackupReplicationArns(List<String> automatedBackupReplicationArns) {
+        this.automatedBackupReplicationArns = automatedBackupReplicationArns != null
+                ? new ArrayList<>(automatedBackupReplicationArns) : new ArrayList<>();
     }
 
     public List<String> getReadReplicaDbInstanceIdentifiers() { return readReplicaDbInstanceIdentifiers; }
@@ -264,17 +286,35 @@ public class DbInstance {
                 && !readReplicaSourceDbInstanceIdentifier.isBlank();
     }
 
+    public List<DbRoleAssociation> getAssociatedRoles() { return associatedRoles; }
+    public void setAssociatedRoles(List<DbRoleAssociation> associatedRoles) {
+        this.associatedRoles = associatedRoles != null ? new ArrayList<>(associatedRoles) : new ArrayList<>();
+    }
+
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags != null ? new LinkedHashMap<>(tags) : new LinkedHashMap<>(); }
 
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
+    /** The create or modify request's NetworkType, IPV4 or DUAL; null on older records, reported as IPV4. */
+    public String getNetworkType() { return networkType; }
+    public void setNetworkType(String networkType) { this.networkType = networkType; }
+
+    /** Provisioned IOPS: set on gp3, io1 and io2 storage, null on gp2 and magnetic. */
+    public Integer getIops() { return iops; }
+    public void setIops(Integer iops) { this.iops = iops; }
+
+    /** Provisioned throughput in MiBps: set on gp3 storage only. */
+    public Integer getStorageThroughput() { return storageThroughput; }
+    public void setStorageThroughput(Integer storageThroughput) { this.storageThroughput = storageThroughput; }
+
+    /** The port the endpoint listens on when endpoints are routed by name; 0 until assigned. */
+    public int getListenerPort() { return listenerPort; }
+    public void setListenerPort(int listenerPort) { this.listenerPort = listenerPort; }
+
     public int getProxyPort() { return proxyPort; }
     public void setProxyPort(int proxyPort) { this.proxyPort = proxyPort; }
-
-    public int getPort() { return port; }
-    public void setPort(int port) { this.port = port; }
 
     public String getDockerVolumeName() { return dockerVolumeName; }
     public void setDockerVolumeName(String dockerVolumeName) { this.dockerVolumeName = dockerVolumeName; }
@@ -285,6 +325,16 @@ public class DbInstance {
     public String getContainerStorageResourceId() { return containerStorageResourceId; }
     public void setContainerStorageResourceId(String containerStorageResourceId) {
         this.containerStorageResourceId = containerStorageResourceId;
+    }
+
+    public boolean isBackendCleanupRequired() { return backendCleanupRequired; }
+    public void setBackendCleanupRequired(boolean backendCleanupRequired) {
+        this.backendCleanupRequired = backendCleanupRequired;
+    }
+
+    public boolean isManagedSecretCleanupRequired() { return managedSecretCleanupRequired; }
+    public void setManagedSecretCleanupRequired(boolean managedSecretCleanupRequired) {
+        this.managedSecretCleanupRequired = managedSecretCleanupRequired;
     }
 
     public String getContainerId() { return containerId; }
@@ -327,34 +377,13 @@ public class DbInstance {
         this.maxAllocatedStorage = maxAllocatedStorage;
     }
 
-    public String getStorageType() { return storageType; }
-    public void setStorageType(String storageType) { this.storageType = storageType; }
-
-    public Integer getIops() { return iops; }
-    public void setIops(Integer iops) { this.iops = iops; }
-
-    public Integer getStorageThroughput() { return storageThroughput; }
-    public void setStorageThroughput(Integer storageThroughput) { this.storageThroughput = storageThroughput; }
-
-    public boolean isDeletionProtection() { return deletionProtection; }
-    public void setDeletionProtection(boolean deletionProtection) { this.deletionProtection = deletionProtection; }
-
-    public String getNetworkType() { return networkType; }
-    public void setNetworkType(String networkType) { this.networkType = networkType; }
-
     public DbInstancePendingModifiedValues getPendingModifiedValues() { return pendingModifiedValues; }
     public void setPendingModifiedValues(DbInstancePendingModifiedValues pendingModifiedValues) {
         this.pendingModifiedValues = pendingModifiedValues;
     }
 
-    public String getParameterApplyStatus() { return parameterApplyStatus; }
-    public void setParameterApplyStatus(String parameterApplyStatus) { this.parameterApplyStatus = parameterApplyStatus; }
-
     public String getTransitionalStatus() { return transitionalStatus; }
     public void setTransitionalStatus(String transitionalStatus) { this.transitionalStatus = transitionalStatus; }
-
-    public String getContainerRuntimeId() { return containerRuntimeId; }
-    public void setContainerRuntimeId(String containerRuntimeId) { this.containerRuntimeId = containerRuntimeId; }
 
     public boolean isTransitionalStatusReported() { return transitionalStatusReported; }
     public void setTransitionalStatusReported(boolean transitionalStatusReported) {

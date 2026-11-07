@@ -13,14 +13,15 @@ public class DbSnapshot {
 
     private String dbSnapshotIdentifier;
     private String dbSnapshotArn;
+    private String snapshotType;
     private String sourceDbSnapshotIdentifier;
     private String dbInstanceIdentifier;
     private Instant snapshotCreateTime;
     private DatabaseEngine engine;
     private String engineVersion;
     private int allocatedStorage;
-    private String status = "available";
-    private String snapshotType = "manual";
+    private String storageType;
+    private String status;
     private String masterUsername;
     private String masterPassword;
     private String availabilityZone;
@@ -32,6 +33,7 @@ public class DbSnapshot {
     private String dbName;
     private String dbInstanceClass;
     private String optionGroupName;
+    private Boolean storageEncrypted;
     private String kmsKeyId;
     private Map<String, String> tags = new LinkedHashMap<>();
     /** Account IDs authorized to copy/restore this snapshot; the "restore" DBSnapshotAttribute. */
@@ -87,6 +89,9 @@ public class DbSnapshot {
     public String getEngineVersion() { return engineVersion; }
     public void setEngineVersion(String engineVersion) { this.engineVersion = engineVersion; }
 
+    public String getStorageType() { return storageType != null ? storageType : DbInstance.DEFAULT_STORAGE_TYPE; }
+    public void setStorageType(String storageType) { this.storageType = storageType; }
+
     public int getAllocatedStorage() { return allocatedStorage; }
     public void setAllocatedStorage(int allocatedStorage) { this.allocatedStorage = allocatedStorage; }
 
@@ -118,9 +123,7 @@ public class DbSnapshot {
     public void setDbiResourceId(String dbiResourceId) { this.dbiResourceId = dbiResourceId; }
 
     public Map<String, String> getTags() { return tags; }
-    public void setTags(Map<String, String> tags) {
-        this.tags = tags != null ? new LinkedHashMap<>(tags) : new LinkedHashMap<>();
-    }
+    public void setTags(Map<String, String> tags) { this.tags = tags; }
 
     public List<String> getRestoreAccountIds() { return restoreAccountIds; }
     public void setRestoreAccountIds(List<String> restoreAccountIds) {
@@ -129,12 +132,20 @@ public class DbSnapshot {
 
     public String getDbName() { return dbName; }
     public void setDbName(String dbName) { this.dbName = dbName; }
-
+    
     public String getDbInstanceClass() { return dbInstanceClass; }
     public void setDbInstanceClass(String dbInstanceClass) { this.dbInstanceClass = dbInstanceClass; }
 
     public String getOptionGroupName() { return optionGroupName; }
     public void setOptionGroupName(String optionGroupName) { this.optionGroupName = optionGroupName; }
+
+    public boolean isStorageEncrypted() {
+        if (storageEncrypted != null) {
+            return storageEncrypted;
+        }
+        return kmsKeyId != null && !kmsKeyId.isBlank();
+    }
+    public void setStorageEncrypted(boolean storageEncrypted) { this.storageEncrypted = storageEncrypted; }
 
     public String getKmsKeyId() { return kmsKeyId; }
     public void setKmsKeyId(String kmsKeyId) { this.kmsKeyId = kmsKeyId; }

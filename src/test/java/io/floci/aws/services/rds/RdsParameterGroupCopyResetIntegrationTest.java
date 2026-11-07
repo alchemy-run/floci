@@ -6,6 +6,10 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+
+import java.util.List;
 
 import static io.restassured.RestAssured.given;
 import static io.restassured.http.ContentType.URLENC;
@@ -42,6 +46,48 @@ class RdsParameterGroupCopyResetIntegrationTest {
                 .formParam("Version", "2014-10-31");
     }
 
+    @ParameterizedTest
+    @CsvSource({
+            "DBParameterGroup, postgres15, reset-boolean-instance",
+            "DBClusterParameterGroup, aurora-postgresql15, reset-boolean-cluster"
+    })
+    void malformedResetAllPreservesParameterOverrides(String groupType, String family, String name) {
+        String nameParameter = groupType + "Name";
+        String describeAction = groupType.equals("DBParameterGroup")
+                ? "DescribeDBParameters" : "DescribeDBClusterParameters";
+        query("Create" + groupType)
+                .formParam(nameParameter, name)
+                .formParam("DBParameterGroupFamily", family)
+                .formParam("Description", "boolean regression")
+        .when().post("/").then().statusCode(200);
+        try {
+            query("Modify" + groupType)
+                    .formParam(nameParameter, name)
+                    .formParam("Parameters.member.1.ParameterName", "max_connections")
+                    .formParam("Parameters.member.1.ParameterValue", "250")
+            .when().post("/").then().statusCode(200);
+
+            for (String invalid : List.of("yes", "", "1", "0", " true", "false ", "not-a-boolean")) {
+                query("Reset" + groupType)
+                        .formParam(nameParameter, name)
+                        .formParam("ResetAllParameters", invalid)
+                        .formParam("Parameters.Parameter.1.ParameterName", "max_connections")
+                        .formParam("Parameters.Parameter.1.ApplyMethod", "immediate")
+                .when().post("/").then().statusCode(400)
+                        .body(containsString("<Code>InvalidParameterValue</Code>"))
+                        .body(containsString("ResetAllParameters must be true or false."));
+
+                query(describeAction).formParam(nameParameter, name)
+                .when().post("/").then().statusCode(200)
+                        .body(containsString("<ParameterName>max_connections</ParameterName>"))
+                        .body(containsString("<ParameterValue>250</ParameterValue>"));
+            }
+        } finally {
+            query("Delete" + groupType).formParam(nameParameter, name)
+            .when().post("/").then().statusCode(200);
+        }
+    }
+
     @Test
     @Order(1)
     void copyDbParameterGroupCarriesFamilyOverridesAndTags() {
@@ -56,7 +102,6 @@ class RdsParameterGroupCopyResetIntegrationTest {
                 .formParam("Parameters.member.1.ParameterValue", "250")
                 .formParam("Parameters.member.2.ParameterName", "log_min_duration_statement")
                 .formParam("Parameters.member.2.ParameterValue", "500")
-                .formParam("Parameters.member.2.ApplyMethod", "pending-reboot")
         .when().post("/").then().statusCode(200);
 
         // The source may be named by ARN, as the API reference allows.
@@ -154,7 +199,7 @@ class RdsParameterGroupCopyResetIntegrationTest {
         query("ResetDBParameterGroup")
                 .formParam("DBParameterGroupName", TARGET_PG)
                 .formParam("Parameters.Parameter.1.ParameterName", "max_connections")
-                .formParam("Parameters.Parameter.1.ApplyMethod", "pending-reboot")
+                .formParam("Parameters.Parameter.1.ApplyMethod", "immediate")
         .when().post("/")
         .then()
             .statusCode(200)
@@ -163,21 +208,12 @@ class RdsParameterGroupCopyResetIntegrationTest {
 
         query("DescribeDBParameters")
                 .formParam("DBParameterGroupName", TARGET_PG)
+                .formParam("Source", "user")
         .when().post("/")
         .then()
             .statusCode(200)
-            .body(containsString("<ParameterName>max_connections</ParameterName>"))
-            .body(containsString("<ParameterValue>LEAST({DBInstanceClassMemory/9531392},5000)</ParameterValue>"))
-            .body(containsString("<Source>engine-default</Source>"))
-            .body(containsString("<ParameterName>log_min_duration_statement</ParameterName>"));
-
-        query("DescribeDBParameters")
-                .formParam("DBParameterGroupName", TARGET_PG)
-                .formParam("Source", "user")
-        .when().post("/").then().statusCode(200)
             .body(not(containsString("<ParameterName>max_connections</ParameterName>")))
-            .body(containsString("<ParameterName>log_min_duration_statement</ParameterName>"))
-            .body(containsString("<ApplyMethod>pending-reboot</ApplyMethod>"));
+            .body(containsString("<ParameterName>log_min_duration_statement</ParameterName>"));
 
         query("ResetDBParameterGroup")
                 .formParam("DBParameterGroupName", TARGET_PG)
@@ -188,17 +224,10 @@ class RdsParameterGroupCopyResetIntegrationTest {
 
         query("DescribeDBParameters")
                 .formParam("DBParameterGroupName", TARGET_PG)
+                .formParam("Source", "user")
         .when().post("/")
         .then()
             .statusCode(200)
-            .body(containsString("<ParameterName>work_mem</ParameterName><ParameterValue>4096</ParameterValue>"))
-            .body(containsString("<Source>engine-default</Source>"))
-            .body(not(containsString("<Source>user</Source>")));
-
-        query("DescribeDBParameters")
-                .formParam("DBParameterGroupName", TARGET_PG)
-                .formParam("Source", "user")
-        .when().post("/").then().statusCode(200)
             .body(not(containsString("<ParameterName>")));
 
         query("ResetDBParameterGroup")

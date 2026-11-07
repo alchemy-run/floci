@@ -1,6 +1,7 @@
 package io.floci.aws.services.redshift;
 
 import io.floci.aws.core.common.AccountResolver;
+import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.services.iam.IamService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -37,7 +38,7 @@ public class RedshiftIamDbUserResolver {
             LOG.warnv("GetClusterCredentialsWithIAM caller could not be resolved; using {0}", FALLBACK_DB_USER);
             return FALLBACK_DB_USER;
         }
-        String resource = arn.get().substring(arn.get().lastIndexOf(':') + 1);
+        String resource = AwsArnUtils.parse(arn.get()).resource();
         if (resource.startsWith("assumed-role/")) {
             String[] parts = resource.split("/");
             return parts.length >= 2 ? "IAMR:" + parts[1] : FALLBACK_DB_USER;

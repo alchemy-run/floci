@@ -1,12 +1,13 @@
 package io.floci.aws.services.redshift.proxy;
 
 import io.floci.aws.config.EmulatorConfig;
-import io.floci.aws.core.common.dns.ContainerEndpoints;
 import io.floci.aws.services.iam.IamService;
 import io.floci.aws.services.rds.proxy.PasswordValidator;
 import io.floci.aws.services.rds.proxy.RdsProxyManager;
 import io.floci.aws.services.rds.proxy.RdsProxyTlsCertificates;
 import io.floci.aws.services.rds.proxy.RdsSigV4Validator;
+import io.floci.aws.services.redshift.RedshiftAuditLogPublisher;
+import io.floci.aws.services.redshift.spectrum.SpectrumInterceptor;
 import io.floci.aws.services.s3.S3Service;
 import io.quarkus.runtime.ShutdownEvent;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -16,6 +17,7 @@ import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.OptionalInt;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
@@ -32,7 +34,10 @@ public class RedshiftProxyManager {
     private final RdsProxyTlsCertificates tlsCertificates;
     private final S3Service s3Service;
     private final IamService iamService;
+    private final SpectrumInterceptor spectrumInterceptor;
     private final EmulatorConfig config;
+    private final RedshiftParquetWriter parquetWriter;
+    private final RedshiftAuditLogPublisher auditLogPublisher;
     private final ConcurrentHashMap<String, RedshiftAuthProxy> proxies = new ConcurrentHashMap<>();
     /**
      * Proxies whose listener could not be closed during a failed start or replace. The
@@ -41,75 +46,38 @@ public class RedshiftProxyManager {
      * caller leaves the port reserved rather than handing it out to another cluster.
      */
     private final ConcurrentHashMap<String, RedshiftAuthProxy> unclosableProxies = new ConcurrentHashMap<>();
+
     /**
-     * Owns the shared PostgreSQL endpoint listeners (with RDS), which route each connection on a
-     * cluster's advertised port to its proxy by TLS server name. Null when endpoints are not routed.
+     * Serves cluster endpoints named under {@code endpoint-domain} on the shared listeners the RDS
+     * endpoint router owns, routed by TLS server name. Null where the manager is built by hand.
      */
-    private final RdsProxyManager endpointRouter;
-    private final ContainerEndpoints containerEndpoints;
-    /** The advertised port each cluster's endpoint is routed on. */
-    private final ConcurrentHashMap<String, Integer> advertisedPorts = new ConcurrentHashMap<>();
+    @Inject
+    RdsProxyManager endpointRouter;
 
     public RedshiftProxyManager(RdsSigV4Validator sigV4Validator, RdsProxyTlsCertificates tlsCertificates,
                                 S3Service s3Service, IamService iamService, EmulatorConfig config) {
-        this(sigV4Validator, tlsCertificates, s3Service, iamService, config, null, null);
+        this(sigV4Validator, tlsCertificates, s3Service, iamService, config, null);
+    }
+
+    public RedshiftProxyManager(RdsSigV4Validator sigV4Validator, RdsProxyTlsCertificates tlsCertificates,
+                                S3Service s3Service, IamService iamService, EmulatorConfig config,
+                                SpectrumInterceptor spectrumInterceptor) {
+        this(sigV4Validator, tlsCertificates, s3Service, iamService, config, spectrumInterceptor, null, null);
     }
 
     @Inject
     public RedshiftProxyManager(RdsSigV4Validator sigV4Validator, RdsProxyTlsCertificates tlsCertificates,
                                 S3Service s3Service, IamService iamService, EmulatorConfig config,
-                                RdsProxyManager endpointRouter, ContainerEndpoints containerEndpoints) {
+                                SpectrumInterceptor spectrumInterceptor,
+                                RedshiftAuditLogPublisher auditLogPublisher, RedshiftParquetWriter parquetWriter) {
         this.sigV4Validator = sigV4Validator;
         this.tlsCertificates = tlsCertificates;
         this.s3Service = s3Service;
         this.iamService = iamService;
+        this.spectrumInterceptor = spectrumInterceptor;
         this.config = config;
-        this.endpointRouter = endpointRouter;
-        this.containerEndpoints = containerEndpoints;
-    }
-
-    /**
-     * Serves the cluster's proxy on its advertised endpoint: {@code hostname} on {@code port},
-     * which any number of clusters (and RDS PostgreSQL endpoints) share. Containers Floci launches
-     * reach the port at Floci's address too.
-     *
-     * @return false when no proxy runs under {@code relayKey} or the port cannot be bound here
-     */
-    public synchronized boolean advertise(String relayKey, String hostname, int port) {
-        RedshiftAuthProxy proxy = proxies.get(relayKey);
-        if (proxy == null || port <= 0) {
-            return false;
-        }
-        withdraw(relayKey);
-        if (port == proxy.getPort()) {
-            return true;
-        }
-        if (endpointRouter == null) {
-            return false;
-        }
-        tlsCertificates.ensureHost(hostname);
-        if (!endpointRouter.routePostgresEndpoint(routeKey(relayKey), List.of(hostname), port, proxy.getPort())) {
-            return false;
-        }
-        advertisedPorts.put(relayKey, port);
-        if (containerEndpoints != null) {
-            containerEndpoints.publishHostPort(port);
-        }
-        return true;
-    }
-
-    private void withdraw(String relayKey) {
-        Integer port = advertisedPorts.remove(relayKey);
-        if (endpointRouter != null) {
-            endpointRouter.unroutePostgresEndpoint(routeKey(relayKey));
-        }
-        if (port != null && containerEndpoints != null) {
-            containerEndpoints.withdrawHostPort(port);
-        }
-    }
-
-    private static String routeKey(String relayKey) {
-        return "redshift:" + relayKey;
+        this.parquetWriter = parquetWriter;
+        this.auditLogPublisher = auditLogPublisher;
     }
 
     public synchronized void startProxy(String relayKey, int proxyPort,
@@ -124,11 +92,21 @@ public class RedshiftProxyManager {
                                         String backendHost, int backendPort, String advertisedHost,
                                         String masterUsername, String masterPassword, String dbName,
                                         PasswordValidator passwordValidator, List<String> iamRoleArns) {
+        startProxy(relayKey, proxyPort, backendHost, backendPort, advertisedHost, masterUsername,
+                masterPassword, dbName, passwordValidator, iamRoleArns, null);
+    }
+
+    public synchronized void startProxy(String relayKey, int proxyPort,
+                                        String backendHost, int backendPort, String advertisedHost,
+                                        String masterUsername, String masterPassword, String dbName,
+                                        PasswordValidator passwordValidator, List<String> iamRoleArns,
+                                        String defaultIamRoleArn) {
         // A prior unclosable entry for this key is left in place: its listener may still
         // be bound, and only a successful stop (never a fresh start) may drop it.
         // Make sure the self-signed proxy certificate covers the host clients will connect to,
         // so sslmode=prefer/require handshakes succeed.
         tlsCertificates.ensureHost(advertisedHost);
+        invalidateSpectrumRuntime(relayKey);
         EmulatorConfig.RedshiftServiceConfig redshiftConfig = config.services().redshift();
         String clusterAccountId = relayKey.substring(0, relayKey.indexOf(':'));
         RedshiftAuthProxy proxy = new RedshiftAuthProxy(
@@ -137,7 +115,8 @@ public class RedshiftProxyManager {
                 clusterAccountId,
                 iamRoleArns,
                 redshiftConfig.proxyHandshakeTimeoutMillis(), redshiftConfig.proxyBackendConnectTimeoutMillis(),
-                redshiftConfig.proxyMaxConnections());
+                redshiftConfig.proxyMaxConnections(), spectrumInterceptor, auditLogPublisher, parquetWriter);
+        proxy.updateIamRoles(iamRoleArns, defaultIamRoleArn);
         try {
             proxy.start(proxyPort);
         } catch (IOException | RuntimeException e) {
@@ -158,6 +137,24 @@ public class RedshiftProxyManager {
                 throw failure;
             }
         }
+        routeEndpoint(relayKey, advertisedHost, proxyPort);
+    }
+
+    private void routeEndpoint(String relayKey, String advertisedHost, int proxyPort) {
+        String domain = config.services().redshift().endpointDomain().filter(d -> !d.isBlank()).orElse(null);
+        if (endpointRouter == null || domain == null || advertisedHost == null
+                || !advertisedHost.endsWith("." + domain)) {
+            return;
+        }
+        int port = config.services().redshift().defaultPort();
+        if (!endpointRouter.routePostgresEndpoint(routeKey(relayKey), List.of(advertisedHost), port, proxyPort)) {
+            LOG.warnv("Redshift endpoint {0} cannot listen on port {1}; it is reachable on proxy port {2} only",
+                    advertisedHost, String.valueOf(port), String.valueOf(proxyPort));
+        }
+    }
+
+    private static String routeKey(String relayKey) {
+        return "redshift:" + relayKey;
     }
 
     public synchronized void updateMasterPassword(String relayKey, String newPassword) {
@@ -176,8 +173,23 @@ public class RedshiftProxyManager {
         }
     }
 
+    public synchronized void updateIamRoles(String relayKey, List<String> iamRoleArns, String defaultIamRoleArn) {
+        RedshiftAuthProxy proxy = proxies.get(relayKey);
+        if (proxy != null) {
+            proxy.updateIamRoles(iamRoleArns, defaultIamRoleArn);
+        }
+    }
+
+    /** Open client connections of the proxy registered under {@code relayKey}; empty when none runs. */
+    public OptionalInt activeConnections(String relayKey) {
+        RedshiftAuthProxy proxy = proxies.get(relayKey);
+        return proxy == null ? OptionalInt.empty() : OptionalInt.of(proxy.activeConnections());
+    }
+
     public synchronized void stopProxy(String relayKey) {
-        withdraw(relayKey);
+        if (endpointRouter != null) {
+            endpointRouter.unroutePostgresEndpoint(routeKey(relayKey));
+        }
         // Retry any listener a previous failed start/replace could not close. If it still
         // cannot be closed this throws, and the entry stays for the next retry.
         RedshiftAuthProxy unclosable = unclosableProxies.get(relayKey);
@@ -192,10 +204,23 @@ public class RedshiftProxyManager {
             proxies.remove(relayKey);
             LOG.infov("Stopped Redshift proxy for cluster {0}", relayKey);
         }
+        invalidateSpectrumRuntime(relayKey);
+    }
+
+    public void forgetSpectrumRuntime(String relayKey) {
+        if (spectrumInterceptor != null && spectrumInterceptor.preparation() != null) {
+            String accountId = relayKey.substring(0, relayKey.indexOf(':'));
+            spectrumInterceptor.preparation().forgetRuntime(accountId, relayKey);
+        }
+    }
+
+    private void invalidateSpectrumRuntime(String relayKey) {
+        if (spectrumInterceptor != null && spectrumInterceptor.preparation() != null) {
+            spectrumInterceptor.preparation().invalidateRuntime(relayKey);
+        }
     }
 
     public synchronized void stopAll() {
-        List.copyOf(advertisedPorts.keySet()).forEach(this::withdraw);
         proxies.forEach((relayKey, proxy) -> {
             try {
                 proxy.stop();

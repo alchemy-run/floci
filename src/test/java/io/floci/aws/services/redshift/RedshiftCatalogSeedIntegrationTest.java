@@ -58,7 +58,7 @@ class RedshiftCatalogSeedIntegrationTest {
     }
 
     private static String jdbcUrl(Cluster cluster) {
-        return RedshiftEndpoints.jdbcUrl(cluster.getEndpoint().getAddress(), cluster.getEndpoint().getPort(), "dev");
+        return "jdbc:postgresql://127.0.0.1:" + cluster.getEndpoint().getPort() + "/dev";
     }
 
     private static Connection waitForConnection(Cluster cluster, String username, String password) throws SQLException {
@@ -75,7 +75,7 @@ class RedshiftCatalogSeedIntegrationTest {
     }
 
     @Test
-    void testCatalogViewsIntrospection() throws Exception {
+    void catalogViewsIntrospection() throws Exception {
         clusterId = "cat-seed-" + UUID.randomUUID().toString().substring(0, 8);
         Cluster cluster = service.createCluster(clusterId, "dc2.large", "admin", "Secret123");
 
@@ -234,8 +234,7 @@ class RedshiftCatalogSeedIntegrationTest {
             stmt.execute("CREATE DATABASE test_clone_db");
         }
 
-        String cloneDbUrl = RedshiftEndpoints.jdbcUrl(
-                cluster.getEndpoint().getAddress(), cluster.getEndpoint().getPort(), "test_clone_db");
+        String cloneDbUrl = "jdbc:postgresql://127.0.0.1:" + cluster.getEndpoint().getPort() + "/test_clone_db";
         try (Connection cloneConn = DriverManager.getConnection(cloneDbUrl, "admin", "Secret123");
              Statement cloneStmt = cloneConn.createStatement()) {
             try (ResultSet rs = cloneStmt.executeQuery("SELECT count(*) FROM pg_table_def")) {
@@ -251,7 +250,7 @@ class RedshiftCatalogSeedIntegrationTest {
     }
 
     @Test
-    void testAllDocumentedRedshiftColumnsContract() throws Exception {
+    void allDocumentedRedshiftColumnsContract() throws Exception {
         clusterId = "cat-contract-" + UUID.randomUUID().toString().substring(0, 8);
         Cluster cluster = service.createCluster(clusterId, "dc2.large", "admin", "Secret123");
 

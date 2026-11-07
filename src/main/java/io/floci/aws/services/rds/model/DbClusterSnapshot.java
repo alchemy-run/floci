@@ -6,7 +6,6 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -18,14 +17,14 @@ public class DbClusterSnapshot {
     private String dbClusterSnapshotIdentifier;
     private String dbClusterSnapshotArn;
     private String dbClusterIdentifier;
-    private Instant snapshotCreateTime = Instant.now();
+    private Instant snapshotCreateTime;
     private Instant clusterCreateTime;
     private DatabaseEngine engine;
     private String engineIdentifier;
     private String engineVersion;
     private String engineMode;
     private int allocatedStorage;
-    private String status = "available";
+    private String status;
     private int port;
     private String vpcId;
     private List<String> availabilityZones = new ArrayList<>();
@@ -61,9 +60,7 @@ public class DbClusterSnapshot {
     public DatabaseEngine getEngine() { return engine; }
     public void setEngine(DatabaseEngine v) { this.engine = v; }
 
-    public String getEngineIdentifier() {
-        return engineIdentifier != null ? engineIdentifier : engine != null ? engine.name().toLowerCase(Locale.ROOT) : null;
-    }
+    public String getEngineIdentifier() { return engineIdentifier; }
     public void setEngineIdentifier(String v) { this.engineIdentifier = v; }
 
     public String getEngineVersion() { return engineVersion; }
@@ -121,7 +118,7 @@ public class DbClusterSnapshot {
     public void setDbClusterResourceId(String v) { this.dbClusterResourceId = v; }
 
     public Map<String, String> getTags() { return tags; }
-    public void setTags(Map<String, String> v) { this.tags = v != null ? v : new LinkedHashMap<>(); }
+    public void setTags(Map<String, String> v) { this.tags = v; }
 
     public List<String> getRestoreAccountIds() { return restoreAccountIds; }
     public void setRestoreAccountIds(List<String> v) { this.restoreAccountIds = v; }

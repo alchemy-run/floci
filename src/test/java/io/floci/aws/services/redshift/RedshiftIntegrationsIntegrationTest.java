@@ -7,9 +7,12 @@ import io.restassured.config.HttpClientConfig;
 import io.restassured.config.RestAssuredConfig;
 import io.restassured.response.Response;
 import io.restassured.specification.RequestSpecification;
+import jakarta.inject.Inject;
 import org.awaitility.Awaitility;
+import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.TestInstance;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -39,10 +42,14 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * integrations returns an empty list rather than an error.
  */
 @QuarkusTest
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
 class RedshiftIntegrationsIntegrationTest {
 
-    private static String source;
-    private static String otherSource;
+    @Inject
+    RedshiftService service;
+
+    private String source;
+    private String otherSource;
     private static final String TARGET = "arn:aws:redshift:us-east-1:000000000000:cluster:zero-etl-cluster";
 
     /**
@@ -80,6 +87,13 @@ class RedshiftIntegrationsIntegrationTest {
         otherSource = newOtherSource;
     }
 
+    @AfterAll
+    void deleteZeroEtlCluster() {
+        if (source != null) {
+            service.deleteCluster("zero-etl-cluster");
+        }
+    }
+
     private static String createDynamoTable(String tableName) {
         Response response = given()
                 .header("X-Amz-Target", "DynamoDB_20120810.CreateTable")
@@ -94,19 +108,18 @@ class RedshiftIntegrationsIntegrationTest {
                         }
                         """.formatted(tableName))
                 .when().post("/");
-        if (response.statusCode() == 200) {
-            return response.then().extract().path("TableDescription.LatestStreamArn");
+        if (response.statusCode() != 200) {
+            return given()
+                    .header("X-Amz-Target", "DynamoDB_20120810.DescribeTable")
+                    .contentType("application/x-amz-json-1.0")
+                    .body("{\"TableName\":\"%s\"}".formatted(tableName))
+                    .when().post("/")
+                    .then().statusCode(200).extract().path("Table.LatestStreamArn");
         }
-        // Left over from an earlier attempt: DescribeTable answers with a Table, not a TableDescription.
-        return given()
-                .header("X-Amz-Target", "DynamoDB_20120810.DescribeTable")
-                .contentType("application/x-amz-json-1.0")
-                .body("{\"TableName\":\"%s\"}".formatted(tableName))
-                .when().post("/")
-                .then().statusCode(200).extract().path("Table.LatestStreamArn");
+        return response.then().statusCode(200).extract().path("TableDescription.LatestStreamArn");
     }
 
-    private static String createIntegration(String name) {
+    private String createIntegration(String name) {
         return query("Action", "CreateIntegration", "IntegrationName", name,
                 "SourceArn", source, "TargetArn", TARGET)
                 .then().statusCode(200)
@@ -168,27 +181,27 @@ class RedshiftIntegrationsIntegrationTest {
                 .extract().body().asString();
         String arn = arnOf(createResponse);
         String landingTable = "floci_zetl_" + arn.substring(arn.lastIndexOf(':') + 1).replace('-', '_');
-        String url = clusterJdbcUrl("zero-etl-cluster");
+        int port = clusterPort("zero-etl-cluster");
 
         Awaitility.await()
                 .atMost(Duration.ofSeconds(30))
                 .pollInterval(Duration.ofMillis(500))
                 .ignoreExceptions()
                 .untilAsserted(() -> assertTrue(
-                        landingTableHasBackfilledRow(url, landingTable, "pre-existing-1")));
+                        landingTableHasBackfilledRow(port, landingTable, "pre-existing-1")));
     }
 
-    private static String clusterJdbcUrl(String clusterIdentifier) {
+    private static int clusterPort(String clusterIdentifier) {
         String xml = query("Action", "DescribeClusters", "ClusterIdentifier", clusterIdentifier)
                 .then().statusCode(200).extract().body().asString();
-        Matcher matcher = Pattern.compile("<Endpoint>.*?<Address>([^<]+)</Address>.*?<Port>(\\d+)</Port>",
-                Pattern.DOTALL).matcher(xml);
-        assertTrue(matcher.find(), "DescribeClusters returned no endpoint: " + xml);
-        return RedshiftEndpoints.jdbcUrl(matcher.group(1), Integer.parseInt(matcher.group(2)), "dev");
+        Matcher matcher = Pattern.compile("<Endpoint>.*?<Port>(\\d+)</Port>", Pattern.DOTALL).matcher(xml);
+        assertTrue(matcher.find(), "DescribeClusters returned no endpoint port: " + xml);
+        return Integer.parseInt(matcher.group(1));
     }
 
-    private static boolean landingTableHasBackfilledRow(String url, String landingTable, String itemId)
+    private static boolean landingTableHasBackfilledRow(int port, String landingTable, String itemId)
             throws SQLException {
+        String url = "jdbc:postgresql://127.0.0.1:" + port + "/dev";
         try (Connection connection = DriverManager.getConnection(url, "admin", "password123");
              Statement statement = connection.createStatement();
              ResultSet rows = statement.executeQuery("SELECT new_image_json FROM " + landingTable

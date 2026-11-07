@@ -1,18 +1,10 @@
 package io.floci.aws.services.rds.model;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import io.quarkus.runtime.annotations.RegisterForReflection;
-
-import java.util.Locale;
 
 @RegisterForReflection
 public enum DatabaseEngine {
     POSTGRES, MYSQL, MARIADB, SQLSERVER;
-
-    @JsonCreator
-    public static DatabaseEngine fromJson(String value) {
-        return valueOf(value.toUpperCase(Locale.ROOT));
-    }
 
     public int defaultPort() {
         return switch (this) {

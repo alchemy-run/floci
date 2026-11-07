@@ -2,7 +2,7 @@
 
 **Protocol:** Query (XML) for management API + PostgreSQL / MySQL / SQL Server wire protocol for data plane
 **Management Endpoint:** `POST http://localhost:4566/`
-**Data Endpoint:** `<id>.<account-region token>.<region>.rds.localhost.floci.io:<Port>` (TCP; `Port` defaults to the engine's, e.g. 5432)
+**Data Endpoint:** `localhost:<proxy-port>` (TCP)
 
 ### Recoverable backend startup failures
 
@@ -52,10 +52,9 @@ RDS endpoints return the us-east-1 hosted zone ID `Z2R2ITUGPM61AM` in all region
 | Action | Description |
 | --- | --- |
 | `CreateDBInstance` | Start a new database instance |
-| `DescribeDBInstances` | List instances and their connection info : the list form includes DocumentDB and Neptune instances and takes an `engine` filter |
-| `DescribeDBEngineVersions` | List the engine catalogue's versions with their parameter group family, default flag and upgrade targets |
+| `DescribeDBInstances` | List instances and their connection info — the list form includes DocumentDB and Neptune instances and takes an `engine` filter |
 | `DeleteDBInstance` | Stop and remove an instance |
-| `ModifyDBInstance` | Update instance settings; `NewDBInstanceIdentifier` renames the instance (identifier, ARN and endpoint host) at once, whatever `ApplyImmediately` says |
+| `ModifyDBInstance` | Update instance settings |
 | `RebootDBInstance` | Restart a database instance |
 | `StopDBInstance` | Stop a standalone instance temporarily: an optional `DBSnapshotIdentifier` first, then its container goes away while the record, endpoint and volume stay |
 | `StartDBInstance` | Start a stopped instance on the volume it kept, same endpoint |
@@ -66,14 +65,38 @@ RDS endpoints return the us-east-1 hosted zone ID `Z2R2ITUGPM61AM` in all region
 | `PromoteReadReplica` | Detach a read replica into a standalone instance and turn automated backups on |
 | `SwitchoverReadReplica` | Refused with `InvalidDBInstanceState`: AWS supports switchover only for Oracle and SQL Server replicas, neither of which is emulated |
 | `PromoteReadReplicaDBCluster` | Refused with `InvalidDBClusterStateFault`: no cluster is created as a replica of an instance |
+| `DescribeDBEngineVersions` | List the engine catalogue's versions with their parameter group family, default flag and upgrade targets |
+| `DescribeEngineDefaultParameters` | Return a known family's default parameters (an empty list, as Floci's default groups hold none) |
+| `DescribeEngineDefaultClusterParameters` | Return a known family's default cluster parameters (an empty list, as for instances) |
+| `DescribeValidDBInstanceModifications` | Return the storage an instance can move to: its type and the sizes a modify stores as asked |
 | `DescribeOrderableDBInstanceOptions` | List the orderable engine, version and instance class combinations from the engine catalogue; see [Engine catalogue](#engine-catalogue) |
 | `DescribeEvents` | - |
+| `DescribeCertificates` | List the Region's RDS certificate authorities and the one new instances get; see [Certificate authorities](#certificate-authorities) |
+| `ModifyCertificates` | Set or remove the account's default certificate authority for new instances |
+| `CreateEventSubscription` | Create an event notification subscription (stored, nothing is published) |
+| `DescribeEventSubscriptions` | List subscriptions, or the one the request names |
+| `ModifyEventSubscription` | Update the members the request names |
+| `DeleteEventSubscription` | Delete a subscription |
+| `CreateDBClusterEndpoint` | Create an Aurora custom endpoint (`READER` or `ANY`) with a static or exclusion member list; see [Cluster endpoints](#cluster-endpoints) |
+| `DescribeDBClusterEndpoints` | List a cluster's built-in writer and reader endpoints and its custom endpoints, with the four documented filters |
+| `ModifyDBClusterEndpoint` | Change a custom endpoint's type or member list |
+| `DeleteDBClusterEndpoint` | Delete a custom endpoint |
+| `EnableHttpEndpoint` | Turn on an Aurora cluster's Data API endpoint by ARN; see [Data API endpoint](#data-api-endpoint) |
+| `DisableHttpEndpoint` | Turn off a cluster's Data API endpoint by ARN |
+| `DescribeDBLogFiles` | List an instance's log files, read from its database container; see [Log files](#log-files) |
+| `DownloadDBLogFilePortion` | Read a block of a log file, from the start or the most recent lines |
+| `AddRoleToDBCluster` | Associate an IAM role with a cluster, optionally for a feature; see [IAM role associations](#iam-role-associations) |
+| `RemoveRoleFromDBCluster` | Remove a role from a cluster |
+| `AddRoleToDBInstance` | Associate an IAM role with an instance for a feature |
+| `RemoveRoleFromDBInstance` | Remove a role from an instance |
+| `AddSourceIdentifierToSubscription` | Add a source id to a subscription |
+| `RemoveSourceIdentifierFromSubscription` | Remove a source id from a subscription |
 | `CreateDBSubnetGroup` | Create a DB subnet group; tags given here are readable through `ListTagsForResource` |
 | `DescribeDBSubnetGroups` | List DB subnet groups |
 | `ModifyDBSubnetGroup` | Update DB subnet group description and subnet list |
 | `DeleteDBSubnetGroup` | Delete a DB subnet group |
 | `CreateDBCluster` | Create an Aurora-compatible cluster |
-| `DescribeDBClusters` | List clusters : the list form covers the RDS family, DocumentDB and Neptune clusters included, and takes an `engine` filter |
+| `DescribeDBClusters` | List clusters — the list form covers the RDS family, DocumentDB and Neptune clusters included, and takes an `engine` filter |
 | `DeleteDBCluster` | Delete a cluster |
 | `ModifyDBCluster` | Update cluster settings |
 | `CreateDBParameterGroup` | Create a parameter group |
@@ -81,14 +104,14 @@ RDS endpoints return the us-east-1 hosted zone ID `Z2R2ITUGPM61AM` in all region
 | `DeleteDBParameterGroup` | Delete a parameter group |
 | `ModifyDBParameterGroup` | Update parameter group settings |
 | `CopyDBParameterGroup` | Copy a parameter group (by name or ARN) with its family and parameter overrides into a new group |
-| `ResetDBParameterGroup` | Reset user parameters on a DB parameter group |
+| `ResetDBParameterGroup` | Reset named parameters, or all of them, to engine defaults |
 | `DescribeDBParameters` | List parameters in a group |
 | `CreateDBClusterParameterGroup` | Create an Aurora-compatible cluster parameter group |
 | `DescribeDBClusterParameterGroups` | List cluster parameter groups |
 | `DeleteDBClusterParameterGroup` | Delete a cluster parameter group |
 | `ModifyDBClusterParameterGroup` | Update cluster parameter group settings |
 | `CopyDBClusterParameterGroup` | Copy a cluster parameter group into a new group; a managed `default.*` group cannot be copied, as on AWS |
-| `ResetDBClusterParameterGroup` | Reset user parameters on a cluster parameter group |
+| `ResetDBClusterParameterGroup` | Reset named cluster parameters, or all of them, to engine defaults |
 | `DescribeDBClusterParameters` | List parameters in a cluster group |
 | `CreateOptionGroup` | Create an option group |
 | `CopyOptionGroup` | Copy an option group with its engine, major version and options into a new group |
@@ -101,6 +124,10 @@ RDS endpoints return the us-east-1 hosted zone ID `Z2R2ITUGPM61AM` in all region
 | `ModifyDBSnapshot` | Change the engine version or option group of an available manual DB snapshot |
 | `RestoreDBInstanceFromDBSnapshot` | Create a new DB instance from a snapshot |
 | `RestoreDBInstanceToPointInTime` | Create a new DB instance from a source instance at a time in its restorable window; see [Point in time restore](#point-in-time-restore) |
+| `DescribeDBInstanceAutomatedBackups` | List the Region's instance automated backups: `active` for live instances, `retained` and `replicating` ones; see [Automated backups](#automated-backups) |
+| `DeleteDBInstanceAutomatedBackup` | Delete a retained instance automated backup by `DbiResourceId` or `DBInstanceAutomatedBackupsArn` |
+| `StartDBInstanceAutomatedBackupsReplication` | Replicate a source instance's automated backups from its Region to this one (metadata only) |
+| `StopDBInstanceAutomatedBackupsReplication` | Stop replicating to this Region; the replica is kept as `retained` |
 | `DescribeDBSnapshots` | List DB instance snapshots |
 | `DescribeDBSnapshotAttributes` | Return a snapshot's `restore` attribute (accounts authorized to copy/restore it) |
 | `ModifyDBSnapshotAttribute` | Add or remove accounts authorized to copy/restore a snapshot |
@@ -122,8 +149,14 @@ RDS endpoints return the us-east-1 hosted zone ID `Z2R2ITUGPM61AM` in all region
 | `DeleteDBClusterSnapshot` | Delete an available cluster snapshot and its data; the response carries `Status` `deleted` |
 | `CopyDBClusterSnapshot` | Copy an available cluster snapshot (by identifier or same-region ARN) to a new manual one with its data; `CopyTags` and `Tags`; the copy reports `SourceDBClusterSnapshotArn` |
 | `RestoreDBClusterFromSnapshot` | Create a cluster from a cluster snapshot's settings and data; `Engine` must match the snapshot's |
+| `RestoreDBClusterToPointInTime` | Create a cluster from a source cluster at a time in its restorable window; see [Point in time restore](#point-in-time-restore) |
+| `DescribeDBClusterAutomatedBackups` | List the Region's retained cluster automated backups; see [Automated backups](#automated-backups) |
+| `DeleteDBClusterAutomatedBackup` | Delete a retained cluster automated backup by `DbClusterResourceId` |
 | `DescribeDBClusterSnapshotAttributes` | Return the `restore` attribute of a cluster snapshot |
 | `ModifyDBClusterSnapshotAttribute` | Add or remove `restore` values (account ids or `all`) on a cluster snapshot |
+| `StartExportTask` | Export a DB snapshot or DB cluster snapshot to S3 as Parquet; see [Exporting snapshots to Amazon S3](#exporting-snapshots-to-amazon-s3) |
+| `DescribeExportTasks` | List export tasks, by `ExportTaskIdentifier`, `SourceArn`, `SourceType` and the `export-task-identifier`, `s3-bucket`, `source-arn` and `status` filters |
+| `CancelExportTask` | Cancel a running export task; what it already wrote stays in the bucket |
 | `DescribeGlobalClusters` | List the account's global clusters with their primary and secondary members; see [Global clusters](#global-clusters) |
 | `CreateGlobalCluster` | Create an Aurora global database, empty or with an existing Aurora cluster as its primary |
 | `ModifyGlobalCluster` | Rename a global cluster, set deletion protection, or upgrade its engine version (members follow) |
@@ -131,16 +164,12 @@ RDS endpoints return the us-east-1 hosted zone ID `Z2R2ITUGPM61AM` in all region
 | `RemoveFromGlobalCluster` | Detach a member into a standalone cluster; the primary goes last |
 | `FailoverGlobalCluster` | Promote a secondary to primary (failover with `AllowDataLoss`, or switchover) |
 | `SwitchoverGlobalCluster` | Promote a secondary to primary and demote the current primary to a secondary |
-| `FailoverDBCluster` | Return the cluster unchanged |
+| `FailoverDBCluster` | Move a DB cluster's writer role to a reader instance, the named one or the first |
+| `DescribePendingMaintenanceActions` | List the maintenance actions pending for instances and clusters |
+| `ApplyPendingMaintenanceAction` | Apply or schedule a pending maintenance action |
 | `AddTagsToResource` | Add tags to a DB resource |
 | `ListTagsForResource` | List tags for a DB resource |
 | `RemoveTagsFromResource` | Remove tags from a DB resource |
-| `DescribeDBClusterEndpoints` | List custom cluster endpoints |
-| `CreateDBClusterEndpoint` | Create a custom cluster endpoint |
-| `ModifyDBClusterEndpoint` | Update a custom cluster endpoint |
-| `DeleteDBClusterEndpoint` | Delete a custom cluster endpoint |
-| `DescribePendingMaintenanceActions` | List pending maintenance (empty locally) |
-| `ApplyPendingMaintenanceAction` | Opt in to pending maintenance; missing ARN is `ResourceNotFoundFault` |
 <!-- floci:actions:end -->
 
 `CreateDBInstance` stores `StorageEncrypted`, `KmsKeyId`, `BackupRetentionPeriod`,
@@ -153,41 +182,8 @@ returned as the key ARN; a key that does not exist or is not enabled is
 `KMSKeyNotAccessibleFault`. Where AWS picks a random window,
 Floci uses `04:00-06:00` and `mon:00:00-mon:03:00` (or, when the window given on create overlaps the
 usual default, a 30-minute window starting where the given one ends); a window given on modify is
-checked against the instance's other window.
-
-`ModifyDBInstance` follows `ApplyImmediately` the way AWS does. Without it, IAM database
-authentication, the instance class, Multi-AZ, storage, and a backup retention change between
-zero and non-zero are queued and reported as `PendingModifiedValues`; they apply when the next
-maintenance window starts, or at once with the next request that sets `ApplyImmediately`, which
-also applies everything already queued. The password, public access, deletion protection,
-network type, log exports, the autoscaling ceiling and the parameter and security group
-associations apply at once either way. A new parameter group reports `pending-reboot` until
-`RebootDBInstance`, and a password change records a `Reset master credentials` event.
-
-Storage defaults to `gp3` (`io1` when only `Iops` is given). Below 400 GiB (200 GiB for Oracle)
-gp3 has a fixed 3000 IOPS and 125 MiBps; at or above it the baseline is 12000 IOPS and 500 MiBps
-and both can be provisioned higher, with throughput at most a quarter of the IOPS. Storage cannot
-shrink and must grow by at least 10%, and a `MaxAllocatedStorage` equal to the allocation turns
-autoscaling off. Floci completes each operation at once but reports `creating` for a second
-after `CreateDBInstance` (and to the first `DescribeDBInstances` naming the instance, however late
-it comes, as a client polling a real creation always sees it), and `modifying` (one second) then `storage-optimization` (two seconds)
-after a storage change, during which a further storage change is refused. The periods are
-configurable below. `DeleteDBInstance` refuses an instance with
-deletion protection and deletes the Secrets Manager secret RDS manages for its master password.
-
-!!! note "Stopping and starting"
-
-    `StopDBInstance` and `StopDBCluster` follow the user guide: the response reports `stopping`
-    (`StopDBCluster` for the cluster and its members), the stored status settles to `stopped`,
-    and `StartDBInstance` / `StartDBCluster` report `starting` and settle to `available`. While
-    stopped, the identifier, endpoint (same port), parameter and option groups and the Docker
-    volume all stay, so the data comes back on start; the container itself is removed and the
-    endpoint refuses connections. `StopDBInstance` refuses a cluster member (use `StopDBCluster`),
-    a read replica or an instance that has one, and anything not `available`, with
-    `InvalidDBInstanceState`; `ModifyDBInstance` on a stopped instance is refused the same way.
-    `DeleteDBInstance` works on a stopped instance. A stopped instance or cluster stays stopped
-    across an emulator restart. Not modeled: the automatic restart after seven days, and the
-    Multi-AZ SQL Server restriction.
+checked against the instance's other window. Modifications apply immediately —
+`PendingModifiedValues` is not modeled.
 
 !!! note "Stopping and starting"
 
@@ -277,9 +273,6 @@ they belong to, as the model requires. An omitted `Enabled` activates the subscr
 | `FLOCI_SERVICES_RDS_PROXY_HANDSHAKE_TIMEOUT_MILLIS` | `10000` | Max time a client has to complete the startup/auth handshake before the proxy drops it |
 | `FLOCI_SERVICES_RDS_PROXY_BACKEND_CONNECT_TIMEOUT_MILLIS` | `5000` | Max time the proxy waits for the backend TCP connect |
 | `FLOCI_SERVICES_RDS_PROXY_MAX_CONNECTIONS` | `100` | Max concurrent connections per proxy before new ones are refused |
-| `FLOCI_SERVICES_RDS_CREATING_STATUS_MILLIS` | `1000` | How long a new instance reports `creating` (`0` skips it) |
-| `FLOCI_SERVICES_RDS_MODIFYING_STATUS_MILLIS` | `1000` | How long a storage change reports `modifying` |
-| `FLOCI_SERVICES_RDS_STORAGE_OPTIMIZATION_STATUS_MILLIS` | `2000` | How long `storage-optimization` is reported and further storage changes are refused |
 | `FLOCI_SERVICES_RDS_AURORA_AUTO_PAUSE_ENABLED` | `true` | Pause an Aurora Serverless v2 cluster whose `MinCapacity` is 0 after `SecondsUntilAutoPause` without connections; see [Automatic pause and resume](#automatic-pause-and-resume) |
 | `FLOCI_SERVICES_RDS_AURORA_RESUME_DELAY_MILLIS` | `0` | How long the first connection to a paused cluster is held while it resumes; Aurora takes about `15000` |
 
@@ -307,9 +300,7 @@ services:
     image: floci/floci:latest
     ports:
       - "4566:4566"
-      - "5432:5432"             # PostgreSQL endpoints
-      - "3306:3306"             # MySQL / MariaDB endpoints
-      - "7001-7099:7001-7099"   # internal per-resource proxies
+      - "7001-7099:7001-7099"   # RDS proxy ports
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
@@ -339,7 +330,7 @@ instances are registered as `available` immediately, with no Docker container or
 them. Each resource still gets a unique endpoint port, but nothing listens on it.
 
 ```yaml
-# docker-compose.yml : CI / test environment
+# docker-compose.yml — CI / test environment
 services:
   floci:
     image: floci/floci:latest
@@ -548,8 +539,8 @@ aws rds describe-db-instances \
   --query 'DBInstances[0].Endpoint' \
   --endpoint-url $AWS_ENDPOINT_URL
 
-# Connect with psql to the address and port returned above
-psql "host=mypostgres.c1a2b3c4d5e6.us-east-1.rds.localhost.floci.io port=5432 user=admin sslmode=require"
+# Connect with psql (use the port returned above)
+psql -h localhost -p 7001 -U admin
 
 # Create a MySQL instance
 aws rds create-db-instance \
@@ -561,26 +552,9 @@ aws rds create-db-instance \
   --allocated-storage 20 \
   --endpoint-url $AWS_ENDPOINT_URL
 
-# Connect with the mysql client (a MySQL-family instance sharing 3306 with another needs its own Port)
-mysql -h mymysql.c1a2b3c4d5e6.us-east-1.rds.localhost.floci.io -P 3306 -u root -psecret123
+# Connect with mysql client
+mysql -h 127.0.0.1 -P 7002 -u root -psecret123
 ```
-
-### Connecting to an endpoint
-
-As on AWS, every DB instance and cluster gets its own host name and listens on its `Port`, so
-several of them share 5432 (or 3306, 1433). The names sit under `rds.localhost.floci.io`, which
-resolves to `127.0.0.1` on the host and to Floci inside the containers Floci starts; Floci accepts
-each connection on the shared port and hands it to the named resource:
-
-- With a single resource on a port, any connection reaches it, TLS or not.
-- With several, PostgreSQL clients must use TLS (`sslmode=require` or stricter): the TLS server
-  name selects the resource. A plaintext connection, or one to an IP address, names none of them
-  and is refused with a PostgreSQL error saying so.
-- MySQL-family clients start TLS only after the server greets them, so two MySQL or MariaDB
-  resources on one port cannot be told apart. Give each its own `Port`.
-
-If Floci cannot bind a listener port (another process holds it), the resource stays reachable
-only on its internal proxy port.
 
 ## Supported Engines
 
@@ -628,8 +602,8 @@ engines it can run (`postgres 13`–`18`, `mysql 8.0`/`8.4`, `mariadb 10.11`/`11
 instance created without `--option-group-name` reports the matching default. Default groups can't
 be modified, deleted, or tagged.
 
-`CreateOptionGroup` accepts any `EngineName` AWS accepts : including `oracle-*`, `sqlserver-*`,
-and `db2-*` : so a Terraform `aws_db_option_group` for an engine Floci cannot start still applies.
+`CreateOptionGroup` accepts any `EngineName` AWS accepts — including `oracle-*`, `sqlserver-*`,
+and `db2-*` — so a Terraform `aws_db_option_group` for an engine Floci cannot start still applies.
 Attaching one to a DB instance requires the group's engine and major engine version to match the
 instance, as on AWS: a `mysql 8.0` group can't be attached to a `mysql 8.4` instance. A mismatch
 fails with `InvalidParameterCombination`.
@@ -661,8 +635,8 @@ Known gaps, all deliberate:
 | Behavior | Status |
 |---|---|
 | `DescribeOptionGroupOptions` | Not implemented: the per-engine option catalog is not modeled |
-| `OptionGroupQuotaExceededFault` (AWS caps an account at 20 groups) | Not enforced : capping a local emulator would only get in a test's way |
-| `OptionSetting` metadata (`DataType`, `ApplyType`, `AllowedValues`, `DefaultValue`, `Description`) | Omitted : it would require the per-engine option catalog `DescribeOptionGroupOptions` serves |
+| `OptionGroupQuotaExceededFault` (AWS caps an account at 20 groups) | Not enforced — capping a local emulator would only get in a test's way |
+| `OptionSetting` metadata (`DataType`, `ApplyType`, `AllowedValues`, `DefaultValue`, `Description`) | Omitted — it would require the per-engine option catalog `DescribeOptionGroupOptions` serves |
 | `MaxRecords` / `Marker` pagination | Every group is returned in one page, as with every other RDS list action |
 
 ## Read replicas
@@ -1015,16 +989,16 @@ automatically. No configuration is required.
 | Scenario | Volume behavior |
 |---|---|
 | `memory` mode (default) | Volume is removed automatically when the instance is deleted |
-| `persistent` / `hybrid` / `wal` | Volume is retained after delete : data survives for manual recovery |
+| `persistent` / `hybrid` / `wal` | Volume is retained after delete — data survives for manual recovery |
 
 ```bash
-# CI : ephemeral, volumes cleaned up on each delete
+# CI — ephemeral, volumes cleaned up on each delete
 FLOCI_STORAGE_MODE=memory
 
-# Local dev : retain DB data across Floci restarts
+# Local dev — retain DB data across Floci restarts
 FLOCI_STORAGE_MODE=hybrid
 
-# Local dev : also remove volumes immediately on delete
+# Local dev — also remove volumes immediately on delete
 FLOCI_STORAGE_MODE=hybrid
 FLOCI_STORAGE_PRUNE_VOLUMES_ON_DELETE=true
 ```
@@ -1036,7 +1010,7 @@ FLOCI_STORAGE_HOST_PERSISTENT_PATH=/absolute/host/path/data
 ```
 
 !!! note "Docker Desktop on macOS"
-    Named volumes work correctly on Docker Desktop for macOS. Bind mounts to paths inside the Floci container are not supported : use named volumes (the default).
+    Named volumes work correctly on Docker Desktop for macOS. Bind mounts to paths inside the Floci container are not supported — use named volumes (the default).
 
 ## Authentication
 
@@ -1205,6 +1179,6 @@ exercise the same connection-string settings you use in production:
 PGSSLROOTCERT=./data/tls/floci-root-ca.crt psql "host=localhost port=7001 user=admin sslmode=verify-full"
 
 # MySQL / MariaDB
-mysql -h mymysql.c1a2b3c4d5e6.us-east-1.rds.localhost.floci.io -P 3306 -u root -psecret123 \
+mysql -h 127.0.0.1 -P 7002 -u root -psecret123 \
   --ssl-mode=VERIFY_IDENTITY --ssl-ca=./data/tls/floci-root-ca.crt
 ```

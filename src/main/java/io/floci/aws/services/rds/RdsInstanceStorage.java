@@ -2,7 +2,6 @@ package io.floci.aws.services.rds;
 
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.services.rds.model.DbInstance;
-import io.floci.aws.services.rds.model.DbInstancePendingModifiedValues;
 
 import java.util.Locale;
 import java.util.Objects;
@@ -62,25 +61,6 @@ final class RdsInstanceStorage {
             type = isAurora(engine) ? AURORA : GP2;
         }
         return new Storage(instance.getAllocatedStorage(), type, instance.getIops(), instance.getStorageThroughput());
-    }
-
-    /**
-     * The storage once the queued storage changes are applied. PendingModifiedValues names only
-     * the members that change, so a member left out keeps its value where the new storage type
-     * still has it: IOPS on io1, io2 and gp3, throughput on gp3.
-     */
-    static Storage withPending(Storage current, DbInstancePendingModifiedValues pending) {
-        if (pending == null || !pending.hasStorageChanges()) {
-            return current;
-        }
-        String type = pending.getStorageType() != null ? pending.getStorageType() : current.storageType();
-        int allocation = pending.getAllocatedStorage() != null
-                ? pending.getAllocatedStorage() : current.allocatedStorage();
-        boolean provisionsIops = GP3.equals(type) || IO1.equals(type) || IO2.equals(type);
-        Integer iops = pending.getIops() != null ? pending.getIops() : provisionsIops ? current.iops() : null;
-        Integer throughput = pending.getStorageThroughput() != null ? pending.getStorageThroughput()
-                : GP3.equals(type) ? current.storageThroughput() : null;
-        return new Storage(allocation, type, iops, throughput);
     }
 
     /**

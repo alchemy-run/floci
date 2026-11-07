@@ -4,9 +4,28 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
+import io.floci.aws.core.common.EpochSeconds;
+import io.floci.aws.core.common.RequestContext;
 import io.floci.aws.core.common.Resettable;
 import io.floci.aws.core.common.SqlParameterParser.ParsedSql;
+import io.floci.aws.core.common.StoredResourceArns;
+import io.floci.aws.core.storage.AccountAwareStorageBackend;
+import io.floci.aws.services.iam.IamService;
+import io.floci.aws.services.redshift.RedshiftAuditLogPublisher;
+import io.floci.aws.services.redshift.RedshiftAuditSql;
+import io.floci.aws.services.redshift.RedshiftAuditSql.UserChange;
+import io.floci.aws.services.redshift.RedshiftAuditSql.UserChanges;
+import io.floci.aws.services.redshift.proxy.CopyJobSql;
+import io.floci.aws.services.redshift.proxy.RedshiftSqlInterceptor;
+import io.floci.aws.services.redshift.spectrum.BackendSql;
+import io.floci.aws.services.redshift.spectrum.SpectrumQueryPreparation;
+import io.floci.aws.services.redshift.spectrum.SpectrumReadException;
+import io.floci.aws.services.redshift.spectrum.SpectrumSession;
+import io.floci.aws.services.redshift.spectrum.SpectrumSqlException;
+import io.floci.aws.services.redshiftdata.RedshiftDataStatementStore.StoredParameter;
+import io.floci.aws.services.redshiftdata.RedshiftDataStatementStore.StoredStatement;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -16,72 +35,614 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.ResultSetMetaData;
 import java.sql.SQLException;
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
+import java.util.function.BiConsumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @ApplicationScoped
-public class RedshiftDataService implements Resettable {
+public class RedshiftDataService implements Resettable, StoredResourceArns {
 
     private static final int PAGE_SIZE = 1000;
+    static final Pattern AUTO_COMMIT_SQL = Pattern.compile(
+            "(?is)\\A(?:\\s+|--[^\\r\\n]*(?:\\r?\\n|$)|/\\*.*?\\*/)*"
+                    + "(?:VACUUM\\b|(?:CREATE|DROP)\\s+(?:DATABASE|TABLESPACE)\\b|ALTER\\s+SYSTEM\\b"
+                    + "|CREATE\\s+(?:UNIQUE\\s+)?INDEX\\s+CONCURRENTLY\\b|DROP\\s+INDEX\\s+CONCURRENTLY\\b"
+                    + "|REINDEX\\b[^;]*?\\bCONCURRENTLY\\b)");
+    private static final Pattern TRANSACTION_CONTROL = Pattern.compile(
+            "(?is)\\A(BEGIN|START\\s+TRANSACTION|COMMIT|END|ROLLBACK|ABORT)(?:\\s+(?:WORK|TRANSACTION))?\\s*;?\\s*\\z");
+    private static final Pattern TRANSACTION_PREFIX = Pattern.compile("(?is)\\A(?:BEGIN|START|COMMIT|END|ROLLBACK|ABORT)\\b");
+    private static final Pattern TRANSACTION_COMMENTS = Pattern.compile("(?s)/\\*.*?\\*/|--[^\\r\\n]*");
 
     private final RedshiftDataResourceResolver resolver;
     private final RedshiftDataConnectionFactory connectionFactory;
     private final RedshiftDataStatementStore store;
     private final ObjectMapper objectMapper;
+    private final SpectrumQueryPreparation preparation;
+    private final RedshiftDataExecutor executor;
+    private final RedshiftDataEventPublisher publisher;
+    private final RedshiftAuditLogPublisher auditLogPublisher;
+    private final RequestContext requestContext;
+    private final IamService iamService;
+    private final RedshiftDataIdempotencyStore idempotency;
+    private final RedshiftDataSessions sessions;
+    private final ConcurrentHashMap<RedshiftDataIdempotencyStore.Scope, AdmissionLock> admissionLocks = new ConcurrentHashMap<>();
+
+    RedshiftDataService(RedshiftDataResourceResolver resolver, RedshiftDataConnectionFactory connectionFactory,
+                        RedshiftDataStatementStore store, ObjectMapper objectMapper, SpectrumQueryPreparation preparation,
+                        RedshiftDataExecutor executor, RedshiftDataEventPublisher publisher) {
+        this(resolver, connectionFactory, store, objectMapper, preparation, executor, publisher, null,
+                null, new RedshiftDataIdempotencyStore(AccountAwareStorageBackend.inMemory("000000000000"),
+                        Clock.systemUTC()), new RedshiftDataSessions(), null);
+    }
+
+    RedshiftDataService(RedshiftDataResourceResolver resolver, RedshiftDataConnectionFactory connectionFactory,
+                        RedshiftDataStatementStore store, ObjectMapper objectMapper, SpectrumQueryPreparation preparation,
+                        RedshiftDataExecutor executor, RedshiftDataEventPublisher publisher,
+                        RequestContext requestContext, IamService iamService, RedshiftDataIdempotencyStore idempotency,
+                        RedshiftDataSessions sessions) {
+        this(resolver, connectionFactory, store, objectMapper, preparation, executor, publisher, requestContext,
+                iamService, idempotency, sessions, null);
+    }
+
+    RedshiftDataService(RedshiftDataResourceResolver resolver, RedshiftDataConnectionFactory connectionFactory,
+                               RedshiftDataStatementStore store, ObjectMapper objectMapper, SpectrumQueryPreparation preparation,
+                               RedshiftDataExecutor executor, RedshiftDataEventPublisher publisher,
+                               RequestContext requestContext, IamService iamService, RedshiftDataIdempotencyStore idempotency) {
+        this(resolver, connectionFactory, store, objectMapper, preparation, executor, publisher,
+                requestContext, iamService, idempotency, new RedshiftDataSessions(), null);
+    }
 
     @Inject
-    public RedshiftDataService(RedshiftDataResourceResolver resolver,
-                               RedshiftDataConnectionFactory connectionFactory,
-                               RedshiftDataStatementStore store,
-                               ObjectMapper objectMapper) {
+    public RedshiftDataService(RedshiftDataResourceResolver resolver, RedshiftDataConnectionFactory connectionFactory,
+                               RedshiftDataStatementStore store, ObjectMapper objectMapper, SpectrumQueryPreparation preparation,
+                               RedshiftDataExecutor executor, RedshiftDataEventPublisher publisher,
+                               RequestContext requestContext, IamService iamService, RedshiftDataIdempotencyStore idempotency,
+                               RedshiftDataSessions sessions, RedshiftAuditLogPublisher auditLogPublisher) {
         this.resolver = resolver;
         this.connectionFactory = connectionFactory;
         this.store = store;
         this.objectMapper = objectMapper;
+        this.preparation = preparation;
+        this.executor = executor;
+        this.publisher = publisher;
+        this.auditLogPublisher = auditLogPublisher;
+        this.requestContext = requestContext;
+        this.iamService = iamService;
+        this.idempotency = idempotency;
+        this.sessions = sessions;
     }
 
     @Override
     public void clear() {
-        store.clear();
+        executor.clear(() -> {
+            RuntimeException failure = null;
+            try {
+                sessions.clear();
+            } catch (RuntimeException sessionFailure) {
+                failure = sessionFailure;
+            }
+            try {
+                store.clear();
+            } catch (RuntimeException storageFailure) {
+                if (failure == null) {
+                    failure = storageFailure;
+                } else if (failure != storageFailure) {
+                    failure.addSuppressed(storageFailure);
+                }
+            }
+            try {
+                idempotency.clear();
+            } catch (RuntimeException receiptFailure) {
+                if (failure == null) {
+                    failure = receiptFailure;
+                } else if (failure != receiptFailure) {
+                    failure.addSuppressed(receiptFailure);
+                }
+            }
+            if (failure != null) {
+                throw failure;
+            }
+        });
     }
 
     // ── ExecuteStatement ────────────────────────────────────────────────────
 
     public ObjectNode executeStatement(JsonNode request, String region) {
+        return executeStatement(request, region, null);
+    }
+
+    public ObjectNode executeStatement(JsonNode request, String region, String principal) {
+        return execute(request, region, principal, false);
+    }
+
+    private ObjectNode execute(JsonNode request, String region, String principal, boolean batch) {
+        String token = RedshiftDataIdempotencyStore.clientToken(request);
+        int waitSeconds = waitSeconds(request);
+        RedshiftDataSessions.validate(request);
+        boolean retained = request.has("SessionId") || request.path("SessionKeepAliveSeconds").asInt() > 0;
+        RedshiftDataSessions.Scope owner = retained ? sessionScope(region, principal)
+                : new RedshiftDataSessions.Scope(store.accountId(), region, null);
+        if (token != null && request.has("SessionId")) {
+            RedshiftDataIdempotencyStore.Scope retryScope = new RedshiftDataIdempotencyStore.Scope(
+                    owner.accountId(), region, batch ? "BatchExecuteStatement" : "ExecuteStatement", token);
+            Admission replay = executor.admitting(() -> {
+                RedshiftDataIdempotencyStore.Receipt receipt = idempotency.find(retryScope);
+                return receipt == null ? null : replay(receipt, retryScope, owner, principal);
+            });
+            if (replay != null) {
+                return awaitAdmission(replay, waitSeconds);
+            }
+        }
+        PendingStatement pending = batch ? prepareBatch(request, region, owner) : prepareStatement(request, region, owner);
+        RedshiftDataStatementStore.StoredStatement stored = pending.statement();
+        RedshiftDataIdempotencyStore.Scope scope = token == null ? null : new RedshiftDataIdempotencyStore.Scope(
+                stored.accountId, region, batch ? "BatchExecuteStatement" : "ExecuteStatement", token);
+        Admission admission = executor.admitting(() -> scope == null ? submit(pending, principal, null)
+                : admitScoped(pending, principal, scope));
+        return awaitAdmission(admission, waitSeconds);
+    }
+
+    private ObjectNode awaitAdmission(Admission admission, int waitSeconds) {
+        if (waitSeconds > 0 && admission.execution() != null) {
+            admission.execution().await(Duration.ofSeconds(waitSeconds));
+            RedshiftDataStatementStore.StoredStatement current = store.getForAccount(admission.accountId(), admission.id());
+            if (current != null) {
+                return executeResponse(current);
+            }
+        }
+        return admission.response();
+    }
+
+    private RedshiftDataSessions.Scope sessionScope(String region, String principal) {
+        String caller = principal;
+        if (caller == null && requestContext != null && requestContext.getAccessKeyId() != null) {
+            String accessKey = requestContext.getAccessKeyId();
+            caller = iamService == null ? "access-key:" + accessKey
+                    : iamService.resolveCallerArn(accessKey).orElse("access-key:" + accessKey);
+        }
+        String identity = caller == null ? "anonymous" : caller;
+        String role = principal == null && requestContext != null && iamService != null
+                ? iamService.resolvePrincipalArn(requestContext.getAccessKeyId()).orElse(identity) : identity;
+        return new RedshiftDataSessions.Scope(store.accountId(), region, identity, role);
+    }
+
+    public ObjectNode listSessions(JsonNode request, String region) {
+        return new RedshiftDataSessionListing(objectMapper, sessions).list(request, sessionScope(region, null));
+    }
+
+    @Override
+    public String namespace() {
+        return "redshift-data";
+    }
+
+    @Override
+    public Optional<String> find(String type, List<String> names, String region) {
+        return resolver.find(type, names, region);
+    }
+
+    /** The cluster or workgroup the caller's open session runs on, named by its {@code SessionId}, as it reads it. */
+    @Override
+    public List<String> through(String member, String value, String region) {
+        return "SessionId".equals(member) ? sessions.targetArn(sessionScope(region, null), value).stream().toList()
+                : List.of();
+    }
+
+    private Admission replay(RedshiftDataIdempotencyStore.Receipt receipt, RedshiftDataIdempotencyStore.Scope scope,
+                             RedshiftDataSessions.Scope owner, String principal) {
+        if (receipt.sessionOwner != null) {
+            String caller = owner.caller() == null ? sessionScope(scope.region(), principal).caller() : owner.caller();
+            if (!Objects.equals(receipt.sessionOwner, caller)) {
+                throw new AwsException("ResourceNotFoundException", "Session was not found", 400);
+            }
+        }
+        String id = receipt.response.path("Id").asText();
+        RedshiftDataStatementStore.StoredStatement current = store.getForAccount(scope.accountId(), id);
+        return new Admission(scope.accountId(), id, current == null ? receipt.response : executeResponse(current),
+                executor.execution(scope.accountId(), id));
+    }
+
+    private record Admission(String accountId, String id, ObjectNode response, RedshiftDataExecution execution) { }
+
+    private static final class AdmissionLock {
+        private final ReentrantLock lock = new ReentrantLock();
+        private int users;
+    }
+
+    private Admission admitScoped(PendingStatement pending, String principal, RedshiftDataIdempotencyStore.Scope scope) {
+        AdmissionLock scoped = admissionLocks.compute(scope, (key, existing) -> {
+            AdmissionLock selected = existing == null ? new AdmissionLock() : existing;
+            selected.users++;
+            return selected;
+        });
+        scoped.lock.lock();
+        try {
+            RedshiftDataIdempotencyStore.Receipt receipt = idempotency.find(scope);
+            if (receipt == null) {
+                return submit(pending, principal, scope);
+            }
+            return replay(receipt, scope, pending.owner(), principal);
+        } finally {
+            scoped.lock.unlock();
+            admissionLocks.compute(scope, (key, existing) -> --scoped.users == 0 ? null : scoped);
+        }
+    }
+
+    private Admission submit(PendingStatement pending, String principal, RedshiftDataIdempotencyStore.Scope scope) {
+        RedshiftDataStatementStore.StoredStatement stored = pending.statement();
+        if (principal != null) {
+            stored.principal = principal;
+        }
+        RedshiftDataSessions.Reservation session = sessions.reserve(pending.owner(), pending.request(), pending.target());
+        if (session != null) {
+            stored.sessionId = session.id();
+        }
+        ObjectNode response = executeResponse(stored.snapshot());
+        RedshiftDataExecution handle;
+        try {
+            handle = executor.submit(stored.accountId, stored.region, stored.id,
+                    () -> {
+                        if (scope == null) {
+                            store.putForAccount(stored.accountId, stored);
+                        } else {
+                            store.admitForAccount(stored.accountId, stored);
+                            if (session == null) {
+                                idempotency.put(scope, response);
+                            } else {
+                                idempotency.put(scope, response, pending.owner().caller());
+                            }
+                        }
+                        if (session != null) {
+                            session.admitted(stored.id);
+                        }
+                    },
+                    execution -> {
+                        try {
+                            execution.checkCancellation();
+                            if (session != null) {
+                                session.bind(execution);
+                            }
+                            stored.status = RedshiftDataStatementStore.Status.STARTED;
+                            executor.publish(execution, () -> store.putForAccount(stored.accountId, stored));
+                            pending.run().accept(execution, session);
+                        } catch (Exception failure) {
+                            stored.status = RedshiftDataStatementStore.Status.FAILED;
+                            stored.error = failure.getMessage();
+                        } finally {
+                            execution.terminal();
+                            if (session != null) {
+                                session.finish();
+                            }
+                        }
+                        complete(stored, execution);
+                    },
+                    (execution, failure) -> recoverStatement(stored, execution, failure));
+        } catch (RuntimeException failure) {
+            if (session != null) {
+                session.abort();
+            }
+            try {
+                if (scope != null) {
+                    idempotency.removeIfStatement(scope, stored.id);
+                }
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            try {
+                store.deleteForAccount(stored.accountId, stored.id);
+            } catch (RuntimeException cleanupFailure) {
+                failure.addSuppressed(cleanupFailure);
+            }
+            throw failure;
+        }
+        return new Admission(stored.accountId, stored.id, response, handle);
+    }
+
+    private void complete(RedshiftDataStatementStore.StoredStatement stored, RedshiftDataExecution execution) {
+        execution.terminal();
+        if (execution.isCancellationRequested()) {
+            stored.status = RedshiftDataStatementStore.Status.ABORTED;
+            stored.error = "Statement cancelled";
+        }
+        if (stored.status != RedshiftDataStatementStore.Status.FINISHED) {
+            stored.hasResultSet = false;
+            stored.rows = null;
+            stored.resultRows = 0;
+            stored.resultSize = 0;
+        }
+        stored.updatedAt = Instant.now();
+        executor.publish(execution, () -> {
+            store.putForAccount(stored.accountId, stored);
+            if (stored.withEvent && publisher != null) {
+                RedshiftDataStatementStore.StoredStatement terminal = stored.snapshot();
+                executor.deliver(execution, stored.accountId, stored.region, stored.id,
+                        () -> publisher.publish(terminal));
+            }
+        });
+    }
+
+    /** Last resort for a worker that died outside the statement handler: never leave a statement active. */
+    private void recoverStatement(RedshiftDataStatementStore.StoredStatement stored,
+                                  RedshiftDataExecution execution, RuntimeException failure) {
+        RedshiftDataStatementStore.StoredStatement persisted = store.getForAccount(stored.accountId, stored.id);
+        if (persisted != null && persisted.status != null && persisted.status.isTerminal()) {
+            return;
+        }
+        stored.status = RedshiftDataStatementStore.Status.FAILED;
+        stored.error = "Internal error: " + failure.getMessage();
+        complete(stored, execution);
+    }
+
+    private static int waitSeconds(JsonNode request) {
+        if (!request.has("WaitTimeSeconds")) {
+            return 0;
+        }
+        JsonNode wait = request.get("WaitTimeSeconds");
+        if (!wait.isIntegralNumber() || !wait.canConvertToInt() || wait.asInt() < 1 || wait.asInt() > 30) {
+            throw new AwsException("ValidationException", "WaitTimeSeconds must be an integer between 1 and 30", 400);
+        }
+        return wait.asInt();
+    }
+
+    private void capture(RedshiftDataStatementStore.StoredStatement stored,
+                         RedshiftDataResourceResolver.DatabaseTarget target, String region, JsonNode request) {
+        AwsArnUtils.Arn arn = AwsArnUtils.parse(target.arn());
+        stored.accountId = arn.accountId();
+        stored.region = region;
+        stored.resourceArn = target.arn();
+        stored.withEvent = request.path("WithEvent").asBoolean(false);
+        stored.expiresAt = store.expiresAt(stored.createdAt);
+        if (stored.withEvent && requestContext != null && requestContext.getAccessKeyId() != null) {
+            stored.principal = iamService.resolveCallerArn(requestContext.getAccessKeyId()).orElse(null);
+        }
+    }
+
+    private PendingStatement prepareStatement(JsonNode request, String region, RedshiftDataSessions.Scope owner) {
         String sql = requiredText(request, "Sql");
         rejectMultiStatement(sql);
         Map<String, String> parameters = RedshiftDataSqlParameters.parseParameters(request, "Parameters");
 
-        RedshiftDataResourceResolver.DatabaseTarget target = resolver.resolve(request, region);
+        ResolvedTarget resolved = resolveTarget(request, region, owner);
+        RedshiftDataResourceResolver.DatabaseTarget target = resolved.target();
 
         RedshiftDataStatementStore.StoredStatement stored = newStatement(request);
         stored.sql = sql;
         stored.sqls = List.of(sql);
-        stored.clusterIdentifier = clusterIdentifierOrNull(request);
+        stored.clusterIdentifier = clusterIdentifierOrNull(resolved.parameters());
+        stored.workgroupName = workgroupNameOrNull(resolved.parameters());
         stored.dbUser = target.user();
         stored.database = target.database();
         stored.resultFormat = request.path("ResultFormat").asText("JSON");
+        stored.queryParameters = storedParameters(parameters);
+        capture(stored, target, region, request);
 
-        runStatement(stored, target, sql, parameters);
-        store.put(stored);
-        return executeResponse(stored);
+        return new PendingStatement(stored, (execution, session) -> runStatement(stored, target, sql, parameters, execution, session),
+                target, request.deepCopy(), owner);
+    }
+
+    private record PendingStatement(RedshiftDataStatementStore.StoredStatement statement,
+                                    BiConsumer<RedshiftDataExecution, RedshiftDataSessions.Reservation> run,
+                                    RedshiftDataResourceResolver.DatabaseTarget target, JsonNode request,
+                                    RedshiftDataSessions.Scope owner) { }
+
+    private record ResolvedTarget(RedshiftDataResourceResolver.DatabaseTarget target, JsonNode parameters) { }
+
+    private ResolvedTarget resolveTarget(JsonNode request, String region, RedshiftDataSessions.Scope owner) {
+        if (request.has("SessionId")) {
+            RedshiftDataSessions.Session session = sessions.find(owner, request.get("SessionId").asText());
+            return new ResolvedTarget(session.target(request), session.parameters());
+        }
+        return new ResolvedTarget(resolver.resolve(request, region), request);
+    }
+
+    private ConnectionUse connection(RedshiftDataResourceResolver.DatabaseTarget target,
+                                     RedshiftDataSessions.Reservation session) throws SQLException {
+        Runnable disconnected = () -> publishConnection(target, "disconnection", null);
+        try {
+            Connection connection;
+            if (session == null) {
+                connection = connectionFactory.open(target);
+                publishConnection(target, "authenticated", null);
+            } else {
+                connection = session.connection(connectionFactory,
+                        () -> publishConnection(target, "authenticated", null), disconnected);
+            }
+            return new ConnectionUse(connection, session, disconnected);
+        } catch (SQLException failure) {
+            publishConnection(target, "authentication failure", failure.getSQLState());
+            throw failure;
+        }
+    }
+
+    private void publishConnection(RedshiftDataResourceResolver.DatabaseTarget target, String event, String error) {
+        if (auditLogPublisher != null && target.cluster() != null) {
+            AwsArnUtils.Arn arn = AwsArnUtils.parse(target.arn());
+            auditLogPublisher.publishConnection(target.cluster(), arn.accountId(), arn.region(), target.database(),
+                    target.auditUser(), event, null, error);
+        }
+    }
+
+    private record ConnectionUse(Connection connection, RedshiftDataSessions.Reservation session,
+                                 Runnable disconnected) implements AutoCloseable {
+        @Override
+        public void close() throws SQLException {
+            if (session == null) {
+                try {
+                    connection.close();
+                } finally {
+                    disconnected.run();
+                }
+                return;
+            }
+            try {
+                if (connection.isClosed()) {
+                    session.discard();
+                } else if (!session.inTransaction() && !connection.getAutoCommit()) {
+                    // A failed batch or worker must not leak an open transaction to the next request.
+                    connection.rollback();
+                    connection.setAutoCommit(true);
+                }
+            } catch (SQLException | RuntimeException failure) {
+                try {
+                    session.discard();
+                } catch (RuntimeException cleanupFailure) {
+                    failure.addSuppressed(cleanupFailure);
+                }
+                throw failure;
+            }
+        }
     }
 
     private void runStatement(RedshiftDataStatementStore.StoredStatement stored,
                               RedshiftDataResourceResolver.DatabaseTarget target,
-                              String sql, Map<String, String> parameters) {
-        try (Connection connection = connectionFactory.open(target)) {
-            runOnConnection(stored, connection, sql, parameters);
+                              String sql, Map<String, String> parameters, RedshiftDataExecution execution,
+                              RedshiftDataSessions.Reservation session) {
+        try (ConnectionUse use = connection(target, session)) {
+            Connection connection = use.connection();
+            execution.track(connection);
+            try {
+                publishActivity(stored, target, sql);
+                if (session != null && transactionControl(stored, target, sql, connection, session, execution)) {
+                    return;
+                }
+                if (session != null && session.transactionFailed()) {
+                    throw new SQLException("Current transaction is aborted; use COMMIT or ROLLBACK to end it", "25P02");
+                }
+                boolean autoCommit = AUTO_COMMIT_SQL.matcher(sql).find() || CopyJobSql.requiresAutoCommit(sql)
+                        || preparation != null && target.spectrum() != null
+                        && preparation.handlesDdl(sql, target.spectrum());
+                if (autoCommit) {
+                    if (session != null && session.inTransaction()) {
+                        throw new SQLException("Statement cannot run inside a transaction block", "25001");
+                    }
+                    execution.commit(() -> runOnConnection(stored, connection, sql, parameters,
+                            target.spectrum(), execution, true));
+                    successfulUserChange(stored, target, sql, session);
+                } else {
+                    runOnConnection(stored, connection, sql, parameters, target.spectrum(), execution, false);
+                    execution.commit(() -> {
+                        if ((session == null || !session.inTransaction()) && !connection.getAutoCommit()) {
+                            connection.commit();
+                        }
+                    });
+                    successfulUserChange(stored, target, sql, session);
+                }
+            } catch (SQLException failure) {
+                if (session != null && failure.getSQLState() != null && failure.getSQLState().startsWith("08")) {
+                    session.discard();
+                    throw failure;
+                }
+                if (session != null && session.inTransaction()) {
+                    session.failTransaction();
+                } else if (!connection.getAutoCommit()) {
+                    connection.rollback();
+                }
+                throw failure;
+            } catch (RuntimeException failure) {
+                if (session != null && session.inTransaction()) {
+                    session.failTransaction();
+                }
+                throw failure;
+            }
         } catch (SQLException e) {
             stored.status = RedshiftDataStatementStore.Status.FAILED;
             stored.error = e.getMessage();
         }
         stored.updatedAt = Instant.now();
+    }
+
+    private void publishActivity(RedshiftDataStatementStore.StoredStatement stored,
+                                 RedshiftDataResourceResolver.DatabaseTarget target, String sql) {
+        if (auditLogPublisher != null && target.cluster() != null) {
+            auditLogPublisher.publishActivity(target.cluster(), stored.accountId, stored.region,
+                    target.database(), target.auditUser(), sql);
+        }
+    }
+
+    private void successfulUserChange(RedshiftDataStatementStore.StoredStatement stored,
+                                      RedshiftDataResourceResolver.DatabaseTarget target, String sql,
+                                      RedshiftDataSessions.Reservation session) {
+        if (session != null && session.inTransaction()) {
+            session.completeUserChanges(sql);
+        } else {
+            publishUserChanges(stored, target, RedshiftAuditSql.userChanges(sql));
+        }
+    }
+
+    private void publishUserChanges(RedshiftDataStatementStore.StoredStatement stored,
+                                    RedshiftDataResourceResolver.DatabaseTarget target, List<UserChange> changes) {
+        if (auditLogPublisher != null && target.cluster() != null) {
+            for (UserChange change : changes) {
+                auditLogPublisher.publishUserChange(target.cluster(), stored.accountId, stored.region,
+                        target.database(), change.username(), change.action(), change.oldUsername());
+            }
+        }
+    }
+
+    private boolean transactionControl(RedshiftDataStatementStore.StoredStatement stored,
+                                       RedshiftDataResourceResolver.DatabaseTarget target, String sql,
+                                       Connection connection, RedshiftDataSessions.Reservation session,
+                                       RedshiftDataExecution execution) throws SQLException {
+        String normalized = TRANSACTION_COMMENTS.matcher(sql).replaceAll(" ").trim();
+        Matcher control = TRANSACTION_CONTROL.matcher(normalized);
+        if (!control.matches()) {
+            if (TRANSACTION_PREFIX.matcher(normalized).find()) {
+                throw new SQLException("Transaction control modifiers are not supported", "0A000");
+            }
+            return false;
+        }
+        String command = control.group(1).toUpperCase(Locale.ROOT).split("\\s+")[0];
+        execution.commit(() -> {
+            switch (command) {
+                case "BEGIN", "START" -> {
+                    if (session.transactionFailed()) {
+                        throw new SQLException("Current transaction is aborted; use COMMIT or ROLLBACK to end it", "25P02");
+                    }
+                    connection.setAutoCommit(false);
+                    session.transaction(true);
+                }
+                case "COMMIT", "END" -> {
+                    boolean rolledBack = session.transactionFailed();
+                    if (!connection.getAutoCommit()) {
+                        if (session.transactionFailed()) {
+                            connection.rollback();
+                        } else {
+                            connection.commit();
+                        }
+                    }
+                    List<UserChange> changes = session.takeUserChanges();
+                    if (!rolledBack) {
+                        publishUserChanges(stored, target, changes);
+                    }
+                    session.transaction(false);
+                    connection.setAutoCommit(true);
+                }
+                default -> {
+                    if (!connection.getAutoCommit()) {
+                        connection.rollback();
+                    }
+                    session.takeUserChanges();
+                    session.transaction(false);
+                    connection.setAutoCommit(true);
+                }
+            }
+        });
+        stored.status = RedshiftDataStatementStore.Status.FINISHED;
+        stored.updatedAt = Instant.now();
+        return true;
     }
 
     /**
@@ -103,25 +664,54 @@ public class RedshiftDataService implements Resettable {
     }
 
     private void runOnConnection(RedshiftDataStatementStore.StoredStatement stored,
-                                 Connection connection, String sql, Map<String, String> parameters)
+                                 Connection connection, String sql, Map<String, String> parameters, SpectrumSession context,
+                                 RedshiftDataExecution execution, boolean autoCommit)
             throws SQLException {
-        ParsedSql parsed = RedshiftDataSqlParameters.parse(sql);
+        if (preparation != null && context != null) {
+            SpectrumSession session = new SpectrumSession(context.accountId(), context.clusterKey(), context.databaseName(),
+                    context.iamRoleArns(), !connection.getAutoCommit());
+            try {
+                if (preparation.prepare(sql, session, new RedshiftDataBackendSql(connection, execution))) {
+                    stored.status = RedshiftDataStatementStore.Status.FINISHED;
+                    return;
+                }
+            } catch (SpectrumSqlException exception) {
+                throw new SQLException(exception.getMessage(), exception.sqlState(), exception);
+            } catch (SpectrumReadException exception) {
+                throw new SQLException(exception.getMessage(), exception.sqlState(), exception);
+            } catch (RuntimeException exception) {
+                // Anything else from Glue or the read path must fail the statement, not leave it running.
+                throw new SQLException("External query preparation failed: " + exception.getMessage(), "58030", exception);
+            }
+        }
+        String rewritten = CopyJobSql.rewrite(sql, !autoCommit || !connection.getAutoCommit());
+        ParsedSql parsed = RedshiftDataSqlParameters.parse(RedshiftSqlInterceptor.rewrite(rewritten));
+        execution.checkCancellation();
+        if (!autoCommit) {
+            connection.setAutoCommit(false);
+        }
         long t0 = System.nanoTime();
         try (PreparedStatement statement = connection.prepareStatement(parsed.sql())) {
-            RedshiftDataSqlParameters.bind(statement, parsed.parameterOrder(), parameters);
-            boolean hasResultSet = statement.execute();
-            if (hasResultSet) {
-                try (ResultSet rs = statement.getResultSet()) {
-                    rejectResultTypesRedshiftLacks(rs.getMetaData());
-                    stored.columnMetadata = RedshiftDataColumnMetadata.toColumnMetadata(objectMapper, rs.getMetaData());
-                    stored.rows = RedshiftDataFieldMapper.rows(objectMapper, rs);
-                    stored.hasResultSet = true;
-                    stored.resultRows = stored.rows.size();
-                    stored.resultSize = RedshiftDataFieldMapper.serializedSize(stored.rows);
+            execution.track(statement);
+            try {
+                RedshiftDataSqlParameters.bind(statement, parsed.parameterOrder(), parameters);
+                execution.checkCancellation();
+                boolean hasResultSet = statement.execute();
+                if (hasResultSet) {
+                    try (ResultSet rs = statement.getResultSet()) {
+                        rejectResultTypesRedshiftLacks(rs.getMetaData());
+                        stored.columnMetadata = RedshiftDataColumnMetadata.toColumnMetadata(objectMapper, rs.getMetaData());
+                        stored.rows = RedshiftDataFieldMapper.rows(objectMapper, rs);
+                        stored.hasResultSet = true;
+                        stored.resultRows = stored.rows.size();
+                        stored.resultSize = RedshiftDataFieldMapper.serializedSize(stored.rows);
+                    }
+                } else {
+                    stored.hasResultSet = false;
+                    stored.resultRows = Math.max(statement.getUpdateCount(), 0);
                 }
-            } else {
-                stored.hasResultSet = false;
-                stored.resultRows = Math.max(statement.getUpdateCount(), 0);
+            } finally {
+                execution.untrack(statement);
             }
         }
         stored.durationNanos = System.nanoTime() - t0;
@@ -133,18 +723,22 @@ public class RedshiftDataService implements Resettable {
         response.put("Id", stored.id);
         if (stored.clusterIdentifier != null) {
             response.put("ClusterIdentifier", stored.clusterIdentifier);
-        } else {
+        } else if (stored.workgroupName == null) {
             response.putNull("ClusterIdentifier");
         }
-        response.put("CreatedAt", epochSeconds(stored.createdAt));
+        response.put("CreatedAt", EpochSeconds.fromInstant(stored.createdAt));
         response.put("Database", stored.database);
         if (stored.dbUser != null) {
             response.put("DbUser", stored.dbUser);
         }
         response.putArray("DbGroups");
-        response.putNull("WorkgroupName");
+        putWorkgroupName(response, stored);
         response.put("HasResultSet", stored.hasResultSet);
-        response.putNull("SessionId");
+        if (stored.sessionId == null) {
+            response.putNull("SessionId");
+        } else {
+            response.put("SessionId", stored.sessionId);
+        }
         return response;
     }
 
@@ -153,15 +747,19 @@ public class RedshiftDataService implements Resettable {
     public ObjectNode describeStatement(JsonNode request) {
         RedshiftDataStatementStore.StoredStatement stored = require(request);
         ObjectNode response = objectMapper.createObjectNode();
+        if (stored.sessionId != null) {
+            response.put("SessionId", stored.sessionId);
+        }
         response.put("Id", stored.id);
         response.put("Status", stored.status.name());
-        response.put("CreatedAt", epochSeconds(stored.createdAt));
-        response.put("UpdatedAt", epochSeconds(stored.updatedAt));
+        response.put("CreatedAt", EpochSeconds.fromInstant(stored.createdAt));
+        response.put("UpdatedAt", EpochSeconds.fromInstant(stored.updatedAt));
         response.put("Duration", stored.durationNanos);
         if (stored.error != null) {
             response.put("Error", stored.error);
         }
         response.put("QueryString", stored.sql);
+        putQueryParameters(response, stored.queryParameters);
         int stableId = stored.id.hashCode() & Integer.MAX_VALUE;
         response.put("RedshiftPid", stableId);
         response.put("RedshiftQueryId", (long) stableId);
@@ -175,7 +773,7 @@ public class RedshiftDataService implements Resettable {
         if (stored.dbUser != null) {
             response.put("DbUser", stored.dbUser);
         }
-        response.putNull("WorkgroupName");
+        putWorkgroupName(response, stored);
         response.put("ResultFormat", stored.resultFormat);
         if (stored.batch && stored.subStatements != null) {
             ArrayNode subs = response.putArray("SubStatements");
@@ -284,6 +882,14 @@ public class RedshiftDataService implements Resettable {
     // ── BatchExecuteStatement ──────────────────────────────────────────────
 
     public ObjectNode batchExecuteStatement(JsonNode request, String region) {
+        return batchExecuteStatement(request, region, null);
+    }
+
+    public ObjectNode batchExecuteStatement(JsonNode request, String region, String principal) {
+        return execute(request, region, principal, true);
+    }
+
+    private PendingStatement prepareBatch(JsonNode request, String region, RedshiftDataSessions.Scope owner) {
         JsonNode sqlsNode = request.get("Sqls");
         if (sqlsNode == null || !sqlsNode.isArray() || sqlsNode.isEmpty()) {
             throw new AwsException("ValidationException", "Sqls must be a non-empty array of SQL statements.", 400);
@@ -292,58 +898,117 @@ public class RedshiftDataService implements Resettable {
         for (JsonNode n : sqlsNode) {
             sqls.add(n.asText());
         }
+        Map<String, String> parameters = RedshiftDataSqlParameters.parseBatchParameters(request, sqls);
 
-        RedshiftDataResourceResolver.DatabaseTarget target = resolver.resolve(request, region);
+        ResolvedTarget resolved = resolveTarget(request, region, owner);
+        RedshiftDataResourceResolver.DatabaseTarget target = resolved.target();
 
         RedshiftDataStatementStore.StoredStatement parent = newStatement(request);
         parent.batch = true;
         parent.sql = String.join("; ", sqls);
         parent.sqls = sqls;
-        parent.clusterIdentifier = clusterIdentifierOrNull(request);
+        parent.clusterIdentifier = clusterIdentifierOrNull(resolved.parameters());
+        parent.workgroupName = workgroupNameOrNull(resolved.parameters());
         parent.dbUser = target.user();
         parent.database = target.database();
         parent.resultFormat = request.path("ResultFormat").asText("JSON");
         parent.subStatements = new ArrayList<>();
+        parent.queryParameters = storedParameters(parameters);
+        capture(parent, target, region, request);
 
+        return new PendingStatement(parent, (execution, session) -> runBatch(parent, sqls, parameters, target, execution, session),
+                target, request.deepCopy(), owner);
+    }
+
+    private void runBatch(RedshiftDataStatementStore.StoredStatement parent, List<String> sqls, Map<String, String> parameters,
+                          RedshiftDataResourceResolver.DatabaseTarget target, RedshiftDataExecution execution,
+                          RedshiftDataSessions.Reservation session) {
         long totalDuration = 0;
-        try (Connection connection = connectionFactory.open(target)) {
-            connection.setAutoCommit(false);
-            boolean failed = false;
-            for (int n = 0; n < sqls.size(); n++) {
-                RedshiftDataStatementStore.StoredStatement sub = new RedshiftDataStatementStore.StoredStatement();
-                sub.id = parent.id + ":" + (n + 1);
-                sub.sql = sqls.get(n);
-                sub.sqls = List.of(sqls.get(n));
-                sub.clusterIdentifier = parent.clusterIdentifier;
-                sub.database = parent.database;
-                sub.dbUser = parent.dbUser;
-                sub.resultFormat = parent.resultFormat;
-                Instant now = Instant.now();
-                sub.createdAt = now;
-                sub.updatedAt = now;
-                try {
-                    runOnConnection(sub, connection, sqls.get(n), Map.of());
-                } catch (SQLException e) {
-                    sub.status = RedshiftDataStatementStore.Status.FAILED;
-                    sub.error = e.getMessage();
+        if (session != null) {
+            if (session.transactionFailed()) {
+                parent.status = RedshiftDataStatementStore.Status.FAILED;
+                parent.error = "Current transaction is aborted; use COMMIT or ROLLBACK to end it";
+                parent.updatedAt = Instant.now();
+                return;
+            }
+            session.transaction(false);
+        }
+        try (ConnectionUse use = connection(target, session)) {
+            Connection connection = use.connection();
+            execution.track(connection);
+            BackendSql batchBackend = new RedshiftDataBackendSql(connection, execution);
+            UserChanges userChanges = session == null ? new UserChanges() : session.takeUserChangeState();
+            boolean committed = false;
+            try {
+                connection.setAutoCommit(false);
+                boolean failed = false;
+                for (int n = 0; n < sqls.size(); n++) {
+                    RedshiftDataStatementStore.StoredStatement sub = new RedshiftDataStatementStore.StoredStatement();
+                    sub.id = parent.id + ":" + (n + 1);
+                    sub.sql = sqls.get(n);
+                    sub.sqls = List.of(sqls.get(n));
+                    sub.clusterIdentifier = parent.clusterIdentifier;
+                    sub.workgroupName = parent.workgroupName;
+                    sub.database = parent.database;
+                    sub.dbUser = parent.dbUser;
+                    sub.sessionId = parent.sessionId;
+                    sub.resultFormat = parent.resultFormat;
+                    Instant now = Instant.now();
+                    sub.createdAt = now;
+                    sub.updatedAt = now;
+                    try {
+                        execution.checkCancellation();
+                        publishActivity(parent, target, sqls.get(n));
+                        runBatchEntry(sub, connection, sqls.get(n), parameters, target.spectrum(), execution, userChanges);
+                    } catch (SQLException e) {
+                        sub.status = RedshiftDataStatementStore.Status.FAILED;
+                        sub.error = e.getMessage();
+                        sub.updatedAt = Instant.now();
+                        parent.subStatements.add(sub);
+                        executor.publish(execution, () -> store.putForAccount(parent.accountId, sub));
+                        totalDuration += sub.durationNanos;
+                        parent.status = RedshiftDataStatementStore.Status.FAILED;
+                        parent.error = e.getMessage();
+                        if (session != null && e.getSQLState() != null && e.getSQLState().startsWith("08")) {
+                            session.discard();
+                            throw e;
+                        }
+                        connection.rollback();
+                        if (session != null) {
+                            session.takeUserChanges();
+                        }
+                        failed = true;
+                        break;
+                    }
                     sub.updatedAt = Instant.now();
                     parent.subStatements.add(sub);
-                    store.put(sub);
+                    executor.publish(execution, () -> {
+                        store.putForAccount(parent.accountId, sub);
+                        store.putForAccount(parent.accountId, parent);
+                    });
                     totalDuration += sub.durationNanos;
-                    parent.status = RedshiftDataStatementStore.Status.FAILED;
-                    parent.error = e.getMessage();
-                    connection.rollback();
-                    failed = true;
-                    break;
                 }
-                sub.updatedAt = Instant.now();
-                parent.subStatements.add(sub);
-                store.put(sub);
-                totalDuration += sub.durationNanos;
-            }
-            if (!failed) {
-                connection.commit();
-                parent.status = RedshiftDataStatementStore.Status.FINISHED;
+                if (!failed) {
+                    execution.commit(connection::commit);
+                    committed = true;
+                    userChanges.commit();
+                    parent.status = RedshiftDataStatementStore.Status.FINISHED;
+                }
+            } finally {
+                if (!committed) {
+                    userChanges.rollback();
+                }
+                publishUserChanges(parent, target, userChanges.drainCommitted());
+                if (!committed && session != null) {
+                    session.takeUserChanges();
+                }
+                if (preparation != null) {
+                    if (committed) {
+                        preparation.finishCycle(batchBackend, true);
+                    } else {
+                        preparation.finishCycle(batchBackend);
+                    }
+                }
             }
         } catch (SQLException e) {
             parent.status = RedshiftDataStatementStore.Status.FAILED;
@@ -363,8 +1028,34 @@ public class RedshiftDataService implements Resettable {
         }
         parent.durationNanos = totalDuration;
         parent.updatedAt = Instant.now();
-        store.put(parent);
-        return executeResponse(parent);
+    }
+
+    private void runBatchEntry(RedshiftDataStatementStore.StoredStatement sub, Connection connection, String sql,
+                               Map<String, String> parameters, SpectrumSession context,
+                               RedshiftDataExecution execution, UserChanges userChanges)
+            throws SQLException {
+        List<String> commands = RedshiftAuditSql.statements(sql);
+        if (commands.isEmpty()) {
+            runOnConnection(sub, connection, sql, parameters, context, execution, false);
+            return;
+        }
+        long duration = 0;
+        for (int i = 0; i < commands.size(); i++) {
+            // JDBC exposes the first result of an entry; later commands still affect transaction audit state.
+            RedshiftDataStatementStore.StoredStatement result = i == 0 ? sub : new RedshiftDataStatementStore.StoredStatement();
+            try {
+                String command = commands.get(i);
+                if (RedshiftAuditSql.isCommit(command)) {
+                    execution.commit(() -> runOnConnection(result, connection, command, parameters, context, execution, false));
+                } else {
+                    runOnConnection(result, connection, command, parameters, context, execution, false);
+                }
+                userChanges.complete(command);
+            } finally {
+                duration += result.durationNanos;
+                sub.durationNanos = duration;
+            }
+        }
     }
 
     // ── ListStatements ─────────────────────────────────────────────────────
@@ -396,18 +1087,22 @@ public class RedshiftDataService implements Resettable {
             RedshiftDataStatementStore.StoredStatement s = all.get(i);
             ObjectNode node = statements.addObject();
             node.put("Id", s.id);
+            if (s.sessionId != null) {
+                node.put("SessionId", s.sessionId);
+            }
             node.put("QueryString", s.sql);
             ArrayNode queryStrings = node.putArray("QueryStrings");
             for (String sql : s.sqls != null ? s.sqls : List.of(s.sql)) {
                 queryStrings.add(sql);
             }
             node.put("Status", s.status.name());
-            node.put("CreatedAt", epochSeconds(s.createdAt));
-            node.put("UpdatedAt", epochSeconds(s.updatedAt));
+            node.put("CreatedAt", EpochSeconds.fromInstant(s.createdAt));
+            node.put("UpdatedAt", EpochSeconds.fromInstant(s.updatedAt));
             if (s.statementName != null) {
                 node.put("StatementName", s.statementName);
             }
             node.put("IsBatchStatement", s.batch);
+            putQueryParameters(node, s.queryParameters);
             node.put("ResultRows", s.resultRows);
             node.put("ResultSize", s.resultSize);
             node.put("Duration", s.durationNanos);
@@ -422,13 +1117,13 @@ public class RedshiftDataService implements Resettable {
 
     public ObjectNode cancelStatement(JsonNode request) {
         RedshiftDataStatementStore.StoredStatement stored = require(request);
-        if (stored.status != RedshiftDataStatementStore.Status.FINISHED
-                && stored.status != RedshiftDataStatementStore.Status.FAILED) {
-            stored.status = RedshiftDataStatementStore.Status.ABORTED;
-            stored.updatedAt = Instant.now();
+        if (stored.status.isTerminal()) {
+            throw new AwsException("ValidationException",
+                    "Could not cancel a query that is already in " + stored.status.name() + " state with ID: " + stored.id,
+                    400);
         }
         ObjectNode response = objectMapper.createObjectNode();
-        response.put("Status", true);
+        response.put("Status", executor.cancel(stored.accountId, stored.id));
         return response;
     }
 
@@ -616,7 +1311,7 @@ public class RedshiftDataService implements Resettable {
         Instant now = Instant.now();
         stored.createdAt = now;
         stored.updatedAt = now;
-        stored.status = RedshiftDataStatementStore.Status.STARTED;
+        stored.status = RedshiftDataStatementStore.Status.SUBMITTED;
         return stored;
     }
 
@@ -631,7 +1326,14 @@ public class RedshiftDataService implements Resettable {
 
     private RedshiftDataStatementStore.StoredStatement resultBearing(JsonNode request) {
         RedshiftDataStatementStore.StoredStatement stored = require(request);
-        if (!stored.hasResultSet || stored.rows == null) {
+        int childSuffix = stored.id.indexOf(':');
+        if (childSuffix >= 0) {
+            RedshiftDataStatementStore.StoredStatement parent = store.get(stored.id.substring(0, childSuffix));
+            if (parent == null || parent.status != RedshiftDataStatementStore.Status.FINISHED) {
+                throw new AwsException("ValidationException", "Statement has no result set", 400);
+            }
+        }
+        if (stored.status != RedshiftDataStatementStore.Status.FINISHED || !stored.hasResultSet || stored.rows == null) {
             throw new AwsException("ValidationException", "Statement has no result set", 400);
         }
         return stored;
@@ -664,12 +1366,42 @@ public class RedshiftDataService implements Resettable {
         return offset;
     }
 
-    private static double epochSeconds(Instant instant) {
-        return instant.toEpochMilli() / 1000.0;
-    }
-
     private String clusterIdentifierOrNull(JsonNode request) {
         return textOrNull(request, "ClusterIdentifier");
+    }
+
+    private String workgroupNameOrNull(JsonNode request) {
+        return textOrNull(request, "WorkgroupName");
+    }
+
+    /** A cluster statement keeps the null member it always had; a workgroup statement names its workgroup. */
+    private static void putWorkgroupName(ObjectNode response, RedshiftDataStatementStore.StoredStatement stored) {
+        if (stored.workgroupName != null) {
+            response.put("WorkgroupName", stored.workgroupName);
+        } else {
+            response.putNull("WorkgroupName");
+        }
+    }
+
+    private static List<StoredParameter> storedParameters(Map<String, String> parameters) {
+        return parameters.isEmpty() ? null : parameters.entrySet().stream()
+                .map(entry -> new StoredParameter(entry.getKey(), entry.getValue())).toList();
+    }
+
+    private static void putQueryParameters(ObjectNode target, List<StoredParameter> parameters) {
+        if (parameters == null || parameters.isEmpty()) {
+            return;
+        }
+        ArrayNode queryParameters = target.putArray("QueryParameters");
+        for (StoredParameter parameter : parameters) {
+            ObjectNode paramNode = queryParameters.addObject();
+            paramNode.put("name", parameter.name());
+            if (parameter.value() == null) {
+                paramNode.putNull("value");
+            } else {
+                paramNode.put("value", parameter.value());
+            }
+        }
     }
 
     private static String requiredText(JsonNode request, String name) {

@@ -1,6 +1,6 @@
 package io.floci.aws.services.rds.proxy;
 
-import io.floci.aws.config.EmulatorConfig;
+import io.floci.aws.config.FlociCertificateAuthority;
 import io.floci.aws.services.acm.CertificateGenerator;
 import io.floci.aws.testutil.IamServiceTestHelper;
 import io.floci.aws.testutil.SigV4TokenTestHelper;
@@ -37,8 +37,6 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 class MySqlProtocolHandlerTest {
 
@@ -95,7 +93,8 @@ class MySqlProtocolHandlerTest {
                         MySqlProtocolHandler.handleAuth(
                                 proxyClient, backend, NO_RECONNECT, "admin", "secret",
                                 false, testSigV4Validator(), testTlsCertificates(),
-                                (user, pass) -> PasswordValidator.AuthResult.MASTER_EQUIVALENT, 5000);
+                                (user, pass) -> PasswordValidator.AuthResult.MASTER_EQUIVALENT, 5000,
+                                username -> true, testBinding());
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -132,6 +131,66 @@ class MySqlProtocolHandlerTest {
     }
 
     @Test
+    void closesTheBackendWhenTheClientDropsWithoutQuitting() throws Exception {
+        byte[] nonce = fixedNonce();
+        AtomicReference<Integer> backendReadAfterDrop = new AtomicReference<>();
+
+        try (ServerSocket backendServer = new ServerSocket(0);
+             ServerSocket clientServer = new ServerSocket(0)) {
+
+            Thread backendThread = Thread.ofVirtual().start(() -> {
+                try (Socket socket = backendServer.accept()) {
+                    OutputStream out = socket.getOutputStream();
+                    InputStream in = socket.getInputStream();
+                    out.write(buildHandshakeV10(nonce));
+                    out.flush();
+                    readMysqlPacketRaw(in);
+                    writeMysqlPacket(out, 2, OK_PAYLOAD);
+                    out.flush();
+                    // Stays connected and silent, as an idle MySQL server does.
+                    socket.setSoTimeout(5_000);
+                    backendReadAfterDrop.set(in.read());
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
+
+            Socket proxyClient;
+            try (Socket ourClient = new Socket("localhost", clientServer.getLocalPort())) {
+                proxyClient = clientServer.accept();
+                Socket backend = new Socket("localhost", backendServer.getLocalPort());
+
+                Thread authThread = Thread.ofVirtual().start(() -> {
+                    try {
+                        MySqlProtocolHandler.handleAuth(
+                                proxyClient, backend, NO_RECONNECT, "admin", "secret",
+                                false, testSigV4Validator(), testTlsCertificates(),
+                                (user, pass) -> PasswordValidator.AuthResult.MASTER_EQUIVALENT, 5000,
+                                username -> true, testBinding());
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                });
+
+                InputStream clientIn = ourClient.getInputStream();
+                OutputStream clientOut = ourClient.getOutputStream();
+                assertNotNull(readMysqlPacketRaw(clientIn));
+                clientOut.write(buildHandshakeResponse41("admin", scrambleNativePassword("secret", nonce), (byte) 1));
+                clientOut.flush();
+                assertNotNull(readMysqlPacketRaw(clientIn));
+
+                // No COM_QUIT: the client just goes away.
+                ourClient.close();
+
+                joinAll(backendThread, authThread);
+            }
+            assertTrue(proxyClient.isClosed(), "the proxy must close its side of the dropped client");
+        }
+
+        assertEquals(-1, backendReadAfterDrop.get(), "the proxy must close the backend once the client drops");
+    }
+
+    @Test
     void validatesCachingSha2MasterScrambleAndForwardsResponse() throws Exception {
         byte[] nonce = fixedNonce();
         AtomicReference<Byte> backendResponseSeq = new AtomicReference<>();
@@ -157,7 +216,8 @@ class MySqlProtocolHandlerTest {
                         MySqlProtocolHandler.handleAuth(
                                 proxyClient, backend, NO_RECONNECT, "admin", "secret",
                                 false, testSigV4Validator(), testTlsCertificates(),
-                                (user, pass) -> PasswordValidator.AuthResult.MASTER_EQUIVALENT, 5000);
+                                (user, pass) -> PasswordValidator.AuthResult.MASTER_EQUIVALENT, 5000,
+                                username -> true, testBinding());
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -213,7 +273,8 @@ class MySqlProtocolHandlerTest {
                         MySqlProtocolHandler.handleAuth(
                                 proxyClient, backend, NO_RECONNECT, "admin", "secret",
                                 false, testSigV4Validator(), tlsCertificates,
-                                (user, pass) -> PasswordValidator.AuthResult.MASTER_EQUIVALENT, 5000);
+                                (user, pass) -> PasswordValidator.AuthResult.MASTER_EQUIVALENT, 5000,
+                                username -> true, testBinding());
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -311,7 +372,8 @@ class MySqlProtocolHandlerTest {
                         MySqlProtocolHandler.handleAuth(
                                 proxyClient, backend, NO_RECONNECT, "admin", "secret",
                                 false, testSigV4Validator(), tlsCertificates,
-                                (user, pass) -> PasswordValidator.AuthResult.MASTER_EQUIVALENT, 5000);
+                                (user, pass) -> PasswordValidator.AuthResult.MASTER_EQUIVALENT, 5000,
+                                username -> true, testBinding());
                     } catch (IOException e) {
                         throw new RuntimeException(e);
                     }
@@ -372,7 +434,8 @@ class MySqlProtocolHandlerTest {
                         MySqlProtocolHandler.handleAuth(
                                 proxyClient, backend, NO_RECONNECT, "admin", "secret",
                                 false, testSigV4Validator(), testTlsCertificates(),
-                                (user, pass) -> PasswordValidator.AuthResult.MASTER_EQUIVALENT, 200);
+                                (user, pass) -> PasswordValidator.AuthResult.MASTER_EQUIVALENT, 200,
+                                username -> true, testBinding());
                     } catch (IOException e) {
                         authFailure.set(e);
                     }
@@ -675,7 +738,8 @@ class MySqlProtocolHandlerTest {
                 MySqlProtocolHandler.handleAuth(
                         proxyClient, backend, connector, "admin", "secret",
                         iamEnabled, testSigV4Validator(), tlsCertificates,
-                        (user, pass) -> PasswordValidator.AuthResult.PASSTHROUGH, 5000);
+                        (user, pass) -> PasswordValidator.AuthResult.PASSTHROUGH, 5000,
+                        username -> true, testBinding());
             } catch (IOException e) {
                 throw new UncheckedIOException(e);
             }
@@ -690,15 +754,18 @@ class MySqlProtocolHandlerTest {
     }
 
     private RdsProxyTlsCertificates testTlsCertificates() {
-        EmulatorConfig.StorageConfig storage = mock(EmulatorConfig.StorageConfig.class);
-        when(storage.persistentPath()).thenReturn(tempDir.toString());
-        EmulatorConfig config = mock(EmulatorConfig.class);
-        when(config.storage()).thenReturn(storage);
-        return new RdsProxyTlsCertificates(config, new CertificateGenerator());
+        return new RdsProxyTlsCertificates(FlociCertificateAuthority.loadOrCreate(tempDir.resolve("tls")),
+                new CertificateGenerator());
     }
 
     private static RdsSigV4Validator testSigV4Validator() {
         return new RdsSigV4Validator(IamServiceTestHelper.iamServiceWithAccessKey("AKIATEST", "secret"));
+    }
+
+    /** What the proxy publishes for the endpoint {@link #rdsToken} generates tokens for. */
+    private static RdsProxyBinding testBinding() {
+        return new RdsProxyBinding("mydb.abc123.us-east-1.rds.amazonaws.com", 3306, "us-east-1",
+                "123456789012", "db-ABCDEFGHIJKL01234", true);
     }
 
     private static SSLSocket trustedClientSocket(Socket socket) throws Exception {

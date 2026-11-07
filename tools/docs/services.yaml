@@ -33,6 +33,10 @@ services:
     doc: docs/services/payment-cryptography.md
     sources:
       - { path: services/paymentcryptography/PaymentCryptographyJsonHandler.java, mode: switch }
+  - service: paymentcryptographydata
+    doc: docs/services/payment-cryptography-data.md
+    sources:
+      - { path: services/paymentcryptography/PaymentCryptographyCryptoController.java, mode: rest }
   - service: applicationautoscaling
     doc: docs/services/applicationautoscaling.md
     sources:
@@ -342,6 +346,11 @@ services:
     # ExecuteSql / BatchExecuteSql are the deprecated pre-2020 operations: the handler
     # recognizes them only to return a ValidationException, they are not supported actions.
     exclude_actions: [ExecuteSql, BatchExecuteSql]
+  - service: redshiftserverless
+    doc: docs/services/redshift-serverless.md
+    sources:
+      - { path: services/redshiftserverless/RedshiftServerlessJsonHandler.java, mode: switch }
+      - { path: services/redshiftserverless/RedshiftServerlessAdminJsonHandler.java, mode: switch }
   - service: cognitoidentity
     doc: docs/services/cognitoidentity.md
     sources:

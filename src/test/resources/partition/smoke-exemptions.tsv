@@ -19,6 +19,7 @@ lightsail	no non-commercial partition publishes the service, so a case would be 
 marketplace	the ARN-minting calls are pinned to us-east-1 except ResolveCustomer, whose record nothing removes, so a case would leak state into the shared emulator
 neptune	CreateDBCluster starts a graph container whenever Docker is reachable, and the package has no container-free resource
 redshiftdata	the only ARN it mints is internal and never returned, and every action needs a running cluster container
+redshiftserverless	adopted from upstream with its own ARN tests; no cross-service smoke case covers it yet
 rum	no RUM response carries the app monitor ARN: it is minted only for Resource Explorer listings
 s3	covered by S3PartitionIntegrationTest (bucket rules, all partitions)
 signin	the only ARN is the sub claim of an id token issued by the OAuth flow, and the session that flow registers cannot be removed

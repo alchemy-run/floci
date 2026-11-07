@@ -3,10 +3,12 @@ package io.floci.aws.services.redshiftdata;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
-import io.floci.aws.services.dynamodb.model.DynamoDbStreamRecord;
 import io.floci.aws.services.redshift.RedshiftService;
+import io.floci.aws.services.redshift.RedshiftZeroEtlEndpoints;
 import io.floci.aws.services.redshift.model.Cluster;
+import io.floci.aws.services.redshiftserverless.RedshiftServerlessService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -16,6 +18,8 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Types;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.regex.Pattern;
 
@@ -39,21 +43,25 @@ public class RedshiftZeroEtlWriter {
             + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (event_id) DO NOTHING";
 
     private final RedshiftService redshiftService;
+    private final RedshiftZeroEtlEndpoints endpoints;
     private final RedshiftDataConnectionFactory connectionFactory;
     private final ObjectMapper objectMapper;
 
     @Inject
     RedshiftZeroEtlWriter(RedshiftService redshiftService,
+                          RedshiftZeroEtlEndpoints endpoints,
                           RedshiftDataConnectionFactory connectionFactory,
                           ObjectMapper objectMapper) {
         this.redshiftService = redshiftService;
+        this.endpoints = endpoints;
         this.connectionFactory = connectionFactory;
         this.objectMapper = objectMapper;
     }
 
-    public void createLandingTable(String accountId, String clusterIdentifier, String tableName) {
+    /** {@code targetArn} names a Redshift Serverless namespace or a provisioned cluster. */
+    public void createLandingTable(String accountId, String targetArn, String tableName) {
         String safeTableName = validateTableName(tableName);
-        try (Connection connection = connectionFactory.open(target(accountId, clusterIdentifier));
+        try (Connection connection = connectionFactory.open(target(accountId, targetArn));
              Statement statement = connection.createStatement()) {
             statement.executeUpdate(LANDING_TABLE_DDL.formatted(safeTableName) + ")");
         } catch (SQLException e) {
@@ -61,40 +69,46 @@ public class RedshiftZeroEtlWriter {
         }
     }
 
-    public String writeBatch(String accountId, String clusterIdentifier, String tableName,
-                             List<DynamoDbStreamRecord> records) {
+    /** Writes AWS DynamoDB Streams {@code Records[]} elements, skipping event ids already landed. */
+    public void writeBatch(String accountId, String targetArn, String tableName, List<JsonNode> records) {
         if (records == null || records.isEmpty()) {
-            return null;
+            return;
         }
         String safeTableName = validateTableName(tableName);
-        String newestSequence = null;
-        try (Connection connection = connectionFactory.open(target(accountId, clusterIdentifier));
+        try (Connection connection = connectionFactory.open(target(accountId, targetArn));
              PreparedStatement statement = connection.prepareStatement(INSERT_RECORD.formatted(safeTableName))) {
-            for (DynamoDbStreamRecord record : records) {
+            for (JsonNode record : records) {
                 bind(statement, record);
                 statement.executeUpdate();
-                newestSequence = record.getSequenceNumber();
             }
         } catch (SQLException e) {
             throw new AwsException("InternalFailure", "Could not write Redshift zero-ETL records.", 500);
         }
-        return newestSequence;
     }
 
-    private void bind(PreparedStatement statement, DynamoDbStreamRecord record) throws SQLException {
-        statement.setString(1, record.getEventId());
-        statement.setString(2, record.getEventName());
-        setNullableString(statement, 3, record.getEventSource());
-        setNullableString(statement, 4, record.getAwsRegion());
-        statement.setString(5, record.getSequenceNumber());
-        if (record.getApproximateCreationDateTime() > 0) {
-            statement.setObject(6, Instant.ofEpochSecond(record.getApproximateCreationDateTime()));
+    private void bind(PreparedStatement statement, JsonNode record) throws SQLException {
+        JsonNode dynamodb = record.path("dynamodb");
+        statement.setString(1, text(record, "eventID"));
+        statement.setString(2, text(record, "eventName"));
+        setNullableString(statement, 3, text(record, "eventSource"));
+        setNullableString(statement, 4, text(record, "awsRegion"));
+        statement.setString(5, text(dynamodb, "SequenceNumber"));
+        long approximateCreationDateTime = dynamodb.path("ApproximateCreationDateTime").asLong();
+        if (approximateCreationDateTime > 0) {
+            // The PostgreSQL driver binds an OffsetDateTime to TIMESTAMPTZ but cannot infer a type for an Instant.
+            statement.setObject(6, OffsetDateTime.ofInstant(Instant.ofEpochSecond(approximateCreationDateTime),
+                    ZoneOffset.UTC), Types.TIMESTAMP_WITH_TIMEZONE);
         } else {
             statement.setNull(6, Types.TIMESTAMP_WITH_TIMEZONE);
         }
-        setJson(statement, 7, record.getKeys());
-        setJson(statement, 8, record.getOldImage());
-        setJson(statement, 9, record.getNewImage());
+        setJson(statement, 7, dynamodb.get("Keys"));
+        setJson(statement, 8, dynamodb.get("OldImage"));
+        setJson(statement, 9, dynamodb.get("NewImage"));
+    }
+
+    private static String text(JsonNode node, String field) {
+        JsonNode value = node.get(field);
+        return value == null || value.isNull() ? null : value.asText();
     }
 
     private void setNullableString(PreparedStatement statement, int index, String value) throws SQLException {
@@ -117,7 +131,17 @@ public class RedshiftZeroEtlWriter {
         }
     }
 
-    private RedshiftDataResourceResolver.DatabaseTarget target(String accountId, String clusterIdentifier) {
+    /**
+     * A namespace is written through its workgroup, into the namespace's database as its admin user, the
+     * same identity a cluster target is written with.
+     */
+    private RedshiftDataResourceResolver.DatabaseTarget target(String accountId, String targetArn) {
+        if (RedshiftZeroEtlEndpoints.isNamespaceArn(targetArn)) {
+            RedshiftServerlessService.WorkgroupTarget workgroup = endpoints.targetWorkgroup(accountId, targetArn);
+            return new RedshiftDataResourceResolver.DatabaseTarget(workgroup.arn(), workgroup.host(),
+                    workgroup.port(), workgroup.database(), workgroup.masterUsername(), workgroup.masterPassword());
+        }
+        String clusterIdentifier = AwsArnUtils.parse(targetArn).resource().substring("cluster:".length());
         Cluster cluster;
         try {
             cluster = redshiftService.describeClustersForAccount(accountId, clusterIdentifier).get(0);
