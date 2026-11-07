@@ -151,7 +151,7 @@ class RdsStorageTypeIntegrationTest {
         String replica = "storage-type-replica";
         String pitr = "storage-type-pitr";
         try {
-            var createSource = create(source).formParam("StorageType", storageType)
+            RequestSpecification createSource = create(source).formParam("StorageType", storageType)
                     .formParam("BackupRetentionPeriod", "2");
             if (storageType.startsWith("io")) {
                 createSource.formParam("Iops", "1000");
