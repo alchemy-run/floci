@@ -69,8 +69,18 @@ against a bucket matched by an active trail's selectors:
 Both success and `AwsException` paths emit; the latter populates
 `errorCode` / `errorMessage` (`NoSuchKey`, `NoSuchBucketPolicy`, etc.).
 
-If `floci.iam.enforcement-enabled` is set, IAM-deny responses also emit
-records with `errorCode: "AccessDenied"` for the same op set.
+If `floci.services.iam.enforcement-enabled` is set, IAM-deny responses also
+emit records with `errorCode: "AccessDenied"`, named after the operation that
+was refused. Besides the ops above, that covers the object ACL and tagging
+operations, `PutObjectRetention`, `GetObjectAttributes`, and the `POST`
+operations `CreateMultipartUpload`, `CompleteMultipartUpload`, `RestoreObject`
+and `SelectObjectContent`. A `POST` is named from the request's
+sub-resource, since `CreateMultipartUpload` and `CompleteMultipartUpload` are
+both checked as `s3:PutObject` and `SelectObjectContent` as `s3:GetObject`. A request
+refused for a permission it needs besides its own, such as
+`s3:PutObjectTagging` for an upload that sets tags, is recorded as the
+operation. A browser `POST` upload, whose credential is in its form fields, is
+recorded as `PostObject` when IAM refuses it.
 
 ## CloudTrail Lake Queries
 

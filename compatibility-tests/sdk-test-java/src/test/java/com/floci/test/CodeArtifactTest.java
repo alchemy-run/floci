@@ -1,5 +1,7 @@
 package com.floci.test;
 
+// Explicit import: this file's Tag usage is the CodeArtifact model type, not JUnit's @Tag.
+
 import org.jboss.logging.Logger;
 import org.junit.jupiter.api.*;
 import software.amazon.awssdk.core.ResponseBytes;

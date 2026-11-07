@@ -1,0 +1,270 @@
+package io.floci.aws.services.rds.proxy;
+
+import io.floci.aws.services.rds.model.DatabaseEngine;
+import org.jboss.logging.Logger;
+
+import java.io.IOException;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
+import java.net.Socket;
+import java.util.concurrent.Semaphore;
+
+/**
+ * TCP auth proxy for a single RDS DB instance or cluster.
+ * Dispatches to the appropriate engine-specific protocol handler for the
+ * auth intercept, then bridges client ↔ backend transparently.
+ */
+public class RdsAuthProxy {
+
+    private static final Logger LOG = Logger.getLogger(RdsAuthProxy.class);
+
+    private final int backendPort;
+    private volatile boolean iamEnabled;
+    private final String instanceId;
+    private final String backendHost;
+    private final String masterUsername;
+    private volatile String masterPassword;
+    private final String dbName;
+    private final DatabaseEngine engine;
+    private final RdsSigV4Validator sigV4;
+    private volatile RdsMysqlBinding mysqlBinding;
+    private final MySqlProtocolHandler.IamUserChecker iamUserChecker;
+    private final RdsProxyTlsCertificates tlsCertificates;
+    private final MasterPasswordCheck passwordValidator;
+    private final int handshakeTimeoutMillis;
+    private final int backendConnectTimeoutMillis;
+    private final Semaphore connectionPermits;
+
+    private volatile boolean running;
+    private ServerSocket serverSocket;
+    private volatile Thread acceptThread;
+    private volatile int port;
+
+    public RdsAuthProxy(String instanceId, String backendHost, int backendPort,
+                        DatabaseEngine engine, boolean iamEnabled,
+                        String masterUsername, String masterPassword, String dbName,
+                        RdsSigV4Validator sigV4, RdsProxyTlsCertificates tlsCertificates,
+                        MasterPasswordCheck passwordValidator,
+                        int handshakeTimeoutMillis, int backendConnectTimeoutMillis,
+                        int maxConnections) {
+        this(instanceId, backendHost, backendPort, engine, iamEnabled, masterUsername, masterPassword,
+                dbName, sigV4, tlsCertificates, passwordValidator, handshakeTimeoutMillis,
+                backendConnectTimeoutMillis, maxConnections, null, username -> false);
+    }
+
+    public RdsAuthProxy(String instanceId, String backendHost, int backendPort,
+                        DatabaseEngine engine, boolean iamEnabled,
+                        String masterUsername, String masterPassword, String dbName,
+                        RdsSigV4Validator sigV4, RdsProxyTlsCertificates tlsCertificates,
+                        MasterPasswordCheck passwordValidator,
+                        int handshakeTimeoutMillis, int backendConnectTimeoutMillis,
+                        int maxConnections, RdsMysqlBinding mysqlBinding) {
+        this(instanceId, backendHost, backendPort, engine, iamEnabled, masterUsername, masterPassword,
+                dbName, sigV4, tlsCertificates, passwordValidator, handshakeTimeoutMillis,
+                backendConnectTimeoutMillis, maxConnections, mysqlBinding,
+                username -> mysqlBinding != null);
+    }
+
+    public RdsAuthProxy(String instanceId, String backendHost, int backendPort,
+                        DatabaseEngine engine, boolean iamEnabled,
+                        String masterUsername, String masterPassword, String dbName,
+                        RdsSigV4Validator sigV4, RdsProxyTlsCertificates tlsCertificates,
+                        MasterPasswordCheck passwordValidator,
+                        int handshakeTimeoutMillis, int backendConnectTimeoutMillis,
+                        int maxConnections, RdsMysqlBinding mysqlBinding,
+                        MySqlProtocolHandler.IamUserChecker iamUserChecker) {
+        this.instanceId = instanceId;
+        this.backendHost = backendHost;
+        this.backendPort = backendPort;
+        this.engine = engine;
+        this.iamEnabled = iamEnabled;
+        this.masterUsername = masterUsername;
+        this.masterPassword = masterPassword;
+        this.dbName = dbName;
+        this.sigV4 = sigV4;
+        this.mysqlBinding = mysqlBinding;
+        this.iamUserChecker = iamUserChecker;
+        this.tlsCertificates = tlsCertificates;
+        this.passwordValidator = passwordValidator;
+        this.handshakeTimeoutMillis = handshakeTimeoutMillis;
+        this.backendConnectTimeoutMillis = backendConnectTimeoutMillis;
+        this.connectionPermits = new Semaphore(Math.max(1, maxConnections));
+    }
+
+    public void start(int proxyPort) throws IOException {
+        serverSocket = new ServerSocket();
+        serverSocket.setReuseAddress(true);
+        serverSocket.bind(new InetSocketAddress(proxyPort));
+        port = serverSocket.getLocalPort();
+        running = true;
+        acceptThread = Thread.ofVirtual().name("rds-proxy-accept-" + instanceId).start(this::acceptLoop);
+        LOG.infov("RDS proxy started for instance {0} on port {1} → {2}:{3}",
+                instanceId, String.valueOf(proxyPort), backendHost, String.valueOf(backendPort));
+    }
+
+    /** Swap the master-password snapshot after a rotation; new connections authenticate against it. */
+    public void updateMasterPassword(String newPassword) {
+        this.masterPassword = newPassword;
+    }
+
+    /** Apply an IAM-auth setting change to new connections without restarting the listener. */
+    public void updateIamEnabled(boolean enabled) {
+        this.iamEnabled = enabled;
+    }
+
+    /**
+     * The host and port MySQL IAM tokens must be signed for: the advertised endpoint, which is
+     * not this listener's internal port once the endpoint is served on its configured port.
+     */
+    public void updateMysqlBinding(RdsMysqlBinding binding) {
+        if (this.mysqlBinding != null) {
+            this.mysqlBinding = binding;
+        }
+    }
+
+    /** The port this proxy accepted connections on, or 0 before {@link #start}. */
+    public int getPort() {
+        return port;
+    }
+
+    public DatabaseEngine getEngine() {
+        return engine;
+    }
+
+    public void stop() {
+        running = false;
+        try {
+            if (serverSocket != null) {
+                serverSocket.close();
+            }
+        } catch (IOException e) {
+            LOG.warnv(e, "Error closing RDS proxy server socket for instance {0}", instanceId);
+            throw new RuntimeException(
+                    "Failed to stop RDS proxy for instance " + instanceId, e);
+        }
+        // Closing a socket a virtual thread is accepting on only wakes that thread; the
+        // descriptor is released when it leaves accept(). Wait for that so the port can be
+        // bound again (e.g. by the restarted proxy after a rename) once stop() returns.
+        Thread thread = acceptThread;
+        if (thread != null && thread != Thread.currentThread()) {
+            try {
+                if (!thread.join(java.time.Duration.ofSeconds(5))) {
+                    LOG.warnv("RDS proxy for instance {0} did not stop within 5s", instanceId);
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+    }
+
+    private void acceptLoop() {
+        while (running) {
+            try {
+                Socket client = serverSocket.accept();
+                if (!connectionPermits.tryAcquire()) {
+                    LOG.warnv("Refusing RDS connection for instance {0}: connection limit reached",
+                            instanceId);
+                    closeQuietly(client);
+                    continue;
+                }
+                Thread.ofVirtual().name("rds-proxy-conn-" + instanceId)
+                        .start(() -> {
+                            try {
+                                handleConnection(client);
+                            } finally {
+                                connectionPermits.release();
+                            }
+                        });
+            } catch (IOException e) {
+                if (running) {
+                    LOG.warnv("Accept error for RDS instance {0}: {1}", instanceId, e.getMessage());
+                }
+            }
+        }
+    }
+
+    private void handleConnection(Socket client) {
+        Socket backend = null;
+        PostgresProtocolHandler.AuthenticatedSession session = null;
+        try {
+            client.setTcpNoDelay(true);
+
+            // RDS only proxy-validates the master user; a non-master user passes through so the
+            // backend enforces its own credentials.
+            PasswordValidator authAdapter = (user, pass) -> {
+                if (!masterUsername.equals(user)) {
+                    return PasswordValidator.AuthResult.PASSTHROUGH;
+                }
+                return passwordValidator.validate(user, pass)
+                        ? PasswordValidator.AuthResult.MASTER_EQUIVALENT
+                        : PasswordValidator.AuthResult.REJECT;
+            };
+
+            PostgresProtocolHandler.BackendConnector connector = () -> {
+                Socket backendSocket = new Socket();
+                backendSocket.connect(new InetSocketAddress(backendHost, backendPort),
+                        backendConnectTimeoutMillis);
+                backendSocket.setTcpNoDelay(true);
+                return backendSocket;
+            };
+
+            switch (engine) {
+                case POSTGRES -> {
+                    session = PostgresProtocolHandler.authenticate(
+                                    client, connector, masterUsername, masterPassword, dbName,
+                                    iamEnabled, sigV4, tlsCertificates, authAdapter,
+                                    handshakeTimeoutMillis);
+                    if (session != null) {
+                        PostgresProtocolHandler.bridge(session);
+                    }
+                }
+                case MYSQL, MARIADB -> {
+                    backend = connector.connect();
+                    MySqlProtocolHandler.handleAuth(
+                            client, backend, connector, masterUsername, masterPassword,
+                            iamEnabled, sigV4, tlsCertificates, authAdapter,
+                            handshakeTimeoutMillis,
+                            iamUserChecker, mysqlBinding);
+                }
+                case SQLSERVER -> {
+                    backend = connector.connect();
+                    TcpStreamBridge.relay(client, backend);
+                }
+            }
+        } catch (Exception e) {
+            LOG.debugv("RDS connection error for instance {0}: {1}", instanceId, e.getMessage());
+        } finally {
+            // A handler's success path bridges then closes both sockets; every other path
+            // (early return on a bare probe, auth failure, thrown IOException) can leave the
+            // backend DB connection open. Closing here is idempotent, and also covers a
+            // RuntimeException thrown between authenticate() returning a session and bridge()
+            // finishing its own cleanup, which would otherwise leak session.backend().
+            closeQuietly(client);
+            closeQuietly(backend);
+            if (session != null) {
+                closeQuietly(session.backend());
+            }
+        }
+    }
+
+    private static void closeQuietly(Socket s) {
+        if (s == null) {
+            return;
+        }
+        try {
+            s.close();
+        } catch (IOException e) {
+            LOG.debugv(e, "Error closing RDS proxy client socket");
+        }
+    }
+
+    /**
+     * Callback for master-password validation, implemented by RdsService. Returns true when the
+     * supplied master credentials are current. Non-master users are never asked here: the backend
+     * database is the authority for their passwords.
+     */
+    @FunctionalInterface
+    public interface MasterPasswordCheck {
+        boolean validate(String username, String password);
+    }
+}

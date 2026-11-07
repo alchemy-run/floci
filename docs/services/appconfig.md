@@ -58,6 +58,16 @@ Associations on the application, environment, or configuration profile all match
 Tagging operations:
 
 - `TagResource` / `UntagResource` / `ListTagsForResource` (applications, environments, profiles, strategies, extensions, associations)
+- `GetConfiguration` (deprecated by AWS in favor of the [data plane](#data-plane))
+
+`GetConfiguration` accepts application, environment and configuration profile names or IDs, and requires
+`client_id`. It returns the deployed version's content with its `Content-Type` and `Configuration-Version`;
+feature flags are resolved as on the [data plane](#data-plane), including Ion for a caller that accepts it.
+A `client_configuration_version` equal to the deployed version returns HTTP 200 with an empty body.
+A missing or undeployed environment returns `BadRequestException`; an unknown application or configuration profile
+returns `ResourceNotFoundException`.
+Only hosted configurations are served: a deployed version with no hosted configuration version behind it,
+such as one from an S3 or SSM source, returns `ResourceNotFoundException`.
 
 ## Data Plane (AppConfigData) {#data-plane}
 
@@ -71,6 +81,16 @@ The data plane is used by applications to retrieve the active configuration for 
 Basic `AWS.AppConfig.FeatureFlags` profiles are returned in AWS retrieval-time JSON format. Multi-variant
 feature flags require context evaluation and Amazon Ion output, which Floci does not yet emulate. Floci
 returns those configurations unchanged.
+Basic `AWS.AppConfig.FeatureFlags` profiles are returned in AWS retrieval-time JSON format.
+
+Feature flags with variants are returned, as AWS does, in Amazon Ion (`application/ion; type=AWS.AppConfig.FeatureFlags`)
+to a caller whose `Accept` header asks for it, as the AWS AppConfig Agent's does: the caller evaluates the variants'
+rules against its own context (`?flag=name&context=key=value`). The layout is the one AWS documents for the agent's
+[local development mode](https://docs.aws.amazon.com/appconfig/latest/userguide/appconfig-agent-how-to-use-local-development-samples.html#appconfig-agent-how-to-use-local-development-samples-multi-variant):
+each flag with variants is a list of its variants, and each basic flag in the same profile is its retrieval-time JSON
+as a string. Rules of the form `(eq $attribute "value")` are
+encoded; a profile with any other rule is returned unchanged, as JSON, and Floci logs a warning, as it does for a
+caller that does not accept Ion.
 
 ## Configuration
 

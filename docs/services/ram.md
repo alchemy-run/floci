@@ -111,7 +111,8 @@ aws --endpoint-url http://localhost:4566 ram accept-resource-share-invitation \
 - `TagResource`/`UntagResource` only support tagging by `resourceShareArn`; tagging an
   individual shared resource via `resourceArn` is not modeled (RAM's `TagResource` accepts
   either, but LZA only tags shares).
-- Permission-related operations are not implemented: `CreatePermission`,
-  `AssociateResourceSharePermission`, `ListPermissions`, and the rest of the permission-version
-  family. Shares created here always use RAM's default managed permission implicitly: there
-  is no explicit permission model to associate or version.
+- Only `ListResourceSharePermissions` of the permission family is implemented; `CreatePermission`,
+  `AssociateResourceSharePermission`, `ListPermissions`, and the permission-version
+  family are not, and `nextToken`/`maxResults` are accepted but ignored. Shares created here
+  always use RAM's default managed permission implicitly: there is no explicit permission model
+  to associate or version.

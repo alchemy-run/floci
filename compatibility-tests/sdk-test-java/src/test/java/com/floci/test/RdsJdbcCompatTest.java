@@ -3,10 +3,11 @@ package com.floci.test;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
-import org.junit.jupiter.api.MethodOrderer;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
@@ -34,6 +35,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("RDS JDBC Proxy")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+// RDS and DSQL both serve PostgreSQL on 5432, one at a time.
+@ResourceLock("port-5432")
 class RdsJdbcCompatTest {
 
     private static final StaticCredentialsProvider CREDENTIALS =

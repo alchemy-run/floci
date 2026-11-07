@@ -5,10 +5,12 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import software.amazon.awssdk.services.ec2.Ec2Client;
+import software.amazon.awssdk.services.ec2.model.IamInstanceProfile;
 import software.amazon.awssdk.services.ec2.model.InstanceType;
 import software.amazon.awssdk.services.ec2.model.RequestLaunchTemplateData;
 import software.amazon.awssdk.services.ec2.model.RunInstancesRequest;
 import software.amazon.awssdk.services.iam.IamClient;
+import software.amazon.awssdk.services.iam.model.InstanceProfile;
 
 import java.util.UUID;
 import java.util.stream.Stream;
@@ -23,12 +25,13 @@ class Ec2InstanceProfilePathTest {
 
     @ParameterizedTest
     @MethodSource("launches")
-    @DisplayName("EC2 launches resolve profile names to the full IAM ARN, including its path")
+    @DisplayName("EC2 launches resolve profile names to the full IAM ARN and IAM's profile id")
     void preservesInstanceProfilePath(String mode, String path) {
         String name = "profile-path-" + UUID.randomUUID();
         try (Ec2Client ec2 = TestFixtures.ec2Client(); IamClient iam = TestFixtures.iamClient()) {
-            String profileArn = iam.createInstanceProfile(r -> r.instanceProfileName(name).path(path))
-                    .instanceProfile().arn();
+            InstanceProfile created = iam.createInstanceProfile(r -> r.instanceProfileName(name).path(path))
+                    .instanceProfile();
+            String profileArn = created.arn();
             String instanceId = null;
             String templateId = null;
             try {
@@ -60,8 +63,10 @@ class Ec2InstanceProfilePathTest {
                     instanceId = ec2.runInstances(launch.build()).instances().get(0).instanceId();
                 }
                 String selectedInstance = instanceId;
-                assertThat(ec2.describeInstances(r -> r.instanceIds(selectedInstance))
-                        .reservations().get(0).instances().get(0).iamInstanceProfile().arn()).isEqualTo(profileArn);
+                IamInstanceProfile attached = ec2.describeInstances(r -> r.instanceIds(selectedInstance))
+                        .reservations().get(0).instances().get(0).iamInstanceProfile();
+                assertThat(attached.arn()).isEqualTo(profileArn);
+                assertThat(attached.id()).isEqualTo(created.instanceProfileId());
             } finally {
                 if (instanceId != null) {
                     String cleanupId = instanceId;

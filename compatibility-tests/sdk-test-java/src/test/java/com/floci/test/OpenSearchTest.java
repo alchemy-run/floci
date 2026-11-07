@@ -3,16 +3,16 @@ package com.floci.test;
 import org.junit.jupiter.api.*;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
+import software.amazon.awssdk.auth.signer.Aws4Signer;
+import software.amazon.awssdk.auth.signer.params.Aws4SignerParams;
+import software.amazon.awssdk.http.SdkHttpFullRequest;
+import software.amazon.awssdk.http.SdkHttpMethod;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.opensearch.OpenSearchClient;
 import software.amazon.awssdk.services.opensearch.model.*;
 import software.amazon.awssdk.services.opensearch.model.Tag;
 
-import software.amazon.awssdk.auth.signer.Aws4Signer;
-import software.amazon.awssdk.auth.signer.params.Aws4SignerParams;
-import software.amazon.awssdk.http.SdkHttpFullRequest;
-import software.amazon.awssdk.http.SdkHttpMethod;
-
+import java.io.IOException;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -151,27 +151,16 @@ class OpenSearchTest {
 
     @Test
     @Order(7)
-    void domainEndpointReachable() {
+    void domainEndpointReachable() throws InterruptedException {
         if (domainEndpoint == null || domainEndpoint.isBlank()) {
             // Mock mode: endpoint is empty — skip HTTP probe
             return;
         }
 
-        // Wait for domain to be ready (processing = false)
-        long start = System.currentTimeMillis();
-        boolean ready = false;
-        while (System.currentTimeMillis() - start < 180000) { // 3 minutes timeout
-            DescribeDomainResponse response = opensearch.describeDomain(DescribeDomainRequest.builder()
-                    .domainName(DOMAIN_NAME)
-                    .build());
-            if (!response.domainStatus().processing()) {
-                ready = true;
-                break;
-            }
-            try { Thread.sleep(5000); } catch (InterruptedException e) {}
-        }
-
-        assertThat(ready).as("Domain did not become ready in time").isTrue();
+        TestFixtures.await(() -> !opensearch.describeDomain(DescribeDomainRequest.builder()
+                        .domainName(DOMAIN_NAME)
+                        .build()).domainStatus().processing(),
+                DOMAIN_NAME, "processing to finish", 180_000_000_000L, TestFixtures.isRealAws() ? 5_000 : 250);
 
         // Like AWS, the endpoint is a bare host name: the client picks the scheme, and the REST API
         // answers only SigV4 requests signed for "es" unless the access policy opens it to anyone.
@@ -197,7 +186,7 @@ class OpenSearchTest {
             HttpResponse<String> response = http.send(request.build(), HttpResponse.BodyHandlers.ofString());
             assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
             assertThat(response.body()).contains("\"cluster_name\"");
-        } catch (java.io.IOException e) {
+        } catch (IOException e) {
             fail("OpenSearch endpoint " + domainEndpoint + " not reachable: " + e.getMessage());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

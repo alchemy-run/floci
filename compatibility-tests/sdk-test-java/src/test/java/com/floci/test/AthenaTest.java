@@ -1,6 +1,7 @@
 package com.floci.test;
 
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.athena.AthenaClient;
 import software.amazon.awssdk.services.athena.model.*;
@@ -17,6 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("Athena Query Execution")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@ResourceLock("floci-duck")
 class AthenaTest {
 
     private static AthenaClient athena;
@@ -345,7 +347,7 @@ class AthenaTest {
 
         ListTagsForResourceResponse response = athena.listTagsForResource(
                 ListTagsForResourceRequest.builder()
-                        .resourceARN("arn:aws:athena:us-east-1:000000000000:workgroup/" + groupName)
+                        .resourceARN(TestFixtures.arn("athena", "000000000000", "workgroup/" + groupName))
                         .build());
 
         assertThat(response.tags()).hasSize(1);

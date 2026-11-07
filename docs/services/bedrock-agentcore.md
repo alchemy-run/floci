@@ -157,6 +157,30 @@ than the configured maximum is a `ServiceQuotaExceededException`.
   DevTools input events and `screenshot` returns a real PNG. `SaveBrowserSessionProfile` captures
   the browser's cookies, and a session started with that profile gets them back.
 
+## Harnesses
+
+A harness is stored with its configuration and settles in `READY` at once. No agent runtime is
+started for it, and `InvokeHarness` does not read it.
+
+- `harnessName` (a letter, then up to 39 letters, digits and underscores) and `executionRoleArn`
+  are required. The id is the name plus `-` and 10 alphanumerics, and a second harness with the
+  same name in the Region is a `ConflictException`. A repeated `clientToken` answers the harness
+  the first call created.
+- Members a request leaves out are filled in as AWS fills them: `apiFormat` `converse_stream` on a
+  `bedrockModelConfig`, empty `systemPrompt`, `tools`, `skills`, `allowedTools` and
+  `environmentVariables`, and a `sliding_window` truncation keeping 150 messages. `memory`,
+  `maxIterations`, `maxTokens` and `timeoutSeconds` are returned only when given.
+- `environment.agentCoreRuntimeEnvironment` names the harness's runtime `harness_<name>`, with an
+  id and ARN that stay the same across updates, a 900-second idle session timeout and an 8-hour
+  maximum lifetime unless given, and `PUBLIC` networking.
+- Each `UpdateHarness` appends a version. A member the request carries replaces the current one;
+  `environmentArtifact`, `authorizerConfiguration` and `memory` are set through `optionalValue`,
+  and an empty wrapper removes them. `GetHarness?harnessVersion=` reads an earlier version.
+- An unknown harness is `ResourceNotFoundException` with AWS's message, "Agent with name `<id>` not
+  found.", and an unknown version "Version `<n>` not found for harness `<id>`".
+- Tags are set with `tags` on create and through the shared `/tags/{resourceArn}` route.
+  `deleteManagedMemory` on `DeleteHarness` is accepted and has no effect.
+
 ## Data plane — `InvokeAgentRuntime`
 
 `POST /runtimes/{agentRuntimeArn}/invocations` returns a fixed, configurable JSON
@@ -188,8 +212,8 @@ message**, so a chat client visibly works end to end and a request that failed t
 rather than hidden behind a fixed string. A request whose `messages` array is present but empty, or
 carries no user turn, is legitimate and gets a canned reply rather than an error.
 
-The `harnessArn` is not resolved: the emulator models no harness resource, so there is nothing to
-look one up in. Tool execution, skills and multi-turn iteration are not emulated, so no tool-use
+The `harnessArn` is not resolved against the [harnesses](#harnesses) created through the control
+plane, so an application can invoke a harness it never created here. Tool execution, skills and multi-turn iteration are not emulated, so no tool-use
 block is ever produced even when a request supplies `tools`.
 
 ## Configuration
@@ -229,14 +253,56 @@ block is ever produced even when a request supplies `tools`.
 - `agentRuntimeName` must match `[a-zA-Z][a-zA-Z0-9_]{0,47}` (no hyphens); invalid
   names return `ValidationException`.
 - Each `UpdateAgentRuntime` increments the version and preserves prior versions for
-  `GetAgentRuntime?version=` and `ListAgentRuntimeVersions`.
+  `GetAgentRuntime?version=` and `ListAgentRuntimeVersions`. As on AWS, the new version holds
+  exactly the configuration the request carries: an omitted `description`,
+  `authorizerConfiguration`, `protocolConfiguration` or `environmentVariables` is cleared on
+  it rather than carried over from the previous version.
+- `networkConfiguration.networkMode` must be `PUBLIC` or `VPC` and
+  `protocolConfiguration.serverProtocol` must be `MCP`, `HTTP`, `A2A` or `AGUI`; anything else returns
+  the API's `ValidationException`.
 - Timestamps (`createdAt`, `lastUpdatedAt`) are ISO-8601 strings.
-- Config blobs (`agentRuntimeArtifact`, `networkConfiguration`, …) are stored opaquely
+- Config blobs (`agentRuntimeArtifact`, `networkConfiguration`, …) are otherwise stored opaquely
   and echoed back; they are not deeply validated.
 - `CreateMemory` persists `tags`, `encryptionKeyArn`, and `memoryExecutionRoleArn`;
   `UpdateMemory` applies `description`, `eventExpiryDuration`, and
   `memoryExecutionRoleArn`. As in AWS, memory tags are returned only by
   `ListTagsForResource`, never embedded in the `memory` response shape.
+
+## CloudFormation
+
+Floci provisions these resource types:
+
+- `AWS::BedrockAgentCore::Runtime`
+- `AWS::BedrockAgentCore::RuntimeEndpoint`
+- `AWS::BedrockAgentCore::Memory`
+
+`Ref` follows each registry schema's `primaryIdentifier`: the runtime's `AgentRuntimeId`, the
+endpoint's `AgentRuntimeEndpointArn` and the memory's `MemoryArn`. Every read-only attribute the
+schemas declare resolves through `Fn::GetAtt`, including the runtime's nested
+`WorkloadIdentityDetails.WorkloadIdentityArn`; `FailureReason` is always empty because the
+emulated resources never leave `READY` / `ACTIVE`. Nested configuration objects
+(`AgentRuntimeArtifact`, `NetworkConfiguration`, `AuthorizerConfiguration`) are stored in the
+API's camelCase shape, so `GetAgentRuntime` returns what the template declared; the template's
+string `ProtocolConfiguration` becomes the API's `{"serverProtocol": …}`, and an omitted
+`NetworkConfiguration` defaults to `PUBLIC`.
+
+An update that keeps the create-only properties (the runtime's `AgentRuntimeName`, the endpoint's
+`AgentRuntimeId` and `Name`, the memory's `Name` and `EncryptionKeyArn`) is applied in place with a
+tag diff; a runtime whose declared configuration did not change keeps its version. The template is
+the whole declared configuration: an optional property it no longer carries (a `Description`, the
+runtime's `AuthorizerConfiguration`, `ProtocolConfiguration` or `EnvironmentVariables`, the
+memory's `MemoryExecutionRoleArn`) is cleared on the resource. A member whose `Fn::If` selects
+`AWS::NoValue` inside a nested configuration object is omitted. When a later resource fails the
+stack update, an in-place change is rolled back onto the resource (a runtime as a further
+version, as on AWS), and a provision that fails after its own change undoes it before the failure
+propagates. Changing a create-only property creates a replacement and deletes the displaced
+resource once the stack update commits, as on AWS. Deleting the stack deletes the resources.
+
+Properties the emulated control plane has no model for are accepted and logged once at `WARN`
+rather than failing the stack: the runtime's `CapacityProviderConfiguration`,
+`FilesystemConfigurations`, `LifecycleConfiguration`, `PlatformVersion` and
+`RequestHeaderConfiguration`; the endpoint's `Tags`; and the memory's `MemoryStrategies`,
+`IndexedKeys`, `NamespaceKeys` and `StreamDeliveryResources`.
 
 ## Examples
 

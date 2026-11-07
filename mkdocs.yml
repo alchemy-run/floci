@@ -87,6 +87,7 @@ nav:
     - Docker Configuration: configuration/docker.md
     - Ports Reference: configuration/ports.md
     - Multi-Account Isolation: configuration/multi-account.md
+    - AWS Partitions: configuration/partitions.md
     - Storage Modes: configuration/storage.md
     - TLS / HTTPS: configuration/tls.md
     - Initialization Hooks: configuration/initialization-hooks.md
@@ -105,6 +106,7 @@ nav:
     - DynamoDB: services/dynamodb.md
     - Lambda: services/lambda.md
     - Lambda MicroVMs: services/lambda-microvms.md
+    - Lambda Web Functions: services/lambda-web-functions.md
     - API Gateway: services/api-gateway.md
     - Cognito: services/cognito.md
     - Cognito Identity: services/cognitoidentity.md
@@ -139,6 +141,7 @@ nav:
     - AWS Service Catalog: services/service-catalog.md
     - ElastiCache: services/elasticache.md
     - MemoryDB: services/memorydb.md
+    - Aurora DSQL: services/dsql.md
     - RDS: services/rds.md
     - RDS Data API: services/rds-data.md
     - Timestream for InfluxDB: services/timestream-influxdb.md
@@ -151,10 +154,13 @@ nav:
     - DocumentDB: services/docdb.md
     - DMS: services/dms.md
     - Athena: services/athena.md
+    - QuickSight: services/quicksight.md
     - Redshift: services/redshift.md
     - Redshift Data API: services/redshift-data.md
+    - Redshift Serverless: services/redshift-serverless.md
     - Data Firehose: services/firehose.md
     - EventBridge: services/eventbridge.md
+    - EventBridge V2: services/eventbridgev2.md
     - EventBridge Pipes: services/pipes.md
     - EventBridge Scheduler: services/scheduler.md
     - CloudWatch: services/cloudwatch.md
@@ -165,9 +171,12 @@ nav:
     - GuardDuty: services/guardduty.md
     - Connect: services/connect.md
     - AppIntegrations: services/appintegrations.md
+    - Amazon Data Lifecycle Manager: services/dlm.md
     - ACM: services/acm.md
+    - Payment Cryptography: services/payment-cryptography.md
     - ECS: services/ecs.md
     - ECR: services/ecr.md
+    - AWS Resource Groups: services/resource-groups.md
     - Resource Groups Tagging API: services/resource-groups-tagging.md
     - Resource Explorer 2: services/resource-explorer.md
     - EKS: services/eks.md
@@ -197,6 +206,7 @@ nav:
     - AWS FIS: services/fis.md
     - CloudTrail: services/cloudtrail.md
     - CloudFront: services/cloudfront.md
+    - CloudFront Private S3 Origin: services/cloudfront-private-origin.md
     - Route53: services/route53.md
     - Route 53 Resolver: services/route53resolver.md
     - AWS Cloud Map: services/cloudmap.md
@@ -229,4 +239,6 @@ nav:
     - Python: testcontainers/python.md
     - .NET: testcontainers/dotnet.md
     - Go: testcontainers/go.md
-  - Contributing: contributing.md
+  - Development:
+    - Contributing: contributing.md
+    - Local concurrency primitives: concurrency.md

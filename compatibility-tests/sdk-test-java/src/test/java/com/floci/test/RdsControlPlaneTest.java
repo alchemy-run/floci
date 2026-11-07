@@ -4,6 +4,7 @@ import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
@@ -52,6 +53,8 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 
 @DisplayName("RDS Control Plane")
+// RDS and DSQL both serve PostgreSQL on 5432, one at a time.
+@ResourceLock("port-5432")
 class RdsControlPlaneTest {
 
     private static final Logger LOG = Logger.getLogger(RdsControlPlaneTest.class.getName());
@@ -68,7 +71,10 @@ class RdsControlPlaneTest {
         proxyName = TestFixtures.uniqueName("rds-proxy");
         serverlessClusterName = TestFixtures.uniqueName("rds-serverless");
         try (Ec2Client ec2 = TestFixtures.ec2Client()) {
-            DescribeSubnetsResponse response = ec2.describeSubnets();
+            // The default VPC's subnets: other suites create subnets in VPCs of their own, and a
+            // subnet group or proxy must keep to one VPC.
+            DescribeSubnetsResponse response = ec2.describeSubnets(r -> r
+                    .filters(f -> f.name("default-for-az").values("true")));
             subnetIds = response.subnets().stream()
                     .map(subnet -> subnet.subnetId())
                     .sorted()
@@ -717,7 +723,8 @@ class RdsControlPlaneTest {
 
     private static List<String> subnetIdsFor(Region region) {
         try (Ec2Client ec2 = ec2Client(region)) {
-            return ec2.describeSubnets().subnets().stream()
+            return ec2.describeSubnets(r -> r.filters(f -> f.name("default-for-az").values("true")))
+                    .subnets().stream()
                     .map(subnet -> subnet.subnetId())
                     .sorted()
                     .limit(2)

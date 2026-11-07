@@ -25,16 +25,29 @@
 When `floci.services.scheduler.invocation-enabled` is `true` (the default), a
 background dispatcher fires schedule targets on time. Supported expressions:
 
-- `at(YYYY-MM-DDTHH:mm:ss)` : one-time fire; honors `ScheduleExpressionTimezone`
+- `at(YYYY-MM-DDTHH:mm:ss)`: one-time fire; honors `ScheduleExpressionTimezone`
   (default UTC) and `ActionAfterCompletion=DELETE`.
-- `rate(N unit)` : repeating fire (`minutes`, `hours`, `days`, `weeks`).
-- `cron(minute hour day-of-month month day-of-week year)` : AWS 6-field cron;
+- `rate(N unit)`: repeating fire (`minutes`, `hours`, `days`). The first
+  occurrence uses `StartDate`, or creation time when `StartDate` is omitted,
+  and is delivered on the first eligible dispatcher tick. Later occurrences
+  retain the interval from the previous actual dispatch time.
+- `cron(minute hour day-of-month month day-of-week year)`: AWS 6-field cron;
   honors `ScheduleExpressionTimezone`. Day-of-week is `1-7` or `SUN-SAT`, so
   `2` is Monday and `cron(30 2 ? * 2#1 *)` is the first Monday of the month.
+
+`CreateSchedule` and `UpdateSchedule` validate expression syntax and require
+`Target.RoleArn` to be an IAM role ARN. Invalid values return HTTP 400 with
+`ValidationException`, including when a Step Functions task calls Scheduler.
 
 `State=DISABLED` schedules and schedules outside their `StartDate`/`EndDate`
 window are skipped. The dispatcher ticks every
 `floci.services.scheduler.tick-interval-seconds` (default `10`).
+
+Rate schedules use the same dispatcher whether created or updated directly or
+through Step Functions. A changed future `StartDate` takes effect before the
+first dispatch. The dispatcher keeps its last-fire state in memory; past dates,
+restart, post-dispatch updates and re-enable timing have not been verified
+against live AWS. Fixed-anchor recurrence is not implemented.
 
 Supported target types: SQS, Lambda, SNS, ECS `RunTask`, EventBridge
 `PutEvents`, and unqualified Step Functions state machine ARNs. Templated
@@ -48,6 +61,17 @@ an asynchronous execution with that payload as its input. Scheduler delivery
 succeeds when `StartExecution` is accepted; a later workflow failure does not
 trigger Scheduler retries.
 
+When `Input` is present, Floci replaces the Scheduler context attributes in it
+on every invocation, for templated and universal (`aws-sdk`) targets alike:
+`<aws.scheduler.schedule-arn>` with the schedule ARN,
+`<aws.scheduler.scheduled-time>` with the occurrence's scheduled time in UTC
+to the second (for example `2026-04-21T09:17:54Z`), `<aws.scheduler.execution-id>`
+with a 16-character hex id, and `<aws.scheduler.attempt-number>` with the
+1-based attempt number. Each attempted invocation, retries included, gets its
+own execution id and increments the attempt number; a dead-letter message
+reports the last attempt's id as `EXECUTION_ID`. The dead-letter body carries
+the last attempt's request, with matching context attributes.
+
 `CreateSchedule` and `UpdateSchedule` reject a non-JSON `Input` for Lambda,
 Step Functions, and EventBridge targets with a `ValidationException`, as AWS
 does. A blank `Input`, or one with text after the JSON value such as
@@ -55,10 +79,18 @@ does. A blank `Input`, or one with text after the JSON value such as
 and the `Input` of a universal (`aws-sdk`) target is only checked when the
 schedule is invoked.
 
-`Target.Input` substitutes the AWS Scheduler context attributes
-`<aws.scheduler.schedule-arn>`, `<aws.scheduler.scheduled-time>`,
-`<aws.scheduler.execution-id>`, and `<aws.scheduler.attempt-number>` at
-fire time (the same placeholders live EventBridge Scheduler replaces).
+Universal targets (`arn:aws:scheduler:::aws-sdk:<service>:<action>`) deliver `sns:publish`,
+`sqs:sendMessage`, `redshiftdata:executeStatement` and `redshiftdata:batchExecuteStatement`; any
+other action fails when the schedule fires. The Redshift Data targets take the Data API request
+as `Input` (PascalCase) and run the SQL against a provisioned cluster (`ClusterIdentifier`) or a
+Serverless workgroup (`WorkgroupName`). The SQL runs on the shared bounded Data API worker pool, so a slow statement does not
+delay other schedules. Pool saturation rejects admission and follows Scheduler retries.
+`WithEvent=true` emits a terminal EventBridge event in the schedule account and region,
+with the target role ARN as `principal`. Delivery succeeds once the Data API accepts the request;
+a SQL error is recorded on the statement and does not trigger Scheduler retries, while a request
+the Data API rejects (an unknown cluster, a malformed request) is retried like any failed
+delivery. When `redshift` or `redshift-data` is disabled the target fails with
+`ServiceNotAvailableException`.
 
 ### Retries and dead-letter queues
 
@@ -87,6 +119,38 @@ and `Message`, Step Functions `stateMachineArn` and `input`, EventBridge
 `Entries`, and ECS `cluster`, `taskDefinition`, and `count` with the configured
 launch type, group, and network configuration. Non-JSON input of a universal
 target is encoded as a JSON string field.
+
+## CloudFormation
+
+`AWS::Scheduler::Schedule` creates a real schedule. `Ref` returns its name and
+`Fn::GetAtt Arn` returns its Scheduler ARN. An omitted `Name` is generated once
+and kept on updates. Expression, state, dates, timezone, time window, KMS key and
+target changes update the schedule in place. A `Name` change creates a replacement;
+`GroupName` changes keep the same `Ref` and move the schedule to the requested group.
+The group must already exist or be declared as an `AWS::Scheduler::ScheduleGroup`.
+
+The displaced schedule stays until the stack update commits, then is deleted.
+`UpdateReplacePolicy: Retain` keeps a schedule displaced by a name replacement;
+it does not retain the old address of a group move. A failed stack update restores
+the original schedule configuration and removes a replacement or group-move destination.
+During a group move the old schedule is disabled before creating the destination,
+so the stored schedules are not both enabled. A rollback disables the destination
+before restoring the original state. A name replacement can briefly leave both
+schedules enabled until commit, following the existing replacement lifecycle.
+
+If restoring a failed update also fails, the original configuration snapshot is
+kept. A later schedule update retries that restoration before taking a new snapshot
+or applying its desired configuration. If Floci skips the failed schedule during an
+otherwise unrelated stack update, cleanup preserves the snapshot and leaves the
+stack in `UPDATE_COMPLETE_CLEANUP_IN_PROGRESS` with an explicit reason. Further
+updates are blocked, and `DeleteStack` is the available recovery path. This is a
+Floci recovery limitation; AWS requires `ContinueUpdateRollback` to complete a failed
+rollback before accepting another stack update.
+
+Target parameters are limited to those the Scheduler API currently models:
+retry/dead-letter configuration, SQS, ECS and EventBridge parameters. Kinesis and
+SageMaker pipeline parameters are rejected instead of silently discarded.
+Invocation support and time-window limitations are the same as the Scheduler API.
 
 ## Configuration
 

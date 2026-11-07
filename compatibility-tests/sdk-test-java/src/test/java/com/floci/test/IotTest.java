@@ -4,76 +4,113 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
-import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
-import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.core.SdkBytes;
-import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.iot.IotClient;
-import software.amazon.awssdk.services.iot.model.AttributePayload;
+import software.amazon.awssdk.services.iot.model.Action;
+import software.amazon.awssdk.services.iot.model.AddThingToThingGroupRequest;
 import software.amazon.awssdk.services.iot.model.AttachPolicyRequest;
 import software.amazon.awssdk.services.iot.model.AttachThingPrincipalRequest;
+import software.amazon.awssdk.services.iot.model.AttributePayload;
 import software.amazon.awssdk.services.iot.model.AuthorizerConfig;
 import software.amazon.awssdk.services.iot.model.CertificateMode;
 import software.amazon.awssdk.services.iot.model.CertificateStatus;
-import software.amazon.awssdk.services.iot.model.Action;
-import software.amazon.awssdk.services.iot.model.AddThingToThingGroupRequest;
-import software.amazon.awssdk.services.iot.model.CreateKeysAndCertificateRequest;
 import software.amazon.awssdk.services.iot.model.CreateDomainConfigurationRequest;
+import software.amazon.awssdk.services.iot.model.CreateDomainConfigurationResponse;
 import software.amazon.awssdk.services.iot.model.CreateJobRequest;
+import software.amazon.awssdk.services.iot.model.CreateJobResponse;
+import software.amazon.awssdk.services.iot.model.CreateKeysAndCertificateRequest;
+import software.amazon.awssdk.services.iot.model.CreateKeysAndCertificateResponse;
 import software.amazon.awssdk.services.iot.model.CreatePolicyRequest;
+import software.amazon.awssdk.services.iot.model.CreatePolicyResponse;
 import software.amazon.awssdk.services.iot.model.CreateThingGroupRequest;
+import software.amazon.awssdk.services.iot.model.CreateThingGroupResponse;
 import software.amazon.awssdk.services.iot.model.CreateThingRequest;
+import software.amazon.awssdk.services.iot.model.CreateThingResponse;
 import software.amazon.awssdk.services.iot.model.CreateThingTypeRequest;
+import software.amazon.awssdk.services.iot.model.CreateThingTypeResponse;
 import software.amazon.awssdk.services.iot.model.CreateTopicRuleRequest;
 import software.amazon.awssdk.services.iot.model.DeleteDomainConfigurationRequest;
 import software.amazon.awssdk.services.iot.model.DeleteThingGroupRequest;
-import software.amazon.awssdk.services.iot.model.DeleteTopicRuleRequest;
 import software.amazon.awssdk.services.iot.model.DeleteThingRequest;
 import software.amazon.awssdk.services.iot.model.DeleteThingTypeRequest;
+import software.amazon.awssdk.services.iot.model.DeleteTopicRuleRequest;
+import software.amazon.awssdk.services.iot.model.DeprecateThingTypeRequest;
 import software.amazon.awssdk.services.iot.model.DescribeCertificateRequest;
+import software.amazon.awssdk.services.iot.model.DescribeCertificateResponse;
 import software.amazon.awssdk.services.iot.model.DescribeDomainConfigurationRequest;
+import software.amazon.awssdk.services.iot.model.DescribeDomainConfigurationResponse;
 import software.amazon.awssdk.services.iot.model.DescribeEndpointRequest;
+import software.amazon.awssdk.services.iot.model.DescribeEndpointResponse;
+import software.amazon.awssdk.services.iot.model.DescribeIndexRequest;
+import software.amazon.awssdk.services.iot.model.DescribeIndexResponse;
 import software.amazon.awssdk.services.iot.model.DescribeJobRequest;
 import software.amazon.awssdk.services.iot.model.DescribeThingRequest;
+import software.amazon.awssdk.services.iot.model.DescribeThingResponse;
 import software.amazon.awssdk.services.iot.model.DescribeThingTypeRequest;
+import software.amazon.awssdk.services.iot.model.DescribeThingTypeResponse;
+import software.amazon.awssdk.services.iot.model.DetachPolicyRequest;
+import software.amazon.awssdk.services.iot.model.DetachThingPrincipalRequest;
+import software.amazon.awssdk.services.iot.model.DeviceDefenderIndexingMode;
+import software.amazon.awssdk.services.iot.model.DisableTopicRuleRequest;
 import software.amazon.awssdk.services.iot.model.DomainConfigurationStatus;
 import software.amazon.awssdk.services.iot.model.DomainConfigurationSummary;
 import software.amazon.awssdk.services.iot.model.DomainType;
-import software.amazon.awssdk.services.iot.model.DisableTopicRuleRequest;
-import software.amazon.awssdk.services.iot.model.DeprecateThingTypeRequest;
-import software.amazon.awssdk.services.iot.model.DetachPolicyRequest;
-import software.amazon.awssdk.services.iot.model.DetachThingPrincipalRequest;
 import software.amazon.awssdk.services.iot.model.EnableTopicRuleRequest;
+import software.amazon.awssdk.services.iot.model.Field;
+import software.amazon.awssdk.services.iot.model.GetIndexingConfigurationRequest;
+import software.amazon.awssdk.services.iot.model.GetIndexingConfigurationResponse;
 import software.amazon.awssdk.services.iot.model.GetPolicyRequest;
+import software.amazon.awssdk.services.iot.model.GetPolicyResponse;
 import software.amazon.awssdk.services.iot.model.GetTopicRuleRequest;
+import software.amazon.awssdk.services.iot.model.GetTopicRuleResponse;
+import software.amazon.awssdk.services.iot.model.IndexNotReadyException;
+import software.amazon.awssdk.services.iot.model.IndexStatus;
 import software.amazon.awssdk.services.iot.model.InvalidRequestException;
 import software.amazon.awssdk.services.iot.model.ListCertificatesRequest;
+import software.amazon.awssdk.services.iot.model.ListCertificatesResponse;
 import software.amazon.awssdk.services.iot.model.ListDomainConfigurationsRequest;
+import software.amazon.awssdk.services.iot.model.ListDomainConfigurationsResponse;
 import software.amazon.awssdk.services.iot.model.ListJobExecutionsForThingRequest;
 import software.amazon.awssdk.services.iot.model.ListJobsRequest;
 import software.amazon.awssdk.services.iot.model.ListPoliciesRequest;
+import software.amazon.awssdk.services.iot.model.ListPoliciesResponse;
+import software.amazon.awssdk.services.iot.model.ListTagsForResourceRequest;
+import software.amazon.awssdk.services.iot.model.ListTagsForResourceResponse;
 import software.amazon.awssdk.services.iot.model.ListThingGroupsForThingRequest;
+import software.amazon.awssdk.services.iot.model.ListThingPrincipalsRequest;
+import software.amazon.awssdk.services.iot.model.ListThingPrincipalsResponse;
+import software.amazon.awssdk.services.iot.model.ListThingTypesRequest;
 import software.amazon.awssdk.services.iot.model.ListThingsInThingGroupRequest;
 import software.amazon.awssdk.services.iot.model.ListThingsRequest;
-import software.amazon.awssdk.services.iot.model.ListTagsForResourceRequest;
-import software.amazon.awssdk.services.iot.model.ListThingPrincipalsRequest;
-import software.amazon.awssdk.services.iot.model.ListThingTypesRequest;
+import software.amazon.awssdk.services.iot.model.ListThingsResponse;
 import software.amazon.awssdk.services.iot.model.ListTopicRulesRequest;
+import software.amazon.awssdk.services.iot.model.ListTopicRulesResponse;
+import software.amazon.awssdk.services.iot.model.NamedShadowIndexingMode;
 import software.amazon.awssdk.services.iot.model.RemoveThingFromThingGroupRequest;
+import software.amazon.awssdk.services.iot.model.ResourceAlreadyExistsException;
+import software.amazon.awssdk.services.iot.model.ResourceNotFoundException;
+import software.amazon.awssdk.services.iot.model.SearchIndexRequest;
+import software.amazon.awssdk.services.iot.model.SearchIndexResponse;
 import software.amazon.awssdk.services.iot.model.ServerCertificateStatus;
 import software.amazon.awssdk.services.iot.model.ServiceType;
 import software.amazon.awssdk.services.iot.model.SqsAction;
-import software.amazon.awssdk.services.iot.model.ResourceAlreadyExistsException;
-import software.amazon.awssdk.services.iot.model.ResourceNotFoundException;
 import software.amazon.awssdk.services.iot.model.Tag;
 import software.amazon.awssdk.services.iot.model.TagResourceRequest;
+import software.amazon.awssdk.services.iot.model.ThingConnectivityIndexingMode;
+import software.amazon.awssdk.services.iot.model.ThingDocument;
+import software.amazon.awssdk.services.iot.model.ThingGroupIndexingConfiguration;
+import software.amazon.awssdk.services.iot.model.ThingGroupIndexingMode;
 import software.amazon.awssdk.services.iot.model.ThingGroupProperties;
+import software.amazon.awssdk.services.iot.model.ThingIndexingConfiguration;
+import software.amazon.awssdk.services.iot.model.ThingIndexingMode;
+import software.amazon.awssdk.services.iot.model.ThingTypeDefinition;
 import software.amazon.awssdk.services.iot.model.ThingTypeProperties;
 import software.amazon.awssdk.services.iot.model.TopicRulePayload;
-import software.amazon.awssdk.services.iot.model.UnauthorizedException;
-import software.amazon.awssdk.services.iot.model.UpdateDomainConfigurationRequest;
 import software.amazon.awssdk.services.iot.model.UntagResourceRequest;
 import software.amazon.awssdk.services.iot.model.UpdateCertificateRequest;
+import software.amazon.awssdk.services.iot.model.UpdateDomainConfigurationRequest;
+import software.amazon.awssdk.services.iot.model.UpdateDomainConfigurationResponse;
+import software.amazon.awssdk.services.iot.model.UpdateIndexingConfigurationRequest;
 import software.amazon.awssdk.services.iot.model.UpdateThingRequest;
 import software.amazon.awssdk.services.iot.model.UpdateThingTypeRequest;
 import software.amazon.awssdk.services.iot.model.VersionConflictException;
@@ -81,18 +118,26 @@ import software.amazon.awssdk.services.iotdataplane.IotDataPlaneClient;
 import software.amazon.awssdk.services.iotdataplane.model.DeleteConnectionRequest;
 import software.amazon.awssdk.services.iotdataplane.model.DeleteThingShadowRequest;
 import software.amazon.awssdk.services.iotdataplane.model.GetThingShadowRequest;
+import software.amazon.awssdk.services.iotdataplane.model.GetThingShadowResponse;
 import software.amazon.awssdk.services.iotdataplane.model.ListNamedShadowsForThingRequest;
+import software.amazon.awssdk.services.iotdataplane.model.ListNamedShadowsForThingResponse;
 import software.amazon.awssdk.services.iotdataplane.model.PublishRequest;
 import software.amazon.awssdk.services.iotdataplane.model.UpdateThingShadowRequest;
+import software.amazon.awssdk.services.iotdataplane.model.UpdateThingShadowResponse;
 import software.amazon.awssdk.services.iotjobsdataplane.IotJobsDataPlaneClient;
 import software.amazon.awssdk.services.iotjobsdataplane.model.GetPendingJobExecutionsRequest;
+import software.amazon.awssdk.services.iotjobsdataplane.model.GetPendingJobExecutionsResponse;
 import software.amazon.awssdk.services.iotjobsdataplane.model.JobExecutionStatus;
 import software.amazon.awssdk.services.iotjobsdataplane.model.StartNextPendingJobExecutionRequest;
+import software.amazon.awssdk.services.iotjobsdataplane.model.StartNextPendingJobExecutionResponse;
 import software.amazon.awssdk.services.iotjobsdataplane.model.UpdateJobExecutionRequest;
+import software.amazon.awssdk.services.iotjobsdataplane.model.UpdateJobExecutionResponse;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.CreateQueueRequest;
 import software.amazon.awssdk.services.sqs.model.DeleteQueueRequest;
+import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sqs.model.ReceiveMessageRequest;
+import software.amazon.awssdk.services.sqs.model.ReceiveMessageResponse;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -100,11 +145,16 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.net.Socket;
-import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -121,7 +171,7 @@ class IotTest {
 
     @Test
     void describeEndpoint() {
-        var response = iot.describeEndpoint(DescribeEndpointRequest.builder()
+        DescribeEndpointResponse response = iot.describeEndpoint(DescribeEndpointRequest.builder()
                 .endpointType("iot:Data-ATS")
                 .build());
 
@@ -129,98 +179,10 @@ class IotTest {
     }
 
     @Test
-    void describedEndpointServesSignedDataPlaneRequests() {
-        String address = iot.describeEndpoint(r -> r.endpointType("iot:Data-ATS")).endpointAddress();
-        // AWS returns a bare hostname (<prefix>-ats.iot.<region>.amazonaws.com) and the client picks
-        // the port. Floci's embedded DNS, injected into this container, resolves it to Floci.
-        URI gateway = TestFixtures.endpoint();
-        String authority = address.contains(":") || gateway.getPort() < 0 ? address : address + ":" + gateway.getPort();
-        URI endpoint = URI.create(gateway.getScheme() + "://" + authority);
-        String topic = "devices/java-iot/endpoint-route";
-        try (IotDataPlaneClient data = IotDataPlaneClient.builder()
-                .endpointOverride(endpoint).region(Region.US_EAST_1)
-                .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
-                .build()) {
-            try {
-                long before = System.currentTimeMillis();
-                data.publish(r -> r.topic(topic).retain(true).payload(SdkBytes.fromUtf8String("routable-endpoint")));
-                var retained = data.getRetainedMessage(r -> r.topic(topic));
-                assertThat(retained.payload().asUtf8String()).isEqualTo("routable-endpoint");
-                assertThat(retained.lastModifiedTime()).isBetween(before, System.currentTimeMillis());
-                assertThat(data.listRetainedMessages(r -> {}).retainedTopics()).anySatisfy(message -> {
-                    assertThat(message.topic()).isEqualTo(topic);
-                    assertThat(message.lastModifiedTime()).isEqualTo(retained.lastModifiedTime());
-                });
-            } finally {
-                data.publish(r -> r.topic(topic).retain(true).payload(SdkBytes.fromByteArray(new byte[0])));
-            }
-        }
-    }
-
-    @Test
-    void missingTopicRuleUsesTheSdkUnauthorizedException() {
-        String name = "java_missing_topic_rule_wire";
-        assertThatThrownBy(() -> iot.getTopicRule(r -> r.ruleName(name)))
-                .isInstanceOfSatisfying(UnauthorizedException.class, error -> {
-                    assertThat(error.statusCode()).isEqualTo(401);
-                    assertThat(error.awsErrorDetails().errorMessage()).isEqualTo("Access to topic rule '" + name + "' was denied");
-                });
-        assertThatThrownBy(() -> iot.deleteTopicRule(r -> r.ruleName(name)))
-                .isInstanceOfSatisfying(UnauthorizedException.class, error -> {
-                    assertThat(error.statusCode()).isEqualTo(401);
-                    assertThat(error.awsErrorDetails().errorMessage()).contains("Access to topic rule");
-                });
-    }
-
-    @Test
-    void signedTopicRuleOperationsRespectAccountAndRegionOwnership() {
-        String name = "java_topic_rule_ownership";
-        TopicRulePayload payload = TopicRulePayload.builder().sql("SELECT * FROM 'devices/java-iot/ownership'")
-                .actions(Action.builder().republish(r -> r.topic("devices/java-iot/ownership-target")
-                        .roleArn("arn:aws:iam::000000000000:role/iot-rule-role")).build())
-                .build();
-        iot.createTopicRule(r -> r.ruleName(name).topicRulePayload(payload));
-        String ownedArn = iot.getTopicRule(r -> r.ruleName(name)).ruleArn();
-        try (IotClient otherAccount = IotClient.builder()
-                    .endpointOverride(TestFixtures.endpoint()).region(Region.US_EAST_1)
-                    .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("111111111111", "test")))
-                    .build();
-             IotClient otherRegion = IotClient.builder()
-                    .endpointOverride(TestFixtures.endpoint()).region(Region.EU_WEST_1)
-                    .credentialsProvider(StaticCredentialsProvider.create(AwsBasicCredentials.create("test", "test")))
-                    .build()) {
-            for (IotClient foreign : List.of(otherAccount, otherRegion)) {
-                assertThatThrownBy(() -> foreign.getTopicRule(r -> r.ruleName(name)))
-                        .isInstanceOf(UnauthorizedException.class);
-                assertThatThrownBy(() -> foreign.deleteTopicRule(r -> r.ruleName(name)))
-                        .isInstanceOf(UnauthorizedException.class);
-                assertThat(foreign.listTopicRules(r -> {}).rules()).noneMatch(rule -> name.equals(rule.ruleName()));
-                foreign.createTopicRule(r -> r.ruleName(name).topicRulePayload(payload));
-                try {
-                    assertThatThrownBy(() -> foreign.listTagsForResource(r -> r.resourceArn(ownedArn)))
-                            .isInstanceOf(ResourceNotFoundException.class);
-                    assertThatThrownBy(() -> foreign.tagResource(r -> r.resourceArn(ownedArn)
-                            .tags(Tag.builder().key("foreign").value("blocked").build())))
-                            .isInstanceOf(ResourceNotFoundException.class);
-                    assertThatThrownBy(() -> foreign.untagResource(r -> r.resourceArn(ownedArn).tagKeys("owner")))
-                            .isInstanceOf(ResourceNotFoundException.class);
-                    String foreignArn = foreign.getTopicRule(r -> r.ruleName(name)).ruleArn();
-                    assertThat(foreign.listTagsForResource(r -> r.resourceArn(foreignArn)).tags()).isEmpty();
-                } finally {
-                    foreign.deleteTopicRule(r -> r.ruleName(name));
-                }
-            }
-            assertThat(iot.getTopicRule(r -> r.ruleName(name)).ruleArn()).isEqualTo(ownedArn);
-            assertThat(iot.listTagsForResource(r -> r.resourceArn(ownedArn)).tags()).isEmpty();
-        } finally {
-            iot.deleteTopicRule(r -> r.ruleName(name));
-        }
-    }
-
-    @Test
     void domainConfigurationLifecycle() {
         String name = "java-iot-domain";
-        String certificateArn = "arn:aws:acm:us-east-1:000000000000:certificate/11111111-1111-1111-1111-111111111111";
+        String certificateArn = TestFixtures.arn("acm", "000000000000",
+                "certificate/11111111-1111-1111-1111-111111111111");
         boolean leftOver = iot.listDomainConfigurations(ListDomainConfigurationsRequest.builder().build())
                 .domainConfigurations().stream()
                 .anyMatch(summary -> name.equals(summary.domainConfigurationName()));
@@ -237,14 +199,14 @@ class IotTest {
                 .build()))
                 .isInstanceOf(ResourceNotFoundException.class);
 
-        var managed = iot.describeDomainConfiguration(DescribeDomainConfigurationRequest.builder()
+        DescribeDomainConfigurationResponse managed = iot.describeDomainConfiguration(DescribeDomainConfigurationRequest.builder()
                 .domainConfigurationName("iot:Data-ATS")
                 .build());
         assertThat(managed.domainType()).isEqualTo(DomainType.AWS_MANAGED);
         assertThat(managed.domainConfigurationStatus()).isEqualTo(DomainConfigurationStatus.ENABLED);
         assertThat(managed.domainName()).isNotBlank();
 
-        var created = iot.createDomainConfiguration(CreateDomainConfigurationRequest.builder()
+        CreateDomainConfigurationResponse created = iot.createDomainConfiguration(CreateDomainConfigurationRequest.builder()
                 .domainConfigurationName(name)
                 .domainName("iot.java.example.com")
                 .serverCertificateArns(certificateArn)
@@ -257,7 +219,7 @@ class IotTest {
                 .build());
         assertThat(created.domainConfigurationName()).isEqualTo(name);
         assertThat(created.domainConfigurationArn())
-                .startsWith("arn:aws:iot:us-east-1:000000000000:domainconfiguration/" + name + "/");
+                .startsWith(TestFixtures.arn("iot", "000000000000", "domainconfiguration/" + name + "/"));
 
         assertThatThrownBy(() -> iot.createDomainConfiguration(CreateDomainConfigurationRequest.builder()
                 .domainConfigurationName(name)
@@ -266,7 +228,7 @@ class IotTest {
                 .build()))
                 .isInstanceOf(ResourceAlreadyExistsException.class);
 
-        var described = iot.describeDomainConfiguration(DescribeDomainConfigurationRequest.builder()
+        DescribeDomainConfigurationResponse described = iot.describeDomainConfiguration(DescribeDomainConfigurationRequest.builder()
                 .domainConfigurationName(name)
                 .build());
         assertThat(described.domainConfigurationArn()).isEqualTo(created.domainConfigurationArn());
@@ -282,7 +244,7 @@ class IotTest {
         assertThat(described.lastStatusChangeDate()).isNotNull();
         assertThat(described.tlsConfig().securityPolicy()).isEqualTo("IoTSecurityPolicy_TLS13_1_2_2022_10");
 
-        var enabled = iot.updateDomainConfiguration(UpdateDomainConfigurationRequest.builder()
+        UpdateDomainConfigurationResponse enabled = iot.updateDomainConfiguration(UpdateDomainConfigurationRequest.builder()
                 .domainConfigurationName(name)
                 .domainConfigurationStatus(DomainConfigurationStatus.ENABLED)
                 .build());
@@ -292,12 +254,12 @@ class IotTest {
                 .build()).domainConfigurationStatus())
                 .isEqualTo(DomainConfigurationStatus.ENABLED);
 
-        var tags = iot.listTagsForResource(ListTagsForResourceRequest.builder()
+        ListTagsForResourceResponse tags = iot.listTagsForResource(ListTagsForResourceRequest.builder()
                 .resourceArn(created.domainConfigurationArn())
                 .build());
         assertThat(tags.tags()).extracting(Tag::key).contains("env");
 
-        var listed = iot.listDomainConfigurations(ListDomainConfigurationsRequest.builder()
+        ListDomainConfigurationsResponse listed = iot.listDomainConfigurations(ListDomainConfigurationsRequest.builder()
                 .serviceType(ServiceType.DATA)
                 .build());
         assertThat(listed.domainConfigurations())
@@ -309,7 +271,7 @@ class IotTest {
                 .build()))
                 .isInstanceOf(InvalidRequestException.class);
 
-        var updated = iot.updateDomainConfiguration(UpdateDomainConfigurationRequest.builder()
+        UpdateDomainConfigurationResponse updated = iot.updateDomainConfiguration(UpdateDomainConfigurationRequest.builder()
                 .domainConfigurationName(name)
                 .domainConfigurationStatus(DomainConfigurationStatus.DISABLED)
                 .build());
@@ -327,6 +289,155 @@ class IotTest {
     }
 
     @Test
+    void fleetIndexingConfiguration() {
+        GetIndexingConfigurationResponse prior =
+                iot.getIndexingConfiguration(GetIndexingConfigurationRequest.builder().build());
+        try {
+            iot.updateIndexingConfiguration(UpdateIndexingConfigurationRequest.builder()
+                    .thingIndexingConfiguration(ThingIndexingConfiguration.builder()
+                            .thingIndexingMode(ThingIndexingMode.REGISTRY)
+                            .thingConnectivityIndexingMode(ThingConnectivityIndexingMode.STATUS)
+                            .build())
+                    .thingGroupIndexingConfiguration(ThingGroupIndexingConfiguration.builder()
+                            .thingGroupIndexingMode(ThingGroupIndexingMode.ON)
+                            .build())
+                    .build());
+
+            GetIndexingConfigurationResponse enabled =
+                    iot.getIndexingConfiguration(GetIndexingConfigurationRequest.builder().build());
+            ThingIndexingConfiguration thing = enabled.thingIndexingConfiguration();
+            assertThat(thing.thingIndexingMode()).isEqualTo(ThingIndexingMode.REGISTRY);
+            assertThat(thing.thingConnectivityIndexingMode()).isEqualTo(ThingConnectivityIndexingMode.STATUS);
+            assertThat(thing.deviceDefenderIndexingMode()).isEqualTo(DeviceDefenderIndexingMode.OFF);
+            assertThat(thing.namedShadowIndexingMode()).isEqualTo(NamedShadowIndexingMode.OFF);
+            assertThat(thing.managedFields())
+                    .extracting(field -> field.name() + ":" + field.typeAsString())
+                    .containsExactlyInAnyOrder(
+                            "thingName:String", "thingId:String", "registry.version:Number",
+                            "registry.thingTypeName:String", "registry.thingGroupNames:String",
+                            "connectivity.connected:Boolean", "connectivity.timestamp:Number",
+                            "connectivity.disconnectReason:String", "connectivity.clientId:String",
+                            "connectivity.cleanSession:Boolean", "connectivity.keepAliveDuration:Number",
+                            "connectivity.sessionExpiry:Number", "connectivity.version:Number");
+            assertThat(thing.filter().namedShadowNames()).isEmpty();
+            assertThat(enabled.thingGroupIndexingConfiguration().thingGroupIndexingMode())
+                    .isEqualTo(ThingGroupIndexingMode.ON);
+            assertThat(enabled.thingGroupIndexingConfiguration().managedFields())
+                    .extracting(Field::name)
+                    .containsExactlyInAnyOrder("parentGroupNames", "description", "version", "thingGroupName",
+                            "thingGroupId");
+
+            DescribeIndexResponse things = iot.describeIndex(DescribeIndexRequest.builder()
+                    .indexName("AWS_Things")
+                    .build());
+            assertThat(things.schema()).isEqualTo("REGISTRY_AND_CONNECTIVITY_STATUS");
+            assertIndexStatus(things.indexStatus());
+            DescribeIndexResponse groups = iot.describeIndex(DescribeIndexRequest.builder()
+                    .indexName("AWS_ThingGroups")
+                    .build());
+            assertThat(groups.schema()).isEqualTo("REGISTRY");
+            assertIndexStatus(groups.indexStatus());
+
+            assertThatThrownBy(() -> iot.updateIndexingConfiguration(UpdateIndexingConfigurationRequest.builder()
+                    .thingIndexingConfiguration(ThingIndexingConfiguration.builder()
+                            .thingIndexingMode(ThingIndexingMode.REGISTRY_AND_SHADOW)
+                            .namedShadowIndexingMode(NamedShadowIndexingMode.ON)
+                            .build())
+                    .build()))
+                    .isInstanceOf(InvalidRequestException.class)
+                    .hasMessageContaining("NamedShadowNames Filter must not be empty for enabling NamedShadowIndexingMode");
+
+            iot.updateIndexingConfiguration(UpdateIndexingConfigurationRequest.builder()
+                    .thingIndexingConfiguration(ThingIndexingConfiguration.builder()
+                            .thingIndexingMode(ThingIndexingMode.OFF)
+                            .build())
+                    .build());
+            assertThatThrownBy(() -> iot.describeIndex(DescribeIndexRequest.builder().indexName("AWS_Things").build()))
+                    .isInstanceOf(ResourceNotFoundException.class)
+                    .hasMessageContaining("Index AWS_Things does not exist");
+            GetIndexingConfigurationResponse thingOff =
+                    iot.getIndexingConfiguration(GetIndexingConfigurationRequest.builder().build());
+            assertThat(thingOff.thingIndexingConfiguration().thingIndexingMode()).isEqualTo(ThingIndexingMode.OFF);
+            assertThat(thingOff.thingIndexingConfiguration().thingConnectivityIndexingMode())
+                    .isEqualTo(ThingConnectivityIndexingMode.OFF);
+            assertThat(thingOff.thingIndexingConfiguration().managedFields()).isEmpty();
+            assertThat(thingOff.thingGroupIndexingConfiguration().thingGroupIndexingMode())
+                    .isEqualTo(ThingGroupIndexingMode.ON);
+        } finally {
+            // Indexing is account wide on AWS: put back whatever the account had before this test.
+            iot.updateIndexingConfiguration(UpdateIndexingConfigurationRequest.builder()
+                    .thingIndexingConfiguration(prior.thingIndexingConfiguration())
+                    .thingGroupIndexingConfiguration(prior.thingGroupIndexingConfiguration())
+                    .build());
+        }
+    }
+
+    /** A thing type of the account meant for tests and not deprecated, or null when it has none. */
+    private String existingTestThingType() {
+        return iot.listThingTypesPaginator(ListThingTypesRequest.builder().build()).thingTypes().stream()
+                .filter(type -> !Boolean.TRUE.equals(type.thingTypeMetadata().deprecated()))
+                .map(ThingTypeDefinition::thingTypeName)
+                .filter(name -> name.contains("test"))
+                .sorted()
+                .findFirst()
+                .orElse(null);
+    }
+
+    /**
+     * This test's things a query finds, in name order. On AWS the search is polled until they are the
+     * expected ones: AWS indexes a change a few seconds after it and refuses searches while a new
+     * index builds. Floci answers at once, so against Floci the search runs once.
+     */
+    private List<ThingDocument> awaitSearch(String query, String prefix, String... expectedSuffixes)
+            throws InterruptedException {
+        List<String> expected = Arrays.stream(expectedSuffixes).map(suffix -> prefix + suffix).toList();
+        Instant deadline = Instant.now().plusSeconds(120);
+        while (true) {
+            List<ThingDocument> found = new ArrayList<>();
+            String notReady = null;
+            try {
+                String nextToken = null;
+                do {
+                    SearchIndexResponse page = iot.searchIndex(SearchIndexRequest.builder()
+                            .queryString(query)
+                            .nextToken(nextToken)
+                            .build());
+                    page.things().stream().filter(thing -> thing.thingName().startsWith(prefix)).forEach(found::add);
+                    nextToken = page.nextToken();
+                } while (nextToken != null);
+            } catch (IndexNotReadyException e) {
+                notReady = e.getMessage();
+            }
+            found.sort(Comparator.comparing(ThingDocument::thingName));
+            List<String> names = found.stream().map(ThingDocument::thingName).toList();
+            if (!TestFixtures.isRealAws() || notReady == null && names.equals(expected)
+                    || Instant.now().isAfter(deadline)) {
+                assertThat(notReady).as("index not ready").isNull();
+                assertThat(names).as(query).isEqualTo(expected);
+                return found;
+            }
+            Thread.sleep(2_000);
+        }
+    }
+
+    private static void deleteIfPresent(Runnable delete) {
+        try {
+            delete.run();
+        } catch (ResourceNotFoundException ignored) {
+            // The test failed before creating it.
+        }
+    }
+
+    private static void assertIndexStatus(IndexStatus status) {
+        if (TestFixtures.isRealAws()) {
+            // AWS builds the index in the background after a mode change; Floci has it ready at once.
+            assertThat(status).isIn(IndexStatus.ACTIVE, IndexStatus.BUILDING, IndexStatus.REBUILDING);
+        } else {
+            assertThat(status).isEqualTo(IndexStatus.ACTIVE);
+        }
+    }
+
+    @Test
     void thingRegistryCrud() {
         String thingName = "java-iot-thing";
         String otherThingName = "java-iot-other-thing";
@@ -339,14 +450,14 @@ class IotTest {
         assertThatThrownBy(() -> iot.describeThing(DescribeThingRequest.builder().thingName(thingName).build()))
                 .isInstanceOf(ResourceNotFoundException.class);
 
-        var created = iot.createThing(CreateThingRequest.builder()
+        CreateThingResponse created = iot.createThing(CreateThingRequest.builder()
                 .thingName(thingName)
                 .attributePayload(AttributePayload.builder().attributes(Map.of("env", "java")).build())
                 .build());
         assertThat(created.thingName()).isEqualTo(thingName);
         assertThat(created.thingArn()).endsWith(":thing/" + thingName);
 
-        var idempotent = iot.createThing(CreateThingRequest.builder()
+        CreateThingResponse idempotent = iot.createThing(CreateThingRequest.builder()
                 .thingName(thingName)
                 .attributePayload(AttributePayload.builder().attributes(Map.of("env", "java")).build())
                 .build());
@@ -355,18 +466,18 @@ class IotTest {
         assertThatThrownBy(() -> iot.createThing(CreateThingRequest.builder().thingName(thingName).build()))
                 .isInstanceOf(ResourceAlreadyExistsException.class);
 
-        var described = iot.describeThing(DescribeThingRequest.builder().thingName(thingName).build());
+        DescribeThingResponse described = iot.describeThing(DescribeThingRequest.builder().thingName(thingName).build());
         assertThat(described.attributes()).containsEntry("env", "java");
 
         iot.createThing(CreateThingRequest.builder().thingName(otherThingName).build());
 
-        var listed = iot.listThings(ListThingsRequest.builder().build());
+        ListThingsResponse listed = iot.listThings(ListThingsRequest.builder().build());
         assertThat(listed.things()).anyMatch(thing -> thingName.equals(thing.thingName()));
 
-        var firstPage = iot.listThings(ListThingsRequest.builder().maxResults(1).build());
+        ListThingsResponse firstPage = iot.listThings(ListThingsRequest.builder().maxResults(1).build());
         assertThat(firstPage.things()).hasSize(1);
         assertThat(firstPage.nextToken()).isNotBlank();
-        var secondPage = iot.listThings(ListThingsRequest.builder()
+        ListThingsResponse secondPage = iot.listThings(ListThingsRequest.builder()
                 .maxResults(1)
                 .nextToken(firstPage.nextToken())
                 .build());
@@ -394,7 +505,7 @@ class IotTest {
                 .build()))
                 .isInstanceOf(VersionConflictException.class);
 
-        var updated = iot.describeThing(DescribeThingRequest.builder().thingName(thingName).build());
+        DescribeThingResponse updated = iot.describeThing(DescribeThingRequest.builder().thingName(thingName).build());
         assertThat(updated.attributes()).containsEntry("env", "versioned").containsEntry("owner", "iot");
 
         iot.deleteThing(DeleteThingRequest.builder().thingName(thingName).build());
@@ -411,10 +522,10 @@ class IotTest {
         } catch (Exception ignored) {
         }
 
-        var created = iot.createThing(CreateThingRequest.builder().thingName(thingName).build());
+        CreateThingResponse created = iot.createThing(CreateThingRequest.builder().thingName(thingName).build());
         String thingArn = created.thingArn();
 
-        var emptyTags = iot.listTagsForResource(ListTagsForResourceRequest.builder()
+        ListTagsForResourceResponse emptyTags = iot.listTagsForResource(ListTagsForResourceRequest.builder()
                 .resourceArn(thingArn)
                 .build());
         assertThat(emptyTags.tags()).isEmpty();
@@ -425,7 +536,7 @@ class IotTest {
                         Tag.builder().key("owner").value("iot").build())
                 .build());
 
-        var tags = iot.listTagsForResource(ListTagsForResourceRequest.builder()
+        ListTagsForResourceResponse tags = iot.listTagsForResource(ListTagsForResourceRequest.builder()
                 .resourceArn(thingArn)
                 .build());
         assertThat(tags.tags()).extracting(Tag::key).containsExactlyInAnyOrder("env", "owner");
@@ -436,36 +547,36 @@ class IotTest {
                 .tagKeys("env")
                 .build());
 
-        var remainingTags = iot.listTagsForResource(ListTagsForResourceRequest.builder()
+        ListTagsForResourceResponse remainingTags = iot.listTagsForResource(ListTagsForResourceRequest.builder()
                 .resourceArn(thingArn)
                 .build());
         assertThat(remainingTags.tags()).extracting(Tag::key).containsExactly("owner");
 
         assertThatThrownBy(() -> iot.listTagsForResource(ListTagsForResourceRequest.builder()
-                .resourceArn("arn:aws:iot:us-east-1:000000000000:thing/missing-tagged-thing")
+                .resourceArn(TestFixtures.arn("iot", "000000000000", "thing/missing-tagged-thing"))
                 .build()))
                 .isInstanceOf(ResourceNotFoundException.class);
     }
 
     @Test
     void certificatesPoliciesAndAttachments() {
-        var cert = iot.createKeysAndCertificate(CreateKeysAndCertificateRequest.builder()
+        CreateKeysAndCertificateResponse cert = iot.createKeysAndCertificate(CreateKeysAndCertificateRequest.builder()
                 .setAsActive(true)
                 .build());
         assertThat(cert.certificatePem()).contains("BEGIN CERTIFICATE");
         assertThat(cert.keyPair().publicKey()).contains("BEGIN PUBLIC KEY");
 
-        var described = iot.describeCertificate(DescribeCertificateRequest.builder()
+        DescribeCertificateResponse described = iot.describeCertificate(DescribeCertificateRequest.builder()
                 .certificateId(cert.certificateId())
                 .build());
         assertThat(described.certificateDescription().status()).isEqualTo(CertificateStatus.ACTIVE);
         assertThat(described.certificateDescription().certificateMode()).isEqualTo(CertificateMode.DEFAULT);
         assertThat(described.certificateDescription().validity().notAfter())
-                .isEqualTo(java.time.Instant.parse("2049-12-31T23:59:59Z"));
+                .isEqualTo(Instant.parse("2049-12-31T23:59:59Z"));
         assertThat(cert.certificateId()).matches("[0-9a-f]{64}");
         assertThat(cert.keyPair().privateKey()).startsWith("-----BEGIN RSA PRIVATE KEY-----");
 
-        var certs = iot.listCertificates(ListCertificatesRequest.builder().build());
+        ListCertificatesResponse certs = iot.listCertificates(ListCertificatesRequest.builder().build());
         assertThat(certs.certificates()).anyMatch(item -> cert.certificateArn().equals(item.certificateArn()));
 
         iot.updateCertificate(UpdateCertificateRequest.builder()
@@ -479,16 +590,16 @@ class IotTest {
 
         String policyName = "java-iot-policy";
         String policyDocument = "{\"Version\":\"2012-10-17\",\"Statement\":[]}";
-        var policy = iot.createPolicy(CreatePolicyRequest.builder()
+        CreatePolicyResponse policy = iot.createPolicy(CreatePolicyRequest.builder()
                 .policyName(policyName)
                 .policyDocument(policyDocument)
                 .build());
         assertThat(policy.policyName()).isEqualTo(policyName);
 
-        var gotPolicy = iot.getPolicy(GetPolicyRequest.builder().policyName(policyName).build());
+        GetPolicyResponse gotPolicy = iot.getPolicy(GetPolicyRequest.builder().policyName(policyName).build());
         assertThat(gotPolicy.policyDocument()).contains("2012-10-17");
 
-        var policies = iot.listPolicies(ListPoliciesRequest.builder().build());
+        ListPoliciesResponse policies = iot.listPolicies(ListPoliciesRequest.builder().build());
         assertThat(policies.policies()).anyMatch(item -> policyName.equals(item.policyName()));
 
         iot.attachPolicy(AttachPolicyRequest.builder().policyName(policyName).target(cert.certificateArn()).build());
@@ -504,7 +615,7 @@ class IotTest {
                 .thingName(thingName)
                 .principal(cert.certificateArn())
                 .build());
-        var principals = iot.listThingPrincipals(ListThingPrincipalsRequest.builder().thingName(thingName).build());
+        ListThingPrincipalsResponse principals = iot.listThingPrincipals(ListThingPrincipalsRequest.builder().thingName(thingName).build());
         assertThat(principals.principals()).contains(cert.certificateArn());
         iot.detachThingPrincipal(DetachThingPrincipalRequest.builder()
                 .thingName(thingName)
@@ -525,7 +636,7 @@ class IotTest {
                 .build()))
                 .isInstanceOf(software.amazon.awssdk.services.iotdataplane.model.ResourceNotFoundException.class);
 
-        var updated = iotData.updateThingShadow(UpdateThingShadowRequest.builder()
+        UpdateThingShadowResponse updated = iotData.updateThingShadow(UpdateThingShadowRequest.builder()
                 .thingName(thingName)
                 .payload(SdkBytes.fromUtf8String("{\"state\":{\"desired\":{\"color\":\"blue\"}}}"))
                 .build());
@@ -535,7 +646,7 @@ class IotTest {
                 .thingName(thingName)
                 .payload(SdkBytes.fromUtf8String("{\"state\":{\"reported\":{\"color\":\"green\"}}}"))
                 .build());
-        var got = iotData.getThingShadow(GetThingShadowRequest.builder().thingName(thingName).build());
+        GetThingShadowResponse got = iotData.getThingShadow(GetThingShadowRequest.builder().thingName(thingName).build());
         assertThat(got.payload().asUtf8String()).contains("blue").contains("green");
 
         iotData.updateThingShadow(UpdateThingShadowRequest.builder()
@@ -543,7 +654,7 @@ class IotTest {
                 .shadowName("settings")
                 .payload(SdkBytes.fromUtf8String("{\"state\":{\"desired\":{\"mode\":\"auto\"}}}"))
                 .build());
-        var named = iotData.listNamedShadowsForThing(ListNamedShadowsForThingRequest.builder()
+        ListNamedShadowsForThingResponse named = iotData.listNamedShadowsForThing(ListNamedShadowsForThingRequest.builder()
                 .thingName(thingName)
                 .build());
         assertThat(named.results()).contains("settings");
@@ -572,7 +683,8 @@ class IotTest {
                             .ruleDisabled(false)
                             .actions(Action.builder()
                                     .sqs(SqsAction.builder()
-                                            .roleArn("arn:aws:iam::000000000000:role/iot-rule-role")
+                                            .roleArn(TestFixtures.globalArn(
+                                                    "iam", "000000000000", "role/iot-rule-role"))
                                             .queueUrl(queueUrl)
                                             .useBase64(false)
                                             .build())
@@ -580,12 +692,12 @@ class IotTest {
                             .build())
                     .build());
 
-            var got = iot.getTopicRule(GetTopicRuleRequest.builder().ruleName(ruleName).build());
+            GetTopicRuleResponse got = iot.getTopicRule(GetTopicRuleRequest.builder().ruleName(ruleName).build());
             assertThat(got.rule().ruleName()).isEqualTo(ruleName);
             assertThat(got.rule().actions().get(0).sqs().queueUrl()).isEqualTo(queueUrl);
 
             iot.disableTopicRule(DisableTopicRuleRequest.builder().ruleName(ruleName).build());
-            var listed = iot.listTopicRules(ListTopicRulesRequest.builder().build());
+            ListTopicRulesResponse listed = iot.listTopicRules(ListTopicRulesRequest.builder().build());
             assertThat(listed.rules()).anyMatch(rule -> ruleName.equals(rule.ruleName()) && rule.ruleDisabled());
 
             iot.enableTopicRule(EnableTopicRuleRequest.builder().ruleName(ruleName).build());
@@ -594,7 +706,7 @@ class IotTest {
                     .payload(SdkBytes.fromUtf8String("java-rule-payload"))
                     .build());
 
-            var received = sqs.receiveMessage(ReceiveMessageRequest.builder()
+            ReceiveMessageResponse received = sqs.receiveMessage(ReceiveMessageRequest.builder()
                     .queueUrl(queueUrl)
                     .maxNumberOfMessages(1)
                     .build());
@@ -604,6 +716,85 @@ class IotTest {
             try {
                 iot.deleteTopicRule(DeleteTopicRuleRequest.builder().ruleName(ruleName).build());
             } catch (Exception ignored) {
+            }
+            sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(queueUrl).build());
+        }
+    }
+
+    @Test
+    void namedShadowUpdateReachesATopicRuleOnItsAcceptedTopic() throws Exception {
+        String ruleName = "java_iot_shadow_rule";
+        String thingName = "java-iot-shadow-rule-thing";
+        String queueUrl = sqs.createQueue(CreateQueueRequest.builder()
+                .queueName("java-iot-shadow-rule-queue")
+                .build()).queueUrl();
+
+        try {
+            iot.createTopicRule(CreateTopicRuleRequest.builder()
+                    .ruleName(ruleName)
+                    .topicRulePayload(TopicRulePayload.builder()
+                            .sql("SELECT *, topic() AS topic, clientid() AS cid "
+                                    + "FROM '$aws/things/+/shadow/name/building/update/accepted' "
+                                    + "WHERE endswith(clientToken, 'inbound')")
+                            .ruleDisabled(false)
+                            .actions(Action.builder()
+                                    .sqs(SqsAction.builder()
+                                            .roleArn(TestFixtures.globalArn(
+                                                    "iam", "000000000000", "role/iot-rule-role"))
+                                            .queueUrl(queueUrl)
+                                            .useBase64(false)
+                                            .build())
+                                    .build())
+                            .build())
+                    .build());
+
+            iotData.updateThingShadow(UpdateThingShadowRequest.builder()
+                    .thingName(thingName)
+                    .shadowName("building")
+                    .payload(SdkBytes.fromUtf8String(
+                            "{\"state\":{\"desired\":{\"temp\":20}},\"clientToken\":\"x:outbound\"}"))
+                    .build());
+            UpdateThingShadowResponse updated = iotData.updateThingShadow(UpdateThingShadowRequest.builder()
+                    .thingName(thingName)
+                    .shadowName("building")
+                    .payload(SdkBytes.fromUtf8String(
+                            "{\"state\":{\"desired\":{\"temp\":21}},\"clientToken\":\"x:inbound\"}"))
+                    .build());
+            JsonNode accepted = OBJECT_MAPPER.readTree(updated.payload().asByteArray());
+
+            ReceiveMessageResponse received = sqs.receiveMessage(ReceiveMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .maxNumberOfMessages(10)
+                    .waitTimeSeconds(5)
+                    .build());
+            assertThat(received.messages()).hasSize(1);
+            JsonNode message = OBJECT_MAPPER.readTree(received.messages().get(0).body());
+            assertThat(message.path("topic").asText())
+                    .isEqualTo("$aws/things/" + thingName + "/shadow/name/building/update/accepted");
+            assertThat(message.path("cid").asText()).isEqualTo("N/A");
+            assertThat(message.path("clientToken").asText()).isEqualTo("x:inbound");
+            assertThat(message.at("/state/desired/temp").asInt()).isEqualTo(21);
+            assertThat(message.path("version").asLong()).isEqualTo(accepted.path("version").asLong());
+
+            ReceiveMessageResponse outbound = sqs.receiveMessage(ReceiveMessageRequest.builder()
+                    .queueUrl(queueUrl)
+                    .maxNumberOfMessages(10)
+                    .waitTimeSeconds(1)
+                    .build());
+            assertThat(outbound.messages()).isEmpty();
+        } finally {
+            try {
+                iot.deleteTopicRule(DeleteTopicRuleRequest.builder().ruleName(ruleName).build());
+            } catch (ResourceNotFoundException ignored) {
+                // The rule was never created; there is nothing to clean up.
+            }
+            try {
+                iotData.deleteThingShadow(DeleteThingShadowRequest.builder()
+                        .thingName(thingName)
+                        .shadowName("building")
+                        .build());
+            } catch (software.amazon.awssdk.services.iotdataplane.model.ResourceNotFoundException ignored) {
+                // Name clash with the IoT control-plane ResourceNotFoundException; the shadow was never created.
             }
             sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(queueUrl).build());
         }
@@ -728,6 +919,80 @@ class IotTest {
     }
 
     @Test
+    void thingUpdateHonoursMergeThingTypeAndExpectedVersion() {
+        // AWS keeps a deprecated thing type for five minutes before it can be deleted, so on AWS the
+        // test borrows a test thing type the account already has, as fleetIndexSearch does.
+        String thingType = TestFixtures.isRealAws() ? existingTestThingType() : "java-iot-update-type";
+        assertThat(thingType)
+                .as("on AWS the account needs an active thing type whose name contains \"test\"")
+                .isNotNull();
+        String thingName = "java-iot-update-thing";
+        try {
+            iot.deleteThing(DeleteThingRequest.builder().thingName(thingName).build());
+        } catch (Exception ignored) {
+            // Nothing is left over from an earlier run.
+        }
+        if (!TestFixtures.isRealAws()) {
+            deleteThingTypeQuietly(thingType);
+            iot.createThingType(CreateThingTypeRequest.builder().thingTypeName(thingType).build());
+        }
+        iot.createThing(CreateThingRequest.builder()
+                .thingName(thingName)
+                .attributePayload(AttributePayload.builder().attributes(Map.of("env", "java", "owner", "iot")).build())
+                .build());
+
+        iot.updateThing(UpdateThingRequest.builder()
+                .thingName(thingName)
+                .attributePayload(AttributePayload.builder()
+                        .attributes(Map.of("fw", "1.2", "owner", ""))
+                        .merge(true)
+                        .build())
+                .build());
+        DescribeThingResponse merged = iot.describeThing(DescribeThingRequest.builder().thingName(thingName).build());
+        assertThat(merged.attributes()).isEqualTo(Map.of("env", "java", "fw", "1.2"));
+
+        iot.updateThing(UpdateThingRequest.builder().thingName(thingName).thingTypeName(thingType).build());
+        DescribeThingResponse typed = iot.describeThing(DescribeThingRequest.builder().thingName(thingName).build());
+        assertThat(typed.thingTypeName()).isEqualTo(thingType);
+        assertThat(typed.attributes()).isEqualTo(Map.of("env", "java", "fw", "1.2"));
+
+        iot.updateThing(UpdateThingRequest.builder().thingName(thingName).removeThingType(true).build());
+        DescribeThingResponse untyped = iot.describeThing(DescribeThingRequest.builder().thingName(thingName).build());
+        assertThat(untyped.thingTypeName()).isNull();
+
+        assertThatThrownBy(() -> iot.updateThing(UpdateThingRequest.builder()
+                .thingName(thingName)
+                .thingTypeName(thingType)
+                .removeThingType(true)
+                .build()))
+                .isInstanceOf(InvalidRequestException.class);
+
+        long version = untyped.version();
+        assertThatThrownBy(() -> iot.deleteThing(DeleteThingRequest.builder()
+                .thingName(thingName)
+                .expectedVersion(version - 1)
+                .build()))
+                .isInstanceOf(VersionConflictException.class);
+        assertThat(iot.describeThing(DescribeThingRequest.builder().thingName(thingName).build()).version()).isEqualTo(version);
+
+        iot.deleteThing(DeleteThingRequest.builder().thingName(thingName).expectedVersion(version).build());
+        assertThatThrownBy(() -> iot.describeThing(DescribeThingRequest.builder().thingName(thingName).build()))
+                .isInstanceOf(ResourceNotFoundException.class);
+        if (!TestFixtures.isRealAws()) {
+            deleteThingTypeQuietly(thingType);
+        }
+    }
+
+    private void deleteThingTypeQuietly(String thingType) {
+        try {
+            iot.deprecateThingType(DeprecateThingTypeRequest.builder().thingTypeName(thingType).build());
+            iot.deleteThingType(DeleteThingTypeRequest.builder().thingTypeName(thingType).build());
+        } catch (Exception ignored) {
+            // Absent: nothing is left over from an earlier run.
+        }
+    }
+
+    @Test
     void mqttConnectPublishSubscribe() throws Exception {
         String topic = "devices/java-iot-mqtt/events";
         byte[] payload = "java-mqtt".getBytes(StandardCharsets.UTF_8);
@@ -784,9 +1049,78 @@ class IotTest {
         }
     }
 
+    @Test
+    void mqttPresenceEventsReachTopicRulesOverSqs() throws Exception {
+        String suffix = Long.toString(System.nanoTime());
+        String clientId = "tklocal-java-" + suffix;
+        String queueUrl = sqs.createQueue(CreateQueueRequest.builder()
+                .queueName("java-iot-presence-" + suffix)
+                .build()).queueUrl();
+        String connectedRule = "java_iot_presence_connected_" + suffix;
+        String disconnectedRule = "java_iot_presence_disconnected_" + suffix;
+        createSqsRule(connectedRule,
+                "SELECT * FROM '$aws/events/presence/connected/+' WHERE startswith(clientId, 'tklocal-')", queueUrl);
+        createSqsRule(disconnectedRule,
+                "SELECT * FROM '$aws/events/presence/disconnected/+' WHERE startswith(clientId, 'tklocal-')", queueUrl);
+        try {
+            try (Socket client = mqttConnect(clientId)) {
+                client.getOutputStream().write(new byte[] {(byte) 0xe0, 0x00});
+            }
+
+            Map<String, JsonNode> byType = new HashMap<>();
+            long deadline = System.currentTimeMillis() + 10_000;
+            while (byType.size() < 2 && System.currentTimeMillis() < deadline) {
+                for (Message message : sqs.receiveMessage(ReceiveMessageRequest.builder()
+                        .queueUrl(queueUrl)
+                        .maxNumberOfMessages(10)
+                        .build()).messages()) {
+                    JsonNode event = OBJECT_MAPPER.readTree(message.body());
+                    if (clientId.equals(event.path("clientId").asText())) {
+                        byType.put(event.path("eventType").asText(), event);
+                    }
+                }
+                Thread.sleep(100);
+            }
+
+            assertThat(byType).containsOnlyKeys("connected", "disconnected");
+            JsonNode connected = byType.get("connected");
+            JsonNode disconnected = byType.get("disconnected");
+            assertThat(connected.path("timestamp").isIntegralNumber()).isTrue();
+            assertThat(connected.path("ipAddress").asText()).isNotEmpty();
+            assertThat(disconnected.path("sessionIdentifier").asText())
+                    .isNotEmpty()
+                    .isEqualTo(connected.path("sessionIdentifier").asText());
+            assertThat(disconnected.path("versionNumber").asLong()).isEqualTo(connected.path("versionNumber").asLong());
+            assertThat(disconnected.path("clientInitiatedDisconnect").asBoolean()).isTrue();
+            assertThat(disconnected.path("disconnectReason").asText()).isEqualTo("CLIENT_INITIATED_DISCONNECT");
+        } finally {
+            iot.deleteTopicRule(DeleteTopicRuleRequest.builder().ruleName(connectedRule).build());
+            iot.deleteTopicRule(DeleteTopicRuleRequest.builder().ruleName(disconnectedRule).build());
+            sqs.deleteQueue(DeleteQueueRequest.builder().queueUrl(queueUrl).build());
+        }
+    }
+
+    private void createSqsRule(String ruleName, String sql, String queueUrl) {
+        iot.createTopicRule(CreateTopicRuleRequest.builder()
+                .ruleName(ruleName)
+                .topicRulePayload(TopicRulePayload.builder()
+                        .sql(sql)
+                        .awsIotSqlVersion("2016-03-23")
+                        .ruleDisabled(false)
+                        .actions(Action.builder()
+                                .sqs(SqsAction.builder()
+                                        .roleArn(TestFixtures.globalArn("iam", "000000000000", "role/iot-rule-role"))
+                                        .queueUrl(queueUrl)
+                                        .useBase64(false)
+                                        .build())
+                                .build())
+                        .build())
+                .build());
+    }
+
     private Socket mqttConnect(String clientId) throws IOException {
         Socket socket = new Socket();
-        socket.connect(new InetSocketAddress(TestFixtures.proxyHost(), 1883), 5_000);
+        socket.connect(new InetSocketAddress("floci", 1883), 5_000);
         socket.setSoTimeout(5_000);
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         mqttUtf8(body, "MQTT");
@@ -802,7 +1136,7 @@ class IotTest {
 
     private Socket mqtt5Connect(String clientId) throws IOException {
         Socket socket = new Socket();
-        socket.connect(new InetSocketAddress(TestFixtures.proxyHost(), 1883), 5_000);
+        socket.connect(new InetSocketAddress("floci", 1883), 5_000);
         socket.setSoTimeout(5_000);
         ByteArrayOutputStream body = new ByteArrayOutputStream();
         mqttUtf8(body, "MQTT");

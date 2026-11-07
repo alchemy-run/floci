@@ -7,7 +7,7 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
-
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.services.ses.SesClient;
 import software.amazon.awssdk.services.ses.model.ConfigurationSetAttribute;
 import software.amazon.awssdk.services.ses.model.DeleteIdentityRequest;
@@ -15,7 +15,6 @@ import software.amazon.awssdk.services.ses.model.DescribeConfigurationSetRequest
 import software.amazon.awssdk.services.ses.model.DescribeConfigurationSetResponse;
 import software.amazon.awssdk.services.ses.model.UpdateConfigurationSetSendingEnabledRequest;
 import software.amazon.awssdk.services.ses.model.VerifyEmailIdentityRequest;
-
 import software.amazon.awssdk.services.sesv2.SesV2Client;
 import software.amazon.awssdk.services.sesv2.model.Body;
 import software.amazon.awssdk.services.sesv2.model.Content;
@@ -51,6 +50,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 @DisplayName("SES Per-Configuration-Set Sending Toggle (v1 + v2)")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@ResourceLock("ses-account")
 class SesConfigurationSetSendingTest {
 
     private static final String CS_NAME = "compat-cs-sending";
@@ -78,6 +78,7 @@ class SesConfigurationSetSendingTest {
                 .emailAddress(FROM).build());
         sesV1.verifyEmailIdentity(VerifyEmailIdentityRequest.builder()
                 .emailAddress(TO).build());
+        sesV1.verifyEmailIdentity(VerifyEmailIdentityRequest.builder().emailAddress(FROM).build());
     }
 
     @AfterAll

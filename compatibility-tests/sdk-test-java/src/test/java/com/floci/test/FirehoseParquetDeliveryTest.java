@@ -8,6 +8,7 @@ import org.junit.jupiter.api.MethodOrderer;
 import org.junit.jupiter.api.Order;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestMethodOrder;
+import org.junit.jupiter.api.parallel.ResourceLock;
 import software.amazon.awssdk.core.SdkBytes;
 import software.amazon.awssdk.services.athena.AthenaClient;
 import software.amazon.awssdk.services.athena.model.Datum;
@@ -54,6 +55,7 @@ import software.amazon.awssdk.services.s3.model.S3Object;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.List;
 
@@ -76,10 +78,12 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @DisplayName("Firehose data format conversion delivery (JSON to Parquet)")
 @TestMethodOrder(MethodOrderer.OrderAnnotation.class)
+@ResourceLock("floci-duck")
 class FirehoseParquetDeliveryTest {
 
     private static final int BUFFERING_INTERVAL_SECONDS = 5;
     private static final long POLL_TIMEOUT_MILLIS = 240_000L;
+    private static final long POLL_INTERVAL_MILLIS = TestFixtures.isRealAws() ? 5_000L : 250L;
     private static final byte[] PARQUET_MAGIC = "PAR1".getBytes(StandardCharsets.US_ASCII);
 
     private static final String VALID_RECORD_1 =
@@ -221,7 +225,7 @@ class FirehoseParquetDeliveryTest {
                 throw new AssertionError("delivery stream stayed " + status + " for "
                         + POLL_TIMEOUT_MILLIS / 1000 + "s");
             }
-            Thread.sleep(5_000L);
+            Thread.sleep(POLL_INTERVAL_MILLIS);
         }
     }
 
@@ -275,10 +279,10 @@ class FirehoseParquetDeliveryTest {
         byte[] body = s3.getObject(GetObjectRequest.builder().bucket(bucket).key(key).build())
                 .readAllBytes();
         assertThat(body.length).isGreaterThan(PARQUET_MAGIC.length * 2);
-        assertThat(java.util.Arrays.copyOfRange(body, 0, PARQUET_MAGIC.length))
+        assertThat(Arrays.copyOfRange(body, 0, PARQUET_MAGIC.length))
                 .as("delivered object must start with the Parquet magic")
                 .isEqualTo(PARQUET_MAGIC);
-        assertThat(java.util.Arrays.copyOfRange(body, body.length - PARQUET_MAGIC.length, body.length))
+        assertThat(Arrays.copyOfRange(body, body.length - PARQUET_MAGIC.length, body.length))
                 .as("delivered object must end with the Parquet magic")
                 .isEqualTo(PARQUET_MAGIC);
     }
@@ -470,7 +474,7 @@ class FirehoseParquetDeliveryTest {
             if (!contents.isEmpty()) {
                 return contents.get(0).key();
             }
-            Thread.sleep(5_000L);
+            Thread.sleep(POLL_INTERVAL_MILLIS);
         }
         throw new AssertionError("no object delivered under " + prefix + " within "
                 + POLL_TIMEOUT_MILLIS / 1000 + "s");

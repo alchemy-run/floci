@@ -29,6 +29,9 @@ Floci Batch implements the AWS Batch control plane for local integration tests. 
 | `TagResource` | `POST /v1/tagresource` | Tag a compute environment, queue, or job definition |
 | `UntagResource` | `POST /v1/untagresource` | Remove tags from a Batch resource |
 | `ListTagsForResource` | `POST /v1/listtagsforresource` | List tags on a Batch resource |
+| `ListTagsForResource` | `GET /v1/tags/{resourceArn}` | List the tags of a compute environment, job queue, job definition, or job |
+| `TagResource` | `POST /v1/tags/{resourceArn}` | Add or overwrite tags on a resource; tags the request omits are kept |
+| `UntagResource` | `DELETE /v1/tags/{resourceArn}?tagKeys=...` | Remove the named tag keys from a resource |
 
 ## Runner Modes
 
@@ -104,6 +107,8 @@ does not yet preempt the remaining nodes (see Limitations). `DescribeJobs`/queue
 return one entry for the whole
 job (with `nodeProperties`, no per-node `container`); pass `multiNodeJobId` to `ListJobs` for a
 one-entry-per-node breakdown with each node's own `container` and `nodeProperties.nodeIndex`.
+Use `maxResults` and `nextToken` to page this breakdown, with up to 1,000 nodes per page.
+The final page omits `nextToken`.
 `containerOverrides` and array jobs are not supported on MNP job definitions; use `nodeOverrides`
 instead.
 
@@ -173,5 +178,3 @@ correctness, deliberately deferred):
 - `ListJobs` with `arrayJobId` ignores the `filters` parameter (only `jobStatus` is honored for
   children). This matches AWS's own note that filters don't apply to child jobs, but it means array
   children can't be filtered by `JOB_NAME`/`JOB_DEFINITION`/etc.
-- `ListJobs` with `multiNodeJobId` has no pagination (`maxResults`/`nextToken`); it always returns
-  every node in one response.

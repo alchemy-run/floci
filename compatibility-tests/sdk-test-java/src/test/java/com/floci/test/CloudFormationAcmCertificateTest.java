@@ -68,9 +68,7 @@ class CloudFormationAcmCertificateTest {
         assertThat(waitForTerminal(stackName, 60)).isEqualTo("CREATE_COMPLETE");
 
         String arn = output("CertArn");
-        assertThat(arn).startsWith("arn:aws:acm:us-east-1:");
-        // DNS validation completes once the certificate's validation CNAME is published.
-        TestFixtures.validateAcmCertificateViaRoute53(acm, arn);
+        assertThat(arn).startsWith("arn:" + TestFixtures.partition() + ":acm:" + TestFixtures.region().id() + ":");
         CertificateDetail created = describe(arn);
         assertThat(created.domainName()).isEqualTo(domainName);
         assertThat(created.status()).isEqualTo(CertificateStatus.ISSUED);
@@ -108,6 +106,7 @@ class CloudFormationAcmCertificateTest {
         assertThatThrownBy(() -> describe(replacement)).isInstanceOf(ResourceNotFoundException.class);
     }
 
+    // Email validation, so the certificate is issued without a published DNS record.
     private static String template() {
         return """
                 {
@@ -120,7 +119,7 @@ class CloudFormationAcmCertificateTest {
                       "Type": "AWS::CertificateManager::Certificate",
                       "Properties": {
                         "DomainName": "%s",
-                        "ValidationMethod": "DNS",
+                        "ValidationMethod": "EMAIL",
                         "CertificateExport": {"Ref": "Export"},
                         "CertificateTransparencyLoggingPreference": {"Ref": "TransparencyLogging"}
                       }

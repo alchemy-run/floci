@@ -48,6 +48,37 @@ Floci emulates Amazon Athena with **real SQL execution** powered by a [floci-duc
 | `GetQueryRuntimeStatistics` | Returns a stub timeline for a query |
 <!-- floci:actions:end -->
 
+`ListDataCatalogs` accepts `MaxResults` from 2 to 50. Floci uses 50 when it is
+omitted, since the API reference does not document a default. The built-in
+`AwsDataCatalog` stays first, followed by registered catalogs in name order.
+`GetDataCatalog`, `ListDatabases`, `ListTableMetadata` and `GetTableMetadata`
+read `AwsDataCatalog` when the request names no catalog or a JSON null.
+Pass the opaque `NextToken` to continue; final pages omit it. Tokens are scoped
+to the action, caller account, and request region and remain resumable after a
+cursor catalog is deleted. Malformed tokens, tokens outside the 1-to-1024
+character range, and invalid page sizes return `InvalidRequestException`.
+
+`ListQueryExecutions` returns at most `MaxResults` IDs from the requested
+`WorkGroup`, defaulting to `primary`. Floci uses a bounded page of 50 when the
+page size is omitted, null, or zero; the API reference permits zero but does not
+specify its behavior or a default. Positive page sizes must not exceed 50.
+IDs are ordered deterministically, and the final page omits `NextToken`.
+Continuation tokens are scoped to the action, account, region, and workgroup;
+invalid sizes, malformed tokens, and tokens outside 1 to 1024 characters return
+`InvalidRequestException`.
+
+A workgroup reports what its request gave and AWS's defaults for the rest. With
+no `ResultConfiguration`, it reports none (`primary` reports an empty one, as on
+AWS); a query then names its own output location, and Floci writes results to
+`s3://floci-athena-results/results/` when neither does. With no `EngineVersion`,
+it selects `AUTO`, reported with the effective version `Athena engine version 3`.
+`ManagedQueryResultsConfiguration` (`Enabled` and an optional
+`EncryptionConfiguration.KmsKey`) and `EnableMinimumEncryptionConfiguration`
+round-trip through `CreateWorkGroup`, `UpdateWorkGroup`
+(`ManagedQueryResultsConfigurationUpdates`, with `RemoveEncryptionConfiguration`)
+and `GetWorkGroup`; Floci records the setting and keeps no separate managed
+results storage.
+
 ## How it works
 
 1. **Literal SELECT fast path**: `SELECT <integer>` (optional `AS alias`) completes in-process: writes a header+value CSV, caches the `ResultSet`, and marks `SUCCEEDED` without starting DuckDB. Alchemy's first `/select-one` after deploy used to 5xx while the sidecar cold-started.

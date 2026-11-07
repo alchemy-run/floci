@@ -14,8 +14,8 @@ import software.amazon.awssdk.services.datasync.model.CreateTaskResponse;
 import software.amazon.awssdk.services.datasync.model.DescribeAgentResponse;
 import software.amazon.awssdk.services.datasync.model.DescribeLocationNfsResponse;
 import software.amazon.awssdk.services.datasync.model.DescribeLocationS3Response;
-import software.amazon.awssdk.services.datasync.model.DescribeTaskResponse;
 import software.amazon.awssdk.services.datasync.model.DescribeTaskExecutionResponse;
+import software.amazon.awssdk.services.datasync.model.DescribeTaskResponse;
 import software.amazon.awssdk.services.datasync.model.InvalidRequestException;
 import software.amazon.awssdk.services.datasync.model.S3StorageClass;
 import software.amazon.awssdk.services.datasync.model.TagListEntry;
@@ -26,6 +26,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.S3Object;
 
 import java.util.List;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -61,7 +62,7 @@ class DataSyncTest {
         datasync.close();
     }
 
-    private static void deleteQuietly(String kind, String arn, java.util.function.Consumer<String> delete) {
+    private static void deleteQuietly(String kind, String arn, Consumer<String> delete) {
         if (arn == null) {
             return;
         }

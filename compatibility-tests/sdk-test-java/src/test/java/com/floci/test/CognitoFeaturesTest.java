@@ -322,6 +322,27 @@ class CognitoFeaturesTest {
                 .isTrue();
     }
 
+    // ── Issue #4760: GetUserAuthFactors ──────────────────────────────────────
+
+    @Test
+    @Order(34)
+    void getUserAuthFactorsListsPasswordAndVerifiedEmail() {
+        InitiateAuthResponse resp = cognito.initiateAuth(b -> b
+                .clientId(clientId)
+                .authFlow(AuthFlowType.USER_PASSWORD_AUTH)
+                .authParameters(Map.of("USERNAME", USERNAME, "PASSWORD", PASSWORD)));
+        String accessToken = resp.authenticationResult().accessToken();
+
+        GetUserAuthFactorsResponse factors = cognito.getUserAuthFactors(b -> b.accessToken(accessToken));
+
+        assertThat(factors.username())
+                .isEqualTo(cognito.getUser(b -> b.accessToken(accessToken)).username());
+        assertThat(factors.configuredUserAuthFactors())
+                .containsExactly(AuthFactorType.PASSWORD, AuthFactorType.EMAIL_OTP);
+        assertThat(factors.preferredMfaSetting()).isNull();
+        assertThat(factors.hasUserMFASettingList()).isFalse();
+    }
+
     // ── Issue #220 — AdminGetUser accepts sub UUID and email as Username ───────
 
     @Test
@@ -433,12 +454,27 @@ class CognitoFeaturesTest {
         assertThat(sub.mutable()).isFalse();
     }
 
+    @Test
+    @Order(56)
+    void describeUserPoolReturnsItsPrefixDomain() {
+        String domain = "compat-" + UUID.randomUUID().toString().replace("-", "").substring(0, 20);
+        cognito.createUserPoolDomain(b -> b.domain(domain).userPoolId(poolId));
+
+        try {
+            UserPoolType userPool = cognito.describeUserPool(b -> b.userPoolId(poolId)).userPool();
+            assertThat(userPool.domain()).isEqualTo(domain);
+            assertThat(userPool.customDomain()).isNull();
+        } finally {
+            cognito.deleteUserPoolDomain(b -> b.domain(domain).userPoolId(poolId));
+        }
+    }
+
     // ── AdminRespondToAuthChallenge ─────────────────────────────────────────
 
     @Test
     @Order(60)
     void adminRespondToAuthChallengeNewPasswordRequired() {
-        String tempUser = "admin-challenge-user-" + java.util.UUID.randomUUID();
+        String tempUser = "admin-challenge-user-" + UUID.randomUUID();
         String tempPassword = "TempPass1!";
         String newPassword = "Permanent99!";
 

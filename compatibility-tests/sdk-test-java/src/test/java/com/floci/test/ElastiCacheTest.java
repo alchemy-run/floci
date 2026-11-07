@@ -16,10 +16,10 @@ import software.amazon.awssdk.services.elasticache.model.DeleteReplicationGroupR
 import software.amazon.awssdk.services.elasticache.model.DeleteUserRequest;
 import software.amazon.awssdk.services.elasticache.model.DescribeReplicationGroupsRequest;
 import software.amazon.awssdk.services.elasticache.model.DescribeUsersRequest;
+import software.amazon.awssdk.services.elasticache.model.ElastiCacheException;
 import software.amazon.awssdk.services.elasticache.model.InputAuthenticationType;
 import software.amazon.awssdk.services.elasticache.model.ModifyReplicationGroupRequest;
 import software.amazon.awssdk.services.elasticache.model.ModifyUserRequest;
-import software.amazon.awssdk.services.elasticache.model.ElastiCacheException;
 
 import java.io.IOException;
 import java.io.InputStream;
