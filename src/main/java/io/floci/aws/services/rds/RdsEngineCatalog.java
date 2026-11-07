@@ -1,10 +1,13 @@
 package io.floci.aws.services.rds;
 
+
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The engine versions RDS reports through DescribeDBEngineVersions and
@@ -184,8 +187,8 @@ final class RdsEngineCatalog {
     }
 
     /** The parameter group families the catalogue's versions use. */
-    static java.util.Set<String> families() {
-        java.util.Set<String> families = new java.util.LinkedHashSet<>();
+    static Set<String> families() {
+        Set<String> families = new LinkedHashSet<>();
         VERSIONS.forEach(version -> families.add(version.family()));
         return families;
     }

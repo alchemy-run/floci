@@ -1,7 +1,5 @@
 package io.floci.aws.services.rds;
 
-import io.floci.aws.services.rds.model.DbInstancePendingModifiedValues;
-import io.floci.aws.services.rds.model.DbInstanceModifyOptions;
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsErrorMessages;
@@ -23,6 +21,8 @@ import io.floci.aws.services.rds.model.DbClusterSnapshot;
 import io.floci.aws.services.rds.model.DbEndpoint;
 import io.floci.aws.services.rds.model.DbInstance;
 import io.floci.aws.services.rds.model.DbInstanceAutomatedBackup;
+import io.floci.aws.services.rds.model.DbInstanceModifyOptions;
+import io.floci.aws.services.rds.model.DbInstancePendingModifiedValues;
 import io.floci.aws.services.rds.model.DbInstanceScalingChanges;
 import io.floci.aws.services.rds.model.DbInstanceSettings;
 import io.floci.aws.services.rds.model.DbInstanceStatus;

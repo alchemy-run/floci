@@ -50,6 +50,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -58,9 +61,11 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -1882,8 +1887,8 @@ public class RedshiftService implements ManagedSecretRotator {
         try {
             Files.createDirectories(dumpDir);
             temporary = Files.createTempFile(dumpDir, "snapshot-copy-", ".sql");
-            Files.copy(Path.of(source.getSqlDump()), temporary, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-            Files.move(temporary, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            Files.copy(Path.of(source.getSqlDump()), temporary, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(temporary, target, StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             throw new AwsException("InternalFailure", "Failed to copy snapshot data: " + e.getMessage(), 500);
         } finally {
@@ -3693,7 +3698,7 @@ public class RedshiftService implements ManagedSecretRotator {
     private static final String DEFAULT_DB_NAME = "dev";
     // CreateCluster DBName: 1 to 64 lowercase letters, digits, underscores or dollar signs, starting
     // with a letter or underscore, and not a reserved word.
-    private static final java.util.regex.Pattern DB_NAME = java.util.regex.Pattern.compile("[a-z_][a-z0-9_$]{0,63}");
+    private static final Pattern DB_NAME = Pattern.compile("[a-z_][a-z0-9_$]{0,63}");
     private static final Set<String> RESERVED_DB_NAMES = Set.of("padb_harvest", "template0", "template1", "postgres");
 
     /** Dumps the cluster's own database: "dev" unless CreateCluster named another. */
@@ -3816,7 +3821,7 @@ public class RedshiftService implements ManagedSecretRotator {
             return proxyEndpoint(proxyPort);
         }
         String region = regionResolver.getRegion();
-        return new Endpoint(clusterIdentifier.toLowerCase(java.util.Locale.ROOT) + "."
+        return new Endpoint(clusterIdentifier.toLowerCase(Locale.ROOT) + "."
                 + endpointToken(accountId, region) + "." + region + "." + domain.get(),
                 config.services().redshift().defaultPort());
     }
@@ -3824,11 +3829,11 @@ public class RedshiftService implements ManagedSecretRotator {
     // AWS gives every account and region a stable 12-character endpoint label.
     private static String endpointToken(String accountId, String region) {
         try {
-            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
+            byte[] digest = MessageDigest.getInstance("SHA-256")
                     .digest(("redshift:" + accountId + ":" + region)
-                            .getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return java.util.HexFormat.of().formatHex(digest).substring(0, 12);
-        } catch (java.security.NoSuchAlgorithmException e) {
+                            .getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest).substring(0, 12);
+        } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is unavailable", e);
         }
     }

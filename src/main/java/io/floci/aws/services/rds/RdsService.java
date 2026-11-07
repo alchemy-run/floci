@@ -37,7 +37,6 @@ import io.floci.aws.services.rds.container.RdsContainerManager;
 import io.floci.aws.services.rds.export.SnapshotExportSource;
 import io.floci.aws.services.rds.model.DatabaseEngine;
 import io.floci.aws.services.rds.model.DbCluster;
-import io.floci.aws.services.rds.model.LogExportChanges;
 import io.floci.aws.services.rds.model.DbClusterAutomatedBackup;
 import io.floci.aws.services.rds.model.DbClusterEndpoint;
 import io.floci.aws.services.rds.model.DbClusterParameterGroup;
@@ -45,9 +44,9 @@ import io.floci.aws.services.rds.model.DbClusterSnapshot;
 import io.floci.aws.services.rds.model.DbEndpoint;
 import io.floci.aws.services.rds.model.DbInstance;
 import io.floci.aws.services.rds.model.DbInstanceAutomatedBackup;
-import io.floci.aws.services.rds.model.DbInstanceScalingChanges;
 import io.floci.aws.services.rds.model.DbInstanceModifyOptions;
 import io.floci.aws.services.rds.model.DbInstancePendingModifiedValues;
+import io.floci.aws.services.rds.model.DbInstanceScalingChanges;
 import io.floci.aws.services.rds.model.DbInstanceSettings;
 import io.floci.aws.services.rds.model.DbInstanceStatus;
 import io.floci.aws.services.rds.model.DbParameterGroup;
@@ -62,6 +61,7 @@ import io.floci.aws.services.rds.model.DbSubnetGroup;
 import io.floci.aws.services.rds.model.EventSubscription;
 import io.floci.aws.services.rds.model.GlobalCluster;
 import io.floci.aws.services.rds.model.GlobalClusterMember;
+import io.floci.aws.services.rds.model.LogExportChanges;
 import io.floci.aws.services.rds.model.OptionGroup;
 import io.floci.aws.services.rds.model.OptionGroupOption;
 import io.floci.aws.services.rds.model.PointInTimeRestoreRequest;
@@ -78,6 +78,9 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
@@ -86,6 +89,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -9274,10 +9278,10 @@ public class RdsService implements Resettable, ResourceProvider {
     /** The per-account, per-Region label AWS puts in every RDS endpoint: "c" and 11 characters. */
     static String endpointToken(String accountId, String region) {
         try {
-            byte[] digest = java.security.MessageDigest.getInstance("SHA-256")
-                    .digest((accountId + ":" + region).getBytes(java.nio.charset.StandardCharsets.UTF_8));
-            return "c" + java.util.HexFormat.of().formatHex(digest).substring(0, 11);
-        } catch (java.security.NoSuchAlgorithmException e) {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest((accountId + ":" + region).getBytes(StandardCharsets.UTF_8));
+            return "c" + HexFormat.of().formatHex(digest).substring(0, 11);
+        } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 unavailable", e);
         }
     }
