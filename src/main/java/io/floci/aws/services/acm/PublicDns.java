@@ -43,6 +43,11 @@ public class PublicDns {
         String candidate = name;
         while (candidate.contains(".")) {
             candidate = candidate.substring(candidate.indexOf('.') + 1);
+            // A name with a CNAME is no zone apex, and an NS query for it follows the alias and
+            // answers with the name servers of whatever the alias points at.
+            if (!lookup(candidate, "CNAME", null).isEmpty()) {
+                continue;
+            }
             List<String> servers = lookup(candidate, "NS", null);
             if (!servers.isEmpty()) {
                 return servers;
