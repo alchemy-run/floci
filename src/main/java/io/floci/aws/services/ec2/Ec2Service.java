@@ -10385,6 +10385,13 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 || ownerIds.contains("self") && caller.equals(snapshot.getOwnerId());
     }
 
+    /** The tags a snapshot carries from its creation, plus those CreateTags added since. */
+    private List<Tag> snapshotTags(Snapshot snapshot) {
+        List<Tag> all = new ArrayList<>(snapshot.getTags() != null ? snapshot.getTags() : List.of());
+        all.addAll(resourceTags(snapshot.getRegion(), snapshot.getSnapshotId()));
+        return all;
+    }
+
     private boolean matchesSnapshotFilter(Snapshot snapshot, String name, List<String> values) {
         return switch (name) {
             case "description" -> matchesFilterValue(values, snapshot.getDescription());
@@ -10395,11 +10402,10 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             case "volume-id" -> matchesFilterValue(values, snapshot.getVolumeId());
             case "volume-size" -> matchesFilterValue(values,
                     snapshot.getVolumeSize() != null ? String.valueOf(snapshot.getVolumeSize()) : null);
-            case "tag-value" -> resourceTags(snapshot.getRegion(), snapshot.getSnapshotId()).stream()
+            case "tag-value" -> snapshotTags(snapshot).stream()
                     .anyMatch(tag -> matchesFilterValue(values, tag.getValue()));
             default -> !isTagFilter(name)
-                    || matchesTagFilter(resourceTags(snapshot.getRegion(), snapshot.getSnapshotId()), name, values,
-                            Ec2Service::matchesFilterValue);
+                    || matchesTagFilter(snapshotTags(snapshot), name, values, Ec2Service::matchesFilterValue);
         };
     }
 
