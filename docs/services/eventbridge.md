@@ -49,6 +49,11 @@
 | `DescribeReplay` | - |
 | `CancelReplay` | - |
 | `ListReplays` | - |
+| `CreateEndpoint` | Create a global endpoint over a primary and a secondary event bus |
+| `DescribeEndpoint` | Get an endpoint with its routing, replication and buses |
+| `UpdateEndpoint` | Change an endpoint in place |
+| `DeleteEndpoint` | Remove an endpoint |
+| `ListEndpoints` | List endpoints, optionally by name prefix |
 <!-- floci:actions:end -->
 
 `ListRules` and `ListConnections` accept `NextToken` values of 1 to 2048
