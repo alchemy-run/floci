@@ -291,6 +291,11 @@ public class EksAddonService {
         return update;
     }
 
+    /** Records an update of the cluster itself, which DescribeUpdate and ListUpdates then report. */
+    public void recordClusterUpdate(Cluster cluster, Update update) {
+        updatesStorage.put(prefix(cluster) + update.id(), new StoredUpdate(update, null));
+    }
+
     public synchronized Addon delete(Cluster cluster, String addonName, boolean preserve) {
         requireActiveCluster(cluster);
         if (addonName == null || addonName.isBlank()) {

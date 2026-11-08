@@ -69,6 +69,33 @@ public class CreateClusterRequest {
     public Logging getLogging() { return logging; }
     public void setLogging(Logging logging) { this.logging = logging; }
 
+    private Map<String, Object> upgradePolicy;
+    private Map<String, Object> zonalShiftConfig;
+    private Map<String, Object> computeConfig;
+    private Map<String, Object> storageConfig;
+    private Map<String, Object> remoteNetworkConfig;
+    private Boolean deletionProtection;
+
+    public Map<String, Object> getUpgradePolicy() { return upgradePolicy; }
+    public void setUpgradePolicy(Map<String, Object> upgradePolicy) { this.upgradePolicy = upgradePolicy; }
+
+    public Map<String, Object> getZonalShiftConfig() { return zonalShiftConfig; }
+    public void setZonalShiftConfig(Map<String, Object> zonalShiftConfig) { this.zonalShiftConfig = zonalShiftConfig; }
+
+    public Map<String, Object> getComputeConfig() { return computeConfig; }
+    public void setComputeConfig(Map<String, Object> computeConfig) { this.computeConfig = computeConfig; }
+
+    public Map<String, Object> getStorageConfig() { return storageConfig; }
+    public void setStorageConfig(Map<String, Object> storageConfig) { this.storageConfig = storageConfig; }
+
+    public Map<String, Object> getRemoteNetworkConfig() { return remoteNetworkConfig; }
+    public void setRemoteNetworkConfig(Map<String, Object> remoteNetworkConfig) {
+        this.remoteNetworkConfig = remoteNetworkConfig;
+    }
+
+    public Boolean getDeletionProtection() { return deletionProtection; }
+    public void setDeletionProtection(Boolean deletionProtection) { this.deletionProtection = deletionProtection; }
+
     public String getClientRequestToken() { return clientRequestToken; }
     public void setClientRequestToken(String clientRequestToken) { this.clientRequestToken = clientRequestToken; }
 }

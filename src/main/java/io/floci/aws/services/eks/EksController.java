@@ -21,6 +21,8 @@ import io.floci.aws.services.eks.model.PodIdentityAssociation;
 import io.floci.aws.services.eks.model.Update;
 import io.floci.aws.services.eks.model.UpdateAccessEntryRequest;
 import io.floci.aws.services.eks.model.UpdateAddonRequest;
+import io.floci.aws.services.eks.model.UpdateClusterConfigRequest;
+import io.floci.aws.services.eks.model.UpdateClusterVersionRequest;
 import io.floci.aws.services.eks.model.UpdateNodegroupConfigRequest;
 import io.floci.aws.services.eks.model.UpdateNodegroupVersionRequest;
 import io.floci.aws.services.eks.model.UpdatePodIdentityAssociationRequest;
@@ -354,6 +356,20 @@ public class EksController {
                                 UpdateAddonRequest request) {
         Cluster cluster = eksService.describeCluster(name);
         Update update = addons.update(cluster, addonName, request);
+        return Response.ok(Map.of("update", update)).build();
+    }
+
+    @POST
+    @Path("/clusters/{name}/update-config")
+    public Response updateClusterConfig(@PathParam("name") String name, UpdateClusterConfigRequest request) {
+        Update update = eksService.updateClusterConfig(name, request);
+        return Response.ok(Map.of("update", update)).build();
+    }
+
+    @POST
+    @Path("/clusters/{name}/updates")
+    public Response updateClusterVersion(@PathParam("name") String name, UpdateClusterVersionRequest request) {
+        Update update = eksService.updateClusterVersion(name, request);
         return Response.ok(Map.of("update", update)).build();
     }
 

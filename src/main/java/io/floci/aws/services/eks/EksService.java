@@ -46,6 +46,8 @@ import io.floci.aws.services.eks.model.OidcIdentity;
 import io.floci.aws.services.eks.model.Provider;
 import io.floci.aws.services.eks.model.ResourcesVpcConfig;
 import io.floci.aws.services.eks.model.Update;
+import io.floci.aws.services.eks.model.UpdateClusterConfigRequest;
+import io.floci.aws.services.eks.model.UpdateClusterVersionRequest;
 import io.floci.aws.services.eks.model.UpdateNodegroupConfigRequest;
 import io.floci.aws.services.eks.model.UpdateNodegroupVersionRequest;
 import io.floci.aws.services.eks.model.UpdateParam;
@@ -514,6 +516,12 @@ public class EksService implements TagHandler, ResourceProvider {
         cluster.setKubernetesNetworkConfig(buildNetworkConfig(request.getKubernetesNetworkConfig(), vpcCidr));
         cluster.setPodCidr(EksClusterManager.DEFAULT_POD_CIDR);
         cluster.setLogging(buildLogging(request.getLogging()));
+        cluster.setUpgradePolicy(request.getUpgradePolicy());
+        cluster.setZonalShiftConfig(request.getZonalShiftConfig());
+        cluster.setComputeConfig(request.getComputeConfig());
+        cluster.setStorageConfig(request.getStorageConfig());
+        cluster.setRemoteNetworkConfig(request.getRemoteNetworkConfig());
+        cluster.setDeletionProtection(request.getDeletionProtection());
         cluster.setEncryptionConfig(buildEncryptionConfig(request.getEncryptionConfig()));
         cluster.setStatus(ClusterStatus.CREATING);
         cluster.setTags(request.getTags() != null ? new HashMap<>(request.getTags()) : new HashMap<>());
@@ -598,6 +606,11 @@ public class EksService implements TagHandler, ResourceProvider {
 
     public Cluster deleteCluster(String name) {
         Cluster cluster = describeCluster(name);
+        if (Boolean.TRUE.equals(cluster.getDeletionProtection())) {
+            throw new AwsException("InvalidRequestException", "Cluster " + name
+                    + " has deletion protection enabled. Disable deletion protection before deleting the cluster.",
+                    400);
+        }
 
         cluster.setStatus(ClusterStatus.DELETING);
         if (!config.services().eks().mock()) {
@@ -614,6 +627,149 @@ public class EksService implements TagHandler, ResourceProvider {
         storage.delete(name);
         oidcService.deleteKey(name);
         return cluster;
+    }
+
+    /**
+     * UpdateClusterConfig. EKS applies one category per request (the Auto Mode trio counts as one)
+     * and reports an update; floci applies it at once, so the update is already Successful.
+     */
+    public synchronized Update updateClusterConfig(String name, UpdateClusterConfigRequest request) {
+        Cluster cluster = describeCluster(name);
+        boolean autoMode = request.computeConfig() != null || request.storageConfig() != null
+                || request.kubernetesNetworkConfig() != null;
+        long categories = Stream.of(request.resourcesVpcConfig(), request.logging(), request.accessConfig(),
+                request.upgradePolicy(), request.zonalShiftConfig(), request.remoteNetworkConfig(),
+                request.deletionProtection()).filter(Objects::nonNull).count() + (autoMode ? 1 : 0);
+        if (categories != 1) {
+            throw new AwsException("InvalidParameterException", categories == 0
+                    ? "No changes needed for the cluster." : "Only one type of update can be allowed.", 400);
+        }
+        String type;
+        List<UpdateParam> params = new ArrayList<>();
+        if (request.logging() != null) {
+            type = "LoggingUpdate";
+            cluster.setLogging(mergeLogging(cluster.getLogging(), request.logging()));
+            params.add(new UpdateParam("ClusterLogging", writeJson(cluster.getLogging().getClusterLogging())));
+        } else if (request.resourcesVpcConfig() != null) {
+            ResourcesVpcConfig update = request.resourcesVpcConfig();
+            ResourcesVpcConfig current = cluster.getResourcesVpcConfig();
+            boolean endpoints = update.getEndpointPublicAccess() != null || update.getEndpointPrivateAccess() != null
+                    || update.getPublicAccessCidrs() != null;
+            type = endpoints ? "EndpointAccessUpdate" : "VpcConfigUpdate";
+            if (update.getEndpointPublicAccess() != null) {
+                current.setEndpointPublicAccess(update.getEndpointPublicAccess());
+                params.add(new UpdateParam("EndpointPublicAccess", String.valueOf(update.getEndpointPublicAccess())));
+            }
+            if (update.getEndpointPrivateAccess() != null) {
+                current.setEndpointPrivateAccess(update.getEndpointPrivateAccess());
+                params.add(new UpdateParam("EndpointPrivateAccess", String.valueOf(update.getEndpointPrivateAccess())));
+            }
+            if (update.getPublicAccessCidrs() != null) {
+                current.setPublicAccessCidrs(new ArrayList<>(update.getPublicAccessCidrs()));
+                params.add(new UpdateParam("PublicAccessCidrs", writeJson(update.getPublicAccessCidrs())));
+            }
+            if (update.getSubnetIds() != null) {
+                current.setSubnetIds(new ArrayList<>(update.getSubnetIds()));
+                params.add(new UpdateParam("Subnets", writeJson(update.getSubnetIds())));
+            }
+            if (update.getSecurityGroupIds() != null) {
+                current.setSecurityGroupIds(new ArrayList<>(update.getSecurityGroupIds()));
+                params.add(new UpdateParam("SecurityGroups", writeJson(update.getSecurityGroupIds())));
+            }
+        } else if (request.accessConfig() != null) {
+            type = "AccessConfigUpdate";
+            String mode = request.accessConfig().authenticationMode();
+            AccessConfig current = cluster.getAccessConfig();
+            cluster.setAccessConfig(new AccessConfig(mode,
+                    current == null ? null : current.bootstrapClusterCreatorAdminPermissions()));
+            params.add(new UpdateParam("AuthenticationMode", mode));
+        } else if (request.upgradePolicy() != null) {
+            type = "UpgradePolicyUpdate";
+            cluster.setUpgradePolicy(request.upgradePolicy());
+            params.add(new UpdateParam("UpgradePolicy", writeJson(request.upgradePolicy())));
+        } else if (request.zonalShiftConfig() != null) {
+            type = "ZonalShiftConfigUpdate";
+            cluster.setZonalShiftConfig(request.zonalShiftConfig());
+            params.add(new UpdateParam("ZonalShiftConfig", writeJson(request.zonalShiftConfig())));
+        } else if (request.remoteNetworkConfig() != null) {
+            type = "RemoteNetworkConfigUpdate";
+            cluster.setRemoteNetworkConfig(request.remoteNetworkConfig());
+            params.add(new UpdateParam("RemoteNetworkConfig", writeJson(request.remoteNetworkConfig())));
+        } else if (request.deletionProtection() != null) {
+            type = "DeletionProtectionUpdate";
+            cluster.setDeletionProtection(request.deletionProtection());
+            params.add(new UpdateParam("DeletionProtection", String.valueOf(request.deletionProtection())));
+        } else {
+            type = "AutoModeUpdate";
+            if (request.computeConfig() != null) {
+                cluster.setComputeConfig(request.computeConfig());
+                params.add(new UpdateParam("ComputeConfig", writeJson(request.computeConfig())));
+            }
+            if (request.storageConfig() != null) {
+                cluster.setStorageConfig(request.storageConfig());
+                params.add(new UpdateParam("StorageConfig", writeJson(request.storageConfig())));
+            }
+            if (request.kubernetesNetworkConfig() != null) {
+                params.add(new UpdateParam("KubernetesNetworkConfig", writeJson(request.kubernetesNetworkConfig())));
+            }
+        }
+        storage.put(cluster.getName(), cluster);
+        return recordClusterUpdate(cluster, type, params);
+    }
+
+    /** UpdateClusterVersion: the control plane moves to the requested Kubernetes version. */
+    public synchronized Update updateClusterVersion(String name, UpdateClusterVersionRequest request) {
+        Cluster cluster = describeCluster(name);
+        String version = request.version() == null ? "" : request.version().trim();
+        if (!K8S_VERSION_PATTERN.matcher(version).matches()) {
+            throw new AwsException("InvalidParameterException",
+                    "The specified parameter version is not valid: " + version, 400);
+        }
+        if (version.equals(cluster.getVersion())) {
+            throw new AwsException("InvalidParameterException",
+                    "Unsupported Kubernetes minor version update from " + version + " to " + version, 400);
+        }
+        cluster.setVersion(version);
+        cluster.setExplicitVersion(true);
+        storage.put(cluster.getName(), cluster);
+        return recordClusterUpdate(cluster, "VersionUpdate", List.of(
+                new UpdateParam("Version", version),
+                new UpdateParam("PlatformVersion", cluster.getPlatformVersion())));
+    }
+
+    private Update recordClusterUpdate(Cluster cluster, String type, List<UpdateParam> params) {
+        Update update = new Update(UUID.randomUUID().toString(), "Successful", type, params,
+                Instant.now().toEpochMilli() / 1000.0, List.of());
+        if (addons != null) {
+            addons.recordClusterUpdate(cluster, update);
+        }
+        return update;
+    }
+
+    /** Applies a logging update: the types it names take its setting, the others keep theirs. */
+    private Logging mergeLogging(Logging current, Logging update) {
+        Set<String> enabled = new LinkedHashSet<>();
+        if (current != null && current.getClusterLogging() != null) {
+            for (LogSetup setup : current.getClusterLogging()) {
+                if (Boolean.TRUE.equals(setup.getEnabled()) && setup.getTypes() != null) {
+                    enabled.addAll(setup.getTypes());
+                }
+            }
+        }
+        List<LogSetup> requested = new ArrayList<>();
+        enabled.forEach(type -> requested.add(new LogSetup(List.of(type), true)));
+        if (update.getClusterLogging() != null) {
+            requested.addAll(update.getClusterLogging());
+        }
+        return buildLogging(new Logging(requested));
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return new ObjectMapper().writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            return String.valueOf(value);
+        }
     }
 
     public Nodegroup createNodeGroup(String clusterName, CreateNodeGroupRequest request) {

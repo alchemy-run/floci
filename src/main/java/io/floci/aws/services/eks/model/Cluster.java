@@ -98,6 +98,40 @@ public class Cluster {
 
     private AccessConfig accessConfig;
 
+    // Settings floci stores and reports as the request carried them; UpdateClusterConfig changes them.
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Map<String, Object> upgradePolicy;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Map<String, Object> zonalShiftConfig;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Map<String, Object> computeConfig;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Map<String, Object> storageConfig;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Map<String, Object> remoteNetworkConfig;
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private Boolean deletionProtection;
+
+    public Map<String, Object> getUpgradePolicy() { return upgradePolicy; }
+    public void setUpgradePolicy(Map<String, Object> upgradePolicy) { this.upgradePolicy = upgradePolicy; }
+
+    public Map<String, Object> getZonalShiftConfig() { return zonalShiftConfig; }
+    public void setZonalShiftConfig(Map<String, Object> zonalShiftConfig) { this.zonalShiftConfig = zonalShiftConfig; }
+
+    public Map<String, Object> getComputeConfig() { return computeConfig; }
+    public void setComputeConfig(Map<String, Object> computeConfig) { this.computeConfig = computeConfig; }
+
+    public Map<String, Object> getStorageConfig() { return storageConfig; }
+    public void setStorageConfig(Map<String, Object> storageConfig) { this.storageConfig = storageConfig; }
+
+    public Map<String, Object> getRemoteNetworkConfig() { return remoteNetworkConfig; }
+    public void setRemoteNetworkConfig(Map<String, Object> remoteNetworkConfig) {
+        this.remoteNetworkConfig = remoteNetworkConfig;
+    }
+
+    public Boolean getDeletionProtection() { return deletionProtection; }
+    public void setDeletionProtection(Boolean deletionProtection) { this.deletionProtection = deletionProtection; }
+
     public AccessConfig getAccessConfig() { return accessConfig; }
     public void setAccessConfig(AccessConfig accessConfig) { this.accessConfig = accessConfig; }
 
@@ -194,6 +228,12 @@ public class Cluster {
         c.explicitVersion = this.explicitVersion;
         c.dockerName = this.dockerName;
         c.accessConfig = this.accessConfig;
+        c.upgradePolicy = this.upgradePolicy;
+        c.zonalShiftConfig = this.zonalShiftConfig;
+        c.computeConfig = this.computeConfig;
+        c.storageConfig = this.storageConfig;
+        c.remoteNetworkConfig = this.remoteNetworkConfig;
+        c.deletionProtection = this.deletionProtection;
         return c;
     }
 }
