@@ -414,7 +414,6 @@ AWS::Organizations::Account	RoleName	accepted and ignored
 AWS::Pipes::Pipe	KmsKeyIdentifier	accepted and ignored
 AWS::Pipes::Pipe	LogConfiguration	accepted and ignored
 AWS::RDS::DBCluster	AllocatedStorage	accepted and ignored
-AWS::RDS::DBCluster	AssociatedRoles	accepted and ignored by the provisioner this fork keeps
 AWS::RDS::DBCluster	AutoMinorVersionUpgrade	accepted and ignored
 AWS::RDS::DBCluster	AvailabilityZones	accepted and ignored
 AWS::RDS::DBCluster	BacktrackWindow	accepted and ignored
@@ -429,7 +428,6 @@ AWS::RDS::DBCluster	Domain	accepted and ignored
 AWS::RDS::DBCluster	DomainIAMRoleName	accepted and ignored
 AWS::RDS::DBCluster	EnableCloudwatchLogsExports	accepted and ignored
 AWS::RDS::DBCluster	EnableGlobalWriteForwarding	accepted and ignored
-AWS::RDS::DBCluster	EnableHttpEndpoint	accepted and ignored by the provisioner this fork keeps
 AWS::RDS::DBCluster	EnableLocalWriteForwarding	accepted and ignored
 AWS::RDS::DBCluster	EngineLifecycleSupport	accepted and ignored
 AWS::RDS::DBCluster	GlobalClusterIdentifier	accepted and ignored
@@ -457,7 +455,6 @@ AWS::RDS::DBClusterParameterGroup	Tags	accepted and ignored
 AWS::RDS::DBInstance	AdditionalStorageVolumes	accepted and ignored
 AWS::RDS::DBInstance	AllowMajorVersionUpgrade	accepted and ignored
 AWS::RDS::DBInstance	ApplyImmediately	accepted and ignored
-AWS::RDS::DBInstance	AssociatedRoles	accepted and ignored by the provisioner this fork keeps
 AWS::RDS::DBInstance	AutoMinorVersionUpgrade	accepted and ignored
 AWS::RDS::DBInstance	AutomaticBackupReplicationKmsKeyId	accepted and ignored
 AWS::RDS::DBInstance	AutomaticBackupReplicationRegion	accepted and ignored
@@ -465,7 +462,6 @@ AWS::RDS::DBInstance	AutomaticBackupReplicationRetentionPeriod	accepted and igno
 AWS::RDS::DBInstance	AvailabilityZone	accepted and ignored
 AWS::RDS::DBInstance	BackupRetentionPeriod	accepted and ignored
 AWS::RDS::DBInstance	BackupTarget	accepted and ignored
-AWS::RDS::DBInstance	CACertificateIdentifier	accepted and ignored by the provisioner this fork keeps
 AWS::RDS::DBInstance	CertificateRotationRestart	accepted and ignored
 AWS::RDS::DBInstance	CharacterSetName	accepted and ignored
 AWS::RDS::DBInstance	CopyTagsToSnapshot	accepted and ignored
@@ -565,10 +561,19 @@ AWS::Redshift::Cluster	SnapshotClusterIdentifier	accepted and ignored
 AWS::Redshift::Cluster	SnapshotCopyGrantName	accepted and ignored
 AWS::Redshift::Cluster	SnapshotCopyManual	accepted and ignored
 AWS::Redshift::Cluster	SnapshotCopyRetentionPeriod	accepted and ignored
-AWS::Redshift::Cluster	SnapshotIdentifier	accepted and ignored by the provisioner this fork keeps
 AWS::Redshift::ClusterSecurityGroup	Description	accepted and ignored
 AWS::Redshift::ClusterSecurityGroup	Tags	accepted and ignored
 AWS::Redshift::ClusterSubnetGroup	Tags	accepted and ignored
+AWS::RedshiftServerless::Namespace	FinalSnapshotName	accepted and ignored by the upstream Redshift Serverless provisioner
+AWS::RedshiftServerless::Namespace	FinalSnapshotRetentionPeriod	accepted and ignored by the upstream Redshift Serverless provisioner
+AWS::RedshiftServerless::Namespace	NamespaceResourcePolicy	accepted and ignored by the upstream Redshift Serverless provisioner
+AWS::RedshiftServerless::Namespace	RedshiftIdcApplicationArn	accepted and ignored by the upstream Redshift Serverless provisioner
+AWS::RedshiftServerless::Namespace	SnapshotCopyConfigurations	accepted and ignored by the upstream Redshift Serverless provisioner
+AWS::RedshiftServerless::Workgroup	RecoveryPointId	accepted and ignored by the upstream Redshift Serverless provisioner
+AWS::RedshiftServerless::Workgroup	SnapshotArn	accepted and ignored by the upstream Redshift Serverless provisioner
+AWS::RedshiftServerless::Workgroup	SnapshotName	accepted and ignored by the upstream Redshift Serverless provisioner
+AWS::RedshiftServerless::Workgroup	SnapshotOwnerAccount	accepted and ignored by the upstream Redshift Serverless provisioner
+AWS::RedshiftServerless::Workgroup	Workgroup	accepted and ignored by the upstream Redshift Serverless provisioner
 AWS::Route53::HostedZone	DelegationSetId	accepted and ignored
 AWS::Route53::HostedZone	HostedZoneFeatures	accepted and ignored
 AWS::Route53::HostedZone	QueryLoggingConfig	accepted and ignored
@@ -599,7 +604,6 @@ AWS::S3::Bucket	WebsiteConfiguration	silently dropped, as the S3CfnProvisioner j
 AWS::SNS::Subscription	DeliveryPolicy	accepted and ignored
 AWS::SNS::Subscription	Region	accepted and ignored
 AWS::SNS::Subscription	ReplayPolicy	accepted and ignored
-AWS::SNS::Subscription	SubscriptionRoleArn	accepted and ignored
 AWS::SNS::Topic	ArchivePolicy	accepted and ignored
 AWS::SNS::Topic	DataProtectionPolicy	accepted and ignored
 AWS::SNS::Topic	DeliveryStatusLogging	accepted and ignored

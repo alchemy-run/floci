@@ -1,11 +1,13 @@
 package io.floci.aws.services.redshift.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * A zero-ETL integration between a source (for example a DynamoDB table) and a Redshift target.
@@ -14,16 +16,22 @@ import java.util.Map;
  * ({@code active}), and {@code errors} is present but empty on a healthy integration.
  */
 @RegisterForReflection
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Integration {
     private String integrationArn;
     private String accountId;
     private String integrationName;
     private String sourceArn;
     private String targetArn;
+    private String sourceType;
     private String sourceStreamArn;
     private String targetClusterIdentifier;
     private String landingTableName;
-    private String checkpointSequenceNumber;
+    /**
+     * The newest DynamoDB Stream sequence written to the landing table, by shard. Concurrent because
+     * a store flush can serialize it while the consumer commits.
+     */
+    private Map<String, String> shardSequenceNumbers = new ConcurrentHashMap<>();
     private String backfillLastEvaluatedKey;
     private boolean backfillCompleted;
     private int retryCount;
@@ -55,8 +63,11 @@ public class Integration {
     public void setTargetClusterIdentifier(String targetClusterIdentifier) { this.targetClusterIdentifier = targetClusterIdentifier; }
     public String getLandingTableName() { return landingTableName; }
     public void setLandingTableName(String landingTableName) { this.landingTableName = landingTableName; }
-    public String getCheckpointSequenceNumber() { return checkpointSequenceNumber; }
-    public void setCheckpointSequenceNumber(String checkpointSequenceNumber) { this.checkpointSequenceNumber = checkpointSequenceNumber; }
+    public Map<String, String> getShardSequenceNumbers() { return shardSequenceNumbers; }
+    public void setShardSequenceNumbers(Map<String, String> shardSequenceNumbers) {
+        this.shardSequenceNumbers = shardSequenceNumbers == null
+                ? new ConcurrentHashMap<>() : new ConcurrentHashMap<>(shardSequenceNumbers);
+    }
     public String getBackfillLastEvaluatedKey() { return backfillLastEvaluatedKey; }
     public void setBackfillLastEvaluatedKey(String backfillLastEvaluatedKey) { this.backfillLastEvaluatedKey = backfillLastEvaluatedKey; }
     public boolean isBackfillCompleted() { return backfillCompleted; }
@@ -69,6 +80,9 @@ public class Integration {
     public void setPollingEnabled(boolean pollingEnabled) { this.pollingEnabled = pollingEnabled; }
     public String getDescription() { return description; }
     public void setDescription(String description) { this.description = description; }
+    /** {@code s3-event-notifications} for an S3 event integration; null for a DynamoDB zero-ETL integration. */
+    public String getSourceType() { return sourceType; }
+    public void setSourceType(String sourceType) { this.sourceType = sourceType; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
     public String getKmsKeyId() { return kmsKeyId; }

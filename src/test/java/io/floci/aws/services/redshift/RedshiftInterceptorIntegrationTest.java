@@ -2,6 +2,7 @@ package io.floci.aws.services.redshift;
 
 import io.floci.aws.services.iam.IamService;
 import io.floci.aws.services.redshift.model.Cluster;
+import io.floci.aws.services.redshift.model.Snapshot;
 import io.floci.aws.services.s3.S3Service;
 import io.floci.aws.services.s3.model.S3Object;
 import io.quarkus.test.junit.QuarkusTest;
@@ -25,10 +26,12 @@ import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.UUID;
 import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
@@ -53,6 +56,9 @@ class RedshiftInterceptorIntegrationTest {
     RedshiftService service;
 
     @Inject
+    RedshiftSnapshotScheduler snapshotScheduler;
+
+    @Inject
     S3Service s3;
 
     @Inject
@@ -72,6 +78,8 @@ class RedshiftInterceptorIntegrationTest {
     void deleteSharedCluster() {
         if (sharedClusterId != null) {
             service.deleteCluster(sharedClusterId);
+            // Drops the automated snapshot dumps taken from the deleted cluster.
+            snapshotScheduler.tick(Instant.now());
         }
     }
 
@@ -88,11 +96,13 @@ class RedshiftInterceptorIntegrationTest {
     }
 
     private static String jdbcUrl(Cluster cluster) {
-        return RedshiftEndpoints.jdbcUrl(cluster.getEndpoint().getAddress(), cluster.getEndpoint().getPort(), "dev");
+        // Use 127.0.0.1 explicitly instead of c.getEndpoint().getAddress() to avoid UnknownHostException
+        // in CI environments where floci.emulator.hostname is set to host.docker.internal.
+        return "jdbc:postgresql://127.0.0.1:" + cluster.getEndpoint().getPort() + "/dev";
     }
 
     private static String namedPreparedJdbcUrl(Cluster cluster) {
-        return jdbcUrl(cluster) + "&prepareThreshold=1";
+        return jdbcUrl(cluster) + "?prepareThreshold=1";
     }
 
     /**
@@ -102,7 +112,7 @@ class RedshiftInterceptorIntegrationTest {
      * Extended even for a plain {@link java.sql.Statement}.
      */
     private static String simpleQueryJdbcUrl(Cluster cluster) {
-        return jdbcUrl(cluster) + "&preferQueryMode=simple";
+        return jdbcUrl(cluster) + "?preferQueryMode=simple";
     }
 
     private static Connection waitForConnection(Cluster cluster, String username, String password) throws SQLException {
@@ -182,6 +192,117 @@ class RedshiftInterceptorIntegrationTest {
         } finally {
             service.deleteCluster(clusterId);
         }
+    }
+
+    @Test
+    void copyAcceptsRegionKeyCredentialsAndNullHandlingOptions() throws Exception {
+        String bucket = "redshift-copy-options";
+        s3.createBucket(bucket, "us-east-1");
+        s3.putObject(bucket, "people/p1.txt",
+                "1|alice\n2|\n3|   \n".getBytes(StandardCharsets.UTF_8), "text/plain", Map.of());
+
+        try (Connection connection = waitForConnection(sharedCluster, "admin", "Secret123");
+                Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE copy_opts_people (id int, name text)");
+            statement.execute("COPY copy_opts_people FROM 's3://" + bucket + "/people/p1.txt' "
+                    + "ACCESS_KEY_ID 'test' SECRET_ACCESS_KEY 'test' REGION 'us-east-1' "
+                    + "EMPTYASNULL BLANKSASNULL");
+            try (ResultSet rows = statement.executeQuery(
+                    "SELECT count(*) FROM copy_opts_people WHERE name IS NULL")) {
+                assertTrue(rows.next());
+                assertEquals(2, rows.getInt(1));
+            }
+        }
+    }
+
+    @Test
+    void copyTruncateColumnsCutsOverlongValuesOverSimpleQuery() throws Exception {
+        String bucket = "redshift-copy-truncate";
+        s3.createBucket(bucket, "us-east-1");
+        s3.putObject(bucket, "t.txt",
+                "1|abcdef\n".getBytes(StandardCharsets.UTF_8), "text/plain", Map.of());
+
+        try (Connection connection = waitForConnection(
+                simpleQueryJdbcUrl(sharedCluster), "admin", "Secret123");
+                Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE copy_trunc (id int, name varchar(3))");
+            statement.execute("COPY copy_trunc FROM 's3://" + bucket + "/t.txt' TRUNCATECOLUMNS");
+            try (ResultSet rows = statement.executeQuery("SELECT name FROM copy_trunc")) {
+                assertTrue(rows.next());
+                assertEquals("abc", rows.getString(1));
+            }
+        }
+    }
+
+    @Test
+    void copyTruncateColumnsOverExtendedQueryTruncatesData() throws Exception {
+        String bucket = "redshift-copy-truncate-ext";
+        s3.createBucket(bucket, "us-east-1");
+        s3.putObject(bucket, "t.txt",
+                "1|abcdef\n".getBytes(StandardCharsets.UTF_8), "text/plain", Map.of());
+
+        try (Connection connection = waitForConnection(sharedCluster, "admin", "Secret123");
+                Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE copy_trunc_ext (id int, name varchar(3))");
+            statement.execute("COPY copy_trunc_ext FROM 's3://" + bucket + "/t.txt' TRUNCATECOLUMNS");
+            try (ResultSet rs = statement.executeQuery("SELECT name FROM copy_trunc_ext")) {
+                assertTrue(rs.next());
+                assertEquals("abc", rs.getString(1));
+            }
+        }
+    }
+
+    @Test
+    void unloadAppliesExtensionAndAcceptsRegion() throws Exception {
+        String bucket = "redshift-unload-extension";
+        s3.createBucket(bucket, "us-east-1");
+
+        try (Connection connection = waitForConnection(sharedCluster, "admin", "Secret123");
+                Statement statement = connection.createStatement()) {
+            statement.execute("UNLOAD ('select 1') TO 's3://" + bucket + "/ext/' "
+                    + "REGION 'us-east-1' EXTENSION '.csv' ALLOWOVERWRITE");
+        }
+
+        List<S3Object> objects = s3.listObjects(bucket, "ext/", null, 100);
+        assertEquals(1, objects.size());
+        assertEquals("ext/0000_part_00.csv", objects.get(0).getKey());
+    }
+
+    @Test
+    void unloadCleanPathRemovesOnlyObjectsUnderThePrefix() throws Exception {
+        String bucket = "redshift-unload-cleanpath";
+        s3.createBucket(bucket, "us-east-1");
+        s3.putObject(bucket, "clean/old.txt", "old\n".getBytes(StandardCharsets.UTF_8), "text/plain", Map.of());
+        s3.putObject(bucket, "clean2/keep.txt", "keep\n".getBytes(StandardCharsets.UTF_8), "text/plain", Map.of());
+
+        try (Connection connection = waitForConnection(sharedCluster, "admin", "Secret123");
+                Statement statement = connection.createStatement()) {
+            statement.execute("UNLOAD ('select 1') TO 's3://" + bucket + "/clean/' CLEANPATH");
+        }
+
+        List<S3Object> cleaned = s3.listObjects(bucket, "clean/", null, 100);
+        assertEquals(1, cleaned.size());
+        assertEquals("clean/0000_part_00", cleaned.get(0).getKey());
+        assertTrue(s3.objectExists(bucket, "clean2/keep.txt"));
+    }
+
+    @Test
+    void unloadEscapeEscapesTheDelimiterInData() throws Exception {
+        String bucket = "redshift-unload-escape";
+        s3.createBucket(bucket, "us-east-1");
+
+        try (Connection connection = waitForConnection(sharedCluster, "admin", "Secret123");
+                Statement statement = connection.createStatement()) {
+            statement.execute("CREATE TABLE unload_escape (v text)");
+            statement.execute("INSERT INTO unload_escape VALUES ('a|b')");
+            statement.execute("UNLOAD ('select v from unload_escape') TO 's3://" + bucket
+                    + "/esc/' ESCAPE ALLOWOVERWRITE");
+        }
+
+        List<S3Object> objects = s3.listObjects(bucket, "esc/", null, 100);
+        assertEquals(1, objects.size());
+        assertEquals("a\\|b\n", new String(
+                s3.getObject(bucket, objects.get(0).getKey()).getData(), StandardCharsets.UTF_8));
     }
 
     @Test
@@ -496,7 +617,7 @@ class RedshiftInterceptorIntegrationTest {
     }
 
     @Test
-    void copyFromS3JsonAutoWithoutColumnsOverExtendedQueryFailsClearly() throws Exception {
+    void copyFromS3JsonAutoWithoutColumnsOverExtendedQueryLoadsRows() throws Exception {
         Cluster cluster = sharedCluster;
 
         String bucket = "redshift-copy-json-auto-extended";
@@ -504,13 +625,15 @@ class RedshiftInterceptorIntegrationTest {
         s3.putObject(bucket, "data/items.json",
                 "{\"id\": 1}\n".getBytes(StandardCharsets.UTF_8), "application/json", Map.of());
 
-        // Default connection: pgjdbc's default query mode is Extended even for a plain Statement,
-        // where the column list is fixed at Parse time and catalog discovery cannot run.
         try (Connection c = waitForConnection(cluster, "admin", "Secret123")) {
             c.createStatement().execute("CREATE TABLE ext_items (id int)");
-            SQLException ex = assertThrows(SQLException.class, () -> c.createStatement().execute(
-                    "COPY ext_items FROM 's3://" + bucket + "/data/items.json' FORMAT AS JSON 'auto'"));
-            assertTrue(ex.getMessage().contains("explicit column list"));
+            c.createStatement().execute(
+                    "COPY ext_items FROM 's3://" + bucket + "/data/items.json' FORMAT AS JSON 'auto'");
+            try (ResultSet rs = c.createStatement().executeQuery("SELECT count(*), max(id) FROM ext_items")) {
+                assertTrue(rs.next());
+                assertEquals(1, rs.getInt(1));
+                assertEquals(1, rs.getInt(2));
+            }
         }
     }
 
@@ -581,6 +704,44 @@ class RedshiftInterceptorIntegrationTest {
             SQLException ex = assertThrows(SQLException.class,
                     () -> c.createStatement().execute("COPY t_mand FROM 's3://" + bucket + "/manifest' MANIFEST"));
             assertTrue(ex.getMessage().toLowerCase().contains("does not exist") || ex.getMessage().toLowerCase().contains("missing.csv"), ex.getMessage());
+        }
+    }
+
+    @Test
+    void automatedDumpRestoresTheRowsPresentAtSnapshotTime() throws Exception {
+        String suffix = UUID.randomUUID().toString().substring(0, 8);
+        String table = "snapshot_rows_" + suffix;
+        String restoredId = "it-auto-restored-" + suffix;
+        String scheduleId = "auto-hourly-" + suffix;
+        service.createSnapshotSchedule(scheduleId, null, List.of("rate(1 hour)"), Map.of());
+        boolean restored = false;
+        try {
+            try (Connection connection = waitForConnection(sharedCluster, "admin", "Secret123");
+                    Statement statement = connection.createStatement()) {
+                statement.execute("CREATE TABLE " + table + " (id integer)");
+                statement.execute("INSERT INTO " + table + " VALUES (42)");
+                Cluster associated = service.modifyClusterSnapshotSchedule(sharedClusterId, scheduleId, false);
+                snapshotScheduler.tick(associated.getAutomatedSnapshotAnchor().plusSeconds(3600));
+                statement.execute("INSERT INTO " + table + " VALUES (99)");
+            }
+            Snapshot snapshot = service.describeSnapshots(null, sharedClusterId).stream()
+                    .filter(value -> "automated".equals(value.getSnapshotType())).findFirst().orElseThrow();
+            Cluster target = service.restoreFromClusterSnapshot(restoredId, snapshot.getSnapshotIdentifier());
+            restored = true;
+            try (Connection connection = waitForConnection(target, "admin", "Secret123");
+                    Statement statement = connection.createStatement();
+                    ResultSet rows = statement.executeQuery("SELECT count(*), min(id), max(id) FROM " + table)) {
+                assertTrue(rows.next());
+                assertEquals(1, rows.getInt(1));
+                assertEquals(42, rows.getInt(2));
+                assertEquals(42, rows.getInt(3));
+            }
+        } finally {
+            if (restored) {
+                service.deleteCluster(restoredId);
+            }
+            service.modifyClusterSnapshotSchedule(sharedClusterId, null, true);
+            service.deleteSnapshotSchedule(scheduleId);
         }
     }
 }

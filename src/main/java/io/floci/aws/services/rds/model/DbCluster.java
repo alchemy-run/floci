@@ -22,6 +22,7 @@ public class DbCluster {
     private DbEndpoint endpoint;
     private DbEndpoint readerEndpoint;
     private boolean iamDatabaseAuthenticationEnabled;
+    private boolean httpEndpointEnabled;
     private List<String> dbClusterMembers = new ArrayList<>();
     // The member that holds the writer role. Null on a cluster persisted before the role was
     // modelled, in which case the first member is the writer, as it always was reported.
@@ -41,22 +42,22 @@ public class DbCluster {
     private String masterUserSecretKmsKeyId;
     private Instant createdAt;
     private int proxyPort;
+    private int listenerPort;
+    private String networkType;
+    private boolean deletionProtection;
+    private List<String> enabledCloudwatchLogsExports = new ArrayList<>();
     private Map<String, String> tags = new LinkedHashMap<>();
+    private List<DbRoleAssociation> associatedRoles = new ArrayList<>();
     private String engineMode;
     private boolean storageEncrypted;
-    // The listener port clients connect to. 0 on a record persisted before it was modelled,
-    // which reads as the engine default.
-    private int port;
-    private List<String> vpcSecurityGroupIds = new ArrayList<>();
-    private List<String> enabledCloudwatchLogsExports = new ArrayList<>();
-    private boolean deletionProtection;
-    private String networkType;
-    // AWS keeps one day of automated backups when CreateDBCluster omits it.
     private int backupRetentionPeriod = 1;
+    private String kmsKeyId;
 
     private String dockerVolumeName;
     private String volumeId;
     private String containerStorageResourceId;
+    private boolean backendCleanupRequired;
+    private boolean managedSecretCleanupRequired;
 
     // Aurora Serverless v2 scaling (ACUs). Null when the cluster is not Serverless v2.
     private Double serverlessV2MinCapacity;
@@ -126,6 +127,10 @@ public class DbCluster {
         this.iamDatabaseAuthenticationEnabled = iamDatabaseAuthenticationEnabled;
     }
 
+    /** Whether the Data API endpoint is on; EnableHttpEndpoint and DisableHttpEndpoint set it. */
+    public boolean isHttpEndpointEnabled() { return httpEndpointEnabled; }
+    public void setHttpEndpointEnabled(boolean httpEndpointEnabled) { this.httpEndpointEnabled = httpEndpointEnabled; }
+
     public List<String> getDbClusterMembers() { return dbClusterMembers; }
     public void setDbClusterMembers(List<String> dbClusterMembers) { this.dbClusterMembers = dbClusterMembers; }
 
@@ -185,8 +190,30 @@ public class DbCluster {
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
 
+    public boolean isDeletionProtection() { return deletionProtection; }
+    public void setDeletionProtection(boolean deletionProtection) { this.deletionProtection = deletionProtection; }
+
+    public List<String> getEnabledCloudwatchLogsExports() { return enabledCloudwatchLogsExports; }
+    public void setEnabledCloudwatchLogsExports(List<String> enabledCloudwatchLogsExports) {
+        this.enabledCloudwatchLogsExports = enabledCloudwatchLogsExports != null
+                ? new ArrayList<>(enabledCloudwatchLogsExports) : new ArrayList<>();
+    }
+
+    /** The create or modify request's NetworkType, IPV4 or DUAL; null on older records, reported as IPV4. */
+    public String getNetworkType() { return networkType; }
+    public void setNetworkType(String networkType) { this.networkType = networkType; }
+
+    /** The port the endpoint listens on when endpoints are routed by name; 0 until assigned. */
+    public int getListenerPort() { return listenerPort; }
+    public void setListenerPort(int listenerPort) { this.listenerPort = listenerPort; }
+
     public int getProxyPort() { return proxyPort; }
     public void setProxyPort(int proxyPort) { this.proxyPort = proxyPort; }
+
+    public List<DbRoleAssociation> getAssociatedRoles() { return associatedRoles; }
+    public void setAssociatedRoles(List<DbRoleAssociation> associatedRoles) {
+        this.associatedRoles = associatedRoles != null ? new ArrayList<>(associatedRoles) : new ArrayList<>();
+    }
 
     public Map<String, String> getTags() { return tags; }
     public void setTags(Map<String, String> tags) { this.tags = tags != null ? new LinkedHashMap<>(tags) : new LinkedHashMap<>(); }
@@ -197,28 +224,11 @@ public class DbCluster {
     public boolean isStorageEncrypted() { return storageEncrypted; }
     public void setStorageEncrypted(boolean storageEncrypted) { this.storageEncrypted = storageEncrypted; }
 
-    public int getPort() { return port; }
-    public void setPort(int port) { this.port = port; }
-
-    public List<String> getVpcSecurityGroupIds() { return vpcSecurityGroupIds; }
-    public void setVpcSecurityGroupIds(List<String> vpcSecurityGroupIds) {
-        this.vpcSecurityGroupIds = vpcSecurityGroupIds != null ? new ArrayList<>(vpcSecurityGroupIds) : new ArrayList<>();
-    }
-
-    public List<String> getEnabledCloudwatchLogsExports() { return enabledCloudwatchLogsExports; }
-    public void setEnabledCloudwatchLogsExports(List<String> enabledCloudwatchLogsExports) {
-        this.enabledCloudwatchLogsExports = enabledCloudwatchLogsExports != null
-                ? new ArrayList<>(enabledCloudwatchLogsExports) : new ArrayList<>();
-    }
-
-    public boolean isDeletionProtection() { return deletionProtection; }
-    public void setDeletionProtection(boolean deletionProtection) { this.deletionProtection = deletionProtection; }
-
-    public String getNetworkType() { return networkType; }
-    public void setNetworkType(String networkType) { this.networkType = networkType; }
-
     public int getBackupRetentionPeriod() { return backupRetentionPeriod; }
     public void setBackupRetentionPeriod(int backupRetentionPeriod) { this.backupRetentionPeriod = backupRetentionPeriod; }
+
+    public String getKmsKeyId() { return kmsKeyId; }
+    public void setKmsKeyId(String kmsKeyId) { this.kmsKeyId = kmsKeyId; }
 
     public String getDockerVolumeName() { return dockerVolumeName; }
     public void setDockerVolumeName(String dockerVolumeName) { this.dockerVolumeName = dockerVolumeName; }
@@ -229,6 +239,16 @@ public class DbCluster {
     public String getContainerStorageResourceId() { return containerStorageResourceId; }
     public void setContainerStorageResourceId(String containerStorageResourceId) {
         this.containerStorageResourceId = containerStorageResourceId;
+    }
+
+    public boolean isBackendCleanupRequired() { return backendCleanupRequired; }
+    public void setBackendCleanupRequired(boolean backendCleanupRequired) {
+        this.backendCleanupRequired = backendCleanupRequired;
+    }
+
+    public boolean isManagedSecretCleanupRequired() { return managedSecretCleanupRequired; }
+    public void setManagedSecretCleanupRequired(boolean managedSecretCleanupRequired) {
+        this.managedSecretCleanupRequired = managedSecretCleanupRequired;
     }
 
     public String getContainerId() { return containerId; }

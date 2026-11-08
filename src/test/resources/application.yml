@@ -223,9 +223,14 @@ floci:
       proxy-backend-connect-timeout-millis: 5000
       proxy-max-connections: 2000
       spectrum-max-rows: 1000000
+      # Upstream's endpoints (one port per cluster) unless a test opts into routed names.
+      endpoint-domain: ""
     rds:
       enabled: true
       mock: false
+      endpoint-domain: ""
+      # New instances are available at once unless a test opts into the creating status.
+      creating-status-millis: 0
       proxy-base-port: 7001
       proxy-max-port: 7099
       default-sql-server-image: "mcr.microsoft.com/mssql/server:2022-latest"
@@ -403,6 +408,8 @@ floci:
     elbv2:
       enabled: true
       mock: true
+      backend-keep-alive: true
+      backend-keep-alive-timeout-seconds: 60
     codebuild:
       enabled: true
       # docker-network: floci-network
