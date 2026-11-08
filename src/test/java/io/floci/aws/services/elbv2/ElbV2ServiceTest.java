@@ -598,6 +598,39 @@ class ElbV2ServiceTest {
         verify(dataPlane).publishListener(any(Listener.class), eq(REGION), any(), any(), any(), any());
     }
 
+    @Test
+    void targetGroupsCreatedAtOnceInAFreshRegionAreAllKept() throws Exception {
+        // Two declarative deploys create their target groups at the same moment in a fresh Region;
+        // none of them may be lost to another request installing the Region's first map.
+        int groups = 8;
+        ExecutorService pool = Executors.newFixedThreadPool(groups);
+        try {
+            for (int round = 0; round < 20; round++) {
+                ElbV2Service fresh = serviceWithStorage(
+                        new SharedStorageFactory(), mock(ElbV2DataPlane.class), mock(ElbV2HealthChecker.class));
+                CountDownLatch start = new CountDownLatch(1);
+                List<Future<String>> created = new ArrayList<>();
+                for (int i = 0; i < groups; i++) {
+                    String name = "race-" + round + "-" + i;
+                    created.add(pool.submit(() -> {
+                        start.await();
+                        return fresh.createTargetGroup(REGION, name, "HTTP", "HTTP1", 80, "vpc-a", "ip",
+                                "HTTP", "traffic-port", true, "/", 30, 5, 5, 2, "200", "ipv4", Map.of())
+                                .getTargetGroupArn();
+                    }));
+                }
+                start.countDown();
+                List<String> arns = new ArrayList<>();
+                for (Future<String> future : created) {
+                    arns.add(future.get(10, TimeUnit.SECONDS));
+                }
+                assertEquals(groups, fresh.describeTargetGroups(REGION, null, arns, List.of()).size());
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
     @ParameterizedTest
     @CsvSource({"HTTPS,", "HTTPS, ELBSecurityPolicy-TLS13-1-2-2021-06",
             "TLS,", "TLS, ELBSecurityPolicy-TLS13-1-2-2021-06"})
