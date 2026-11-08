@@ -135,6 +135,7 @@ class SnsDataProtectionPolicyIntegrationTest {
             .post("/")
         .then()
             .statusCode(404)
-            .body(containsString("ResourceNotFoundException"));
+            // The awsQuery wire code of ResourceNotFoundException.
+            .body(containsString("<Code>ResourceNotFound</Code>"));
     }
 }
