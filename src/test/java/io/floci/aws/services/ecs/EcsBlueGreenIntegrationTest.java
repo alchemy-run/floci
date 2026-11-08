@@ -110,5 +110,17 @@ class EcsBlueGreenIntegrationTest {
 
         ecs("UpdateService", update);
         assertEquals(Map.of(blue, "100", green, "0"), weights(rule));
+
+        // A client that resends the whole load balancer configuration with each deployment, as
+        // declarative tools do, still alternates: the rule, not the request, says which group serves.
+        String resend = "{\"cluster\":\"bg-cluster\",\"service\":\"bg-svc\",\"forceNewDeployment\":true,"
+                + "\"loadBalancers\":[{\"targetGroupArn\":\"" + blue + "\",\"containerName\":\"app\","
+                + "\"containerPort\":80,\"advancedConfiguration\":{\"alternateTargetGroupArn\":\"" + green + "\","
+                + "\"productionListenerRule\":\"" + rule + "\","
+                + "\"roleArn\":\"arn:aws:iam::000000000000:role/ecs-infra\"}}]}";
+        ecs("UpdateService", resend);
+        assertEquals(Map.of(blue, "0", green, "100"), weights(rule));
+        ecs("UpdateService", resend);
+        assertEquals(Map.of(blue, "100", green, "0"), weights(rule));
     }
 }

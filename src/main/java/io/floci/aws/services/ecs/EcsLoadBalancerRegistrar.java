@@ -254,10 +254,16 @@ public class EcsLoadBalancerRegistrar {
             if (alternate == null || productionRule == null) {
                 continue;
             }
-            String next = lb.getServingTargetGroupArn().equals(lb.getTargetGroupArn())
-                    ? alternate : lb.getTargetGroupArn();
+            String next = null;
             try {
                 Rule rule = elbV2Service.describeRules(region, null, List.of(productionRule)).getFirst();
+                // The rule says which group serves now. UpdateService may have replaced the service's
+                // load balancers since the last shift, so the remembered serving group is only a fallback.
+                String serving = servingGroup(rule, lb.getTargetGroupArn(), alternate);
+                if (serving == null) {
+                    serving = lb.getServingTargetGroupArn();
+                }
+                next = serving.equals(lb.getTargetGroupArn()) ? alternate : lb.getTargetGroupArn();
                 List<Action> actions = new ArrayList<>();
                 for (Action action : rule.getActions()) {
                     if ("forward".equals(action.getType())) {
@@ -278,6 +284,33 @@ public class EcsLoadBalancerRegistrar {
                 LOG.warnv("Blue/green: could not shift {0} to {1}: {2}", svc.getServiceName(), next, e.getMessage());
             }
         }
+    }
+
+    /** The group of the pair the rule forwards the larger weight to, or null when it names neither. */
+    private static String servingGroup(Rule rule, String primary, String alternate) {
+        String serving = null;
+        int best = -1;
+        for (Action action : rule.getActions()) {
+            if (!"forward".equals(action.getType())) {
+                continue;
+            }
+            if (action.getTargetGroups() == null || action.getTargetGroups().isEmpty()) {
+                String arn = action.getTargetGroupArn();
+                if (primary.equals(arn) || alternate.equals(arn)) {
+                    return arn;
+                }
+                continue;
+            }
+            for (Action.TargetGroupTuple tuple : action.getTargetGroups()) {
+                String arn = tuple.getTargetGroupArn();
+                int weight = tuple.getWeight() == null ? 1 : tuple.getWeight();
+                if ((primary.equals(arn) || alternate.equals(arn)) && weight > best) {
+                    serving = arn;
+                    best = weight;
+                }
+            }
+        }
+        return serving;
     }
 
     /**

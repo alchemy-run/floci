@@ -254,7 +254,9 @@ public class EcsJsonHandler {
 
     private Response handleUpdateCluster(JsonNode req, String region) {
         String clusterId = req.path("cluster").asText();
-        List<ClusterSetting> settings = parseClusterSettings(req.path("settings"));
+        // A request that leaves settings out keeps the cluster's settings.
+        List<ClusterSetting> settings = req.has("settings")
+                ? parseClusterSettings(req.path("settings")) : null;
         EcsCluster cluster = service.updateCluster(clusterId, settings,
                 parseRawObject(req.path("configuration")),
                 parseRawObject(req.path("serviceConnectDefaults")), region);
