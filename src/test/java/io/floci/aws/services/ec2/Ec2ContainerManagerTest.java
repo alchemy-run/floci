@@ -13,6 +13,7 @@ import com.github.dockerjava.api.command.InspectExecResponse;
 import com.github.dockerjava.api.command.ListContainersCmd;
 import com.github.dockerjava.api.command.PingCmd;
 import com.github.dockerjava.api.command.RemoveContainerCmd;
+import com.github.dockerjava.api.command.RestartContainerCmd;
 import com.github.dockerjava.api.command.StartContainerCmd;
 import com.github.dockerjava.api.command.StopContainerCmd;
 import com.github.dockerjava.api.exception.DockerException;
@@ -2298,6 +2299,33 @@ class Ec2ContainerManagerTest {
         // UserData is the next step after sshd, so its exec marks sshd startup as finished.
         awaitUntil(() -> commandIndex(harness.executedCommands, "/var/lib/user-data.sh") >= 0, Duration.ofSeconds(2));
         assertEquals(-1, commandIndex(harness.executedCommands, "/usr/local/sbin/sshd"));
+    }
+
+    @Test
+    void aRebootWaitsForTheLaunchUserDataInsteadOfCuttingItShort() throws Exception {
+        // The instance reports running before its user data finishes. A reboot right then (as a
+        // deployer that reboots on every reconcile issues) restarted the container mid-script, so
+        // a hosted guest never got its service; the restart now waits for the bring-up.
+        LaunchHarness harness = launchHarness();
+        InspectContainerCmd inspect = mock(InspectContainerCmd.class);
+        InspectContainerResponse withIp = inspectResponse("172.18.0.21");
+        when(harness.dockerClient.inspectContainerCmd(TEST_CONTAINER_ID)).thenReturn(inspect);
+        when(inspect.exec()).thenReturn(withIp);
+        CountDownLatch userDataStarted = new CountDownLatch(1);
+        CountDownLatch finishUserData = new CountDownLatch(1);
+        harness.stubSuccessfulExecs(userDataStarted, finishUserData);
+        RestartContainerCmd restart = mock(RestartContainerCmd.class);
+        when(harness.dockerClient.restartContainerCmd(TEST_CONTAINER_ID)).thenReturn(restart);
+        Instance instance = instance("i-reboot-during-userdata");
+        instance.setUserData("#!/bin/sh\necho ready\n");
+
+        harness.manager.launch(instance, "ubuntu:24.04", null, "us-west-2");
+        assertTrue(userDataStarted.await(5, TimeUnit.SECONDS));
+        harness.manager.reboot(instance);
+
+        verify(restart, after(300).never()).exec();
+        finishUserData.countDown();
+        verify(restart, timeout(5000)).exec();
     }
 
     @Test

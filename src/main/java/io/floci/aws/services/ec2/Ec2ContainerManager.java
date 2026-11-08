@@ -172,6 +172,14 @@ public class Ec2ContainerManager {
     private final ExecutorService executor;
     private final Semaphore metadataSetupSlots = new Semaphore(METADATA_SETUP_CONCURRENCY);
     private final Map<String, CompletableFuture<Void>> lifecycleOperations = new ConcurrentHashMap<>();
+    /**
+     * Per instance id, the launch's guest bring-up (sshd, IMDS, user data) still in flight. The
+     * instance reports running before it finishes, and a reboot that restarted the container in
+     * the middle killed the user data, so a reboot waits for it.
+     */
+    private final Map<String, CompletableFuture<Void>> bringUps = new ConcurrentHashMap<>();
+    /** How long a reboot waits for an in-flight launch bring-up; user data can install packages. */
+    static final long BRING_UP_WAIT_SECONDS = 600;
     /** Instances whose service-network lookup failed and is retried on the next address read. */
     private final Set<String> serviceNetworkRetries = ConcurrentHashMap.newKeySet();
     /** The latest service-network lookup started per instance; only that one may publish. */
@@ -507,6 +515,8 @@ public class Ec2ContainerManager {
         // network, exposeReachablePrivateAddress replaces the reported private IP with the bridge
         // one, and the address actually leased would otherwise be unrecoverable on the paths below.
         String leasedPrivateIp = instance.getPrivateIpAddress();
+        CompletableFuture<Void> bringUp = new CompletableFuture<>();
+        bringUps.put(instance.getInstanceId(), bringUp);
 
         try {
             executor.execute(() -> {
@@ -662,9 +672,14 @@ public class Ec2ContainerManager {
                     } else {
                         markContainerlessRunning(instance);
                     }
+                } finally {
+                    bringUps.remove(instance.getInstanceId(), bringUp);
+                    bringUp.complete(null);
                 }
             });
         } catch (RejectedExecutionException e) {
+            bringUps.remove(instance.getInstanceId(), bringUp);
+            bringUp.complete(null);
             LOG.warnv("Could not schedule EC2 instance {0} launch because the launch executor is saturated or stopping",
                     instance.getInstanceId());
             failLaunch(instance, leasedPrivateIp);
@@ -1698,13 +1713,26 @@ public class Ec2ContainerManager {
         if (containerId == null) {
             return;
         }
-        executor.submit(() -> {
+        Runnable rebootTask = () -> {
             try {
                 dockerClient.restartContainerCmd(containerId).exec();
                 LOG.infov("Rebooted EC2 container {0}", containerId);
                 restartGuestServices(instance, containerId);
             } catch (Exception e) {
                 LOG.warnv("Error rebooting EC2 container {0}: {1}", containerId, e.getMessage());
+            }
+        };
+        // Scheduled once the launch's bring-up is done rather than waiting on an executor thread,
+        // which a bring-up still queued behind it would need.
+        bringUpFinished(instance.getInstanceId()).whenComplete((ignored, timedOut) -> {
+            if (timedOut != null) {
+                LOG.warnv("Rebooting EC2 instance {0} before its launch bring-up finished",
+                        instance.getInstanceId());
+            }
+            try {
+                executor.submit(rebootTask);
+            } catch (RejectedExecutionException e) {
+                LOG.warnv("Could not schedule reboot of EC2 container {0}: {1}", containerId, e.getMessage());
             }
         });
     }
@@ -1721,6 +1749,7 @@ public class Ec2ContainerManager {
      */
     private void restartGuestServices(Instance instance, String containerId) {
         if (needsPrivateNamespace(instance)) {
+            restartPrivateNamespaceGuest(instance, containerId);
             return;
         }
         try {
@@ -1753,6 +1782,58 @@ public class Ec2ContainerManager {
             Thread.currentThread().interrupt();
         } catch (Exception e) {
             LOG.warnv("Post-reboot bring-up failed for EC2 container {0}: {1}", containerId, e.getMessage());
+        }
+    }
+
+    /** Completes when the launch's guest bring-up of {@code instanceId} is done, or after a bound. */
+    CompletableFuture<Void> bringUpFinished(String instanceId) {
+        CompletableFuture<Void> bringUp = bringUps.get(instanceId);
+        return bringUp == null ? CompletableFuture.completedFuture(null)
+                : bringUp.copy().orTimeout(BRING_UP_WAIT_SECONDS, TimeUnit.SECONDS);
+    }
+
+    /**
+     * Post-reboot bring-up of a guest in its firewall helper's network namespace. The namespace
+     * and its IMDS route belong to the helper and survive the restart; the guest's own processes
+     * do not, so sshd (unless the image's init starts it), the stored user data and the published
+     * ports are brought back, as boot does on a real instance.
+     */
+    private void restartPrivateNamespaceGuest(Instance instance, String containerId) {
+        try {
+            String instanceId = instance.getInstanceId();
+            boolean running = false;
+            for (int i = 0; i < 30 && !running; i++) {
+                running = lifecycleManager.isContainerRunning(containerId);
+                if (!running) {
+                    Thread.sleep(500);
+                }
+            }
+            if (!running) {
+                LOG.warnv("EC2 container {0} did not come back after reboot", containerId);
+                return;
+            }
+            if (!bootsOwnInit(containerId)) {
+                startSshd(containerId, instanceId);
+            }
+            String userData = instance.getUserData();
+            if (userData != null && !userData.isBlank()) {
+                executeUserData(containerId, instanceId, userData, instance.getRegion());
+            }
+            portForwardManager.restore(instance);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            LOG.warnv("Post-reboot bring-up failed for EC2 container {0}: {1}", containerId, e.getMessage());
+        }
+    }
+
+    /** Whether the container runs the image's own init, which starts sshd from its unit. */
+    private boolean bootsOwnInit(String containerId) {
+        try {
+            String[] cmd = dockerClient.inspectContainerCmd(containerId).exec().getConfig().getCmd();
+            return cmd != null && cmd.length > 0 && "/sbin/init".equals(cmd[0]);
+        } catch (Exception e) {
+            return false;
         }
     }
 
