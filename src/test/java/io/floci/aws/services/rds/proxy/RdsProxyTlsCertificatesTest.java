@@ -107,6 +107,44 @@ class RdsProxyTlsCertificatesTest {
     }
 
     @Test
+    void routedEndpointNamesShareOneWildcardPerAccountAndRegion() {
+        assertEquals("*.c0ddd4c66556.us-east-1.rds.localhost.floci.io",
+                RdsProxyTlsCertificates.coveringName("mydb.c0ddd4c66556.us-east-1.rds.localhost.floci.io"));
+        assertEquals("*.cluster-ro-c0ddd4c66556.us-east-1.rds.localhost.floci.io",
+                RdsProxyTlsCertificates.coveringName("app.cluster-ro-c0ddd4c66556.us-east-1.rds.localhost.floci.io"));
+        assertEquals("*.0123456789ab.us-west-2.redshift.localhost.floci.io",
+                RdsProxyTlsCertificates.coveringName("wh.0123456789ab.us-west-2.redshift.localhost.floci.io"));
+        assertEquals("host.docker.internal", RdsProxyTlsCertificates.coveringName("host.docker.internal"));
+
+        // A second database in the same account and Region is already covered.
+        RdsProxyTlsCertificates certs = newCertificates();
+        certs.ensureHost("one.c0ddd4c66556.us-east-1.rds.localhost.floci.io");
+        SSLContext context = certs.sslContext();
+        certs.ensureHost("two.c0ddd4c66556.us-east-1.rds.localhost.floci.io");
+        assertSame(context, certs.sslContext());
+    }
+
+    @Test
+    void savedRoutedNamesCollapseIntoTheirWildcardOnLoad() throws Exception {
+        Path tls = tempDir.resolve("tls");
+        FlociCertificateAuthority.loadOrCreate(tls);
+        StringBuilder hosts = new StringBuilder("\"localhost\"");
+        for (int i = 0; i < 900; i++) {
+            hosts.append(",\"db").append(i).append(".c0ddd4c66556.us-east-1.rds.localhost.floci.io\"");
+        }
+        Files.writeString(tls.resolve("rds-ca.metadata.json"),
+                "{\"hostnames\":[" + hosts + "],\"learnedHostnames\":[],\"generatedAt\":\"2026-01-01T00:00:00Z\","
+                        + "\"flociVersion\":\"test\"}");
+
+        RdsProxyTlsCertificates certs = newCertificates();
+        certs.sslContext();
+
+        String metadata = Files.readString(tls.resolve("rds-ca.metadata.json"));
+        assertTrue(metadata.contains("*.c0ddd4c66556.us-east-1.rds.localhost.floci.io"), metadata);
+        assertTrue(metadata.length() < 1000, "900 saved names collapse into one wildcard: " + metadata.length());
+    }
+
+    @Test
     void persistsAndReloadsSansAcrossInstances() throws Exception {
         RdsProxyTlsCertificates first = newCertificates();
         first.ensureHost("172.17.0.5");

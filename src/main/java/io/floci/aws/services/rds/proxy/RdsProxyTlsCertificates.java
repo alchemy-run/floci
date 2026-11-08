@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Pattern;
 
 /**
  * Owns the RDS auth proxy's in-memory server certificate signed by Floci's shared root CA.
@@ -38,6 +39,13 @@ public class RdsProxyTlsCertificates {
 
     private static final List<String> DEFAULT_SANS = List.of("localhost", "127.0.0.1");
     private static final String METADATA_NAME = "rds-ca.metadata.json";
+    /**
+     * The account-and-Region label of a routed endpoint name ({@code endpoint-domain}): RDS
+     * {@code c<11 hex>} under an instance, {@code cluster-} or {@code cluster-ro-}, and Redshift's
+     * 12 hex digits. AWS covers each with one wildcard, and so does Floci: listing every name
+     * instead grew the certificate past OpenSSL's 100 KB limit after enough databases.
+     */
+    private static final Pattern ROUTED_TOKEN = Pattern.compile("(cluster-(ro-)?)?c[0-9a-f]{11}|[0-9a-f]{12}");
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     private final FlociCertificateAuthority certificateAuthority;
@@ -68,6 +76,7 @@ public class RdsProxyTlsCertificates {
         if (host == null || host.isBlank()) {
             return;
         }
+        host = coveringName(host);
         ensureInitialized();
         if (current.sans().contains(host)) {
             return;
@@ -108,7 +117,7 @@ public class RdsProxyTlsCertificates {
             Path metadataFile = tlsDir.resolve(METADATA_NAME);
             if (Files.exists(metadataFile)) {
                 try {
-                    sans.addAll(readMetadata(metadataFile));
+                    readMetadata(metadataFile).forEach(saved -> sans.add(coveringName(saved)));
                 } catch (IOException e) {
                     LOG.warnv(e, "RDS proxy TLS: invalid SAN metadata at {0}; keeping the CA and using default hosts",
                             metadataFile);
@@ -141,6 +150,18 @@ public class RdsProxyTlsCertificates {
                 }
             }
         }
+    }
+
+    /**
+     * The SAN that covers {@code host}: {@code *.<token>.<region>.<domain>} for a routed endpoint
+     * name, the name itself otherwise. A wildcard covers exactly one label, the resource's id.
+     */
+    static String coveringName(String host) {
+        String[] labels = host.split("\\.");
+        if (labels.length >= 5 && !labels[0].equals("*") && ROUTED_TOKEN.matcher(labels[1]).matches()) {
+            return "*" + host.substring(labels[0].length());
+        }
+        return host;
     }
 
     private void regenerate(Set<String> sans) {
