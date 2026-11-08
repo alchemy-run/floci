@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
@@ -103,6 +104,58 @@ class RuntimeApiServerTest {
         awaitWaitingContexts(1);
 
         assertTrue(server.hasRuntimePolled());
+    }
+
+    @Test
+    @Timeout(15)
+    void anInvocationWritesTheStartEndAndReportLinesLambdaWrites() throws Exception {
+        List<String> lines = new CopyOnWriteArrayList<>();
+        server.setPlatformLogSink(lines::add);
+        server.setMemorySize(256);
+        CompletableFuture<HttpResponse<String>> next = httpClient.sendAsync(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/2018-06-01/runtime/invocation/next"))
+                        .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        awaitWaitingContexts(1);
+        server.enqueue(new PendingInvocation("req-report", "{}".getBytes(), System.currentTimeMillis() + 60_000,
+                "arn:aws:lambda:us-east-1:000000000000:function:test", new CompletableFuture<>()));
+        next.get(5, TimeUnit.SECONDS);
+        httpClient.send(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/2018-06-01/runtime/invocation/req-report/response"))
+                        .POST(HttpRequest.BodyPublishers.ofString("{}")).build(),
+                HttpResponse.BodyHandlers.ofString());
+
+        assertEquals("START RequestId: req-report Version: $LATEST", lines.get(0));
+        assertTrue(lines.contains("END RequestId: req-report"), lines.toString());
+        String report = lines.stream().filter(l -> l.startsWith("REPORT RequestId: req-report")).findFirst()
+                .orElseThrow();
+        assertTrue(report.contains("\tMemory Size: 256 MB"), report);
+        assertFalse(report.contains("Status:"), report);
+    }
+
+    @Test
+    @Timeout(15)
+    void aTimedOutInvocationReportsStatusTimeoutOnce() throws Exception {
+        List<String> lines = new CopyOnWriteArrayList<>();
+        server.setPlatformLogSink(lines::add);
+        CompletableFuture<HttpResponse<String>> next = httpClient.sendAsync(HttpRequest.newBuilder()
+                        .uri(URI.create("http://localhost:" + port + "/2018-06-01/runtime/invocation/next"))
+                        .GET().build(),
+                HttpResponse.BodyHandlers.ofString());
+        awaitWaitingContexts(1);
+        server.enqueue(new PendingInvocation("req-slow", "{}".getBytes(), System.currentTimeMillis() + 60_000,
+                "arn:aws:lambda:us-east-1:000000000000:function:test", new CompletableFuture<>()));
+        next.get(5, TimeUnit.SECONDS);
+        while (lines.isEmpty()) {
+            Thread.onSpinWait();
+        }
+
+        server.reportTimeout("req-slow");
+        server.reportTimeout("req-slow");
+
+        List<String> reports = lines.stream().filter(l -> l.startsWith("REPORT RequestId: req-slow")).toList();
+        assertEquals(1, reports.size(), lines.toString());
+        assertTrue(reports.get(0).endsWith("\tStatus: timeout"), reports.get(0));
     }
 
     @Test

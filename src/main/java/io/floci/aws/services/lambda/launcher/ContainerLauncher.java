@@ -222,6 +222,7 @@ public class ContainerLauncher implements LambdaRuntimeLauncher {
         RuntimeApiServer runtimeApiServer = runtimeApiServerFactory.create();
         runtimeApiServer.setFunctionMetadata(fn.getFunctionName(), fn.getVersion(), fn.getHandler(),
                 fn.getAccountId());
+        runtimeApiServer.setMemorySize(fn.getMemorySize());
 
         // Everything after the runtime-api server is allocated runs inside one try/catch: a failure
         // ANYWHERE below — image/host resolve, the code-volume populate (ensureCodeVolume), the spec

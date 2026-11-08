@@ -407,6 +407,7 @@ public class LambdaExecutorService implements Resettable {
                             fn.getFunctionName(), initTimeoutSeconds);
                 } else {
                     LOG.warnv("Function {0} timed out after {1}s", fn.getFunctionName(), fn.getTimeout());
+                    runtimeApiServer.reportTimeout(requestId);
                 }
                 warmPool.destroyHandle(handle);
                 return new InvokeResult(200, "Unhandled",
@@ -529,6 +530,7 @@ public class LambdaExecutorService implements Resettable {
             Throwable cause = e instanceof ExecutionException && e.getCause() != null ? e.getCause() : e;
             if (cause instanceof TimeoutException) {
                 LOG.warnv("Function {0} timed out after {1}s", fn.getFunctionName(), fn.getTimeout());
+                handle.getRuntimeApiServer().reportTimeout(requestId);
                 warmPool.destroyHandle(handle);
                 return new InvokeResult(200, "Unhandled",
                         buildErrorPayload("Task timed out after " + fn.getTimeout() + " seconds", "Function.TimedOut"),
