@@ -1199,7 +1199,8 @@ public class RdsQueryHandler {
         }
         List<String> subnetIds = memberList(params, "SubnetIds");
         try {
-            DbSubnetGroup group = service.modifyDbSubnetGroup(name, subnetIds, region);
+            DbSubnetGroup group = service.modifyDbSubnetGroup(name,
+                    params.getFirst("DBSubnetGroupDescription"), subnetIds, region);
             return Response.ok(AwsQueryResponse.envelope("ModifyDBSubnetGroup",
                     AwsNamespaces.RDS, dbSubnetGroupXml(group))).build();
         } catch (AwsException e) {

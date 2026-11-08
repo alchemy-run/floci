@@ -4561,6 +4561,19 @@ class RdsServiceTest {
     }
 
     @Test
+    void modifyDbSubnetGroupChangesTheDescriptionOnlyWhenGiven() {
+        rdsService.createDbSubnetGroup(
+                "described-subnets", "first", List.of("subnet-default-a", "subnet-default-b"));
+
+        rdsService.modifyDbSubnetGroup("described-subnets", "second",
+                List.of("subnet-default-a", "subnet-default-b"), null);
+        assertEquals("second", rdsService.getDbSubnetGroup("described-subnets", null).getDescription());
+
+        rdsService.modifyDbSubnetGroup("described-subnets", List.of("subnet-default-a"));
+        assertEquals("second", rdsService.getDbSubnetGroup("described-subnets", null).getDescription());
+    }
+
+    @Test
     void sameNamedSubnetGroupsAreRegionScopedIncludingTagsAndDeletion() {
         List<String> westSubnetIds = List.of("subnet-west-a", "subnet-west-b");
         when(ec2Service.describeSubnets(eq("us-west-2"), eq(westSubnetIds), eq(Map.of())))
