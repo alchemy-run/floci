@@ -135,6 +135,11 @@ class EksAccessEntryIntegrationTest {
 
             given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
                     .get(rawEntry).then().statusCode(200).body("accessEntry.username", equalTo("ops:{{SessionName}}"));
+            // An update that leaves the username out resets it to the generated default.
+            given().header("Authorization", auth(account, "eks")).contentType("application/json")
+                    .urlEncodingEnabled(false).body(Map.of("kubernetesGroups", java.util.List.of("editors")))
+                    .post(rawEntry).then().statusCode(200)
+                    .body("accessEntry.username", startsWith("arn:aws:sts::" + account + ":assumed-role/" + role));
             given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
                     .delete(rawEntry).then().statusCode(200);
             given().header("Authorization", auth(account, "eks")).contentType("application/json")

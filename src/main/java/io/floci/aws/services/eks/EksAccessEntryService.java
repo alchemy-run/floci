@@ -98,8 +98,7 @@ public class EksAccessEntryService {
             validateStandardUsername(username);
         }
         if (username == null) {
-            username = role ? "arn:" + arn[1] + ":sts::" + arn[4] + ":assumed-role/" + name + "/{{SessionName}}"
-                    : principal;
+            username = defaultUsername(principal);
         }
         List<String> groups = node ? List.of("system:nodes")
                 : request.kubernetesGroups() == null ? List.of() : request.kubernetesGroups();
@@ -170,13 +169,28 @@ public class EksAccessEntryService {
         if (groups != null) {
             validateGroups(groups);
         }
+        // An update that leaves the username out resets a STANDARD entry's to the generated default.
+        String nextUsername = username != null ? username
+                : "STANDARD".equals(current.type()) ? defaultUsername(current.principalArn()) : current.username();
         AccessEntry updated = new AccessEntry(current.accessEntryArn(), current.clusterName(), current.principalArn(),
-                current.type(), username != null ? username : current.username(),
+                current.type(), nextUsername,
                 groups != null ? List.copyOf(groups) : current.kubernetesGroups(), current.tags(),
                 current.createdAt(), Instant.now().toEpochMilli() / 1000.0);
         entries.put(prefix(cluster) + principal, new StoredEntry(updated, stored.principalId(),
                 stored.clientRequestToken(), stored.policies()));
         return updated;
+    }
+
+    /**
+     * The username EKS generates for a STANDARD entry: a role's assumed-role session, or the
+     * user's own ARN.
+     */
+    private static String defaultUsername(String principal) {
+        String[] arn = principal.split(":", 6);
+        String name = principal.substring(principal.lastIndexOf('/') + 1);
+        return arn[5].startsWith("role/")
+                ? "arn:" + arn[1] + ":sts::" + arn[4] + ":assumed-role/" + name + "/{{SessionName}}"
+                : principal;
     }
 
     /** The access entry with this ARN on {@code cluster}; ResourceNotFoundException when there is none. */
