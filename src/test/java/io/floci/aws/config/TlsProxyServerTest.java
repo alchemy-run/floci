@@ -2,11 +2,17 @@ package io.floci.aws.config;
 
 import io.floci.aws.testutil.FreePorts;
 import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.net.NetServer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+
+import javax.net.ssl.SNIHostName;
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLParameters;
 
 import java.io.IOException;
 import java.net.Inet4Address;
@@ -15,8 +21,12 @@ import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
 import java.net.Socket;
 import java.net.SocketException;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -152,6 +162,58 @@ class TlsProxyServerTest {
 
     @Test
     @Timeout(20)
+    void aSharedPortHandsTheServerNamesItsSharerClaimsToIt() throws Exception {
+        httpBackend = startMarkerBackend("PLAIN");
+        httpsBackend = startMarkerBackend("TLS");
+        NetServer listener = startMarkerBackend("LISTENER");
+        try {
+            int[] ports = FreePorts.anyInterfacePorts(2);
+            int awsHttpsPort = ports[1];
+            proxy = new TlsProxyServer(vertx, configWith(true, ports[0], awsHttpsPort), "127.0.0.1",
+                    httpBackend.actualPort(), httpsBackend.actualPort());
+            proxy.shareTlsPort(awsHttpsPort, name -> name.equals("app.example.com") ? listener.actualPort() : null);
+
+            assertEquals("LISTENER", roundTrip(awsHttpsPort, clientHello("app.example.com")));
+            // A name the sharer does not claim, and a ClientHello naming none, stay with Floci.
+            assertEquals("TLS", roundTrip(awsHttpsPort, clientHello("localhost.floci.io")));
+            assertEquals("TLS", roundTrip(awsHttpsPort, clientHello(null)));
+            assertEquals("PLAIN", roundTrip(awsHttpsPort, new byte[]{(byte) 'G'}));
+            // Only the shared port is shared.
+            assertEquals("TLS", roundTrip(ports[0], clientHello("app.example.com")));
+        } finally {
+            closeBackend(listener);
+        }
+    }
+
+    @Test
+    void clientHelloServerNameIsRead() throws Exception {
+        assertEquals(Optional.of("app.example.com"),
+                TlsClientHello.serverName(Buffer.buffer(clientHello("App.Example.com"))));
+        assertEquals(Optional.empty(), TlsClientHello.serverName(Buffer.buffer(clientHello(null))));
+        assertEquals(Optional.empty(), TlsClientHello.serverName(Buffer.buffer("GET / HTTP/1.1")));
+        byte[] hello = clientHello("app.example.com");
+        assertEquals(Optional.empty(), TlsClientHello.serverName(Buffer.buffer(Arrays.copyOf(hello, 40))));
+    }
+
+    /** The first record a JDK client sends, naming {@code serverName} in SNI when it is not null. */
+    private static byte[] clientHello(String serverName) throws Exception {
+        SSLEngine engine = SSLContext.getDefault().createSSLEngine(serverName, 443);
+        engine.setUseClientMode(true);
+        if (serverName != null) {
+            SSLParameters parameters = engine.getSSLParameters();
+            parameters.setServerNames(List.of(new SNIHostName(serverName)));
+            engine.setSSLParameters(parameters);
+        }
+        ByteBuffer out = ByteBuffer.allocate(engine.getSession().getPacketBufferSize());
+        engine.wrap(ByteBuffer.allocate(0), out);
+        out.flip();
+        byte[] record = new byte[out.remaining()];
+        out.get(record);
+        return record;
+    }
+
+    @Test
+    @Timeout(20)
     void tlsDisabled_bindsNothing() throws Exception {
         int publicPort = FreePorts.anyInterfacePort();
         proxy = new TlsProxyServer(vertx, configWith(false, publicPort, 443), "127.0.0.1", 4510, 4511);
@@ -176,9 +238,13 @@ class TlsProxyServerTest {
     }
 
     private String roundTrip(int proxyPort, byte firstByte) throws Exception {
+        return roundTrip(proxyPort, new byte[]{firstByte});
+    }
+
+    private String roundTrip(int proxyPort, byte[] firstBytes) throws Exception {
         awaitListening(proxyPort);
         try (Socket sock = new Socket("127.0.0.1", proxyPort)) {
-            sock.getOutputStream().write(new byte[]{firstByte});
+            sock.getOutputStream().write(firstBytes);
             sock.getOutputStream().flush();
             byte[] buf = new byte[64];
             int n = sock.getInputStream().read(buf);

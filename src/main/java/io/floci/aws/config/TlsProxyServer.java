@@ -4,6 +4,7 @@ import io.quarkus.runtime.Startup;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.net.NetClient;
 import io.vertx.core.net.NetServer;
 import io.vertx.core.net.NetServerOptions;
@@ -17,10 +18,12 @@ import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Function;
 import java.util.function.IntConsumer;
 
 /**
@@ -89,6 +92,26 @@ public class TlsProxyServer {
         failedPorts.forEach(handler::accept);
     }
     private NetClient client;
+
+    /**
+     * Per public port, who else answers TLS there: given the server name a ClientHello asks for,
+     * the loopback port to hand the connection to, or null to keep it for Floci.
+     */
+    private final Map<Integer, Function<String, Integer>> handoffs = new ConcurrentHashMap<>();
+
+    /**
+     * Shares a port the proxy holds with another TLS server, by server name. An HTTPS load balancer
+     * listener on 443 serves its own domains this way while CDK's callbacks, which name Floci's
+     * hosts, still reach Floci.
+     */
+    public void shareTlsPort(int port, Function<String, Integer> backendForServerName) {
+        handoffs.put(port, backendForServerName);
+    }
+
+    /** Stops sharing {@code port}, if {@code backendForServerName} is still the one sharing it. */
+    public void unshareTlsPort(int port, Function<String, Integer> backendForServerName) {
+        handoffs.remove(port, backendForServerName);
+    }
 
     @Inject
     public TlsProxyServer(Vertx vertx, EmulatorConfig config, Config mpConfig) {
@@ -199,12 +222,8 @@ public class TlsProxyServer {
                 frontSocket.pause();
 
                 // Inspect first byte to determine protocol
-                int backendPort;
-                if (buffer.length() > 0 && buffer.getByte(0) == TLS_HANDSHAKE) {
-                    backendPort = httpsBackendPort;
-                } else {
-                    backendPort = httpBackendPort;
-                }
+                int backendPort = buffer.length() > 0 && buffer.getByte(0) == TLS_HANDSHAKE
+                        ? tlsBackendPort(frontSocket, buffer) : httpBackendPort;
 
                 // Connect to the appropriate backend
                 client.connect(backendPort, "127.0.0.1").onComplete(ar -> {
@@ -231,6 +250,15 @@ public class TlsProxyServer {
             // Resume to receive the first buffer
             frontSocket.resume();
         };
+    }
+
+    /** Floci's HTTPS backend, unless the port is shared and its sharer claims the server name. */
+    private int tlsBackendPort(NetSocket frontSocket, Buffer clientHello) {
+        Function<String, Integer> handoff = handoffs.get(frontSocket.localAddress().port());
+        if (handoff == null) {
+            return httpsBackendPort;
+        }
+        return TlsClientHello.serverName(clientHello).map(handoff).orElse(httpsBackendPort);
     }
 
     @PreDestroy

@@ -575,25 +575,29 @@ public class ElbV2DataPlane {
     }
 
     private void startPortServer(int port, PortState state) {
-        if (isReservedByFloci(port)) {
+        boolean tcp = servedBindings(port).anyMatch(ListenerBinding::tcp);
+        boolean secure = !tcp && portIsSecure(port);
+        // An HTTPS listener on the TLS proxy's AWS-HTTPS port shares it: the proxy hands it the
+        // connections whose server name its certificates cover, and keeps the rest for Floci.
+        boolean sharedWithProxy = isReservedByFloci(port) && port != config.port() && secure;
+        if (isReservedByFloci(port) && !sharedWithProxy) {
             // Returning null leaves `servers` untouched: computeIfAbsent skips a null mapping.
             // The emulator's own port cannot be handed over, so the two cases need different
             // advice: freeing floci.tls.aws-https-port is only meaningful for the TLS proxy.
             String remedy = port == config.port()
                     ? "This is the emulator's own port, so it cannot be freed; give the listener a different port."
-                    : "Set floci.tls.aws-https-port=0 (or disable TLS) to free it.";
+                    : "Only HTTPS listeners share it; set floci.tls.aws-https-port=0 (or disable TLS) to free it.";
             LOG.warnv("ELBv2 listener port {0} is reserved by Floci itself; the listener is "
                     + "registered but serves no traffic. {1}", String.valueOf(port), remedy);
             return;
         }
-        if (servedBindings(port).anyMatch(ListenerBinding::tcp)) {
+        if (tcp) {
             startTcpServer(port, state);
             return;
         }
-        boolean secure = portIsSecure(port);
         HttpServerOptions options = new HttpServerOptions()
-                .setHost("0.0.0.0")
-                .setPort(port)
+                .setHost(sharedWithProxy ? "127.0.0.1" : "0.0.0.0")
+                .setPort(sharedWithProxy ? 0 : port)
                 .setMaxHeaderSize(MAX_REQUEST_HEADER_SIZE)
                 .setMaxInitialLineLength(MAX_REQUEST_LINE_LENGTH);
         if (secure) {
@@ -608,7 +612,13 @@ public class ElbV2DataPlane {
         try {
             server.requestHandler(req -> handleRequest(req, port));
             server.listen()
-                    .onSuccess(s -> portStarted(port, state, generation, secure ? "HTTPS" : "HTTP"))
+                    .onSuccess(s -> {
+                        if (sharedWithProxy) {
+                            tlsProxyServer.shareTlsPort(port, name -> servers.get(port) == server
+                                    && servesServerName(port, name) ? server.actualPort() : null);
+                        }
+                        portStarted(port, state, generation, secure ? "HTTPS" : "HTTP");
+                    })
                     .onFailure(err -> onCurrentPort(port, state, () -> {
                         if (state.generation == generation && servers.remove(port, server)) {
                             scheduleBindRetry(port, state);
@@ -965,6 +975,44 @@ public class ElbV2DataPlane {
             options.addCertValue(Buffer.buffer(certificatePemChain(certificate)));
         }
         return options;
+    }
+
+    /** Whether a certificate an HTTPS listener on {@code port} serves covers {@code serverName}. */
+    private boolean servesServerName(int port, String serverName) {
+        return servedBindings(port).filter(ListenerBinding::secure)
+                .flatMap(binding -> binding.certificates().stream())
+                .flatMap(certificate -> certificateNames(certificate).stream())
+                .anyMatch(name -> certificateNameMatches(name, serverName));
+    }
+
+    /** TLS name matching: exact, or a leading {@code *.} label standing for exactly one label. */
+    static boolean certificateNameMatches(String certificateName, String serverName) {
+        String name = certificateName.toLowerCase(Locale.ROOT);
+        String host = serverName.toLowerCase(Locale.ROOT);
+        if (name.startsWith("*.")) {
+            int dot = host.indexOf('.');
+            return dot > 0 && host.substring(dot + 1).equals(name.substring(2));
+        }
+        return name.equals(host);
+    }
+
+    private static List<String> certificateNames(CertificateMaterial certificate) {
+        try {
+            X509Certificate x509 = (X509Certificate) CertificateFactory.getInstance("X.509")
+                    .generateCertificate(new ByteArrayInputStream(
+                            certificate.certificateBody().getBytes(StandardCharsets.US_ASCII)));
+            List<String> names = new ArrayList<>();
+            if (x509.getSubjectAlternativeNames() != null) {
+                for (List<?> entry : x509.getSubjectAlternativeNames()) {
+                    if (Integer.valueOf(2).equals(entry.get(0))) {
+                        names.add(entry.get(1).toString());
+                    }
+                }
+            }
+            return names;
+        } catch (CertificateException | RuntimeException unreadable) {
+            return List.of();
+        }
     }
 
     private boolean portIsSecure(int port) {
