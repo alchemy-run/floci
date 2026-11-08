@@ -99,6 +99,23 @@ class Ec2RepeatedFilterNamesIntegrationTest {
     }
 
     @Test
+    void networkAclTagFiltersMatchOnlyTaggedAcls() {
+        String name = unique("acl-tag-");
+        String vpc = ec2("CreateVpc", "CidrBlock", "10.77.0.0/16").getString("CreateVpcResponse.vpc.vpcId");
+        String acl = ec2("CreateNetworkAcl", "VpcId", vpc,
+                "TagSpecification.1.ResourceType", "network-acl",
+                "TagSpecification.1.Tag.1.Key", "Name", "TagSpecification.1.Tag.1.Value", name)
+                .getString("CreateNetworkAclResponse.networkAcl.networkAclId");
+
+        // The VPC's default ACL is untagged, so neither tag filter matches it.
+        String path = "DescribeNetworkAclsResponse.networkAclSet.item.networkAclId";
+        assertEquals(Set.of(acl), values(describe("DescribeNetworkAcls", List.of(), filter("tag:Name", name)), path));
+        assertEquals(Set.of(acl), values(describe("DescribeNetworkAcls", List.of(), filter("tag-value", name)), path));
+        assertEquals(Set.of(), values(describe("DescribeNetworkAcls", List.of(), filter("tag:Name", name + "-none")),
+                path));
+    }
+
+    @Test
     void describeInstancesAndsTwoTagKeyFilters() {
         String only = unique("RepeatedOnly");
         String shared = unique("RepeatedShared");
