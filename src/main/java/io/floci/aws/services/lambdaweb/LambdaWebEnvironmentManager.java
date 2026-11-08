@@ -49,6 +49,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.EnumMap;
 import java.util.List;
@@ -494,6 +495,22 @@ public class LambdaWebEnvironmentManager implements ContainerTeardown {
             lifecycleManager.stopAndRemove(environment.containerId, null, 1);
         } finally {
             forgetCredentials(environment);
+        }
+    }
+
+    /**
+     * Stops the environments that serve any of {@code domainNames}: a deleted function or endpoint
+     * takes its servers with it, as AWS spins down an endpoint's environments when it goes.
+     */
+    public void discardDomains(Collection<String> domainNames) {
+        if (domainNames.isEmpty()) {
+            return;
+        }
+        for (Environment environment : allEnvironments()) {
+            String key = environment.poolKey;
+            if (key != null && domainNames.contains(key.substring(key.lastIndexOf('|') + 1))) {
+                discard(environment);
+            }
         }
     }
 

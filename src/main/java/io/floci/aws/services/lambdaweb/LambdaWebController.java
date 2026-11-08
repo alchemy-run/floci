@@ -25,8 +25,10 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Lambda Web Functions (apiVersion 2025-03-07, rest-json, signs as {@code lambda}). The tag and
@@ -41,12 +43,24 @@ public class LambdaWebController {
     private final LambdaWebService service;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
+    private final LambdaWebEnvironmentManager environments;
 
     @Inject
-    public LambdaWebController(LambdaWebService service, RegionResolver regionResolver, ObjectMapper objectMapper) {
+    public LambdaWebController(LambdaWebService service, RegionResolver regionResolver, ObjectMapper objectMapper,
+                               LambdaWebEnvironmentManager environments) {
         this.service = service;
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
+        this.environments = environments;
+    }
+
+    /** Every name an endpoint is served under: its domain and its regional domains. */
+    private static Set<String> domainsOf(WebFunctionEndpoint endpoint) {
+        Set<String> domains = new HashSet<>(endpoint.regionalDomainNames.values());
+        if (endpoint.domainName != null) {
+            domains.add(endpoint.domainName);
+        }
+        return domains;
     }
 
     @PUT
@@ -79,7 +93,11 @@ public class LambdaWebController {
     @Path("/web-functions/{functionName}")
     public Response deleteWebFunction(@Context HttpHeaders headers, @PathParam("functionName") String functionName) {
         String region = regionResolver.resolveRegion(headers);
+        Set<String> domains = new HashSet<>();
+        service.getFunction(region, functionName).endpoints.values()
+                .forEach(endpoint -> domains.addAll(domainsOf(endpoint)));
         service.deleteFunction(region, functionName);
+        environments.discardDomains(domains);
         return Response.noContent().build();
     }
 
@@ -170,7 +188,9 @@ public class LambdaWebController {
                                               @PathParam("functionName") String functionName,
                                               @PathParam("endpointName") String endpointName) {
         String region = regionResolver.resolveRegion(headers);
+        Set<String> domains = domainsOf(service.getEndpoint(region, functionName, endpointName));
         service.deleteEndpoint(region, functionName, endpointName);
+        environments.discardDomains(domains);
         return Response.noContent().build();
     }
 

@@ -905,6 +905,29 @@ public class LambdaService implements ResourceProvider {
 
     private record ResolvedFunctionTarget(String functionArn, String functionName) {}
 
+    /**
+     * AWS refuses an SQS mapping whose queue would make a message visible again while the function
+     * may still be running on it: the queue's VisibilityTimeout must be at least the function's
+     * timeout. A queue whose attributes cannot be read is left to the poller.
+     */
+    private void requireVisibilityCoversTimeout(String queueUrl, String region, int functionTimeout) {
+        if (sqsService == null) {
+            return;
+        }
+        String visibility;
+        try {
+            visibility = sqsService.getQueueAttributes(queueUrl, List.of("VisibilityTimeout"), region)
+                    .get("VisibilityTimeout");
+        } catch (RuntimeException e) {
+            return;
+        }
+        if (visibility != null && Integer.parseInt(visibility) < functionTimeout) {
+            throw new AwsException("InvalidParameterValueException",
+                    "Queue visibility timeout: " + visibility + " seconds is less than Function timeout: "
+                            + functionTimeout + " seconds", 400);
+        }
+    }
+
     private ResolvedFunctionTarget resolveFunctionTarget(String region, LambdaArnUtils.ResolvedFunctionRef fnRef) {
         String name = fnRef.name();
         LambdaFunction fn = getFunction(region, name);
@@ -1776,6 +1799,10 @@ public class LambdaService implements ResourceProvider {
         String queueUrl = (eventSourceArn != null && eventSourceArn.contains(":sqs:"))
                 ? AwsArnUtils.arnToQueueUrl(eventSourceArn, config != null ? config.effectiveBaseUrl() : null)
                 : null;
+        if (queueUrl != null) {
+            requireVisibilityCoversTimeout(queueUrl, resolvedRegion,
+                    getFunction(resolvedRegion, target.functionName()).getTimeout());
+        }
 
         EventSourceMapping esm = new EventSourceMapping();
         esm.setUuid(UUID.randomUUID().toString());
