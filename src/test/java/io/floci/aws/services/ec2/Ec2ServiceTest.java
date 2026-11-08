@@ -2058,7 +2058,7 @@ class Ec2ServiceTest {
 
     @ParameterizedTest
     @CsvSource(value = {"192.168.65.2,192.168.65.2,192.168.65.2", "' 192.168.65.3 ',192.168.65.3,192.168.65.3",
-            "'  ',127.0.0.1,localhost", "NULL,127.0.0.1,localhost"}, nullValues = "NULL")
+            "'  ',127.0.0.1,INSTANCE", "NULL,127.0.0.1,INSTANCE"}, nullValues = "NULL")
     void fixedMockAddressesUseTheConfiguredAddress(String configured, String expected, String dnsName) {
         EmulatorConfig config = mockConfig(true);
         when(config.services().ec2().mockPublicAddresses())
@@ -2071,7 +2071,9 @@ class Ec2ServiceTest {
                 1, 1, null, List.of(), subnetId, null, List.of(), null, null, null).getInstances().getFirst();
         service.describeInstances(region, List.of(instance.getInstanceId()), Map.of());
         assertEquals(expected, instance.getPublicIpAddress());
-        assertEquals(dnsName, instance.getPublicDnsName());
+        // On loopback the name is the instance's own <id>.localhost.floci.io, which resolves there too.
+        assertEquals("INSTANCE".equals(dnsName) ? instance.getInstanceId() + ".localhost.floci.io" : dnsName,
+                instance.getPublicDnsName());
 
         // The rule still decides: released on stop, back on start.
         service.stopInstances(region, List.of(instance.getInstanceId()));

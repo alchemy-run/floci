@@ -5063,7 +5063,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
 
     private static void setPublicAddress(Instance instance, String publicIp) {
         instance.setPublicIpAddress(publicIp);
-        instance.setPublicDnsName("127.0.0.1".equals(publicIp) ? "localhost" : publicIp);
+        instance.setPublicDnsName(Ec2ContainerManager.loopbackPublicDnsName(instance, publicIp));
     }
 
     private static void clearPublicAddress(Instance instance) {

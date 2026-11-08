@@ -1100,12 +1100,14 @@ class Ec2ContainerManagerTest {
         Ec2ContainerManager manager = managerWithReachability(reachability);
 
         Instance instance = new Instance();
+        instance.setInstanceId("i-0123456789abcdef0");
         instance.setContainerBridgeIp("192.168.215.2");
 
         assertEquals("127.0.0.1", manager.reachablePublicAddress(instance));
         manager.exposeReachablePublicAddress(instance);
         assertEquals("127.0.0.1", instance.getPublicIpAddress());
-        assertEquals("localhost", instance.getPublicDnsName());
+        // The instance's own name: it resolves to 127.0.0.1 and is what the port mux routes by.
+        assertEquals("i-0123456789abcdef0.localhost.floci.io", instance.getPublicDnsName());
     }
 
     @Test

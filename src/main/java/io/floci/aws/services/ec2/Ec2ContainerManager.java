@@ -1539,7 +1539,21 @@ public class Ec2ContainerManager {
             return;
         }
         instance.setPublicIpAddress(publicAddress);
-        instance.setPublicDnsName("127.0.0.1".equals(publicAddress) ? "localhost" : publicAddress);
+        instance.setPublicDnsName(loopbackPublicDnsName(instance, publicAddress));
+    }
+
+    /**
+     * The public DNS name for a public address. On loopback it is the instance's own
+     * {@code <id>.localhost.floci.io}: it resolves to 127.0.0.1 too, and it is the Host the
+     * port mux routes each instance's published app ports by, where {@code localhost} reaches
+     * no instance once two serve the same port.
+     */
+    public static String loopbackPublicDnsName(Instance instance, String publicAddress) {
+        if (!"127.0.0.1".equals(publicAddress)) {
+            return publicAddress;
+        }
+        return instance.getInstanceId() == null || instance.getInstanceId().isBlank()
+                ? "localhost" : instance.getInstanceId() + ".localhost.floci.io";
     }
 
     static void exposeReachablePrivateAddress(Instance instance, String privateIp) {
