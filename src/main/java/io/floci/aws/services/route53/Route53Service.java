@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -659,8 +660,11 @@ public class Route53Service {
         return all;
     }
 
-    public HealthCheck updateHealthCheck(String id, HealthCheckConfig cfg) {
+    /** Changes only what the update names, as UpdateHealthCheck does; see {@link HealthCheckConfig#applyUpdate}. */
+    public HealthCheck updateHealthCheck(String id, HealthCheckConfig update, Set<String> resetElements) {
         HealthCheck hc = getHealthCheck(id);
+        HealthCheckConfig cfg = hc.getConfig() != null ? hc.getConfig() : new HealthCheckConfig();
+        cfg.applyUpdate(update, resetElements);
         hc.setConfig(cfg);
         hc.setHealthCheckVersion(hc.getHealthCheckVersion() + 1);
         healthCheckStore.put(id, hc);

@@ -578,7 +578,9 @@ public class Route53Controller {
     public Response updateHealthCheck(@PathParam("HealthCheckId") String id, String body) {
         try {
             HealthCheckConfig cfg = parseHealthCheckConfig(body);
-            HealthCheck hc = service.updateHealthCheck(id, cfg);
+            List<String> resetNames = childTexts(body, "ResetElements", "ResettableElementName");
+            Set<String> reset = resetNames == null ? Set.of() : Set.copyOf(resetNames);
+            HealthCheck hc = service.updateHealthCheck(id, cfg, reset);
             String xml = new XmlBuilder()
                     .start("UpdateHealthCheckResponse", NS)
                     .raw(xmlHealthCheck(hc))
@@ -1011,8 +1013,35 @@ public class Route53Controller {
                .elem("FullyQualifiedDomainName", cfg.getFullyQualifiedDomainName())
                .elem("RequestInterval",
                        cfg.getRequestInterval() != null ? String.valueOf(cfg.getRequestInterval()) : null)
+               .elem("SearchString", cfg.getSearchString())
                .elem("FailureThreshold",
                        cfg.getFailureThreshold() != null ? String.valueOf(cfg.getFailureThreshold()) : null)
+               .elem("MeasureLatency", String.valueOf(Boolean.TRUE.equals(cfg.getMeasureLatency())))
+               .elem("Inverted", String.valueOf(Boolean.TRUE.equals(cfg.getInverted())))
+               .elem("Disabled", String.valueOf(Boolean.TRUE.equals(cfg.getDisabled())))
+               .elem("HealthThreshold",
+                       cfg.getHealthThreshold() != null ? String.valueOf(cfg.getHealthThreshold()) : null);
+            if (cfg.getChildHealthChecks() != null && !cfg.getChildHealthChecks().isEmpty()) {
+                xml.start("ChildHealthChecks");
+                cfg.getChildHealthChecks().forEach(child -> xml.elem("ChildHealthCheck", child));
+                xml.end("ChildHealthChecks");
+            }
+            if (cfg.getEnableSni() != null) {
+                xml.elem("EnableSNI", String.valueOf(cfg.getEnableSni()));
+            }
+            if (cfg.getRegions() != null && !cfg.getRegions().isEmpty()) {
+                xml.start("Regions");
+                cfg.getRegions().forEach(region -> xml.elem("Region", region));
+                xml.end("Regions");
+            }
+            if (cfg.getAlarmName() != null) {
+                xml.start("AlarmIdentifier")
+                   .elem("Region", cfg.getAlarmRegion())
+                   .elem("Name", cfg.getAlarmName())
+                   .end("AlarmIdentifier");
+            }
+            xml.elem("InsufficientDataHealthStatus", cfg.getInsufficientDataHealthStatus())
+               .elem("RoutingControlArn", cfg.getRoutingControlArn())
                .end("HealthCheckConfig");
         }
         xml.elem("HealthCheckVersion", hc.getHealthCheckVersion())
@@ -1369,25 +1398,63 @@ public class Route53Controller {
         }
     }
 
+    /**
+     * Reads a HealthCheckConfig from a CreateHealthCheck body, or the same members from the top
+     * level of an UpdateHealthCheck body. A member the body leaves out stays null, which is what
+     * lets an update keep it.
+     */
     private HealthCheckConfig parseHealthCheckConfig(String body) {
         HealthCheckConfig cfg = new HealthCheckConfig();
         cfg.setType(XmlParser.extractFirst(body, "Type", null));
         cfg.setIpAddress(XmlParser.extractFirst(body, "IPAddress", null));
-        String portStr = XmlParser.extractFirst(body, "Port", null);
-        if (portStr != null) {
-            try { cfg.setPort(Integer.parseInt(portStr)); } catch (NumberFormatException ignored) {}
-        }
+        cfg.setPort(intOrNull(XmlParser.extractFirst(body, "Port", null)));
         cfg.setResourcePath(XmlParser.extractFirst(body, "ResourcePath", null));
         cfg.setFullyQualifiedDomainName(XmlParser.extractFirst(body, "FullyQualifiedDomainName", null));
-        String riStr = XmlParser.extractFirst(body, "RequestInterval", null);
-        if (riStr != null) {
-            try { cfg.setRequestInterval(Integer.parseInt(riStr)); } catch (NumberFormatException ignored) {}
-        }
-        String ftStr = XmlParser.extractFirst(body, "FailureThreshold", null);
-        if (ftStr != null) {
-            try { cfg.setFailureThreshold(Integer.parseInt(ftStr)); } catch (NumberFormatException ignored) {}
+        cfg.setSearchString(XmlParser.extractFirst(body, "SearchString", null));
+        cfg.setRequestInterval(intOrNull(XmlParser.extractFirst(body, "RequestInterval", null)));
+        cfg.setFailureThreshold(intOrNull(XmlParser.extractFirst(body, "FailureThreshold", null)));
+        cfg.setMeasureLatency(booleanOrNull(XmlParser.extractFirst(body, "MeasureLatency", null)));
+        cfg.setInverted(booleanOrNull(XmlParser.extractFirst(body, "Inverted", null)));
+        cfg.setDisabled(booleanOrNull(XmlParser.extractFirst(body, "Disabled", null)));
+        cfg.setHealthThreshold(intOrNull(XmlParser.extractFirst(body, "HealthThreshold", null)));
+        cfg.setEnableSni(booleanOrNull(XmlParser.extractFirst(body, "EnableSNI", null)));
+        cfg.setInsufficientDataHealthStatus(XmlParser.extractFirst(body, "InsufficientDataHealthStatus", null));
+        cfg.setRoutingControlArn(XmlParser.extractFirst(body, "RoutingControlArn", null));
+        cfg.setChildHealthChecks(childTexts(body, "ChildHealthChecks", "ChildHealthCheck"));
+        cfg.setRegions(childTexts(body, "Regions", "Region"));
+        XmlParser.XmlElement alarm = XmlParser.extractElementTree(body, "AlarmIdentifier");
+        if (alarm != null) {
+            cfg.setAlarmName(alarm.child("Name") == null ? null : alarm.child("Name").text());
+            cfg.setAlarmRegion(alarm.child("Region") == null ? null : alarm.child("Region").text());
         }
         return cfg;
+    }
+
+    /** The texts of {@code child} elements inside {@code parent}, or null when there is no parent. */
+    private static List<String> childTexts(String body, String parent, String child) {
+        XmlParser.XmlElement element = XmlParser.extractElementTree(body, parent);
+        if (element == null) {
+            return null;
+        }
+        return element.children().stream()
+                .filter(c -> child.equals(c.name()))
+                .map(XmlParser.XmlElement::text)
+                .toList();
+    }
+
+    private static Integer intOrNull(String value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private static Boolean booleanOrNull(String value) {
+        return value == null ? null : Boolean.valueOf(value.trim());
     }
 
     /**
