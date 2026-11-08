@@ -13,6 +13,8 @@ import io.floci.aws.services.ecs.model.EcsTask;
 import io.floci.aws.services.ecs.model.EcsTaskAddress;
 import io.floci.aws.services.ecs.model.NetworkBinding;
 import io.floci.aws.services.elbv2.ElbV2Service;
+import io.floci.aws.services.elbv2.model.Action;
+import io.floci.aws.services.elbv2.model.Rule;
 import io.floci.aws.services.elbv2.model.TargetDescription;
 import io.floci.aws.services.elbv2.model.TargetHealth;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -206,6 +208,7 @@ public class EcsLoadBalancerRegistrar {
             if (lb.getTargetGroupArn() == null || lb.getTargetGroupArn().isBlank()) {
                 continue;
             }
+            String servingTargetGroupArn = lb.getServingTargetGroupArn();
             Container container = task.getContainers().stream()
                     .filter(c -> lb.getContainerName() == null
                             || lb.getContainerName().equals(c.getName()))
@@ -225,7 +228,55 @@ public class EcsLoadBalancerRegistrar {
             TargetDescription td = new TargetDescription();
             td.setId(containerManager.resolveContainerHost(container));
             td.setPort(EcsTaskAddress.isLoopback(td.getId()) ? binding.hostPort() : binding.containerPort());
-            action.accept(lb.getTargetGroupArn(), td);
+            action.accept(servingTargetGroupArn, td);
+        }
+    }
+
+    /**
+     * ECS native blue/green: a new deployment of a {@code BLUE_GREEN} service runs its tasks in
+     * the target group that is not serving, then points the production listener rule at it. Floci
+     * completes the shift at once, with the bake time already passed, so the new group takes all
+     * traffic and the old tasks are drained as the rolling path drains them.
+     */
+    public void shiftBlueGreenTraffic(EcsServiceModel svc, String region) {
+        Object strategy = svc.getDeploymentConfiguration() == null
+                ? null : svc.getDeploymentConfiguration().get("strategy");
+        if (!"BLUE_GREEN".equals(strategy) || svc.getLoadBalancers() == null) {
+            return;
+        }
+        for (EcsLoadBalancer lb : svc.getLoadBalancers()) {
+            Map<String, Object> advanced = lb.getAdvancedConfiguration();
+            if (advanced == null || lb.getTargetGroupArn() == null) {
+                continue;
+            }
+            String alternate = advanced.get("alternateTargetGroupArn") instanceof String s ? s : null;
+            String productionRule = advanced.get("productionListenerRule") instanceof String s ? s : null;
+            if (alternate == null || productionRule == null) {
+                continue;
+            }
+            String next = lb.getServingTargetGroupArn().equals(lb.getTargetGroupArn())
+                    ? alternate : lb.getTargetGroupArn();
+            try {
+                Rule rule = elbV2Service.describeRules(region, null, List.of(productionRule)).getFirst();
+                List<Action> actions = new ArrayList<>();
+                for (Action action : rule.getActions()) {
+                    if ("forward".equals(action.getType())) {
+                        if (action.getTargetGroups() != null && !action.getTargetGroups().isEmpty()) {
+                            for (Action.TargetGroupTuple tuple : action.getTargetGroups()) {
+                                tuple.setWeight(next.equals(tuple.getTargetGroupArn()) ? 100 : 0);
+                            }
+                        } else {
+                            action.setTargetGroupArn(next);
+                        }
+                    }
+                    actions.add(action);
+                }
+                elbV2Service.modifyRule(region, productionRule, null, actions);
+                lb.setServingTargetGroupArn(next);
+                LOG.infov("Blue/green: shifted {0} production traffic to {1}", svc.getServiceName(), next);
+            } catch (RuntimeException e) {
+                LOG.warnv("Blue/green: could not shift {0} to {1}: {2}", svc.getServiceName(), next, e.getMessage());
+            }
         }
     }
 
