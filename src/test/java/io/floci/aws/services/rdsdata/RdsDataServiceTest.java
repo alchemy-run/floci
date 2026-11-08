@@ -883,15 +883,42 @@ class RdsDataServiceTest {
     }
 
     @Test
+    void formatRecordsAsJsonAnswersWithOneObjectPerRow() throws Exception {
+        TestHarness harness = new TestHarness();
+        harness.createTables();
+        harness.service.executeStatement(
+                harness.request("insert into data_api_events(name) values ('first')"), REGION);
+
+        ObjectNode select = harness.request("select name as \"name\", 42 as \"answer\", true as \"flag\", "
+                + "null as \"nothing\" from data_api_events");
+        select.put("formatRecordsAs", "JSON");
+        ObjectNode response = harness.service.executeStatement(select, REGION);
+
+        assertFalse(response.has("records"), "JSON results replace records");
+        JsonNode rows = objectMapper.readTree(response.get("formattedRecords").asText());
+        assertEquals(1, rows.size());
+        assertEquals("first", rows.get(0).get("name").asText());
+        assertTrue(rows.get(0).get("answer").isNumber());
+        assertEquals(42, rows.get(0).get("answer").asInt());
+        assertTrue(rows.get(0).get("flag").isBoolean());
+        assertTrue(rows.get(0).get("nothing").isNull());
+
+        // A statement without a result set has nothing to format.
+        ObjectNode update = harness.request("insert into data_api_events(name) values ('second')");
+        update.put("formatRecordsAs", "JSON");
+        assertFalse(harness.service.executeStatement(update, REGION).has("formattedRecords"));
+    }
+
+    @Test
     void rejectsUnsupportedExecuteOptions() throws Exception {
         TestHarness harness = new TestHarness();
         harness.createTables();
 
         ObjectNode formattedRecords = harness.request("select 1");
-        formattedRecords.put("formatRecordsAs", "JSON");
+        formattedRecords.put("formatRecordsAs", "XML");
         AwsException formattedRecordsError = assertThrows(AwsException.class,
                 () -> harness.service.executeStatement(formattedRecords, REGION));
-        assertEquals("BadRequestException", formattedRecordsError.getErrorCode());
+        assertEquals("ValidationException", formattedRecordsError.getErrorCode());
 
         ObjectNode malformedParameters = harness.request("select 1");
         malformedParameters.set("parameters", objectMapper.createObjectNode());
