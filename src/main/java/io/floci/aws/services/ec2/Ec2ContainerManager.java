@@ -1976,7 +1976,9 @@ public class Ec2ContainerManager {
                     // image -- ships only yum, so without this branch the chain falls through
                     // and sshd is never installed.
                     "  elif command -v yum >/dev/null 2>&1; then yum install -y openssh-server openssh-clients >/dev/null 2>&1;" +
-                    "  elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server openssh-client >/dev/null 2>&1;" +
+                    // No recommends: on Ubuntu they pull in systemd, whose configure step stalls in a
+                    // container and leaves dpkg interrupted, so the guest's own apt-get then fails.
+                    "  elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server openssh-client >/dev/null 2>&1;" +
                     "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssh >/dev/null 2>&1;" +
                     "  fi;" +
                     "fi;" +
