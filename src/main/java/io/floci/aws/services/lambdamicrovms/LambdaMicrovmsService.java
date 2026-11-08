@@ -352,6 +352,8 @@ public class LambdaMicrovmsService {
         public String stateReason;
         public String lastUpdateStatus;
         public String lastUpdateStatusReason;
+        /** Each configuration change makes a new version; resources reference {@code <arn>:<version>}. */
+        public long latestVersion = 1;
         public final Map<String, String> tags = new LinkedHashMap<>();
     }
 
@@ -476,6 +478,9 @@ public class LambdaMicrovmsService {
         if (operatorRole != null && !operatorRole.isBlank() && !operatorRole.equals(connector.operatorRole)) {
             connector.operatorRole = operatorRole;
             changed = true;
+        }
+        if (changed) {
+            connector.latestVersion++;
         }
         connector.lastModified = Instant.now();
         connector.lastUpdateStatus = "Successful";
