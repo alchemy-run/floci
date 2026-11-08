@@ -25,6 +25,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -176,6 +177,40 @@ public class EksAccessEntryService {
         entries.put(prefix(cluster) + principal, new StoredEntry(updated, stored.principalId(),
                 stored.clientRequestToken(), stored.policies()));
         return updated;
+    }
+
+    /** The access entry with this ARN on {@code cluster}; ResourceNotFoundException when there is none. */
+    public AccessEntry byArn(Cluster cluster, String accessEntryArn) {
+        return storedByArn(cluster, accessEntryArn).entry();
+    }
+
+    /** TagResource / UntagResource on an access entry: only its tags change. */
+    public synchronized AccessEntry tag(Cluster cluster, String accessEntryArn, Map<String, String> add,
+                                        List<String> removeKeys) {
+        StoredEntry stored = storedByArn(cluster, accessEntryArn);
+        AccessEntry current = stored.entry();
+        Map<String, String> tags = new LinkedHashMap<>(current.tags() == null ? Map.of() : current.tags());
+        if (add != null) {
+            tags.putAll(add);
+        }
+        if (removeKeys != null) {
+            removeKeys.forEach(tags::remove);
+        }
+        AccessEntry updated = new AccessEntry(current.accessEntryArn(), current.clusterName(), current.principalArn(),
+                current.type(), current.username(), current.kubernetesGroups(), Map.copyOf(tags),
+                current.createdAt(), current.modifiedAt());
+        entries.put(prefix(cluster) + current.principalArn(), new StoredEntry(updated, stored.principalId(),
+                stored.clientRequestToken(), stored.policies()));
+        return updated;
+    }
+
+    private StoredEntry storedByArn(Cluster cluster, String accessEntryArn) {
+        String p = prefix(cluster);
+        return entries.scan(key -> key.startsWith(p)).stream()
+                .filter(stored -> accessEntryArn.equals(stored.entry().accessEntryArn()))
+                .findFirst()
+                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Resource not found: " + accessEntryArn, 404));
     }
 
     /** Associating a policy that is already associated replaces its access scope. */

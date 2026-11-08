@@ -1415,6 +1415,10 @@ public class EksService implements TagHandler, ResourceProvider {
             podIdentityAssociations.tag(cluster, associationId(resourceArn), tags, null);
             return;
         }
+        if (resourceArn.contains(":access-entry/")) {
+            accessEntries.tag(cluster, resourceArn, tags, null);
+            return;
+        }
         if (cluster.getTags() == null) {
             cluster.setTags(new HashMap<>());
         }
@@ -1429,6 +1433,10 @@ public class EksService implements TagHandler, ResourceProvider {
             podIdentityAssociations.tag(cluster, associationId(resourceArn), null, tagKeys);
             return;
         }
+        if (resourceArn.contains(":access-entry/")) {
+            accessEntries.tag(cluster, resourceArn, null, tagKeys);
+            return;
+        }
         if (cluster.getTags() != null && tagKeys != null) {
             tagKeys.forEach(cluster.getTags()::remove);
         }
@@ -1441,6 +1449,10 @@ public class EksService implements TagHandler, ResourceProvider {
         if (resourceArn.contains(":podidentityassociation/")) {
             return podIdentityAssociations.describe(cluster, associationId(resourceArn)).tags();
         }
+        if (resourceArn.contains(":access-entry/")) {
+            Map<String, String> tags = accessEntries.byArn(cluster, resourceArn).tags();
+            return tags == null ? Map.of() : tags;
+        }
         return cluster.getTags() != null ? cluster.getTags() : Map.of();
     }
 
@@ -1451,6 +1463,14 @@ public class EksService implements TagHandler, ResourceProvider {
         }
         String[] resource = arn[5].split("/", -1);
         boolean association = resource.length == 3 && "podidentityassociation".equals(resource[0]);
+        // access-entry/<cluster>/<role|user>/<account>/<name...>/<uuid>
+        if (resource.length >= 6 && "access-entry".equals(resource[0])
+                && arn[3].equals(region == null ? regionResolver.getRegion() : region)
+                && arn[4].equals(regionResolver.getAccountId())) {
+            Cluster cluster = describeCluster(resource[1]);
+            accessEntries.byArn(cluster, resourceArn);
+            return cluster;
+        }
         if ((!association && !(resource.length == 2 && "cluster".equals(resource[0])))
                 || !arn[3].equals(region == null ? regionResolver.getRegion() : region)
                 || !arn[4].equals(regionResolver.getAccountId())) {
