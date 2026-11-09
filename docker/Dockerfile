@@ -1,5 +1,7 @@
 # Stage 1: Build
-FROM eclipse-temurin:25-jdk-noble AS build
+# The jar is the same on every architecture, so it builds on the builder's own
+# platform: under emulation the arm64 Maven build took 29 minutes.
+FROM --platform=$BUILDPLATFORM eclipse-temurin:25-jdk-noble AS build
 WORKDIR /build
 
 RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
