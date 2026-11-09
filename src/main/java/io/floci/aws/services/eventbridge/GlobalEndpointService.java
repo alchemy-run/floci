@@ -3,6 +3,7 @@ package io.floci.aws.services.eventbridge;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import io.floci.aws.core.common.AwsException;
+import io.floci.aws.core.common.AwsRegions;
 import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.core.storage.StorageBackend;
 import io.floci.aws.core.storage.StorageFactory;
@@ -57,7 +58,7 @@ public class GlobalEndpointService {
         endpoint.setArn(regionResolver.buildArn("events", region, "endpoint/" + name));
         String id = randomLabel(5) + "." + randomLabel(3);
         endpoint.setEndpointId(id);
-        endpoint.setEndpointUrl("https://" + id + ".endpoint.events.amazonaws.com");
+        endpoint.setEndpointUrl("https://" + id + ".endpoint.events." + AwsRegions.dnsSuffixFor(region));
         endpoint.setDescription(textOrNull(request.path("Description")));
         endpoint.setRoutingConfig(request.path("RoutingConfig").toString());
         endpoint.setReplicationConfig(request.has("ReplicationConfig")

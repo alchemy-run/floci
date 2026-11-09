@@ -496,11 +496,25 @@ class ElbV2TcpDataPlaneIntegrationTest {
         assertEquals(120_000L, dataPlane.tcpIdleTimeoutMillis(listenerArn, "us-east-1"));
     }
 
+    // The replacement listens on a fresh port and becomes the target: binding
+    // the old port again races any other test that is handed it meanwhile.
     private void replaceBackend(NetServerOptions options, Handler<NetSocket> handler) throws Exception {
-        int port = backend.actualPort();
-        backend.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
-        backend = vertx.createNetServer(options).connectHandler(handler).listen(port, "127.0.0.1")
+        NetServer previous = backend;
+        NetServer replacement = vertx.createNetServer(options).connectHandler(handler).listen(0, "127.0.0.1")
                 .toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
+        client.registerTargets(request -> request.targetGroupArn(targetGroupArn)
+                .targets(TargetDescription.builder().id("127.0.0.1").port(replacement.actualPort()).build()));
+        completeInitialHealthChecks(2);
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() -> assertEquals(
+                TargetHealthStateEnum.HEALTHY,
+                client.describeTargetHealth(request -> request.targetGroupArn(targetGroupArn)
+                                .targets(TargetDescription.builder().id("127.0.0.1")
+                                        .port(replacement.actualPort()).build()))
+                        .targetHealthDescriptions().getFirst().targetHealth().state()));
+        client.deregisterTargets(request -> request.targetGroupArn(targetGroupArn)
+                .targets(TargetDescription.builder().id("127.0.0.1").port(previous.actualPort()).build()));
+        backend = replacement;
+        previous.close().toCompletionStage().toCompletableFuture().get(5, TimeUnit.SECONDS);
     }
 
     private static Socket connect(int port) throws IOException {
