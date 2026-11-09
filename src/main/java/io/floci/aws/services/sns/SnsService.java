@@ -3103,11 +3103,12 @@ public class SnsService implements Resettable, ResourceProvider {
 
     private final Map<String, String> sandboxNumbers = new ConcurrentHashMap<>();
 
+    // The data protection operations model a missing topic as NotFoundException (wire code
+    // NotFound), unlike the tagging operations' ResourceNotFoundException.
     public String getDataProtectionPolicy(String resourceArn, String region) {
         String key = topicKey(region, resourceArn);
         Topic topic = topicStore.get(key)
-                .orElseThrow(() -> new AwsException("ResourceNotFound",
-                        "Resource does not exist.", 404));
+                .orElseThrow(() -> new AwsException("NotFound", "Topic does not exist.", 404));
         return topic.getDataProtectionPolicy() != null ? topic.getDataProtectionPolicy() : "";
     }
 
@@ -3117,8 +3118,7 @@ public class SnsService implements Resettable, ResourceProvider {
         }
         String key = topicKey(region, resourceArn);
         Topic topic = topicStore.get(key)
-                .orElseThrow(() -> new AwsException("ResourceNotFound",
-                        "Resource does not exist.", 404));
+                .orElseThrow(() -> new AwsException("NotFound", "Topic does not exist.", 404));
         topic.setDataProtectionPolicy(dataProtectionPolicy);
         topicStore.put(key, topic);
     }

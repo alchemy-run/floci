@@ -135,7 +135,7 @@ class SnsDataProtectionPolicyIntegrationTest {
             .post("/")
         .then()
             .statusCode(404)
-            // The awsQuery wire code of ResourceNotFoundException.
-            .body(containsString("<Code>ResourceNotFound</Code>"));
+            // GetDataProtectionPolicy models a missing topic as NotFoundException, wire code NotFound.
+            .body(containsString("<Code>NotFound</Code>"));
     }
 }
