@@ -30,6 +30,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -182,6 +183,36 @@ class TlsProxyServerTest {
             assertEquals("TLS", roundTrip(ports[0], clientHello("app.example.com")));
         } finally {
             closeBackend(listener);
+        }
+    }
+
+    @Test
+    @Timeout(20)
+    void aServerNameSharerAnswersOnEveryPortAfterThePortsOwnSharer() throws Exception {
+        httpBackend = startMarkerBackend("PLAIN");
+        httpsBackend = startMarkerBackend("TLS");
+        NetServer listener = startMarkerBackend("LISTENER");
+        NetServer distribution = startMarkerBackend("DISTRIBUTION");
+        try {
+            int[] ports = FreePorts.anyInterfacePorts(2);
+            int awsHttpsPort = ports[1];
+            proxy = new TlsProxyServer(vertx, configWith(true, ports[0], awsHttpsPort), "127.0.0.1",
+                    httpBackend.actualPort(), httpsBackend.actualPort());
+            proxy.shareTlsPort(awsHttpsPort, name -> name.equals("app.example.com") ? listener.actualPort() : null);
+            Function<String, Integer> byName = name -> name.endsWith(".example.com") ? distribution.actualPort() : null;
+            proxy.shareTlsByServerName(byName);
+
+            assertEquals("LISTENER", roundTrip(awsHttpsPort, clientHello("app.example.com")));
+            assertEquals("DISTRIBUTION", roundTrip(awsHttpsPort, clientHello("shop.example.com")));
+            assertEquals("DISTRIBUTION", roundTrip(ports[0], clientHello("app.example.com")));
+            assertEquals("TLS", roundTrip(ports[0], clientHello("localhost.floci.io")));
+            assertEquals("TLS", roundTrip(ports[0], clientHello(null)));
+
+            proxy.unshareTlsByServerName(byName);
+            assertEquals("TLS", roundTrip(ports[0], clientHello("shop.example.com")));
+        } finally {
+            closeBackend(listener);
+            closeBackend(distribution);
         }
     }
 
