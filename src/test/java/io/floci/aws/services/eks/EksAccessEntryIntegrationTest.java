@@ -45,6 +45,19 @@ class EksAccessEntryIntegrationTest {
                     .body("accessEntry.principalArn", equalTo(principal));
             given().header("Authorization", auth(account, "eks")).get(path).then().statusCode(200)
                     .body("accessEntries", contains(principal)).body("nextToken", nullValue());
+            // An access entry is taggable by its ARN, like a cluster.
+            String tagsPath = "/tags/" + URLEncoder.encode(arn, StandardCharsets.UTF_8);
+            given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
+                    .contentType("application/json").body(Map.of("tags", Map.of("env", "test")))
+                    .post(tagsPath).then().statusCode(200);
+            given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
+                    .get(tagsPath).then().statusCode(200)
+                    .body("tags.team", equalTo("platform")).body("tags.env", equalTo("test"));
+            given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
+                    .delete(tagsPath + "?tagKeys=team").then().statusCode(200);
+            given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
+                    .get(entryPath).then().statusCode(200)
+                    .body("accessEntry.tags.team", nullValue()).body("accessEntry.tags.env", equalTo("test"));
             given().header("Authorization", auth("246802468024", "eks")).get(path).then().statusCode(404);
             given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
                     .delete(entryPath).then().statusCode(200).body(equalTo("{}"));
@@ -122,6 +135,11 @@ class EksAccessEntryIntegrationTest {
 
             given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
                     .get(rawEntry).then().statusCode(200).body("accessEntry.username", equalTo("ops:{{SessionName}}"));
+            // An update that leaves the username out resets it to the generated default.
+            given().header("Authorization", auth(account, "eks")).contentType("application/json")
+                    .urlEncodingEnabled(false).body(Map.of("kubernetesGroups", java.util.List.of("editors")))
+                    .post(rawEntry).then().statusCode(200)
+                    .body("accessEntry.username", startsWith("arn:aws:sts::" + account + ":assumed-role/" + role));
             given().header("Authorization", auth(account, "eks")).urlEncodingEnabled(false)
                     .delete(rawEntry).then().statusCode(200);
             given().header("Authorization", auth(account, "eks")).contentType("application/json")

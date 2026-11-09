@@ -12,6 +12,7 @@ import java.util.Set;
 import java.util.UUID;
 
 import static io.restassured.RestAssured.given;
+import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -96,6 +97,35 @@ class Ec2RepeatedFilterNamesIntegrationTest {
     private static String createSecurityGroup(String vpcId) {
         return ec2("CreateSecurityGroup", "GroupName", unique("repeated-"), "GroupDescription", "repeated filters",
                 "VpcId", vpcId).getString("CreateSecurityGroupResponse.groupId");
+    }
+
+    @Test
+    void publicIpNamesOneAddressAndAnUnknownOneIsNotFound() {
+        String first = ec2("AllocateAddress", "Domain", "vpc").getString("AllocateAddressResponse.publicIp");
+        ec2("AllocateAddress", "Domain", "vpc");
+
+        assertEquals(Set.of(first), values(ec2("DescribeAddresses", "PublicIp.1", first),
+                "DescribeAddressesResponse.addressesSet.item.publicIp"));
+        request("ec2", "DescribeAddresses", "PublicIp.1", "192.0.2.1")
+                .when().post("/").then().statusCode(400)
+                .body(containsString("InvalidAddress.NotFound"));
+    }
+
+    @Test
+    void networkAclTagFiltersMatchOnlyTaggedAcls() {
+        String name = unique("acl-tag-");
+        String vpc = ec2("CreateVpc", "CidrBlock", "10.77.0.0/16").getString("CreateVpcResponse.vpc.vpcId");
+        String acl = ec2("CreateNetworkAcl", "VpcId", vpc,
+                "TagSpecification.1.ResourceType", "network-acl",
+                "TagSpecification.1.Tag.1.Key", "Name", "TagSpecification.1.Tag.1.Value", name)
+                .getString("CreateNetworkAclResponse.networkAcl.networkAclId");
+
+        // The VPC's default ACL is untagged, so neither tag filter matches it.
+        String path = "DescribeNetworkAclsResponse.networkAclSet.item.networkAclId";
+        assertEquals(Set.of(acl), values(describe("DescribeNetworkAcls", List.of(), filter("tag:Name", name)), path));
+        assertEquals(Set.of(acl), values(describe("DescribeNetworkAcls", List.of(), filter("tag-value", name)), path));
+        assertEquals(Set.of(), values(describe("DescribeNetworkAcls", List.of(), filter("tag:Name", name + "-none")),
+                path));
     }
 
     @Test

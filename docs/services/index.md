@@ -41,7 +41,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [SWF](swf.md) | `POST /` + `X-Amz-Target: SimpleWorkflowService.*` | JSON 1.0 | 39 |
 | [CloudFormation](cloudformation.md) | `POST /` with `Action=` param | Query | 40 |
 | [Cloud Control API](cloudcontrol.md) | `POST /` + `X-Amz-Target: CloudApiService.*` | JSON 1.1 | 5 |
-| [EventBridge](eventbridge.md) | `POST /` + `X-Amz-Target: AmazonEventBridge.*` | JSON 1.1 | 41 |
+| [EventBridge](eventbridge.md) | `POST /` + `X-Amz-Target: AmazonEventBridge.*` | JSON 1.1 | 46 |
 | [EventBridge V2](eventbridgev2.md) | `POST /service/AWSEventsV2/operation/*` | Smithy RPC v2 CBOR | 10 |
 | [EventBridge Scheduler](scheduler.md) | `/schedules/*`, `/schedule-groups/*`, `/tags/*` | REST JSON | [See actions](scheduler.md) |
 | [EventBridge Pipes](pipes.md) | `/v1/pipes/*`, `/tags/*` | REST JSON | [See actions](pipes.md) |

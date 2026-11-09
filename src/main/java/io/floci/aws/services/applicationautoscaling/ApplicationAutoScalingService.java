@@ -508,6 +508,22 @@ public class ApplicationAutoScalingService {
                 .toList();
     }
 
+    /** CloudWatch's limit on an alarm name. */
+    private static final int MAX_ALARM_NAME = 255;
+
+    /**
+     * {@code TargetTracking-<resourceId>-<suffix>-<uuid>}, with the resource id shortened when the
+     * whole name would pass CloudWatch's 255-character limit: an ECS service's resource id alone
+     * can be that long, and the policy must not fail over a name the caller never chose.
+     */
+    static String targetTrackingAlarmName(String resourceId, String suffix, String uniqueId) {
+        String prefix = "TargetTracking-";
+        String tail = "-" + suffix + "-" + uniqueId;
+        int room = MAX_ALARM_NAME - prefix.length() - tail.length();
+        String id = resourceId.length() > room ? resourceId.substring(0, room) : resourceId;
+        return prefix + id + tail;
+    }
+
     /**
      * Creates the pair of CloudWatch alarms that AWS provisions on behalf of a target
      * tracking policy. The alarms are real: they show up in DescribeAlarms exactly as they
@@ -516,8 +532,7 @@ public class ApplicationAutoScalingService {
     private List<Alarm> createTargetTrackingAlarms(ScalingPolicy policy, String region) {
         List<Alarm> alarms = new ArrayList<>();
         for (String suffix : List.of("AlarmHigh", "AlarmLow")) {
-            String alarmName = "TargetTracking-" + policy.getResourceId() + "-" + suffix + "-"
-                    + UUID.randomUUID();
+            String alarmName = targetTrackingAlarmName(policy.getResourceId(), suffix, UUID.randomUUID().toString());
             MetricAlarm alarm = new MetricAlarm();
             alarm.setActionsEnabled(true);
             alarm.setAlarmName(alarmName);

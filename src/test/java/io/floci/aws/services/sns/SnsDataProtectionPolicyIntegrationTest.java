@@ -135,6 +135,7 @@ class SnsDataProtectionPolicyIntegrationTest {
             .post("/")
         .then()
             .statusCode(404)
-            .body(containsString("ResourceNotFoundException"));
+            // GetDataProtectionPolicy models a missing topic as NotFoundException, wire code NotFound.
+            .body(containsString("<Code>NotFound</Code>"));
     }
 }

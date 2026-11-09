@@ -4,6 +4,7 @@ import io.quarkus.runtime.Startup;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
+import io.vertx.core.buffer.Buffer;
 import io.vertx.core.net.NetClient;
 import io.vertx.core.net.NetServer;
 import io.vertx.core.net.NetServerOptions;
@@ -17,10 +18,12 @@ import org.jboss.logging.Logger;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.function.Function;
 import java.util.function.IntConsumer;
 
 /**
@@ -89,6 +92,42 @@ public class TlsProxyServer {
         failedPorts.forEach(handler::accept);
     }
     private NetClient client;
+
+    /**
+     * Per public port, who else answers TLS there: given the server name a ClientHello asks for,
+     * the loopback port to hand the connection to, or null to keep it for Floci.
+     */
+    private final Map<Integer, Function<String, Integer>> handoffs = new ConcurrentHashMap<>();
+
+    /**
+     * Who answers TLS on every port the proxy holds, by server name, after the port's own sharer.
+     * CloudFront serves each distribution's certificate for its alternate domain names this way.
+     */
+    private final List<Function<String, Integer>> serverNameHandoffs = new CopyOnWriteArrayList<>();
+
+    /**
+     * Shares a port the proxy holds with another TLS server, by server name. An HTTPS load balancer
+     * listener on 443 serves its own domains this way while CDK's callbacks, which name Floci's
+     * hosts, still reach Floci.
+     */
+    public void shareTlsPort(int port, Function<String, Integer> backendForServerName) {
+        handoffs.put(port, backendForServerName);
+    }
+
+    /** Stops sharing {@code port}, if {@code backendForServerName} is still the one sharing it. */
+    public void unshareTlsPort(int port, Function<String, Integer> backendForServerName) {
+        handoffs.remove(port, backendForServerName);
+    }
+
+    /** Shares every port the proxy holds with another TLS server, for the names it claims. */
+    public void shareTlsByServerName(Function<String, Integer> backendForServerName) {
+        serverNameHandoffs.add(backendForServerName);
+    }
+
+    /** Stops sharing by server name. */
+    public void unshareTlsByServerName(Function<String, Integer> backendForServerName) {
+        serverNameHandoffs.remove(backendForServerName);
+    }
 
     @Inject
     public TlsProxyServer(Vertx vertx, EmulatorConfig config, Config mpConfig) {
@@ -199,12 +238,8 @@ public class TlsProxyServer {
                 frontSocket.pause();
 
                 // Inspect first byte to determine protocol
-                int backendPort;
-                if (buffer.length() > 0 && buffer.getByte(0) == TLS_HANDSHAKE) {
-                    backendPort = httpsBackendPort;
-                } else {
-                    backendPort = httpBackendPort;
-                }
+                int backendPort = buffer.length() > 0 && buffer.getByte(0) == TLS_HANDSHAKE
+                        ? tlsBackendPort(frontSocket, buffer) : httpBackendPort;
 
                 // Connect to the appropriate backend
                 client.connect(backendPort, "127.0.0.1").onComplete(ar -> {
@@ -231,6 +266,23 @@ public class TlsProxyServer {
             // Resume to receive the first buffer
             frontSocket.resume();
         };
+    }
+
+    /** Floci's HTTPS backend, unless a sharer of the port, or of every port, claims the server name. */
+    private int tlsBackendPort(NetSocket frontSocket, Buffer clientHello) {
+        Function<String, Integer> handoff = handoffs.get(frontSocket.localAddress().port());
+        if (handoff == null && serverNameHandoffs.isEmpty()) {
+            return httpsBackendPort;
+        }
+        String serverName = TlsClientHello.serverName(clientHello).orElse(null);
+        if (serverName == null) {
+            return httpsBackendPort;
+        }
+        Integer port = handoff == null ? null : handoff.apply(serverName);
+        for (int i = 0; port == null && i < serverNameHandoffs.size(); i++) {
+            port = serverNameHandoffs.get(i).apply(serverName);
+        }
+        return port == null ? httpsBackendPort : port;
     }
 
     @PreDestroy

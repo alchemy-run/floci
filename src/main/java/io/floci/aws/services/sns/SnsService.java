@@ -1658,7 +1658,7 @@ public class SnsService implements Resettable, ResourceProvider {
     public void tagResource(String resourceArn, Map<String, String> tags, String region) {
         String key = topicKey(region, resourceArn);
         Topic topic = topicStore.get(key)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                .orElseThrow(() -> new AwsException("ResourceNotFound",
                         "Resource does not exist.", 404));
         if (tags != null) topic.getTags().putAll(tags);
         topicStore.put(key, topic);
@@ -1667,7 +1667,7 @@ public class SnsService implements Resettable, ResourceProvider {
     public void untagResource(String resourceArn, List<String> tagKeys, String region) {
         String key = topicKey(region, resourceArn);
         Topic topic = topicStore.get(key)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                .orElseThrow(() -> new AwsException("ResourceNotFound",
                         "Resource does not exist.", 404));
         if (tagKeys != null) tagKeys.forEach(topic.getTags()::remove);
         topicStore.put(key, topic);
@@ -1676,7 +1676,7 @@ public class SnsService implements Resettable, ResourceProvider {
     public Map<String, String> listTagsForResource(String resourceArn, String region) {
         String key = topicKey(region, resourceArn);
         Topic topic = topicStore.get(key)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                .orElseThrow(() -> new AwsException("ResourceNotFound",
                         "Resource does not exist.", 404));
         return new LinkedHashMap<>(topic.getTags());
     }
@@ -3103,11 +3103,12 @@ public class SnsService implements Resettable, ResourceProvider {
 
     private final Map<String, String> sandboxNumbers = new ConcurrentHashMap<>();
 
+    // The data protection operations model a missing topic as NotFoundException (wire code
+    // NotFound), unlike the tagging operations' ResourceNotFoundException.
     public String getDataProtectionPolicy(String resourceArn, String region) {
         String key = topicKey(region, resourceArn);
         Topic topic = topicStore.get(key)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Resource does not exist.", 404));
+                .orElseThrow(() -> new AwsException("NotFound", "Topic does not exist.", 404));
         return topic.getDataProtectionPolicy() != null ? topic.getDataProtectionPolicy() : "";
     }
 
@@ -3117,8 +3118,7 @@ public class SnsService implements Resettable, ResourceProvider {
         }
         String key = topicKey(region, resourceArn);
         Topic topic = topicStore.get(key)
-                .orElseThrow(() -> new AwsException("ResourceNotFoundException",
-                        "Resource does not exist.", 404));
+                .orElseThrow(() -> new AwsException("NotFound", "Topic does not exist.", 404));
         topic.setDataProtectionPolicy(dataProtectionPolicy);
         topicStore.put(key, topic);
     }

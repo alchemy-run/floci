@@ -752,9 +752,15 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         if (request.getTags() != null && !request.getTags().isEmpty()) {
             cluster.setTags(new LinkedHashMap<>(request.getTags()));
         }
-        if (request.getSettings() != null && !request.getSettings().isEmpty()) {
-            cluster.setSettings(new ArrayList<>(request.getSettings()));
+        List<ClusterSetting> settings = request.getSettings() != null
+                ? new ArrayList<>(request.getSettings()) : new ArrayList<>();
+        // A new cluster takes the account's containerInsights setting when the request names
+        // none, and DescribeClusters reports it.
+        if (settings.stream().noneMatch(setting -> "containerInsights".equals(setting.name()))) {
+            settings.add(new ClusterSetting("containerInsights",
+                    effectiveAccountSetting(rootPrincipalArn(), "containerInsights")));
         }
+        cluster.setSettings(settings);
         cluster.setConfiguration(request.getConfiguration());
         cluster.setServiceConnectDefaults(request.getServiceConnectDefaults());
         cluster.setCapacityProviders(request.getCapacityProviders());
@@ -3036,6 +3042,9 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 // service already running the version LATEST resolves to is not a change.
                 rollingChange |= !Objects.equals(platformVersionBefore, svc.getPlatformVersion());
                 if (taskDefChanged || forceNewDeployment || serviceConnectChanged || rollingChange) {
+                    if (lbRegistrar != null) {
+                        lbRegistrar.shiftBlueGreenTraffic(svc, region);
+                    }
                     svc.setDeploymentId(newDeploymentId());
                     svc.setLastDeploymentAt(Instant.now());
                     recordServiceDeployment(svc, svc.getTaskDefinition(), region);

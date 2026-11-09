@@ -118,6 +118,15 @@ class ApsScraperServiceTest {
     }
 
     @Test
+    void aWellFormedIdOfNoScraperIsMissingAndAMalformedOneIsInvalid() {
+        // AMP accepts any ScraperId of its documented shape and reports an unknown one missing.
+        assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,
+                () -> service.describeScraper(REGION, "missing-test_stage-1")).getErrorCode());
+        assertEquals("ValidationException", assertThrows(AwsException.class,
+                () -> service.describeScraper(REGION, "-starts-with-a-hyphen")).getErrorCode());
+    }
+
+    @Test
     void scraperLoggingConfigurationIsAnUpsertScopedToTheScraper() {
         String scraperId = service.createScraper(REGION, createRequest("logged")).path("scraperId").asText();
         assertEquals("ResourceNotFoundException", assertThrows(AwsException.class,

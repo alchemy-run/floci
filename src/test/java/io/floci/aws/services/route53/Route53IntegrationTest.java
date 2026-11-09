@@ -431,6 +431,54 @@ class Route53IntegrationTest {
     }
 
     @Test
+    @Order(17)
+    void updateHealthCheck_changesOnlyWhatItNames() {
+        // UpdateHealthCheck carries the members to change at the top level; the rest stay.
+        String update = """
+                <UpdateHealthCheckRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                  <HealthCheckVersion>1</HealthCheckVersion>
+                  <ResourcePath>/out-of-band</ResourcePath>
+                  <Disabled>true</Disabled>
+                  <Inverted>true</Inverted>
+                </UpdateHealthCheckRequest>
+                """;
+        given()
+                .contentType(XML).body(update)
+                .when().post("/2013-04-01/healthcheck/" + healthCheckId)
+                .then()
+                .statusCode(200)
+                .body("UpdateHealthCheckResponse.HealthCheck.HealthCheckVersion", equalTo("2"));
+        given()
+                .when().get("/2013-04-01/healthcheck/" + healthCheckId)
+                .then()
+                .statusCode(200)
+                .body("GetHealthCheckResponse.HealthCheck.HealthCheckConfig.ResourcePath", equalTo("/out-of-band"))
+                .body("GetHealthCheckResponse.HealthCheck.HealthCheckConfig.Disabled", equalTo("true"))
+                .body("GetHealthCheckResponse.HealthCheck.HealthCheckConfig.Inverted", equalTo("true"))
+                .body("GetHealthCheckResponse.HealthCheck.HealthCheckConfig.Type", equalTo("HTTPS"))
+                .body("GetHealthCheckResponse.HealthCheck.HealthCheckConfig.Port", equalTo("443"))
+                .body("GetHealthCheckResponse.HealthCheck.HealthCheckConfig.FullyQualifiedDomainName",
+                        equalTo("example.com"));
+
+        // ResetElements clears a member back to its default.
+        String reset = """
+                <UpdateHealthCheckRequest xmlns="https://route53.amazonaws.com/doc/2013-04-01/">
+                  <Disabled>false</Disabled>
+                  <ResetElements><ResettableElementName>ResourcePath</ResettableElementName></ResetElements>
+                </UpdateHealthCheckRequest>
+                """;
+        String afterReset = given()
+                .contentType(XML).body(reset)
+                .when().post("/2013-04-01/healthcheck/" + healthCheckId)
+                .then()
+                .statusCode(200)
+                .body("UpdateHealthCheckResponse.HealthCheck.HealthCheckConfig.Disabled", equalTo("false"))
+                .body("UpdateHealthCheckResponse.HealthCheck.HealthCheckConfig.Inverted", equalTo("true"))
+                .extract().body().asString();
+        assertThat(afterReset, not(containsString("<ResourcePath>")));
+    }
+
+    @Test
     @Order(18)
     void listHealthChecks_includesCreated() {
         String body = given()

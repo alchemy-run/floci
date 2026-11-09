@@ -13,6 +13,7 @@ import com.github.dockerjava.api.command.InspectExecResponse;
 import com.github.dockerjava.api.command.ListContainersCmd;
 import com.github.dockerjava.api.command.PingCmd;
 import com.github.dockerjava.api.command.RemoveContainerCmd;
+import com.github.dockerjava.api.command.RestartContainerCmd;
 import com.github.dockerjava.api.command.StartContainerCmd;
 import com.github.dockerjava.api.command.StopContainerCmd;
 import com.github.dockerjava.api.exception.DockerException;
@@ -1100,12 +1101,14 @@ class Ec2ContainerManagerTest {
         Ec2ContainerManager manager = managerWithReachability(reachability);
 
         Instance instance = new Instance();
+        instance.setInstanceId("i-0123456789abcdef0");
         instance.setContainerBridgeIp("192.168.215.2");
 
         assertEquals("127.0.0.1", manager.reachablePublicAddress(instance));
         manager.exposeReachablePublicAddress(instance);
         assertEquals("127.0.0.1", instance.getPublicIpAddress());
-        assertEquals("localhost", instance.getPublicDnsName());
+        // The instance's own name: it resolves to 127.0.0.1 and is what the port mux routes by.
+        assertEquals("i-0123456789abcdef0.localhost.floci.io", instance.getPublicDnsName());
     }
 
     @Test
@@ -1623,6 +1626,9 @@ class Ec2ContainerManagerTest {
         // yum is only a compatibility shim over dnf.
         assertTrue(script.indexOf("command -v dnf") < script.indexOf("command -v yum"),
                 "dnf must be probed before yum");
+        // Ubuntu's recommends pull in systemd, whose configure step stalls in a container and
+        // leaves dpkg interrupted for the guest's own apt-get.
+        assertTrue(script.contains("apt-get install -y --no-install-recommends openssh-server"), script);
     }
 
     @Test
@@ -2296,6 +2302,33 @@ class Ec2ContainerManagerTest {
     }
 
     @Test
+    void aRebootWaitsForTheLaunchUserDataInsteadOfCuttingItShort() throws Exception {
+        // The instance reports running before its user data finishes. A reboot right then (as a
+        // deployer that reboots on every reconcile issues) restarted the container mid-script, so
+        // a hosted guest never got its service; the restart now waits for the bring-up.
+        LaunchHarness harness = launchHarness();
+        InspectContainerCmd inspect = mock(InspectContainerCmd.class);
+        InspectContainerResponse withIp = inspectResponse("172.18.0.21");
+        when(harness.dockerClient.inspectContainerCmd(TEST_CONTAINER_ID)).thenReturn(inspect);
+        when(inspect.exec()).thenReturn(withIp);
+        CountDownLatch userDataStarted = new CountDownLatch(1);
+        CountDownLatch finishUserData = new CountDownLatch(1);
+        harness.stubSuccessfulExecs(userDataStarted, finishUserData);
+        RestartContainerCmd restart = mock(RestartContainerCmd.class);
+        when(harness.dockerClient.restartContainerCmd(TEST_CONTAINER_ID)).thenReturn(restart);
+        Instance instance = instance("i-reboot-during-userdata");
+        instance.setUserData("#!/bin/sh\necho ready\n");
+
+        harness.manager.launch(instance, "ubuntu:24.04", null, "us-west-2");
+        assertTrue(userDataStarted.await(5, TimeUnit.SECONDS));
+        harness.manager.reboot(instance);
+
+        verify(restart, after(300).never()).exec();
+        finishUserData.countDown();
+        verify(restart, timeout(5000)).exec();
+    }
+
+    @Test
     void launchWithoutKeyPairStillStartsSshd() throws Exception {
         // Regression for #2184: sshd previously only started when a key pair was supplied, so
         // run-instances without --key-name left no daemon listening at all ("connection refused")
@@ -2323,7 +2356,7 @@ class Ec2ContainerManagerTest {
             + "if ! command -v sshd >/dev/null 2>&1 || ! command -v scp >/dev/null 2>&1; then"
             + "  if command -v dnf >/dev/null 2>&1; then dnf install -y openssh-server openssh-clients >/dev/null 2>&1;"
             + "  elif command -v yum >/dev/null 2>&1; then yum install -y openssh-server openssh-clients >/dev/null 2>&1;"
-            + "  elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y openssh-server openssh-client >/dev/null 2>&1;"
+            + "  elif command -v apt-get >/dev/null 2>&1; then DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends openssh-server openssh-client >/dev/null 2>&1;"
             + "  elif command -v apk >/dev/null 2>&1; then apk add --no-cache openssh >/dev/null 2>&1;"
             + "  fi;"
             + "fi;"

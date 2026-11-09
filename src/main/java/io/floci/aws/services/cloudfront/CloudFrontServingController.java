@@ -604,14 +604,33 @@ public class CloudFrontServingController {
             String viewerAuthorization,
             boolean includeBody,
             ViewerRange viewerRange) {
+        return fetchFromS3(distribution, origin, key, viewerAuthorization, includeBody, viewerRange, null);
+    }
+
+    /**
+     * Reads {@code key} from an S3 origin. {@code accessControl} is the origin access control a
+     * viewer-request function's {@code updateRequestOrigin} chose, which replaces the origin's own;
+     * null keeps the origin's.
+     */
+    private OriginResponse fetchFromS3(
+            Distribution distribution,
+            Origin origin,
+            String key,
+            String viewerAuthorization,
+            boolean includeBody,
+            ViewerRange viewerRange,
+            AccessControl accessControl) {
         String bucket = CloudFrontRequestRouter.bucketFromS3Domain(origin.getDomainName());
         if (bucket == null) {
             return OriginResponse.error(502, "Could not determine S3 bucket for origin.");
         }
         OriginResponse response;
         try {
-            authorizeS3OriginRead(
-                    distribution, origin, bucket, key, viewerAuthorization);
+            if (accessControl != null) {
+                authorizeS3OriginRead(distribution, origin, bucket, key, viewerAuthorization, accessControl);
+            } else {
+                authorizeS3OriginRead(distribution, origin, bucket, key, viewerAuthorization);
+            }
             if (includeBody) {
                 // The body is streamed to the viewer, so an object of any size is served without
                 // being read into the heap; the metadata and the stream come from one snapshot.
@@ -1780,7 +1799,8 @@ public class CloudFrontServingController {
         } else {
             String key = CloudFrontRequestRouter.resolveOriginKey(origin.getOriginPath(),
                     decodedViewerPath(rawPath), distribution.getConfig().getDefaultRootObject());
-            response = fetchFromS3(distribution, origin, key, headers.get("authorization"), !"HEAD".equals(method));
+            response = fetchFromS3(distribution, origin, key, headers.get("authorization"), !"HEAD".equals(method),
+                    null, resolved.accessControl());
         }
         return toResponse(response, !"HEAD".equals(method), null);
     }

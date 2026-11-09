@@ -21,6 +21,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.math.BigInteger;
 import java.nio.charset.StandardCharsets;
 import java.sql.Array;
 import java.sql.Blob;
@@ -34,6 +35,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -195,10 +197,11 @@ public class RdsDataService implements Resettable {
         String sql = requiredText(request, "sql");
         Map<String, JsonNode> parameters = parseParameters(request);
         boolean includeMetadata = request.path("includeResultMetadata").asBoolean(false);
+        boolean formatJson = formatsRecordsAsJson(request);
 
         try {
             return onTargetConnection(request, region, (connection, engine) ->
-                    executeOnConnection(connection, engine, sql, parameters, includeMetadata));
+                    executeOnConnection(connection, engine, sql, parameters, includeMetadata, formatJson));
         } catch (SQLException e) {
             throw databaseError(e);
         }
@@ -372,12 +375,13 @@ public class RdsDataService implements Resettable {
     }
 
     private ObjectNode executeOnConnection(Connection connection, DatabaseEngine engine, String sql,
-                                           Map<String, JsonNode> parameters, boolean includeMetadata)
+                                           Map<String, JsonNode> parameters, boolean includeMetadata,
+                                           boolean formatJson)
             throws SQLException {
         ParsedSql parsed = RdsDataSqlParameters.parse(sql, usesBackslashEscapes(engine));
         try (PreparedStatement statement = prepare(connection, engine, parsed.sql())) {
             RdsDataSqlParameters.bind(statement, parsed.parameterOrder(), parameters);
-            return buildResponse(statement, statement.execute(), includeMetadata, engine);
+            return buildResponse(statement, statement.execute(), includeMetadata, formatJson, engine);
         }
     }
 
@@ -555,7 +559,7 @@ public class RdsDataService implements Resettable {
      * caller that tests the field for presence.
      */
     private ObjectNode buildResponse(Statement statement, boolean hasResultSet, boolean includeMetadata,
-                                     DatabaseEngine engine) throws SQLException {
+                                     boolean formatJson, DatabaseEngine engine) throws SQLException {
         ObjectNode response = objectMapper.createObjectNode();
         if (hasResultSet) {
             try (ResultSet rs = statement.getResultSet()) {
@@ -566,7 +570,12 @@ public class RdsDataService implements Resettable {
                 if (columnMetadata != null) {
                     response.set("columnMetadata", columnMetadata);
                 }
-                response.set("records", records(rs, meta, columnMetadata));
+                if (formatJson) {
+                    // formatRecordsAs JSON answers with this string in place of records.
+                    response.put("formattedRecords", formattedRecords(rs, meta).toString());
+                } else {
+                    response.set("records", records(rs, meta, columnMetadata));
+                }
             }
             response.put("numberOfRecordsUpdated", 0L);
         } else {
@@ -649,6 +658,52 @@ public class RdsDataService implements Resettable {
             records.add(row);
         }
         return records;
+    }
+
+    /**
+     * The result set as {@code formatRecordsAs: JSON} reports it: one object per row, keyed by
+     * column label, with numbers, booleans and nulls as JSON values, arrays as JSON arrays, binary
+     * as base64, and everything else as its text.
+     */
+    private ArrayNode formattedRecords(ResultSet rs, ResultSetMetaData meta) throws SQLException {
+        ArrayNode rows = objectMapper.createArrayNode();
+        int columnCount = meta.getColumnCount();
+        long responseBytes = 2;
+        while (rs.next()) {
+            ObjectNode row = objectMapper.createObjectNode();
+            for (int i = 1; i <= columnCount; i++) {
+                row.set(meta.getColumnLabel(i), jsonValue(rs.getObject(i)));
+            }
+            responseBytes += row.toString().getBytes(StandardCharsets.UTF_8).length + (rows.isEmpty() ? 0 : 1);
+            if (responseBytes > MAX_RESPONSE_BYTES) {
+                throw new AwsException("UnsupportedResultException", "Database response exceeded size limit", 400);
+            }
+            rows.add(row);
+        }
+        return rows;
+    }
+
+    private JsonNode jsonValue(Object value) throws SQLException {
+        return switch (value) {
+            case null -> objectMapper.nullNode();
+            case Boolean b -> objectMapper.getNodeFactory().booleanNode(b);
+            case Integer n -> objectMapper.getNodeFactory().numberNode(n);
+            case Long n -> objectMapper.getNodeFactory().numberNode(n);
+            case Short n -> objectMapper.getNodeFactory().numberNode(n);
+            case Byte n -> objectMapper.getNodeFactory().numberNode(n);
+            case Double n -> objectMapper.getNodeFactory().numberNode(n);
+            case Float n -> objectMapper.getNodeFactory().numberNode(n);
+            case BigInteger n -> objectMapper.getNodeFactory().numberNode(n);
+            case byte[] bytes -> objectMapper.getNodeFactory().textNode(Base64.getEncoder().encodeToString(bytes));
+            case Array array -> {
+                ArrayNode items = objectMapper.createArrayNode();
+                for (Object item : (Object[]) array.getArray()) {
+                    items.add(jsonValue(item));
+                }
+                yield items;
+            }
+            default -> objectMapper.getNodeFactory().textNode(value.toString());
+        };
     }
 
     /** A column value's size as the driver returns it: the raw length of binary, the UTF-8 length of anything else's text. */
@@ -802,7 +857,7 @@ public class RdsDataService implements Resettable {
     }
 
     private static void rejectUnsupportedOptions(JsonNode request) {
-        rejectFormattedRecords(request);
+        formatsRecordsAsJson(request);
         rejectResultSetOptions(request);
     }
 
@@ -853,13 +908,18 @@ public class RdsDataService implements Resettable {
         return byName;
     }
 
-    private static void rejectFormattedRecords(JsonNode request) {
+    /** Whether the request asks for {@code formatRecordsAs: JSON}; NONE or absent asks for records. */
+    private static boolean formatsRecordsAsJson(JsonNode request) {
         String formatRecordsAs = textOrNull(request, "formatRecordsAs");
-        if (formatRecordsAs != null && !formatRecordsAs.isBlank()
-                && !"NONE".equalsIgnoreCase(formatRecordsAs)) {
-            throw new AwsException("BadRequestException",
-                    "formattedRecords is not supported by this local RDS Data API implementation.", 400);
+        if (formatRecordsAs == null || formatRecordsAs.isBlank() || "NONE".equals(formatRecordsAs)) {
+            return false;
         }
+        if ("JSON".equals(formatRecordsAs)) {
+            return true;
+        }
+        throw new AwsException("ValidationException", "1 validation error detected: Value '" + formatRecordsAs
+                + "' at 'formatRecordsAs' failed to satisfy constraint: Member must satisfy enum value set: [NONE, JSON]",
+                400);
     }
 
     private static void rejectResultSetOptions(JsonNode request) {

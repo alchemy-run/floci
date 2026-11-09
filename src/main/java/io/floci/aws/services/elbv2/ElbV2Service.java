@@ -2004,8 +2004,12 @@ public class ElbV2Service implements ResourceProvider, ServerCertificateReferenc
      * immutable inner map. Mutating it throws {@code UnsupportedOperationException}
      * with a null message — the Query dispatcher surfaces that as
      * {@code InternalFailure: Unexpected error: null}.
+     *
+     * <p>Synchronized: two requests that reach a Region first at the same moment would otherwise
+     * each install their own copy, and the later one would drop what the earlier one stored (two
+     * target groups created at once, one of them lost).
      */
-    private <V> Map<String, V> mutableRegion(Map<String, Map<String, V>> resources, String region) {
+    private synchronized <V> Map<String, V> mutableRegion(Map<String, Map<String, V>> resources, String region) {
         Map<String, V> existing = resources.get(region);
         if (existing instanceof ConcurrentHashMap) {
             return existing;

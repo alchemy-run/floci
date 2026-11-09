@@ -6,6 +6,7 @@ import io.floci.aws.config.LocalStackParity;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.CertificateReferenceResolver;
+import io.floci.aws.core.common.CertificateReferenceResolver.CertificateMaterial;
 import io.floci.aws.core.common.CloudFrontEdgeDomain;
 import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.core.common.SmithyValidationErrors;
@@ -286,6 +287,48 @@ public class CloudFrontService implements ServerCertificateReferenceProvider {
             }
         }
         return references;
+    }
+
+    /**
+     * The ACM certificate served to a viewer whose TLS ClientHello names {@code serverName}: the
+     * one on the distribution with {@code serverName} as an alternate domain name, an exact alias
+     * before the most specific wildcard. Null when no distribution claims the name with an ACM
+     * certificate, or the certificate cannot be read, so Floci's own certificate answers. Like
+     * {@link #acmCertificateReferences} it reads a copy of the store and takes no monitor: the TLS
+     * proxy asks on its event loop for every connection.
+     */
+    public CertificateMaterial viewerCertificateFor(String serverName) {
+        if (certificates == null || serverName == null || serverName.isBlank()) {
+            return null;
+        }
+        Distribution exact = null;
+        Distribution wildcard = null;
+        int wildcardLength = -1;
+        for (Distribution distribution : distStore.scan(k -> true)) {
+            DistributionConfig config = distribution.getConfig();
+            if (config == null || config.getAliases() == null || acmCertificateArn(config) == null) {
+                continue;
+            }
+            for (String alias : config.getAliases()) {
+                if (serverName.equalsIgnoreCase(alias)) {
+                    exact = distribution;
+                } else if (wildcardAliasMatches(alias, serverName) && alias.length() > wildcardLength) {
+                    wildcard = distribution;
+                    wildcardLength = alias.length();
+                }
+            }
+        }
+        Distribution serving = exact != null ? exact : wildcard;
+        if (serving == null) {
+            return null;
+        }
+        String certificateArn = acmCertificateArn(serving.getConfig());
+        try {
+            return certificates.publishedMaterial(serving.getArn(),
+                    AwsArnUtils.parse(certificateArn).region(), certificateArn);
+        } catch (RuntimeException unreadable) {
+            return null;
+        }
     }
 
     /**

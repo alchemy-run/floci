@@ -33,7 +33,7 @@ class RdsDataControllerIntegrationTest {
     }
 
     @Test
-    void executeRejectsFormattedRecordsWithJsonDataApiError() {
+    void executeRejectsAnUnknownRecordFormatWithJsonDataApiError() {
         given()
             .contentType("application/json")
             .body("""
@@ -42,7 +42,7 @@ class RdsDataControllerIntegrationTest {
                   "secretArn": "arn:aws:secretsmanager:us-east-1:000000000000:secret:missing",
                   "database": "app",
                   "sql": "select 1",
-                  "formatRecordsAs": "JSON"
+                  "formatRecordsAs": "XML"
                 }
                 """)
         .when()
@@ -50,9 +50,9 @@ class RdsDataControllerIntegrationTest {
         .then()
             .statusCode(400)
             .contentType("application/json")
-            .header("X-Amzn-Errortype", "BadRequestException")
-            .header("x-amzn-query-error", "BadRequestException;Sender")
-            .body("__type", equalTo("BadRequestException"));
+            .header("X-Amzn-Errortype", "ValidationException")
+            .header("x-amzn-query-error", "ValidationException;Sender")
+            .body("__type", equalTo("ValidationException"));
     }
 
     @Test

@@ -79,6 +79,19 @@ class ApplicationAutoScalingServiceTest {
     }
 
     @Test
+    void targetTrackingAlarmNamesFitCloudWatchsLimit() {
+        String uuid = "f0037601-31f4-4378-bc2e-900f66157907";
+        assertEquals("TargetTracking-service/c/s-AlarmHigh-" + uuid,
+                ApplicationAutoScalingService.targetTrackingAlarmName("service/c/s", "AlarmHigh", uuid));
+        // An ECS service's resource id can be long enough to push the name past 255 characters.
+        String longId = "service/cluster/" + "x".repeat(240);
+        String name = ApplicationAutoScalingService.targetTrackingAlarmName(longId, "AlarmHigh", uuid);
+        assertEquals(255, name.length());
+        assertTrue(name.startsWith("TargetTracking-service/cluster/"));
+        assertTrue(name.endsWith("-AlarmHigh-" + uuid));
+    }
+
+    @Test
     void registerCreatesTargetWithArnAndServiceLinkedRole() {
         ScalableTarget target = register();
 

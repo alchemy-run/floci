@@ -10,10 +10,13 @@ import io.floci.aws.services.s3.S3Service;
 import io.floci.aws.testing.S3EnforceAuthProfile;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.TestProfile;
+import io.restassured.response.ExtractableResponse;
+import io.restassured.response.Response;
 import jakarta.inject.Inject;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -144,6 +147,72 @@ class CloudFrontS3AuthServingTest {
                 .get("/index.html")
         .then()
                 .statusCode(403);
+    }
+
+    @Test
+    void aViewerRequestFunctionsOriginAccessControlSignsTheS3OriginItChose() {
+        String suffix = Long.toString(System.nanoTime(), 36);
+        String bucket = "cf-fn-oac-" + suffix;
+        s3Service.createBucket(bucket, "us-east-1");
+        s3Service.putObject(bucket, "index.html", "FUNCTION-ORIGIN".getBytes(StandardCharsets.UTF_8),
+                "text/html", Map.of());
+        String functionName = "fn-oac-" + suffix;
+        String code = """
+                import cf from "cloudfront";
+                async function handler(event) {
+                  cf.updateRequestOrigin({
+                    domainName: "%s.s3.us-east-1.amazonaws.com",
+                    originAccessControlConfig: {
+                      enabled: true, signingBehavior: "always", signingProtocol: "sigv4", originType: "s3"
+                    }
+                  });
+                  return event.request;
+                }
+                """.formatted(bucket);
+        ExtractableResponse<Response> created =
+                given().contentType("application/xml")
+                .body("""
+                        <CreateFunctionRequest xmlns="http://cloudfront.amazonaws.com/doc/2020-05-31/">
+                          <Name>%s</Name>
+                          <FunctionConfig><Comment>oac</Comment><Runtime>cloudfront-js-2.0</Runtime></FunctionConfig>
+                          <FunctionCode>%s</FunctionCode>
+                        </CreateFunctionRequest>
+                        """.formatted(functionName,
+                        Base64.getEncoder().encodeToString(code.getBytes(StandardCharsets.UTF_8))))
+                .when().post("/2020-05-31/function")
+                .then().statusCode(201).extract();
+        String functionArn = created.body().asString()
+                .replaceAll("(?s).*<FunctionARN>([^<]*)</FunctionARN>.*", "$1");
+        given().header("If-Match", created.header("ETag")).when().post("/2020-05-31/function/" + functionName + "/publish")
+                .then().statusCode(200);
+
+        Origin placeholder = new Origin();
+        placeholder.setId("placeholder");
+        placeholder.setDomainName("placeholder.invalid");
+        placeholder.setCustomOriginConfig(new LinkedHashMap<>(Map.of(
+                "HTTPPort", "80", "HTTPSPort", "443", "OriginProtocolPolicy", "https-only")));
+        DefaultCacheBehavior behavior = new DefaultCacheBehavior();
+        behavior.setTargetOriginId(placeholder.getId());
+        behavior.setViewerProtocolPolicy("allow-all");
+        behavior.setFunctionAssociations(List.of(Map.of(
+                "EventType", "viewer-request", "FunctionARN", functionArn)));
+        DistributionConfig config = new DistributionConfig();
+        config.setEnabled(true);
+        config.setDefaultRootObject("index.html");
+        config.setOrigins(List.of(placeholder));
+        config.setDefaultCacheBehavior(behavior);
+        Distribution distribution = new Distribution();
+        distribution.setConfig(config);
+        distribution = cloudFrontService.createDistribution(distribution, Map.of());
+        try {
+            given().header("Host", distribution.getDomainName()).when().get("/")
+                    .then().statusCode(403);
+            s3Service.putBucketPolicy(bucket, oacReadPolicy(bucket, distribution.getArn()));
+            given().header("Host", distribution.getDomainName()).when().get("/")
+                    .then().statusCode(200).body(equalTo("FUNCTION-ORIGIN"));
+        } finally {
+            cloudFrontService.removeDistribution(distribution.getId());
+        }
     }
 
     private Distribution distribution(

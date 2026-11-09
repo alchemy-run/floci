@@ -5100,9 +5100,20 @@ public class Ec2QueryHandler {
 
     private Response handleDescribeAddresses(MultivaluedMap<String, String> p, String region) {
         List<String> allocationIds = getList(p, "AllocationId");
-        List<Map.Entry<String, List<String>>> filters = getFiltersList(p);
+        List<String> publicIps = getList(p, "PublicIp");
+        List<Map.Entry<String, List<String>>> filters = new ArrayList<>(getFiltersList(p));
+        if (!publicIps.isEmpty()) {
+            filters.add(Map.entry("public-ip", publicIps));
+        }
         List<Address> addrs = service.describeAddresses(region, allocationIds, filters);
         service.requireAddresses(region, allocationIds);
+        // As on AWS, a PublicIp that names no address is an error rather than an empty answer.
+        for (String publicIp : publicIps) {
+            if (addrs.stream().noneMatch(addr -> publicIp.equals(addr.getPublicIp()))) {
+                throw new AwsException("InvalidAddress.NotFound",
+                        "Address '" + publicIp + "' not found.", 400);
+            }
+        }
         XmlBuilder xml = new XmlBuilder()
                 .start("DescribeAddressesResponse", AwsNamespaces.EC2)
                 .elem("requestId", UUID.randomUUID().toString())

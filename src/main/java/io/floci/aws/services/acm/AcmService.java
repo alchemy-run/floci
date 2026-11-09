@@ -1148,6 +1148,10 @@ public class AcmService implements ResourceProvider {
     @Inject
     Route53Service route53Service;
 
+    /** Finds validation records kept outside floci's Route 53; unset in unit tests. */
+    @Inject
+    PublicDns publicDns;
+
     private static String normalizeDnsName(String name) {
         String normalized = name.toLowerCase(Locale.ROOT);
         return normalized.endsWith(".") ? normalized : normalized + ".";
@@ -1180,6 +1184,8 @@ public class AcmService implements ResourceProvider {
                 LOG.debugv("Hosted zone {0} was deleted during certificate validation", zone.getId());
             }
         }
-        return false;
+        // As on AWS, a record in DNS hosted elsewhere (a Cloudflare zone) validates the domain too.
+        return publicDns != null && publicDns.cnameTargets(name).stream()
+                .anyMatch(target -> normalizeDnsName(target).equals(value));
     }
 }

@@ -17,6 +17,7 @@ import io.floci.aws.services.eventbridge.model.Connection;
 import io.floci.aws.services.eventbridge.model.ConnectionState;
 import io.floci.aws.services.eventbridge.model.EcsParameters;
 import io.floci.aws.services.eventbridge.model.EventBus;
+import io.floci.aws.services.eventbridge.model.GlobalEndpoint;
 import io.floci.aws.services.eventbridge.model.HttpParameters;
 import io.floci.aws.services.eventbridge.model.InputTransformer;
 import io.floci.aws.services.eventbridge.model.RedshiftDataParameters;
@@ -46,12 +47,20 @@ public class EventBridgeHandler {
     private static final Logger LOG = Logger.getLogger(EventBridgeHandler.class);
 
     private final EventBridgeService eventBridgeService;
+    private final GlobalEndpointService endpointService;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public EventBridgeHandler(EventBridgeService eventBridgeService, ObjectMapper objectMapper) {
+    public EventBridgeHandler(EventBridgeService eventBridgeService, GlobalEndpointService endpointService,
+                              ObjectMapper objectMapper) {
         this.eventBridgeService = eventBridgeService;
+        this.endpointService = endpointService;
         this.objectMapper = objectMapper;
+    }
+
+    /** For tests that exercise buses and rules only; global endpoints need {@link GlobalEndpointService}. */
+    public EventBridgeHandler(EventBridgeService eventBridgeService, ObjectMapper objectMapper) {
+        this(eventBridgeService, null, objectMapper);
     }
 
     public Response handle(String action, JsonNode request, String region) {
@@ -100,6 +109,15 @@ public class EventBridgeHandler {
                 case "DescribeReplay" -> handleDescribeReplay(request, region);
                 case "CancelReplay" -> handleCancelReplay(request, region);
                 case "ListReplays" -> handleListReplays(request, region);
+                case "CreateEndpoint" -> endpointResponse(endpointService.create(request, region), false);
+                case "DescribeEndpoint" -> endpointResponse(
+                        endpointService.describe(request.path("Name").asText(null), region), true);
+                case "UpdateEndpoint" -> endpointResponse(endpointService.update(request, region), false);
+                case "DeleteEndpoint" -> {
+                    endpointService.delete(request.path("Name").asText(null), region);
+                    yield Response.ok(objectMapper.createObjectNode()).build();
+                }
+                case "ListEndpoints" -> handleListEndpoints(request, region);
                 default -> Response.status(400)
                         .entity(new AwsErrorResponse("UnsupportedOperation", "Operation " + action + " is not supported."))
                         .build();
@@ -393,7 +411,48 @@ public class EventBridgeHandler {
         return Response.ok(response).build();
     }
 
+    private Response handleListEndpoints(JsonNode request, String region) {
+        ObjectNode response = objectMapper.createObjectNode();
+        ArrayNode endpoints = response.putArray("Endpoints");
+        for (GlobalEndpoint endpoint : endpointService.list(request.path("NamePrefix").asText(null), region)) {
+            endpoints.add(endpointNode(endpoint, true));
+        }
+        return Response.ok(response).build();
+    }
+
+    private Response endpointResponse(GlobalEndpoint endpoint, boolean full) {
+        return Response.ok(endpointNode(endpoint, full)).build();
+    }
+
+    /** Create and Update answer the configuration; Describe and List add ids, times and the description. */
+    private ObjectNode endpointNode(GlobalEndpoint endpoint, boolean full) {
+        ObjectNode node = objectMapper.createObjectNode();
+        node.put("Name", endpoint.getName());
+        node.put("Arn", endpoint.getArn());
+        node.set("RoutingConfig", readJson(endpoint.getRoutingConfig()));
+        node.set("ReplicationConfig", readJson(endpoint.getReplicationConfig()));
+        node.set("EventBuses", readJson(endpoint.getEventBuses()));
+        if (endpoint.getRoleArn() != null) {
+            node.put("RoleArn", endpoint.getRoleArn());
+        }
+        node.put("EndpointId", endpoint.getEndpointId());
+        node.put("EndpointUrl", endpoint.getEndpointUrl());
+        node.put("State", endpoint.getState());
+        if (full) {
+            if (endpoint.getDescription() != null) {
+                node.put("Description", endpoint.getDescription());
+            }
+            node.put("CreationTime", endpoint.getCreationTime().getEpochSecond());
+            node.put("LastModifiedTime", endpoint.getLastModifiedTime().getEpochSecond());
+        }
+        return node;
+    }
+
     private Response handlePutEvents(JsonNode request, String region) {
+        // An endpoint routes to its primary bus, named on each entry as without one.
+        if (request.hasNonNull("EndpointId") && endpointService != null) {
+            endpointService.byId(request.get("EndpointId").asText());
+        }
         List<Map<String, Object>> entries = new ArrayList<>();
         JsonNode entriesNode = request.path("Entries");
         if (entriesNode.isArray()) {

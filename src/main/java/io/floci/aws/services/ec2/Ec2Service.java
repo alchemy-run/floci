@@ -1719,7 +1719,12 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                         acl.getAssociations().stream().anyMatch(a -> values.contains(a.getSubnetId()));
                 case "association.network-acl-association-id" ->
                         acl.getAssociations().stream().anyMatch(a -> values.contains(a.getNetworkAclAssociationId()));
-                default -> true;
+                // A tag filter left unmatched made every ACL match a Name lookup.
+                case "tag-value" -> resourceTags(acl.getRegion(), acl.getNetworkAclId()).stream()
+                        .anyMatch(tag -> matchesFilterValue(values, tag.getValue()));
+                default -> !isTagFilter(f.getKey())
+                        || matchesTagFilter(resourceTags(acl.getRegion(), acl.getNetworkAclId()), f.getKey(), values,
+                                Ec2Service::matchesFilterValue);
             };
             if (!matches) {
                 return false;
@@ -5058,7 +5063,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
 
     private static void setPublicAddress(Instance instance, String publicIp) {
         instance.setPublicIpAddress(publicIp);
-        instance.setPublicDnsName("127.0.0.1".equals(publicIp) ? "localhost" : publicIp);
+        instance.setPublicDnsName(Ec2ContainerManager.loopbackPublicDnsName(instance, publicIp));
     }
 
     private static void clearPublicAddress(Instance instance) {
@@ -10191,7 +10196,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
 
     private boolean matchesImageFilter(Ec2ImageCatalog.CatalogImage catalogImage, String name, List<String> values) {
         Image image = catalogImage.toImage();
-        if (isImageTagFilter(name)) {
+        if (isTagFilter(name)) {
             return matchesImageTagFilter(image, name, values);
         }
         return switch (name) {
@@ -10266,7 +10271,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     private boolean matchesRegisteredImageFilter(Image image, String name, List<String> values) {
-        if (isImageTagFilter(name)) {
+        if (isTagFilter(name)) {
             return matchesImageTagFilter(image, name, values);
         }
         return switch (name) {
@@ -10325,7 +10330,8 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         return image;
     }
 
-    private boolean isImageTagFilter(String name) {
+    /** A {@code tag:<key>} or {@code tag-key} filter, which {@link #matchesTagFilter} evaluates. */
+    static boolean isTagFilter(String name) {
         return name != null && (name.startsWith("tag:") || "tag-key".equals(name));
     }
 
@@ -10379,6 +10385,13 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 || ownerIds.contains("self") && caller.equals(snapshot.getOwnerId());
     }
 
+    /** The tags a snapshot carries from its creation, plus those CreateTags added since. */
+    private List<Tag> snapshotTags(Snapshot snapshot) {
+        List<Tag> all = new ArrayList<>(snapshot.getTags() != null ? snapshot.getTags() : List.of());
+        all.addAll(resourceTags(snapshot.getRegion(), snapshot.getSnapshotId()));
+        return all;
+    }
+
     private boolean matchesSnapshotFilter(Snapshot snapshot, String name, List<String> values) {
         return switch (name) {
             case "description" -> matchesFilterValue(values, snapshot.getDescription());
@@ -10389,7 +10402,10 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             case "volume-id" -> matchesFilterValue(values, snapshot.getVolumeId());
             case "volume-size" -> matchesFilterValue(values,
                     snapshot.getVolumeSize() != null ? String.valueOf(snapshot.getVolumeSize()) : null);
-            default -> true;
+            case "tag-value" -> snapshotTags(snapshot).stream()
+                    .anyMatch(tag -> matchesFilterValue(values, tag.getValue()));
+            default -> !isTagFilter(name)
+                    || matchesTagFilter(snapshotTags(snapshot), name, values, Ec2Service::matchesFilterValue);
         };
     }
 

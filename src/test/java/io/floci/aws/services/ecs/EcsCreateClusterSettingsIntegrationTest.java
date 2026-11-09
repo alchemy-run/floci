@@ -3,7 +3,6 @@ package io.floci.aws.services.ecs;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.specification.RequestSpecification;
-import org.hamcrest.Matchers;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -71,9 +70,9 @@ class EcsCreateClusterSettingsIntegrationTest {
     }
 
     @Test
-    void aClusterCreatedWithoutSettingsReportsNone() {
-        // The absent case must stay absent rather than gaining an empty array, since a client
-        // diffing its configuration would see that as a change too.
+    void aClusterCreatedWithoutSettingsReportsTheAccountDefault() {
+        // As on AWS, a cluster created without settings takes the account's containerInsights
+        // setting, which is disabled until the account changes it.
         String cluster = "create-nosettings-" + Long.toString(System.nanoTime(), 36);
 
         ecs("CreateCluster")
@@ -85,6 +84,42 @@ class EcsCreateClusterSettingsIntegrationTest {
         .then()
             .statusCode(200)
             .body("cluster.clusterName", equalTo(cluster))
-            .body("cluster.settings", Matchers.nullValue());
+            .body("cluster.settings", hasSize(1))
+            .body("cluster.settings[0].name", equalTo("containerInsights"))
+            .body("cluster.settings[0].value", equalTo("disabled"));
+    }
+
+    @Test
+    void updateClusterWithoutSettingsKeepsThem() {
+        // UpdateCluster changes only the members it names. A client that updates the configuration
+        // alone must not wipe the settings, or its next read reports them as drift.
+        String cluster = "update-keeps-settings-" + Long.toString(System.nanoTime(), 36);
+        ecs("CreateCluster")
+            .body("""
+                {"clusterName": "%s",
+                 "settings": [{"name": "containerInsights", "value": "enabled"}]}
+                """.formatted(cluster))
+        .when().post("/").then().statusCode(200);
+
+        ecs("UpdateCluster")
+            .body("""
+                {"cluster": "%s", "configuration": {"executeCommandConfiguration": {"logging": "DEFAULT"}}}
+                """.formatted(cluster))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("cluster.settings[0].value", equalTo("enabled"));
+
+        ecs("DescribeClusters")
+            .body("""
+                {"clusters": ["%s"], "include": ["SETTINGS"]}
+                """.formatted(cluster))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("clusters[0].settings", hasSize(1))
+            .body("clusters[0].settings[0].value", equalTo("enabled"));
     }
 }

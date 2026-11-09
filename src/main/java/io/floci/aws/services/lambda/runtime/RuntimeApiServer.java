@@ -21,6 +21,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -485,6 +486,7 @@ public class RuntimeApiServer {
                 InvokeResult result = new InvokeResult(200, null, payload, null, requestId);
                 invocation.getResultFuture().complete(result);
                 emitQuotedRequestFinalized();
+                emitEndAndReport(requestId, null);
             }
             sendStatusOk(ctx);
         });
@@ -989,6 +991,7 @@ public class RuntimeApiServer {
         if (invocation != null) {
             byte[] payload = ctx.body().buffer() != null ? ctx.body().buffer().getBytes() : new byte[0];
             invocation.getResultFuture().complete(new InvokeResult(200, "Unhandled", payload, null, requestId));
+            emitEndAndReport(requestId, null);
         }
         sendStatusOk(ctx);
     }
@@ -1064,6 +1067,7 @@ public class RuntimeApiServer {
         // before the write would emit a second INVOKE for the same requestId on redelivery.
         write.onSuccess(v -> {
             invocation.markDispatched();
+            emitStart(invocation.getRequestId());
             notifyExtensionsOfInvoke(invocation);
         });
         write.onFailure(err -> {
@@ -1296,6 +1300,47 @@ public class RuntimeApiServer {
         platformLogSink.accept("\"ALCHEMY_REQUEST_FINALIZED\"");
     }
 
+    /** When each dispatched invocation started, for its REPORT line; removed once reported. */
+    private final Map<String, Long> invocationStarts = new ConcurrentHashMap<>();
+    private volatile int memorySizeMb = 128;
+
+    public void setMemorySize(int memorySizeMb) {
+        if (memorySizeMb > 0) {
+            this.memorySizeMb = memorySizeMb;
+        }
+    }
+
+    /** The platform's START line, as Lambda writes it before the function's own output. */
+    private void emitStart(String requestId) {
+        invocationStarts.put(requestId, System.nanoTime());
+        platformLogSink.accept("START RequestId: " + requestId + " Version: " + functionVersion);
+    }
+
+    /**
+     * The platform's END and REPORT lines, once per invocation. {@code status} is null for an
+     * invocation the runtime answered, and {@code timeout} when Lambda stopped it at its deadline.
+     */
+    private void emitEndAndReport(String requestId, String status) {
+        Long started = invocationStarts.remove(requestId);
+        if (started == null) {
+            return;
+        }
+        double durationMs = (System.nanoTime() - started) / 1_000_000.0;
+        long billedMs = Math.max(1, (long) Math.ceil(durationMs));
+        platformLogSink.accept("END RequestId: " + requestId);
+        platformLogSink.accept("REPORT RequestId: " + requestId
+                + "\tDuration: " + String.format(Locale.ROOT, "%.2f", durationMs) + " ms"
+                + "\tBilled Duration: " + billedMs + " ms"
+                + "\tMemory Size: " + memorySizeMb + " MB"
+                + "\tMax Memory Used: " + memorySizeMb + " MB"
+                + (status == null ? "" : "\tStatus: " + status));
+    }
+
+    /** Lambda stopped the invocation at its deadline: its REPORT says {@code Status: timeout}. */
+    public void reportTimeout(String requestId) {
+        emitEndAndReport(requestId, "timeout");
+    }
+
     /**
      * POST /runtime/invocation/{requestId}/response with
      * {@code Lambda-Runtime-Function-Response-Mode: streaming}: completes the
@@ -1335,5 +1380,6 @@ public class RuntimeApiServer {
         result.setStream(stream);
         invocation.getResultFuture().complete(result);
         emitQuotedRequestFinalized();
+        emitEndAndReport(requestId, null);
     }
 }

@@ -8483,12 +8483,19 @@ public class RdsService implements Resettable, ResourceProvider {
     }
 
     public DbSubnetGroup modifyDbSubnetGroup(String name, List<String> subnetIds, String region) {
+        return modifyDbSubnetGroup(name, null, subnetIds, region);
+    }
+
+    /** {@code description} replaces the group's when the request carries one; null keeps it. */
+    public DbSubnetGroup modifyDbSubnetGroup(String name, String description, List<String> subnetIds,
+                                             String region) {
         DbSubnetGroup existing = getDbSubnetGroup(name, region);
         if (subnetIds == null || subnetIds.isEmpty()) {
             throw new AwsException("InvalidParameterValue",
                     "SubnetIds must contain at least one subnet.", 400);
         }
-        DbSubnetGroup group = buildSubnetGroup(name, existing.getDescription(), subnetIds, effectiveRegion(region));
+        DbSubnetGroup group = buildSubnetGroup(name,
+                description != null ? description : existing.getDescription(), subnetIds, effectiveRegion(region));
         group.setTags(existing.getTags());
         putSubnetGroupForScope(
                 currentAccountId(), effectiveRegion(region), name, group);

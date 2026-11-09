@@ -31,6 +31,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.nio.file.Path;
 import java.security.Security;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -150,6 +151,32 @@ class AcmIssuanceServiceTest {
         assertNotNull(issued.getCertificateBody());
         assertTrue(issued.getDomainValidationOptions().stream()
                 .allMatch(validation -> "SUCCESS".equals(validation.validationStatus())));
+    }
+
+    @Test
+    void aValidationRecordInPublicDnsHostedElsewhereIssuesTheCertificate(@TempDir Path dir) {
+        // No floci hosted zone covers the domain: the records live in DNS hosted elsewhere, which
+        // ACM reads from public DNS. Only the exact expected CNAME counts.
+        AcmService service = newService(dir, store(dir), 0, newRoute53());
+        Certificate requested = request(service, null);
+        Map<String, String> published = new HashMap<>();
+        service.publicDns = new PublicDns() {
+            @Override
+            public List<String> cnameTargets(String name) {
+                String target = published.get(name);
+                return target == null ? List.of() : List.of(target);
+            }
+        };
+        ResourceRecord primary = requested.getDomainValidationOptions().getFirst().resourceRecord();
+        ResourceRecord san = requested.getDomainValidationOptions().getLast().resourceRecord();
+
+        published.put(primary.name(), primary.value().replaceAll("\\.$", ""));
+        published.put(san.name(), "_incorrect.acm-validations.aws");
+        assertEquals(CertificateStatus.PENDING_VALIDATION,
+                service.describeCertificate(requested.getArn(), REGION).getStatus());
+
+        published.put(san.name(), san.value().toUpperCase(Locale.ROOT));
+        assertEquals(CertificateStatus.ISSUED, service.describeCertificate(requested.getArn(), REGION).getStatus());
     }
 
     @Test

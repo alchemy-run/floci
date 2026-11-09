@@ -40,8 +40,11 @@ public class ApsService implements TagHandler {
     private static final int MAX_PAGE = 1000;
     private static final int MAX_NAMESPACE_NAME_LENGTH = 128;
     private static final Pattern NAMESPACE_NAME = Pattern.compile(".*[0-9A-Za-z][-.0-9A-Z_a-z]*.*");
-    private static final Pattern SCRAPER_ID = Pattern.compile(
-            "s-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}");
+    /**
+     * The ScraperId shape AMP accepts. Scrapers it creates are named {@code s-<uuid>}, but a
+     * request naming any other well-formed id is answered as missing, not as invalid.
+     */
+    private static final Pattern SCRAPER_ID = Pattern.compile("[0-9A-Za-z][-.0-9A-Z_a-z]{0,63}");
     private static final Set<String> SCRAPER_FILTER_KEYS = Set.of("status", "sourceArn", "destinationArn", "alias");
     static final String SCRAPER_LIMITATION =
             "Scraper configuration stored; the local emulator does not collect metrics from the source.";

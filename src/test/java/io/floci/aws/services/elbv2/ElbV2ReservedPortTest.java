@@ -157,6 +157,15 @@ class ElbV2ReservedPortTest {
     }
 
     @Test
+    void certificateNamesMatchExactlyOrByOneWildcardLabel() {
+        assertTrue(ElbV2DataPlane.certificateNameMatches("app.example.com", "App.Example.com"));
+        assertTrue(ElbV2DataPlane.certificateNameMatches("*.example.com", "www.example.com"));
+        assertFalse(ElbV2DataPlane.certificateNameMatches("*.example.com", "example.com"));
+        assertFalse(ElbV2DataPlane.certificateNameMatches("*.example.com", "a.b.example.com"));
+        assertFalse(ElbV2DataPlane.certificateNameMatches("app.example.com", "localhost.floci.io"));
+    }
+
+    @Test
     void leavesOrdinaryListenerPortsAlone() {
         ElbV2DataPlane dataPlane = dataPlaneWith(4566, true, 443);
         assertFalse(dataPlane.isReservedByFloci(80));

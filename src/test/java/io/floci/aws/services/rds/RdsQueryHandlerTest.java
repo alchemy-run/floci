@@ -917,7 +917,7 @@ class RdsQueryHandlerTest {
         DbClusterParameterGroup clusterParameterGroup = new DbClusterParameterGroup(
                 "cpg1", "aurora-postgresql16", "cluster parameter group");
         when(service.modifyDbSubnetGroup(
-                "custom-group", List.of("subnet-a", "subnet-b"), "us-west-2"))
+                "custom-group", null, List.of("subnet-a", "subnet-b"), "us-west-2"))
                 .thenReturn(subnetGroup);
         when(service.listDbParameterGroups(null, "us-west-2"))
                 .thenReturn(List.of(parameterGroup));
@@ -960,7 +960,7 @@ class RdsQueryHandlerTest {
         handler.handle("DeleteDBClusterParameterGroup", clusterParameterParams, "us-west-2");
 
         verify(service).modifyDbSubnetGroup(
-                "custom-group", List.of("subnet-a", "subnet-b"), "us-west-2");
+                "custom-group", null, List.of("subnet-a", "subnet-b"), "us-west-2");
         verify(service).deleteDbSubnetGroup("custom-group", "us-west-2");
         verify(service).listDbParameterGroups(null, "us-west-2");
         verify(service).modifyDbParameterGroup(
@@ -1356,18 +1356,21 @@ class RdsQueryHandlerTest {
 
     @Test
     void modifyDbSubnetGroup_passesSubnetMembersToService() {
-        when(service.modifyDbSubnetGroup("sample-db-subnets", List.of("subnet-new-a", "subnet-new-b"), null))
+        when(service.modifyDbSubnetGroup("sample-db-subnets", "new description",
+                List.of("subnet-new-a", "subnet-new-b"), null))
                 .thenReturn(new DbSubnetGroup(
                         "sample-db-subnets", "test", "vpc-123", List.of("subnet-new-a", "subnet-new-b"),
                         Map.of("subnet-new-a", "us-east-1a", "subnet-new-b", "us-east-1b")));
 
         MultivaluedMap<String, String> p = params();
         p.add("DBSubnetGroupName", "sample-db-subnets");
+        p.add("DBSubnetGroupDescription", "new description");
         p.add("SubnetIds.SubnetIdentifier.1", "subnet-new-a");
         p.add("SubnetIds.SubnetIdentifier.2", "subnet-new-b");
         Response response = handler.handle("ModifyDBSubnetGroup", p);
 
-        verify(service).modifyDbSubnetGroup("sample-db-subnets", List.of("subnet-new-a", "subnet-new-b"), null);
+        verify(service).modifyDbSubnetGroup("sample-db-subnets", "new description",
+                List.of("subnet-new-a", "subnet-new-b"), null);
         String body = (String) response.getEntity();
         assertEquals(200, response.getStatus());
         assertTrue(body.contains("<DBSubnetGroupName>sample-db-subnets</DBSubnetGroupName>"));
