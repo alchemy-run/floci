@@ -11,6 +11,22 @@
 | `TranslateText` | Translate a UTF-8 text string between two languages |
 | `TranslateDocument` | Translate a document (≤100 KB) supplied as a base64 blob |
 | `ListLanguages` | List the language codes and names Floci recognizes |
+| `ImportTerminology` | Create or overwrite a custom terminology from a CSV, TSV, or TMX file |
+| `GetTerminology` | Get a terminology's properties |
+| `ListTerminologies` | List terminologies |
+| `DeleteTerminology` | Delete a terminology |
+| `CreateParallelData` | Create parallel data from a file in S3 |
+| `GetParallelData` | Get parallel data's properties |
+| `UpdateParallelData` | Re-import parallel data from a file in S3 |
+| `DeleteParallelData` | Delete parallel data |
+| `ListParallelData` | List parallel data |
+| `StartTextTranslationJob` | Start a batch job over an S3 prefix |
+| `DescribeTextTranslationJob` | Get a batch job's properties |
+| `ListTextTranslationJobs` | List batch jobs, optionally filtered by name or status |
+| `StopTextTranslationJob` | Stop a batch job |
+| `TagResource` | Tag a terminology or parallel data |
+| `UntagResource` | Remove tags |
+| `ListTagsForResource` | List tags |
 <!-- floci:actions:end -->
 
 ## Emulation Behavior
@@ -40,8 +56,19 @@
   `DisplayLanguageCode` is validated against the AWS enum
   (`de`, `en`, `es`, `fr`, `it`, `ja`, `ko`, `pt`, `zh`, `zh-TW`) but every `LanguageName`
   is returned in English regardless.
-- **Out of scope:** custom terminology, parallel data, asynchronous batch translation jobs
-  (`StartTextTranslationJob` and friends), and tagging, all needing persistent state.
+- **Custom terminology:** `TranslateText` with `TerminologyNames` replaces each source term
+  found in the translated text (whole word, any case) with its target term, and lists the
+  terms it applied in `AppliedTerminologies`. A name that doesn't exist returns
+  `ResourceNotFoundException`.
+- **Parallel data:** `CreateParallelData` and `UpdateParallelData` read the S3 file at once,
+  so `GetParallelData` already reports `ACTIVE` with the file's languages and record count,
+  or `FAILED` with the reason when the file can't be read. Parallel data doesn't change
+  translations.
+- **Batch jobs:** `StartTextTranslationJob` translates every object under the input prefix
+  (echo or mock, with terminologies applied) and writes
+  `<output>/<account>-TranslateText-<JobId>/<target>.<file>`, as Translate does. The job
+  reports `SUBMITTED` for two seconds, then `COMPLETED`. `StopTextTranslationJob` on a job
+  that hasn't settled answers `STOP_REQUESTED` and leaves it `STOPPED`.
 - **Deviation:** `ListLanguages` always returns `LanguageName`s in English regardless of
   `DisplayLanguageCode` (real Translate localizes them), and the `Formality` /
   `Profanity` / `Brevity` translation settings are accepted but ignored.
@@ -68,8 +95,9 @@ JSON file shared across Translate, Comprehend, Textract, and Rekognition:
 }
 ```
 
-The lookup key is the **exact `Text` value** sent in the request, so only `TranslateText`
-can be mocked; `TranslateDocument` carries a binary payload with no stable key. The file is
+The lookup key is the **exact `Text` value** sent in the request. A `text/plain` or
+`text/html` document is looked up by its decoded text, and a batch job by each input
+object's text; a `.docx` document has no stable key and is always echoed. The file is
 re-read when its modification time changes, so it can be edited without restarting the
 emulator. A missing file, an unset `AI_MOCK_CONFIG`, or no matching entry all fall back to
 the echoed-input default. Mocking is opt-in and never breaks a call that isn't using it.
