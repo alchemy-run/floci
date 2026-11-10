@@ -5,10 +5,15 @@ import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import io.quarkus.runtime.annotations.RegisterForReflection;
 
+import java.util.Map;
+
 @RegisterForReflection
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class BackupJob {
+    public static final String INDEX_FIELD = "FlociIndex";
+    public static final String RECOVERY_POINT_TAGS_FIELD = "FlociRecoveryPointTags";
+
 
     @JsonProperty("BackupJobId")
     private String backupJobId;
@@ -63,6 +68,14 @@ public class BackupJob {
 
     @JsonProperty("AccountId")
     private String accountId;
+
+    /** Whether the job's recovery point is indexed for search ({@code ENABLED}); internal, not in the API. */
+    @JsonProperty(INDEX_FIELD)
+    private String index;
+
+    /** The tags the job gives its recovery point; internal, not in the API. */
+    @JsonProperty(RECOVERY_POINT_TAGS_FIELD)
+    private Map<String, String> recoveryPointTags;
 
     public BackupJob() {}
 
@@ -119,4 +132,10 @@ public class BackupJob {
 
     public String getAccountId() { return accountId; }
     public void setAccountId(String accountId) { this.accountId = accountId; }
+
+    public String getIndex() { return index; }
+    public void setIndex(String index) { this.index = index; }
+
+    public Map<String, String> getRecoveryPointTags() { return recoveryPointTags; }
+    public void setRecoveryPointTags(Map<String, String> recoveryPointTags) { this.recoveryPointTags = recoveryPointTags; }
 }

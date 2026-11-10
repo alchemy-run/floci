@@ -8,6 +8,7 @@ import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -25,24 +26,21 @@ import java.util.Map;
  */
 public class TagDispatcher {
 
-    private final Map<String, TagHandler> handlersByServiceKey;
+    private final Map<String, List<TagHandler>> handlersByServiceKey;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
 
     public TagDispatcher(Iterable<TagHandler> handlers,
                          RegionResolver regionResolver,
                          ObjectMapper objectMapper) {
-        Map<String, TagHandler> map = new HashMap<>();
+        // Several handlers may share a service key when they split its ARN space between them
+        // (AWS Backup and Backup Search both mint arn:aws:backup:...); each says which ARNs are its
+        // through TagHandler#handles, and the first that claims an ARN serves it.
+        Map<String, List<TagHandler>> map = new HashMap<>();
         for (TagHandler h : handlers) {
-            String serviceKey = h.serviceKey();
-            TagHandler existing = map.putIfAbsent(serviceKey, h);
-            if (existing != null) {
-                throw new IllegalStateException(
-                        "Duplicate TagHandler registration for service key '" + serviceKey
-                                + "': " + existing.getClass().getName()
-                                + " and " + h.getClass().getName());
-            }
+            map.computeIfAbsent(h.serviceKey(), k -> new ArrayList<>()).add(h);
         }
+        map.replaceAll((key, list) -> List.copyOf(list));
         this.handlersByServiceKey = Map.copyOf(map);
         this.regionResolver = regionResolver;
         this.objectMapper = objectMapper;
@@ -212,9 +210,12 @@ public class TagDispatcher {
             throw new AwsException("BadRequestException",
                     "Invalid resource ARN: " + arn, 400);
         }
-        TagHandler handler = handlersByServiceKey.get(serviceKey);
-        if (handler != null && !handler.handles(arn)) {
-            handler = null;
+        TagHandler handler = null;
+        for (TagHandler candidate : handlersByServiceKey.getOrDefault(serviceKey, List.of())) {
+            if (candidate.handles(arn)) {
+                handler = candidate;
+                break;
+            }
         }
         if (handler == null) {
             // Surface an unregistered service as an invalid-ARN error so floci's

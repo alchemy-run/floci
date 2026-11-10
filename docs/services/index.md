@@ -97,6 +97,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Lightsail](lightsail.md) | `POST /` + `X-Amz-Target: Lightsail_20161128.*` | JSON 1.1 | 79 local responses; 161 recognized actions |
 | [ACM](acm.md) | `POST /` + `X-Amz-Target: CertificateManager.*` | JSON 1.1 | 17 |
 | [App Runner](apprunner.md) | `POST /` + `X-Amz-Target: AppRunner.*`; services by `Host` | JSON 1.0 | 37 |
+| [Backup Search](backupsearch.md) | `/search-jobs`, `/export-search-jobs` (signed `backup-search`) | REST JSON | 12 |
 | [B2B Data Interchange](b2bi.md) | `POST /` + `X-Amz-Target: B2BI.*` | JSON 1.0 | 30 |
 | [Audit Manager](auditmanager.md) | `/assessments`, `/controls`, `/insights`, … (signed `auditmanager`) | REST JSON | 62 |
 | [AppRegistry](appregistry.md) | `/applications`, `/attribute-groups` (signed `servicecatalog`) | REST JSON | 24 |

@@ -484,6 +484,8 @@ floci:
       enabled: true
     b2bi:
       enabled: true
+    backup-search:
+      enabled: true
     rekognition:
       enabled: true
     translate:

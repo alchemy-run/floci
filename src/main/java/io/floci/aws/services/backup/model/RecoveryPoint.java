@@ -60,7 +60,19 @@ public class RecoveryPoint {
     @JsonProperty("LastRestoreTime")
     private Long lastRestoreTime;
 
+    @JsonProperty("IndexStatus")
+    private String indexStatus;
+
+    @JsonProperty("IndexStatusMessage")
+    private String indexStatusMessage;
+
     public RecoveryPoint() {}
+
+    public String getIndexStatus() { return indexStatus; }
+    public void setIndexStatus(String indexStatus) { this.indexStatus = indexStatus; }
+
+    public String getIndexStatusMessage() { return indexStatusMessage; }
+    public void setIndexStatusMessage(String indexStatusMessage) { this.indexStatusMessage = indexStatusMessage; }
 
     public String getRecoveryPointArn() { return recoveryPointArn; }
     public void setRecoveryPointArn(String recoveryPointArn) { this.recoveryPointArn = recoveryPointArn; }

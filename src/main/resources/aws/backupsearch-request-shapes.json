@@ -1,0 +1,401 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_backupsearch_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "GetSearchJob": "GetSearchJobInput",
+    "GetSearchResultExportJob": "GetSearchResultExportJobInput",
+    "ListSearchJobBackups": "ListSearchJobBackupsInput",
+    "ListSearchJobResults": "ListSearchJobResultsInput",
+    "ListSearchJobs": "ListSearchJobsInput",
+    "ListSearchResultExportJobs": "ListSearchResultExportJobsInput",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "StartSearchJob": "StartSearchJobInput",
+    "StartSearchResultExportJob": "StartSearchResultExportJobInput",
+    "StopSearchJob": "StopSearchJobInput",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest"
+  },
+  "shapes": {
+    "BackupCreationTimeFilter": {
+      "type": "structure",
+      "members": {
+        "CreatedAfter": "Timestamp",
+        "CreatedBefore": "Timestamp"
+      }
+    },
+    "EBSItemFilter": {
+      "type": "structure",
+      "members": {
+        "FilePaths": "StringConditionList",
+        "Sizes": "LongConditionList",
+        "CreationTimes": "TimeConditionList",
+        "LastModificationTimes": "TimeConditionList"
+      }
+    },
+    "EBSItemFilters": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "EBSItemFilter"
+    },
+    "EncryptionKeyArn": {
+      "type": "string"
+    },
+    "ExportJobStatus": {
+      "type": "string",
+      "enum": [
+        "RUNNING",
+        "FAILED",
+        "COMPLETED"
+      ]
+    },
+    "ExportSpecification": {
+      "type": "structure",
+      "members": {
+        "s3ExportSpecification": "S3ExportSpecification"
+      }
+    },
+    "GenericId": {
+      "type": "string"
+    },
+    "GetSearchJobInput": {
+      "type": "structure",
+      "required": [
+        "SearchJobIdentifier"
+      ],
+      "members": {
+        "SearchJobIdentifier": "GenericId"
+      }
+    },
+    "GetSearchResultExportJobInput": {
+      "type": "structure",
+      "required": [
+        "ExportJobIdentifier"
+      ],
+      "members": {
+        "ExportJobIdentifier": "GenericId"
+      }
+    },
+    "IamRoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:(?:aws|aws-cn|aws-us-gov):iam::[a-z0-9-]+:role/(.+)"
+    },
+    "ItemFilters": {
+      "type": "structure",
+      "members": {
+        "S3ItemFilters": "S3ItemFilters",
+        "EBSItemFilters": "EBSItemFilters"
+      }
+    },
+    "ListSearchJobBackupsInput": {
+      "type": "structure",
+      "required": [
+        "SearchJobIdentifier"
+      ],
+      "members": {
+        "SearchJobIdentifier": "GenericId",
+        "NextToken": "String",
+        "MaxResults": "ListSearchJobBackupsInputMaxResultsInteger"
+      }
+    },
+    "ListSearchJobBackupsInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "ListSearchJobResultsInput": {
+      "type": "structure",
+      "required": [
+        "SearchJobIdentifier"
+      ],
+      "members": {
+        "SearchJobIdentifier": "GenericId",
+        "NextToken": "String",
+        "MaxResults": "ListSearchJobResultsInputMaxResultsInteger"
+      }
+    },
+    "ListSearchJobResultsInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "ListSearchJobsInput": {
+      "type": "structure",
+      "members": {
+        "ByStatus": "SearchJobState",
+        "NextToken": "String",
+        "MaxResults": "ListSearchJobsInputMaxResultsInteger"
+      }
+    },
+    "ListSearchJobsInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "ListSearchResultExportJobsInput": {
+      "type": "structure",
+      "members": {
+        "Status": "ExportJobStatus",
+        "SearchJobIdentifier": "GenericId",
+        "NextToken": "String",
+        "MaxResults": "ListSearchResultExportJobsInputMaxResultsInteger"
+      }
+    },
+    "ListSearchResultExportJobsInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "String"
+      }
+    },
+    "Long": {
+      "type": "long"
+    },
+    "LongCondition": {
+      "type": "structure",
+      "required": [
+        "Value"
+      ],
+      "members": {
+        "Value": "Long",
+        "Operator": "LongConditionOperator"
+      }
+    },
+    "LongConditionList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "LongCondition"
+    },
+    "LongConditionOperator": {
+      "type": "string",
+      "enum": [
+        "EQUALS_TO",
+        "NOT_EQUALS_TO",
+        "LESS_THAN_EQUAL_TO",
+        "GREATER_THAN_EQUAL_TO"
+      ]
+    },
+    "RecoveryPoint": {
+      "type": "string"
+    },
+    "RecoveryPointArnList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "RecoveryPoint"
+    },
+    "ResourceArnList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "String"
+    },
+    "ResourceType": {
+      "type": "string",
+      "enum": [
+        "S3",
+        "EBS"
+      ]
+    },
+    "ResourceTypeList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "ResourceType"
+    },
+    "S3ExportSpecification": {
+      "type": "structure",
+      "required": [
+        "DestinationBucket"
+      ],
+      "members": {
+        "DestinationBucket": "String",
+        "DestinationPrefix": "String"
+      }
+    },
+    "S3ItemFilter": {
+      "type": "structure",
+      "members": {
+        "ObjectKeys": "StringConditionList",
+        "Sizes": "LongConditionList",
+        "CreationTimes": "TimeConditionList",
+        "VersionIds": "StringConditionList",
+        "ETags": "StringConditionList"
+      }
+    },
+    "S3ItemFilters": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "S3ItemFilter"
+    },
+    "SearchJobState": {
+      "type": "string",
+      "enum": [
+        "RUNNING",
+        "COMPLETED",
+        "STOPPING",
+        "STOPPED",
+        "FAILED"
+      ]
+    },
+    "SearchScope": {
+      "type": "structure",
+      "required": [
+        "BackupResourceTypes"
+      ],
+      "members": {
+        "BackupResourceTypes": "ResourceTypeList",
+        "BackupResourceCreationTime": "BackupCreationTimeFilter",
+        "SourceResourceArns": "ResourceArnList",
+        "BackupResourceArns": "RecoveryPointArnList",
+        "BackupResourceTags": "TagMap"
+      }
+    },
+    "StartSearchJobInput": {
+      "type": "structure",
+      "required": [
+        "SearchScope"
+      ],
+      "members": {
+        "Tags": "TagMap",
+        "Name": "StartSearchJobInputNameString",
+        "EncryptionKeyArn": "EncryptionKeyArn",
+        "ClientToken": "String",
+        "SearchScope": "SearchScope",
+        "ItemFilters": "ItemFilters"
+      }
+    },
+    "StartSearchJobInputNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 500
+    },
+    "StartSearchResultExportJobInput": {
+      "type": "structure",
+      "required": [
+        "SearchJobIdentifier",
+        "ExportSpecification"
+      ],
+      "members": {
+        "SearchJobIdentifier": "GenericId",
+        "ExportSpecification": "ExportSpecification",
+        "ClientToken": "String",
+        "Tags": "TagMap",
+        "RoleArn": "IamRoleArn"
+      }
+    },
+    "StopSearchJobInput": {
+      "type": "structure",
+      "required": [
+        "SearchJobIdentifier"
+      ],
+      "members": {
+        "SearchJobIdentifier": "GenericId"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringCondition": {
+      "type": "structure",
+      "required": [
+        "Value"
+      ],
+      "members": {
+        "Value": "String",
+        "Operator": "StringConditionOperator"
+      }
+    },
+    "StringConditionList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "StringCondition"
+    },
+    "StringConditionOperator": {
+      "type": "string",
+      "enum": [
+        "EQUALS_TO",
+        "NOT_EQUALS_TO",
+        "CONTAINS",
+        "DOES_NOT_CONTAIN",
+        "BEGINS_WITH",
+        "ENDS_WITH",
+        "DOES_NOT_BEGIN_WITH",
+        "DOES_NOT_END_WITH"
+      ]
+    },
+    "TagKeys": {
+      "type": "list",
+      "member": "String"
+    },
+    "TagMap": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "String",
+        "Tags": "TagMap"
+      }
+    },
+    "TimeCondition": {
+      "type": "structure",
+      "required": [
+        "Value"
+      ],
+      "members": {
+        "Value": "Timestamp",
+        "Operator": "TimeConditionOperator"
+      }
+    },
+    "TimeConditionList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "TimeCondition"
+    },
+    "TimeConditionOperator": {
+      "type": "string",
+      "enum": [
+        "EQUALS_TO",
+        "NOT_EQUALS_TO",
+        "LESS_THAN_EQUAL_TO",
+        "GREATER_THAN_EQUAL_TO"
+      ]
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "String",
+        "TagKeys": "TagKeys"
+      }
+    }
+  }
+}

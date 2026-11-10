@@ -223,6 +223,19 @@ services:
     doc: docs/services/apprunner.md
     sources:
       - { path: services/apprunner/AppRunnerJsonHandler.java, mode: switch }
+  - service: backupsearch
+    doc: docs/services/backupsearch.md
+    sources:
+      - { path: services/backupsearch/BackupSearchController.java, mode: rest }
+      - { path: core/common/SharedTagsController.java, mode: rest }
+    rename_actions:
+      ListTags: ListTagsForResource
+      TagResourcePost: TagResource
+    exclude_actions:
+      - ListTagsByQuery
+      - TagResourceByBody
+      - TagResourcePut
+      - UntagResourceByQuery
   - service: b2bi
     doc: docs/services/b2bi.md
     sources:

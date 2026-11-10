@@ -18,6 +18,7 @@ import io.floci.aws.services.aps.ApsController;
 import io.floci.aws.services.aps.ApsDataPlaneController;
 import io.floci.aws.services.auditmanager.AuditManagerController;
 import io.floci.aws.services.backup.BackupController;
+import io.floci.aws.services.backupsearch.BackupSearchController;
 import io.floci.aws.services.batch.BatchController;
 import io.floci.aws.services.bedrock.BedrockController;
 import io.floci.aws.services.bedrockagentcore.BedrockAgentCoreController;
@@ -695,6 +696,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AppRunner."), Set.of("apprunner"), Set.of(), Set.of()),
+                descriptor("backup-search", "backupsearch", config.services().backupSearch().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("backup-search"), Set.of(), Set.of(BackupSearchController.class)),
                 descriptor("b2bi", "b2bi", config.services().b2bi().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
