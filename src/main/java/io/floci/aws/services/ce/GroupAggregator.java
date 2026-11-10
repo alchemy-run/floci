@@ -36,6 +36,13 @@ final class GroupAggregator {
     ObjectNode buildResultByTime(Instant bucketStart, Instant bucketEnd,
                                   List<UsageLine> lines, List<GroupBy> groupBys, Set<String> metrics,
                                   CostSynthesizer synthesizer) {
+        return buildResultByTime(bucketStart, bucketEnd, lines, groupBys, metrics, synthesizer,
+                FilterExpressionEvaluator.CategoryResolver.NONE);
+    }
+
+    ObjectNode buildResultByTime(Instant bucketStart, Instant bucketEnd,
+                                  List<UsageLine> lines, List<GroupBy> groupBys, Set<String> metrics,
+                                  CostSynthesizer synthesizer, FilterExpressionEvaluator.CategoryResolver categories) {
         ObjectNode result = objectMapper.createObjectNode();
         ObjectNode timePeriod = result.putObject("TimePeriod");
         timePeriod.put("Start", bucketStart.toString());
@@ -57,7 +64,7 @@ final class GroupAggregator {
                 totalAmounts.merge(metric, mv.amount(), Double::sum);
                 totalUnits.putIfAbsent(metric, mv.unit() == null ? "" : mv.unit());
                 if (!groupBys.isEmpty()) {
-                    List<String> key = groupKey(groupBys, line);
+                    List<String> key = groupKey(groupBys, line, categories);
                     groupAmounts.computeIfAbsent(key, k -> new HashMap<>())
                             .merge(metric, mv.amount(), Double::sum);
                     groupUnits.computeIfAbsent(key, k -> new HashMap<>())
@@ -91,7 +98,9 @@ final class GroupAggregator {
         return result;
     }
 
-    private static List<String> groupKey(List<GroupBy> groupBys, UsageLine line) {
+    /** AWS group keys: dimension values verbatim, tags and cost categories as {@code key$value}. */
+    static List<String> groupKey(List<GroupBy> groupBys, UsageLine line,
+                                 FilterExpressionEvaluator.CategoryResolver categories) {
         List<String> out = new ArrayList<>(groupBys.size());
         for (GroupBy gb : groupBys) {
             out.add(switch (gb.type()) {
@@ -99,8 +108,11 @@ final class GroupAggregator {
                     String v = FilterExpressionEvaluator.dimensionValue(gb.key(), line);
                     yield v == null ? "" : v;
                 }
-                case "TAG" -> line.tags() == null ? "" : line.tags().getOrDefault(gb.key(), "");
-                case "COST_CATEGORY" -> "";
+                case "TAG" -> gb.key() + "$" + (line.tags() == null ? "" : line.tags().getOrDefault(gb.key(), ""));
+                case "COST_CATEGORY" -> {
+                    String v = categories.value(gb.key(), line);
+                    yield gb.key() + "$" + (v == null ? "" : v);
+                }
                 default -> throw new AwsException("ValidationException",
                         "Unsupported GroupBy.Type: " + gb.type(), 400);
             });

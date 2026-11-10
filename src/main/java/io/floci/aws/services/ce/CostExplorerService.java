@@ -42,24 +42,28 @@ public class CostExplorerService {
     private final PricingRateLookup rateLookup;
     private final GroupAggregator aggregator;
     private final double monthlyCreditUsd;
+    private final CostCategoryService categories;
 
     @Inject
     public CostExplorerService(ObjectMapper objectMapper,
                                 Instance<ResourceUsageEnumerator> enumerators,
                                 PricingRateLookup rateLookup,
-                                EmulatorConfig config) {
-        this(objectMapper, enumerators, rateLookup, config.services().ce().creditUsdMonthly());
+                                EmulatorConfig config,
+                                CostCategoryService categories) {
+        this(objectMapper, enumerators, rateLookup, config.services().ce().creditUsdMonthly(), categories);
     }
 
     CostExplorerService(ObjectMapper objectMapper,
                          Instance<ResourceUsageEnumerator> enumerators,
                          PricingRateLookup rateLookup,
-                         double monthlyCreditUsd) {
+                         double monthlyCreditUsd,
+                         CostCategoryService categories) {
         this.objectMapper = objectMapper;
         this.enumerators = enumerators;
         this.rateLookup = rateLookup;
         this.aggregator = new GroupAggregator(objectMapper);
         this.monthlyCreditUsd = monthlyCreditUsd;
+        this.categories = categories;
     }
 
     public ObjectNode getCostAndUsage(JsonNode request, String defaultRegion) {
@@ -89,13 +93,14 @@ public class CostExplorerService {
         }
         List<GroupAggregator.GroupBy> groupBys = GroupAggregator.parseGroupBy(request.path("GroupBy"));
         JsonNode filter = request.has("Filter") ? request.get("Filter") : null;
+        FilterExpressionEvaluator.CategoryResolver resolver = resolver(window.end());
 
         List<UsageLine> all = collectLines(window.start(), window.end(), defaultRegion);
         // Apply filter once across the full window so the same set is reused
         // per bucket (lines are emitted per request scope, no cross-bucket leakage).
         List<UsageLine> filtered = new ArrayList<>();
         for (UsageLine line : all) {
-            if (FilterExpressionEvaluator.matches(filter, line)) {
+            if (FilterExpressionEvaluator.matches(filter, line, resolver)) {
                 filtered.add(line);
             }
         }
@@ -105,7 +110,7 @@ public class CostExplorerService {
             CreditLineEmitter creditEmitter = new CreditLineEmitter(monthlyCreditUsd);
             List<UsageLine> credits = creditEmitter.emit(filtered.stream(), synthesizer).toList();
             for (UsageLine credit : credits) {
-                if (FilterExpressionEvaluator.matches(filter, credit)) {
+                if (FilterExpressionEvaluator.matches(filter, credit, resolver)) {
                     filtered.add(credit);
                 }
             }
@@ -121,7 +126,7 @@ public class CostExplorerService {
                 }
             }
             resultsByTime.add(aggregator.buildResultByTime(bucket.start(), bucket.end(),
-                    bucketLines, groupBys, metrics, synthesizer));
+                    bucketLines, groupBys, metrics, synthesizer, resolver));
         }
         ArrayNode groupDefinitions = response.putArray("GroupDefinitions");
         for (GroupAggregator.GroupBy gb : groupBys) {
@@ -143,9 +148,10 @@ public class CostExplorerService {
         String search = request.path("SearchString").asText(null);
         JsonNode filter = request.has("Filter") ? request.get("Filter") : null;
 
+        FilterExpressionEvaluator.CategoryResolver resolver = resolver(window.end());
         Set<String> values = new TreeSet<>();
         for (UsageLine line : collectLines(window.start(), window.end(), defaultRegion)) {
-            if (!FilterExpressionEvaluator.matches(filter, line)) {
+            if (!FilterExpressionEvaluator.matches(filter, line, resolver)) {
                 continue;
             }
             String v = FilterExpressionEvaluator.dimensionValue(dimension, line);
@@ -173,8 +179,9 @@ public class CostExplorerService {
 
         Set<String> values = new TreeSet<>();
         Set<String> keys = new TreeSet<>();
+        FilterExpressionEvaluator.CategoryResolver resolver = resolver(window.end());
         for (UsageLine line : collectLines(window.start(), window.end(), defaultRegion)) {
-            if (!FilterExpressionEvaluator.matches(filter, line)) {
+            if (!FilterExpressionEvaluator.matches(filter, line, resolver)) {
                 continue;
             }
             if (line.tags() == null) {
@@ -256,13 +263,73 @@ public class CostExplorerService {
         return response;
     }
 
-    public ObjectNode getCostCategories(JsonNode request) {
+    /**
+     * Floci has no Savings Plans to attribute usage to, so the per-plan breakdown is empty for any valid period.
+     */
+    public ObjectNode getSavingsPlansUtilizationDetails(JsonNode request) {
+        TimeWindow window = parseTimeWindow(request);
         ObjectNode response = objectMapper.createObjectNode();
-        response.putArray("CostCategoryNames");
-        response.putArray("CostCategoryValues");
-        response.put("ReturnSize", 0);
-        response.put("TotalSize", 0);
+        response.putArray("SavingsPlansUtilizationDetails");
+        ObjectNode period = response.putObject("TimePeriod");
+        period.put("Start", window.start().toString().substring(0, 10));
+        period.put("End", window.end().toString().substring(0, 10));
         return response;
+    }
+
+    /**
+     * Without {@code CostCategoryName}, lists the categories in effect during the period; with it, lists the
+     * values that category assigns to the period's usage.
+     */
+    public ObjectNode getCostCategories(JsonNode request, String defaultRegion) {
+        TimeWindow window = parseTimeWindow(request);
+        String search = request.path("SearchString").asText(null);
+        JsonNode filter = request.has("Filter") ? request.get("Filter") : null;
+        String name = request.path("CostCategoryName").asText(null);
+        Set<String> emitted = new TreeSet<>();
+        ObjectNode response = objectMapper.createObjectNode();
+        if (name == null || name.isEmpty()) {
+            for (String category : categories.namesEffectiveDuring(window.end())) {
+                if (search == null || category.contains(search)) {
+                    emitted.add(category);
+                }
+            }
+        } else {
+            FilterExpressionEvaluator.CategoryResolver resolver = resolver(window.end());
+            for (UsageLine line : collectLines(window.start(), window.end(), defaultRegion)) {
+                if (!FilterExpressionEvaluator.matches(filter, line, resolver)) {
+                    continue;
+                }
+                String value = resolver.value(name, line);
+                if (value != null && !value.isEmpty() && (search == null || value.contains(search))) {
+                    emitted.add(value);
+                }
+            }
+        }
+        List<String> sorted = new ArrayList<>(emitted);
+        int max = request.path("MaxResults").canConvertToInt() && request.path("MaxResults").intValue() > 0
+                ? request.path("MaxResults").intValue() : 1000;
+        List<String> pageItems = sorted.subList(0, Math.min(max, sorted.size()));
+        ArrayNode out = response.putArray(name == null || name.isEmpty() ? "CostCategoryNames" : "CostCategoryValues");
+        pageItems.forEach(out::add);
+        if (name != null && !name.isEmpty()) {
+            response.putArray("CostCategoryNames").add(name);
+        }
+        response.put("ReturnSize", pageItems.size());
+        response.put("TotalSize", sorted.size());
+        return response;
+    }
+
+    /** Usage lines for {@code [start, end)} in {@code region}, before any filter or credits. */
+    List<UsageLine> lines(Instant start, Instant end, String region) {
+        return collectLines(start, end, region);
+    }
+
+    CostSynthesizer synthesizer() {
+        return new CostSynthesizer(rateLookup);
+    }
+
+    FilterExpressionEvaluator.CategoryResolver resolver(Instant end) {
+        return categories.resolver(end.minusSeconds(1));
     }
 
     private List<UsageLine> collectLines(Instant start, Instant end, String region) {

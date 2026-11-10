@@ -18,9 +18,11 @@ import jakarta.inject.Inject;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
-import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -28,12 +30,21 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+import static io.floci.aws.services.ce.CeRequests.checkTagCount;
+import static io.floci.aws.services.ce.CeRequests.invalid;
+import static io.floci.aws.services.ce.CeRequests.object;
+import static io.floci.aws.services.ce.CeRequests.present;
+import static io.floci.aws.services.ce.CeRequests.singleRoot;
+import static io.floci.aws.services.ce.CeRequests.strings;
+import static io.floci.aws.services.ce.CeRequests.tagText;
+import static io.floci.aws.services.ce.CeRequests.tags;
+import static io.floci.aws.services.ce.CeRequests.text;
+
 /** Stores Cost Anomaly Detection configuration without generating anomalies or notifications. */
 @ApplicationScoped
 public class CostAnomalyService implements Resettable {
 
     private static final BigDecimal MAX_THRESHOLD = new BigDecimal("10000000000");
-    private static final Pattern TAG_TEXT = Pattern.compile("[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*");
     private static final Pattern EMAIL = Pattern.compile(
             "^[a-zA-Z0-9.!#$%&'*+=?^_`{|}~-]+@[a-zA-Z0-9_-]+(\\.[a-zA-Z0-9_-]+)+$");
     private static final Pattern SNS = Pattern.compile(
@@ -63,7 +74,7 @@ public class CostAnomalyService implements Resettable {
     public synchronized ObjectNode createMonitor(JsonNode request) {
         ObjectNode input = object(request, "AnomalyMonitor");
         validateMonitor(input);
-        ObjectNode tags = tags(request, false);
+        ObjectNode tags = tags(mapper, request, false);
         String account = monitors.accountId();
         String type = input.path("MonitorType").textValue();
         String dimension = input.path("MonitorDimension").asText();
@@ -117,7 +128,7 @@ public class CostAnomalyService implements Resettable {
         validateSubscribers(input);
         ObjectNode definition = fields(input, "SubscriptionName", "Frequency", "MonitorArnList", "Subscribers");
         definition.set("ThresholdExpression", threshold(input));
-        ObjectNode tags = tags(request, false);
+        ObjectNode tags = tags(mapper, request, false);
         if (subscriptions.scanForAccount(account, key -> true).size() >= 100) {
             throw new AwsException("LimitExceededException", "The account's subscription limit has been reached.", 400);
         }
@@ -188,7 +199,7 @@ public class CostAnomalyService implements Resettable {
         String account = monitors.accountId();
         ObjectNode resource = existing(storage, account, arn, "ResourceNotFoundException").deepCopy();
         ObjectNode updatedTags = (ObjectNode) resource.get("tags");
-        updatedTags.setAll(tags(request, true));
+        updatedTags.setAll(tags(mapper, request, true));
         checkTagCount(updatedTags);
         storage.putForAccount(account, arn, resource);
     }
@@ -203,6 +214,47 @@ public class CostAnomalyService implements Resettable {
             updatedTags.remove(tagText(key, true));
         }
         storage.putForAccount(account, arn, resource);
+    }
+
+    /**
+     * Lists detected anomalies. Floci synthesizes cost from current resource state, so spend never deviates from
+     * its own baseline and no anomalies are ever detected; the request is still validated as AWS does.
+     */
+    public synchronized ObjectNode getAnomalies(JsonNode request) {
+        if (present(request, "MonitorArn")) {
+            existing(monitors, monitors.accountId(), text(request, "MonitorArn", 1024), "UnknownMonitorException");
+        }
+        ObjectNode interval = object(request, "DateInterval");
+        LocalDate start = date(interval, "StartDate");
+        LocalDate today = LocalDate.now(ZoneOffset.UTC);
+        if (start.isBefore(today.minusDays(90)) || start.isAfter(today)) {
+            throw invalid("DateInterval.StartDate must be within the last 90 days.");
+        }
+        if (present(interval, "EndDate") && date(interval, "EndDate").isBefore(start)) {
+            throw invalid("DateInterval.EndDate must not be before StartDate.");
+        }
+        if (present(request, "Feedback")
+                && !Set.of("YES", "NO", "PLANNED_ACTIVITY").contains(text(request, "Feedback", 1024))) {
+            throw invalid("Feedback must be YES, NO, or PLANNED_ACTIVITY.");
+        }
+        return page(List.of(), request, "Anomalies", "AnomalyId");
+    }
+
+    public synchronized ObjectNode provideAnomalyFeedback(JsonNode request) {
+        text(request, "AnomalyId", 1024);
+        if (!Set.of("YES", "NO", "PLANNED_ACTIVITY").contains(text(request, "Feedback", 1024))) {
+            throw invalid("Feedback must be YES, NO, or PLANNED_ACTIVITY.");
+        }
+        throw invalid("Feedback is submitted for an invalid anomaly.");
+    }
+
+    private static LocalDate date(JsonNode parent, String field) {
+        String value = text(parent, field, 40);
+        try {
+            return LocalDate.parse(value.length() > 10 ? value.substring(0, 10) : value);
+        } catch (DateTimeParseException e) {
+            throw invalid(field + " must be a date in YYYY-MM-DD format.");
+        }
     }
 
     @Override
@@ -400,42 +452,6 @@ public class CostAnomalyService implements Resettable {
         }
     }
 
-    private ObjectNode tags(JsonNode request, boolean required) {
-        ObjectNode tags = mapper.createObjectNode();
-        if (!required && !present(request, "ResourceTags")) {
-            return tags;
-        }
-        JsonNode input = request.path("ResourceTags");
-        if (!input.isArray() || input.size() > 200) {
-            throw invalid("ResourceTags must be an array of at most 200 tags.");
-        }
-        for (JsonNode tag : input) {
-            String key = tagText(text(tag, "Key", 128), true);
-            String value = tagText(text(tag, "Value", 256), false);
-            if (tags.has(key)) {
-                throw invalid("Each resource tag key must be unique.");
-            }
-            tags.put(key, value);
-        }
-        checkTagCount(tags);
-        return tags;
-    }
-
-    private String tagText(String value, boolean key) {
-        String trimmed = value.strip();
-        if (!TAG_TEXT.matcher(trimmed).matches()
-                || (key && (trimmed.isEmpty() || trimmed.regionMatches(true, 0, "aws:", 0, 4)))) {
-            throw invalid("Resource tags must use valid characters and must not use reserved AWS keys.");
-        }
-        return trimmed;
-    }
-
-    private void checkTagCount(ObjectNode tags) {
-        if (tags.size() > 50) {
-            throw new AwsException("TooManyTagsException", "A resource may have at most 50 user tags.", 400);
-        }
-    }
-
     private AccountAwareStorageBackend<ObjectNode> taggedStorage(String arn) {
         String account = monitors.accountId();
         if (monitors.getForAccount(account, arn).isPresent()) {
@@ -483,53 +499,4 @@ public class CostAnomalyService implements Resettable {
         return false;
     }
 
-    private static ObjectNode object(JsonNode parent, String name) {
-        if (parent != null && parent.get(name) instanceof ObjectNode object) {
-            return object;
-        }
-        throw invalid(name + " must be an object.");
-    }
-
-    private static String text(JsonNode parent, String name, int maximum) {
-        JsonNode value = parent == null ? null : parent.get(name);
-        if (value == null || !value.isTextual() || value.textValue().length() > maximum) {
-            throw invalid(name + " must be a string of at most " + maximum + " characters.");
-        }
-        return value.textValue();
-    }
-
-    private static List<String> strings(JsonNode parent, String name, int maximum, int stringMaximum) {
-        JsonNode value = parent.path(name);
-        if (!value.isArray() || value.size() > maximum) {
-            throw invalid(name + " must be an array of at most " + maximum + " strings.");
-        }
-        List<String> result = new ArrayList<>();
-        for (JsonNode element : value) {
-            if (!element.isTextual() || element.textValue().length() > stringMaximum) {
-                throw invalid(name + " must contain strings of at most " + stringMaximum + " characters.");
-            }
-            result.add(element.textValue());
-        }
-        return result;
-    }
-
-    private static String singleRoot(ObjectNode expression, Set<String> supported) {
-        Iterator<String> fields = expression.fieldNames();
-        if (expression.size() != 1 || !fields.hasNext()) {
-            throw invalid("An expression must contain exactly one root operator.");
-        }
-        String root = fields.next();
-        if (!supported.contains(root)) {
-            throw invalid("Unsupported expression operator: " + root);
-        }
-        return root;
-    }
-
-    private static boolean present(JsonNode node, String field) {
-        return node != null && node.hasNonNull(field);
-    }
-
-    private static AwsException invalid(String message) {
-        return new AwsException("ValidationException", message, 400);
-    }
 }
