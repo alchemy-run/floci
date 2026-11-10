@@ -20,6 +20,8 @@ import java.util.Map;
  * @param memorySwapBytes memory plus swap the container may use, in bytes; equal to the memory
  *        limit means no swap (null = daemon default)
  * @param memorySwappiness swappiness from 0 to 100 (null = daemon default)
+ * @param runtime the OCI runtime registered with the daemon to run the container with, as
+ *        {@code docker run --runtime} names it (null = daemon default, usually runc)
  */
 public record LinuxOptions(
         List<String> capAdd,
@@ -28,8 +30,9 @@ public record LinuxOptions(
         Long shmSizeBytes,
         Map<String, String> tmpfs,
         Long memorySwapBytes,
-        Long memorySwappiness
+        Long memorySwappiness,
+        String runtime
 ) {
     public static final LinuxOptions NONE =
-            new LinuxOptions(List.of(), List.of(), List.of(), null, Map.of(), null, null);
+            new LinuxOptions(List.of(), List.of(), List.of(), null, Map.of(), null, null, null);
 }

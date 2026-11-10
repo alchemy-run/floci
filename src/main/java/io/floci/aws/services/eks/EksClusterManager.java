@@ -43,6 +43,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -94,27 +95,29 @@ public class EksClusterManager {
     static final String SANDBOX_RUNTIME_CLASSES_FILE = "floci-eks-nitro-sandboxes.yaml";
     static final String SANDBOX_RUNTIME_CLASSES_TAR_ENTRY = "server/manifests/" + SANDBOX_RUNTIME_CLASSES_FILE;
     /**
-     * The RuntimeClasses EKS Auto Mode provides for Nitro Sandboxes. k3s has no Nitro hypervisor, so
-     * both map to its default runc handler: a pod that names one is scheduled and runs as an
-     * ordinary container instead of staying Pending on a RuntimeClass that does not exist.
+     * The RuntimeClasses EKS Auto Mode provides for Nitro Sandboxes, on {@code handler}: gVisor's
+     * {@code runsc} when the cluster has it, else k3s's default {@code runc}, under which a pod
+     * that names one is scheduled and runs as an ordinary container instead of staying Pending.
      */
-    static final String SANDBOX_RUNTIME_CLASSES_MANIFEST = """
-            apiVersion: node.k8s.io/v1
-            kind: RuntimeClass
-            metadata:
-              name: isolated-sandbox
-              labels:
-                app.kubernetes.io/managed-by: floci
-            handler: runc
-            ---
-            apiVersion: node.k8s.io/v1
-            kind: RuntimeClass
-            metadata:
-              name: confidential-sandbox
-              labels:
-                app.kubernetes.io/managed-by: floci
-            handler: runc
-            """;
+    static String sandboxRuntimeClassesManifest(String handler) {
+        return """
+                apiVersion: node.k8s.io/v1
+                kind: RuntimeClass
+                metadata:
+                  name: isolated-sandbox
+                  labels:
+                    app.kubernetes.io/managed-by: floci
+                handler: %1$s
+                ---
+                apiVersion: node.k8s.io/v1
+                kind: RuntimeClass
+                metadata:
+                  name: confidential-sandbox
+                  labels:
+                    app.kubernetes.io/managed-by: floci
+                handler: %1$s
+                """.formatted(handler);
+    }
     private static final String ENDPOINT_MODE_NETWORK = "network";
     public static final String DEFAULT_POD_CIDR = "10.42.0.0/16";
 
@@ -1530,17 +1533,75 @@ public class EksClusterManager {
         if (!isAutoMode(cluster)) {
             return;
         }
+        String handler = "gvisor".equalsIgnoreCase(config.services().eks().sandboxRuntime())
+                && installGvisor(containerId, cluster) ? EksGvisorRuntime.HANDLER : "runc";
         try {
             lifecycleManager.getDockerClient()
                     .copyArchiveToContainerCmd(containerId)
                     .withTarInputStream(new ByteArrayInputStream(
-                            tarSingleFile(SANDBOX_RUNTIME_CLASSES_TAR_ENTRY, SANDBOX_RUNTIME_CLASSES_MANIFEST)))
+                            tarSingleFile(SANDBOX_RUNTIME_CLASSES_TAR_ENTRY, sandboxRuntimeClassesManifest(handler))))
                     .withRemotePath(K3S_DATA_DIR)
                     .exec();
         } catch (Exception e) {
             LOG.warnv("EKS cluster {0} has no Nitro Sandbox RuntimeClasses: could not copy {1} into the "
                     + "k3s container: {2}", cluster.getName(), SANDBOX_RUNTIME_CLASSES_FILE, e.getMessage());
         }
+    }
+
+    /**
+     * Unpacks gVisor into the created k3s container and registers its {@code runsc} runtime with
+     * containerd, before k3s starts and generates its containerd config. Returns false, leaving
+     * the classes on runc, when the release can't be fetched or copied.
+     */
+    private boolean installGvisor(String containerId, Cluster cluster) {
+        try {
+            String arch = EksGvisorRuntime.releaseArch(
+                    lifecycleManager.getDockerClient().infoCmd().exec().getArchitecture());
+            Path tarball = gvisorRuntime().tarball(arch);
+            try (InputStream archive = Files.newInputStream(tarball)) {
+                // The Docker archive API unpacks a bzip2-compressed tar as it is.
+                lifecycleManager.getDockerClient()
+                        .copyArchiveToContainerCmd(containerId)
+                        .withTarInputStream(archive)
+                        .withRemotePath(EksGvisorRuntime.INSTALL_DIR)
+                        .exec();
+            }
+            for (String[] template : new String[][]{
+                    {EksGvisorRuntime.CONTAINERD_V3_TEMPLATE_ENTRY, EksGvisorRuntime.CONTAINERD_V3_TEMPLATE},
+                    {EksGvisorRuntime.CONTAINERD_V2_TEMPLATE_ENTRY, EksGvisorRuntime.CONTAINERD_V2_TEMPLATE}}) {
+                lifecycleManager.getDockerClient()
+                        .copyArchiveToContainerCmd(containerId)
+                        .withTarInputStream(new ByteArrayInputStream(tarSingleFile(template[0], template[1])))
+                        .withRemotePath(K3S_DATA_DIR)
+                        .exec();
+            }
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (Exception e) {
+            LOG.warnv("EKS cluster {0} runs its Nitro Sandbox RuntimeClasses on runc: could not install "
+                    + "gVisor: {1}", cluster.getName(), e.getMessage());
+            return false;
+        }
+    }
+
+    private volatile EksGvisorRuntime gvisorRuntime;
+
+    private EksGvisorRuntime gvisorRuntime() {
+        EksGvisorRuntime runtime = gvisorRuntime;
+        if (runtime == null) {
+            synchronized (this) {
+                runtime = gvisorRuntime;
+                if (runtime == null) {
+                    runtime = new EksGvisorRuntime(config.services().eks().gvisorReleaseUrl(),
+                            config.services().eks().gvisorVersion(),
+                            Paths.get(config.services().eks().dataPath(), "gvisor"));
+                    gvisorRuntime = runtime;
+                }
+            }
+        }
+        return runtime;
     }
 
     static boolean isAutoMode(Cluster cluster) {

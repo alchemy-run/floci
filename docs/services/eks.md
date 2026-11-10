@@ -63,9 +63,17 @@ EKS uses a standard REST API with JSON bodies: not the JSON 1.1 (`X-Amz-Target`)
 ## Nitro Sandbox RuntimeClasses
 
 An Auto Mode cluster (`computeConfig.enabled: true`) gets the `isolated-sandbox` and
-`confidential-sandbox` RuntimeClasses that EKS Auto Mode provides for Nitro Sandboxes. Both use
-k3s's `runc` handler, so a pod that names one is scheduled and runs as an ordinary container,
-without isolation. Other clusters get no extra RuntimeClasses.
+`confidential-sandbox` RuntimeClasses that EKS Auto Mode provides for Nitro Sandboxes. Other
+clusters get no extra RuntimeClasses.
+
+By default both use k3s's `runc` handler, so a pod that names one is scheduled and runs as an
+ordinary container, without isolation. With `FLOCI_SERVICES_EKS_SANDBOX_RUNTIME=gvisor` they use
+[gVisor](https://gvisor.dev)'s `runsc` instead: each sandboxed pod runs on its own user-space
+kernel and does not share the node's kernel with other pods, which is the property a Nitro
+Sandbox gives. gVisor's systrap platform needs no KVM, so this works inside Docker Desktop.
+Floci downloads the pinned release once (about 70 MB, checked against its published SHA-512),
+caches it under the EKS data path, and installs it into each Auto Mode cluster's k3s container.
+If the release can't be fetched, the classes fall back to `runc` and Floci logs a warning.
 
 ## Read-only catalogs
 
@@ -823,6 +831,9 @@ When an instance joins a cluster, Floci registers a Kubernetes `Node` matching A
 | `FLOCI_SERVICES_EKS_KEEP_RUNNING_ON_SHUTDOWN` | `false` | Leave k3s containers running after Floci stops |
 | `FLOCI_SERVICES_EKS_ENDPOINT_MODE` | `host` | `describe-cluster` endpoint: `host` (`localhost:<hostPort>`) or `network` (container DNS) |
 | `FLOCI_SERVICES_EKS_IAM_AUTH_WEBHOOK` | `true` | Wire a token-auth webhook into k3s so `aws eks get-token` works |
+| `FLOCI_SERVICES_EKS_SANDBOX_RUNTIME` | `runc` | Runtime behind the Nitro Sandbox RuntimeClasses on Auto Mode clusters: `runc` or `gvisor` |
+| `FLOCI_SERVICES_EKS_GVISOR_VERSION` | `20261026.0` | gVisor release installed for `gvisor` |
+| `FLOCI_SERVICES_EKS_GVISOR_RELEASE_URL` | `https://storage.googleapis.com/gvisor/releases/release` | Where gVisor releases are downloaded from |
 | `FLOCI_SERVICES_EKS_IAM_AUTH_ALLOW_PUBLIC_CREDENTIALS` | `false` | Accept tokens signed with the public `test`/`test` and `floci`/`floci` pairs, mapped to cluster-admin. Only for an emulator reachable on loopback |
 | `FLOCI_SERVICES_EKS_ECR_REGISTRY_MIRROR` | `true` | Inject a containerd `registries.yaml` so pods can pull images pushed to [Floci ECR](ecr.md) |
 | `FLOCI_SERVICES_EKS_DISABLE_CNI` | `false` | Start k3s without bundled flannel, network policy, and kube-proxy so an external CNI can take over |

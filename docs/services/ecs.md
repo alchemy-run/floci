@@ -809,8 +809,11 @@ The task itself still runs as a local container.
 A task definition whose `trustedExecutionConfiguration.isolationMode` is `ISOLATED_SANDBOX` or
 `CONFIDENTIAL_SANDBOX` (Nitro Sandboxes) needs a Managed Instances provider with
 `nitroEnclavesEnabled`; anywhere else RunTask answers `InvalidParameterException`. Its tasks
-report `trustedExecutionSummary.isolationMode`. Floci has no Nitro hypervisor, so the container is
-not isolated from the host.
+report `trustedExecutionSummary.isolationMode`. Floci has no Nitro hypervisor. By default the
+task's containers run on the Docker daemon's default runtime, so they are not isolated from the
+host. Set `FLOCI_SERVICES_ECS_SANDBOX_RUNTIME` to a runtime registered with the daemon, such as
+gVisor's `runsc` after `runsc install` on a Linux host, and those containers run on it instead;
+other tasks keep the default.
 
 ### Service Deployments & Revisions
 
