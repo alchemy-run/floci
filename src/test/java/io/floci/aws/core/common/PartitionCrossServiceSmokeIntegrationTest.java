@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1327,6 +1327,23 @@ class PartitionCrossServiceSmokeIntegrationTest {
         cleanup.register(() -> signed(region, "apprunner")
                 .header("X-Amz-Target", "AppRunner.DeleteAutoScalingConfiguration").contentType(JSON_1_0)
                 .body("{\"AutoScalingConfigurationArn\":\"" + arn + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void auditManagerControlArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "auditmanager");
+        signed(region, "auditmanager").contentType(JSON).body("{}").post("/account/registerAccount").then()
+                .statusCode(200);
+        String name = unique("smoke-control", partitionCase);
+        String id = signed(region, "auditmanager").contentType(JSON).body("{\"name\":\"" + name
+                + "\",\"controlMappingSources\":[{\"sourceName\":\"manual\",\"sourceSetUpOption\":"
+                + "\"Procedural_Controls_Mapping\",\"sourceType\":\"MANUAL\"}]}").post("/controls").then()
+                .statusCode(200).extract().path("control.id");
+        cleanup.register(() -> signed(region, "auditmanager").delete("/controls/" + id));
+        String arn = signed(region, "auditmanager").get("/controls/" + id).then().statusCode(200).extract()
+                .path("control.arn");
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 

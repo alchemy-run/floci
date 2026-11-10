@@ -480,6 +480,8 @@ floci:
       enabled: true
     app-runner:
       enabled: true
+    audit-manager:
+      enabled: true
     rekognition:
       enabled: true
     translate:

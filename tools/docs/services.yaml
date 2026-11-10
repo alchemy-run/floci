@@ -223,6 +223,19 @@ services:
     doc: docs/services/apprunner.md
     sources:
       - { path: services/apprunner/AppRunnerJsonHandler.java, mode: switch }
+  - service: auditmanager
+    doc: docs/services/auditmanager.md
+    sources:
+      - { path: services/auditmanager/AuditManagerController.java, mode: rest }
+      - { path: core/common/SharedTagsController.java, mode: rest }
+    rename_actions:
+      ListTags: ListTagsForResource
+      TagResourcePost: TagResource
+    exclude_actions:
+      - ListTagsByQuery
+      - TagResourceByBody
+      - TagResourcePut
+      - UntagResourceByQuery
   - service: aiops
     doc: docs/services/aiops.md
     sources:

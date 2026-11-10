@@ -1,0 +1,1324 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_auditmanager_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateAssessmentReportEvidenceFolder": "AssociateAssessmentReportEvidenceFolderRequest",
+    "BatchAssociateAssessmentReportEvidence": "BatchAssociateAssessmentReportEvidenceRequest",
+    "BatchCreateDelegationByAssessment": "BatchCreateDelegationByAssessmentRequest",
+    "BatchDeleteDelegationByAssessment": "BatchDeleteDelegationByAssessmentRequest",
+    "BatchDisassociateAssessmentReportEvidence": "BatchDisassociateAssessmentReportEvidenceRequest",
+    "BatchImportEvidenceToAssessmentControl": "BatchImportEvidenceToAssessmentControlRequest",
+    "CreateAssessment": "CreateAssessmentRequest",
+    "CreateAssessmentFramework": "CreateAssessmentFrameworkRequest",
+    "CreateAssessmentReport": "CreateAssessmentReportRequest",
+    "CreateControl": "CreateControlRequest",
+    "DeleteAssessment": "DeleteAssessmentRequest",
+    "DeleteAssessmentFramework": "DeleteAssessmentFrameworkRequest",
+    "DeleteAssessmentFrameworkShare": "DeleteAssessmentFrameworkShareRequest",
+    "DeleteAssessmentReport": "DeleteAssessmentReportRequest",
+    "DeleteControl": "DeleteControlRequest",
+    "DeregisterAccount": "DeregisterAccountRequest",
+    "DeregisterOrganizationAdminAccount": "DeregisterOrganizationAdminAccountRequest",
+    "DisassociateAssessmentReportEvidenceFolder": "DisassociateAssessmentReportEvidenceFolderRequest",
+    "GetAccountStatus": "GetAccountStatusRequest",
+    "GetAssessment": "GetAssessmentRequest",
+    "GetAssessmentFramework": "GetAssessmentFrameworkRequest",
+    "GetAssessmentReportUrl": "GetAssessmentReportUrlRequest",
+    "GetChangeLogs": "GetChangeLogsRequest",
+    "GetControl": "GetControlRequest",
+    "GetDelegations": "GetDelegationsRequest",
+    "GetEvidence": "GetEvidenceRequest",
+    "GetEvidenceByEvidenceFolder": "GetEvidenceByEvidenceFolderRequest",
+    "GetEvidenceFileUploadUrl": "GetEvidenceFileUploadUrlRequest",
+    "GetEvidenceFolder": "GetEvidenceFolderRequest",
+    "GetEvidenceFoldersByAssessment": "GetEvidenceFoldersByAssessmentRequest",
+    "GetEvidenceFoldersByAssessmentControl": "GetEvidenceFoldersByAssessmentControlRequest",
+    "GetInsights": "GetInsightsRequest",
+    "GetInsightsByAssessment": "GetInsightsByAssessmentRequest",
+    "GetOrganizationAdminAccount": "GetOrganizationAdminAccountRequest",
+    "GetServicesInScope": "GetServicesInScopeRequest",
+    "GetSettings": "GetSettingsRequest",
+    "ListAssessmentControlInsightsByControlDomain": "ListAssessmentControlInsightsByControlDomainRequest",
+    "ListAssessmentFrameworkShareRequests": "ListAssessmentFrameworkShareRequestsRequest",
+    "ListAssessmentFrameworks": "ListAssessmentFrameworksRequest",
+    "ListAssessmentReports": "ListAssessmentReportsRequest",
+    "ListAssessments": "ListAssessmentsRequest",
+    "ListControlDomainInsights": "ListControlDomainInsightsRequest",
+    "ListControlDomainInsightsByAssessment": "ListControlDomainInsightsByAssessmentRequest",
+    "ListControlInsightsByControlDomain": "ListControlInsightsByControlDomainRequest",
+    "ListControls": "ListControlsRequest",
+    "ListKeywordsForDataSource": "ListKeywordsForDataSourceRequest",
+    "ListNotifications": "ListNotificationsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "RegisterAccount": "RegisterAccountRequest",
+    "RegisterOrganizationAdminAccount": "RegisterOrganizationAdminAccountRequest",
+    "StartAssessmentFrameworkShare": "StartAssessmentFrameworkShareRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateAssessment": "UpdateAssessmentRequest",
+    "UpdateAssessmentControl": "UpdateAssessmentControlRequest",
+    "UpdateAssessmentControlSetStatus": "UpdateAssessmentControlSetStatusRequest",
+    "UpdateAssessmentFramework": "UpdateAssessmentFrameworkRequest",
+    "UpdateAssessmentFrameworkShare": "UpdateAssessmentFrameworkShareRequest",
+    "UpdateAssessmentStatus": "UpdateAssessmentStatusRequest",
+    "UpdateControl": "UpdateControlRequest",
+    "UpdateSettings": "UpdateSettingsRequest",
+    "ValidateAssessmentReportIntegrity": "ValidateAssessmentReportIntegrityRequest"
+  },
+  "shapes": {
+    "AWSAccount": {
+      "type": "structure",
+      "members": {
+        "id": "AccountId",
+        "emailAddress": "EmailAddress",
+        "name": "AccountName"
+      }
+    },
+    "AWSAccounts": {
+      "type": "list",
+      "min": 1,
+      "max": 200,
+      "member": "AWSAccount"
+    },
+    "AWSService": {
+      "type": "structure",
+      "members": {
+        "serviceName": "AWSServiceName"
+      }
+    },
+    "AWSServiceName": {
+      "type": "string",
+      "min": 1,
+      "max": 40,
+      "pattern": "^[a-zA-Z0-9-\\s().]+$"
+    },
+    "AWSServices": {
+      "type": "list",
+      "member": "AWSService"
+    },
+    "AccountId": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "^[0-9]{12}$"
+    },
+    "AccountName": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "^[\\u0020-\\u007E]+$"
+    },
+    "ActionPlanInstructions": {
+      "type": "string",
+      "max": 1000,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "ActionPlanTitle": {
+      "type": "string",
+      "max": 300,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "AssessmentDescription": {
+      "type": "string",
+      "max": 1000,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "AssessmentName": {
+      "type": "string",
+      "min": 1,
+      "max": 300,
+      "pattern": "^[^\\\\]*$"
+    },
+    "AssessmentReportDescription": {
+      "type": "string",
+      "max": 1000,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "AssessmentReportDestinationType": {
+      "type": "string",
+      "enum": [
+        "S3"
+      ]
+    },
+    "AssessmentReportName": {
+      "type": "string",
+      "min": 1,
+      "max": 300,
+      "pattern": "^[a-zA-Z0-9-_\\.]+$"
+    },
+    "AssessmentReportsDestination": {
+      "type": "structure",
+      "members": {
+        "destinationType": "AssessmentReportDestinationType",
+        "destination": "S3Url"
+      }
+    },
+    "AssessmentStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "INACTIVE"
+      ]
+    },
+    "AssociateAssessmentReportEvidenceFolderRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "evidenceFolderId"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "evidenceFolderId": "UUID"
+      }
+    },
+    "AuditManagerArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "^arn:.*:auditmanager:.*"
+    },
+    "BatchAssociateAssessmentReportEvidenceRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "evidenceFolderId",
+        "evidenceIds"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "evidenceFolderId": "UUID",
+        "evidenceIds": "EvidenceIds"
+      }
+    },
+    "BatchCreateDelegationByAssessmentRequest": {
+      "type": "structure",
+      "required": [
+        "createDelegationRequests",
+        "assessmentId"
+      ],
+      "members": {
+        "createDelegationRequests": "CreateDelegationRequests",
+        "assessmentId": "UUID"
+      }
+    },
+    "BatchDeleteDelegationByAssessmentRequest": {
+      "type": "structure",
+      "required": [
+        "delegationIds",
+        "assessmentId"
+      ],
+      "members": {
+        "delegationIds": "DelegationIds",
+        "assessmentId": "UUID"
+      }
+    },
+    "BatchDisassociateAssessmentReportEvidenceRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "evidenceFolderId",
+        "evidenceIds"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "evidenceFolderId": "UUID",
+        "evidenceIds": "EvidenceIds"
+      }
+    },
+    "BatchImportEvidenceToAssessmentControlRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "controlSetId",
+        "controlId",
+        "manualEvidence"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "controlSetId": "ControlSetId",
+        "controlId": "UUID",
+        "manualEvidence": "ManualEvidenceList"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "ComplianceType": {
+      "type": "string",
+      "max": 100,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "ControlCatalogId": {
+      "type": "string",
+      "min": 13,
+      "max": 2048,
+      "pattern": "^arn:.*:controlcatalog:.*|UNCATEGORIZED"
+    },
+    "ControlCommentBody": {
+      "type": "string",
+      "max": 500,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "ControlDescription": {
+      "type": "string",
+      "max": 1000,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "ControlDomainId": {
+      "type": "string",
+      "min": 13,
+      "max": 2048,
+      "pattern": "^arn:.*:controlcatalog:.*:.*:domain/.*|UNCATEGORIZED|^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+    },
+    "ControlMappingSource": {
+      "type": "structure",
+      "members": {
+        "sourceId": "UUID",
+        "sourceName": "SourceName",
+        "sourceDescription": "SourceDescription",
+        "sourceSetUpOption": "SourceSetUpOption",
+        "sourceType": "SourceType",
+        "sourceKeyword": "SourceKeyword",
+        "sourceFrequency": "SourceFrequency",
+        "troubleshootingText": "TroubleshootingText"
+      }
+    },
+    "ControlMappingSources": {
+      "type": "list",
+      "min": 1,
+      "member": "ControlMappingSource"
+    },
+    "ControlName": {
+      "type": "string",
+      "min": 1,
+      "max": 300,
+      "pattern": "^[^\\\\]*$"
+    },
+    "ControlSetId": {
+      "type": "string",
+      "min": 1,
+      "max": 300,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "ControlSetName": {
+      "type": "string",
+      "min": 1,
+      "max": 300,
+      "pattern": "^[^\\\\\\_]*$"
+    },
+    "ControlSetStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "UNDER_REVIEW",
+        "REVIEWED"
+      ]
+    },
+    "ControlStatus": {
+      "type": "string",
+      "enum": [
+        "UNDER_REVIEW",
+        "REVIEWED",
+        "INACTIVE"
+      ]
+    },
+    "ControlType": {
+      "type": "string",
+      "enum": [
+        "Standard",
+        "Custom",
+        "Core"
+      ]
+    },
+    "CreateAssessmentFrameworkControl": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "UUID"
+      }
+    },
+    "CreateAssessmentFrameworkControlSet": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "ControlSetName",
+        "controls": "CreateAssessmentFrameworkControls"
+      }
+    },
+    "CreateAssessmentFrameworkControlSets": {
+      "type": "list",
+      "min": 1,
+      "member": "CreateAssessmentFrameworkControlSet"
+    },
+    "CreateAssessmentFrameworkControls": {
+      "type": "list",
+      "min": 1,
+      "member": "CreateAssessmentFrameworkControl"
+    },
+    "CreateAssessmentFrameworkRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "controlSets"
+      ],
+      "members": {
+        "name": "FrameworkName",
+        "description": "FrameworkDescription",
+        "complianceType": "ComplianceType",
+        "controlSets": "CreateAssessmentFrameworkControlSets",
+        "tags": "TagMap"
+      }
+    },
+    "CreateAssessmentReportRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "assessmentId"
+      ],
+      "members": {
+        "name": "AssessmentReportName",
+        "description": "AssessmentReportDescription",
+        "assessmentId": "UUID",
+        "queryStatement": "QueryStatement"
+      }
+    },
+    "CreateAssessmentRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "assessmentReportsDestination",
+        "scope",
+        "roles",
+        "frameworkId"
+      ],
+      "members": {
+        "name": "AssessmentName",
+        "description": "AssessmentDescription",
+        "assessmentReportsDestination": "AssessmentReportsDestination",
+        "scope": "Scope",
+        "roles": "Roles",
+        "frameworkId": "UUID",
+        "tags": "TagMap"
+      }
+    },
+    "CreateControlMappingSource": {
+      "type": "structure",
+      "members": {
+        "sourceName": "SourceName",
+        "sourceDescription": "SourceDescription",
+        "sourceSetUpOption": "SourceSetUpOption",
+        "sourceType": "SourceType",
+        "sourceKeyword": "SourceKeyword",
+        "sourceFrequency": "SourceFrequency",
+        "troubleshootingText": "TroubleshootingText"
+      }
+    },
+    "CreateControlMappingSources": {
+      "type": "list",
+      "min": 1,
+      "member": "CreateControlMappingSource"
+    },
+    "CreateControlRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "controlMappingSources"
+      ],
+      "members": {
+        "name": "ControlName",
+        "description": "ControlDescription",
+        "testingInformation": "TestingInformation",
+        "actionPlanTitle": "ActionPlanTitle",
+        "actionPlanInstructions": "ActionPlanInstructions",
+        "controlMappingSources": "CreateControlMappingSources",
+        "tags": "TagMap"
+      }
+    },
+    "CreateDelegationRequest": {
+      "type": "structure",
+      "members": {
+        "comment": "DelegationComment",
+        "controlSetId": "ControlSetId",
+        "roleArn": "IamArn",
+        "roleType": "RoleType"
+      }
+    },
+    "CreateDelegationRequests": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "CreateDelegationRequest"
+    },
+    "DataSourceType": {
+      "type": "string",
+      "enum": [
+        "AWS_Cloudtrail",
+        "AWS_Config",
+        "AWS_Security_Hub",
+        "AWS_API_Call",
+        "MANUAL"
+      ]
+    },
+    "DefaultExportDestination": {
+      "type": "structure",
+      "members": {
+        "destinationType": "ExportDestinationType",
+        "destination": "S3Url"
+      }
+    },
+    "DelegationComment": {
+      "type": "string",
+      "max": 350,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "DelegationIds": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "UUID"
+    },
+    "DeleteAssessmentFrameworkRequest": {
+      "type": "structure",
+      "required": [
+        "frameworkId"
+      ],
+      "members": {
+        "frameworkId": "UUID"
+      }
+    },
+    "DeleteAssessmentFrameworkShareRequest": {
+      "type": "structure",
+      "required": [
+        "requestId",
+        "requestType"
+      ],
+      "members": {
+        "requestId": "UUID",
+        "requestType": "ShareRequestType"
+      }
+    },
+    "DeleteAssessmentReportRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "assessmentReportId"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "assessmentReportId": "UUID"
+      }
+    },
+    "DeleteAssessmentRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId"
+      ],
+      "members": {
+        "assessmentId": "UUID"
+      }
+    },
+    "DeleteControlRequest": {
+      "type": "structure",
+      "required": [
+        "controlId"
+      ],
+      "members": {
+        "controlId": "UUID"
+      }
+    },
+    "DeleteResources": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "DEFAULT"
+      ]
+    },
+    "DeregisterAccountRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DeregisterOrganizationAdminAccountRequest": {
+      "type": "structure",
+      "members": {
+        "adminAccountId": "AccountId"
+      }
+    },
+    "DeregistrationPolicy": {
+      "type": "structure",
+      "members": {
+        "deleteResources": "DeleteResources"
+      }
+    },
+    "DisassociateAssessmentReportEvidenceFolderRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "evidenceFolderId"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "evidenceFolderId": "UUID"
+      }
+    },
+    "EmailAddress": {
+      "type": "string",
+      "min": 1,
+      "max": 320,
+      "pattern": "^.*@.*$"
+    },
+    "EvidenceIds": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "UUID"
+    },
+    "ExportDestinationType": {
+      "type": "string",
+      "enum": [
+        "S3"
+      ]
+    },
+    "FrameworkDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "FrameworkName": {
+      "type": "string",
+      "min": 1,
+      "max": 300,
+      "pattern": "^[^\\\\]*$"
+    },
+    "FrameworkType": {
+      "type": "string",
+      "enum": [
+        "Standard",
+        "Custom"
+      ]
+    },
+    "GetAccountStatusRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetAssessmentFrameworkRequest": {
+      "type": "structure",
+      "required": [
+        "frameworkId"
+      ],
+      "members": {
+        "frameworkId": "UUID"
+      }
+    },
+    "GetAssessmentReportUrlRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentReportId",
+        "assessmentId"
+      ],
+      "members": {
+        "assessmentReportId": "UUID",
+        "assessmentId": "UUID"
+      }
+    },
+    "GetAssessmentRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId"
+      ],
+      "members": {
+        "assessmentId": "UUID"
+      }
+    },
+    "GetChangeLogsRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "controlSetId": "ControlSetId",
+        "controlId": "UUID",
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "GetControlRequest": {
+      "type": "structure",
+      "required": [
+        "controlId"
+      ],
+      "members": {
+        "controlId": "UUID"
+      }
+    },
+    "GetDelegationsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "GetEvidenceByEvidenceFolderRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "controlSetId",
+        "evidenceFolderId"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "controlSetId": "ControlSetId",
+        "evidenceFolderId": "UUID",
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "GetEvidenceFileUploadUrlRequest": {
+      "type": "structure",
+      "required": [
+        "fileName"
+      ],
+      "members": {
+        "fileName": "ManualEvidenceLocalFileName"
+      }
+    },
+    "GetEvidenceFolderRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "controlSetId",
+        "evidenceFolderId"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "controlSetId": "ControlSetId",
+        "evidenceFolderId": "UUID"
+      }
+    },
+    "GetEvidenceFoldersByAssessmentControlRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "controlSetId",
+        "controlId"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "controlSetId": "ControlSetId",
+        "controlId": "UUID",
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "GetEvidenceFoldersByAssessmentRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "GetEvidenceRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "controlSetId",
+        "evidenceFolderId",
+        "evidenceId"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "controlSetId": "ControlSetId",
+        "evidenceFolderId": "UUID",
+        "evidenceId": "UUID"
+      }
+    },
+    "GetInsightsByAssessmentRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId"
+      ],
+      "members": {
+        "assessmentId": "UUID"
+      }
+    },
+    "GetInsightsRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetOrganizationAdminAccountRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetServicesInScopeRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetSettingsRequest": {
+      "type": "structure",
+      "required": [
+        "attribute"
+      ],
+      "members": {
+        "attribute": "SettingAttribute"
+      }
+    },
+    "IamArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "^arn:.*:iam:.*"
+    },
+    "KeywordInputType": {
+      "type": "string",
+      "enum": [
+        "SELECT_FROM_LIST",
+        "UPLOAD_FILE",
+        "INPUT_TEXT"
+      ]
+    },
+    "KeywordValue": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[a-zA-Z_0-9-\\s().:\\/]+$"
+    },
+    "KmsKey": {
+      "type": "string",
+      "min": 7,
+      "max": 2048,
+      "pattern": "^arn:.*:kms:.*|DEFAULT"
+    },
+    "ListAssessmentControlInsightsByControlDomainRequest": {
+      "type": "structure",
+      "required": [
+        "controlDomainId",
+        "assessmentId"
+      ],
+      "members": {
+        "controlDomainId": "ControlDomainId",
+        "assessmentId": "UUID",
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAssessmentFrameworkShareRequestsRequest": {
+      "type": "structure",
+      "required": [
+        "requestType"
+      ],
+      "members": {
+        "requestType": "ShareRequestType",
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAssessmentFrameworksRequest": {
+      "type": "structure",
+      "required": [
+        "frameworkType"
+      ],
+      "members": {
+        "frameworkType": "FrameworkType",
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAssessmentReportsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAssessmentsRequest": {
+      "type": "structure",
+      "members": {
+        "status": "AssessmentStatus",
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListControlDomainInsightsByAssessmentRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListControlDomainInsightsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListControlInsightsByControlDomainRequest": {
+      "type": "structure",
+      "required": [
+        "controlDomainId"
+      ],
+      "members": {
+        "controlDomainId": "ControlDomainId",
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListControlsRequest": {
+      "type": "structure",
+      "required": [
+        "controlType"
+      ],
+      "members": {
+        "controlType": "ControlType",
+        "nextToken": "Token",
+        "maxResults": "MaxResults",
+        "controlCatalogId": "ControlCatalogId"
+      }
+    },
+    "ListKeywordsForDataSourceRequest": {
+      "type": "structure",
+      "required": [
+        "source"
+      ],
+      "members": {
+        "source": "DataSourceType",
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListNotificationsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "Token",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "AuditManagerArn"
+      }
+    },
+    "ManualEvidence": {
+      "type": "structure",
+      "members": {
+        "s3ResourcePath": "S3Url",
+        "textResponse": "ManualEvidenceTextResponse",
+        "evidenceFileName": "ManualEvidenceLocalFileName"
+      }
+    },
+    "ManualEvidenceList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "ManualEvidence"
+    },
+    "ManualEvidenceLocalFileName": {
+      "type": "string",
+      "min": 1,
+      "max": 300,
+      "pattern": "[^\\/]*"
+    },
+    "ManualEvidenceTextResponse": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "QueryStatement": {
+      "type": "string",
+      "min": 1,
+      "max": 10000,
+      "pattern": "(?s).*"
+    },
+    "Region": {
+      "type": "string",
+      "pattern": "^[a-z]{2}-[a-z]+-[0-9]{1}$"
+    },
+    "RegisterAccountRequest": {
+      "type": "structure",
+      "members": {
+        "kmsKey": "KmsKey",
+        "delegatedAdminAccount": "AccountId"
+      }
+    },
+    "RegisterOrganizationAdminAccountRequest": {
+      "type": "structure",
+      "required": [
+        "adminAccountId"
+      ],
+      "members": {
+        "adminAccountId": "AccountId"
+      }
+    },
+    "Role": {
+      "type": "structure",
+      "required": [
+        "roleType",
+        "roleArn"
+      ],
+      "members": {
+        "roleType": "RoleType",
+        "roleArn": "IamArn"
+      }
+    },
+    "RoleType": {
+      "type": "string",
+      "enum": [
+        "PROCESS_OWNER",
+        "RESOURCE_OWNER"
+      ]
+    },
+    "Roles": {
+      "type": "list",
+      "member": "Role"
+    },
+    "S3Url": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^(S|s)3:\\/\\/[a-zA-Z0-9\\-\\.\\(\\)\\'\\*\\_\\!\\=\\+\\@\\:\\s\\,\\?\\/]+$"
+    },
+    "Scope": {
+      "type": "structure",
+      "members": {
+        "awsAccounts": "AWSAccounts",
+        "awsServices": "AWSServices"
+      }
+    },
+    "SettingAttribute": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "IS_AWS_ORG_ENABLED",
+        "SNS_TOPIC",
+        "DEFAULT_ASSESSMENT_REPORTS_DESTINATION",
+        "DEFAULT_PROCESS_OWNERS",
+        "EVIDENCE_FINDER_ENABLEMENT",
+        "DEREGISTRATION_POLICY",
+        "DEFAULT_EXPORT_DESTINATION"
+      ]
+    },
+    "ShareRequestAction": {
+      "type": "string",
+      "enum": [
+        "ACCEPT",
+        "DECLINE",
+        "REVOKE"
+      ]
+    },
+    "ShareRequestComment": {
+      "type": "string",
+      "max": 500,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "ShareRequestType": {
+      "type": "string",
+      "enum": [
+        "SENT",
+        "RECEIVED"
+      ]
+    },
+    "SnsArn": {
+      "type": "string",
+      "min": 4,
+      "max": 2048,
+      "pattern": "^arn:.*:sns:.*|NONE"
+    },
+    "SourceDescription": {
+      "type": "string",
+      "max": 1000,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "SourceFrequency": {
+      "type": "string",
+      "enum": [
+        "DAILY",
+        "WEEKLY",
+        "MONTHLY"
+      ]
+    },
+    "SourceKeyword": {
+      "type": "structure",
+      "members": {
+        "keywordInputType": "KeywordInputType",
+        "keywordValue": "KeywordValue"
+      }
+    },
+    "SourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 300
+    },
+    "SourceSetUpOption": {
+      "type": "string",
+      "enum": [
+        "System_Controls_Mapping",
+        "Procedural_Controls_Mapping"
+      ]
+    },
+    "SourceType": {
+      "type": "string",
+      "enum": [
+        "AWS_Cloudtrail",
+        "AWS_Config",
+        "AWS_Security_Hub",
+        "AWS_API_Call",
+        "MANUAL",
+        "Common_Control",
+        "Core_Control"
+      ]
+    },
+    "StartAssessmentFrameworkShareRequest": {
+      "type": "structure",
+      "required": [
+        "frameworkId",
+        "destinationAccount",
+        "destinationRegion"
+      ],
+      "members": {
+        "frameworkId": "UUID",
+        "destinationAccount": "AccountId",
+        "destinationRegion": "Region",
+        "comment": "ShareRequestComment"
+      }
+    },
+    "String": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": ".*"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^(?!aws:)[a-zA-Z+-=._:/]+$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "AuditManagerArn",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": ".{0,255}"
+    },
+    "TestingInformation": {
+      "type": "string",
+      "max": 1000,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "Token": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "^[A-Za-z0-9+\\/=]*$"
+    },
+    "TroubleshootingText": {
+      "type": "string",
+      "max": 1000,
+      "pattern": "^[\\w\\W\\s\\S]*$"
+    },
+    "UUID": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "AuditManagerArn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateAssessmentControlRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "controlSetId",
+        "controlId"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "controlSetId": "ControlSetId",
+        "controlId": "UUID",
+        "controlStatus": "ControlStatus",
+        "commentBody": "ControlCommentBody"
+      }
+    },
+    "UpdateAssessmentControlSetStatusRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "controlSetId",
+        "status",
+        "comment"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "controlSetId": "String",
+        "status": "ControlSetStatus",
+        "comment": "DelegationComment"
+      }
+    },
+    "UpdateAssessmentFrameworkControlSet": {
+      "type": "structure",
+      "required": [
+        "name",
+        "controls"
+      ],
+      "members": {
+        "id": "ControlSetName",
+        "name": "ControlSetName",
+        "controls": "CreateAssessmentFrameworkControls"
+      }
+    },
+    "UpdateAssessmentFrameworkControlSets": {
+      "type": "list",
+      "min": 1,
+      "member": "UpdateAssessmentFrameworkControlSet"
+    },
+    "UpdateAssessmentFrameworkRequest": {
+      "type": "structure",
+      "required": [
+        "frameworkId",
+        "name",
+        "controlSets"
+      ],
+      "members": {
+        "frameworkId": "UUID",
+        "name": "FrameworkName",
+        "description": "FrameworkDescription",
+        "complianceType": "ComplianceType",
+        "controlSets": "UpdateAssessmentFrameworkControlSets"
+      }
+    },
+    "UpdateAssessmentFrameworkShareRequest": {
+      "type": "structure",
+      "required": [
+        "requestId",
+        "requestType",
+        "action"
+      ],
+      "members": {
+        "requestId": "UUID",
+        "requestType": "ShareRequestType",
+        "action": "ShareRequestAction"
+      }
+    },
+    "UpdateAssessmentRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "scope"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "assessmentName": "AssessmentName",
+        "assessmentDescription": "AssessmentDescription",
+        "scope": "Scope",
+        "assessmentReportsDestination": "AssessmentReportsDestination",
+        "roles": "Roles"
+      }
+    },
+    "UpdateAssessmentStatusRequest": {
+      "type": "structure",
+      "required": [
+        "assessmentId",
+        "status"
+      ],
+      "members": {
+        "assessmentId": "UUID",
+        "status": "AssessmentStatus"
+      }
+    },
+    "UpdateControlRequest": {
+      "type": "structure",
+      "required": [
+        "controlId",
+        "name",
+        "controlMappingSources"
+      ],
+      "members": {
+        "controlId": "UUID",
+        "name": "ControlName",
+        "description": "ControlDescription",
+        "testingInformation": "TestingInformation",
+        "actionPlanTitle": "ActionPlanTitle",
+        "actionPlanInstructions": "ActionPlanInstructions",
+        "controlMappingSources": "ControlMappingSources"
+      }
+    },
+    "UpdateSettingsRequest": {
+      "type": "structure",
+      "members": {
+        "snsTopic": "SnsArn",
+        "defaultAssessmentReportsDestination": "AssessmentReportsDestination",
+        "defaultProcessOwners": "Roles",
+        "kmsKey": "KmsKey",
+        "evidenceFinderEnabled": "Boolean",
+        "deregistrationPolicy": "DeregistrationPolicy",
+        "defaultExportDestination": "DefaultExportDestination"
+      }
+    },
+    "ValidateAssessmentReportIntegrityRequest": {
+      "type": "structure",
+      "required": [
+        "s3RelativePath"
+      ],
+      "members": {
+        "s3RelativePath": "S3Url"
+      }
+    }
+  }
+}

@@ -16,6 +16,7 @@ import io.floci.aws.services.appsync.AppSyncController;
 import io.floci.aws.services.appsync.graphql.AppSyncExecutionController;
 import io.floci.aws.services.aps.ApsController;
 import io.floci.aws.services.aps.ApsDataPlaneController;
+import io.floci.aws.services.auditmanager.AuditManagerController;
 import io.floci.aws.services.backup.BackupController;
 import io.floci.aws.services.batch.BatchController;
 import io.floci.aws.services.bedrock.BedrockController;
@@ -694,6 +695,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AppRunner."), Set.of("apprunner"), Set.of(), Set.of()),
+                descriptor("auditmanager", "auditmanager", config.services().auditManager().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("auditmanager"), Set.of(), Set.of(AuditManagerController.class)),
                 descriptor("servicecatalog-appregistry", "appregistry", config.services().appRegistry().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

@@ -200,6 +200,8 @@ _REST = ("REST: its requests name their resources in the path, which RequestReso
 
 # Namespaces Floci serves whose resources are not read yet, and why.
 NOT_COVERED: dict[str, str] = {
+    "apprunner": "not read yet: its JSON operations name services, connections and configurations by ARN",
+    "auditmanager": "REST routes no rule maps yet",
     "cloudfront-keyvaluestore": "the Alchemy fork's KeyValueStore data plane; its requests are not read yet",
     "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",
     "acm-pca": _LATER,

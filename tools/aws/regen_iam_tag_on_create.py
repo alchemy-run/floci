@@ -108,6 +108,8 @@ _NO_ROUTES = "REST routes no rule maps yet"
 # Namespaces Floci serves whose operations list a tagging action but are not read here yet, each with
 # why. `TagOnCreateNamespacesIntegrationTest` fails for a namespace Floci serves that is in neither list.
 NOT_COVERED = {
+    "apprunner": "not read yet: its Create* operations take Tags",
+    "auditmanager": "REST routes no rule maps yet",
     "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",
     "acm-pca": "not read yet: CreateCertificateAuthority tags on creation; a later batch",
     "geo": _NO_ROUTES, "polly": _NO_ROUTES, "aiops": _NO_ROUTES, "amplify": _NO_ROUTES, "appflow": _NO_ROUTES,

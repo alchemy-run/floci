@@ -859,6 +859,7 @@ public interface EmulatorConfig {
         AppFlowServiceConfig appFlow();
         AppRegistryServiceConfig appRegistry();
         AppRunnerServiceConfig appRunner();
+        AuditManagerServiceConfig auditManager();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2865,6 +2866,11 @@ public interface EmulatorConfig {
     }
 
     interface AppRunnerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AuditManagerServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
