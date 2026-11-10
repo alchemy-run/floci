@@ -93,6 +93,7 @@ NOT_COVERED = {
     "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",
     "aiops": "REST routes no rule maps yet",
     "amplify": "REST routes no rule maps yet",
+    "appflow": "REST routes no rule maps yet",
     "comprehendmedical": "not read yet: its Start*Job operations pass DataAccessRoleArn; a later batch",
     "geo": "REST routes no rule maps yet",
     "apigateway": "authorized by HTTP method, so no request is checked as one of these operations",

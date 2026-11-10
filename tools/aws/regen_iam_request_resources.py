@@ -211,6 +211,7 @@ NOT_COVERED: dict[str, str] = {
     "account": _REST,
     "aiops": _REST,
     "amplify": _REST,
+    "appflow": _REST,
     "airflow": _REST,
     "app-integrations": _REST,
     "appconfig": _REST,

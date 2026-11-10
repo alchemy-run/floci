@@ -9,6 +9,7 @@ import io.floci.aws.services.amplify.AmplifyController;
 import io.floci.aws.services.apigateway.ApiGatewayController;
 import io.floci.aws.services.appconfig.AppConfigController;
 import io.floci.aws.services.appconfig.AppConfigDataController;
+import io.floci.aws.services.appflow.AppFlowController;
 import io.floci.aws.services.appintegrations.AppIntegrationsController;
 import io.floci.aws.services.appsync.AppSyncController;
 import io.floci.aws.services.appsync.graphql.AppSyncExecutionController;
@@ -688,6 +689,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("polly"), Set.of(), Set.of(PollyController.class)),
+                descriptor("appflow", "appflow", config.services().appFlow().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("appflow"), Set.of(), Set.of(AppFlowController.class)),
                 descriptor("amplify", "amplify", config.services().amplify().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

@@ -991,6 +991,8 @@ floci:
       enabled: true
     amplify:
       enabled: true
+    app-flow:
+      enabled: true
     rekognition:
       enabled: true
     translate:

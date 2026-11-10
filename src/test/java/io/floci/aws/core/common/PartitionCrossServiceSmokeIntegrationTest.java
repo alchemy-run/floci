@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1316,6 +1316,21 @@ class PartitionCrossServiceSmokeIntegrationTest {
      * A service no partition lists (the newer ones {@code endpoints.json} omits) runs everywhere,
      * the same reading strict partition mode applies: silence there is not absence.
      */
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void appFlowConnectorProfileArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "appflow");
+        String name = unique("smoke-profile", partitionCase);
+        String arn = signed(region, "appflow").contentType(JSON)
+                .body("{\"connectorProfileName\":\"" + name + "\",\"connectorType\":\"Salesforce\","
+                        + "\"connectionMode\":\"Public\",\"connectorProfileConfig\":{\"connectorProfileProperties\":"
+                        + "{},\"connectorProfileCredentials\":{\"Salesforce\":{\"accessToken\":\"t\"}}}}")
+                .post("/create-connector-profile").then().statusCode(200).extract().path("connectorProfileArn");
+        cleanup.register(() -> signed(region, "appflow").contentType(JSON)
+                .body("{\"connectorProfileName\":\"" + name + "\"}").post("/delete-connector-profile"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
     void amplifyAppArn(PartitionCase partitionCase) {

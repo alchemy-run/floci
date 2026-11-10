@@ -856,6 +856,7 @@ public interface EmulatorConfig {
         AcmPcaServiceConfig acmPca();
         AiOpsServiceConfig aiOps();
         AmplifyServiceConfig amplify();
+        AppFlowServiceConfig appFlow();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2847,6 +2848,11 @@ public interface EmulatorConfig {
     }
 
     interface AmplifyServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppFlowServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
