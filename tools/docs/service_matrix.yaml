@@ -19,6 +19,7 @@
 # documents a facet of another service and deliberately has no row of its own).
 
 aliases:
+  servicecatalog-appregistry: appregistry   # AppRegistry's endpoint prefix; it signs with "servicecatalog"
   acm-pca: acmpca                       # Private CA's SigV4 signing name is "acm-pca"
   geo: location                         # Location's SigV4 signing name is "geo"
   geo-maps: location                    # Maps API facet, documented in location.md

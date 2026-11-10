@@ -1,0 +1,415 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_appregistry_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateAttributeGroup": "AssociateAttributeGroupRequest",
+    "AssociateResource": "AssociateResourceRequest",
+    "CreateApplication": "CreateApplicationRequest",
+    "CreateAttributeGroup": "CreateAttributeGroupRequest",
+    "DeleteApplication": "DeleteApplicationRequest",
+    "DeleteAttributeGroup": "DeleteAttributeGroupRequest",
+    "DisassociateAttributeGroup": "DisassociateAttributeGroupRequest",
+    "DisassociateResource": "DisassociateResourceRequest",
+    "GetApplication": "GetApplicationRequest",
+    "GetAssociatedResource": "GetAssociatedResourceRequest",
+    "GetAttributeGroup": "GetAttributeGroupRequest",
+    "ListApplications": "ListApplicationsRequest",
+    "ListAssociatedAttributeGroups": "ListAssociatedAttributeGroupsRequest",
+    "ListAssociatedResources": "ListAssociatedResourcesRequest",
+    "ListAttributeGroups": "ListAttributeGroupsRequest",
+    "ListAttributeGroupsForApplication": "ListAttributeGroupsForApplicationRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutConfiguration": "PutConfigurationRequest",
+    "SyncResource": "SyncResourceRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateApplication": "UpdateApplicationRequest",
+    "UpdateAttributeGroup": "UpdateAttributeGroupRequest"
+  },
+  "shapes": {
+    "AppRegistryConfiguration": {
+      "type": "structure",
+      "members": {
+        "tagQueryConfiguration": "TagQueryConfiguration"
+      }
+    },
+    "ApplicationSpecifier": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "([-.\\w]+)|(arn:aws[-a-z]*:servicecatalog:[a-z]{2}(-gov)?-[a-z]+-\\d:\\d{12}:/applications/[-.\\w]+)"
+    },
+    "Arn": {
+      "type": "string",
+      "min": 1,
+      "max": 1600,
+      "pattern": "arn:(aws[a-zA-Z0-9-]*):([a-zA-Z0-9\\-])+:([a-z]{2}(-gov)?-[a-z]+-\\d{1})?:(\\d{12})?:(.*)"
+    },
+    "AssociateAttributeGroupRequest": {
+      "type": "structure",
+      "required": [
+        "application",
+        "attributeGroup"
+      ],
+      "members": {
+        "application": "ApplicationSpecifier",
+        "attributeGroup": "AttributeGroupSpecifier"
+      }
+    },
+    "AssociateResourceRequest": {
+      "type": "structure",
+      "required": [
+        "application",
+        "resourceType",
+        "resource"
+      ],
+      "members": {
+        "application": "ApplicationSpecifier",
+        "resourceType": "ResourceType",
+        "resource": "ResourceSpecifier",
+        "options": "Options"
+      }
+    },
+    "AssociationOption": {
+      "type": "string",
+      "enum": [
+        "APPLY_APPLICATION_TAG",
+        "SKIP_APPLICATION_TAG"
+      ]
+    },
+    "AttributeGroupSpecifier": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "([-.\\w]+)|(arn:aws[-a-z]*:servicecatalog:[a-z]{2}(-gov)?-[a-z]+-\\d:\\d{12}:/attribute-groups/[-.\\w]+)"
+    },
+    "Attributes": {
+      "type": "string",
+      "min": 1,
+      "max": 8000,
+      "pattern": "[\\u0009\\u000A\\u000D\\u0020-\\u00FF]+"
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "CreateApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "clientToken"
+      ],
+      "members": {
+        "name": "Name",
+        "description": "Description",
+        "tags": "Tags",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateAttributeGroupRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "attributes",
+        "clientToken"
+      ],
+      "members": {
+        "name": "Name",
+        "description": "Description",
+        "attributes": "Attributes",
+        "tags": "Tags",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "application"
+      ],
+      "members": {
+        "application": "ApplicationSpecifier"
+      }
+    },
+    "DeleteAttributeGroupRequest": {
+      "type": "structure",
+      "required": [
+        "attributeGroup"
+      ],
+      "members": {
+        "attributeGroup": "AttributeGroupSpecifier"
+      }
+    },
+    "Description": {
+      "type": "string",
+      "max": 1024
+    },
+    "DisassociateAttributeGroupRequest": {
+      "type": "structure",
+      "required": [
+        "application",
+        "attributeGroup"
+      ],
+      "members": {
+        "application": "ApplicationSpecifier",
+        "attributeGroup": "AttributeGroupSpecifier"
+      }
+    },
+    "DisassociateResourceRequest": {
+      "type": "structure",
+      "required": [
+        "application",
+        "resourceType",
+        "resource"
+      ],
+      "members": {
+        "application": "ApplicationSpecifier",
+        "resourceType": "ResourceType",
+        "resource": "ResourceSpecifier"
+      }
+    },
+    "GetApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "application"
+      ],
+      "members": {
+        "application": "ApplicationSpecifier"
+      }
+    },
+    "GetAssociatedResourceFilter": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "ResourceItemStatus"
+    },
+    "GetAssociatedResourceRequest": {
+      "type": "structure",
+      "required": [
+        "application",
+        "resourceType",
+        "resource"
+      ],
+      "members": {
+        "application": "ApplicationSpecifier",
+        "resourceType": "ResourceType",
+        "resource": "ResourceSpecifier",
+        "nextToken": "NextToken",
+        "resourceTagStatus": "GetAssociatedResourceFilter",
+        "maxResults": "MaxResults"
+      }
+    },
+    "GetAttributeGroupRequest": {
+      "type": "structure",
+      "required": [
+        "attributeGroup"
+      ],
+      "members": {
+        "attributeGroup": "AttributeGroupSpecifier"
+      }
+    },
+    "ListApplicationsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAssociatedAttributeGroupsRequest": {
+      "type": "structure",
+      "required": [
+        "application"
+      ],
+      "members": {
+        "application": "ApplicationSpecifier",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAssociatedResourcesRequest": {
+      "type": "structure",
+      "required": [
+        "application"
+      ],
+      "members": {
+        "application": "ApplicationSpecifier",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAttributeGroupsForApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "application"
+      ],
+      "members": {
+        "application": "ApplicationSpecifier",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAttributeGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "Arn"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "Name": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[-.\\w]+"
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 2024,
+      "pattern": "[A-Za-z0-9+/=]+"
+    },
+    "Options": {
+      "type": "list",
+      "member": "AssociationOption"
+    },
+    "PutConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "configuration"
+      ],
+      "members": {
+        "configuration": "AppRegistryConfiguration"
+      }
+    },
+    "ResourceItemStatus": {
+      "type": "string",
+      "enum": [
+        "SUCCESS",
+        "FAILED",
+        "IN_PROGRESS",
+        "SKIPPED"
+      ]
+    },
+    "ResourceSpecifier": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "\\S+"
+    },
+    "ResourceType": {
+      "type": "string",
+      "enum": [
+        "CFN_STACK",
+        "RESOURCE_TAG_VALUE"
+      ]
+    },
+    "SyncResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceType",
+        "resource"
+      ],
+      "members": {
+        "resourceType": "ResourceType",
+        "resource": "ResourceSpecifier"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:\\/=+\\-@]*)$"
+    },
+    "TagKeyConfig": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "^(?!\\s+$)[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*"
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagQueryConfiguration": {
+      "type": "structure",
+      "members": {
+        "tagKey": "TagKeyConfig"
+      }
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "max": 256,
+      "pattern": "[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*"
+    },
+    "Tags": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tagKeys": "TagKeys"
+      }
+    },
+    "UpdateApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "application"
+      ],
+      "members": {
+        "application": "ApplicationSpecifier",
+        "name": "Name",
+        "description": "Description"
+      }
+    },
+    "UpdateAttributeGroupRequest": {
+      "type": "structure",
+      "required": [
+        "attributeGroup"
+      ],
+      "members": {
+        "attributeGroup": "AttributeGroupSpecifier",
+        "name": "Name",
+        "description": "Description",
+        "attributes": "Attributes"
+      }
+    }
+  }
+}

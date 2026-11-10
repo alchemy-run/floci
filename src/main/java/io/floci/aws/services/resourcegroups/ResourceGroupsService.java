@@ -120,10 +120,31 @@ public class ResourceGroupsService implements Resettable, ResourceProvider {
     // ── Groups ─────────────────────────────────────────────────────────────
 
     public synchronized ResourceGroup create(String region, String account, JsonNode request) {
+        return create(region, account, request, false);
+    }
+
+    /**
+     * Creates a group an AWS service manages for the caller, such as AppRegistry's application
+     * groups, whose names begin with {@code AWS_} as AWS reserves for them.
+     */
+    public synchronized ResourceGroup createServiceManaged(String region, String account, JsonNode request) {
+        return create(region, account, request, true);
+    }
+
+    /** Deletes a service-managed group, if it exists. */
+    public synchronized void deleteServiceManaged(String region, String account, String name) {
+        String key = key(region, name);
+        groups.getForAccount(account, key).ifPresent(group -> {
+            groups.deleteForAccount(account, key);
+            stateChange(region, account, group, "delete");
+        });
+    }
+
+    private ResourceGroup create(String region, String account, JsonNode request, boolean serviceManaged) {
         ResourceGroupsRequestShapes.check("CreateGroup", request);
         String name = text(request, "Name", true);
         validName(name);
-        if (name.toLowerCase(Locale.ROOT).startsWith("aws")) {
+        if (!serviceManaged && name.toLowerCase(Locale.ROOT).startsWith("aws")) {
             throw bad("Group names beginning with AWS are reserved.");
         }
         ResourceQuery query = query(request.get("ResourceQuery"));

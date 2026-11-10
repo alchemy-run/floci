@@ -857,6 +857,7 @@ public interface EmulatorConfig {
         AiOpsServiceConfig aiOps();
         AmplifyServiceConfig amplify();
         AppFlowServiceConfig appFlow();
+        AppRegistryServiceConfig appRegistry();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2853,6 +2854,11 @@ public interface EmulatorConfig {
     }
 
     interface AppFlowServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppRegistryServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

@@ -11,6 +11,7 @@ import io.floci.aws.services.appconfig.AppConfigController;
 import io.floci.aws.services.appconfig.AppConfigDataController;
 import io.floci.aws.services.appflow.AppFlowController;
 import io.floci.aws.services.appintegrations.AppIntegrationsController;
+import io.floci.aws.services.appregistry.AppRegistryController;
 import io.floci.aws.services.appsync.AppSyncController;
 import io.floci.aws.services.appsync.graphql.AppSyncExecutionController;
 import io.floci.aws.services.aps.ApsController;
@@ -689,6 +690,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("polly"), Set.of(), Set.of(PollyController.class)),
+                descriptor("servicecatalog-appregistry", "appregistry", config.services().appRegistry().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of(), Set.of(), Set.of(AppRegistryController.class)),
                 descriptor("appflow", "appflow", config.services().appFlow().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

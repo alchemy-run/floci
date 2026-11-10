@@ -476,6 +476,8 @@ floci:
       enabled: true
     app-flow:
       enabled: true
+    app-registry:
+      enabled: true
     rekognition:
       enabled: true
     translate:
