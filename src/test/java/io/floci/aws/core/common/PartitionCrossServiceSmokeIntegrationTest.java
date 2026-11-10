@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1343,6 +1343,34 @@ class PartitionCrossServiceSmokeIntegrationTest {
                 .header("X-Amz-Target", "com.amazonaws.codeconnections.CodeConnections_20231201.DeleteConnection")
                 .contentType(JSON_1_0).body("{\"ConnectionArn\":\"" + arn + "\"}").post("/"));
         PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void daxClusterArnAndEndpoint(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "dax");
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"dax.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+        String roleName = unique("smoke-dax", partitionCase);
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", roleName)
+                .formParam("AssumeRolePolicyDocument", trust)
+                .post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        cleanup.register(() -> signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteRole").formParam("RoleName", roleName).post("/"));
+        String name = "smoke" + Long.toString(System.nanoTime(), 36);
+        String endpoint = signed(region, "dax").header("X-Amz-Target", "AmazonDAXV3.CreateCluster")
+                .contentType(JSON_1_1).body("{\"ClusterName\":\"" + name + "\",\"NodeType\":\"dax.t3.small\","
+                        + "\"ReplicationFactor\":1,\"IamRoleArn\":\"" + role + "\"}")
+                .post("/").then().statusCode(200).extract().path("Cluster.ClusterDiscoveryEndpoint.Address");
+        cleanup.register(() -> signed(region, "dax").header("X-Amz-Target", "AmazonDAXV3.DeleteCluster")
+                .contentType(JSON_1_1).body("{\"ClusterName\":\"" + name + "\"}").post("/"));
+        String arn = signed(region, "dax").header("X-Amz-Target", "AmazonDAXV3.DescribeClusters")
+                .contentType(JSON_1_1).body("{\"ClusterNames\":[\"" + name + "\"]}")
+                .post("/").then().statusCode(200).extract().path("Clusters[0].ClusterArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        assertTrue(endpoint.endsWith("." + region + "." + AwsRegions.dnsSuffixFor(region)), endpoint);
     }
 
     @ParameterizedTest

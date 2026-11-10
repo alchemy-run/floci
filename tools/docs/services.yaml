@@ -227,6 +227,10 @@ services:
     doc: docs/services/codeconnections.md
     sources:
       - { path: services/codeconnections/CodeConnectionsJsonHandler.java, mode: switch }
+  - service: dax
+    doc: docs/services/dax.md
+    sources:
+      - { path: services/dax/DaxJsonHandler.java, mode: switch }
   - service: chatbot
     doc: docs/services/chatbot.md
     sources:

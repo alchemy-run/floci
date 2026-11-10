@@ -1009,6 +1009,8 @@ floci:
       enabled: true
     code-connections:
       enabled: true
+    dax:
+      enabled: true
     rekognition:
       enabled: true
     translate:

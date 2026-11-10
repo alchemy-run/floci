@@ -1,0 +1,367 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_dax_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateCluster": "CreateClusterRequest",
+    "CreateParameterGroup": "CreateParameterGroupRequest",
+    "CreateSubnetGroup": "CreateSubnetGroupRequest",
+    "DecreaseReplicationFactor": "DecreaseReplicationFactorRequest",
+    "DeleteCluster": "DeleteClusterRequest",
+    "DeleteParameterGroup": "DeleteParameterGroupRequest",
+    "DeleteSubnetGroup": "DeleteSubnetGroupRequest",
+    "DescribeClusters": "DescribeClustersRequest",
+    "DescribeDefaultParameters": "DescribeDefaultParametersRequest",
+    "DescribeEvents": "DescribeEventsRequest",
+    "DescribeParameterGroups": "DescribeParameterGroupsRequest",
+    "DescribeParameters": "DescribeParametersRequest",
+    "DescribeSubnetGroups": "DescribeSubnetGroupsRequest",
+    "IncreaseReplicationFactor": "IncreaseReplicationFactorRequest",
+    "ListTags": "ListTagsRequest",
+    "RebootNode": "RebootNodeRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateCluster": "UpdateClusterRequest",
+    "UpdateParameterGroup": "UpdateParameterGroupRequest",
+    "UpdateSubnetGroup": "UpdateSubnetGroupRequest"
+  },
+  "shapes": {
+    "AvailabilityZoneList": {
+      "type": "list",
+      "member": "String"
+    },
+    "ClusterEndpointEncryptionType": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "TLS"
+      ]
+    },
+    "ClusterNameList": {
+      "type": "list",
+      "member": "String"
+    },
+    "CreateClusterRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterName",
+        "NodeType",
+        "ReplicationFactor",
+        "IamRoleArn"
+      ],
+      "members": {
+        "ClusterName": "String",
+        "NodeType": "String",
+        "Description": "String",
+        "ReplicationFactor": "Integer",
+        "AvailabilityZones": "AvailabilityZoneList",
+        "SubnetGroupName": "String",
+        "SecurityGroupIds": "SecurityGroupIdentifierList",
+        "PreferredMaintenanceWindow": "String",
+        "NotificationTopicArn": "String",
+        "IamRoleArn": "String",
+        "ParameterGroupName": "String",
+        "Tags": "TagList",
+        "SSESpecification": "SSESpecification",
+        "ClusterEndpointEncryptionType": "ClusterEndpointEncryptionType",
+        "NetworkType": "NetworkType"
+      }
+    },
+    "CreateParameterGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ParameterGroupName"
+      ],
+      "members": {
+        "ParameterGroupName": "String",
+        "Description": "String"
+      }
+    },
+    "CreateSubnetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "SubnetGroupName",
+        "SubnetIds"
+      ],
+      "members": {
+        "SubnetGroupName": "String",
+        "Description": "String",
+        "SubnetIds": "SubnetIdentifierList"
+      }
+    },
+    "DecreaseReplicationFactorRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterName",
+        "NewReplicationFactor"
+      ],
+      "members": {
+        "ClusterName": "String",
+        "NewReplicationFactor": "Integer",
+        "AvailabilityZones": "AvailabilityZoneList",
+        "NodeIdsToRemove": "NodeIdentifierList"
+      }
+    },
+    "DeleteClusterRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterName"
+      ],
+      "members": {
+        "ClusterName": "String"
+      }
+    },
+    "DeleteParameterGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ParameterGroupName"
+      ],
+      "members": {
+        "ParameterGroupName": "String"
+      }
+    },
+    "DeleteSubnetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "SubnetGroupName"
+      ],
+      "members": {
+        "SubnetGroupName": "String"
+      }
+    },
+    "DescribeClustersRequest": {
+      "type": "structure",
+      "members": {
+        "ClusterNames": "ClusterNameList",
+        "MaxResults": "IntegerOptional",
+        "NextToken": "String"
+      }
+    },
+    "DescribeDefaultParametersRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "IntegerOptional",
+        "NextToken": "String"
+      }
+    },
+    "DescribeEventsRequest": {
+      "type": "structure",
+      "members": {
+        "SourceName": "String",
+        "SourceType": "SourceType",
+        "StartTime": "TStamp",
+        "EndTime": "TStamp",
+        "Duration": "IntegerOptional",
+        "MaxResults": "IntegerOptional",
+        "NextToken": "String"
+      }
+    },
+    "DescribeParameterGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "ParameterGroupNames": "ParameterGroupNameList",
+        "MaxResults": "IntegerOptional",
+        "NextToken": "String"
+      }
+    },
+    "DescribeParametersRequest": {
+      "type": "structure",
+      "required": [
+        "ParameterGroupName"
+      ],
+      "members": {
+        "ParameterGroupName": "String",
+        "Source": "String",
+        "MaxResults": "IntegerOptional",
+        "NextToken": "String"
+      }
+    },
+    "DescribeSubnetGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "SubnetGroupNames": "SubnetGroupNameList",
+        "MaxResults": "IntegerOptional",
+        "NextToken": "String"
+      }
+    },
+    "IncreaseReplicationFactorRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterName",
+        "NewReplicationFactor"
+      ],
+      "members": {
+        "ClusterName": "String",
+        "NewReplicationFactor": "Integer",
+        "AvailabilityZones": "AvailabilityZoneList"
+      }
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "IntegerOptional": {
+      "type": "integer"
+    },
+    "KeyList": {
+      "type": "list",
+      "member": "String"
+    },
+    "ListTagsRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceName"
+      ],
+      "members": {
+        "ResourceName": "String",
+        "NextToken": "String"
+      }
+    },
+    "NetworkType": {
+      "type": "string",
+      "enum": [
+        "ipv4",
+        "ipv6",
+        "dual_stack"
+      ]
+    },
+    "NodeIdentifierList": {
+      "type": "list",
+      "member": "String"
+    },
+    "ParameterGroupNameList": {
+      "type": "list",
+      "member": "String"
+    },
+    "ParameterNameValue": {
+      "type": "structure",
+      "members": {
+        "ParameterName": "String",
+        "ParameterValue": "String"
+      }
+    },
+    "ParameterNameValueList": {
+      "type": "list",
+      "member": "ParameterNameValue"
+    },
+    "RebootNodeRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterName",
+        "NodeId"
+      ],
+      "members": {
+        "ClusterName": "String",
+        "NodeId": "String"
+      }
+    },
+    "SSEEnabled": {
+      "type": "boolean"
+    },
+    "SSESpecification": {
+      "type": "structure",
+      "required": [
+        "Enabled"
+      ],
+      "members": {
+        "Enabled": "SSEEnabled"
+      }
+    },
+    "SecurityGroupIdentifierList": {
+      "type": "list",
+      "member": "String"
+    },
+    "SourceType": {
+      "type": "string",
+      "enum": [
+        "CLUSTER",
+        "PARAMETER_GROUP",
+        "SUBNET_GROUP"
+      ]
+    },
+    "String": {
+      "type": "string"
+    },
+    "SubnetGroupNameList": {
+      "type": "list",
+      "member": "String"
+    },
+    "SubnetIdentifierList": {
+      "type": "list",
+      "member": "String"
+    },
+    "TStamp": {
+      "type": "timestamp"
+    },
+    "Tag": {
+      "type": "structure",
+      "members": {
+        "Key": "String",
+        "Value": "String"
+      }
+    },
+    "TagList": {
+      "type": "list",
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceName",
+        "Tags"
+      ],
+      "members": {
+        "ResourceName": "String",
+        "Tags": "TagList"
+      }
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceName",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceName": "String",
+        "TagKeys": "KeyList"
+      }
+    },
+    "UpdateClusterRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterName"
+      ],
+      "members": {
+        "ClusterName": "String",
+        "Description": "String",
+        "PreferredMaintenanceWindow": "String",
+        "NotificationTopicArn": "String",
+        "NotificationTopicStatus": "String",
+        "ParameterGroupName": "String",
+        "SecurityGroupIds": "SecurityGroupIdentifierList"
+      }
+    },
+    "UpdateParameterGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ParameterGroupName",
+        "ParameterNameValues"
+      ],
+      "members": {
+        "ParameterGroupName": "String",
+        "ParameterNameValues": "ParameterNameValueList"
+      }
+    },
+    "UpdateSubnetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "SubnetGroupName"
+      ],
+      "members": {
+        "SubnetGroupName": "String",
+        "Description": "String",
+        "SubnetIds": "SubnetIdentifierList"
+      }
+    }
+  }
+}

@@ -492,6 +492,9 @@ floci:
       enabled: true
     code-connections:
       enabled: true
+    dax:
+      enabled: true
+      transition-millis: 0
     rekognition:
       enabled: true
     translate:

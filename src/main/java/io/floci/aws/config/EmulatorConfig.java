@@ -865,6 +865,7 @@ public interface EmulatorConfig {
         BedrockDataAutomationServiceConfig bedrockDataAutomation();
         ChatbotServiceConfig chatbot();
         CodeConnectionsServiceConfig codeConnections();
+        DaxServiceConfig dax();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2903,6 +2904,15 @@ public interface EmulatorConfig {
     interface CodeConnectionsServiceConfig {
         @WithDefault("true")
         boolean enabled();
+    }
+
+    interface DaxServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a cluster, node or resize stays in its transitional state before it settles. */
+        @WithDefault("2000")
+        long transitionMillis();
     }
 
     interface RekognitionServiceConfig {
