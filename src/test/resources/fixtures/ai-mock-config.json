@@ -26,6 +26,15 @@
         ],
         "DetectDocumentTextModelVersion": "1.0"
       }
+    },
+    "sha256:a81e5965a9b687bddb7c7700ae20d1ccbd7f0d17dbb6eb10b6aa958c64de5bfe": {
+      "DetectDocumentText": {
+        "DocumentMetadata": { "Pages": 1 },
+        "Blocks": [
+          { "BlockType": "LINE", "Id": "hashed-line-1", "Confidence": 99.0, "Text": "HASHED" }
+        ],
+        "DetectDocumentTextModelVersion": "1.0"
+      }
     }
   },
   "rekognition": {
