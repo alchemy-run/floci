@@ -110,7 +110,7 @@ _NO_ROUTES = "REST routes no rule maps yet"
 NOT_COVERED = {
     "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",
     "acm-pca": "not read yet: CreateCertificateAuthority tags on creation; a later batch",
-    "geo": _NO_ROUTES, "polly": _NO_ROUTES, "aiops": _NO_ROUTES,
+    "geo": _NO_ROUTES, "polly": _NO_ROUTES, "aiops": _NO_ROUTES, "amplify": _NO_ROUTES,
     "airflow": _NO_ROUTES, "app-integrations": _NO_ROUTES, "appconfig": _NO_ROUTES, "appsync": _NO_ROUTES,
     "aps": _NO_ROUTES, "aws-marketplace": _NO_ROUTES, "backup": _NO_ROUTES,
     "batch": _NO_ROUTES, "bedrock": _NO_ROUTES, "bedrock-agentcore": _NO_ROUTES,

@@ -989,6 +989,8 @@ floci:
       enabled: true
     ai-ops:
       enabled: true
+    amplify:
+      enabled: true
     rekognition:
       enabled: true
     translate:

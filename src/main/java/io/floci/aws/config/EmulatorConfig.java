@@ -855,6 +855,7 @@ public interface EmulatorConfig {
         Route53DomainsServiceConfig route53Domains();
         AcmPcaServiceConfig acmPca();
         AiOpsServiceConfig aiOps();
+        AmplifyServiceConfig amplify();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2841,6 +2842,11 @@ public interface EmulatorConfig {
     }
 
     interface AiOpsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AmplifyServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

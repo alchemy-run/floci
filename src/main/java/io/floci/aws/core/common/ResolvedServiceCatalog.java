@@ -5,6 +5,7 @@ import io.floci.aws.services.accessanalyzer.AccessAnalyzerController;
 import io.floci.aws.services.account.AccountController;
 import io.floci.aws.services.aiops.AiOpsController;
 import io.floci.aws.services.amazonmq.AmazonMqController;
+import io.floci.aws.services.amplify.AmplifyController;
 import io.floci.aws.services.apigateway.ApiGatewayController;
 import io.floci.aws.services.appconfig.AppConfigController;
 import io.floci.aws.services.appconfig.AppConfigDataController;
@@ -687,6 +688,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("polly"), Set.of(), Set.of(PollyController.class)),
+                descriptor("amplify", "amplify", config.services().amplify().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("amplify"), Set.of(), Set.of(AmplifyController.class)),
                 descriptor("aiops", "aiops", config.services().aiOps().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

@@ -96,6 +96,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [EC2](ec2.md) | `POST /` with `Action=` param | EC2 Query | 231 |
 | [Lightsail](lightsail.md) | `POST /` + `X-Amz-Target: Lightsail_20161128.*` | JSON 1.1 | 79 local responses; 161 recognized actions |
 | [ACM](acm.md) | `POST /` + `X-Amz-Target: CertificateManager.*` | JSON 1.1 | 17 |
+| [Amplify Hosting](amplify.md) | `/apps/*`, `/webhooks/*`, `/artifacts/*`; sites by `Host` | REST JSON | 37 |
 | [CloudWatch Investigations](aiops.md) | `/investigationGroups` | REST JSON | 11 |
 | [Private CA](acmpca.md) | `POST /` + `X-Amz-Target: ACMPrivateCA.*` | JSON 1.1 | 23 |
 | [ECR](ecr.md) | `POST /` + `X-Amz-Target: AmazonEC2ContainerRegistry_V20150921.*` (control plane) and `/v2/...` (data plane proxied to `registry:2`) | JSON 1.1 + OCI Distribution | 34 |

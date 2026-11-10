@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1316,6 +1316,18 @@ class PartitionCrossServiceSmokeIntegrationTest {
      * A service no partition lists (the newer ones {@code endpoints.json} omits) runs everywhere,
      * the same reading strict partition mode applies: silence there is not absence.
      */
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void amplifyAppArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "amplify");
+        String appId = signed(region, "amplify").contentType(JSON).body("{\"name\":\"smoke\"}")
+                .post("/apps").then().statusCode(200).extract().path("app.appId");
+        cleanup.register(() -> signed(region, "amplify").delete("/apps/" + appId));
+        String arn = signed(region, "amplify").get("/apps/" + appId).then().statusCode(200)
+                .extract().path("app.appArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
     void investigationGroupArn(PartitionCase partitionCase) {

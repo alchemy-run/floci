@@ -180,6 +180,19 @@ services:
       - PostOperation
       - PatchOperation
       - DeleteOperation
+  - service: amplify
+    doc: docs/services/amplify.md
+    sources:
+      - { path: services/amplify/AmplifyController.java, mode: rest }
+      - { path: core/common/SharedTagsController.java, mode: rest }
+    rename_actions:
+      ListTags: ListTagsForResource
+      TagResourcePost: TagResource
+    exclude_actions:
+      - ListTagsByQuery
+      - TagResourceByBody
+      - TagResourcePut
+      - UntagResourceByQuery
   - service: aiops
     doc: docs/services/aiops.md
     sources:
