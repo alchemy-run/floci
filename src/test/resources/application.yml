@@ -488,6 +488,8 @@ floci:
       enabled: true
     bedrock-data-automation:
       enabled: true
+    chatbot:
+      enabled: true
     rekognition:
       enabled: true
     translate:

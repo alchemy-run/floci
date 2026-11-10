@@ -32,6 +32,7 @@ import io.floci.aws.services.bedrockagentcorecontrol.BedrockAgentCoreResourcePol
 import io.floci.aws.services.bedrockagentcorecontrol.BedrockAgentCoreToolsController;
 import io.floci.aws.services.bedrockdataautomation.BdaController;
 import io.floci.aws.services.bedrockruntime.BedrockRuntimeController;
+import io.floci.aws.services.chatbot.ChatbotController;
 import io.floci.aws.services.cloudfront.CloudFrontController;
 import io.floci.aws.services.cloudfront.CloudFrontKvsDataPlaneController;
 import io.floci.aws.services.cloudfront.CloudFrontServingController;
@@ -697,6 +698,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AppRunner."), Set.of("apprunner"), Set.of(), Set.of()),
+                descriptor("chatbot", "chatbot", config.services().chatbot().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("chatbot"), Set.of(), Set.of(ChatbotController.class)),
                 descriptor("bedrock-data-automation", "bedrock-data-automation",
                         config.services().bedrockDataAutomation().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,

@@ -863,6 +863,7 @@ public interface EmulatorConfig {
         B2biServiceConfig b2bi();
         BackupSearchServiceConfig backupSearch();
         BedrockDataAutomationServiceConfig bedrockDataAutomation();
+        ChatbotServiceConfig chatbot();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2889,6 +2890,11 @@ public interface EmulatorConfig {
     }
 
     interface BedrockDataAutomationServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ChatbotServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

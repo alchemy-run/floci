@@ -90,6 +90,7 @@ NAMESPACES = (
 # Namespaces Floci serves whose operations list iam:PassRole but are not read here yet, each with
 # why. `PassedRolesCoverageTest` fails for a namespace Floci serves that is in neither list.
 NOT_COVERED = {
+    "chatbot": "REST routes no rule maps yet: channel configurations pass IamRoleArn",
     "backup-search": "REST routes no rule maps yet: StartSearchResultExportJob passes RoleArn",
     "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",
     "aiops": "REST routes no rule maps yet",

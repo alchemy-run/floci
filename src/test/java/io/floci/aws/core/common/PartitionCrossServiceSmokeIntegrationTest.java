@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1329,6 +1329,19 @@ class PartitionCrossServiceSmokeIntegrationTest {
                 .header("X-Amz-Target", "AppRunner.DeleteAutoScalingConfiguration").contentType(JSON_1_0)
                 .body("{\"AutoScalingConfigurationArn\":\"" + arn + "\"}").post("/"));
         PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void chatbotCustomActionArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "chatbot");
+        String name = unique("smoke-action", partitionCase);
+        String arn = signed(region, "chatbot").contentType(JSON).body("{\"ActionName\":\"" + name
+                + "\",\"Definition\":{\"CommandText\":\"aws s3 ls\"}}").post("/create-custom-action").then()
+                .statusCode(200).extract().path("CustomActionArn");
+        cleanup.register(() -> signed(region, "chatbot").contentType(JSON).body("{\"CustomActionArn\":\"" + arn
+                + "\"}").post("/delete-custom-action"));
+        PartitionMatrix.assertGlobalArnIn(partitionCase, arn);
     }
 
     @ParameterizedTest

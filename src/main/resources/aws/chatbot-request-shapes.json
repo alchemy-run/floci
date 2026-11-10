@@ -1,0 +1,717 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_chatbot_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateToConfiguration": "AssociateToConfigurationRequest",
+    "CreateChimeWebhookConfiguration": "CreateChimeWebhookConfigurationRequest",
+    "CreateCustomAction": "CreateCustomActionRequest",
+    "CreateMicrosoftTeamsChannelConfiguration": "CreateTeamsChannelConfigurationRequest",
+    "CreateSlackChannelConfiguration": "CreateSlackChannelConfigurationRequest",
+    "DeleteChimeWebhookConfiguration": "DeleteChimeWebhookConfigurationRequest",
+    "DeleteCustomAction": "DeleteCustomActionRequest",
+    "DeleteMicrosoftTeamsChannelConfiguration": "DeleteTeamsChannelConfigurationRequest",
+    "DeleteMicrosoftTeamsConfiguredTeam": "DeleteTeamsConfiguredTeamRequest",
+    "DeleteMicrosoftTeamsUserIdentity": "DeleteMicrosoftTeamsUserIdentityRequest",
+    "DeleteSlackChannelConfiguration": "DeleteSlackChannelConfigurationRequest",
+    "DeleteSlackUserIdentity": "DeleteSlackUserIdentityRequest",
+    "DeleteSlackWorkspaceAuthorization": "DeleteSlackWorkspaceAuthorizationRequest",
+    "DescribeChimeWebhookConfigurations": "DescribeChimeWebhookConfigurationsRequest",
+    "DescribeSlackChannelConfigurations": "DescribeSlackChannelConfigurationsRequest",
+    "DescribeSlackUserIdentities": "DescribeSlackUserIdentitiesRequest",
+    "DescribeSlackWorkspaces": "DescribeSlackWorkspacesRequest",
+    "DisassociateFromConfiguration": "DisassociateFromConfigurationRequest",
+    "GetAccountPreferences": "GetAccountPreferencesRequest",
+    "GetCustomAction": "GetCustomActionRequest",
+    "GetMicrosoftTeamsChannelConfiguration": "GetTeamsChannelConfigurationRequest",
+    "ListAssociations": "ListAssociationsRequest",
+    "ListCustomActions": "ListCustomActionsRequest",
+    "ListMicrosoftTeamsChannelConfigurations": "ListTeamsChannelConfigurationsRequest",
+    "ListMicrosoftTeamsConfiguredTeams": "ListMicrosoftTeamsConfiguredTeamsRequest",
+    "ListMicrosoftTeamsUserIdentities": "ListMicrosoftTeamsUserIdentitiesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateAccountPreferences": "UpdateAccountPreferencesRequest",
+    "UpdateChimeWebhookConfiguration": "UpdateChimeWebhookConfigurationRequest",
+    "UpdateCustomAction": "UpdateCustomActionRequest",
+    "UpdateMicrosoftTeamsChannelConfiguration": "UpdateTeamsChannelConfigurationRequest",
+    "UpdateSlackChannelConfiguration": "UpdateSlackChannelConfigurationRequest"
+  },
+  "shapes": {
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:aws:(wheatley|chatbot):[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]{0,1023}"
+    },
+    "Arn": {
+      "type": "string",
+      "min": 12,
+      "max": 1224,
+      "pattern": "arn:aws:[A-Za-z0-9][A-Za-z0-9_/.-]{0,62}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]{0,1023}"
+    },
+    "AssociateToConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Resource",
+        "ChatConfiguration"
+      ],
+      "members": {
+        "Resource": "ResourceIdentifier",
+        "ChatConfiguration": "ChatConfigurationArn"
+      }
+    },
+    "BooleanAccountPreference": {
+      "type": "boolean"
+    },
+    "ChatConfigurationArn": {
+      "type": "string",
+      "min": 19,
+      "max": 1169,
+      "pattern": "arn:aws:(wheatley|chatbot):[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]{0,1023}"
+    },
+    "ChimeWebhookDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "ChimeWebhookUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "https://hooks\\.chime\\.aws/incomingwebhooks/[A-Za-z0-9\\-]+?\\?token=[A-Za-z0-9\\-]+"
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 33,
+      "max": 126,
+      "pattern": "[\\x21-\\x7F]+"
+    },
+    "ConfigurationName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[A-Za-z0-9-_]+"
+    },
+    "CreateChimeWebhookConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "WebhookDescription",
+        "WebhookUrl",
+        "SnsTopicArns",
+        "IamRoleArn",
+        "ConfigurationName"
+      ],
+      "members": {
+        "WebhookDescription": "ChimeWebhookDescription",
+        "WebhookUrl": "ChimeWebhookUrl",
+        "SnsTopicArns": "SnsTopicArnList",
+        "IamRoleArn": "Arn",
+        "ConfigurationName": "ConfigurationName",
+        "LoggingLevel": "CustomerCwLogLevel",
+        "Tags": "Tags"
+      }
+    },
+    "CreateCustomActionRequest": {
+      "type": "structure",
+      "required": [
+        "Definition",
+        "ActionName"
+      ],
+      "members": {
+        "Definition": "CustomActionDefinition",
+        "AliasName": "CustomActionAliasName",
+        "Attachments": "CustomActionAttachmentList",
+        "Tags": "TagList",
+        "ClientToken": "ClientToken",
+        "ActionName": "CustomActionName"
+      }
+    },
+    "CreateSlackChannelConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "SlackTeamId",
+        "SlackChannelId",
+        "IamRoleArn",
+        "ConfigurationName"
+      ],
+      "members": {
+        "SlackTeamId": "SlackTeamId",
+        "SlackChannelId": "SlackChannelId",
+        "SlackChannelName": "SlackChannelDisplayName",
+        "SnsTopicArns": "SnsTopicArnList",
+        "IamRoleArn": "Arn",
+        "ConfigurationName": "ConfigurationName",
+        "LoggingLevel": "CustomerCwLogLevel",
+        "GuardrailPolicyArns": "GuardrailPolicyArnList",
+        "UserAuthorizationRequired": "BooleanAccountPreference",
+        "Tags": "Tags"
+      }
+    },
+    "CreateTeamsChannelConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId",
+        "TeamId",
+        "TenantId",
+        "IamRoleArn",
+        "ConfigurationName"
+      ],
+      "members": {
+        "ChannelId": "TeamsChannelId",
+        "ChannelName": "TeamsChannelName",
+        "TeamId": "UUID",
+        "TeamName": "TeamName",
+        "TenantId": "UUID",
+        "SnsTopicArns": "SnsTopicArnList",
+        "IamRoleArn": "Arn",
+        "ConfigurationName": "ConfigurationName",
+        "LoggingLevel": "CustomerCwLogLevel",
+        "GuardrailPolicyArns": "GuardrailPolicyArnList",
+        "UserAuthorizationRequired": "BooleanAccountPreference",
+        "Tags": "Tags"
+      }
+    },
+    "CustomActionAliasName": {
+      "type": "string",
+      "min": 1,
+      "max": 30,
+      "pattern": "[A-Za-z0-9-_]+"
+    },
+    "CustomActionArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:aws:chatbot:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:custom-action/[a-zA-Z0-9_-]{1,64}"
+    },
+    "CustomActionAttachment": {
+      "type": "structure",
+      "members": {
+        "NotificationType": "CustomActionAttachmentNotificationType",
+        "ButtonText": "CustomActionButtonText",
+        "Criteria": "CustomActionAttachmentCriteriaList",
+        "Variables": "CustomActionAttachmentVariables"
+      }
+    },
+    "CustomActionAttachmentCriteria": {
+      "type": "structure",
+      "required": [
+        "Operator",
+        "VariableName"
+      ],
+      "members": {
+        "Operator": "CustomActionAttachmentCriteriaOperator",
+        "VariableName": "CustomActionAttachmentCriteriaVariableNameString",
+        "Value": "CustomActionAttachmentCriteriaValueString"
+      }
+    },
+    "CustomActionAttachmentCriteriaList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "CustomActionAttachmentCriteria"
+    },
+    "CustomActionAttachmentCriteriaOperator": {
+      "type": "string",
+      "enum": [
+        "HAS_VALUE",
+        "EQUALS"
+      ]
+    },
+    "CustomActionAttachmentCriteriaValueString": {
+      "type": "string",
+      "min": 0,
+      "max": 1024,
+      "pattern": "[\\S\\s]+"
+    },
+    "CustomActionAttachmentCriteriaVariableNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[A-Za-z0-9-_]+"
+    },
+    "CustomActionAttachmentList": {
+      "type": "list",
+      "member": "CustomActionAttachment"
+    },
+    "CustomActionAttachmentNotificationType": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9-]+"
+    },
+    "CustomActionAttachmentVariables": {
+      "type": "map",
+      "min": 1,
+      "max": 5,
+      "key": "CustomActionAttachmentVariablesKeyString",
+      "value": "CustomActionAttachmentVariablesValueString"
+    },
+    "CustomActionAttachmentVariablesKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[A-Za-z0-9-_]+"
+    },
+    "CustomActionAttachmentVariablesValueString": {
+      "type": "string",
+      "min": 0,
+      "max": 1024,
+      "pattern": "[\\x21-\\x7F]+"
+    },
+    "CustomActionButtonText": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "[\\S\\s]+"
+    },
+    "CustomActionDefinition": {
+      "type": "structure",
+      "required": [
+        "CommandText"
+      ],
+      "members": {
+        "CommandText": "CustomActionDefinitionCommandTextString"
+      }
+    },
+    "CustomActionDefinitionCommandTextString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[\\S\\s]+"
+    },
+    "CustomActionName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9_-]{1,64}"
+    },
+    "CustomerCwLogLevel": {
+      "type": "string",
+      "min": 4,
+      "max": 5,
+      "pattern": "(ERROR|INFO|NONE)"
+    },
+    "DeleteChimeWebhookConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ChatConfigurationArn"
+      ],
+      "members": {
+        "ChatConfigurationArn": "ChatConfigurationArn"
+      }
+    },
+    "DeleteCustomActionRequest": {
+      "type": "structure",
+      "required": [
+        "CustomActionArn"
+      ],
+      "members": {
+        "CustomActionArn": "CustomActionArn"
+      }
+    },
+    "DeleteMicrosoftTeamsUserIdentityRequest": {
+      "type": "structure",
+      "required": [
+        "ChatConfigurationArn",
+        "UserId"
+      ],
+      "members": {
+        "ChatConfigurationArn": "ChatConfigurationArn",
+        "UserId": "UUID"
+      }
+    },
+    "DeleteSlackChannelConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ChatConfigurationArn"
+      ],
+      "members": {
+        "ChatConfigurationArn": "ChatConfigurationArn"
+      }
+    },
+    "DeleteSlackUserIdentityRequest": {
+      "type": "structure",
+      "required": [
+        "ChatConfigurationArn",
+        "SlackTeamId",
+        "SlackUserId"
+      ],
+      "members": {
+        "ChatConfigurationArn": "ChatConfigurationArn",
+        "SlackTeamId": "SlackTeamId",
+        "SlackUserId": "SlackUserId"
+      }
+    },
+    "DeleteSlackWorkspaceAuthorizationRequest": {
+      "type": "structure",
+      "required": [
+        "SlackTeamId"
+      ],
+      "members": {
+        "SlackTeamId": "SlackTeamId"
+      }
+    },
+    "DeleteTeamsChannelConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ChatConfigurationArn"
+      ],
+      "members": {
+        "ChatConfigurationArn": "ChatConfigurationArn"
+      }
+    },
+    "DeleteTeamsConfiguredTeamRequest": {
+      "type": "structure",
+      "required": [
+        "TeamId"
+      ],
+      "members": {
+        "TeamId": "UUID"
+      }
+    },
+    "DescribeChimeWebhookConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "PaginationToken",
+        "ChatConfigurationArn": "ChatConfigurationArn"
+      }
+    },
+    "DescribeSlackChannelConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "PaginationToken",
+        "ChatConfigurationArn": "ChatConfigurationArn"
+      }
+    },
+    "DescribeSlackUserIdentitiesRequest": {
+      "type": "structure",
+      "members": {
+        "ChatConfigurationArn": "ChatConfigurationArn",
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeSlackWorkspacesRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "PaginationToken"
+      }
+    },
+    "DisassociateFromConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Resource",
+        "ChatConfiguration"
+      ],
+      "members": {
+        "Resource": "ResourceIdentifier",
+        "ChatConfiguration": "ChatConfigurationArn"
+      }
+    },
+    "GetAccountPreferencesRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetCustomActionRequest": {
+      "type": "structure",
+      "required": [
+        "CustomActionArn"
+      ],
+      "members": {
+        "CustomActionArn": "CustomActionArn"
+      }
+    },
+    "GetTeamsChannelConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ChatConfigurationArn"
+      ],
+      "members": {
+        "ChatConfigurationArn": "ChatConfigurationArn"
+      }
+    },
+    "GuardrailPolicyArn": {
+      "type": "string",
+      "min": 11,
+      "max": 1163,
+      "pattern": "(^$|(?!.*\\/aws-service-role\\/.*)arn:aws:iam:[A-Za-z0-9_\\/.-]{0,63}:[A-Za-z0-9_\\/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_\\/+=,@.-]{0,1023})"
+    },
+    "GuardrailPolicyArnList": {
+      "type": "list",
+      "member": "GuardrailPolicyArn"
+    },
+    "ListAssociationsRequest": {
+      "type": "structure",
+      "required": [
+        "ChatConfiguration"
+      ],
+      "members": {
+        "ChatConfiguration": "ChatConfigurationArn",
+        "MaxResults": "ListAssociationsRequestMaxResultsInteger",
+        "NextToken": "ListAssociationsRequestNextTokenString"
+      }
+    },
+    "ListAssociationsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListAssociationsRequestNextTokenString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "[\\x20-\\x7F]+"
+    },
+    "ListCustomActionsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "ListCustomActionsRequestMaxResultsInteger",
+        "NextToken": "ListCustomActionsRequestNextTokenString"
+      }
+    },
+    "ListCustomActionsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListCustomActionsRequestNextTokenString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "[\\x20-\\x7F]+"
+    },
+    "ListMicrosoftTeamsConfiguredTeamsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "PaginationToken"
+      }
+    },
+    "ListMicrosoftTeamsUserIdentitiesRequest": {
+      "type": "structure",
+      "members": {
+        "ChatConfigurationArn": "ChatConfigurationArn",
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName"
+      }
+    },
+    "ListTeamsChannelConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "PaginationToken",
+        "TeamId": "UUID"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 1,
+      "max": 1276,
+      "pattern": "[a-zA-Z0-9=\\/+_.\\-,#:\\\\\"{}]{4,1276}"
+    },
+    "ResourceIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:aws:chatbot:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:custom-action/[a-zA-Z0-9_-]{1,64}"
+    },
+    "SlackChannelDisplayName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "SlackChannelId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[A-Za-z0-9]+"
+    },
+    "SlackTeamId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[0-9A-Z]{1,255}"
+    },
+    "SlackUserId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "(.*)"
+    },
+    "SnsTopicArnList": {
+      "type": "list",
+      "member": "Arn"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "TagKey",
+        "TagValue"
+      ],
+      "members": {
+        "TagKey": "TagKey",
+        "TagValue": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Tags"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "Tags": {
+      "type": "list",
+      "member": "Tag"
+    },
+    "TeamName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "(.*)"
+    },
+    "TeamsChannelId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "([a-zA-Z0-9-_=+\\/.,])*%3[aA]([a-zA-Z0-9-_=+\\/.,])*%40([a-zA-Z0-9-_=+\\/.,])*"
+    },
+    "TeamsChannelName": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "(.*)"
+    },
+    "UUID": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateAccountPreferencesRequest": {
+      "type": "structure",
+      "members": {
+        "UserAuthorizationRequired": "BooleanAccountPreference",
+        "TrainingDataCollectionEnabled": "BooleanAccountPreference"
+      }
+    },
+    "UpdateChimeWebhookConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ChatConfigurationArn"
+      ],
+      "members": {
+        "ChatConfigurationArn": "ChatConfigurationArn",
+        "WebhookDescription": "ChimeWebhookDescription",
+        "WebhookUrl": "ChimeWebhookUrl",
+        "SnsTopicArns": "SnsTopicArnList",
+        "IamRoleArn": "Arn",
+        "LoggingLevel": "CustomerCwLogLevel"
+      }
+    },
+    "UpdateCustomActionRequest": {
+      "type": "structure",
+      "required": [
+        "CustomActionArn",
+        "Definition"
+      ],
+      "members": {
+        "CustomActionArn": "CustomActionArn",
+        "Definition": "CustomActionDefinition",
+        "AliasName": "CustomActionAliasName",
+        "Attachments": "CustomActionAttachmentList"
+      }
+    },
+    "UpdateSlackChannelConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ChatConfigurationArn",
+        "SlackChannelId"
+      ],
+      "members": {
+        "ChatConfigurationArn": "ChatConfigurationArn",
+        "SlackChannelId": "SlackChannelId",
+        "SlackChannelName": "SlackChannelDisplayName",
+        "SnsTopicArns": "SnsTopicArnList",
+        "IamRoleArn": "Arn",
+        "LoggingLevel": "CustomerCwLogLevel",
+        "GuardrailPolicyArns": "GuardrailPolicyArnList",
+        "UserAuthorizationRequired": "BooleanAccountPreference"
+      }
+    },
+    "UpdateTeamsChannelConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ChatConfigurationArn",
+        "ChannelId"
+      ],
+      "members": {
+        "ChatConfigurationArn": "ChatConfigurationArn",
+        "ChannelId": "TeamsChannelId",
+        "ChannelName": "TeamsChannelName",
+        "SnsTopicArns": "SnsTopicArnList",
+        "IamRoleArn": "Arn",
+        "LoggingLevel": "CustomerCwLogLevel",
+        "GuardrailPolicyArns": "GuardrailPolicyArnList",
+        "UserAuthorizationRequired": "BooleanAccountPreference"
+      }
+    }
+  }
+}

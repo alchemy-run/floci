@@ -35,11 +35,13 @@ import io.floci.aws.services.sns.model.PlatformEndpoint;
 import io.floci.aws.services.sns.model.PushNotification;
 import io.floci.aws.services.sns.model.SentSms;
 import io.floci.aws.services.sns.model.SmsSandboxPhoneNumber;
+import io.floci.aws.services.sns.model.SnsTopicPublishedEvent;
 import io.floci.aws.services.sns.model.Subscription;
 import io.floci.aws.services.sns.model.Topic;
 import io.floci.aws.services.sqs.SqsService;
 import io.floci.aws.services.sqs.model.MessageAttributeValue;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -183,6 +185,10 @@ public class SnsService implements Resettable, ResourceProvider {
     private final SnsMessageSigner messageSigner;
     private final Map<String, Instant> fifoDeduplicationCache = new ConcurrentHashMap<>();
     private static final HexFormat HEX = HexFormat.of();
+
+    /** Tells services that read topics without a subscription (AWS Chatbot) about each published message. */
+    @Inject
+    Event<SnsTopicPublishedEvent> published;
     
     @Inject
     public SnsService(StorageFactory storageFactory, EmulatorConfig config,
@@ -1147,6 +1153,7 @@ public class SnsService implements Resettable, ResourceProvider {
                     messageStructure);
         }
         LOG.debugv("Published message {0} to topic {1}", messageId, effectiveArn);
+        announce(effectiveArn, messageId, subject, message, region);
         return messageId;
     }
 
@@ -1650,9 +1657,22 @@ public class SnsService implements Resettable, ResourceProvider {
                         messageStructure);
             }
             LOG.debugv("Batch published message {0} (id={1}) to {2}", messageId, id, topicArn);
+            announce(topicArn, messageId, subject, message, region);
             successful.add(new String[]{id, messageId});
         }
         return new BatchPublishResult(successful, failed);
+    }
+
+    private void announce(String topicArn, String messageId, String subject, String message, String region) {
+        if (published == null) {
+            return;
+        }
+        try {
+            published.fire(new SnsTopicPublishedEvent(regionResolver.getAccountId(), region, topicArn, messageId,
+                    subject, message));
+        } catch (RuntimeException e) {
+            LOG.debugv("A listener of topic {0} failed on message {1}: {2}", topicArn, messageId, e.getMessage());
+        }
     }
 
     public void tagResource(String resourceArn, Map<String, String> tags, String region) {
