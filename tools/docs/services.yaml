@@ -219,6 +219,10 @@ services:
       - TagResourceByBody
       - TagResourcePut
       - UntagResourceByQuery
+  - service: apprunner
+    doc: docs/services/apprunner.md
+    sources:
+      - { path: services/apprunner/AppRunnerJsonHandler.java, mode: switch }
   - service: aiops
     doc: docs/services/aiops.md
     sources:

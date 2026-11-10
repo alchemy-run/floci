@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1316,6 +1316,20 @@ class PartitionCrossServiceSmokeIntegrationTest {
      * A service no partition lists (the newer ones {@code endpoints.json} omits) runs everywhere,
      * the same reading strict partition mode applies: silence there is not absence.
      */
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void appRunnerAutoScalingArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "apprunner");
+        String name = "smoke-" + Long.toString(System.nanoTime(), 36);
+        String arn = signed(region, "apprunner").header("X-Amz-Target", "AppRunner.CreateAutoScalingConfiguration")
+                .contentType(JSON_1_0).body("{\"AutoScalingConfigurationName\":\"" + name + "\"}")
+                .post("/").then().statusCode(200).extract().path("AutoScalingConfiguration.AutoScalingConfigurationArn");
+        cleanup.register(() -> signed(region, "apprunner")
+                .header("X-Amz-Target", "AppRunner.DeleteAutoScalingConfiguration").contentType(JSON_1_0)
+                .body("{\"AutoScalingConfigurationArn\":\"" + arn + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
     void appRegistryApplicationArn(PartitionCase partitionCase) {

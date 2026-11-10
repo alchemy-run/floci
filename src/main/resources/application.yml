@@ -995,6 +995,8 @@ floci:
       enabled: true
     app-registry:
       enabled: true
+    app-runner:
+      enabled: true
     rekognition:
       enabled: true
     translate:
