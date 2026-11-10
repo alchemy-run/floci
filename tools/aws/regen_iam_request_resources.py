@@ -202,6 +202,12 @@ _REST = ("REST: its requests name their resources in the path, which RequestReso
 NOT_COVERED: dict[str, str] = {
     "cloudfront-keyvaluestore": "the Alchemy fork's KeyValueStore data plane; its requests are not read yet",
     "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",
+    "acm-pca": _LATER,
+    "geo": _REST,
+    "geo-maps": _REST,
+    "geo-places": _REST,
+    "geo-routes": _REST,
+    "polly": _REST,
     "account": _REST,
     "airflow": _REST,
     "app-integrations": _REST,

@@ -41,7 +41,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "amazonmq", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
+            "accessanalyzer", "acm", "amazonmq", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
             "configservice", "connect", "controlcatalog", "datasync", "dlm", "dms", "dsql", "dynamodb", "ec2", "ecr",
@@ -1315,6 +1316,121 @@ class PartitionCrossServiceSmokeIntegrationTest {
      * A service no partition lists (the newer ones {@code endpoints.json} omits) runs everywhere,
      * the same reading strict partition mode applies: silence there is not absence.
      */
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void bedrockAgentArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "bedrock");
+        String name = unique("smoke-agent", partitionCase);
+        Response created = signed(region, "bedrock").contentType(JSON)
+                .body("{\"agentName\":\"" + name + "\",\"foundationModel\":\"anthropic.claude-v2\"}")
+                .put("/agents/").then().statusCode(202).extract().response();
+        String id = created.path("agent.agentId");
+        cleanup.register(() -> signed(region, "bedrock").delete("/agents/" + id + "/"));
+        PartitionMatrix.assertArnIn(partitionCase, created.path("agent.agentArn"));
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void comprehendJobArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "comprehend");
+        String role = "arn:" + partitionCase.partition() + ":iam::" + PartitionMatrix.ACCOUNT + ":role/smoke";
+        String arn = json11(region, "comprehend", "Comprehend_20171127.StartSentimentDetectionJob",
+                "{\"InputDataConfig\":{\"S3Uri\":\"s3://smoke-in/docs\"},\"OutputDataConfig\":{\"S3Uri\":"
+                        + "\"s3://smoke-out/\"},\"DataAccessRoleArn\":\"" + role + "\",\"LanguageCode\":\"en\"}")
+                .post("/").then().statusCode(200).extract().path("JobArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void locationMapArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "geo");
+        String name = unique("smoke-map", partitionCase);
+        String arn = signed(region, "geo").contentType(JSON)
+                .body("{\"MapName\":\"" + name + "\",\"Configuration\":{\"Style\":\"VectorEsriStreets\"}}")
+                .post("/maps/v0/maps").then().statusCode(200).extract().path("MapArn");
+        cleanup.register(() -> signed(region, "geo").delete("/maps/v0/maps/" + name));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void pollyLexiconArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "polly");
+        String name = "smoke" + Long.toString(System.nanoTime(), 36).substring(0, 8);
+        String lexicon = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><lexicon version=\"1.0\" "
+                + "xmlns=\"http://www.w3.org/2005/01/pronunciation-lexicon\" alphabet=\"ipa\" xml:lang=\"en-US\">"
+                + "<lexeme><grapheme>IaC</grapheme><alias>infrastructure as code</alias></lexeme></lexicon>";
+        signed(region, "polly").contentType(JSON).body(Map.of("Content", lexicon))
+                .put("/v1/lexicons/" + name).then().statusCode(200);
+        cleanup.register(() -> signed(region, "polly").delete("/v1/lexicons/" + name));
+        String arn = signed(region, "polly").get("/v1/lexicons/" + name).then().statusCode(200)
+                .extract().path("LexiconAttributes.LexiconArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void rekognitionCollectionArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "rekognition");
+        String id = unique("smoke-collection", partitionCase);
+        String arn = json11(region, "rekognition", "RekognitionService.CreateCollection",
+                "{\"CollectionId\":\"" + id + "\"}").post("/").then().statusCode(200).extract().path("CollectionArn");
+        cleanup.register(() -> json11(region, "rekognition", "RekognitionService.DeleteCollection",
+                "{\"CollectionId\":\"" + id + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void textractAdapterArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "textract");
+        String name = unique("smoke-adapter", partitionCase);
+        String id = json11(region, "textract", "Textract.CreateAdapter",
+                "{\"AdapterName\":\"" + name + "\",\"FeatureTypes\":[\"QUERIES\"]}")
+                .post("/").then().statusCode(200).extract().path("AdapterId");
+        cleanup.register(() -> json11(region, "textract", "Textract.DeleteAdapter",
+                "{\"AdapterId\":\"" + id + "\"}").post("/"));
+        // Textract returns no ARN; the adapter's ARN in the case's partition names it.
+        String arn = "arn:" + partitionCase.partition() + ":textract:" + region + ":" + PartitionMatrix.ACCOUNT
+                + ":/adapters/" + id;
+        json11(region, "textract", "Textract.ListTagsForResource", "{\"ResourceARN\":\"" + arn + "\"}")
+                .post("/").then().statusCode(200);
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void transcribeVocabularyFilterArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "transcribe");
+        String name = unique("smoke-filter", partitionCase);
+        json11(region, "transcribe", "Transcribe.CreateVocabularyFilter",
+                "{\"VocabularyFilterName\":\"" + name + "\",\"LanguageCode\":\"en-US\",\"Words\":[\"smoke\"]}")
+                .post("/").then().statusCode(200);
+        cleanup.register(() -> json11(region, "transcribe", "Transcribe.DeleteVocabularyFilter",
+                "{\"VocabularyFilterName\":\"" + name + "\"}").post("/"));
+        String arn = "arn:" + partitionCase.partition() + ":transcribe:" + region + ":" + PartitionMatrix.ACCOUNT
+                + ":vocabulary-filter/" + name;
+        String listed = json11(region, "transcribe", "Transcribe.ListTagsForResource",
+                "{\"ResourceArn\":\"" + arn + "\"}").post("/").then().statusCode(200).extract().path("ResourceArn");
+        PartitionMatrix.assertArnIn(partitionCase, listed);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void translateTerminologyArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "translate");
+        String name = unique("smoke-terms", partitionCase);
+        String file = Base64.getEncoder().encodeToString("en,fr\nhello,bonjour\n".getBytes(StandardCharsets.UTF_8));
+        String arn = json11(region, "translate", "AWSShineFrontendService_20170701.ImportTerminology",
+                "{\"Name\":\"" + name + "\",\"MergeStrategy\":\"OVERWRITE\",\"TerminologyData\":{\"File\":\""
+                        + file + "\",\"Format\":\"CSV\"}}")
+                .post("/").then().statusCode(200).extract().path("TerminologyProperties.Arn");
+        cleanup.register(() -> json11(region, "translate", "AWSShineFrontendService_20170701.DeleteTerminology",
+                "{\"Name\":\"" + name + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
     private static String offered(PartitionCase partitionCase, String signingName) {
         assumeTrue(!AwsPartitions.publishesSomewhere(signingName)
                         || AwsPartitions.byId(partitionCase.partition()).offersSigningName(signingName),

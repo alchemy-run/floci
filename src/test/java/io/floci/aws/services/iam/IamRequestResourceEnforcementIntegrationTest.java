@@ -1200,6 +1200,12 @@ class IamRequestResourceEnforcementIntegrationTest {
         String document = "\"Document\":{\"Content\":\""
                 + Base64.getEncoder().encodeToString("hello".getBytes(StandardCharsets.UTF_8))
                 + "\",\"ContentType\":\"text/plain\"},\"SourceLanguageCode\":\"en\",\"TargetLanguageCode\":\"fr\"";
+        String file = Base64.getEncoder().encodeToString("en,fr\nhello,bonjour\n".getBytes(StandardCharsets.UTF_8));
+        adminJson("translate", "AWSShineFrontendService_20170701.ImportTerminology")
+                .body("{\"Name\":\"" + name + "\",\"MergeStrategy\":\"OVERWRITE\",\"TerminologyData\":{\"File\":\""
+                        + file + "\",\"Format\":\"CSV\"}}").post("/").then().statusCode(200);
+        cleanup.register(() -> adminJson("translate", "AWSShineFrontendService_20170701.DeleteTerminology")
+                .body("{\"Name\":\"" + name + "\"}").post("/"));
         User user = user("res-terminology");
         user.policy(allowOn("translate:TranslateText", arn) + "," + allowOn("translate:TranslateDocument", arn));
         translate(user, "TranslateText", "{" + text + ",\"TerminologyNames\":[\"" + name + "\"]}").statusCode(200);

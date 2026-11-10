@@ -169,6 +169,17 @@ services:
       - { path: services/location/GeoMapsController.java, mode: rest }
       - { path: services/location/GeoPlacesController.java, mode: rest }
       - { path: services/location/GeoRoutesController.java, mode: rest }
+  - service: s3control
+    doc: docs/services/s3control.md
+    sources:
+      - { path: services/s3/S3ControlDispatcher.java, mode: switch }
+      - { path: services/s3/S3ControlController.java, mode: rest }
+    exclude_actions:
+      - GetOperation
+      - PutOperation
+      - PostOperation
+      - PatchOperation
+      - DeleteOperation
   - service: route53domains
     doc: docs/services/route53domains.md
     sources:

@@ -91,6 +91,8 @@ NAMESPACES = (
 # why. `PassedRolesCoverageTest` fails for a namespace Floci serves that is in neither list.
 NOT_COVERED = {
     "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",
+    "comprehendmedical": "not read yet: its Start*Job operations pass DataAccessRoleArn; a later batch",
+    "geo": "REST routes no rule maps yet",
     "apigateway": "authorized by HTTP method, so no request is checked as one of these operations",
     "access-analyzer": "REST routes no rule maps yet",
     "airflow": "REST routes no rule maps yet",

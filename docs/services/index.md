@@ -14,6 +14,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [SQS](sqs.md) | `POST /` with `Action=` param | Query / JSON | 23 |
 | [SNS](sns.md) | `POST /` with `Action=` param | Query / JSON | 39 |
 | [S3](s3.md) | `/{bucket}/{key}` | REST XML | 58 |
+| [S3 Control](s3control.md) | `/v20180820/*` + `x-amz-account-id` | REST XML | 97 |
 | [S3 Vectors](s3vectors.md) | `POST /{OperationName}` | REST JSON | 12 |
 | [S3 Tables](s3tables.md) | `/buckets`, `/namespaces/*`, `/tables/*` | REST JSON | 25 |
 | [DynamoDB](dynamodb.md) | `POST /` + `X-Amz-Target: DynamoDB_20120810.*` | JSON 1.1 | 28 |
