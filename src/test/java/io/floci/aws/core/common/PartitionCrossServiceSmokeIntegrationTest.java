@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1342,6 +1342,19 @@ class PartitionCrossServiceSmokeIntegrationTest {
         cleanup.register(() -> signed(region, "codeconnections")
                 .header("X-Amz-Target", "com.amazonaws.codeconnections.CodeConnections_20231201.DeleteConnection")
                 .contentType(JSON_1_0).body("{\"ConnectionArn\":\"" + arn + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void dataBrewRecipeArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "databrew");
+        String name = unique("smoke-recipe", partitionCase);
+        signed(region, "databrew").contentType(JSON).body("{\"Name\":\"" + name + "\",\"Steps\":[]}")
+                .post("/recipes").then().statusCode(200);
+        cleanup.register(() -> signed(region, "databrew").delete("/recipes/" + name + "/recipeVersion/LATEST_WORKING"));
+        String arn = signed(region, "databrew").get("/recipes/" + name).then().statusCode(200).extract()
+                .path("ResourceArn");
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 

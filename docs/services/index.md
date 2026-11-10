@@ -97,6 +97,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Lightsail](lightsail.md) | `POST /` + `X-Amz-Target: Lightsail_20161128.*` | JSON 1.1 | 79 local responses; 161 recognized actions |
 | [ACM](acm.md) | `POST /` + `X-Amz-Target: CertificateManager.*` | JSON 1.1 | 17 |
 | [App Runner](apprunner.md) | `POST /` + `X-Amz-Target: AppRunner.*`; services by `Host` | JSON 1.0 | 37 |
+| [DataBrew](databrew.md) | `/datasets`, `/recipes`, `/projects`, `/jobs`, `/rulesets`, `/schedules` (signed `databrew`) | REST JSON | 44 |
 | [DAX](dax.md) | `POST /` + `X-Amz-Target: AmazonDAXV3.*` | JSON 1.1 | 21 |
 | [CodeConnections](codeconnections.md) | `POST /` + `X-Amz-Target: CodeConnections_20231201.*`, or RPC v2 CBOR | JSON 1.0 + CBOR | 27 |
 | [Chatbot](chatbot.md) | `POST /<operation-path>` (signed `chatbot`) | REST JSON | 34 |

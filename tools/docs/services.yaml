@@ -227,6 +227,10 @@ services:
     doc: docs/services/codeconnections.md
     sources:
       - { path: services/codeconnections/CodeConnectionsJsonHandler.java, mode: switch }
+  - service: databrew
+    doc: docs/services/databrew.md
+    sources:
+      - { path: services/databrew/DataBrewController.java, mode: rest }
   - service: dax
     doc: docs/services/dax.md
     sources:

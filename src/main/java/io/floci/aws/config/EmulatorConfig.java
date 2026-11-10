@@ -866,6 +866,7 @@ public interface EmulatorConfig {
         ChatbotServiceConfig chatbot();
         CodeConnectionsServiceConfig codeConnections();
         DaxServiceConfig dax();
+        DataBrewServiceConfig databrew();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2904,6 +2905,19 @@ public interface EmulatorConfig {
     interface CodeConnectionsServiceConfig {
         @WithDefault("true")
         boolean enabled();
+    }
+
+    interface DataBrewServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a job run spends STARTING and RUNNING before it executes. */
+        @WithDefault("5000")
+        long runStartupMillis();
+
+        /** How long a project session stays INITIALIZING before it is READY. */
+        @WithDefault("2000")
+        long sessionStartupMillis();
     }
 
     interface DaxServiceConfig {

@@ -492,6 +492,10 @@ floci:
       enabled: true
     code-connections:
       enabled: true
+    databrew:
+      enabled: true
+      run-startup-millis: 2000
+      session-startup-millis: 0
     dax:
       enabled: true
       transition-millis: 0

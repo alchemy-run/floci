@@ -286,6 +286,7 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_bedrock_data_automation_shapes.py
 	$(PYTHON) tools/aws/regen_chatbot_shapes.py
 	$(PYTHON) tools/aws/regen_codeconnections_shapes.py
+	$(PYTHON) tools/aws/regen_databrew_shapes.py
 	$(PYTHON) tools/aws/regen_dax_shapes.py
 	$(PYTHON) tools/aws/regen_rest_xml_shapes.py
 	$(PYTHON) tools/aws/regen_logs_delivery_shapes.py
@@ -420,6 +421,10 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_codeconnections_shapes.py --check || { \
 		echo "error: CodeConnections request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_databrew_shapes.py --check || { \
+		echo "error: DataBrew request shapes are out of date; run 'make aws-data-sync'."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_dax_shapes.py --check || { \
