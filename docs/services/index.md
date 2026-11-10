@@ -145,6 +145,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Textract](textract.md) | `POST /` + `X-Amz-Target: Textract.*` | JSON 1.1 | 25 |
 | [Comprehend](comprehend.md) | `POST /` + `X-Amz-Target: Comprehend_20171127.*` | JSON 1.1 | 53 |
 | [Comprehend Medical](comprehendmedical.md) | `POST /` + `X-Amz-Target: ComprehendMedical_20181030.*` | JSON 1.1 | 26 |
+| [Polly](polly.md) | `/v1/lexicons`, `/v1/voices`, `/v1/speech`, `/v1/synthesisTasks`, `/v1/synthesisStream` | REST JSON | 10 |
 | [Rekognition](rekognition.md) | `POST /` + `X-Amz-Target: RekognitionService.*` | JSON 1.1 | 61 |
 | [Translate](translate.md) | `POST /` + `X-Amz-Target: AWSShineFrontendService_20170701.*` | JSON 1.1 | 19 |
 | [Transcribe](transcribe.md) | `POST /` + `X-Amz-Target: Transcribe.*` | JSON 1.1 | 43 |

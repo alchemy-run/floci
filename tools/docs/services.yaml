@@ -162,6 +162,10 @@ services:
     doc: docs/services/comprehend.md
     sources:
       - { path: services/comprehend/ComprehendJsonHandler.java, mode: switch }
+  - service: polly
+    doc: docs/services/polly.md
+    sources:
+      - { path: services/polly/PollyController.java, mode: rest }
   - service: comprehendmedical
     doc: docs/services/comprehendmedical.md
     sources:

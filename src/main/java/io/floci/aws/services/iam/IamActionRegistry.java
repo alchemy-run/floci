@@ -574,6 +574,16 @@ public class IamActionRegistry {
         rule("ses", "POST",  "^/v2/email/vdm/recommendations/?$",                                    "ses:ListRecommendations"),
 
         // ── Resource Groups ─────────────────────────────────────────────────────
+        rule("polly", "PUT", "^/v1/lexicons/[^/]+/?$", "polly:PutLexicon"),
+        rule("polly", "GET", "^/v1/lexicons/[^/]+/?$", "polly:GetLexicon"),
+        rule("polly", "DELETE", "^/v1/lexicons/[^/]+/?$", "polly:DeleteLexicon"),
+        rule("polly", "GET", "^/v1/lexicons/?$", "polly:ListLexicons"),
+        rule("polly", "GET", "^/v1/voices/?$", "polly:DescribeVoices"),
+        rule("polly", "POST", "^/v1/speech/?$", "polly:SynthesizeSpeech"),
+        rule("polly", "POST", "^/v1/synthesisTasks/?$", "polly:StartSpeechSynthesisTask"),
+        rule("polly", "GET", "^/v1/synthesisTasks/[^/]+/?$", "polly:GetSpeechSynthesisTask"),
+        rule("polly", "GET", "^/v1/synthesisTasks/?$", "polly:ListSpeechSynthesisTasks"),
+        rule("polly", "POST", "^/v1/synthesisStream/?$", "polly:StartSpeechSynthesisStream"),
         rule("resource-groups", "POST", "^/_rg/groups/?$", "resource-groups:CreateGroup"),
         rule("resource-groups", "POST", "^/_rg/get-group/?$", "resource-groups:GetGroup"),
         rule("resource-groups", "POST", "^/_rg/delete-group/?$", "resource-groups:DeleteGroup"),

@@ -71,6 +71,7 @@ import io.floci.aws.services.opensearch.ElasticsearchController;
 import io.floci.aws.services.opensearch.OpenSearchController;
 import io.floci.aws.services.paymentcryptography.PaymentCryptographyCryptoController;
 import io.floci.aws.services.pipes.PipesController;
+import io.floci.aws.services.polly.PollyController;
 import io.floci.aws.services.quicksight.QuickSightController;
 import io.floci.aws.services.quicksight.QuickSightEmbedController;
 import io.floci.aws.services.ram.RamController;
@@ -661,6 +662,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("Comprehend_20171127."), Set.of("comprehend"), Set.of(), Set.of()),
+                descriptor("polly", "polly", config.services().polly().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("polly"), Set.of(), Set.of(PollyController.class)),
                 descriptor("comprehendmedical", "comprehendmedical", config.services().comprehendMedical().enabled(),
                         true, null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

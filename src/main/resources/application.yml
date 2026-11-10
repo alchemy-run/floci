@@ -80,6 +80,7 @@ quarkus:
       # is not worth depending on the static initialiser running at build time.
       includes:
         - pricing-snapshots/**
+        - polly/*
         - ui/*.html
         - appsync/*.mjs
         - lambdaweb/*.mjs
@@ -973,6 +974,8 @@ floci:
     comprehend:
       enabled: true
     comprehend-medical:
+      enabled: true
+    polly:
       enabled: true
     rekognition:
       enabled: true

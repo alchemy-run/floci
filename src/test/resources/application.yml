@@ -462,6 +462,8 @@ floci:
       enabled: true
     comprehend-medical:
       enabled: true
+    polly:
+      enabled: true
     rekognition:
       enabled: true
     translate:
