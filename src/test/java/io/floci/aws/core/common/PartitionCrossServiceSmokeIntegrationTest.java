@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "amazonmq", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "amazonmq", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1316,6 +1316,20 @@ class PartitionCrossServiceSmokeIntegrationTest {
      * A service no partition lists (the newer ones {@code endpoints.json} omits) runs everywhere,
      * the same reading strict partition mode applies: silence there is not absence.
      */
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void privateCaArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "acm-pca");
+        String arn = json11(region, "acm-pca", "ACMPrivateCA.CreateCertificateAuthority",
+                "{\"CertificateAuthorityConfiguration\":{\"KeyAlgorithm\":\"EC_prime256v1\",\"SigningAlgorithm\":"
+                        + "\"SHA256WITHECDSA\",\"Subject\":{\"CommonName\":\"smoke.floci.test\"}},"
+                        + "\"CertificateAuthorityType\":\"ROOT\"}")
+                .post("/").then().statusCode(200).extract().path("CertificateAuthorityArn");
+        cleanup.register(() -> json11(region, "acm-pca", "ACMPrivateCA.DeleteCertificateAuthority",
+                "{\"CertificateAuthorityArn\":\"" + arn + "\",\"PermanentDeletionTimeInDays\":7}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
     void bedrockAgentArn(PartitionCase partitionCase) {

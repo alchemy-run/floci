@@ -19,6 +19,7 @@
 # documents a facet of another service and deliberately has no row of its own).
 
 aliases:
+  acm-pca: acmpca                       # Private CA's SigV4 signing name is "acm-pca"
   geo: location                         # Location's SigV4 signing name is "geo"
   geo-maps: location                    # Maps API facet, documented in location.md
   geo-places: location                  # Places API facet, documented in location.md

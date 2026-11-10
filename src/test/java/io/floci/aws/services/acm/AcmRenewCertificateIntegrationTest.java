@@ -1,6 +1,7 @@
 package io.floci.aws.services.acm;
 
 import io.floci.aws.core.common.Pem;
+import io.floci.aws.testing.PrivateCaFixture;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import org.junit.jupiter.api.Test;
@@ -44,17 +45,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @QuarkusTest
 class AcmRenewCertificateIntegrationTest {
 
-    private static final String PCA_ARN =
-            "arn:aws:acm-pca:us-east-1:000000000000:certificate-authority/renew-test";
     private static final String PASSPHRASE = "renew-passphrase";
 
     @Test
     void renewReissuesTheCertificateWithTheReportedValidity() throws Exception {
+        String privateCa = PrivateCaFixture.activeRoot("renew.floci.test");
         try (AcmClient acm = client()) {
             String arn = acm.requestCertificate(request -> request
                     .domainName("renew-sdk.example.test")
                     .subjectAlternativeNames("renew-sdk.example.test", "api.renew-sdk.example.test")
-                    .certificateAuthorityArn(PCA_ARN)
+                    .certificateAuthorityArn(privateCa)
                     .tags(Tag.builder().key("team").value("edge").build()))
                     .certificateArn();
             GetCertificateResponse before = acm.getCertificate(request -> request.certificateArn(arn));

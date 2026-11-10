@@ -853,6 +853,7 @@ public interface EmulatorConfig {
         PollyServiceConfig polly();
         LocationServiceConfig location();
         Route53DomainsServiceConfig route53Domains();
+        AcmPcaServiceConfig acmPca();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2829,6 +2830,11 @@ public interface EmulatorConfig {
     }
 
     interface Route53DomainsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AcmPcaServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

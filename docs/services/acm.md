@@ -31,10 +31,10 @@
 
 - **DNS validation:** Public DNS certificates remain `PENDING_VALIDATION` until every validation CNAME matches a record in a public Floci Route 53 zone. External DNS providers are not queried. Reads observe the records and persist issuance; `GetCertificate` returns `RequestInProgressException` while validation is pending. Issued certificates report `ValidationStatus: SUCCESS` for every domain.
 - **Email validation:** Email approval is simulated. `FLOCI_SERVICES_ACM_VALIDATION_WAIT_SECONDS=0` issues immediately, a positive value issues on a read after the delay, and a negative value leaves the certificate pending. This setting does not bypass DNS validation.
-- **Private / imported certificates are `ISSUED` immediately:** providing `CertificateAuthorityArn` or calling `ImportCertificate` produces an issued cert that `GetCertificate` / `ExportCertificate` can read.
+- **Private / imported certificates are `ISSUED` immediately:** providing `CertificateAuthorityArn` or calling `ImportCertificate` produces an issued cert that `GetCertificate` / `ExportCertificate` can read. A private certificate is signed by the [Private CA](acmpca.md) it names, which must be `ACTIVE`; otherwise the certificate is `FAILED` with a `FailureReason` such as `PCA_INVALID_STATE` or `PCA_RESOURCE_NOT_FOUND`.
 - **Validation Artefacts:** `DomainValidationOptions` follows the validation method as on AWS. `DNS` validation carries the `ResourceRecord` CNAME to publish; `EMAIL` validation carries no record but `ValidationEmails`, the five conventional mailboxes (`admin@`, `administrator@`, `hostmaster@`, `postmaster@`, `webmaster@`) of the `ValidationDomain`, which is the domain itself (wildcard stripped) or the one given in the request's `DomainValidationOptions`. An option naming a domain that is not on the certificate, or a `ValidationDomain` that is not the domain or one of its parents, is rejected with `InvalidDomainValidationOptionsException`. Real ACM also mails the WHOIS contacts, which Floci cannot know.
 - **Real Cryptography:** Certificates are generated with real RSA/EC keys and valid X.509 structure
-- **One Local CA:** Every issued certificate (`AMAZON_ISSUED` and `PRIVATE`) is signed by Floci's local root CA, and `GetCertificate` returns that CA as `CertificateChain`. Trust it once (`GET /_floci/ca.pem`, see [TLS](../configuration/tls.md)) and both Floci's HTTPS endpoint and every ACM certificate validate. `DescribeCertificate` reports `Issuer` as the CA's name, `CN=Floci Local CA`, where AWS reports `Amazon`. `ImportCertificate` keeps the chain you upload.
+- **One Local CA:** Every `AMAZON_ISSUED` certificate is signed by Floci's local root CA, and `GetCertificate` returns that CA as `CertificateChain`. Trust it once (`GET /_floci/ca.pem`, see [TLS](../configuration/tls.md)) and both Floci's HTTPS endpoint and every ACM certificate validate. `DescribeCertificate` reports `Issuer` as the CA's name, `CN=Floci Local CA`, where AWS reports `Amazon`. `ImportCertificate` keeps the chain you upload.
 - **CA on First Use:** The CA is created under `{persistent-path}/tls/` the first time a certificate is issued, also with TLS off and in `memory` storage mode, so that directory must be writable. A certificate keeps the chain it was issued with; after a CA regeneration, delete and re-request it.
 - **Key Algorithms:** `RequestCertificate` accepts `RSA_2048`, `EC_prime256v1`, and `EC_secp384r1` and rejects the rest with a `ValidationException`, matching real ACM; the wider list (`RSA_1024`, `RSA_3072`, `RSA_4096`, `EC_secp521r1`) remains valid for `ImportCertificate`
 - **Alternative names:** `RequestCertificate` rejects an explicit empty `SubjectAlternativeNames` array with `ValidationException`, since the API requires at least one name in it; omit the field when there are no additional names. An `AWS::CertificateManager::Certificate` resource still accepts an empty array and requests the certificate for `DomainName` alone, but the CloudFormation template reference also lists a one-item minimum, so omit the property in templates that also deploy to AWS.
@@ -91,10 +91,10 @@ aws acm list-tags-for-certificate \
   --certificate-arn $CERT_ARN \
   --endpoint-url $AWS_ENDPOINT_URL
 
-# Request a private certificate (exportable)
+# Request a private certificate (exportable), signed by an ACTIVE Private CA (see acmpca.md)
 PRIVATE_ARN=$(aws acm request-certificate \
   --domain-name "internal.example.com" \
-  --certificate-authority-arn "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-1234-1234-123456789012" \
+  --certificate-authority-arn "$CA_ARN" \
   --query CertificateArn --output text \
   --endpoint-url $AWS_ENDPOINT_URL)
 

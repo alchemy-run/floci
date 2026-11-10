@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import io.floci.aws.services.acm.AcmJsonHandler;
+import io.floci.aws.services.acmpca.AcmPcaJsonHandler;
 import io.floci.aws.services.apigatewayv2.ApiGatewayV2JsonHandler;
 import io.floci.aws.services.applicationautoscaling.ApplicationAutoScalingJsonHandler;
 import io.floci.aws.services.athena.AthenaJsonHandler;
@@ -122,6 +123,7 @@ public class AwsJson11Controller {
     private final ComprehendJsonHandler comprehendJsonHandler;
     private final ComprehendMedicalJsonHandler comprehendMedicalJsonHandler;
     private final Route53DomainsJsonHandler route53DomainsJsonHandler;
+    private final AcmPcaJsonHandler acmPcaJsonHandler;
     private final RekognitionJsonHandler rekognitionJsonHandler;
     private final PricingJsonHandler pricingJsonHandler;
     private final TranscribeJsonHandler transcribeJsonHandler;
@@ -181,6 +183,7 @@ public class AwsJson11Controller {
                                ComprehendJsonHandler comprehendJsonHandler,
                                ComprehendMedicalJsonHandler comprehendMedicalJsonHandler,
                                Route53DomainsJsonHandler route53DomainsJsonHandler,
+                               AcmPcaJsonHandler acmPcaJsonHandler,
                                RekognitionJsonHandler rekognitionJsonHandler,
                                PricingJsonHandler pricingJsonHandler,
                                TranscribeJsonHandler transcribeJsonHandler,
@@ -244,6 +247,7 @@ public class AwsJson11Controller {
         this.comprehendJsonHandler = comprehendJsonHandler;
         this.comprehendMedicalJsonHandler = comprehendMedicalJsonHandler;
         this.route53DomainsJsonHandler = route53DomainsJsonHandler;
+        this.acmPcaJsonHandler = acmPcaJsonHandler;
         this.rekognitionJsonHandler = rekognitionJsonHandler;
         this.pricingJsonHandler = pricingJsonHandler;
         this.transcribeJsonHandler = transcribeJsonHandler;
@@ -353,6 +357,7 @@ public class AwsJson11Controller {
                 case "comprehend" -> comprehendJsonHandler.handle(action, request, region);
                 case "comprehendmedical" -> comprehendMedicalJsonHandler.handle(action, request, region);
                 case "route53domains" -> route53DomainsJsonHandler.handle(action, request, region);
+                case "acm-pca" -> acmPcaJsonHandler.handle(action, request, region);
                 case "rekognition" -> rekognitionJsonHandler.handle(action, request, region);
                 case "pricing" -> pricingJsonHandler.handle(action, request, region);
                 case "transcribe" -> transcribeJsonHandler.handle(action, request, region);

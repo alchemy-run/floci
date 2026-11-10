@@ -468,6 +468,8 @@ floci:
       enabled: true
     route53-domains:
       enabled: true
+    acm-pca:
+      enabled: true
     rekognition:
       enabled: true
     translate:

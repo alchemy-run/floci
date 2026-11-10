@@ -180,6 +180,10 @@ services:
       - PostOperation
       - PatchOperation
       - DeleteOperation
+  - service: acmpca
+    doc: docs/services/acmpca.md
+    sources:
+      - { path: services/acmpca/AcmPcaJsonHandler.java, mode: switch }
   - service: route53domains
     doc: docs/services/route53domains.md
     sources:

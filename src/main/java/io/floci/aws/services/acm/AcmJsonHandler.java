@@ -353,6 +353,9 @@ public class AcmJsonHandler {
 
         node.put("Status", cert.getStatus().name());
         node.put("Type", cert.getType().name());
+        if (cert.getFailureReason() != null) {
+            node.put("FailureReason", cert.getFailureReason());
+        }
 
         if (cert.getKeyAlgorithm() != null) {
             node.put("KeyAlgorithm", cert.getKeyAlgorithm().getAwsName());

@@ -42,6 +42,7 @@ public class Certificate {
     private String certificateChain;
     private CertificateOptions certOptions;
     private String certAuthorityArn;
+    private String failureReason;
     private List<DomainValidation> domainValidationOptions;
     private String idempotencyToken;
 
@@ -293,5 +294,13 @@ public class Certificate {
 
     public void setRevokedAt(Instant revokedAt) {
         this.revokedAt = revokedAt;
+    }
+
+    public String getFailureReason() {
+        return failureReason;
+    }
+
+    public void setFailureReason(String failureReason) {
+        this.failureReason = failureReason;
     }
 }
