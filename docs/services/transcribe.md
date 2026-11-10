@@ -4,30 +4,46 @@
 **Header:** `X-Amz-Target: Transcribe.<Action>`
 **Endpoint prefix:** `transcribe`
 
-Floci emulates a small Amazon Transcribe control-plane stub for applications
-that create, inspect, list, and delete transcription jobs or custom
-vocabularies. Jobs transition to `COMPLETED` immediately and vocabularies
-transition to `READY` immediately.
+Floci emulates Amazon Transcribe's batch control plane: transcription, call
+analytics, medical, and medical scribe jobs; custom and medical vocabularies;
+vocabulary filters; call analytics categories; custom language models; and tags.
 
-No real audio transcription is performed. `StartTranscriptionJob` accepts the
-media URI and returns a synthetic `TranscriptFileUri` in the response so AWS SDK
-and CLI clients can exercise their Transcribe control-flow code locally.
+No speech recognition runs. A job reads its media from Floci's S3 when it starts
+and finishes at once: `COMPLETED`, with a transcript written to the output bucket
+(empty text, unless `AI_MOCK_CONFIG` has a `transcribe` entry for the media URI
+with a `Transcript` value), or `FAILED` with Transcribe's `FailureReason` when the
+media can't be read. A standard transcription job then sends the
+`Transcribe Job State Change` event (source `aws.transcribe`) to the default
+EventBridge bus. A vocabulary or language model whose input in S3 can't be read is
+`FAILED` the same way.
 
 ## Supported Operations
 
 | Operation | Notes |
 |-----------|-------|
-| `StartTranscriptionJob` | Creates an in-memory job and returns it as `COMPLETED` |
+| `StartTranscriptionJob` | Reads the media; writes the transcript to `OutputBucketName`/`OutputKey` when given |
 | `GetTranscriptionJob` | Returns a stored job by `TranscriptionJobName` |
 | `ListTranscriptionJobs` | Lists jobs with optional `Status`, `JobNameContains`, and `MaxResults` filters |
 | `DeleteTranscriptionJob` | Removes a stored job |
-| `CreateVocabulary` | Creates an in-memory vocabulary and returns it as `READY` |
-| `GetVocabulary` | Returns a stored vocabulary by `VocabularyName` |
-| `ListVocabularies` | Lists vocabularies with optional `StateEquals`, `NameContains`, and `MaxResults` filters |
-| `DeleteVocabulary` | Removes a stored vocabulary |
+| `StartCallAnalyticsJob` / `GetCallAnalyticsJob` / `ListCallAnalyticsJobs` / `DeleteCallAnalyticsJob` | Call analytics jobs |
+| `StartMedicalTranscriptionJob` / `GetMedicalTranscriptionJob` / `ListMedicalTranscriptionJobs` / `DeleteMedicalTranscriptionJob` | Medical jobs (`en-US` only); the transcript goes to `OutputBucketName` |
+| `StartMedicalScribeJob` / `GetMedicalScribeJob` / `ListMedicalScribeJobs` / `DeleteMedicalScribeJob` | HealthScribe jobs; writes `transcript.json` and `summary.json` under the job name |
+| `CreateVocabulary` / `GetVocabulary` / `UpdateVocabulary` / `ListVocabularies` / `DeleteVocabulary` | Custom vocabularies from `Phrases` or a `VocabularyFileUri` |
+| `CreateMedicalVocabulary` / `GetMedicalVocabulary` / `UpdateMedicalVocabulary` / `ListMedicalVocabularies` / `DeleteMedicalVocabulary` | Medical vocabularies from a `VocabularyFileUri` |
+| `CreateVocabularyFilter` / `GetVocabularyFilter` / `UpdateVocabularyFilter` / `ListVocabularyFilters` / `DeleteVocabularyFilter` | Filters from `Words` or a `VocabularyFilterFileUri` |
+| `CreateCallAnalyticsCategory` / `GetCallAnalyticsCategory` / `UpdateCallAnalyticsCategory` / `ListCallAnalyticsCategories` / `DeleteCallAnalyticsCategory` | Categories with 1–20 rules |
+| `CreateLanguageModel` / `DescribeLanguageModel` / `ListLanguageModels` / `DeleteLanguageModel` | `COMPLETED` when the training prefix has objects, `FAILED` otherwise |
+| `TagResource` / `UntagResource` / `ListTagsForResource` | Tags on any of the above by ARN |
 
 `LanguageCode` defaults to `en-US` and `MediaFormat` defaults to `mp4` when
 they are omitted from `StartTranscriptionJob`.
+
+Errors follow Transcribe, operation by operation: a missing job or vocabulary is
+`BadRequestException`; a missing filter, category, or language model is
+`NotFoundException` (except `DeleteLanguageModel`, whose model has no
+`NotFoundException`: `BadRequestException`); a name in use is `ConflictException`;
+a media or file URI that doesn't match `(s3://|http(s*)://).+` is a
+`BadRequestException` validation error.
 
 ## Configuration
 
@@ -89,7 +105,6 @@ print(job["TranscriptionJob"]["TranscriptionJobStatus"])  # COMPLETED
 ## Out of Scope
 
 - Real speech-to-text processing or audio file parsing.
-- Writing transcript JSON objects to S3.
-- Persistent job or vocabulary storage across restarts.
-- Streaming, medical transcription, call analytics, and other Transcribe APIs
-  beyond the operations listed above.
+- Streaming transcription.
+- Transcription and call analytics job events other than the standard
+  `Transcribe Job State Change`.
