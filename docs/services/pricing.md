@@ -20,7 +20,9 @@ snapshot with `FLOCI_SERVICES_PRICING_SNAPSHOT_PATH`.
 | `ListPriceLists` | Lists available price-list ARNs filtered by service, currency, and optional region |
 | `GetPriceListFileUrl` | Returns a stub HTTPS URL; useful for code paths that validate URL presence |
 
-Pagination is supported on all list operations via `NextToken` + `MaxResults`.
+Pagination is supported on all list operations via `NextToken` + `MaxResults`. `MaxResults` outside 1–100 is an `InvalidParameterException`.
+`GetProducts` for a service code with no bundled snapshot returns an empty `PriceList`, as AWS
+does for an unknown service code.
 
 ## Bundled Snapshot
 

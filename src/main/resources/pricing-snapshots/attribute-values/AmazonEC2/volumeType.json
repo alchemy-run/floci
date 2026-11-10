@@ -1,0 +1,17 @@
+[
+  {
+    "Value": "Cold HDD"
+  },
+  {
+    "Value": "General Purpose"
+  },
+  {
+    "Value": "Magnetic"
+  },
+  {
+    "Value": "Provisioned IOPS"
+  },
+  {
+    "Value": "Throughput Optimized HDD"
+  }
+]

@@ -2,11 +2,16 @@
   {
     "ServiceCode": "AmazonEC2",
     "AttributeNames": [
+      "capacitystatus",
+      "instanceFamily",
       "instanceType",
+      "licenseModel",
       "location",
-      "tenancy",
       "operatingSystem",
-      "productFamily"
+      "preInstalledSw",
+      "productFamily",
+      "tenancy",
+      "volumeType"
     ]
   },
   {
