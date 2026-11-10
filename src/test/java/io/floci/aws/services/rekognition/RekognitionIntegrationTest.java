@@ -350,4 +350,20 @@ class RekognitionIntegrationTest {
             .statusCode(400)
             .body("__type", equalTo("UnknownOperationException"));
     }
+
+    @Test
+    void aBytesImageIsMockedByItsContentHash() {
+        // src/test/resources/fixtures/ai-mock-config.json keys this PNG by "sha256:<hex>" of its bytes.
+        String png = "iVBORw0KGgoAAAANSUhEUgAAAYwAAACECAAAAACmdkNPAAABIElEQVR42u3dMQ6AIAxA0d7/0riymNQUS4f3Z9KIbyNEY2lM4RXAEAwYggFDMGAIBgzBgCEYggFDMGAIBgzBgCEYMHQVI7ZSg17WR6HK85za19eZmb3AgAEDBgwYMGDAgAEDBgwYMGDA6MeY8BJvzcmshwEDBgwYMGDAgAEDBgwYMGDAgAEDBgwYMGDAgAEDBgwYMGDAgAEDxhyMU5fPKpe9YMCAAQMGDBgwYMCAAQMGDBgwYDgodFAIAwYMGDBgwIABAwYMGDBgwIABAwYMGDBgwIABAwYMGDBgwIABAwYMGP0fpp8wZ/lLAAwYMGDAgAEDBgwYMGDAgAEDxm8Y6g8GDMGAIRgwBAOGYMAQDBiCIRgwBAOGYMAQDBiCAUMtPUOmhl+L5IksAAAAAElFTkSuQmCC";
+        given()
+            .contentType("application/x-amz-json-1.1")
+            .header("X-Amz-Target", "RekognitionService.DetectLabels")
+            .header("Authorization", AUTH_HEADER)
+            .body("{\"Image\":{\"Bytes\":\"" + png + "\"}}")
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Labels[0].Name", equalTo("Text"));
+    }
 }

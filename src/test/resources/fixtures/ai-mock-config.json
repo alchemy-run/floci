@@ -38,6 +38,12 @@
     }
   },
   "rekognition": {
+    "sha256:2096fd12c84360f0b35e0f26e2ca80f335739f4a5e6a9dbe520ac5f2c5ed3676": {
+      "DetectLabels": {
+        "Labels": [ { "Name": "Text", "Confidence": 99.1 } ],
+        "LabelModelVersion": "3.0"
+      }
+    },
     "mock-bucket/cat.jpg": {
       "DetectLabels": {
         "Labels": [

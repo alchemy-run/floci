@@ -166,7 +166,8 @@ that was never uploaded fails with `InvalidS3ObjectException`, as it does on AWS
 
 The lookup key is **`"<Bucket>/<Name>"`** from `Image.S3Object` (or `SourceImage.S3Object`
 for `CompareFaces` — `TargetImage` has no independent key in this scheme). A `Bytes`-backed
-image has no such key, so mocking only applies to S3Object-based calls. The file is re-read
+image is keyed by **`"sha256:<hex>"`** of its decoded bytes, as Textract documents are, so a mock
+can answer for a fixed image wherever it comes from. The file is re-read
 when its modification time changes, so it can be edited without restarting the emulator. A
 missing file, an unset `AI_MOCK_CONFIG`, or no matching entry all fall back to the defaults
 above. A `DetectFaces` mock also gives `IndexFaces` and the by-image searches their faces, and

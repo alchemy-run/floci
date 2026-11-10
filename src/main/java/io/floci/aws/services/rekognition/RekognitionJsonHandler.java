@@ -7,6 +7,10 @@ import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
+import java.util.HexFormat;
 import java.util.function.Predicate;
 /**
  * JSON 1.1 handler for Amazon Rekognition API operations.
@@ -120,9 +124,8 @@ public class RekognitionJsonHandler {
     /**
      * The Image shape is required and must carry Bytes or S3Object, matching AWS's own required-member
      * and one-of-Bytes-or-S3Object modeling for Image/SourceImage/TargetImage. Returns
-     * an optional "Bucket/Name" mock-response lookup key when S3Object is present (null
-     * for a Bytes-backed image, which has no such key — mock lookup then simply doesn't
-     * apply, same as always).
+     * the mock-response lookup key: "Bucket/Name" when S3Object is present, otherwise
+     * "sha256:<hex>" of the Bytes image's content.
      */
     private String requireImage(JsonNode request, String field) {
         JsonNode image = request == null ? null : request.get(field);
@@ -139,7 +142,21 @@ public class RekognitionJsonHandler {
             throw new AwsException("InvalidParameterException",
                     field + " must specify Bytes or S3Object.", 400);
         }
-        return extractS3Key(image.get("S3Object"));
+        String s3Key = extractS3Key(image.get("S3Object"));
+        return s3Key != null ? s3Key : bytesKey(image.get("Bytes"));
+    }
+
+    /** {@code "sha256:<hex>"} of a Bytes image's decoded content, the key Textract mocks use too. */
+    private static String bytesKey(JsonNode bytes) {
+        if (bytes == null || !bytes.isTextual()) {
+            return null;
+        }
+        try {
+            byte[] decoded = Base64.getDecoder().decode(bytes.asText());
+            return "sha256:" + HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(decoded));
+        } catch (IllegalArgumentException | NoSuchAlgorithmException e) {
+            return null;
+        }
     }
     private String extractS3Key(JsonNode s3Object) {
         if (s3Object == null || !s3Object.isObject()) {
