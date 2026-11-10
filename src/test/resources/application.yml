@@ -464,6 +464,8 @@ floci:
       enabled: true
     polly:
       enabled: true
+    location:
+      enabled: true
     rekognition:
       enabled: true
     translate:

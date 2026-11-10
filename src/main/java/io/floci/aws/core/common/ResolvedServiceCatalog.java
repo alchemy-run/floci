@@ -59,6 +59,10 @@ import io.floci.aws.services.lambda.microvm.MicrovmEndpointProxyController;
 import io.floci.aws.services.lambdamicrovms.LambdaMicrovmsController;
 import io.floci.aws.services.lambdamicrovms.LambdaNetworkConnectorsController;
 import io.floci.aws.services.lambdaweb.LambdaWebController;
+import io.floci.aws.services.location.GeoMapsController;
+import io.floci.aws.services.location.GeoPlacesController;
+import io.floci.aws.services.location.GeoRoutesController;
+import io.floci.aws.services.location.LocationController;
 import io.floci.aws.services.macie2.MacieController;
 import io.floci.aws.services.marketplace.MarketplaceCatalogController;
 import io.floci.aws.services.marketplace.MarketplaceDeploymentController;
@@ -662,6 +666,22 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("Comprehend_20171127."), Set.of("comprehend"), Set.of(), Set.of()),
+                descriptor("geo", "location", config.services().location().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("geo"), Set.of(), Set.of(LocationController.class)),
+                descriptor("geo-maps", "location", config.services().location().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("geo-maps"), Set.of(), Set.of(GeoMapsController.class)),
+                descriptor("geo-places", "location", config.services().location().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("geo-places"), Set.of(), Set.of(GeoPlacesController.class)),
+                descriptor("geo-routes", "location", config.services().location().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("geo-routes"), Set.of(), Set.of(GeoRoutesController.class)),
                 descriptor("polly", "polly", config.services().polly().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

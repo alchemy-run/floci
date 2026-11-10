@@ -1,0 +1,2190 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_location_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CalculateIsolines": "CalculateIsolinesRequest",
+    "CalculateRouteMatrix": "CalculateRouteMatrixRequest",
+    "CalculateRoutes": "CalculateRoutesRequest",
+    "OptimizeWaypoints": "OptimizeWaypointsRequest",
+    "SnapToRoads": "SnapToRoadsRequest"
+  },
+  "shapes": {
+    "ApiKey": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "BeforeWaypointsList": {
+      "type": "list",
+      "member": "WaypointIndex"
+    },
+    "BoundingBox": {
+      "type": "list",
+      "min": 4,
+      "max": 4,
+      "member": "Double"
+    },
+    "CalculateIsolinesRequest": {
+      "type": "structure",
+      "required": [
+        "Thresholds"
+      ],
+      "members": {
+        "Allow": "IsolineAllowOptions",
+        "ArrivalTime": "TimestampWithTimezoneOffset",
+        "Avoid": "IsolineAvoidanceOptions",
+        "DepartNow": "SensitiveBoolean",
+        "DepartureTime": "TimestampWithTimezoneOffset",
+        "Destination": "Position",
+        "DestinationOptions": "IsolineDestinationOptions",
+        "IsolineGeometryFormat": "GeometryFormat",
+        "IsolineGranularity": "IsolineGranularityOptions",
+        "Key": "ApiKey",
+        "OptimizeIsolineFor": "IsolineOptimizationObjective",
+        "OptimizeRoutingFor": "RoutingObjective",
+        "Origin": "Position",
+        "OriginOptions": "IsolineOriginOptions",
+        "Thresholds": "IsolineThresholds",
+        "Traffic": "IsolineTrafficOptions",
+        "TravelMode": "IsolineTravelMode",
+        "TravelModeOptions": "IsolineTravelModeOptions"
+      }
+    },
+    "CalculateRouteMatrixRequest": {
+      "type": "structure",
+      "required": [
+        "Destinations",
+        "Origins"
+      ],
+      "members": {
+        "Allow": "RouteMatrixAllowOptions",
+        "Avoid": "RouteMatrixAvoidanceOptions",
+        "DepartNow": "SensitiveBoolean",
+        "DepartureTime": "TimestampWithTimezoneOffset",
+        "Destinations": "CalculateRouteMatrixRequestDestinationsList",
+        "Exclude": "RouteMatrixExclusionOptions",
+        "Key": "ApiKey",
+        "OptimizeRoutingFor": "RoutingObjective",
+        "Origins": "CalculateRouteMatrixRequestOriginsList",
+        "RoutingBoundary": "RouteMatrixBoundary",
+        "Traffic": "RouteMatrixTrafficOptions",
+        "TravelMode": "RouteMatrixTravelMode",
+        "TravelModeOptions": "RouteMatrixTravelModeOptions"
+      }
+    },
+    "CalculateRouteMatrixRequestDestinationsList": {
+      "type": "list",
+      "min": 1,
+      "member": "RouteMatrixDestination"
+    },
+    "CalculateRouteMatrixRequestOriginsList": {
+      "type": "list",
+      "min": 1,
+      "member": "RouteMatrixOrigin"
+    },
+    "CalculateRoutesRequest": {
+      "type": "structure",
+      "required": [
+        "Destination",
+        "Origin"
+      ],
+      "members": {
+        "Allow": "RouteAllowOptions",
+        "ArrivalTime": "TimestampWithTimezoneOffset",
+        "Avoid": "RouteAvoidanceOptions",
+        "DepartNow": "SensitiveBoolean",
+        "DepartureTime": "TimestampWithTimezoneOffset",
+        "Destination": "Position",
+        "DestinationOptions": "RouteDestinationOptions",
+        "Driver": "RouteDriverOptions",
+        "Exclude": "RouteExclusionOptions",
+        "InstructionsMeasurementSystem": "MeasurementSystem",
+        "Key": "ApiKey",
+        "Languages": "CalculateRoutesRequestLanguagesList",
+        "LegAdditionalFeatures": "RouteLegAdditionalFeatureList",
+        "LegGeometryFormat": "GeometryFormat",
+        "MaxAlternatives": "CalculateRoutesRequestMaxAlternativesInteger",
+        "OptimizeRoutingFor": "RoutingObjective",
+        "Origin": "Position",
+        "OriginOptions": "RouteOriginOptions",
+        "SpanAdditionalFeatures": "RouteSpanAdditionalFeatureList",
+        "Tolls": "RouteTollOptions",
+        "Traffic": "RouteTrafficOptions",
+        "TravelMode": "RouteTravelMode",
+        "TravelModeOptions": "RouteTravelModeOptions",
+        "TravelStepType": "RouteTravelStepType",
+        "Waypoints": "RouteWaypointList"
+      }
+    },
+    "CalculateRoutesRequestLanguagesList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "LanguageTag"
+    },
+    "CalculateRoutesRequestMaxAlternativesInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 5
+    },
+    "Circle": {
+      "type": "structure",
+      "required": [
+        "Center",
+        "Radius"
+      ],
+      "members": {
+        "Center": "Position",
+        "Radius": "SensitiveDouble"
+      }
+    },
+    "Corridor": {
+      "type": "structure",
+      "required": [
+        "LineString",
+        "Radius"
+      ],
+      "members": {
+        "LineString": "LineString",
+        "Radius": "Integer"
+      }
+    },
+    "CountryCode": {
+      "type": "string",
+      "min": 2,
+      "max": 3,
+      "pattern": "([A-Z]{2}|[A-Z]{3})"
+    },
+    "CountryCodeList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "CountryCode"
+    },
+    "CurrencyCode": {
+      "type": "string",
+      "min": 3,
+      "max": 3,
+      "pattern": "[A-Z]{3}"
+    },
+    "DayOfWeek": {
+      "type": "string",
+      "enum": [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday"
+      ]
+    },
+    "DimensionCentimeters": {
+      "type": "long",
+      "min": 0,
+      "max": 4294967295
+    },
+    "DistanceMeters": {
+      "type": "long",
+      "min": 0,
+      "max": 4294967295
+    },
+    "DistanceThresholdList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "DistanceThresholdListMemberLong"
+    },
+    "DistanceThresholdListMemberLong": {
+      "type": "long",
+      "min": 0,
+      "max": 300000
+    },
+    "Double": {
+      "type": "double"
+    },
+    "DurationSeconds": {
+      "type": "long",
+      "min": 0,
+      "max": 4294967295
+    },
+    "GeometryFormat": {
+      "type": "string",
+      "enum": [
+        "FlexiblePolyline",
+        "Simple"
+      ]
+    },
+    "Heading": {
+      "type": "double",
+      "min": 0.0,
+      "max": 360.0
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "IsolineAllowOptions": {
+      "type": "structure",
+      "members": {
+        "Hot": "SensitiveBoolean",
+        "Hov": "SensitiveBoolean"
+      }
+    },
+    "IsolineAvoidanceArea": {
+      "type": "structure",
+      "required": [
+        "Geometry"
+      ],
+      "members": {
+        "Except": "IsolineAvoidanceAreaGeometryList",
+        "Geometry": "IsolineAvoidanceAreaGeometry"
+      }
+    },
+    "IsolineAvoidanceAreaGeometry": {
+      "type": "structure",
+      "members": {
+        "BoundingBox": "BoundingBox",
+        "Corridor": "Corridor",
+        "Polygon": "IsolineAvoidanceAreaGeometryPolygonList",
+        "PolylineCorridor": "PolylineCorridor",
+        "PolylinePolygon": "IsolineAvoidanceAreaGeometryPolylinePolygonList"
+      }
+    },
+    "IsolineAvoidanceAreaGeometryList": {
+      "type": "list",
+      "member": "IsolineAvoidanceAreaGeometry"
+    },
+    "IsolineAvoidanceAreaGeometryPolygonList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "LinearRing"
+    },
+    "IsolineAvoidanceAreaGeometryPolylinePolygonList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "PolylineRing"
+    },
+    "IsolineAvoidanceAreaList": {
+      "type": "list",
+      "member": "IsolineAvoidanceArea"
+    },
+    "IsolineAvoidanceOptions": {
+      "type": "structure",
+      "members": {
+        "Areas": "IsolineAvoidanceAreaList",
+        "CarShuttleTrains": "SensitiveBoolean",
+        "ControlledAccessHighways": "SensitiveBoolean",
+        "DirtRoads": "SensitiveBoolean",
+        "Ferries": "SensitiveBoolean",
+        "SeasonalClosure": "SensitiveBoolean",
+        "TollRoads": "SensitiveBoolean",
+        "TollTransponders": "SensitiveBoolean",
+        "TruckRoadTypes": "TruckRoadTypeList",
+        "Tunnels": "SensitiveBoolean",
+        "UTurns": "SensitiveBoolean",
+        "ZoneCategories": "IsolineAvoidanceZoneCategoryList"
+      }
+    },
+    "IsolineAvoidanceZoneCategory": {
+      "type": "structure",
+      "members": {
+        "Category": "IsolineZoneCategory"
+      }
+    },
+    "IsolineAvoidanceZoneCategoryList": {
+      "type": "list",
+      "min": 0,
+      "max": 3,
+      "member": "IsolineAvoidanceZoneCategory"
+    },
+    "IsolineCarOptions": {
+      "type": "structure",
+      "members": {
+        "EngineType": "IsolineEngineType",
+        "LicensePlate": "IsolineVehicleLicensePlate",
+        "MaxSpeed": "IsolineCarOptionsMaxSpeedDouble",
+        "Occupancy": "IsolineCarOptionsOccupancyInteger"
+      }
+    },
+    "IsolineCarOptionsMaxSpeedDouble": {
+      "type": "double",
+      "min": 3.6,
+      "max": 252.0
+    },
+    "IsolineCarOptionsOccupancyInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "IsolineDestinationOptions": {
+      "type": "structure",
+      "members": {
+        "AvoidActionsForDistance": "DistanceMeters",
+        "Heading": "Heading",
+        "Matching": "IsolineMatchingOptions",
+        "SideOfStreet": "IsolineSideOfStreetOptions"
+      }
+    },
+    "IsolineEngineType": {
+      "type": "string",
+      "enum": [
+        "Electric",
+        "InternalCombustion",
+        "PluginHybrid"
+      ]
+    },
+    "IsolineGranularityOptions": {
+      "type": "structure",
+      "members": {
+        "MaxPoints": "IsolineGranularityOptionsMaxPointsInteger",
+        "MaxResolution": "DistanceMeters"
+      }
+    },
+    "IsolineGranularityOptionsMaxPointsInteger": {
+      "type": "integer",
+      "min": 31
+    },
+    "IsolineHazardousCargoType": {
+      "type": "string",
+      "enum": [
+        "Combustible",
+        "Corrosive",
+        "Explosive",
+        "Flammable",
+        "Gas",
+        "HarmfulToWater",
+        "Organic",
+        "Other",
+        "Poison",
+        "PoisonousInhalation",
+        "Radioactive"
+      ]
+    },
+    "IsolineHazardousCargoTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 11,
+      "member": "IsolineHazardousCargoType"
+    },
+    "IsolineMatchingOptions": {
+      "type": "structure",
+      "members": {
+        "NameHint": "SensitiveString",
+        "OnRoadThreshold": "DistanceMeters",
+        "Radius": "DistanceMeters",
+        "Strategy": "MatchingStrategy"
+      }
+    },
+    "IsolineOptimizationObjective": {
+      "type": "string",
+      "enum": [
+        "AccurateCalculation",
+        "BalancedCalculation",
+        "FastCalculation"
+      ]
+    },
+    "IsolineOriginOptions": {
+      "type": "structure",
+      "members": {
+        "AvoidActionsForDistance": "DistanceMeters",
+        "Heading": "Heading",
+        "Matching": "IsolineMatchingOptions",
+        "SideOfStreet": "IsolineSideOfStreetOptions"
+      }
+    },
+    "IsolineScooterOptions": {
+      "type": "structure",
+      "members": {
+        "EngineType": "IsolineEngineType",
+        "LicensePlate": "IsolineVehicleLicensePlate",
+        "MaxSpeed": "IsolineScooterOptionsMaxSpeedDouble",
+        "Occupancy": "IsolineScooterOptionsOccupancyInteger"
+      }
+    },
+    "IsolineScooterOptionsMaxSpeedDouble": {
+      "type": "double",
+      "min": 3.6,
+      "max": 252.0
+    },
+    "IsolineScooterOptionsOccupancyInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "IsolineSideOfStreetOptions": {
+      "type": "structure",
+      "required": [
+        "Position"
+      ],
+      "members": {
+        "Position": "Position",
+        "UseWith": "SideOfStreetMatchingStrategy"
+      }
+    },
+    "IsolineThresholds": {
+      "type": "structure",
+      "members": {
+        "Distance": "DistanceThresholdList",
+        "Time": "TimeThresholdList"
+      }
+    },
+    "IsolineTrafficOptions": {
+      "type": "structure",
+      "members": {
+        "FlowEventThresholdOverride": "DurationSeconds",
+        "Usage": "TrafficUsage"
+      }
+    },
+    "IsolineTrailerOptions": {
+      "type": "structure",
+      "members": {
+        "AxleCount": "IsolineTrailerOptionsAxleCountInteger",
+        "TrailerCount": "IsolineTrailerOptionsTrailerCountInteger"
+      }
+    },
+    "IsolineTrailerOptionsAxleCountInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "IsolineTrailerOptionsTrailerCountInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 255
+    },
+    "IsolineTravelMode": {
+      "type": "string",
+      "enum": [
+        "Car",
+        "Pedestrian",
+        "Scooter",
+        "Truck"
+      ]
+    },
+    "IsolineTravelModeOptions": {
+      "type": "structure",
+      "members": {
+        "Car": "IsolineCarOptions",
+        "Scooter": "IsolineScooterOptions",
+        "Truck": "IsolineTruckOptions"
+      }
+    },
+    "IsolineTruckOptions": {
+      "type": "structure",
+      "members": {
+        "AxleCount": "IsolineTruckOptionsAxleCountInteger",
+        "EngineType": "IsolineEngineType",
+        "GrossWeight": "WeightKilograms",
+        "HazardousCargos": "IsolineHazardousCargoTypeList",
+        "Height": "IsolineTruckOptionsHeightLong",
+        "HeightAboveFirstAxle": "IsolineTruckOptionsHeightAboveFirstAxleLong",
+        "KpraLength": "DimensionCentimeters",
+        "Length": "IsolineTruckOptionsLengthLong",
+        "LicensePlate": "IsolineVehicleLicensePlate",
+        "MaxSpeed": "IsolineTruckOptionsMaxSpeedDouble",
+        "Occupancy": "IsolineTruckOptionsOccupancyInteger",
+        "PayloadCapacity": "WeightKilograms",
+        "TireCount": "IsolineTruckOptionsTireCountInteger",
+        "Trailer": "IsolineTrailerOptions",
+        "TruckType": "IsolineTruckType",
+        "TunnelRestrictionCode": "TunnelRestrictionCode",
+        "WeightPerAxle": "WeightKilograms",
+        "WeightPerAxleGroup": "WeightPerAxleGroup",
+        "Width": "IsolineTruckOptionsWidthLong"
+      }
+    },
+    "IsolineTruckOptionsAxleCountInteger": {
+      "type": "integer",
+      "min": 2,
+      "max": 255
+    },
+    "IsolineTruckOptionsHeightAboveFirstAxleLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "IsolineTruckOptionsHeightLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "IsolineTruckOptionsLengthLong": {
+      "type": "long",
+      "min": 0,
+      "max": 30000
+    },
+    "IsolineTruckOptionsMaxSpeedDouble": {
+      "type": "double",
+      "min": 3.6,
+      "max": 252.0
+    },
+    "IsolineTruckOptionsOccupancyInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "IsolineTruckOptionsTireCountInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 255
+    },
+    "IsolineTruckOptionsWidthLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "IsolineTruckType": {
+      "type": "string",
+      "enum": [
+        "LightTruck",
+        "StraightTruck",
+        "Tractor"
+      ]
+    },
+    "IsolineVehicleLicensePlate": {
+      "type": "structure",
+      "members": {
+        "LastCharacter": "IsolineVehicleLicensePlateLastCharacterString"
+      }
+    },
+    "IsolineVehicleLicensePlateLastCharacterString": {
+      "type": "string",
+      "min": 1,
+      "max": 1
+    },
+    "IsolineZoneCategory": {
+      "type": "string",
+      "enum": [
+        "CongestionPricing",
+        "Environmental",
+        "Vignette"
+      ]
+    },
+    "LanguageTag": {
+      "type": "string",
+      "min": 2,
+      "max": 35
+    },
+    "LineString": {
+      "type": "list",
+      "min": 2,
+      "member": "Position"
+    },
+    "LinearRing": {
+      "type": "list",
+      "min": 4,
+      "member": "Position"
+    },
+    "MatchingStrategy": {
+      "type": "string",
+      "enum": [
+        "MatchAny",
+        "MatchMostSignificantRoad"
+      ]
+    },
+    "MeasurementSystem": {
+      "type": "string",
+      "enum": [
+        "Metric",
+        "Imperial"
+      ]
+    },
+    "OptimizeWaypointsRequest": {
+      "type": "structure",
+      "required": [
+        "Origin"
+      ],
+      "members": {
+        "Avoid": "WaypointOptimizationAvoidanceOptions",
+        "Clustering": "WaypointOptimizationClusteringOptions",
+        "DepartureTime": "TimestampWithTimezoneOffset",
+        "Destination": "Position",
+        "DestinationOptions": "WaypointOptimizationDestinationOptions",
+        "Driver": "WaypointOptimizationDriverOptions",
+        "Exclude": "WaypointOptimizationExclusionOptions",
+        "Key": "ApiKey",
+        "OptimizeSequencingFor": "WaypointOptimizationSequencingObjective",
+        "Origin": "Position",
+        "OriginOptions": "WaypointOptimizationOriginOptions",
+        "Traffic": "WaypointOptimizationTrafficOptions",
+        "TravelMode": "WaypointOptimizationTravelMode",
+        "TravelModeOptions": "WaypointOptimizationTravelModeOptions",
+        "Waypoints": "WaypointOptimizationWaypointList"
+      }
+    },
+    "Polyline": {
+      "type": "string",
+      "min": 1
+    },
+    "PolylineCorridor": {
+      "type": "structure",
+      "required": [
+        "Polyline",
+        "Radius"
+      ],
+      "members": {
+        "Polyline": "Polyline",
+        "Radius": "Integer"
+      }
+    },
+    "PolylineRing": {
+      "type": "string",
+      "min": 1
+    },
+    "Position": {
+      "type": "list",
+      "min": 2,
+      "max": 2,
+      "member": "Double"
+    },
+    "RoadSnapHazardousCargoType": {
+      "type": "string",
+      "enum": [
+        "Combustible",
+        "Corrosive",
+        "Explosive",
+        "Flammable",
+        "Gas",
+        "HarmfulToWater",
+        "Organic",
+        "Other",
+        "Poison",
+        "PoisonousInhalation",
+        "Radioactive"
+      ]
+    },
+    "RoadSnapHazardousCargoTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 11,
+      "member": "RoadSnapHazardousCargoType"
+    },
+    "RoadSnapTracePoint": {
+      "type": "structure",
+      "required": [
+        "Position"
+      ],
+      "members": {
+        "Heading": "Heading",
+        "Position": "Position",
+        "Speed": "SpeedKilometersPerHour",
+        "Timestamp": "TimestampWithTimezoneOffset"
+      }
+    },
+    "RoadSnapTrailerOptions": {
+      "type": "structure",
+      "members": {
+        "TrailerCount": "RoadSnapTrailerOptionsTrailerCountInteger"
+      }
+    },
+    "RoadSnapTrailerOptionsTrailerCountInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 4
+    },
+    "RoadSnapTravelMode": {
+      "type": "string",
+      "enum": [
+        "Car",
+        "Pedestrian",
+        "Scooter",
+        "Truck"
+      ]
+    },
+    "RoadSnapTravelModeOptions": {
+      "type": "structure",
+      "members": {
+        "Truck": "RoadSnapTruckOptions"
+      }
+    },
+    "RoadSnapTruckOptions": {
+      "type": "structure",
+      "members": {
+        "GrossWeight": "WeightKilograms",
+        "HazardousCargos": "RoadSnapHazardousCargoTypeList",
+        "Height": "RoadSnapTruckOptionsHeightLong",
+        "Length": "RoadSnapTruckOptionsLengthLong",
+        "Trailer": "RoadSnapTrailerOptions",
+        "TunnelRestrictionCode": "TunnelRestrictionCode",
+        "Width": "RoadSnapTruckOptionsWidthLong"
+      }
+    },
+    "RoadSnapTruckOptionsHeightLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "RoadSnapTruckOptionsLengthLong": {
+      "type": "long",
+      "min": 0,
+      "max": 30000
+    },
+    "RoadSnapTruckOptionsWidthLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "RouteAccessibilityAttribute": {
+      "type": "string",
+      "enum": [
+        "Wheelchair"
+      ]
+    },
+    "RouteAccessibilityAttributeList": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "RouteAccessibilityAttribute"
+    },
+    "RouteAllowOptions": {
+      "type": "structure",
+      "members": {
+        "Hot": "SensitiveBoolean",
+        "Hov": "SensitiveBoolean"
+      }
+    },
+    "RouteAvoidanceArea": {
+      "type": "structure",
+      "required": [
+        "Geometry"
+      ],
+      "members": {
+        "Except": "RouteAvoidanceAreaGeometryList",
+        "Geometry": "RouteAvoidanceAreaGeometry"
+      }
+    },
+    "RouteAvoidanceAreaGeometry": {
+      "type": "structure",
+      "members": {
+        "Corridor": "Corridor",
+        "BoundingBox": "BoundingBox",
+        "Polygon": "RouteAvoidanceAreaGeometryPolygonList",
+        "PolylineCorridor": "PolylineCorridor",
+        "PolylinePolygon": "RouteAvoidanceAreaGeometryPolylinePolygonList"
+      }
+    },
+    "RouteAvoidanceAreaGeometryList": {
+      "type": "list",
+      "member": "RouteAvoidanceAreaGeometry"
+    },
+    "RouteAvoidanceAreaGeometryPolygonList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "LinearRing"
+    },
+    "RouteAvoidanceAreaGeometryPolylinePolygonList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "PolylineRing"
+    },
+    "RouteAvoidanceAreaList": {
+      "type": "list",
+      "member": "RouteAvoidanceArea"
+    },
+    "RouteAvoidanceOptions": {
+      "type": "structure",
+      "members": {
+        "Areas": "RouteAvoidanceAreaList",
+        "CarShuttleTrains": "SensitiveBoolean",
+        "ControlledAccessHighways": "SensitiveBoolean",
+        "DirtRoads": "SensitiveBoolean",
+        "Ferries": "SensitiveBoolean",
+        "SeasonalClosure": "SensitiveBoolean",
+        "TollRoads": "SensitiveBoolean",
+        "TollTransponders": "SensitiveBoolean",
+        "TruckRoadTypes": "TruckRoadTypeList",
+        "Tunnels": "SensitiveBoolean",
+        "UTurns": "SensitiveBoolean",
+        "ZoneCategories": "RouteAvoidanceZoneCategoryList"
+      }
+    },
+    "RouteAvoidanceZoneCategory": {
+      "type": "structure",
+      "required": [
+        "Category"
+      ],
+      "members": {
+        "Category": "RouteZoneCategory"
+      }
+    },
+    "RouteAvoidanceZoneCategoryList": {
+      "type": "list",
+      "min": 0,
+      "max": 3,
+      "member": "RouteAvoidanceZoneCategory"
+    },
+    "RouteCarOptions": {
+      "type": "structure",
+      "members": {
+        "EngineType": "RouteEngineType",
+        "LicensePlate": "RouteVehicleLicensePlate",
+        "MaxSpeed": "RouteCarOptionsMaxSpeedDouble",
+        "Occupancy": "RouteCarOptionsOccupancyInteger"
+      }
+    },
+    "RouteCarOptionsMaxSpeedDouble": {
+      "type": "double",
+      "min": 3.6,
+      "max": 252.0
+    },
+    "RouteCarOptionsOccupancyInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "RouteDestinationOptions": {
+      "type": "structure",
+      "members": {
+        "AvoidActionsForDistance": "RouteDestinationOptionsAvoidActionsForDistanceLong",
+        "AvoidUTurns": "SensitiveBoolean",
+        "Heading": "Heading",
+        "Matching": "RouteMatchingOptions",
+        "SideOfStreet": "RouteSideOfStreetOptions",
+        "StopDuration": "DurationSeconds"
+      }
+    },
+    "RouteDestinationOptionsAvoidActionsForDistanceLong": {
+      "type": "long",
+      "max": 2000
+    },
+    "RouteDriverOptions": {
+      "type": "structure",
+      "members": {
+        "Schedule": "RouteDriverScheduleIntervalList"
+      }
+    },
+    "RouteDriverScheduleInterval": {
+      "type": "structure",
+      "required": [
+        "DriveDuration",
+        "RestDuration"
+      ],
+      "members": {
+        "DriveDuration": "DurationSeconds",
+        "RestDuration": "DurationSeconds"
+      }
+    },
+    "RouteDriverScheduleIntervalList": {
+      "type": "list",
+      "member": "RouteDriverScheduleInterval"
+    },
+    "RouteEmissionType": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "Co2EmissionClass": "SensitiveString",
+        "Type": "SensitiveString"
+      }
+    },
+    "RouteEngineType": {
+      "type": "string",
+      "enum": [
+        "Electric",
+        "InternalCombustion",
+        "PluginHybrid"
+      ]
+    },
+    "RouteExclusionOptions": {
+      "type": "structure",
+      "required": [
+        "Countries"
+      ],
+      "members": {
+        "Countries": "CountryCodeList"
+      }
+    },
+    "RouteHazardousCargoType": {
+      "type": "string",
+      "enum": [
+        "Combustible",
+        "Corrosive",
+        "Explosive",
+        "Flammable",
+        "Gas",
+        "HarmfulToWater",
+        "Organic",
+        "Other",
+        "Poison",
+        "PoisonousInhalation",
+        "Radioactive"
+      ]
+    },
+    "RouteHazardousCargoTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 11,
+      "member": "RouteHazardousCargoType"
+    },
+    "RouteIntermodalEnabledLegs": {
+      "type": "string",
+      "enum": [
+        "FirstLeg",
+        "LastLeg",
+        "EntireRoute",
+        "None"
+      ]
+    },
+    "RouteIntermodalEnabledLegsList": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "RouteIntermodalEnabledLegs"
+    },
+    "RouteIntermodalOptions": {
+      "type": "structure",
+      "members": {
+        "AccessibilityAttributes": "RouteAccessibilityAttributeList",
+        "MaxTransfers": "RouteIntermodalOptionsMaxTransfersInteger",
+        "Pedestrian": "RouteIntermodalPedestrianOptions",
+        "Rental": "RouteIntermodalRentalOptions",
+        "Taxi": "RouteIntermodalTaxiOptions",
+        "Transit": "RouteIntermodalTransitOptions",
+        "Vehicle": "RouteIntermodalVehicleOptions"
+      }
+    },
+    "RouteIntermodalOptionsMaxTransfersInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 6
+    },
+    "RouteIntermodalPedestrianOptions": {
+      "type": "structure",
+      "members": {
+        "MaxDistance": "RouteIntermodalPedestrianOptionsMaxDistanceLong",
+        "Speed": "RouteIntermodalPedestrianOptionsSpeedDouble"
+      }
+    },
+    "RouteIntermodalPedestrianOptionsMaxDistanceLong": {
+      "type": "long",
+      "min": 0,
+      "max": 6000
+    },
+    "RouteIntermodalPedestrianOptionsSpeedDouble": {
+      "type": "double",
+      "min": 1.8,
+      "max": 7.2
+    },
+    "RouteIntermodalRentalOptions": {
+      "type": "structure",
+      "members": {
+        "AllowedModes": "RouteRentalModeList",
+        "EnabledFor": "RouteIntermodalEnabledLegsList",
+        "ExcludedModes": "RouteRentalModeList"
+      }
+    },
+    "RouteIntermodalTaxiOptions": {
+      "type": "structure",
+      "members": {
+        "AllowedModes": "RouteTaxiModeList",
+        "EnabledFor": "RouteIntermodalEnabledLegsList",
+        "ExcludedModes": "RouteTaxiModeList"
+      }
+    },
+    "RouteIntermodalTransitOptions": {
+      "type": "structure",
+      "members": {
+        "AllowedModes": "RouteTransitModeList",
+        "EnabledFor": "RouteIntermodalEnabledLegsList",
+        "ExcludedModes": "RouteTransitModeList"
+      }
+    },
+    "RouteIntermodalVehicleOptions": {
+      "type": "structure",
+      "members": {
+        "AllowedModes": "RouteVehicleModeList",
+        "EnabledFor": "RouteIntermodalEnabledLegsList",
+        "ExcludedModes": "RouteVehicleModeList"
+      }
+    },
+    "RouteLegAdditionalFeature": {
+      "type": "string",
+      "enum": [
+        "Elevation",
+        "Incidents",
+        "PassThroughWaypoints",
+        "Summary",
+        "Tolls",
+        "TravelStepInstructions",
+        "TruckRoadTypes",
+        "TypicalDuration",
+        "Zones",
+        "Bookings",
+        "IntermediateStops",
+        "NextDepartures"
+      ]
+    },
+    "RouteLegAdditionalFeatureList": {
+      "type": "list",
+      "min": 0,
+      "max": 12,
+      "member": "RouteLegAdditionalFeature"
+    },
+    "RouteMatchingOptions": {
+      "type": "structure",
+      "members": {
+        "NameHint": "RouteMatchingOptionsNameHintString",
+        "OnRoadThreshold": "DistanceMeters",
+        "Radius": "DistanceMeters",
+        "Strategy": "MatchingStrategy"
+      }
+    },
+    "RouteMatchingOptionsNameHintString": {
+      "type": "string",
+      "min": 0,
+      "max": 100
+    },
+    "RouteMatrixAllowOptions": {
+      "type": "structure",
+      "members": {
+        "Hot": "SensitiveBoolean",
+        "Hov": "SensitiveBoolean"
+      }
+    },
+    "RouteMatrixAutoCircle": {
+      "type": "structure",
+      "members": {
+        "Margin": "RouteMatrixAutoCircleMarginLong",
+        "MaxRadius": "RouteMatrixAutoCircleMaxRadiusLong"
+      }
+    },
+    "RouteMatrixAutoCircleMarginLong": {
+      "type": "long",
+      "min": 0,
+      "max": 200000
+    },
+    "RouteMatrixAutoCircleMaxRadiusLong": {
+      "type": "long",
+      "min": 0,
+      "max": 200000
+    },
+    "RouteMatrixAvoidanceArea": {
+      "type": "structure",
+      "required": [
+        "Geometry"
+      ],
+      "members": {
+        "Geometry": "RouteMatrixAvoidanceAreaGeometry"
+      }
+    },
+    "RouteMatrixAvoidanceAreaGeometry": {
+      "type": "structure",
+      "members": {
+        "BoundingBox": "BoundingBox",
+        "Polygon": "RouteMatrixAvoidanceAreaGeometryPolygonList",
+        "PolylinePolygon": "RouteMatrixAvoidanceAreaGeometryPolylinePolygonList"
+      }
+    },
+    "RouteMatrixAvoidanceAreaGeometryPolygonList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "LinearRing"
+    },
+    "RouteMatrixAvoidanceAreaGeometryPolylinePolygonList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "PolylineRing"
+    },
+    "RouteMatrixAvoidanceOptions": {
+      "type": "structure",
+      "members": {
+        "Areas": "RouteMatrixAvoidanceOptionsAreasList",
+        "CarShuttleTrains": "SensitiveBoolean",
+        "ControlledAccessHighways": "SensitiveBoolean",
+        "DirtRoads": "SensitiveBoolean",
+        "Ferries": "SensitiveBoolean",
+        "TollRoads": "SensitiveBoolean",
+        "TollTransponders": "SensitiveBoolean",
+        "TruckRoadTypes": "TruckRoadTypeList",
+        "Tunnels": "SensitiveBoolean",
+        "UTurns": "SensitiveBoolean",
+        "ZoneCategories": "RouteMatrixAvoidanceZoneCategoryList"
+      }
+    },
+    "RouteMatrixAvoidanceOptionsAreasList": {
+      "type": "list",
+      "min": 0,
+      "max": 250,
+      "member": "RouteMatrixAvoidanceArea"
+    },
+    "RouteMatrixAvoidanceZoneCategory": {
+      "type": "structure",
+      "members": {
+        "Category": "RouteMatrixZoneCategory"
+      }
+    },
+    "RouteMatrixAvoidanceZoneCategoryList": {
+      "type": "list",
+      "min": 0,
+      "max": 3,
+      "member": "RouteMatrixAvoidanceZoneCategory"
+    },
+    "RouteMatrixBoundary": {
+      "type": "structure",
+      "members": {
+        "Geometry": "RouteMatrixBoundaryGeometry",
+        "Unbounded": "SensitiveBoolean"
+      }
+    },
+    "RouteMatrixBoundaryGeometry": {
+      "type": "structure",
+      "members": {
+        "AutoCircle": "RouteMatrixAutoCircle",
+        "Circle": "Circle",
+        "BoundingBox": "BoundingBox",
+        "Polygon": "RouteMatrixBoundaryGeometryPolygonList"
+      }
+    },
+    "RouteMatrixBoundaryGeometryPolygonList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "LinearRing"
+    },
+    "RouteMatrixCarOptions": {
+      "type": "structure",
+      "members": {
+        "LicensePlate": "RouteMatrixVehicleLicensePlate",
+        "MaxSpeed": "RouteMatrixCarOptionsMaxSpeedDouble",
+        "Occupancy": "RouteMatrixCarOptionsOccupancyInteger"
+      }
+    },
+    "RouteMatrixCarOptionsMaxSpeedDouble": {
+      "type": "double",
+      "min": 3.6,
+      "max": 252.0
+    },
+    "RouteMatrixCarOptionsOccupancyInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "RouteMatrixDestination": {
+      "type": "structure",
+      "required": [
+        "Position"
+      ],
+      "members": {
+        "Options": "RouteMatrixDestinationOptions",
+        "Position": "Position"
+      }
+    },
+    "RouteMatrixDestinationOptions": {
+      "type": "structure",
+      "members": {
+        "AvoidActionsForDistance": "RouteMatrixDestinationOptionsAvoidActionsForDistanceLong",
+        "Heading": "Heading",
+        "Matching": "RouteMatrixMatchingOptions",
+        "SideOfStreet": "RouteMatrixSideOfStreetOptions"
+      }
+    },
+    "RouteMatrixDestinationOptionsAvoidActionsForDistanceLong": {
+      "type": "long",
+      "min": 0
+    },
+    "RouteMatrixExclusionOptions": {
+      "type": "structure",
+      "required": [
+        "Countries"
+      ],
+      "members": {
+        "Countries": "CountryCodeList"
+      }
+    },
+    "RouteMatrixHazardousCargoType": {
+      "type": "string",
+      "enum": [
+        "Combustible",
+        "Corrosive",
+        "Explosive",
+        "Flammable",
+        "Gas",
+        "HarmfulToWater",
+        "Organic",
+        "Other",
+        "Poison",
+        "PoisonousInhalation",
+        "Radioactive"
+      ]
+    },
+    "RouteMatrixHazardousCargoTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 11,
+      "member": "RouteMatrixHazardousCargoType"
+    },
+    "RouteMatrixMatchingOptions": {
+      "type": "structure",
+      "members": {
+        "NameHint": "SensitiveString",
+        "OnRoadThreshold": "RouteMatrixMatchingOptionsOnRoadThresholdLong",
+        "Radius": "DistanceMeters",
+        "Strategy": "MatchingStrategy"
+      }
+    },
+    "RouteMatrixMatchingOptionsOnRoadThresholdLong": {
+      "type": "long",
+      "min": 0
+    },
+    "RouteMatrixOrigin": {
+      "type": "structure",
+      "required": [
+        "Position"
+      ],
+      "members": {
+        "Options": "RouteMatrixOriginOptions",
+        "Position": "Position"
+      }
+    },
+    "RouteMatrixOriginOptions": {
+      "type": "structure",
+      "members": {
+        "AvoidActionsForDistance": "RouteMatrixOriginOptionsAvoidActionsForDistanceLong",
+        "Heading": "Heading",
+        "Matching": "RouteMatrixMatchingOptions",
+        "SideOfStreet": "RouteMatrixSideOfStreetOptions"
+      }
+    },
+    "RouteMatrixOriginOptionsAvoidActionsForDistanceLong": {
+      "type": "long",
+      "min": 0
+    },
+    "RouteMatrixScooterOptions": {
+      "type": "structure",
+      "members": {
+        "LicensePlate": "RouteMatrixVehicleLicensePlate",
+        "MaxSpeed": "RouteMatrixScooterOptionsMaxSpeedDouble",
+        "Occupancy": "RouteMatrixScooterOptionsOccupancyInteger"
+      }
+    },
+    "RouteMatrixScooterOptionsMaxSpeedDouble": {
+      "type": "double",
+      "min": 3.6,
+      "max": 252.0
+    },
+    "RouteMatrixScooterOptionsOccupancyInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "RouteMatrixSideOfStreetOptions": {
+      "type": "structure",
+      "required": [
+        "Position"
+      ],
+      "members": {
+        "Position": "Position",
+        "UseWith": "SideOfStreetMatchingStrategy"
+      }
+    },
+    "RouteMatrixTrafficOptions": {
+      "type": "structure",
+      "members": {
+        "FlowEventThresholdOverride": "DurationSeconds",
+        "Usage": "TrafficUsage"
+      }
+    },
+    "RouteMatrixTrailerOptions": {
+      "type": "structure",
+      "members": {
+        "TrailerCount": "RouteMatrixTrailerOptionsTrailerCountInteger"
+      }
+    },
+    "RouteMatrixTrailerOptionsTrailerCountInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 255
+    },
+    "RouteMatrixTravelMode": {
+      "type": "string",
+      "enum": [
+        "Car",
+        "Pedestrian",
+        "Scooter",
+        "Truck"
+      ]
+    },
+    "RouteMatrixTravelModeOptions": {
+      "type": "structure",
+      "members": {
+        "Car": "RouteMatrixCarOptions",
+        "Scooter": "RouteMatrixScooterOptions",
+        "Truck": "RouteMatrixTruckOptions"
+      }
+    },
+    "RouteMatrixTruckOptions": {
+      "type": "structure",
+      "members": {
+        "AxleCount": "RouteMatrixTruckOptionsAxleCountInteger",
+        "GrossWeight": "WeightKilograms",
+        "HazardousCargos": "RouteMatrixHazardousCargoTypeList",
+        "Height": "RouteMatrixTruckOptionsHeightLong",
+        "KpraLength": "DimensionCentimeters",
+        "Length": "RouteMatrixTruckOptionsLengthLong",
+        "LicensePlate": "RouteMatrixVehicleLicensePlate",
+        "MaxSpeed": "RouteMatrixTruckOptionsMaxSpeedDouble",
+        "Occupancy": "RouteMatrixTruckOptionsOccupancyInteger",
+        "PayloadCapacity": "WeightKilograms",
+        "Trailer": "RouteMatrixTrailerOptions",
+        "TruckType": "RouteMatrixTruckType",
+        "TunnelRestrictionCode": "TunnelRestrictionCode",
+        "WeightPerAxle": "WeightKilograms",
+        "WeightPerAxleGroup": "WeightPerAxleGroup",
+        "Width": "RouteMatrixTruckOptionsWidthLong"
+      }
+    },
+    "RouteMatrixTruckOptionsAxleCountInteger": {
+      "type": "integer",
+      "min": 2,
+      "max": 255
+    },
+    "RouteMatrixTruckOptionsHeightLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "RouteMatrixTruckOptionsLengthLong": {
+      "type": "long",
+      "min": 0,
+      "max": 30000
+    },
+    "RouteMatrixTruckOptionsMaxSpeedDouble": {
+      "type": "double",
+      "min": 3.6,
+      "max": 252.0
+    },
+    "RouteMatrixTruckOptionsOccupancyInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "RouteMatrixTruckOptionsWidthLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "RouteMatrixTruckType": {
+      "type": "string",
+      "enum": [
+        "LightTruck",
+        "StraightTruck",
+        "Tractor"
+      ]
+    },
+    "RouteMatrixVehicleLicensePlate": {
+      "type": "structure",
+      "members": {
+        "LastCharacter": "RouteMatrixVehicleLicensePlateLastCharacterString"
+      }
+    },
+    "RouteMatrixVehicleLicensePlateLastCharacterString": {
+      "type": "string",
+      "min": 1,
+      "max": 1
+    },
+    "RouteMatrixZoneCategory": {
+      "type": "string",
+      "enum": [
+        "CongestionPricing",
+        "Environmental",
+        "Vignette"
+      ]
+    },
+    "RouteOriginOptions": {
+      "type": "structure",
+      "members": {
+        "AvoidActionsForDistance": "RouteOriginOptionsAvoidActionsForDistanceLong",
+        "AvoidUTurns": "SensitiveBoolean",
+        "Heading": "Heading",
+        "Matching": "RouteMatchingOptions",
+        "SideOfStreet": "RouteSideOfStreetOptions"
+      }
+    },
+    "RouteOriginOptionsAvoidActionsForDistanceLong": {
+      "type": "long",
+      "max": 2000
+    },
+    "RoutePedestrianOptions": {
+      "type": "structure",
+      "members": {
+        "Speed": "RoutePedestrianOptionsSpeedDouble"
+      }
+    },
+    "RoutePedestrianOptionsSpeedDouble": {
+      "type": "double",
+      "min": 1.8,
+      "max": 7.2
+    },
+    "RouteRentalMode": {
+      "type": "string",
+      "enum": [
+        "All",
+        "Car"
+      ]
+    },
+    "RouteRentalModeList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "RouteRentalMode"
+    },
+    "RouteScooterOptions": {
+      "type": "structure",
+      "members": {
+        "EngineType": "RouteEngineType",
+        "LicensePlate": "RouteVehicleLicensePlate",
+        "MaxSpeed": "RouteScooterOptionsMaxSpeedDouble",
+        "Occupancy": "RouteScooterOptionsOccupancyInteger"
+      }
+    },
+    "RouteScooterOptionsMaxSpeedDouble": {
+      "type": "double",
+      "min": 3.6,
+      "max": 252.0
+    },
+    "RouteScooterOptionsOccupancyInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "RouteSideOfStreetOptions": {
+      "type": "structure",
+      "required": [
+        "Position"
+      ],
+      "members": {
+        "Position": "Position",
+        "UseWith": "SideOfStreetMatchingStrategy"
+      }
+    },
+    "RouteSpanAdditionalFeature": {
+      "type": "string",
+      "enum": [
+        "BestCaseDuration",
+        "CarAccess",
+        "Country",
+        "Distance",
+        "Duration",
+        "DynamicSpeed",
+        "FunctionalClassification",
+        "Gates",
+        "Incidents",
+        "Names",
+        "Notices",
+        "PedestrianAccess",
+        "RailwayCrossings",
+        "Region",
+        "RoadAttributes",
+        "RouteNumbers",
+        "ScooterAccess",
+        "SpeedLimit",
+        "TollSystems",
+        "TruckAccess",
+        "TruckRoadTypes",
+        "TypicalDuration",
+        "Zones",
+        "Consumption"
+      ]
+    },
+    "RouteSpanAdditionalFeatureList": {
+      "type": "list",
+      "min": 0,
+      "max": 24,
+      "member": "RouteSpanAdditionalFeature"
+    },
+    "RouteTaxiMode": {
+      "type": "string",
+      "enum": [
+        "All",
+        "Car"
+      ]
+    },
+    "RouteTaxiModeList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "RouteTaxiMode"
+    },
+    "RouteTollOptions": {
+      "type": "structure",
+      "members": {
+        "AllTransponders": "SensitiveBoolean",
+        "AllVignettes": "SensitiveBoolean",
+        "Currency": "CurrencyCode",
+        "EmissionType": "RouteEmissionType",
+        "VehicleCategory": "RouteTollVehicleCategory"
+      }
+    },
+    "RouteTollVehicleCategory": {
+      "type": "string",
+      "enum": [
+        "Minibus"
+      ]
+    },
+    "RouteTrafficOptions": {
+      "type": "structure",
+      "members": {
+        "FlowEventThresholdOverride": "DurationSeconds",
+        "Usage": "TrafficUsage"
+      }
+    },
+    "RouteTrailerOptions": {
+      "type": "structure",
+      "members": {
+        "AxleCount": "RouteTrailerOptionsAxleCountInteger",
+        "TrailerCount": "RouteTrailerOptionsTrailerCountInteger"
+      }
+    },
+    "RouteTrailerOptionsAxleCountInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "RouteTrailerOptionsTrailerCountInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 255
+    },
+    "RouteTransitMode": {
+      "type": "string",
+      "enum": [
+        "AerialTramway",
+        "Airplane",
+        "All",
+        "Bus",
+        "BusRapidTransit",
+        "CityTrain",
+        "Ferry",
+        "FunicularRailway",
+        "HighSpeedTrain",
+        "IntercityTrain",
+        "InterregionalTrain",
+        "LightRail",
+        "Monorail",
+        "PrivateBus",
+        "RegionalTrain",
+        "Subway"
+      ]
+    },
+    "RouteTransitModeList": {
+      "type": "list",
+      "min": 1,
+      "max": 15,
+      "member": "RouteTransitMode"
+    },
+    "RouteTransitOptions": {
+      "type": "structure",
+      "members": {
+        "AccessibilityAttributes": "RouteAccessibilityAttributeList",
+        "AllowedModes": "RouteTransitModeList",
+        "ExcludedModes": "RouteTransitModeList",
+        "MaxTransfers": "RouteTransitOptionsMaxTransfersInteger",
+        "Pedestrian": "RouteTransitPedestrianOptions"
+      }
+    },
+    "RouteTransitOptionsMaxTransfersInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 6
+    },
+    "RouteTransitPedestrianOptions": {
+      "type": "structure",
+      "members": {
+        "MaxDistance": "RouteTransitPedestrianOptionsMaxDistanceLong",
+        "Speed": "RouteTransitPedestrianOptionsSpeedDouble"
+      }
+    },
+    "RouteTransitPedestrianOptionsMaxDistanceLong": {
+      "type": "long",
+      "max": 6000
+    },
+    "RouteTransitPedestrianOptionsSpeedDouble": {
+      "type": "double",
+      "min": 1.8,
+      "max": 7.2
+    },
+    "RouteTravelMode": {
+      "type": "string",
+      "enum": [
+        "Car",
+        "Pedestrian",
+        "Scooter",
+        "Truck",
+        "Intermodal",
+        "Transit"
+      ]
+    },
+    "RouteTravelModeOptions": {
+      "type": "structure",
+      "members": {
+        "Car": "RouteCarOptions",
+        "Pedestrian": "RoutePedestrianOptions",
+        "Scooter": "RouteScooterOptions",
+        "Truck": "RouteTruckOptions",
+        "Intermodal": "RouteIntermodalOptions",
+        "Transit": "RouteTransitOptions"
+      }
+    },
+    "RouteTravelStepType": {
+      "type": "string",
+      "enum": [
+        "Default",
+        "TurnByTurn"
+      ]
+    },
+    "RouteTruckOptions": {
+      "type": "structure",
+      "members": {
+        "AxleCount": "RouteTruckOptionsAxleCountInteger",
+        "EngineType": "RouteEngineType",
+        "GrossWeight": "WeightKilograms",
+        "HazardousCargos": "RouteHazardousCargoTypeList",
+        "Height": "RouteTruckOptionsHeightLong",
+        "HeightAboveFirstAxle": "RouteTruckOptionsHeightAboveFirstAxleLong",
+        "KpraLength": "DimensionCentimeters",
+        "Length": "RouteTruckOptionsLengthLong",
+        "LicensePlate": "RouteVehicleLicensePlate",
+        "MaxSpeed": "RouteTruckOptionsMaxSpeedDouble",
+        "Occupancy": "RouteTruckOptionsOccupancyInteger",
+        "PayloadCapacity": "WeightKilograms",
+        "TireCount": "RouteTruckOptionsTireCountInteger",
+        "Trailer": "RouteTrailerOptions",
+        "TruckType": "RouteTruckType",
+        "TunnelRestrictionCode": "RouteTruckOptionsTunnelRestrictionCodeString",
+        "WeightPerAxle": "WeightKilograms",
+        "WeightPerAxleGroup": "WeightPerAxleGroup",
+        "Width": "RouteTruckOptionsWidthLong"
+      }
+    },
+    "RouteTruckOptionsAxleCountInteger": {
+      "type": "integer",
+      "min": 2,
+      "max": 255
+    },
+    "RouteTruckOptionsHeightAboveFirstAxleLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "RouteTruckOptionsHeightLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "RouteTruckOptionsLengthLong": {
+      "type": "long",
+      "min": 0,
+      "max": 30000
+    },
+    "RouteTruckOptionsMaxSpeedDouble": {
+      "type": "double",
+      "min": 3.6,
+      "max": 252.0
+    },
+    "RouteTruckOptionsOccupancyInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "RouteTruckOptionsTireCountInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 255
+    },
+    "RouteTruckOptionsTunnelRestrictionCodeString": {
+      "type": "string",
+      "min": 0,
+      "max": 20
+    },
+    "RouteTruckOptionsWidthLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "RouteTruckType": {
+      "type": "string",
+      "enum": [
+        "LightTruck",
+        "StraightTruck",
+        "Tractor"
+      ]
+    },
+    "RouteVehicleLicensePlate": {
+      "type": "structure",
+      "members": {
+        "LastCharacter": "RouteVehicleLicensePlateLastCharacterString"
+      }
+    },
+    "RouteVehicleLicensePlateLastCharacterString": {
+      "type": "string",
+      "min": 1,
+      "max": 1
+    },
+    "RouteVehicleMode": {
+      "type": "string",
+      "enum": [
+        "All",
+        "Car"
+      ]
+    },
+    "RouteVehicleModeList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "RouteVehicleMode"
+    },
+    "RouteWaypoint": {
+      "type": "structure",
+      "required": [
+        "Position"
+      ],
+      "members": {
+        "AvoidActionsForDistance": "RouteWaypointAvoidActionsForDistanceLong",
+        "AvoidUTurns": "SensitiveBoolean",
+        "Heading": "Heading",
+        "Matching": "RouteMatchingOptions",
+        "PassThrough": "SensitiveBoolean",
+        "Position": "Position",
+        "SideOfStreet": "RouteSideOfStreetOptions",
+        "StopDuration": "RouteWaypointStopDurationLong"
+      }
+    },
+    "RouteWaypointAvoidActionsForDistanceLong": {
+      "type": "long",
+      "max": 2000
+    },
+    "RouteWaypointList": {
+      "type": "list",
+      "member": "RouteWaypoint"
+    },
+    "RouteWaypointStopDurationLong": {
+      "type": "long",
+      "max": 49999
+    },
+    "RouteZoneCategory": {
+      "type": "string",
+      "enum": [
+        "CongestionPricing",
+        "Environmental",
+        "Vignette"
+      ]
+    },
+    "RoutingObjective": {
+      "type": "string",
+      "enum": [
+        "FastestRoute",
+        "ShortestRoute"
+      ]
+    },
+    "SensitiveBoolean": {
+      "type": "boolean"
+    },
+    "SensitiveDouble": {
+      "type": "double"
+    },
+    "SensitiveString": {
+      "type": "string"
+    },
+    "SideOfStreetMatchingStrategy": {
+      "type": "string",
+      "enum": [
+        "AnyStreet",
+        "DividedStreetOnly"
+      ]
+    },
+    "SnapToRoadsRequest": {
+      "type": "structure",
+      "required": [
+        "TracePoints"
+      ],
+      "members": {
+        "Key": "ApiKey",
+        "SnappedGeometryFormat": "GeometryFormat",
+        "SnapRadius": "SnapToRoadsRequestSnapRadiusLong",
+        "TracePoints": "SnapToRoadsRequestTracePointsList",
+        "TravelMode": "RoadSnapTravelMode",
+        "TravelModeOptions": "RoadSnapTravelModeOptions"
+      }
+    },
+    "SnapToRoadsRequestSnapRadiusLong": {
+      "type": "long",
+      "min": 0,
+      "max": 10000
+    },
+    "SnapToRoadsRequestTracePointsList": {
+      "type": "list",
+      "min": 2,
+      "max": 5000,
+      "member": "RoadSnapTracePoint"
+    },
+    "SpeedKilometersPerHour": {
+      "type": "double",
+      "min": 0.0
+    },
+    "TimeOfDay": {
+      "type": "string",
+      "pattern": "([0-1]?[0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](Z|[+-]([0-1]?[0-9]|2[0-3]):[0-5][0-9])"
+    },
+    "TimeThresholdList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "TimeThresholdListMemberLong"
+    },
+    "TimeThresholdListMemberLong": {
+      "type": "long",
+      "min": 0,
+      "max": 10800
+    },
+    "TimestampWithTimezoneOffset": {
+      "type": "string",
+      "pattern": "([1-2][0-9]{3})-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):([0-5][0-9]):([0-5][0-9]|60)(\\.[0-9]{0,9})?(Z|[+-]([01][0-9]|2[0-3]):[0-5][0-9])"
+    },
+    "TrafficUsage": {
+      "type": "string",
+      "enum": [
+        "IgnoreTrafficData",
+        "UseTrafficData"
+      ]
+    },
+    "TruckRoadType": {
+      "type": "string",
+      "min": 1,
+      "max": 3
+    },
+    "TruckRoadTypeList": {
+      "type": "list",
+      "min": 1,
+      "max": 12,
+      "member": "TruckRoadType"
+    },
+    "TunnelRestrictionCode": {
+      "type": "string",
+      "min": 1,
+      "max": 1
+    },
+    "WaypointId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[^,;!]+"
+    },
+    "WaypointIndex": {
+      "type": "integer"
+    },
+    "WaypointOptimizationAccessHours": {
+      "type": "structure",
+      "required": [
+        "From",
+        "To"
+      ],
+      "members": {
+        "From": "WaypointOptimizationAccessHoursEntry",
+        "To": "WaypointOptimizationAccessHoursEntry"
+      }
+    },
+    "WaypointOptimizationAccessHoursEntry": {
+      "type": "structure",
+      "required": [
+        "DayOfWeek",
+        "TimeOfDay"
+      ],
+      "members": {
+        "DayOfWeek": "DayOfWeek",
+        "TimeOfDay": "TimeOfDay"
+      }
+    },
+    "WaypointOptimizationAvoidanceArea": {
+      "type": "structure",
+      "required": [
+        "Geometry"
+      ],
+      "members": {
+        "Geometry": "WaypointOptimizationAvoidanceAreaGeometry"
+      }
+    },
+    "WaypointOptimizationAvoidanceAreaGeometry": {
+      "type": "structure",
+      "members": {
+        "BoundingBox": "BoundingBox"
+      }
+    },
+    "WaypointOptimizationAvoidanceOptions": {
+      "type": "structure",
+      "members": {
+        "Areas": "WaypointOptimizationAvoidanceOptionsAreasList",
+        "CarShuttleTrains": "SensitiveBoolean",
+        "ControlledAccessHighways": "SensitiveBoolean",
+        "DirtRoads": "SensitiveBoolean",
+        "Ferries": "SensitiveBoolean",
+        "TollRoads": "SensitiveBoolean",
+        "Tunnels": "SensitiveBoolean",
+        "UTurns": "SensitiveBoolean"
+      }
+    },
+    "WaypointOptimizationAvoidanceOptionsAreasList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "WaypointOptimizationAvoidanceArea"
+    },
+    "WaypointOptimizationClusteringAlgorithm": {
+      "type": "string",
+      "enum": [
+        "DrivingDistance",
+        "TopologySegment"
+      ]
+    },
+    "WaypointOptimizationClusteringOptions": {
+      "type": "structure",
+      "required": [
+        "Algorithm"
+      ],
+      "members": {
+        "Algorithm": "WaypointOptimizationClusteringAlgorithm",
+        "DrivingDistanceOptions": "WaypointOptimizationDrivingDistanceOptions"
+      }
+    },
+    "WaypointOptimizationDestinationOptions": {
+      "type": "structure",
+      "members": {
+        "AccessHours": "WaypointOptimizationAccessHours",
+        "AppointmentTime": "TimestampWithTimezoneOffset",
+        "Heading": "Heading",
+        "Id": "WaypointId",
+        "ServiceDuration": "DurationSeconds",
+        "SideOfStreet": "WaypointOptimizationSideOfStreetOptions"
+      }
+    },
+    "WaypointOptimizationDriverOptions": {
+      "type": "structure",
+      "members": {
+        "RestCycles": "WaypointOptimizationRestCycles",
+        "RestProfile": "WaypointOptimizationRestProfile",
+        "TreatServiceTimeAs": "WaypointOptimizationServiceTimeTreatment"
+      }
+    },
+    "WaypointOptimizationDrivingDistanceOptions": {
+      "type": "structure",
+      "required": [
+        "DrivingDistance"
+      ],
+      "members": {
+        "DrivingDistance": "WaypointOptimizationDrivingDistanceOptionsDrivingDistanceLong"
+      }
+    },
+    "WaypointOptimizationDrivingDistanceOptionsDrivingDistanceLong": {
+      "type": "long",
+      "min": 5,
+      "max": 50000
+    },
+    "WaypointOptimizationExclusionOptions": {
+      "type": "structure",
+      "required": [
+        "Countries"
+      ],
+      "members": {
+        "Countries": "CountryCodeList"
+      }
+    },
+    "WaypointOptimizationHazardousCargoType": {
+      "type": "string",
+      "enum": [
+        "Combustible",
+        "Corrosive",
+        "Explosive",
+        "Flammable",
+        "Gas",
+        "HarmfulToWater",
+        "Organic",
+        "Other",
+        "Poison",
+        "PoisonousInhalation",
+        "Radioactive"
+      ]
+    },
+    "WaypointOptimizationHazardousCargoTypeList": {
+      "type": "list",
+      "member": "WaypointOptimizationHazardousCargoType"
+    },
+    "WaypointOptimizationOriginOptions": {
+      "type": "structure",
+      "members": {
+        "Id": "WaypointId"
+      }
+    },
+    "WaypointOptimizationPedestrianOptions": {
+      "type": "structure",
+      "members": {
+        "Speed": "WaypointOptimizationPedestrianOptionsSpeedDouble"
+      }
+    },
+    "WaypointOptimizationPedestrianOptionsSpeedDouble": {
+      "type": "double",
+      "min": 1.8,
+      "max": 7.2
+    },
+    "WaypointOptimizationRestCycleDurations": {
+      "type": "structure",
+      "required": [
+        "RestDuration",
+        "WorkDuration"
+      ],
+      "members": {
+        "RestDuration": "DurationSeconds",
+        "WorkDuration": "DurationSeconds"
+      }
+    },
+    "WaypointOptimizationRestCycles": {
+      "type": "structure",
+      "required": [
+        "LongCycle",
+        "ShortCycle"
+      ],
+      "members": {
+        "LongCycle": "WaypointOptimizationRestCycleDurations",
+        "ShortCycle": "WaypointOptimizationRestCycleDurations"
+      }
+    },
+    "WaypointOptimizationRestProfile": {
+      "type": "structure",
+      "required": [
+        "Profile"
+      ],
+      "members": {
+        "Profile": "WaypointOptimizationRestProfileProfileString"
+      }
+    },
+    "WaypointOptimizationRestProfileProfileString": {
+      "type": "string",
+      "min": 2,
+      "max": 2
+    },
+    "WaypointOptimizationSequencingObjective": {
+      "type": "string",
+      "enum": [
+        "FastestRoute",
+        "ShortestRoute"
+      ]
+    },
+    "WaypointOptimizationServiceTimeTreatment": {
+      "type": "string",
+      "enum": [
+        "Rest",
+        "Work"
+      ]
+    },
+    "WaypointOptimizationSideOfStreetOptions": {
+      "type": "structure",
+      "required": [
+        "Position"
+      ],
+      "members": {
+        "Position": "Position",
+        "UseWith": "SideOfStreetMatchingStrategy"
+      }
+    },
+    "WaypointOptimizationTrafficOptions": {
+      "type": "structure",
+      "members": {
+        "Usage": "TrafficUsage"
+      }
+    },
+    "WaypointOptimizationTrailerOptions": {
+      "type": "structure",
+      "members": {
+        "TrailerCount": "WaypointOptimizationTrailerOptionsTrailerCountInteger"
+      }
+    },
+    "WaypointOptimizationTrailerOptionsTrailerCountInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 255
+    },
+    "WaypointOptimizationTravelMode": {
+      "type": "string",
+      "enum": [
+        "Car",
+        "Pedestrian",
+        "Scooter",
+        "Truck"
+      ]
+    },
+    "WaypointOptimizationTravelModeOptions": {
+      "type": "structure",
+      "members": {
+        "Pedestrian": "WaypointOptimizationPedestrianOptions",
+        "Truck": "WaypointOptimizationTruckOptions"
+      }
+    },
+    "WaypointOptimizationTruckOptions": {
+      "type": "structure",
+      "members": {
+        "GrossWeight": "WeightKilograms",
+        "HazardousCargos": "WaypointOptimizationHazardousCargoTypeList",
+        "Height": "WaypointOptimizationTruckOptionsHeightLong",
+        "Length": "WaypointOptimizationTruckOptionsLengthLong",
+        "Trailer": "WaypointOptimizationTrailerOptions",
+        "TruckType": "WaypointOptimizationTruckType",
+        "TunnelRestrictionCode": "TunnelRestrictionCode",
+        "WeightPerAxle": "WeightKilograms",
+        "Width": "WaypointOptimizationTruckOptionsWidthLong"
+      }
+    },
+    "WaypointOptimizationTruckOptionsHeightLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "WaypointOptimizationTruckOptionsLengthLong": {
+      "type": "long",
+      "min": 0,
+      "max": 30000
+    },
+    "WaypointOptimizationTruckOptionsWidthLong": {
+      "type": "long",
+      "min": 0,
+      "max": 5000
+    },
+    "WaypointOptimizationTruckType": {
+      "type": "string",
+      "enum": [
+        "StraightTruck",
+        "Tractor"
+      ]
+    },
+    "WaypointOptimizationWaypoint": {
+      "type": "structure",
+      "required": [
+        "Position"
+      ],
+      "members": {
+        "AccessHours": "WaypointOptimizationAccessHours",
+        "AppointmentTime": "TimestampWithTimezoneOffset",
+        "Before": "BeforeWaypointsList",
+        "Heading": "Heading",
+        "Id": "WaypointId",
+        "Position": "Position",
+        "ServiceDuration": "DurationSeconds",
+        "SideOfStreet": "WaypointOptimizationSideOfStreetOptions"
+      }
+    },
+    "WaypointOptimizationWaypointList": {
+      "type": "list",
+      "member": "WaypointOptimizationWaypoint"
+    },
+    "WeightKilograms": {
+      "type": "long",
+      "min": 0,
+      "max": 4294967295
+    },
+    "WeightPerAxleGroup": {
+      "type": "structure",
+      "members": {
+        "Single": "WeightKilograms",
+        "Tandem": "WeightKilograms",
+        "Triple": "WeightKilograms",
+        "Quad": "WeightKilograms",
+        "Quint": "WeightKilograms"
+      }
+    }
+  }
+}

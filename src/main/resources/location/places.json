@@ -1,0 +1,2236 @@
+{
+ "_note": "Floci's gazetteer: world cities and landmarks the Location and Geo place APIs search. Coordinates are WGS84 longitude/latitude.",
+ "places": [
+  {
+   "name": "Seattle",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 47.6062,
+   "lon": -122.3321,
+   "municipality": "Seattle",
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98101",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 0
+  },
+  {
+   "name": "Bellevue",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 47.6101,
+   "lon": -122.2015,
+   "municipality": "Bellevue",
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98004",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 1
+  },
+  {
+   "name": "Tacoma",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 47.2529,
+   "lon": -122.4443,
+   "municipality": "Tacoma",
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98402",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 2
+  },
+  {
+   "name": "Portland",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 45.5152,
+   "lon": -122.6784,
+   "municipality": "Portland",
+   "region": "Oregon",
+   "regionCode": "OR",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "97204",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 3
+  },
+  {
+   "name": "San Francisco",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 37.7749,
+   "lon": -122.4194,
+   "municipality": "San Francisco",
+   "region": "California",
+   "regionCode": "CA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "94103",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 4
+  },
+  {
+   "name": "Los Angeles",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 34.0522,
+   "lon": -118.2437,
+   "municipality": "Los Angeles",
+   "region": "California",
+   "regionCode": "CA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "90012",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 5
+  },
+  {
+   "name": "San Diego",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 32.7157,
+   "lon": -117.1611,
+   "municipality": "San Diego",
+   "region": "California",
+   "regionCode": "CA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "92101",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 6
+  },
+  {
+   "name": "San Jose",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 37.3382,
+   "lon": -121.8863,
+   "municipality": "San Jose",
+   "region": "California",
+   "regionCode": "CA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "95113",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 7
+  },
+  {
+   "name": "Las Vegas",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 36.1699,
+   "lon": -115.1398,
+   "municipality": "Las Vegas",
+   "region": "Nevada",
+   "regionCode": "NV",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "89101",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 8
+  },
+  {
+   "name": "Phoenix",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 33.4484,
+   "lon": -112.074,
+   "municipality": "Phoenix",
+   "region": "Arizona",
+   "regionCode": "AZ",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "85004",
+   "timeZone": "America/Phoenix",
+   "offset": -25200,
+   "id": 9
+  },
+  {
+   "name": "Denver",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 39.7392,
+   "lon": -104.9903,
+   "municipality": "Denver",
+   "region": "Colorado",
+   "regionCode": "CO",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "80202",
+   "timeZone": "America/Denver",
+   "offset": -25200,
+   "id": 10
+  },
+  {
+   "name": "Salt Lake City",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 40.7608,
+   "lon": -111.891,
+   "municipality": "Salt Lake City",
+   "region": "Utah",
+   "regionCode": "UT",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "84111",
+   "timeZone": "America/Denver",
+   "offset": -25200,
+   "id": 11
+  },
+  {
+   "name": "Dallas",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 32.7767,
+   "lon": -96.797,
+   "municipality": "Dallas",
+   "region": "Texas",
+   "regionCode": "TX",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "75201",
+   "timeZone": "America/Chicago",
+   "offset": -21600,
+   "id": 12
+  },
+  {
+   "name": "Houston",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 29.7604,
+   "lon": -95.3698,
+   "municipality": "Houston",
+   "region": "Texas",
+   "regionCode": "TX",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "77002",
+   "timeZone": "America/Chicago",
+   "offset": -21600,
+   "id": 13
+  },
+  {
+   "name": "Austin",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 30.2672,
+   "lon": -97.7431,
+   "municipality": "Austin",
+   "region": "Texas",
+   "regionCode": "TX",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "78701",
+   "timeZone": "America/Chicago",
+   "offset": -21600,
+   "id": 14
+  },
+  {
+   "name": "Chicago",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 41.8781,
+   "lon": -87.6298,
+   "municipality": "Chicago",
+   "region": "Illinois",
+   "regionCode": "IL",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "60602",
+   "timeZone": "America/Chicago",
+   "offset": -21600,
+   "id": 15
+  },
+  {
+   "name": "Minneapolis",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 44.9778,
+   "lon": -93.265,
+   "municipality": "Minneapolis",
+   "region": "Minnesota",
+   "regionCode": "MN",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "55401",
+   "timeZone": "America/Chicago",
+   "offset": -21600,
+   "id": 16
+  },
+  {
+   "name": "New Orleans",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 29.9511,
+   "lon": -90.0715,
+   "municipality": "New Orleans",
+   "region": "Louisiana",
+   "regionCode": "LA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "70112",
+   "timeZone": "America/Chicago",
+   "offset": -21600,
+   "id": 17
+  },
+  {
+   "name": "Atlanta",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 33.749,
+   "lon": -84.388,
+   "municipality": "Atlanta",
+   "region": "Georgia",
+   "regionCode": "GA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "30303",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 18
+  },
+  {
+   "name": "Miami",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 25.7617,
+   "lon": -80.1918,
+   "municipality": "Miami",
+   "region": "Florida",
+   "regionCode": "FL",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "33130",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 19
+  },
+  {
+   "name": "Orlando",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 28.5384,
+   "lon": -81.3789,
+   "municipality": "Orlando",
+   "region": "Florida",
+   "regionCode": "FL",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "32801",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 20
+  },
+  {
+   "name": "Washington",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 38.9072,
+   "lon": -77.0369,
+   "municipality": "Washington",
+   "region": "District of Columbia",
+   "regionCode": "DC",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "20001",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 21
+  },
+  {
+   "name": "New York",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 40.7128,
+   "lon": -74.006,
+   "municipality": "New York",
+   "region": "New York",
+   "regionCode": "NY",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "10007",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 22
+  },
+  {
+   "name": "Boston",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 42.3601,
+   "lon": -71.0589,
+   "municipality": "Boston",
+   "region": "Massachusetts",
+   "regionCode": "MA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "02108",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 23
+  },
+  {
+   "name": "Philadelphia",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 39.9526,
+   "lon": -75.1652,
+   "municipality": "Philadelphia",
+   "region": "Pennsylvania",
+   "regionCode": "PA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "19107",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 24
+  },
+  {
+   "name": "Detroit",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 42.3314,
+   "lon": -83.0458,
+   "municipality": "Detroit",
+   "region": "Michigan",
+   "regionCode": "MI",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "48226",
+   "timeZone": "America/Detroit",
+   "offset": -18000,
+   "id": 25
+  },
+  {
+   "name": "Honolulu",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 21.3069,
+   "lon": -157.8583,
+   "municipality": "Honolulu",
+   "region": "Hawaii",
+   "regionCode": "HI",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "96813",
+   "timeZone": "Pacific/Honolulu",
+   "offset": -36000,
+   "id": 26
+  },
+  {
+   "name": "Anchorage",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 61.2181,
+   "lon": -149.9003,
+   "municipality": "Anchorage",
+   "region": "Alaska",
+   "regionCode": "AK",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "99501",
+   "timeZone": "America/Anchorage",
+   "offset": -32400,
+   "id": 27
+  },
+  {
+   "name": "Vancouver",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 49.2827,
+   "lon": -123.1207,
+   "municipality": "Vancouver",
+   "region": "British Columbia",
+   "regionCode": "BC",
+   "country": "CAN",
+   "countryName": "Canada",
+   "postalCode": "V6B",
+   "timeZone": "America/Vancouver",
+   "offset": -28800,
+   "id": 28
+  },
+  {
+   "name": "Toronto",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 43.6532,
+   "lon": -79.3832,
+   "municipality": "Toronto",
+   "region": "Ontario",
+   "regionCode": "ON",
+   "country": "CAN",
+   "countryName": "Canada",
+   "postalCode": "M5H",
+   "timeZone": "America/Toronto",
+   "offset": -18000,
+   "id": 29
+  },
+  {
+   "name": "Montreal",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 45.5017,
+   "lon": -73.5673,
+   "municipality": "Montreal",
+   "region": "Quebec",
+   "regionCode": "QC",
+   "country": "CAN",
+   "countryName": "Canada",
+   "postalCode": "H2Y",
+   "timeZone": "America/Toronto",
+   "offset": -18000,
+   "id": 30
+  },
+  {
+   "name": "Calgary",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 51.0447,
+   "lon": -114.0719,
+   "municipality": "Calgary",
+   "region": "Alberta",
+   "regionCode": "AB",
+   "country": "CAN",
+   "countryName": "Canada",
+   "postalCode": "T2P",
+   "timeZone": "America/Edmonton",
+   "offset": -25200,
+   "id": 31
+  },
+  {
+   "name": "Mexico City",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 19.4326,
+   "lon": -99.1332,
+   "municipality": "Mexico City",
+   "region": "Ciudad de Mexico",
+   "regionCode": "CMX",
+   "country": "MEX",
+   "countryName": "Mexico",
+   "postalCode": "06000",
+   "timeZone": "America/Mexico_City",
+   "offset": -21600,
+   "id": 32
+  },
+  {
+   "name": "Sao Paulo",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -23.5505,
+   "lon": -46.6333,
+   "municipality": "Sao Paulo",
+   "region": "Sao Paulo",
+   "regionCode": "SP",
+   "country": "BRA",
+   "countryName": "Brazil",
+   "postalCode": "01001",
+   "timeZone": "America/Sao_Paulo",
+   "offset": -10800,
+   "id": 33
+  },
+  {
+   "name": "Rio de Janeiro",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -22.9068,
+   "lon": -43.1729,
+   "municipality": "Rio de Janeiro",
+   "region": "Rio de Janeiro",
+   "regionCode": "RJ",
+   "country": "BRA",
+   "countryName": "Brazil",
+   "postalCode": "20010",
+   "timeZone": "America/Sao_Paulo",
+   "offset": -10800,
+   "id": 34
+  },
+  {
+   "name": "Buenos Aires",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -34.6037,
+   "lon": -58.3816,
+   "municipality": "Buenos Aires",
+   "region": "Buenos Aires",
+   "regionCode": "C",
+   "country": "ARG",
+   "countryName": "Argentina",
+   "postalCode": "C1002",
+   "timeZone": "America/Argentina/Buenos_Aires",
+   "offset": -10800,
+   "id": 35
+  },
+  {
+   "name": "Santiago",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -33.4489,
+   "lon": -70.6693,
+   "municipality": "Santiago",
+   "region": "Region Metropolitana",
+   "regionCode": "RM",
+   "country": "CHL",
+   "countryName": "Chile",
+   "postalCode": "8320000",
+   "timeZone": "America/Santiago",
+   "offset": -10800,
+   "id": 36
+  },
+  {
+   "name": "Bogota",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 4.711,
+   "lon": -74.0721,
+   "municipality": "Bogota",
+   "region": "Bogota",
+   "regionCode": "DC",
+   "country": "COL",
+   "countryName": "Colombia",
+   "postalCode": "110311",
+   "timeZone": "America/Bogota",
+   "offset": -18000,
+   "id": 37
+  },
+  {
+   "name": "Lima",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -12.0464,
+   "lon": -77.0428,
+   "municipality": "Lima",
+   "region": "Lima",
+   "regionCode": "LIM",
+   "country": "PER",
+   "countryName": "Peru",
+   "postalCode": "15001",
+   "timeZone": "America/Lima",
+   "offset": -18000,
+   "id": 38
+  },
+  {
+   "name": "London",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 51.5074,
+   "lon": -0.1278,
+   "municipality": "London",
+   "region": "England",
+   "regionCode": "ENG",
+   "country": "GBR",
+   "countryName": "United Kingdom",
+   "postalCode": "WC2N",
+   "timeZone": "Europe/London",
+   "offset": 0,
+   "id": 39
+  },
+  {
+   "name": "Manchester",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 53.4808,
+   "lon": -2.2426,
+   "municipality": "Manchester",
+   "region": "England",
+   "regionCode": "ENG",
+   "country": "GBR",
+   "countryName": "United Kingdom",
+   "postalCode": "M2",
+   "timeZone": "Europe/London",
+   "offset": 0,
+   "id": 40
+  },
+  {
+   "name": "Edinburgh",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 55.9533,
+   "lon": -3.1883,
+   "municipality": "Edinburgh",
+   "region": "Scotland",
+   "regionCode": "SCT",
+   "country": "GBR",
+   "countryName": "United Kingdom",
+   "postalCode": "EH1",
+   "timeZone": "Europe/London",
+   "offset": 0,
+   "id": 41
+  },
+  {
+   "name": "Dublin",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 53.3498,
+   "lon": -6.2603,
+   "municipality": "Dublin",
+   "region": "Leinster",
+   "regionCode": "D",
+   "country": "IRL",
+   "countryName": "Ireland",
+   "postalCode": "D01",
+   "timeZone": "Europe/Dublin",
+   "offset": 0,
+   "id": 42
+  },
+  {
+   "name": "Paris",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 48.8566,
+   "lon": 2.3522,
+   "municipality": "Paris",
+   "region": "Ile-de-France",
+   "regionCode": "IDF",
+   "country": "FRA",
+   "countryName": "France",
+   "postalCode": "75001",
+   "timeZone": "Europe/Paris",
+   "offset": 3600,
+   "id": 43
+  },
+  {
+   "name": "Lyon",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 45.764,
+   "lon": 4.8357,
+   "municipality": "Lyon",
+   "region": "Auvergne-Rhone-Alpes",
+   "regionCode": "ARA",
+   "country": "FRA",
+   "countryName": "France",
+   "postalCode": "69001",
+   "timeZone": "Europe/Paris",
+   "offset": 3600,
+   "id": 44
+  },
+  {
+   "name": "Berlin",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 52.52,
+   "lon": 13.405,
+   "municipality": "Berlin",
+   "region": "Berlin",
+   "regionCode": "BE",
+   "country": "DEU",
+   "countryName": "Germany",
+   "postalCode": "10117",
+   "timeZone": "Europe/Berlin",
+   "offset": 3600,
+   "id": 45
+  },
+  {
+   "name": "Munich",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 48.1351,
+   "lon": 11.582,
+   "municipality": "Munich",
+   "region": "Bavaria",
+   "regionCode": "BY",
+   "country": "DEU",
+   "countryName": "Germany",
+   "postalCode": "80331",
+   "timeZone": "Europe/Berlin",
+   "offset": 3600,
+   "id": 46
+  },
+  {
+   "name": "Frankfurt",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 50.1109,
+   "lon": 8.6821,
+   "municipality": "Frankfurt",
+   "region": "Hesse",
+   "regionCode": "HE",
+   "country": "DEU",
+   "countryName": "Germany",
+   "postalCode": "60311",
+   "timeZone": "Europe/Berlin",
+   "offset": 3600,
+   "id": 47
+  },
+  {
+   "name": "Hamburg",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 53.5511,
+   "lon": 9.9937,
+   "municipality": "Hamburg",
+   "region": "Hamburg",
+   "regionCode": "HH",
+   "country": "DEU",
+   "countryName": "Germany",
+   "postalCode": "20095",
+   "timeZone": "Europe/Berlin",
+   "offset": 3600,
+   "id": 48
+  },
+  {
+   "name": "Amsterdam",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 52.3676,
+   "lon": 4.9041,
+   "municipality": "Amsterdam",
+   "region": "North Holland",
+   "regionCode": "NH",
+   "country": "NLD",
+   "countryName": "Netherlands",
+   "postalCode": "1012",
+   "timeZone": "Europe/Amsterdam",
+   "offset": 3600,
+   "id": 49
+  },
+  {
+   "name": "Brussels",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 50.8503,
+   "lon": 4.3517,
+   "municipality": "Brussels",
+   "region": "Brussels",
+   "regionCode": "BRU",
+   "country": "BEL",
+   "countryName": "Belgium",
+   "postalCode": "1000",
+   "timeZone": "Europe/Brussels",
+   "offset": 3600,
+   "id": 50
+  },
+  {
+   "name": "Madrid",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 40.4168,
+   "lon": -3.7038,
+   "municipality": "Madrid",
+   "region": "Community of Madrid",
+   "regionCode": "MD",
+   "country": "ESP",
+   "countryName": "Spain",
+   "postalCode": "28013",
+   "timeZone": "Europe/Madrid",
+   "offset": 3600,
+   "id": 51
+  },
+  {
+   "name": "Barcelona",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 41.3874,
+   "lon": 2.1686,
+   "municipality": "Barcelona",
+   "region": "Catalonia",
+   "regionCode": "CT",
+   "country": "ESP",
+   "countryName": "Spain",
+   "postalCode": "08002",
+   "timeZone": "Europe/Madrid",
+   "offset": 3600,
+   "id": 52
+  },
+  {
+   "name": "Lisbon",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 38.7223,
+   "lon": -9.1393,
+   "municipality": "Lisbon",
+   "region": "Lisbon",
+   "regionCode": "11",
+   "country": "PRT",
+   "countryName": "Portugal",
+   "postalCode": "1100",
+   "timeZone": "Europe/Lisbon",
+   "offset": 0,
+   "id": 53
+  },
+  {
+   "name": "Rome",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 41.9028,
+   "lon": 12.4964,
+   "municipality": "Rome",
+   "region": "Lazio",
+   "regionCode": "62",
+   "country": "ITA",
+   "countryName": "Italy",
+   "postalCode": "00186",
+   "timeZone": "Europe/Rome",
+   "offset": 3600,
+   "id": 54
+  },
+  {
+   "name": "Milan",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 45.4642,
+   "lon": 9.19,
+   "municipality": "Milan",
+   "region": "Lombardy",
+   "regionCode": "25",
+   "country": "ITA",
+   "countryName": "Italy",
+   "postalCode": "20121",
+   "timeZone": "Europe/Rome",
+   "offset": 3600,
+   "id": 55
+  },
+  {
+   "name": "Zurich",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 47.3769,
+   "lon": 8.5417,
+   "municipality": "Zurich",
+   "region": "Zurich",
+   "regionCode": "ZH",
+   "country": "CHE",
+   "countryName": "Switzerland",
+   "postalCode": "8001",
+   "timeZone": "Europe/Zurich",
+   "offset": 3600,
+   "id": 56
+  },
+  {
+   "name": "Vienna",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 48.2082,
+   "lon": 16.3738,
+   "municipality": "Vienna",
+   "region": "Vienna",
+   "regionCode": "9",
+   "country": "AUT",
+   "countryName": "Austria",
+   "postalCode": "1010",
+   "timeZone": "Europe/Vienna",
+   "offset": 3600,
+   "id": 57
+  },
+  {
+   "name": "Prague",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 50.0755,
+   "lon": 14.4378,
+   "municipality": "Prague",
+   "region": "Prague",
+   "regionCode": "10",
+   "country": "CZE",
+   "countryName": "Czechia",
+   "postalCode": "11000",
+   "timeZone": "Europe/Prague",
+   "offset": 3600,
+   "id": 58
+  },
+  {
+   "name": "Warsaw",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 52.2297,
+   "lon": 21.0122,
+   "municipality": "Warsaw",
+   "region": "Masovian",
+   "regionCode": "14",
+   "country": "POL",
+   "countryName": "Poland",
+   "postalCode": "00-001",
+   "timeZone": "Europe/Warsaw",
+   "offset": 3600,
+   "id": 59
+  },
+  {
+   "name": "Stockholm",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 59.3293,
+   "lon": 18.0686,
+   "municipality": "Stockholm",
+   "region": "Stockholm",
+   "regionCode": "AB",
+   "country": "SWE",
+   "countryName": "Sweden",
+   "postalCode": "111 20",
+   "timeZone": "Europe/Stockholm",
+   "offset": 3600,
+   "id": 60
+  },
+  {
+   "name": "Oslo",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 59.9139,
+   "lon": 10.7522,
+   "municipality": "Oslo",
+   "region": "Oslo",
+   "regionCode": "03",
+   "country": "NOR",
+   "countryName": "Norway",
+   "postalCode": "0150",
+   "timeZone": "Europe/Oslo",
+   "offset": 3600,
+   "id": 61
+  },
+  {
+   "name": "Copenhagen",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 55.6761,
+   "lon": 12.5683,
+   "municipality": "Copenhagen",
+   "region": "Capital Region",
+   "regionCode": "84",
+   "country": "DNK",
+   "countryName": "Denmark",
+   "postalCode": "1050",
+   "timeZone": "Europe/Copenhagen",
+   "offset": 3600,
+   "id": 62
+  },
+  {
+   "name": "Helsinki",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 60.1699,
+   "lon": 24.9384,
+   "municipality": "Helsinki",
+   "region": "Uusimaa",
+   "regionCode": "18",
+   "country": "FIN",
+   "countryName": "Finland",
+   "postalCode": "00100",
+   "timeZone": "Europe/Helsinki",
+   "offset": 7200,
+   "id": 63
+  },
+  {
+   "name": "Athens",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 37.9838,
+   "lon": 23.7275,
+   "municipality": "Athens",
+   "region": "Attica",
+   "regionCode": "I",
+   "country": "GRC",
+   "countryName": "Greece",
+   "postalCode": "105 57",
+   "timeZone": "Europe/Athens",
+   "offset": 7200,
+   "id": 64
+  },
+  {
+   "name": "Istanbul",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 41.0082,
+   "lon": 28.9784,
+   "municipality": "Istanbul",
+   "region": "Istanbul",
+   "regionCode": "34",
+   "country": "TUR",
+   "countryName": "Turkey",
+   "postalCode": "34122",
+   "timeZone": "Europe/Istanbul",
+   "offset": 10800,
+   "id": 65
+  },
+  {
+   "name": "Moscow",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 55.7558,
+   "lon": 37.6173,
+   "municipality": "Moscow",
+   "region": "Moscow",
+   "regionCode": "MOW",
+   "country": "RUS",
+   "countryName": "Russia",
+   "postalCode": "101000",
+   "timeZone": "Europe/Moscow",
+   "offset": 10800,
+   "id": 66
+  },
+  {
+   "name": "Cairo",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 30.0444,
+   "lon": 31.2357,
+   "municipality": "Cairo",
+   "region": "Cairo",
+   "regionCode": "C",
+   "country": "EGY",
+   "countryName": "Egypt",
+   "postalCode": "11511",
+   "timeZone": "Africa/Cairo",
+   "offset": 7200,
+   "id": 67
+  },
+  {
+   "name": "Lagos",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 6.5244,
+   "lon": 3.3792,
+   "municipality": "Lagos",
+   "region": "Lagos",
+   "regionCode": "LA",
+   "country": "NGA",
+   "countryName": "Nigeria",
+   "postalCode": "100001",
+   "timeZone": "Africa/Lagos",
+   "offset": 3600,
+   "id": 68
+  },
+  {
+   "name": "Nairobi",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -1.2921,
+   "lon": 36.8219,
+   "municipality": "Nairobi",
+   "region": "Nairobi",
+   "regionCode": "30",
+   "country": "KEN",
+   "countryName": "Kenya",
+   "postalCode": "00100",
+   "timeZone": "Africa/Nairobi",
+   "offset": 10800,
+   "id": 69
+  },
+  {
+   "name": "Johannesburg",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -26.2041,
+   "lon": 28.0473,
+   "municipality": "Johannesburg",
+   "region": "Gauteng",
+   "regionCode": "GP",
+   "country": "ZAF",
+   "countryName": "South Africa",
+   "postalCode": "2001",
+   "timeZone": "Africa/Johannesburg",
+   "offset": 7200,
+   "id": 70
+  },
+  {
+   "name": "Cape Town",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -33.9249,
+   "lon": 18.4241,
+   "municipality": "Cape Town",
+   "region": "Western Cape",
+   "regionCode": "WC",
+   "country": "ZAF",
+   "countryName": "South Africa",
+   "postalCode": "8001",
+   "timeZone": "Africa/Johannesburg",
+   "offset": 7200,
+   "id": 71
+  },
+  {
+   "name": "Dubai",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 25.2048,
+   "lon": 55.2708,
+   "municipality": "Dubai",
+   "region": "Dubai",
+   "regionCode": "DU",
+   "country": "ARE",
+   "countryName": "United Arab Emirates",
+   "postalCode": "00000",
+   "timeZone": "Asia/Dubai",
+   "offset": 14400,
+   "id": 72
+  },
+  {
+   "name": "Riyadh",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 24.7136,
+   "lon": 46.6753,
+   "municipality": "Riyadh",
+   "region": "Riyadh",
+   "regionCode": "01",
+   "country": "SAU",
+   "countryName": "Saudi Arabia",
+   "postalCode": "11564",
+   "timeZone": "Asia/Riyadh",
+   "offset": 10800,
+   "id": 73
+  },
+  {
+   "name": "Tel Aviv",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 32.0853,
+   "lon": 34.7818,
+   "municipality": "Tel Aviv",
+   "region": "Tel Aviv",
+   "regionCode": "TA",
+   "country": "ISR",
+   "countryName": "Israel",
+   "postalCode": "61000",
+   "timeZone": "Asia/Jerusalem",
+   "offset": 7200,
+   "id": 74
+  },
+  {
+   "name": "Mumbai",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 19.076,
+   "lon": 72.8777,
+   "municipality": "Mumbai",
+   "region": "Maharashtra",
+   "regionCode": "MH",
+   "country": "IND",
+   "countryName": "India",
+   "postalCode": "400001",
+   "timeZone": "Asia/Kolkata",
+   "offset": 19800,
+   "id": 75
+  },
+  {
+   "name": "Delhi",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 28.7041,
+   "lon": 77.1025,
+   "municipality": "Delhi",
+   "region": "Delhi",
+   "regionCode": "DL",
+   "country": "IND",
+   "countryName": "India",
+   "postalCode": "110001",
+   "timeZone": "Asia/Kolkata",
+   "offset": 19800,
+   "id": 76
+  },
+  {
+   "name": "Bengaluru",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 12.9716,
+   "lon": 77.5946,
+   "municipality": "Bengaluru",
+   "region": "Karnataka",
+   "regionCode": "KA",
+   "country": "IND",
+   "countryName": "India",
+   "postalCode": "560001",
+   "timeZone": "Asia/Kolkata",
+   "offset": 19800,
+   "id": 77
+  },
+  {
+   "name": "Singapore",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 1.3521,
+   "lon": 103.8198,
+   "municipality": "Singapore",
+   "region": "Singapore",
+   "regionCode": "SG",
+   "country": "SGP",
+   "countryName": "Singapore",
+   "postalCode": "049145",
+   "timeZone": "Asia/Singapore",
+   "offset": 28800,
+   "id": 78
+  },
+  {
+   "name": "Bangkok",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 13.7563,
+   "lon": 100.5018,
+   "municipality": "Bangkok",
+   "region": "Bangkok",
+   "regionCode": "10",
+   "country": "THA",
+   "countryName": "Thailand",
+   "postalCode": "10200",
+   "timeZone": "Asia/Bangkok",
+   "offset": 25200,
+   "id": 79
+  },
+  {
+   "name": "Jakarta",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -6.2088,
+   "lon": 106.8456,
+   "municipality": "Jakarta",
+   "region": "Jakarta",
+   "regionCode": "JK",
+   "country": "IDN",
+   "countryName": "Indonesia",
+   "postalCode": "10110",
+   "timeZone": "Asia/Jakarta",
+   "offset": 25200,
+   "id": 80
+  },
+  {
+   "name": "Kuala Lumpur",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 3.139,
+   "lon": 101.6869,
+   "municipality": "Kuala Lumpur",
+   "region": "Kuala Lumpur",
+   "regionCode": "14",
+   "country": "MYS",
+   "countryName": "Malaysia",
+   "postalCode": "50050",
+   "timeZone": "Asia/Kuala_Lumpur",
+   "offset": 28800,
+   "id": 81
+  },
+  {
+   "name": "Manila",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 14.5995,
+   "lon": 120.9842,
+   "municipality": "Manila",
+   "region": "Metro Manila",
+   "regionCode": "00",
+   "country": "PHL",
+   "countryName": "Philippines",
+   "postalCode": "1000",
+   "timeZone": "Asia/Manila",
+   "offset": 28800,
+   "id": 82
+  },
+  {
+   "name": "Hong Kong",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 22.3193,
+   "lon": 114.1694,
+   "municipality": "Hong Kong",
+   "region": "Hong Kong",
+   "regionCode": "HK",
+   "country": "HKG",
+   "countryName": "Hong Kong",
+   "postalCode": "999077",
+   "timeZone": "Asia/Hong_Kong",
+   "offset": 28800,
+   "id": 83
+  },
+  {
+   "name": "Shanghai",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 31.2304,
+   "lon": 121.4737,
+   "municipality": "Shanghai",
+   "region": "Shanghai",
+   "regionCode": "SH",
+   "country": "CHN",
+   "countryName": "China",
+   "postalCode": "200000",
+   "timeZone": "Asia/Shanghai",
+   "offset": 28800,
+   "id": 84
+  },
+  {
+   "name": "Beijing",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 39.9042,
+   "lon": 116.4074,
+   "municipality": "Beijing",
+   "region": "Beijing",
+   "regionCode": "BJ",
+   "country": "CHN",
+   "countryName": "China",
+   "postalCode": "100000",
+   "timeZone": "Asia/Shanghai",
+   "offset": 28800,
+   "id": 85
+  },
+  {
+   "name": "Taipei",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 25.033,
+   "lon": 121.5654,
+   "municipality": "Taipei",
+   "region": "Taipei",
+   "regionCode": "TPE",
+   "country": "TWN",
+   "countryName": "Taiwan",
+   "postalCode": "100",
+   "timeZone": "Asia/Taipei",
+   "offset": 28800,
+   "id": 86
+  },
+  {
+   "name": "Seoul",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 37.5665,
+   "lon": 126.978,
+   "municipality": "Seoul",
+   "region": "Seoul",
+   "regionCode": "11",
+   "country": "KOR",
+   "countryName": "South Korea",
+   "postalCode": "04524",
+   "timeZone": "Asia/Seoul",
+   "offset": 32400,
+   "id": 87
+  },
+  {
+   "name": "Tokyo",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 35.6762,
+   "lon": 139.6503,
+   "municipality": "Tokyo",
+   "region": "Tokyo",
+   "regionCode": "13",
+   "country": "JPN",
+   "countryName": "Japan",
+   "postalCode": "100-0001",
+   "timeZone": "Asia/Tokyo",
+   "offset": 32400,
+   "id": 88
+  },
+  {
+   "name": "Osaka",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": 34.6937,
+   "lon": 135.5023,
+   "municipality": "Osaka",
+   "region": "Osaka",
+   "regionCode": "27",
+   "country": "JPN",
+   "countryName": "Japan",
+   "postalCode": "530-0001",
+   "timeZone": "Asia/Tokyo",
+   "offset": 32400,
+   "id": 89
+  },
+  {
+   "name": "Sydney",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -33.8688,
+   "lon": 151.2093,
+   "municipality": "Sydney",
+   "region": "New South Wales",
+   "regionCode": "NSW",
+   "country": "AUS",
+   "countryName": "Australia",
+   "postalCode": "2000",
+   "timeZone": "Australia/Sydney",
+   "offset": 36000,
+   "id": 90
+  },
+  {
+   "name": "Melbourne",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -37.8136,
+   "lon": 144.9631,
+   "municipality": "Melbourne",
+   "region": "Victoria",
+   "regionCode": "VIC",
+   "country": "AUS",
+   "countryName": "Australia",
+   "postalCode": "3000",
+   "timeZone": "Australia/Melbourne",
+   "offset": 36000,
+   "id": 91
+  },
+  {
+   "name": "Brisbane",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -27.4698,
+   "lon": 153.0251,
+   "municipality": "Brisbane",
+   "region": "Queensland",
+   "regionCode": "QLD",
+   "country": "AUS",
+   "countryName": "Australia",
+   "postalCode": "4000",
+   "timeZone": "Australia/Brisbane",
+   "offset": 36000,
+   "id": 92
+  },
+  {
+   "name": "Perth",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -31.9505,
+   "lon": 115.8605,
+   "municipality": "Perth",
+   "region": "Western Australia",
+   "regionCode": "WA",
+   "country": "AUS",
+   "countryName": "Australia",
+   "postalCode": "6000",
+   "timeZone": "Australia/Perth",
+   "offset": 28800,
+   "id": 93
+  },
+  {
+   "name": "Auckland",
+   "categories": [
+    "MunicipalityType"
+   ],
+   "lat": -36.8485,
+   "lon": 174.7633,
+   "municipality": "Auckland",
+   "region": "Auckland",
+   "regionCode": "AUK",
+   "country": "NZL",
+   "countryName": "New Zealand",
+   "postalCode": "1010",
+   "timeZone": "Pacific/Auckland",
+   "offset": 43200,
+   "id": 94
+  },
+  {
+   "name": "Space Needle",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 47.6205,
+   "lon": -122.3493,
+   "addressNumber": "400",
+   "street": "Broad St",
+   "neighborhood": "Lower Queen Anne",
+   "municipality": "Seattle",
+   "subRegion": null,
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98109",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 95
+  },
+  {
+   "name": "Pike Place Market",
+   "categories": [
+    "PointOfInterestType",
+    "ShoppingType"
+   ],
+   "lat": 47.6097,
+   "lon": -122.3422,
+   "addressNumber": "85",
+   "street": "Pike St",
+   "neighborhood": "Downtown",
+   "municipality": "Seattle",
+   "subRegion": null,
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98101",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 96
+  },
+  {
+   "name": "Starbucks Reserve Roastery",
+   "categories": [
+    "PointOfInterestType",
+    "CoffeeShopType"
+   ],
+   "lat": 47.6142,
+   "lon": -122.328,
+   "addressNumber": "1124",
+   "street": "Pike St",
+   "neighborhood": "Capitol Hill",
+   "municipality": "Seattle",
+   "subRegion": null,
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98101",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 97
+  },
+  {
+   "name": "Original Starbucks",
+   "categories": [
+    "PointOfInterestType",
+    "CoffeeShopType"
+   ],
+   "lat": 47.6101,
+   "lon": -122.3424,
+   "addressNumber": "1912",
+   "street": "Pike Pl",
+   "neighborhood": "Downtown",
+   "municipality": "Seattle",
+   "subRegion": null,
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98101",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 98
+  },
+  {
+   "name": "Victrola Coffee Roasters",
+   "categories": [
+    "PointOfInterestType",
+    "CoffeeShopType"
+   ],
+   "lat": 47.6143,
+   "lon": -122.3171,
+   "addressNumber": "310",
+   "street": "E Pike St",
+   "neighborhood": "Capitol Hill",
+   "municipality": "Seattle",
+   "subRegion": null,
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98122",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 99
+  },
+  {
+   "name": "Elm Coffee Roasters",
+   "categories": [
+    "PointOfInterestType",
+    "CoffeeShopType"
+   ],
+   "lat": 47.5987,
+   "lon": -122.3326,
+   "addressNumber": "240",
+   "street": "2nd Ave S",
+   "neighborhood": "Pioneer Square",
+   "municipality": "Seattle",
+   "subRegion": null,
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98104",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 100
+  },
+  {
+   "name": "Seattle Center",
+   "categories": [
+    "PointOfInterestType",
+    "ParkType"
+   ],
+   "lat": 47.6215,
+   "lon": -122.3509,
+   "addressNumber": "305",
+   "street": "Harrison St",
+   "neighborhood": "Lower Queen Anne",
+   "municipality": "Seattle",
+   "subRegion": null,
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98109",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 101
+  },
+  {
+   "name": "Museum of Pop Culture",
+   "categories": [
+    "PointOfInterestType",
+    "MuseumType"
+   ],
+   "lat": 47.6215,
+   "lon": -122.3481,
+   "addressNumber": "325",
+   "street": "5th Ave N",
+   "neighborhood": "Lower Queen Anne",
+   "municipality": "Seattle",
+   "subRegion": null,
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98109",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 102
+  },
+  {
+   "name": "Seattle-Tacoma International Airport",
+   "categories": [
+    "PointOfInterestType",
+    "AirportType"
+   ],
+   "lat": 47.4502,
+   "lon": -122.3088,
+   "addressNumber": "17801",
+   "street": "International Blvd",
+   "neighborhood": "SeaTac",
+   "municipality": "Seattle",
+   "subRegion": null,
+   "region": "Washington",
+   "regionCode": "WA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "98158",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 103
+  },
+  {
+   "name": "Golden Gate Bridge",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 37.8199,
+   "lon": -122.4783,
+   "addressNumber": "",
+   "street": "Golden Gate Bridge",
+   "neighborhood": "Presidio",
+   "municipality": "San Francisco",
+   "subRegion": null,
+   "region": "California",
+   "regionCode": "CA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "94129",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 104
+  },
+  {
+   "name": "Blue Bottle Coffee",
+   "categories": [
+    "PointOfInterestType",
+    "CoffeeShopType"
+   ],
+   "lat": 37.7825,
+   "lon": -122.4076,
+   "addressNumber": "66",
+   "street": "Mint St",
+   "neighborhood": "SoMa",
+   "municipality": "San Francisco",
+   "subRegion": null,
+   "region": "California",
+   "regionCode": "CA",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "94103",
+   "timeZone": "America/Los_Angeles",
+   "offset": -28800,
+   "id": 105
+  },
+  {
+   "name": "Statue of Liberty",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 40.6892,
+   "lon": -74.0445,
+   "addressNumber": "",
+   "street": "Liberty Island",
+   "neighborhood": "Liberty Island",
+   "municipality": "New York",
+   "subRegion": null,
+   "region": "New York",
+   "regionCode": "NY",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "10004",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 106
+  },
+  {
+   "name": "Empire State Building",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 40.7484,
+   "lon": -73.9857,
+   "addressNumber": "20",
+   "street": "W 34th St",
+   "neighborhood": "Midtown",
+   "municipality": "New York",
+   "subRegion": null,
+   "region": "New York",
+   "regionCode": "NY",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "10001",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 107
+  },
+  {
+   "name": "Central Park",
+   "categories": [
+    "PointOfInterestType",
+    "ParkType"
+   ],
+   "lat": 40.7829,
+   "lon": -73.9654,
+   "addressNumber": "",
+   "street": "Central Park",
+   "neighborhood": "Manhattan",
+   "municipality": "New York",
+   "subRegion": null,
+   "region": "New York",
+   "regionCode": "NY",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "10024",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 108
+  },
+  {
+   "name": "Times Square",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 40.758,
+   "lon": -73.9855,
+   "addressNumber": "",
+   "street": "Broadway",
+   "neighborhood": "Midtown",
+   "municipality": "New York",
+   "subRegion": null,
+   "region": "New York",
+   "regionCode": "NY",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "10036",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 109
+  },
+  {
+   "name": "White House",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 38.8977,
+   "lon": -77.0365,
+   "addressNumber": "1600",
+   "street": "Pennsylvania Ave NW",
+   "neighborhood": "Downtown",
+   "municipality": "Washington",
+   "subRegion": null,
+   "region": "District of Columbia",
+   "regionCode": "DC",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "20500",
+   "timeZone": "America/New_York",
+   "offset": -18000,
+   "id": 110
+  },
+  {
+   "name": "Willis Tower",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 41.8789,
+   "lon": -87.6359,
+   "addressNumber": "233",
+   "street": "S Wacker Dr",
+   "neighborhood": "The Loop",
+   "municipality": "Chicago",
+   "subRegion": null,
+   "region": "Illinois",
+   "regionCode": "IL",
+   "country": "USA",
+   "countryName": "United States",
+   "postalCode": "60606",
+   "timeZone": "America/Chicago",
+   "offset": -21600,
+   "id": 111
+  },
+  {
+   "name": "Eiffel Tower",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 48.8584,
+   "lon": 2.2945,
+   "addressNumber": "5",
+   "street": "Avenue Anatole France",
+   "neighborhood": "7e Arrondissement",
+   "municipality": "Paris",
+   "subRegion": null,
+   "region": "Ile-de-France",
+   "regionCode": "IDF",
+   "country": "FRA",
+   "countryName": "France",
+   "postalCode": "75007",
+   "timeZone": "Europe/Paris",
+   "offset": 3600,
+   "id": 112
+  },
+  {
+   "name": "Louvre Museum",
+   "categories": [
+    "PointOfInterestType",
+    "MuseumType"
+   ],
+   "lat": 48.8606,
+   "lon": 2.3376,
+   "addressNumber": "",
+   "street": "Rue de Rivoli",
+   "neighborhood": "1er Arrondissement",
+   "municipality": "Paris",
+   "subRegion": null,
+   "region": "Ile-de-France",
+   "regionCode": "IDF",
+   "country": "FRA",
+   "countryName": "France",
+   "postalCode": "75001",
+   "timeZone": "Europe/Paris",
+   "offset": 3600,
+   "id": 113
+  },
+  {
+   "name": "Big Ben",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 51.5007,
+   "lon": -0.1246,
+   "addressNumber": "",
+   "street": "Westminster",
+   "neighborhood": "Westminster",
+   "municipality": "London",
+   "subRegion": null,
+   "region": "England",
+   "regionCode": "ENG",
+   "country": "GBR",
+   "countryName": "United Kingdom",
+   "postalCode": "SW1A",
+   "timeZone": "Europe/London",
+   "offset": 0,
+   "id": 114
+  },
+  {
+   "name": "British Museum",
+   "categories": [
+    "PointOfInterestType",
+    "MuseumType"
+   ],
+   "lat": 51.5194,
+   "lon": -0.127,
+   "addressNumber": "",
+   "street": "Great Russell St",
+   "neighborhood": "Bloomsbury",
+   "municipality": "London",
+   "subRegion": null,
+   "region": "England",
+   "regionCode": "ENG",
+   "country": "GBR",
+   "countryName": "United Kingdom",
+   "postalCode": "WC1B",
+   "timeZone": "Europe/London",
+   "offset": 0,
+   "id": 115
+  },
+  {
+   "name": "Brandenburg Gate",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 52.5163,
+   "lon": 13.3777,
+   "addressNumber": "",
+   "street": "Pariser Platz",
+   "neighborhood": "Mitte",
+   "municipality": "Berlin",
+   "subRegion": null,
+   "region": "Berlin",
+   "regionCode": "BE",
+   "country": "DEU",
+   "countryName": "Germany",
+   "postalCode": "10117",
+   "timeZone": "Europe/Berlin",
+   "offset": 3600,
+   "id": 116
+  },
+  {
+   "name": "Colosseum",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 41.8902,
+   "lon": 12.4922,
+   "addressNumber": "1",
+   "street": "Piazza del Colosseo",
+   "neighborhood": "Celio",
+   "municipality": "Rome",
+   "subRegion": null,
+   "region": "Lazio",
+   "regionCode": "62",
+   "country": "ITA",
+   "countryName": "Italy",
+   "postalCode": "00184",
+   "timeZone": "Europe/Rome",
+   "offset": 3600,
+   "id": 117
+  },
+  {
+   "name": "Sydney Opera House",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": -33.8568,
+   "lon": 151.2153,
+   "addressNumber": "",
+   "street": "Bennelong Point",
+   "neighborhood": "Sydney",
+   "municipality": "Sydney",
+   "subRegion": null,
+   "region": "New South Wales",
+   "regionCode": "NSW",
+   "country": "AUS",
+   "countryName": "Australia",
+   "postalCode": "2000",
+   "timeZone": "Australia/Sydney",
+   "offset": 36000,
+   "id": 118
+  },
+  {
+   "name": "Tokyo Tower",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 35.6586,
+   "lon": 139.7454,
+   "addressNumber": "4-2-8",
+   "street": "Shibakoen",
+   "neighborhood": "Minato",
+   "municipality": "Tokyo",
+   "subRegion": null,
+   "region": "Tokyo",
+   "regionCode": "13",
+   "country": "JPN",
+   "countryName": "Japan",
+   "postalCode": "105-0011",
+   "timeZone": "Asia/Tokyo",
+   "offset": 32400,
+   "id": 119
+  },
+  {
+   "name": "Marina Bay Sands",
+   "categories": [
+    "PointOfInterestType",
+    "HotelType"
+   ],
+   "lat": 1.2834,
+   "lon": 103.8607,
+   "addressNumber": "10",
+   "street": "Bayfront Ave",
+   "neighborhood": "Downtown Core",
+   "municipality": "Singapore",
+   "subRegion": null,
+   "region": "Singapore",
+   "regionCode": "SG",
+   "country": "SGP",
+   "countryName": "Singapore",
+   "postalCode": "018956",
+   "timeZone": "Asia/Singapore",
+   "offset": 28800,
+   "id": 120
+  },
+  {
+   "name": "Burj Khalifa",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 25.1972,
+   "lon": 55.2744,
+   "addressNumber": "1",
+   "street": "Sheikh Mohammed bin Rashid Blvd",
+   "neighborhood": "Downtown Dubai",
+   "municipality": "Dubai",
+   "subRegion": null,
+   "region": "Dubai",
+   "regionCode": "DU",
+   "country": "ARE",
+   "countryName": "United Arab Emirates",
+   "postalCode": "00000",
+   "timeZone": "Asia/Dubai",
+   "offset": 14400,
+   "id": 121
+  },
+  {
+   "name": "CN Tower",
+   "categories": [
+    "PointOfInterestType",
+    "LandmarkType"
+   ],
+   "lat": 43.6426,
+   "lon": -79.3871,
+   "addressNumber": "290",
+   "street": "Bremner Blvd",
+   "neighborhood": "Entertainment District",
+   "municipality": "Toronto",
+   "subRegion": null,
+   "region": "Ontario",
+   "regionCode": "ON",
+   "country": "CAN",
+   "countryName": "Canada",
+   "postalCode": "M5V",
+   "timeZone": "America/Toronto",
+   "offset": -18000,
+   "id": 122
+  }
+ ]
+}

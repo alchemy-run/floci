@@ -851,6 +851,7 @@ public interface EmulatorConfig {
         ComprehendServiceConfig comprehend();
         ComprehendMedicalServiceConfig comprehendMedical();
         PollyServiceConfig polly();
+        LocationServiceConfig location();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2817,6 +2818,11 @@ public interface EmulatorConfig {
     }
 
     interface PollyServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface LocationServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

@@ -80,10 +80,26 @@ public final class RequestConstraintCheck {
             case "string" -> value.isTextual();
             case "boolean" -> value.isBoolean();
             case "integer", "long" -> value.isIntegralNumber() && value.canConvertToLong();
+            case "double", "float" -> value.isNumber();
+            case "timestamp" -> value.isTextual() || value.isNumber();
+            case "blob" -> value.isTextual();
             default -> false;
         };
         if (!validType) {
             throw messages.type(path, type);
+        }
+        if ("double".equals(type) || "float".equals(type)) {
+            double number = value.doubleValue();
+            Double low = shape.has("min") ? shape.get("min").asDouble() : null;
+            Double high = shape.has("max") ? shape.get("max").asDouble() : null;
+            if (low != null && number < low || high != null && number > high) {
+                throw messages.bounds(path, type, low == null ? null : (long) Math.ceil(low),
+                        high == null ? null : (long) Math.floor(high), (long) number);
+            }
+            return;
+        }
+        if ("timestamp".equals(type) || "blob".equals(type)) {
+            return;
         }
         long size = switch (type) {
             case "string" -> value.textValue().codePointCount(0, value.textValue().length());

@@ -162,6 +162,13 @@ services:
     doc: docs/services/comprehend.md
     sources:
       - { path: services/comprehend/ComprehendJsonHandler.java, mode: switch }
+  - service: location
+    doc: docs/services/location.md
+    sources:
+      - { path: services/location/LocationController.java, mode: rest }
+      - { path: services/location/GeoMapsController.java, mode: rest }
+      - { path: services/location/GeoPlacesController.java, mode: rest }
+      - { path: services/location/GeoRoutesController.java, mode: rest }
   - service: polly
     doc: docs/services/polly.md
     sources:
