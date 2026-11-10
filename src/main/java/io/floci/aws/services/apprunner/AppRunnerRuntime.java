@@ -138,7 +138,7 @@ public class AppRunnerRuntime {
         int port = Integer.parseInt(image.path("Port").asText("8080"));
         String imageUri = repository.path("ImageIdentifier").asText();
         if ("ECR".equals(repository.path("ImageRepositoryType").asText()) && ecr.isResolvable()) {
-            imageUri = ecr.get().rewriteImageUri(imageUri);
+            imageUri = ecr.get().rewriteImageUri(EcrRegistryManager.awsShapedUri(imageUri));
         }
         serviceLog(account, region, name, id, "Pulling image " + repository.path("ImageIdentifier").asText()
                 + " from " + repository.path("ImageRepositoryType").asText() + " repository.");

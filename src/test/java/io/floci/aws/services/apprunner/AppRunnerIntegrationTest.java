@@ -93,6 +93,14 @@ class AppRunnerIntegrationTest {
                 + "\",\"SourceConfiguration\":{\"ImageRepository\":{\"ImageIdentifier\":"
                 + "\"000000000000.dkr.ecr.us-east-1.amazonaws.com/app:latest\",\"ImageRepositoryType\":\"ECR\"}}}")
                 .statusCode(400).body("message", containsString("AccessRoleArn"));
+        for (String flociUri : new String[] {"000000000000.dkr.ecr.us-east-1.localhost:5100/app:latest",
+                "localhost:5100/000000000000/us-east-1/app:latest"}) {
+            call("CreateService", "{\"ServiceName\":\"floci-ecr-" + UUID.randomUUID().toString().substring(0, 6)
+                    + "\",\"SourceConfiguration\":{\"ImageRepository\":{\"ImageIdentifier\":\"" + flociUri
+                    + "\",\"ImageRepositoryType\":\"ECR\"},\"AuthenticationConfiguration\":{\"AccessRoleArn\":"
+                    + "\"arn:aws:iam::000000000000:role/apprunner-ecr\"}}}").statusCode(200)
+                    .body("Service.SourceConfiguration.ImageRepository.ImageIdentifier", equalTo(flociUri));
+        }
         call("DescribeService", "{\"ServiceArn\":\"arn:aws:apprunner:us-east-1:000000000000:service/missing/"
                 + "0123456789abcdef0123456789abcdef\"}").statusCode(400)
                 .body("__type", containsString("ResourceNotFoundException"));

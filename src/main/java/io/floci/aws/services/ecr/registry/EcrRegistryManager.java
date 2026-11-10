@@ -183,6 +183,26 @@ public class EcrRegistryManager {
         return Optional.of(m.group(1) != null ? m.group(1) : m.group(2));
     }
 
+    /** A repository URI Floci's ECR hands out, in either URI style: account, Region and repository with tag. */
+    private static final Pattern FLOCI_ECR_URI = Pattern.compile("^(?:([0-9]{12})\\.dkr\\.ecr\\.([a-z0-9-]+)\\."
+            + FLOCI_REGISTRY_HOST + "|" + FLOCI_REGISTRY_HOST + "/([0-9]{12})/([a-z0-9-]+))/(.+)$");
+
+    /**
+     * The image a URI Floci's ECR hands out names, as AWS writes it ({@code <account>.dkr.ecr.<region>.<dnsSuffix>/<repo>}
+     * in the Region's partition), for APIs that check an image URI against AWS's form; any other image is returned
+     * unchanged.
+     */
+    public static String awsShapedUri(String image) {
+        Matcher m = image != null ? FLOCI_ECR_URI.matcher(image) : null;
+        if (m == null || !m.matches()) {
+            return image;
+        }
+        String account = m.group(1) != null ? m.group(1) : m.group(3);
+        String region = m.group(2) != null ? m.group(2) : m.group(4);
+        return account + ".dkr.ecr." + region + "." + AwsPartitions.forRegionOrCommercial(region).dnsSuffix() + "/"
+                + m.group(5);
+    }
+
     private boolean isPresentOnDaemon(String image) {
         try {
             lifecycleManager.getDockerClient().inspectImageCmd(image).exec();

@@ -13,6 +13,7 @@ import io.floci.aws.core.common.RequestScopes;
 import io.floci.aws.core.common.Resettable;
 import io.floci.aws.core.storage.AccountAwareStorageBackend;
 import io.floci.aws.core.storage.StorageFactory;
+import io.floci.aws.services.ecr.registry.EcrRegistryManager;
 import io.floci.aws.services.route53.Route53Service;
 import io.floci.aws.services.route53.model.HostedZone;
 import io.floci.aws.services.route53.model.ResourceRecordSet;
@@ -120,7 +121,17 @@ public class AppRunnerService implements Resettable {
         worker.shutdownNow();
     }
 
+    /** Checks a request against the model, reading an image in Floci's ECR as the AWS URI it stands for. */
     static void check(String operation, JsonNode request) {
+        JsonNode image = request.path("SourceConfiguration").path("ImageRepository");
+        String identifier = image.path("ImageIdentifier").asText(null);
+        String shaped = EcrRegistryManager.awsShapedUri(identifier);
+        if (identifier != null && !identifier.equals(shaped)) {
+            ObjectNode checked = ((ObjectNode) request).deepCopy();
+            ((ObjectNode) checked.path("SourceConfiguration").path("ImageRepository")).put("ImageIdentifier", shaped);
+            SHAPES.check(operation, checked);
+            return;
+        }
         SHAPES.check(operation, request);
     }
 
