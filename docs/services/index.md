@@ -106,7 +106,8 @@ For services extended by this fork, follow the service-page link for the combine
 | [AppConfigData](appconfig.md#data-plane) | `/configurationsessions`, `/configuration` | REST JSON | [See actions](appconfig.md#data-plane) |
 | [AppSync](appsync.md) | `/v1/apis/...` | REST JSON | [See actions](appsync.md) |
 | [Amazon Bedrock](bedrock.md) | `/guardrails`, `/guardrails/{guardrailIdentifier}`, `/resource-policy`, `/resource-policy/{resourceArn}`, `/tagResource`, `/untagResource`, `/listTagsForResource` | REST JSON | 12 |
-| [Bedrock Runtime](bedrock-runtime.md) | `/model/{modelId}/converse`, `/model/{modelId}/invoke` | REST JSON | 2 (stub; streaming returns 501) |
+| [Bedrock Runtime](bedrock-runtime.md) | `/model/{modelId}/converse`, `/model/{modelId}/converse-stream`, `/model/{modelId}/invoke`, `/model/{modelId}/invoke-with-response-stream`, `/model/{modelId}/count-tokens` | REST JSON | 5 (stub or proxy) |
+| [Agents for Amazon Bedrock](bedrock-agent.md) | `/agents/*`, `/knowledgebases/*`, `/rerank`, `/retrieveAndGenerate*`, `/tags/{resourceArn}` | REST JSON | 49 (+ 3 tagging via shared `/tags/{arn}` route) |
 | [Bedrock AgentCore Control](bedrock-agentcore.md) | `/runtimes/*`, `/gateways/*`, `/memories/*`, `/identities/*`, `/browsers*`, `/browser-profiles*`, `/code-interpreters*`, `/harnesses*`, `/resourcepolicy/*`, `/tags/{resourceArn}` | REST JSON | 76 (+ 3 tagging via shared `/tags/{arn}` route) |
 | [Bedrock AgentCore](bedrock-agentcore.md#data-plane-invokeagentruntime) | `/runtimes/{agentRuntimeArn}/invocations` | REST JSON (binary payload) | 1 (canned-response stub) |
 | [EKS](eks.md) | `/clusters`, `/clusters/{name}`, `/tags/{resourceArn}` | REST JSON | 7 |

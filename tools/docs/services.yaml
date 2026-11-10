@@ -49,6 +49,11 @@ services:
     doc: docs/services/bedrock.md
     sources:
       - { path: services/bedrock/BedrockController.java, mode: rest }
+  - service: bedrock-agent
+    doc: docs/services/bedrock-agent.md
+    sources:
+      - { path: services/bedrockagent/BedrockAgentController.java, mode: rest }
+      - { path: services/bedrockagent/BedrockAgentRuntimeController.java, mode: rest }
   - service: bedrock-agentcore-control
     doc: docs/services/bedrock-agentcore.md
     sources:

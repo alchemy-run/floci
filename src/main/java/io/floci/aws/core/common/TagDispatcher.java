@@ -213,6 +213,9 @@ public class TagDispatcher {
                     "Invalid resource ARN: " + arn, 400);
         }
         TagHandler handler = handlersByServiceKey.get(serviceKey);
+        if (handler != null && !handler.handles(arn)) {
+            handler = null;
+        }
         if (handler == null) {
             // Surface an unregistered service as an invalid-ARN error so floci's
             // internal routing isn't leaked to the client.
