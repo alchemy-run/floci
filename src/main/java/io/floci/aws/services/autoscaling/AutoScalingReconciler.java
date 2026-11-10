@@ -667,12 +667,16 @@ public class AutoScalingReconciler {
         return target;
     }
 
+    private static boolean enclaveEnabled(LaunchTemplateData data) {
+        return data.getEnclaveOptions() != null && Boolean.TRUE.equals(data.getEnclaveOptions().getEnabled());
+    }
+
     private Reservation launchWithCapacity(AutoScalingGroup asg, LaunchSource launchSource,
                                            LaunchPlacement placement, String clientToken,
                                            LaunchTemplateData.CapacityReservationSpecification capacitySpecification) {
         String launchZone = Ec2Service.isModelledAvailabilityZone(asg.getRegion(), placement.availabilityZone())
                 ? placement.availabilityZone() : null;
-        return ec2Service.runInstances(
+        Reservation reservation = ec2Service.runInstances(
                 asg.getRegion(), launchSource.imageId(), launchSource.instanceType(), 1, 1,
                 launchSource.keyName(), launchSource.securityGroupIds(), placement.subnetId(), clientToken,
                 AutoScalingService.propagatedInstanceTags(asg, launchSource.instanceTags()), launchSource.userData(),
@@ -683,6 +687,14 @@ public class AutoScalingReconciler {
                         : encodeLegacyUserData(launchSource.userData()),
                 false, null, null, launchSource.blockDeviceMappings(), false, null,
                 capacitySpecification);
+        // A launch template's EnclaveOptions apply at launch, as they do for RunInstances.
+        if (launchSource.enclaveEnabled()) {
+            for (Instance instance : reservation.getInstances()) {
+                ec2Service.setLaunchEnclaveOptions(asg.getRegion(), instance.getInstanceId(), true);
+                instance.setEnclaveEnabled(true);
+            }
+        }
+        return reservation;
     }
 
     private List<Instance> launchInstance(AutoScalingGroup asg, LaunchSource launchSource,
@@ -955,7 +967,7 @@ public class AutoScalingReconciler {
                     // subnet's MapPublicIpOnLaunch, and only null means
                     // "fall back to the subnet default".
                     lc.getAssociatePublicIpAddress(),
-                    launchConfigurationBlockDevices(lc), lc.getMetadataOptions(), null);
+                    launchConfigurationBlockDevices(lc), lc.getMetadataOptions(), null, false);
         }
 
         LaunchTemplate launchTemplate = resolveLaunchTemplate(asg);
@@ -985,7 +997,7 @@ public class AutoScalingReconciler {
                     resolvedVersion,
                     version.getData().effectiveAssociatePublicIpAddress(),
                     version.getData().getBlockDeviceMappings(), version.getData().getMetadataOptions(),
-                    version.getData().getCapacityReservationSpecification());
+                    version.getData().getCapacityReservationSpecification(), enclaveEnabled(version.getData()));
         }
 
         MixedInstancesPolicy.LaunchTemplateSpecification specification =
@@ -1021,7 +1033,7 @@ public class AutoScalingReconciler {
                         resolvedVersion,
                         version.getData().effectiveAssociatePublicIpAddress(),
                         version.getData().getBlockDeviceMappings(), version.getData().getMetadataOptions(),
-                    version.getData().getCapacityReservationSpecification());
+                    version.getData().getCapacityReservationSpecification(), enclaveEnabled(version.getData()));
             }
         }
 
@@ -1167,7 +1179,8 @@ public class AutoScalingReconciler {
             Boolean associatePublicIpAddress,
             List<LaunchTemplateData.BlockDeviceMapping> blockDeviceMappings,
             LaunchTemplateData.MetadataOptions metadataOptions,
-            LaunchTemplateData.CapacityReservationSpecification capacityReservationSpecification) {}
+            LaunchTemplateData.CapacityReservationSpecification capacityReservationSpecification,
+            boolean enclaveEnabled) {}
 
     // Override for describeAutoScalingGroups with null region (all regions)
     // The service only filters by region when non-null; null means all.

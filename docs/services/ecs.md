@@ -788,6 +788,30 @@ to be removed with `UpdateService` before the provider goes. A deleted provider 
 `updateStatus: DELETE_IN_PROGRESS` and an unchanged `status`, because `DELETE_IN_PROGRESS` is not
 one of the four values `CapacityProviderStatus` takes.
 
+#### Managed Instances
+
+A provider created with `managedInstancesProvider` belongs to the `cluster` the request names,
+which is required. Its ARN is `capacity-provider/<cluster>/<name>`, its `type` is
+`MANAGED_INSTANCES`, and it is listed only by `DescribeCapacityProviders` with that `cluster`.
+The same name can exist in two clusters. `UpdateCapacityProvider` with `cluster` changes the
+launch template members it names and keeps the rest. `DeleteCapacityProvider` with `cluster`
+stops the provider's tasks, deregisters its container instances and terminates their EC2
+instances. `DeleteCluster` answers `ClusterContainsCapacityProviderException` while the cluster
+still has one.
+
+A task placed through a Managed Instances provider, or launched with `launchType:
+MANAGED_INSTANCES` on a cluster that has one, runs on a container instance backed by a real EC2
+instance. Floci launches one per provider from its `instanceLaunchTemplate`: the first
+`allowedInstanceTypes` entry, the ECS-optimized AMI, the first subnet, its security groups and
+instance profile, and `EnclaveOptions.Enabled` from `nitroEnclavesEnabled`. Later tasks reuse it.
+The task itself still runs as a local container.
+
+A task definition whose `trustedExecutionConfiguration.isolationMode` is `ISOLATED_SANDBOX` or
+`CONFIDENTIAL_SANDBOX` (Nitro Sandboxes) needs a Managed Instances provider with
+`nitroEnclavesEnabled`; anywhere else RunTask answers `InvalidParameterException`. Its tasks
+report `trustedExecutionSummary.isolationMode`. Floci has no Nitro hypervisor, so the container is
+not isolated from the host.
+
 ### Service Deployments & Revisions
 
 | Operation | Description |

@@ -49,6 +49,20 @@ class EksTokenValidatorTest {
     }
 
     @Test
+    void anEmulatorThatAllowsThePublicPairsAcceptsThem() throws Exception {
+        IamService iamService = IamServiceTestHelper.iamServiceWithAccessKey("floci", "floci");
+        EksTokenValidator validator = new EksTokenValidator(iamService, Clock.systemUTC(), true);
+
+        assertTrue(validator.validate(
+                SigV4TokenTestHelper.createEksToken(CLUSTER_NAME, "test", "test", Instant.now(), 60), CLUSTER_NAME));
+        assertTrue(validator.validate(
+                SigV4TokenTestHelper.createEksToken(CLUSTER_NAME, "floci", "floci", Instant.now(), 60), CLUSTER_NAME));
+        // The pair's secret still has to match.
+        assertFalse(validator.validate(
+                SigV4TokenTestHelper.createEksToken(CLUSTER_NAME, "test", "wrong", Instant.now(), 60), CLUSTER_NAME));
+    }
+
+    @Test
     void validateRejectsTamperedSignature() throws Exception {
         EksTokenValidator validator = validator();
         String token = replaceDecodedToken(token(CLUSTER_NAME, Instant.now(), 60),
