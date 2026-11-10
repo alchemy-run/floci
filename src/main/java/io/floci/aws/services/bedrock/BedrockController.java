@@ -9,6 +9,8 @@ import io.floci.aws.core.common.PaginatedResult;
 import io.floci.aws.core.common.Pagination;
 import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.services.bedrock.model.Guardrail;
+import io.floci.aws.services.bedrockdataautomation.BdaService;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
@@ -46,6 +48,10 @@ public class BedrockController {
     private final BedrockService bedrockService;
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
+
+    /** Bedrock Data Automation, whose resources are tagged through these same routes. */
+    @Inject
+    Instance<BdaService> dataAutomation;
 
     @Inject
     public BedrockController(BedrockService bedrockService, RegionResolver regionResolver,
@@ -185,6 +191,10 @@ public class BedrockController {
     public Response tagResource(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         JsonNode request = readTree(body);
+        if (BdaService.owns(textOrNull(request, "resourceARN"))) {
+            dataAutomation.get().tag(textOrNull(request, "resourceARN"), request.path("tags"), region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        }
         bedrockService.tagResource(textOrNull(request, "resourceARN"),
                 BedrockService.parseTagList(request.get("tags")), region);
         return Response.ok(objectMapper.createObjectNode()).build();
@@ -195,6 +205,10 @@ public class BedrockController {
     public Response untagResource(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         JsonNode request = readTree(body);
+        if (BdaService.owns(textOrNull(request, "resourceARN"))) {
+            dataAutomation.get().untag(textOrNull(request, "resourceARN"), request.path("tagKeys"), region);
+            return Response.ok(objectMapper.createObjectNode()).build();
+        }
         List<String> tagKeys = new ArrayList<>();
         JsonNode keys = request.get("tagKeys");
         if (keys != null && keys.isArray()) {
@@ -209,6 +223,12 @@ public class BedrockController {
     public Response listTagsForResource(@Context HttpHeaders headers, String body) {
         String region = regionResolver.resolveRegion(headers);
         JsonNode request = readTree(body);
+        if (BdaService.owns(textOrNull(request, "resourceARN"))) {
+            ObjectNode response = objectMapper.createObjectNode();
+            ArrayNode list = response.putArray("tags");
+            dataAutomation.get().listTags(textOrNull(request, "resourceARN"), region).forEach(list::add);
+            return Response.ok(response).build();
+        }
         Map<String, String> tags = bedrockService.listTags(textOrNull(request, "resourceARN"), region);
 
         ObjectNode response = objectMapper.createObjectNode();

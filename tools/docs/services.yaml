@@ -223,6 +223,11 @@ services:
     doc: docs/services/apprunner.md
     sources:
       - { path: services/apprunner/AppRunnerJsonHandler.java, mode: switch }
+  - service: bedrock-data-automation
+    doc: docs/services/bedrock-data-automation.md
+    sources:
+      - { path: services/bedrockdataautomation/BdaController.java, mode: switch }
+      - { path: services/bedrockdataautomation/BdaRuntimeJsonHandler.java, mode: switch }
   - service: backupsearch
     doc: docs/services/backupsearch.md
     sources:

@@ -1,0 +1,1399 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_bedrock_data_automation_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CopyBlueprintStage": "CopyBlueprintStageRequest",
+    "CreateBlueprint": "CreateBlueprintRequest",
+    "CreateBlueprintVersion": "CreateBlueprintVersionRequest",
+    "CreateDataAutomationLibrary": "CreateDataAutomationLibraryRequest",
+    "CreateDataAutomationProject": "CreateDataAutomationProjectRequest",
+    "DeleteBlueprint": "DeleteBlueprintRequest",
+    "DeleteDataAutomationLibrary": "DeleteDataAutomationLibraryRequest",
+    "DeleteDataAutomationProject": "DeleteDataAutomationProjectRequest",
+    "GetBlueprint": "GetBlueprintRequest",
+    "GetBlueprintOptimizationStatus": "GetBlueprintOptimizationStatusRequest",
+    "GetDataAutomationLibrary": "GetDataAutomationLibraryRequest",
+    "GetDataAutomationLibraryEntity": "GetDataAutomationLibraryEntityRequest",
+    "GetDataAutomationLibraryIngestionJob": "GetDataAutomationLibraryIngestionJobRequest",
+    "GetDataAutomationProject": "GetDataAutomationProjectRequest",
+    "InvokeBlueprintOptimizationAsync": "InvokeBlueprintOptimizationAsyncRequest",
+    "InvokeDataAutomationLibraryIngestionJob": "InvokeDataAutomationLibraryIngestionJobRequest",
+    "ListBlueprints": "ListBlueprintsRequest",
+    "ListDataAutomationLibraries": "ListDataAutomationLibrariesRequest",
+    "ListDataAutomationLibraryEntities": "ListDataAutomationLibraryEntitiesRequest",
+    "ListDataAutomationLibraryIngestionJobs": "ListDataAutomationLibraryIngestionJobsRequest",
+    "ListDataAutomationProjects": "ListDataAutomationProjectsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateBlueprint": "UpdateBlueprintRequest",
+    "UpdateDataAutomationLibrary": "UpdateDataAutomationLibraryRequest",
+    "UpdateDataAutomationProject": "UpdateDataAutomationProjectRequest"
+  },
+  "shapes": {
+    "AudioExtractionCategory": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State",
+        "types": "AudioExtractionCategoryTypes",
+        "typeConfiguration": "AudioExtractionCategoryTypeConfiguration"
+      }
+    },
+    "AudioExtractionCategoryType": {
+      "type": "string",
+      "enum": [
+        "AUDIO_CONTENT_MODERATION",
+        "TRANSCRIPT",
+        "TOPIC_CONTENT_MODERATION"
+      ]
+    },
+    "AudioExtractionCategoryTypeConfiguration": {
+      "type": "structure",
+      "members": {
+        "transcript": "TranscriptConfiguration"
+      }
+    },
+    "AudioExtractionCategoryTypes": {
+      "type": "list",
+      "member": "AudioExtractionCategoryType"
+    },
+    "AudioGenerativeOutputLanguage": {
+      "type": "string",
+      "enum": [
+        "DEFAULT",
+        "EN"
+      ]
+    },
+    "AudioInputLanguages": {
+      "type": "list",
+      "member": "Language"
+    },
+    "AudioLanguageConfiguration": {
+      "type": "structure",
+      "members": {
+        "inputLanguages": "AudioInputLanguages",
+        "generativeOutputLanguage": "AudioGenerativeOutputLanguage",
+        "identifyMultipleLanguages": "Boolean"
+      }
+    },
+    "AudioOverrideConfiguration": {
+      "type": "structure",
+      "members": {
+        "modalityProcessing": "ModalityProcessingConfiguration",
+        "languageConfiguration": "AudioLanguageConfiguration",
+        "sensitiveDataConfiguration": "SensitiveDataConfiguration"
+      }
+    },
+    "AudioStandardExtraction": {
+      "type": "structure",
+      "required": [
+        "category"
+      ],
+      "members": {
+        "category": "AudioExtractionCategory"
+      }
+    },
+    "AudioStandardGenerativeField": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State",
+        "types": "AudioStandardGenerativeFieldTypes"
+      }
+    },
+    "AudioStandardGenerativeFieldType": {
+      "type": "string",
+      "enum": [
+        "AUDIO_SUMMARY",
+        "IAB",
+        "TOPIC_SUMMARY"
+      ]
+    },
+    "AudioStandardGenerativeFieldTypes": {
+      "type": "list",
+      "member": "AudioStandardGenerativeFieldType"
+    },
+    "AudioStandardOutputConfiguration": {
+      "type": "structure",
+      "members": {
+        "extraction": "AudioStandardExtraction",
+        "generativeField": "AudioStandardGenerativeField"
+      }
+    },
+    "BlueprintArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "arn:aws(|-cn|-us-gov):bedrock:[a-zA-Z0-9-]*:(aws|[0-9]{12}):blueprint/(bedrock-data-automation-public-[a-zA-Z0-9-_]{1,30}|[a-zA-Z0-9-]{12,36})"
+    },
+    "BlueprintFilter": {
+      "type": "structure",
+      "required": [
+        "blueprintArn"
+      ],
+      "members": {
+        "blueprintArn": "BlueprintArn",
+        "blueprintVersion": "BlueprintVersion",
+        "blueprintStage": "BlueprintStage"
+      }
+    },
+    "BlueprintItem": {
+      "type": "structure",
+      "required": [
+        "blueprintArn"
+      ],
+      "members": {
+        "blueprintArn": "BlueprintArn",
+        "blueprintVersion": "BlueprintVersion",
+        "blueprintStage": "BlueprintStage"
+      }
+    },
+    "BlueprintItems": {
+      "type": "list",
+      "member": "BlueprintItem"
+    },
+    "BlueprintName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]+"
+    },
+    "BlueprintOptimizationInvocationArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws(|-cn|-iso|-iso-[a-z]|-us-gov):bedrock:[a-zA-Z0-9-]*:[0-9]{12}:blueprint-optimization-invocation/[a-zA-Z0-9-_]+"
+    },
+    "BlueprintOptimizationObject": {
+      "type": "structure",
+      "required": [
+        "blueprintArn"
+      ],
+      "members": {
+        "blueprintArn": "BlueprintArn",
+        "stage": "BlueprintStage"
+      }
+    },
+    "BlueprintOptimizationOutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "s3Object"
+      ],
+      "members": {
+        "s3Object": "S3Object"
+      }
+    },
+    "BlueprintOptimizationSample": {
+      "type": "structure",
+      "required": [
+        "assetS3Object",
+        "groundTruthS3Object"
+      ],
+      "members": {
+        "assetS3Object": "S3Object",
+        "groundTruthS3Object": "S3Object"
+      }
+    },
+    "BlueprintOptimizationSamples": {
+      "type": "list",
+      "member": "BlueprintOptimizationSample"
+    },
+    "BlueprintSchema": {
+      "type": "string",
+      "min": 1,
+      "max": 100000
+    },
+    "BlueprintStage": {
+      "type": "string",
+      "enum": [
+        "DEVELOPMENT",
+        "LIVE"
+      ]
+    },
+    "BlueprintStageFilter": {
+      "type": "string",
+      "enum": [
+        "DEVELOPMENT",
+        "LIVE",
+        "ALL"
+      ]
+    },
+    "BlueprintVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[0-9]*"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "ChannelLabelingConfiguration": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State"
+      }
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 33,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9](-*[a-zA-Z0-9]){0,256}"
+    },
+    "CopyBlueprintStageRequest": {
+      "type": "structure",
+      "required": [
+        "blueprintArn",
+        "sourceStage",
+        "targetStage"
+      ],
+      "members": {
+        "blueprintArn": "BlueprintArn",
+        "sourceStage": "BlueprintStage",
+        "targetStage": "BlueprintStage",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateBlueprintRequest": {
+      "type": "structure",
+      "required": [
+        "blueprintName",
+        "type",
+        "schema"
+      ],
+      "members": {
+        "blueprintName": "BlueprintName",
+        "type": "Type",
+        "blueprintStage": "BlueprintStage",
+        "schema": "BlueprintSchema",
+        "clientToken": "ClientToken",
+        "encryptionConfiguration": "EncryptionConfiguration",
+        "tags": "TagList"
+      }
+    },
+    "CreateBlueprintVersionRequest": {
+      "type": "structure",
+      "required": [
+        "blueprintArn"
+      ],
+      "members": {
+        "blueprintArn": "BlueprintArn",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateDataAutomationLibraryRequest": {
+      "type": "structure",
+      "required": [
+        "libraryName"
+      ],
+      "members": {
+        "libraryName": "DataAutomationLibraryName",
+        "libraryDescription": "DataAutomationLibraryDescription",
+        "clientToken": "ClientToken",
+        "encryptionConfiguration": "EncryptionConfiguration",
+        "tags": "TagList"
+      }
+    },
+    "CreateDataAutomationProjectRequest": {
+      "type": "structure",
+      "required": [
+        "projectName",
+        "standardOutputConfiguration"
+      ],
+      "members": {
+        "projectName": "DataAutomationProjectName",
+        "projectDescription": "DataAutomationProjectDescription",
+        "projectStage": "DataAutomationProjectStage",
+        "projectType": "DataAutomationProjectType",
+        "standardOutputConfiguration": "StandardOutputConfiguration",
+        "customOutputConfiguration": "CustomOutputConfiguration",
+        "overrideConfiguration": "OverrideConfiguration",
+        "dataAutomationLibraryConfiguration": "DataAutomationLibraryConfiguration",
+        "clientToken": "ClientToken",
+        "encryptionConfiguration": "EncryptionConfiguration",
+        "tags": "TagList"
+      }
+    },
+    "CustomOutputConfiguration": {
+      "type": "structure",
+      "members": {
+        "blueprints": "BlueprintItems",
+        "document": "DocumentCustomOutputConfiguration"
+      }
+    },
+    "DataAutomationLibraryArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "arn:aws(|-cn|-iso|-iso-[a-z]|-us-gov):bedrock:[a-zA-Z0-9-]*:[0-9]{12}:data-automation-library/[a-zA-Z0-9-]{12,36}"
+    },
+    "DataAutomationLibraryConfiguration": {
+      "type": "structure",
+      "members": {
+        "libraries": "DataAutomationLibraryItems"
+      }
+    },
+    "DataAutomationLibraryDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 300,
+      "pattern": "[a-zA-Z0-9\\s!\"\\#\\$%'&\\(\\)\\*\\+\\,\\-\\./:;=\\?@\\[\\\\\\]\\^_`\\{\\|\\}~><\u00c0-\u00d6\u00d8-\u00dc\u00df\u00e0-\u00f6\u00f8-\u00fc\u1e9e\u00bf\u00a1\u0152-\u0153\u00b0\u00a3\u00a5\u20b9\u20ac\u00a7\u00a9\u00aa\u00ae\u2122\u00b9\u00b1-\u00b5\u2713\u2446-\u2449\u0e3f\u20bd\u20b1\u20a6\u20a3\u20a9\u20ab\u20ba]*"
+    },
+    "DataAutomationLibraryFilter": {
+      "type": "structure",
+      "required": [
+        "libraryArn"
+      ],
+      "members": {
+        "libraryArn": "DataAutomationLibraryArn"
+      }
+    },
+    "DataAutomationLibraryIngestionJobArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "arn:aws(|-cn|-iso|-iso-[a-z]|-us-gov):bedrock:[a-zA-Z0-9-]*:[0-9]{12}:data-automation-library-ingestion-job/[a-zA-Z0-9-]{12,36}"
+    },
+    "DataAutomationLibraryItem": {
+      "type": "structure",
+      "required": [
+        "libraryArn"
+      ],
+      "members": {
+        "libraryArn": "DataAutomationLibraryArn"
+      }
+    },
+    "DataAutomationLibraryItems": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "DataAutomationLibraryItem"
+    },
+    "DataAutomationLibraryName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]+"
+    },
+    "DataAutomationProfileArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws(|-cn|-us-gov):bedrock:[a-zA-Z0-9-]*:(aws|[0-9]{12}):data-automation-profile/[a-zA-Z0-9-_.]+"
+    },
+    "DataAutomationProjectArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "arn:aws(|-cn|-us-gov):bedrock:[a-zA-Z0-9-]*:(aws|[0-9]{12}):data-automation-project/[a-zA-Z0-9-]{12,36}"
+    },
+    "DataAutomationProjectDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 300
+    },
+    "DataAutomationProjectFilter": {
+      "type": "structure",
+      "required": [
+        "projectArn"
+      ],
+      "members": {
+        "projectArn": "DataAutomationProjectArn",
+        "projectStage": "DataAutomationProjectStage"
+      }
+    },
+    "DataAutomationProjectName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]+"
+    },
+    "DataAutomationProjectStage": {
+      "type": "string",
+      "enum": [
+        "DEVELOPMENT",
+        "LIVE"
+      ]
+    },
+    "DataAutomationProjectStageFilter": {
+      "type": "string",
+      "enum": [
+        "DEVELOPMENT",
+        "LIVE",
+        "ALL"
+      ]
+    },
+    "DataAutomationProjectType": {
+      "type": "string",
+      "enum": [
+        "ASYNC",
+        "SYNC"
+      ]
+    },
+    "DeleteBlueprintRequest": {
+      "type": "structure",
+      "required": [
+        "blueprintArn"
+      ],
+      "members": {
+        "blueprintArn": "BlueprintArn",
+        "blueprintVersion": "BlueprintVersion"
+      }
+    },
+    "DeleteDataAutomationLibraryRequest": {
+      "type": "structure",
+      "required": [
+        "libraryArn"
+      ],
+      "members": {
+        "libraryArn": "DataAutomationLibraryArn"
+      }
+    },
+    "DeleteDataAutomationProjectRequest": {
+      "type": "structure",
+      "required": [
+        "projectArn"
+      ],
+      "members": {
+        "projectArn": "DataAutomationProjectArn"
+      }
+    },
+    "DeleteEntitiesInfo": {
+      "type": "structure",
+      "required": [
+        "entityIds"
+      ],
+      "members": {
+        "entityIds": "EntityIdList"
+      }
+    },
+    "DesiredModality": {
+      "type": "string",
+      "enum": [
+        "IMAGE",
+        "DOCUMENT",
+        "AUDIO",
+        "VIDEO"
+      ]
+    },
+    "DocumentBoundingBox": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State"
+      }
+    },
+    "DocumentCustomOutputConfiguration": {
+      "type": "structure",
+      "members": {
+        "fallbackBlueprints": "FallbackBlueprintItems"
+      }
+    },
+    "DocumentExtractionGranularity": {
+      "type": "structure",
+      "members": {
+        "types": "DocumentExtractionGranularityTypes"
+      }
+    },
+    "DocumentExtractionGranularityType": {
+      "type": "string",
+      "enum": [
+        "DOCUMENT",
+        "PAGE",
+        "ELEMENT",
+        "WORD",
+        "LINE"
+      ]
+    },
+    "DocumentExtractionGranularityTypes": {
+      "type": "list",
+      "member": "DocumentExtractionGranularityType"
+    },
+    "DocumentOutputAdditionalFileFormat": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State"
+      }
+    },
+    "DocumentOutputFormat": {
+      "type": "structure",
+      "required": [
+        "textFormat",
+        "additionalFileFormat"
+      ],
+      "members": {
+        "textFormat": "DocumentOutputTextFormat",
+        "additionalFileFormat": "DocumentOutputAdditionalFileFormat"
+      }
+    },
+    "DocumentOutputTextFormat": {
+      "type": "structure",
+      "members": {
+        "types": "DocumentOutputTextFormatTypes"
+      }
+    },
+    "DocumentOutputTextFormatType": {
+      "type": "string",
+      "enum": [
+        "PLAIN_TEXT",
+        "MARKDOWN",
+        "HTML",
+        "CSV"
+      ]
+    },
+    "DocumentOutputTextFormatTypes": {
+      "type": "list",
+      "member": "DocumentOutputTextFormatType"
+    },
+    "DocumentOverrideConfiguration": {
+      "type": "structure",
+      "members": {
+        "splitter": "SplitterConfiguration",
+        "modalityProcessing": "ModalityProcessingConfiguration",
+        "sensitiveDataConfiguration": "SensitiveDataConfiguration"
+      }
+    },
+    "DocumentStandardExtraction": {
+      "type": "structure",
+      "required": [
+        "granularity",
+        "boundingBox"
+      ],
+      "members": {
+        "granularity": "DocumentExtractionGranularity",
+        "boundingBox": "DocumentBoundingBox"
+      }
+    },
+    "DocumentStandardGenerativeField": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State"
+      }
+    },
+    "DocumentStandardOutputConfiguration": {
+      "type": "structure",
+      "members": {
+        "extraction": "DocumentStandardExtraction",
+        "generativeField": "DocumentStandardGenerativeField",
+        "outputFormat": "DocumentOutputFormat"
+      }
+    },
+    "EncryptionConfiguration": {
+      "type": "structure",
+      "required": [
+        "kmsKeyId"
+      ],
+      "members": {
+        "kmsKeyId": "KmsKeyId",
+        "kmsEncryptionContext": "KmsEncryptionContext"
+      }
+    },
+    "EncryptionContextKey": {
+      "type": "string",
+      "min": 1,
+      "max": 2000,
+      "pattern": ".*\\S.*"
+    },
+    "EncryptionContextValue": {
+      "type": "string",
+      "min": 1,
+      "max": 2000,
+      "pattern": ".*\\S.*"
+    },
+    "EntityDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 300,
+      "pattern": "[a-zA-Z0-9\\s!\"\\#\\$%'&\\(\\)\\*\\+\\,\\-\\./:;=\\?@\\[\\\\\\]\\^_`\\{\\|\\}~><\u00c0-\u00d6\u00d8-\u00dc\u00df\u00e0-\u00f6\u00f8-\u00fc\u1e9e\u00bf\u00a1\u0152-\u0153\u00b0\u00a3\u00a5\u20b9\u20ac\u00a7\u00a9\u00aa\u00ae\u2122\u00b9\u00b1-\u00b5\u2713\u2446-\u2449\u0e3f\u20bd\u20b1\u20a6\u20a3\u20a9\u20ab\u20ba]*"
+    },
+    "EntityId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]+"
+    },
+    "EntityIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 1000,
+      "member": "EntityId"
+    },
+    "EntityType": {
+      "type": "string",
+      "enum": [
+        "VOCABULARY"
+      ]
+    },
+    "EventBridgeConfiguration": {
+      "type": "structure",
+      "required": [
+        "eventBridgeEnabled"
+      ],
+      "members": {
+        "eventBridgeEnabled": "Boolean"
+      }
+    },
+    "FallbackBlueprintItems": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "BlueprintItem"
+    },
+    "GetBlueprintOptimizationStatusRequest": {
+      "type": "structure",
+      "required": [
+        "invocationArn"
+      ],
+      "members": {
+        "invocationArn": "BlueprintOptimizationInvocationArn"
+      }
+    },
+    "GetBlueprintRequest": {
+      "type": "structure",
+      "required": [
+        "blueprintArn"
+      ],
+      "members": {
+        "blueprintArn": "BlueprintArn",
+        "blueprintVersion": "BlueprintVersion",
+        "blueprintStage": "BlueprintStage"
+      }
+    },
+    "GetDataAutomationLibraryEntityRequest": {
+      "type": "structure",
+      "required": [
+        "libraryArn",
+        "entityType",
+        "entityId"
+      ],
+      "members": {
+        "libraryArn": "DataAutomationLibraryArn",
+        "entityType": "EntityType",
+        "entityId": "EntityId"
+      }
+    },
+    "GetDataAutomationLibraryIngestionJobRequest": {
+      "type": "structure",
+      "required": [
+        "libraryArn",
+        "jobArn"
+      ],
+      "members": {
+        "libraryArn": "DataAutomationLibraryArn",
+        "jobArn": "DataAutomationLibraryIngestionJobArn"
+      }
+    },
+    "GetDataAutomationLibraryRequest": {
+      "type": "structure",
+      "required": [
+        "libraryArn"
+      ],
+      "members": {
+        "libraryArn": "DataAutomationLibraryArn"
+      }
+    },
+    "GetDataAutomationProjectRequest": {
+      "type": "structure",
+      "required": [
+        "projectArn"
+      ],
+      "members": {
+        "projectArn": "DataAutomationProjectArn",
+        "projectStage": "DataAutomationProjectStage"
+      }
+    },
+    "ImageBoundingBox": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State"
+      }
+    },
+    "ImageExtractionCategory": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State",
+        "types": "ImageExtractionCategoryTypes"
+      }
+    },
+    "ImageExtractionCategoryType": {
+      "type": "string",
+      "enum": [
+        "CONTENT_MODERATION",
+        "TEXT_DETECTION",
+        "LOGOS"
+      ]
+    },
+    "ImageExtractionCategoryTypes": {
+      "type": "list",
+      "member": "ImageExtractionCategoryType"
+    },
+    "ImageOverrideConfiguration": {
+      "type": "structure",
+      "members": {
+        "modalityProcessing": "ModalityProcessingConfiguration",
+        "sensitiveDataConfiguration": "SensitiveDataConfiguration"
+      }
+    },
+    "ImageStandardExtraction": {
+      "type": "structure",
+      "required": [
+        "category",
+        "boundingBox"
+      ],
+      "members": {
+        "category": "ImageExtractionCategory",
+        "boundingBox": "ImageBoundingBox"
+      }
+    },
+    "ImageStandardGenerativeField": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State",
+        "types": "ImageStandardGenerativeFieldTypes"
+      }
+    },
+    "ImageStandardGenerativeFieldType": {
+      "type": "string",
+      "enum": [
+        "IMAGE_SUMMARY",
+        "IAB"
+      ]
+    },
+    "ImageStandardGenerativeFieldTypes": {
+      "type": "list",
+      "member": "ImageStandardGenerativeFieldType"
+    },
+    "ImageStandardOutputConfiguration": {
+      "type": "structure",
+      "members": {
+        "extraction": "ImageStandardExtraction",
+        "generativeField": "ImageStandardGenerativeField"
+      }
+    },
+    "InlinePayload": {
+      "type": "structure",
+      "members": {
+        "upsertEntitiesInfo": "UpsertEntitiesInfo",
+        "deleteEntitiesInfo": "DeleteEntitiesInfo"
+      }
+    },
+    "InputConfiguration": {
+      "type": "structure",
+      "members": {
+        "s3Object": "S3Object",
+        "inlinePayload": "InlinePayload"
+      }
+    },
+    "InvokeBlueprintOptimizationAsyncRequest": {
+      "type": "structure",
+      "required": [
+        "blueprint",
+        "samples",
+        "outputConfiguration",
+        "dataAutomationProfileArn"
+      ],
+      "members": {
+        "blueprint": "BlueprintOptimizationObject",
+        "samples": "BlueprintOptimizationSamples",
+        "outputConfiguration": "BlueprintOptimizationOutputConfiguration",
+        "dataAutomationProfileArn": "DataAutomationProfileArn",
+        "encryptionConfiguration": "EncryptionConfiguration",
+        "tags": "TagList"
+      }
+    },
+    "InvokeDataAutomationLibraryIngestionJobRequest": {
+      "type": "structure",
+      "required": [
+        "libraryArn",
+        "inputConfiguration",
+        "entityType",
+        "operationType",
+        "outputConfiguration"
+      ],
+      "members": {
+        "libraryArn": "DataAutomationLibraryArn",
+        "clientToken": "ClientToken",
+        "inputConfiguration": "InputConfiguration",
+        "entityType": "EntityType",
+        "operationType": "LibraryIngestionJobOperationType",
+        "outputConfiguration": "OutputConfiguration",
+        "notificationConfiguration": "NotificationConfiguration",
+        "tags": "TagList"
+      }
+    },
+    "KmsEncryptionContext": {
+      "type": "map",
+      "min": 1,
+      "key": "EncryptionContextKey",
+      "value": "EncryptionContextValue"
+    },
+    "KmsKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]+"
+    },
+    "Language": {
+      "type": "string",
+      "enum": [
+        "EN",
+        "DE",
+        "ES",
+        "FR",
+        "IT",
+        "PT",
+        "JA",
+        "KO",
+        "CN",
+        "TW",
+        "HK"
+      ]
+    },
+    "LibraryIngestionJobOperationType": {
+      "type": "string",
+      "enum": [
+        "UPSERT",
+        "DELETE"
+      ]
+    },
+    "ListBlueprintsRequest": {
+      "type": "structure",
+      "members": {
+        "blueprintArn": "BlueprintArn",
+        "resourceOwner": "ResourceOwner",
+        "blueprintStageFilter": "BlueprintStageFilter",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "projectFilter": "DataAutomationProjectFilter"
+      }
+    },
+    "ListDataAutomationLibrariesRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "projectFilter": "DataAutomationProjectFilter"
+      }
+    },
+    "ListDataAutomationLibraryEntitiesRequest": {
+      "type": "structure",
+      "required": [
+        "libraryArn",
+        "entityType"
+      ],
+      "members": {
+        "libraryArn": "DataAutomationLibraryArn",
+        "entityType": "EntityType",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListDataAutomationLibraryIngestionJobsRequest": {
+      "type": "structure",
+      "required": [
+        "libraryArn"
+      ],
+      "members": {
+        "libraryArn": "DataAutomationLibraryArn",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListDataAutomationProjectsRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "projectStageFilter": "DataAutomationProjectStageFilter",
+        "blueprintFilter": "BlueprintFilter",
+        "resourceOwner": "ResourceOwner",
+        "libraryFilter": "DataAutomationLibraryFilter"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN"
+      ],
+      "members": {
+        "resourceARN": "TaggableResourceArn"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "ModalityProcessingConfiguration": {
+      "type": "structure",
+      "members": {
+        "state": "State"
+      }
+    },
+    "ModalityRoutingConfiguration": {
+      "type": "structure",
+      "members": {
+        "jpeg": "DesiredModality",
+        "png": "DesiredModality",
+        "mp4": "DesiredModality",
+        "mov": "DesiredModality"
+      }
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "\\S*"
+    },
+    "NotificationConfiguration": {
+      "type": "structure",
+      "required": [
+        "eventBridgeConfiguration"
+      ],
+      "members": {
+        "eventBridgeConfiguration": "EventBridgeConfiguration"
+      }
+    },
+    "OutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "s3Uri"
+      ],
+      "members": {
+        "s3Uri": "S3Uri"
+      }
+    },
+    "OverrideConfiguration": {
+      "type": "structure",
+      "members": {
+        "document": "DocumentOverrideConfiguration",
+        "image": "ImageOverrideConfiguration",
+        "video": "VideoOverrideConfiguration",
+        "audio": "AudioOverrideConfiguration",
+        "modalityRouting": "ModalityRoutingConfiguration"
+      }
+    },
+    "PIIEntitiesConfiguration": {
+      "type": "structure",
+      "members": {
+        "piiEntityTypes": "PIIEntityTypes",
+        "redactionMaskMode": "PIIRedactionMaskMode"
+      }
+    },
+    "PIIEntityType": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "ADDRESS",
+        "AGE",
+        "NAME",
+        "EMAIL",
+        "PHONE",
+        "USERNAME",
+        "PASSWORD",
+        "DRIVER_ID",
+        "LICENSE_PLATE",
+        "VEHICLE_IDENTIFICATION_NUMBER",
+        "CREDIT_DEBIT_CARD_CVV",
+        "CREDIT_DEBIT_CARD_EXPIRY",
+        "CREDIT_DEBIT_CARD_NUMBER",
+        "PIN",
+        "INTERNATIONAL_BANK_ACCOUNT_NUMBER",
+        "SWIFT_CODE",
+        "IP_ADDRESS",
+        "MAC_ADDRESS",
+        "URL",
+        "AWS_ACCESS_KEY",
+        "AWS_SECRET_KEY",
+        "US_BANK_ACCOUNT_NUMBER",
+        "US_BANK_ROUTING_NUMBER",
+        "US_INDIVIDUAL_TAX_IDENTIFICATION_NUMBER",
+        "US_PASSPORT_NUMBER",
+        "US_SOCIAL_SECURITY_NUMBER",
+        "CA_HEALTH_NUMBER",
+        "CA_SOCIAL_INSURANCE_NUMBER",
+        "UK_NATIONAL_HEALTH_SERVICE_NUMBER",
+        "UK_NATIONAL_INSURANCE_NUMBER",
+        "UK_UNIQUE_TAXPAYER_REFERENCE_NUMBER"
+      ]
+    },
+    "PIIEntityTypes": {
+      "type": "list",
+      "min": 1,
+      "max": 32,
+      "member": "PIIEntityType"
+    },
+    "PIIRedactionMaskMode": {
+      "type": "string",
+      "enum": [
+        "PII",
+        "ENTITY_TYPE"
+      ]
+    },
+    "Phrase": {
+      "type": "structure",
+      "required": [
+        "text"
+      ],
+      "members": {
+        "text": "PhraseText",
+        "displayAsText": "PhraseDisplayAsText"
+      }
+    },
+    "PhraseDisplayAsText": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": ".*.+.*"
+    },
+    "PhraseList": {
+      "type": "list",
+      "min": 1,
+      "member": "Phrase"
+    },
+    "PhraseText": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": ".*.+.*"
+    },
+    "ResourceOwner": {
+      "type": "string",
+      "enum": [
+        "SERVICE",
+        "ACCOUNT"
+      ]
+    },
+    "S3Object": {
+      "type": "structure",
+      "required": [
+        "s3Uri"
+      ],
+      "members": {
+        "s3Uri": "S3Uri",
+        "version": "S3ObjectVersion"
+      }
+    },
+    "S3ObjectVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "S3Uri": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "s3://[a-z0-9][\\.\\-a-z0-9]{1,61}[a-z0-9](/.*)?"
+    },
+    "SensitiveDataConfiguration": {
+      "type": "structure",
+      "required": [
+        "detectionMode"
+      ],
+      "members": {
+        "detectionMode": "SensitiveDataDetectionMode",
+        "detectionScope": "SensitiveDataDetectionScope",
+        "piiEntitiesConfiguration": "PIIEntitiesConfiguration"
+      }
+    },
+    "SensitiveDataDetectionMode": {
+      "type": "string",
+      "enum": [
+        "DETECTION",
+        "DETECTION_AND_REDACTION"
+      ]
+    },
+    "SensitiveDataDetectionScope": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "SensitiveDataDetectionScopeType"
+    },
+    "SensitiveDataDetectionScopeType": {
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "CUSTOM"
+      ]
+    },
+    "SpeakerLabelingConfiguration": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State"
+      }
+    },
+    "SplitterConfiguration": {
+      "type": "structure",
+      "members": {
+        "state": "State"
+      }
+    },
+    "StandardOutputConfiguration": {
+      "type": "structure",
+      "members": {
+        "document": "DocumentStandardOutputConfiguration",
+        "image": "ImageStandardOutputConfiguration",
+        "video": "VideoStandardOutputConfiguration",
+        "audio": "AudioStandardOutputConfiguration"
+      }
+    },
+    "State": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "key",
+        "value"
+      ],
+      "members": {
+        "key": "TagKey",
+        "value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tags"
+      ],
+      "members": {
+        "resourceARN": "TaggableResourceArn",
+        "tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TaggableResourceArn": {
+      "type": "string",
+      "min": 20,
+      "max": 1011,
+      "pattern": "arn:aws(|-cn|-iso|-iso-[a-z]|-us-gov):bedrock:[a-z0-9-]*:[0-9]{12}:(blueprint|data-automation-project|blueprint-optimization-invocation|data-automation-library|data-automation-library-ingestion-job)/[a-zA-Z0-9-]{12,36}"
+    },
+    "TranscriptConfiguration": {
+      "type": "structure",
+      "members": {
+        "speakerLabeling": "SpeakerLabelingConfiguration",
+        "channelLabeling": "ChannelLabelingConfiguration"
+      }
+    },
+    "Type": {
+      "type": "string",
+      "enum": [
+        "DOCUMENT",
+        "IMAGE",
+        "AUDIO",
+        "VIDEO"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceARN": "TaggableResourceArn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateBlueprintRequest": {
+      "type": "structure",
+      "required": [
+        "blueprintArn",
+        "schema"
+      ],
+      "members": {
+        "blueprintArn": "BlueprintArn",
+        "schema": "BlueprintSchema",
+        "blueprintStage": "BlueprintStage",
+        "encryptionConfiguration": "EncryptionConfiguration"
+      }
+    },
+    "UpdateDataAutomationLibraryRequest": {
+      "type": "structure",
+      "required": [
+        "libraryArn"
+      ],
+      "members": {
+        "libraryArn": "DataAutomationLibraryArn",
+        "libraryDescription": "DataAutomationLibraryDescription",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateDataAutomationProjectRequest": {
+      "type": "structure",
+      "required": [
+        "projectArn",
+        "standardOutputConfiguration"
+      ],
+      "members": {
+        "projectArn": "DataAutomationProjectArn",
+        "projectStage": "DataAutomationProjectStage",
+        "projectDescription": "DataAutomationProjectDescription",
+        "standardOutputConfiguration": "StandardOutputConfiguration",
+        "customOutputConfiguration": "CustomOutputConfiguration",
+        "overrideConfiguration": "OverrideConfiguration",
+        "dataAutomationLibraryConfiguration": "DataAutomationLibraryConfiguration",
+        "encryptionConfiguration": "EncryptionConfiguration"
+      }
+    },
+    "UpsertEntitiesInfo": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "UpsertEntityInfo"
+    },
+    "UpsertEntityInfo": {
+      "type": "structure",
+      "members": {
+        "vocabulary": "VocabularyEntityInfo"
+      }
+    },
+    "VideoBoundingBox": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State"
+      }
+    },
+    "VideoExtractionCategory": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State",
+        "types": "VideoExtractionCategoryTypes"
+      }
+    },
+    "VideoExtractionCategoryType": {
+      "type": "string",
+      "enum": [
+        "CONTENT_MODERATION",
+        "TEXT_DETECTION",
+        "TRANSCRIPT",
+        "LOGOS"
+      ]
+    },
+    "VideoExtractionCategoryTypes": {
+      "type": "list",
+      "member": "VideoExtractionCategoryType"
+    },
+    "VideoOverrideConfiguration": {
+      "type": "structure",
+      "members": {
+        "modalityProcessing": "ModalityProcessingConfiguration",
+        "sensitiveDataConfiguration": "SensitiveDataConfiguration"
+      }
+    },
+    "VideoStandardExtraction": {
+      "type": "structure",
+      "required": [
+        "category",
+        "boundingBox"
+      ],
+      "members": {
+        "category": "VideoExtractionCategory",
+        "boundingBox": "VideoBoundingBox"
+      }
+    },
+    "VideoStandardGenerativeField": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "State",
+        "types": "VideoStandardGenerativeFieldTypes"
+      }
+    },
+    "VideoStandardGenerativeFieldType": {
+      "type": "string",
+      "enum": [
+        "VIDEO_SUMMARY",
+        "IAB",
+        "CHAPTER_SUMMARY"
+      ]
+    },
+    "VideoStandardGenerativeFieldTypes": {
+      "type": "list",
+      "member": "VideoStandardGenerativeFieldType"
+    },
+    "VideoStandardOutputConfiguration": {
+      "type": "structure",
+      "members": {
+        "extraction": "VideoStandardExtraction",
+        "generativeField": "VideoStandardGenerativeField"
+      }
+    },
+    "VocabularyEntityInfo": {
+      "type": "structure",
+      "required": [
+        "language",
+        "phrases"
+      ],
+      "members": {
+        "entityId": "EntityId",
+        "description": "EntityDescription",
+        "language": "Language",
+        "phrases": "PhraseList"
+      }
+    }
+  }
+}

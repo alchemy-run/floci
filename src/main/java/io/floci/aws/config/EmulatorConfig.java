@@ -862,6 +862,7 @@ public interface EmulatorConfig {
         AuditManagerServiceConfig auditManager();
         B2biServiceConfig b2bi();
         BackupSearchServiceConfig backupSearch();
+        BedrockDataAutomationServiceConfig bedrockDataAutomation();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2883,6 +2884,11 @@ public interface EmulatorConfig {
     }
 
     interface BackupSearchServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface BedrockDataAutomationServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

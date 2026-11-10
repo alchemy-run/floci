@@ -16,6 +16,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Map;
@@ -41,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1327,6 +1328,18 @@ class PartitionCrossServiceSmokeIntegrationTest {
         cleanup.register(() -> signed(region, "apprunner")
                 .header("X-Amz-Target", "AppRunner.DeleteAutoScalingConfiguration").contentType(JSON_1_0)
                 .body("{\"AutoScalingConfigurationArn\":\"" + arn + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void bedrockDataAutomationLibraryArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "bedrock");
+        String name = unique("smoke-library", partitionCase);
+        String arn = signed(region, "bedrock").contentType(JSON).body("{\"libraryName\":\"" + name + "\"}")
+                .put("/data-automation-libraries/").then().statusCode(200).extract().path("libraryArn");
+        cleanup.register(() -> signed(region, "bedrock").urlEncodingEnabled(false)
+                .delete("/data-automation-libraries/" + URLEncoder.encode(arn, StandardCharsets.UTF_8) + "/"));
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 

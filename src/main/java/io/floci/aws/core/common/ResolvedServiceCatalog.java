@@ -30,6 +30,7 @@ import io.floci.aws.services.bedrockagentcorecontrol.BedrockAgentCoreIdentityCon
 import io.floci.aws.services.bedrockagentcorecontrol.BedrockAgentCoreMemoryController;
 import io.floci.aws.services.bedrockagentcorecontrol.BedrockAgentCoreResourcePolicyController;
 import io.floci.aws.services.bedrockagentcorecontrol.BedrockAgentCoreToolsController;
+import io.floci.aws.services.bedrockdataautomation.BdaController;
 import io.floci.aws.services.bedrockruntime.BedrockRuntimeController;
 import io.floci.aws.services.cloudfront.CloudFrontController;
 import io.floci.aws.services.cloudfront.CloudFrontKvsDataPlaneController;
@@ -696,6 +697,17 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AppRunner."), Set.of("apprunner"), Set.of(), Set.of()),
+                descriptor("bedrock-data-automation", "bedrock-data-automation",
+                        config.services().bedrockDataAutomation().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        // Signs as "bedrock", which bedrock-runtime claims; routes resolve by resource class.
+                        Set.of(), Set.of(), Set.of(), Set.of(BdaController.class)),
+                descriptor("bedrock-data-automation-runtime", "bedrock-data-automation-runtime",
+                        config.services().bedrockDataAutomation().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AmazonBedrockKeystoneRuntimeService."), Set.of(), Set.of(), Set.of()),
                 descriptor("backup-search", "backupsearch", config.services().backupSearch().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

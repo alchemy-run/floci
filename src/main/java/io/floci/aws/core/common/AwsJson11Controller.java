@@ -11,6 +11,7 @@ import io.floci.aws.services.apigatewayv2.ApiGatewayV2JsonHandler;
 import io.floci.aws.services.applicationautoscaling.ApplicationAutoScalingJsonHandler;
 import io.floci.aws.services.athena.AthenaJsonHandler;
 import io.floci.aws.services.bcmdataexports.BcmDataExportsJsonHandler;
+import io.floci.aws.services.bedrockdataautomation.BdaRuntimeJsonHandler;
 import io.floci.aws.services.budgets.BudgetsJsonHandler;
 import io.floci.aws.services.ce.CostExplorerJsonHandler;
 import io.floci.aws.services.cloudcontrol.CloudControlJsonHandler;
@@ -128,6 +129,7 @@ public class AwsJson11Controller {
     private final PricingJsonHandler pricingJsonHandler;
     private final TranscribeJsonHandler transcribeJsonHandler;
     private final TranslateJsonHandler translateJsonHandler;
+    private final BdaRuntimeJsonHandler bdaRuntimeJsonHandler;
     private final CostExplorerJsonHandler costExplorerJsonHandler;
     private final CurJsonHandler curJsonHandler;
     private final BcmDataExportsJsonHandler bcmDataExportsJsonHandler;
@@ -188,6 +190,7 @@ public class AwsJson11Controller {
                                PricingJsonHandler pricingJsonHandler,
                                TranscribeJsonHandler transcribeJsonHandler,
                                TranslateJsonHandler translateJsonHandler,
+                               BdaRuntimeJsonHandler bdaRuntimeJsonHandler,
                                CostExplorerJsonHandler costExplorerJsonHandler,
                                CurJsonHandler curJsonHandler,
                                BcmDataExportsJsonHandler bcmDataExportsJsonHandler,
@@ -252,6 +255,7 @@ public class AwsJson11Controller {
         this.pricingJsonHandler = pricingJsonHandler;
         this.transcribeJsonHandler = transcribeJsonHandler;
         this.translateJsonHandler = translateJsonHandler;
+        this.bdaRuntimeJsonHandler = bdaRuntimeJsonHandler;
         this.costExplorerJsonHandler = costExplorerJsonHandler;
         this.curJsonHandler = curJsonHandler;
         this.bcmDataExportsJsonHandler = bcmDataExportsJsonHandler;
@@ -362,6 +366,7 @@ public class AwsJson11Controller {
                 case "pricing" -> pricingJsonHandler.handle(action, request, region);
                 case "transcribe" -> transcribeJsonHandler.handle(action, request, region);
                 case "translate" -> translateJsonHandler.handle(action, request, region);
+                case "bedrock-data-automation-runtime" -> bdaRuntimeJsonHandler.handle(action, request, region);
                 case "ce" -> costExplorerJsonHandler.handle(action, request, region);
                 case "cur" -> curJsonHandler.handle(action, request, region);
                 case "bcm-data-exports" -> bcmDataExportsJsonHandler.handle(action, request, region);

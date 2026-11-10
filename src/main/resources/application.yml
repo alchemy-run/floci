@@ -1003,6 +1003,8 @@ floci:
       enabled: true
     backup-search:
       enabled: true
+    bedrock-data-automation:
+      enabled: true
     rekognition:
       enabled: true
     translate:
