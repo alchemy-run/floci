@@ -620,12 +620,15 @@ floci:
       shutdown-timeout-seconds: ${FLOCI_SERVICES_REDSHIFT_DATA_SHUTDOWN_TIMEOUT_SECONDS:10}
     redshift-serverless:
       enabled: true
+      endpoint-domain: redshift-serverless.localhost.floci.io  # FLOCI_SERVICES_REDSHIFT_SERVERLESS_ENDPOINT_DOMAIN; AWS-shaped workgroup endpoint names on the workgroup's port, routed by TLS server name
       snapshot-expiration-enabled: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SNAPSHOT_EXPIRATION_ENABLED:true}
       snapshot-expiration-sweep-interval-seconds: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SNAPSHOT_EXPIRATION_SWEEP_INTERVAL_SECONDS:60}
       snapshot-copy-enabled: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SNAPSHOT_COPY_ENABLED:true}
       snapshot-copy-sweep-interval-seconds: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SNAPSHOT_COPY_SWEEP_INTERVAL_SECONDS:60}
       scheduled-actions-enabled: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SCHEDULED_ACTIONS_ENABLED:true}
       scheduled-action-sweep-interval-seconds: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SCHEDULED_ACTION_SWEEP_INTERVAL_SECONDS:60}
+      recovery-points-enabled: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_RECOVERY_POINTS_ENABLED:true}  # a recovery point of each running workgroup's namespace every interval, kept a day
+      recovery-point-interval-seconds: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_RECOVERY_POINT_INTERVAL_SECONDS:1800}
     neptune:
       enabled: true
       proxy-base-port: 8182

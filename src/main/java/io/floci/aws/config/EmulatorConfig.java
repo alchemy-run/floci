@@ -2054,6 +2054,13 @@ public interface EmulatorConfig {
         @WithDefault("true")
         boolean enabled();
 
+        /**
+         * Domain of AWS-shaped workgroup endpoints, {@code <workgroup>.<account>.<region>.<domain>} on
+         * the workgroup's port, routed to its proxy by TLS server name. Unset, a workgroup's endpoint
+         * is its proxy's own host and port.
+         */
+        Optional<String> endpointDomain();
+
         @WithDefault("true")
         boolean snapshotExpirationEnabled();
 
@@ -2071,6 +2078,14 @@ public interface EmulatorConfig {
 
         @WithDefault("60")
         int scheduledActionSweepIntervalSeconds();
+
+        /** Whether running workgroups get automatic recovery points. */
+        @WithDefault("true")
+        boolean recoveryPointsEnabled();
+
+        /** How often a running workgroup's namespace gets a recovery point; AWS takes one every 30 minutes. */
+        @WithDefault("1800")
+        int recoveryPointIntervalSeconds();
     }
 
     interface NeptuneServiceConfig {

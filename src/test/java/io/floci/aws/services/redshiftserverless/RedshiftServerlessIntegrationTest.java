@@ -73,7 +73,7 @@ class RedshiftServerlessIntegrationTest {
     void stubRuntime() {
         when(runtime.generatePassword()).thenReturn("Generated123");
         when(runtime.start(any(String.class), any(String.class), any(String.class), any(String.class),
-                any(String.class), any(String.class), any(Endpoint.class), anyBoolean(), any()))
+                any(String.class), any(String.class), any(Endpoint.class), anyInt(), anyBoolean(), anyBoolean(), any()))
                 .thenReturn(new RedshiftServerlessRuntime.Backend("127.0.0.1", 55432));
         when(runtime.issueCredential(any(), any(), any(), any(), anyInt()))
                 .thenAnswer(invocation -> new TempCredential(invocation.getArgument(3), "temporary-password",

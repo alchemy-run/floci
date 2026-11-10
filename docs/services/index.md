@@ -86,7 +86,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [QuickSight](quicksight.md) | `/accounts/{AwsAccountId}/...` | REST JSON, metadata only | 16 |
 | [Redshift](redshift.md) | `POST /` with `Action=` param + PostgreSQL container | Query + PostgreSQL wire (+ CFN) | 56 |
 | [Redshift Data API](redshift-data.md) | `POST /` + `X-Amz-Target: RedshiftData.*` | JSON 1.1 | 12 |
-| [Redshift Serverless](redshift-serverless.md) | `POST /` + `X-Amz-Target: RedshiftServerless.*` | JSON 1.1 | 55 |
+| [Redshift Serverless](redshift-serverless.md) | `POST /` + `X-Amz-Target: RedshiftServerless.*` | JSON 1.1 | 63 |
 | [EMR](emr.md) | `POST /` + `X-Amz-Target: ElasticMapReduce.*` | JSON 1.1 | 41 |
 | [EMR Serverless](emr-serverless.md) | `/applications/*`, `/tags/*` | REST JSON | 15 |
 | [Data Firehose](firehose.md) | `POST /` + `X-Amz-Target: Firehose_20150804.*` | JSON 1.1 | 12 |
