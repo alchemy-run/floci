@@ -37,6 +37,9 @@ public final class SageMakerEntities {
         public String region;
         public String accountId;
         public Map<String, String> tags = new LinkedHashMap<>();
+        // The other CreateEndpointConfig members (AsyncInferenceConfig, DataCaptureConfig, KmsKeyId, ...),
+        // stored as sent and echoed by DescribeEndpointConfig.
+        public Map<String, Object> settings = new LinkedHashMap<>();
     }
 
     @RegisterForReflection

@@ -11,7 +11,7 @@ Floci emulates SageMaker control-plane APIs and runs real Docker containers for 
 | Endpoints | `CreateEndpoint`, `DescribeEndpoint`, `UpdateEndpoint`, `UpdateEndpointWeightsAndCapacities`, `DeleteEndpoint`, `ListEndpoints` |
 | Training | `CreateTrainingJob`, `DescribeTrainingJob`, `ListTrainingJobs`, `StopTrainingJob` |
 | Tags | `AddTags`, `ListTags`, `DeleteTags` |
-| Runtime | `POST /endpoints/{EndpointName}/invocations` |
+| Runtime | `InvokeEndpoint`, `InvokeEndpointAsync`, `InvokeEndpointWithResponseStream` (`POST /endpoints/{EndpointName}/invocations`, `/async-invocations`, `/invocations-response-stream`) |
 
 ## Supported Actions
 
@@ -22,7 +22,7 @@ Floci emulates SageMaker control-plane APIs and runs real Docker containers for 
 | `DescribeModel` | Returns a model by name, scoped to the calling region. |
 | `DeleteModel` | Deletes a model by name, scoped to the calling region. |
 | `ListModels` | Lists models for the calling region; supports `NameContains`, `MaxResults` (1-100), and `NextToken` pagination. |
-| `CreateEndpointConfig` | Creates an endpoint configuration; every `ProductionVariants[].ModelName` must already exist. |
+| `CreateEndpointConfig` | Creates an endpoint configuration; every `ProductionVariants[].ModelName` must already exist. `AsyncInferenceConfig`, `DataCaptureConfig`, `KmsKeyId` and the other members are stored and returned by `DescribeEndpointConfig`. |
 | `DescribeEndpointConfig` | Returns an endpoint configuration by name, scoped to the calling region. |
 | `DeleteEndpointConfig` | Deletes an endpoint configuration by name, scoped to the calling region. |
 | `ListEndpointConfigs` | Lists endpoint configurations for the calling region; supports `MaxResults` and `NextToken`. |
@@ -119,6 +119,11 @@ The node image defaults to `public.ecr.aws/docker/library/ubuntu:22.04`, since H
 `CreateEndpoint` starts the model image as a long-lived Docker container with command `serve`, port `8080`, `/ping` health checks, and `/invocations` runtime proxying. `ModelDataUrl` artifacts are downloaded from S3 and placed in `/opt/ml/model`.
 
 Endpoint containers are CPU-only for now; the `gpu` settings above apply to training jobs.
+
+The runtime forwards each invocation to the container's `/invocations`, with `Content-Type`, `Accept` and `X-Amzn-SageMaker-Custom-Attributes`, and names the variant in `x-Amzn-Invoked-Production-Variant`. A missing or not-yet-`InService` endpoint is a `ValidationError`; a container error is a `ModelError` (HTTP 424).
+
+- **`InvokeEndpointAsync`** needs an endpoint config with `AsyncInferenceConfig`. It reads the input from `InputLocation` in S3, invokes the container while the request waits, writes the answer to `<S3OutputPath>/<InferenceId>.out` (or the failure to `<S3FailurePath>/<InferenceId>-error.out`), publishes the AWS notification message to `SuccessTopic` or `ErrorTopic` when configured, and then answers 202 with `InferenceId` and the two locations. `InferenceId` defaults to a UUID.
+- **`InvokeEndpointWithResponseStream`** relays the container's response body as `PayloadPart` events as it arrives, so a container that streams its answer (chunked transfer) streams to the client. A body that breaks off mid-stream ends with a `ModelStreamError` event.
 
 ## Examples
 
