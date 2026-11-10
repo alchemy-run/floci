@@ -23,7 +23,7 @@ Floci emulates Amazon Location Service without a map provider. Places come from 
 | `DescribePlaceIndex` | Describe a place index |
 | `UpdatePlaceIndex` | Update a place index |
 | `DeletePlaceIndex` | Delete a place index |
-| `ListPlaceIndexes` | Page through the place indexs |
+| `ListPlaceIndexes` | Page through the place indexes |
 | `SearchPlaceIndexForText` | Search the gazetteer by text |
 | `SearchPlaceIndexForPosition` | Find the places at a position |
 | `SearchPlaceIndexForSuggestions` | Suggest places for partial text |

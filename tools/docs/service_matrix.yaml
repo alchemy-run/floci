@@ -19,6 +19,10 @@
 # documents a facet of another service and deliberately has no row of its own).
 
 aliases:
+  geo: location                         # Location's SigV4 signing name is "geo"
+  geo-maps: location                    # Maps API facet, documented in location.md
+  geo-places: location                  # Places API facet, documented in location.md
+  geo-routes: location                  # Routes API facet, documented in location.md
   apigateway: api-gateway               # "API Gateway v1" row title
   apigatewayv2: api-gateway             # v2 facet, documented at api-gateway.md#v2
   aps: managed-prometheus               # AMP's SigV4 signing name is "aps"
