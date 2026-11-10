@@ -265,11 +265,20 @@ public class ResourceArnBuilder {
     }
 
     private String buildResourceGroupArn(ContainerRequestContext ctx, String region, String accountId) {
+        String path = IamActionRegistry.decodedPath(ctx);
+        if (path.contains("/_rg/resources/") && path.endsWith("/tags")) {
+            return path.substring(path.indexOf("/_rg/resources/") + "/_rg/resources/".length(),
+                    path.length() - "/tags".length());
+        }
+        if (path.endsWith("/resources/search") || path.contains("account-settings")
+                || path.contains("/get-tag-sync-task") || path.contains("/cancel-tag-sync-task")
+                || path.contains("/list-tag-sync-tasks")) {
+            return "*";
+        }
         JsonNode body = readJsonBody(ctx);
         if (body == null) {
             return "*";
         }
-        String path = IamActionRegistry.decodedPath(ctx);
         boolean create = path.endsWith("/groups") || path.endsWith("/groups/");
         String group = create ? body.path("Name").asText()
                 : body.path("Group").asText(body.path("GroupName").asText());

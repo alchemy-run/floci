@@ -96,7 +96,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Lightsail](lightsail.md) | `POST /` + `X-Amz-Target: Lightsail_20161128.*` | JSON 1.1 | 79 local responses; 161 recognized actions |
 | [ACM](acm.md) | `POST /` + `X-Amz-Target: CertificateManager.*` | JSON 1.1 | 17 |
 | [ECR](ecr.md) | `POST /` + `X-Amz-Target: AmazonEC2ContainerRegistry_V20150921.*` (control plane) and `/v2/...` (data plane proxied to `registry:2`) | JSON 1.1 + OCI Distribution | 34 |
-| [AWS Resource Groups](resource-groups.md) | `/groups`, `/get-group`, `/delete-group`, `/group-resources`, `/list-group-resources` | REST JSON | 5 |
+| [AWS Resource Groups](resource-groups.md) | `/groups`, `/get-group`, `/groups-list`, `/list-group-resources`, `/resources/*` and the other AWS routes | REST JSON | 23 |
 | [Resource Groups Tagging API](resource-groups-tagging.md) | `POST /` + `X-Amz-Target: ResourceGroupsTaggingAPI_20170126.*` | JSON 1.1 | 5 |
 | [Resource Explorer](resource-explorer.md) | `POST /{OperationName}`, rewritten to `/_re2/*` for the four paths S3 Vectors also claims | REST JSON | 32 |
 | [SES](ses.md) | `POST /` with `Action=` param | Query | 71 |
