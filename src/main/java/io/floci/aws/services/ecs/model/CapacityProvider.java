@@ -19,6 +19,9 @@ public class CapacityProvider {
     private String updateStatus;
     private String type;
     private Map<String, Object> autoScalingGroupProvider;
+    /** The cluster a Managed Instances provider belongs to; {@code null} for an account-wide one. */
+    private String cluster;
+    private Map<String, Object> managedInstancesProvider;
     private Map<String, String> tags = new HashMap<>();
 
     public String getCapacityProviderArn() { return capacityProviderArn; }
@@ -39,6 +42,14 @@ public class CapacityProvider {
     public Map<String, Object> getAutoScalingGroupProvider() { return autoScalingGroupProvider; }
     public void setAutoScalingGroupProvider(Map<String, Object> autoScalingGroupProvider) {
         this.autoScalingGroupProvider = autoScalingGroupProvider;
+    }
+
+    public String getCluster() { return cluster; }
+    public void setCluster(String cluster) { this.cluster = cluster; }
+
+    public Map<String, Object> getManagedInstancesProvider() { return managedInstancesProvider; }
+    public void setManagedInstancesProvider(Map<String, Object> managedInstancesProvider) {
+        this.managedInstancesProvider = managedInstancesProvider;
     }
 
     public Map<String, String> getTags() { return tags; }

@@ -75,6 +75,7 @@ import io.floci.aws.services.iam.PassedRoleLookup;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.UriBuilder;
 import org.jboss.logging.Logger;
@@ -278,6 +279,10 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
     // serviceArn → why the reconciler's last attempt to launch one of its tasks failed, and for which
     // deployment. Memory-only.
     private final Map<String, LaunchFailure> launchFailures = new ConcurrentHashMap<>();
+    // Launches the EC2 instances behind Managed Instances providers. Unresolvable when ECS is
+    // built without CDI (unit tests), where managed container instances get a synthetic id.
+    @Inject
+    Instance<EcsManagedInstances> managedInstances;
 
     @Inject
     public EcsService(RegionResolver regionResolver, EcsContainerManager containerManager,
@@ -896,6 +901,11 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         if (runningTasks > 0) {
             throw new AwsException("ClusterContainsTasksException",
                     "The cluster cannot be deleted because it contains running tasks.", 400);
+        }
+        if (capacityProviders.values().stream().anyMatch(cp -> cluster.getClusterName().equals(cp.getCluster()))) {
+            throw new AwsException("ClusterContainsCapacityProviderException",
+                    "The cluster cannot be deleted while it has Managed Instances capacity providers. "
+                            + "Delete them first.", 400);
         }
         clusters.remove(clusterKey(region, cluster.getClusterName()));
         cluster.setStatus("INACTIVE");
@@ -1624,6 +1634,14 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             String taskArn = regionResolver.buildArn("ecs", region,
                     "task/" + cluster.getClusterName() + "/" + taskId);
             Placement placement = placements.get(i);
+            String isolationMode = isolationModeOf(taskDef);
+            String taskContainerInstanceArn = containerInstanceArn;
+            CapacityProvider managed = placement.launchType() == LaunchType.MANAGED_INSTANCES
+                    ? managedCapacityProviderFor(cluster, placement.capacityProviderName()) : null;
+            requireSandboxCapacity(taskDef, isolationMode, managed);
+            if (managed != null && taskContainerInstanceArn == null) {
+                taskContainerInstanceArn = ensureManagedContainerInstance(cluster, managed, region);
+            }
 
             EcsTask task = new EcsTask();
             task.setTaskArn(taskArn);
@@ -1640,7 +1658,8 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             task.setMemory(effectiveMemory(taskDef, request));
             task.setCreatedAt(Instant.now());
             task.setContainers(List.of());
-            task.setContainerInstanceArn(containerInstanceArn);
+            task.setContainerInstanceArn(taskContainerInstanceArn);
+            task.setIsolationMode(isolationMode);
             task.setNetworkConfiguration(networkConfiguration);
             task.setOverrides(request.getOverrides());
             task.setEnableExecuteCommand(request.isEnableExecuteCommand());
@@ -1991,11 +2010,28 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         return placements;
     }
 
-    /** FARGATE and FARGATE_SPOT place Fargate tasks; any other provider is backed by an ASG. */
-    private static Placement placementFor(String capacityProvider) {
-        LaunchType launchType = FARGATE_CAPACITY_PROVIDERS.contains(capacityProvider)
-                ? LaunchType.FARGATE : LaunchType.EC2;
-        return new Placement(launchType, capacityProvider);
+    /**
+     * FARGATE and FARGATE_SPOT place Fargate tasks, a Managed Instances provider places
+     * MANAGED_INSTANCES ones, and any other provider is backed by an ASG.
+     */
+    private Placement placementFor(String capacityProvider) {
+        LaunchType launchType = FARGATE_CAPACITY_PROVIDERS.contains(capacityProvider) ? LaunchType.FARGATE
+                : isManagedInstancesProvider(capacityProvider) ? LaunchType.MANAGED_INSTANCES
+                : LaunchType.EC2;
+        CapacityProvider managed = launchType == LaunchType.MANAGED_INSTANCES
+                ? capacityProviders.values().stream()
+                        .filter(cp -> matches(cp, capacityProvider)).findFirst().orElse(null)
+                : null;
+        return new Placement(launchType, managed != null ? managed.getName() : capacityProvider);
+    }
+
+    private boolean isManagedInstancesProvider(String ref) {
+        return capacityProviders.values().stream()
+                .anyMatch(cp -> CAPACITY_PROVIDER_TYPE_MANAGED_INSTANCES.equals(cp.getType()) && matches(cp, ref));
+    }
+
+    private static boolean matches(CapacityProvider cp, String ref) {
+        return ref.equals(cp.getName()) || ref.equals(cp.getCapacityProviderArn());
     }
 
     /** Accepts the two built-in Fargate providers as well as anything CreateCapacityProvider made. */
@@ -2007,9 +2043,8 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
         if (FARGATE_CAPACITY_PROVIDERS.contains(name) || capacityProviders.containsKey(name)) {
             return;
         }
-        boolean knownByArn = capacityProviders.values().stream()
-                .anyMatch(cp -> name.equals(cp.getCapacityProviderArn()));
-        if (!knownByArn) {
+        boolean known = capacityProviders.values().stream().anyMatch(cp -> matches(cp, name));
+        if (!known) {
             throw new AwsException("ClientException",
                     "The specified capacity provider '" + name + "' was not found. "
                             + "Specify a valid capacity provider and try again.", 400);
@@ -3976,55 +4011,120 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             List.of("aws", "ecs", "fargate");
     private static final int MAX_CAPACITY_PROVIDER_NAME_LENGTH = 255;
     private static final Pattern CAPACITY_PROVIDER_NAME_PATTERN = Pattern.compile("[A-Za-z0-9_-]+");
-    /** The only provider type Floci mints: a created provider always wraps an Auto Scaling group. */
     private static final String CAPACITY_PROVIDER_TYPE_EC2 = "EC2_AUTOSCALING";
+    private static final String CAPACITY_PROVIDER_TYPE_MANAGED_INSTANCES = "MANAGED_INSTANCES";
+    private static final String ISOLATION_MODE_SHARED = "SHARED";
 
     public CapacityProvider createCapacityProvider(String name, Map<String, Object> asgProvider,
                                                     Map<String, String> tags, String region) {
+        return createCapacityProvider(name, null, asgProvider, null, tags, region);
+    }
+
+    /**
+     * Creates an Auto Scaling group provider, which is account-wide, or a Managed Instances one,
+     * which belongs to the {@code cluster} the request names and is listed only under it.
+     */
+    public CapacityProvider createCapacityProvider(String name, String clusterRef,
+                                                    Map<String, Object> asgProvider,
+                                                    Map<String, Object> managedInstancesProvider,
+                                                    Map<String, String> tags, String region) {
         validateCapacityProviderName(name);
-        if (capacityProviders.containsKey(name)) {
+        if ((asgProvider == null) == (managedInstancesProvider == null)) {
             throw new AwsException("InvalidParameterException",
-                    "A capacity provider with name " + name + " already exists.", 400);
+                    "Specify exactly one of autoScalingGroupProvider and managedInstancesProvider.", 400);
         }
         CapacityProvider cp = new CapacityProvider();
         cp.setName(name);
-        cp.setCapacityProviderArn(regionResolver.buildArn("ecs", region, "capacity-provider/" + name));
         cp.setStatus("ACTIVE");
         cp.setUpdateStatus("CREATE_COMPLETE");
-        cp.setType(CAPACITY_PROVIDER_TYPE_EC2);
-        cp.setAutoScalingGroupProvider(asgProvider);
+        if (managedInstancesProvider != null) {
+            if (clusterRef == null || clusterRef.isBlank()) {
+                throw new AwsException("InvalidParameterException",
+                        "A cluster is required to create a Managed Instances capacity provider.", 400);
+            }
+            requireManagedInstancesProvider(managedInstancesProvider);
+            EcsCluster cluster = resolveClusterOrThrow(clusterRef, region);
+            if (findManagedCapacityProvider(cluster.getClusterName(), name) != null) {
+                throw new AwsException("InvalidParameterException",
+                        "A capacity provider with name " + name + " already exists.", 400);
+            }
+            cp.setCluster(cluster.getClusterName());
+            cp.setCapacityProviderArn(regionResolver.buildArn("ecs", region,
+                    "capacity-provider/" + cluster.getClusterName() + "/" + name));
+            cp.setType(CAPACITY_PROVIDER_TYPE_MANAGED_INSTANCES);
+            cp.setManagedInstancesProvider(managedInstancesProvider);
+        } else {
+            if (capacityProviders.containsKey(name)) {
+                throw new AwsException("InvalidParameterException",
+                        "A capacity provider with name " + name + " already exists.", 400);
+            }
+            cp.setCapacityProviderArn(regionResolver.buildArn("ecs", region, "capacity-provider/" + name));
+            cp.setType(CAPACITY_PROVIDER_TYPE_EC2);
+            cp.setAutoScalingGroupProvider(asgProvider);
+        }
         if (tags != null) {
             cp.setTags(tags);
         }
-        capacityProviders.put(name, cp);
+        capacityProviders.put(capacityProviderKey(cp), cp);
         return cp;
     }
 
     public CapacityProvider updateCapacityProvider(String name, Map<String, Object> asgProvider) {
-        CapacityProvider cp = resolveCapacityProviderOrThrow(name);
-        cp.setAutoScalingGroupProvider(asgProvider);
+        return updateCapacityProvider(name, null, asgProvider, null, regionResolver.getDefaultRegion());
+    }
+
+    /**
+     * Updates a provider in place. A Managed Instances update names the launch template members it
+     * changes; the ones it leaves out keep their values.
+     */
+    public CapacityProvider updateCapacityProvider(String name, String clusterRef,
+                                                    Map<String, Object> asgProvider,
+                                                    Map<String, Object> managedInstancesProvider,
+                                                    String region) {
+        CapacityProvider cp = resolveCapacityProviderOrThrow(name, clusterRef, region);
+        if (managedInstancesProvider != null) {
+            if (!CAPACITY_PROVIDER_TYPE_MANAGED_INSTANCES.equals(cp.getType())) {
+                throw new AwsException("InvalidParameterException",
+                        "The capacity provider " + cp.getName() + " is not a Managed Instances capacity provider.", 400);
+            }
+            cp.setManagedInstancesProvider(mergeManagedInstancesProvider(
+                    cp.getManagedInstancesProvider(), managedInstancesProvider));
+        } else if (asgProvider != null) {
+            if (CAPACITY_PROVIDER_TYPE_MANAGED_INSTANCES.equals(cp.getType())) {
+                throw new AwsException("InvalidParameterException",
+                        "The capacity provider " + cp.getName() + " is a Managed Instances capacity provider.", 400);
+            }
+            cp.setAutoScalingGroupProvider(asgProvider);
+        }
         cp.setUpdateStatus("UPDATE_COMPLETE");
-        capacityProviders.put(cp.getName(), cp);
+        capacityProviders.put(capacityProviderKey(cp), cp);
         return cp;
+    }
+
+    public CapacityProvider deleteCapacityProvider(String nameOrArn) {
+        return deleteCapacityProvider(nameOrArn, null, regionResolver.getDefaultRegion());
     }
 
     /**
      * Deletes a capacity provider. "The FARGATE and FARGATE_SPOT capacity providers are reserved
      * and can't be deleted", and "only capacity providers that aren't associated with a cluster
      * can be deleted": both come back as InvalidParameterException rather than removing anything.
+     * A Managed Instances provider belongs to its cluster rather than being associated with it, so
+     * only the service check applies; deleting it stops its tasks and terminates its instances.
      *
      * <p>The deleted provider is reported with {@code updateStatus: DELETE_IN_PROGRESS} and an
      * unchanged {@code status}: DELETE_IN_PROGRESS is not one of the four values
      * {@code CapacityProviderStatus} takes, so reporting it there hands the SDK an enum it
      * cannot map.
      */
-    public CapacityProvider deleteCapacityProvider(String nameOrArn) {
+    public CapacityProvider deleteCapacityProvider(String nameOrArn, String clusterRef, String region) {
         if (RESERVED_CAPACITY_PROVIDERS.contains(nameOrArn)) {
             throw new AwsException("InvalidParameterException",
                     "The " + nameOrArn + " capacity provider is reserved and can't be deleted.", 400);
         }
-        CapacityProvider cp = resolveCapacityProviderOrThrow(nameOrArn);
-        String attachedTo = clusterUsingCapacityProvider(cp.getName());
+        CapacityProvider cp = resolveCapacityProviderOrThrow(nameOrArn, clusterRef, region);
+        boolean managed = CAPACITY_PROVIDER_TYPE_MANAGED_INSTANCES.equals(cp.getType());
+        String attachedTo = managed ? null : clusterUsingCapacityProvider(cp.getName());
         if (attachedTo != null) {
             throw new AwsException("InvalidParameterException",
                     "The capacity provider " + cp.getName() + " is associated with cluster "
@@ -4039,8 +4139,11 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                             + "from the service's capacity provider strategy with UpdateService "
                             + "first.", 400);
         }
+        if (managed) {
+            releaseManagedInstances(cp, region);
+        }
         cp.setUpdateStatus("DELETE_IN_PROGRESS");
-        capacityProviders.remove(cp.getName());
+        capacityProviders.remove(capacityProviderKey(cp));
         return cp;
     }
 
@@ -4052,29 +4155,51 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                 .capacityProviders();
     }
 
-    /**
-     * Describes capacity providers, reporting a name that matches none as a {@code MISSING}
-     * failure rather than dropping it from the answer.
-     */
     public DescribeCapacityProvidersResult describeCapacityProvidersDetailed(List<String> providers,
                                                                               String region) {
+        return describeCapacityProvidersDetailed(providers, null, region);
+    }
+
+    /**
+     * Describes capacity providers, reporting a name that matches none as a {@code MISSING}
+     * failure rather than dropping it from the answer. Without a cluster the account-wide
+     * providers answer; with one, the providers associated with it and the Managed Instances
+     * providers that belong to it.
+     */
+    public DescribeCapacityProvidersResult describeCapacityProvidersDetailed(List<String> providers,
+                                                                              String clusterRef,
+                                                                              String region) {
+        List<CapacityProvider> scope = new ArrayList<>();
+        if (clusterRef == null || clusterRef.isBlank()) {
+            scope.add(builtInFargate(region));
+            scope.add(builtInFargateSpot(region));
+            capacityProviders.values().stream()
+                    .filter(cp -> cp.getCluster() == null)
+                    .forEach(scope::add);
+        } else {
+            EcsCluster cluster = resolveClusterOrThrow(clusterRef, region);
+            List<String> associated = cluster.getCapacityProviders() == null
+                    ? List.of() : cluster.getCapacityProviders();
+            for (String ref : associated) {
+                switch (ref) {
+                    case "FARGATE" -> scope.add(builtInFargate(region));
+                    case "FARGATE_SPOT" -> scope.add(builtInFargateSpot(region));
+                    default -> capacityProviders.values().stream()
+                            .filter(cp -> cp.getCluster() == null && matches(cp, ref))
+                            .findFirst().ifPresent(scope::add);
+                }
+            }
+            capacityProviders.values().stream()
+                    .filter(cp -> cluster.getClusterName().equals(cp.getCluster()))
+                    .forEach(scope::add);
+        }
         if (providers == null || providers.isEmpty()) {
-            List<CapacityProvider> result =
-                    new ArrayList<>(List.of(builtInFargate(region), builtInFargateSpot(region)));
-            result.addAll(capacityProviders.values());
-            return new DescribeCapacityProvidersResult(result, List.of());
+            return new DescribeCapacityProvidersResult(scope, List.of());
         }
         List<CapacityProvider> found = new ArrayList<>();
         List<Failure> failures = new ArrayList<>();
         for (String ref : providers) {
-            CapacityProvider cp = switch (ref) {
-                case "FARGATE" -> builtInFargate(region);
-                case "FARGATE_SPOT" -> builtInFargateSpot(region);
-                default -> capacityProviders.getOrDefault(ref,
-                        capacityProviders.values().stream()
-                                .filter(p -> ref.equals(p.getCapacityProviderArn()))
-                                .findFirst().orElse(null));
-            };
+            CapacityProvider cp = scope.stream().filter(p -> matches(p, ref)).findFirst().orElse(null);
             if (cp == null) {
                 failures.add(Failure.missing(AwsArnUtils.looksLikeArn(ref) ? ref
                         : regionResolver.buildArn("ecs", region, "capacity-provider/" + ref)));
@@ -4083,6 +4208,176 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
             found.add(cp);
         }
         return new DescribeCapacityProvidersResult(found, failures);
+    }
+
+    // ── Managed Instances ─────────────────────────────────────────────────────
+
+    /** An account-wide provider is keyed by name; a Managed Instances one by cluster and name. */
+    private static String capacityProviderKey(CapacityProvider cp) {
+        return cp.getCluster() == null ? cp.getName() : cp.getCluster() + "/" + cp.getName();
+    }
+
+    private CapacityProvider findManagedCapacityProvider(String clusterName, String ref) {
+        CapacityProvider byKey = capacityProviders.get(clusterName + "/" + ref);
+        if (byKey != null) {
+            return byKey;
+        }
+        return capacityProviders.values().stream()
+                .filter(cp -> clusterName.equals(cp.getCluster()) && matches(cp, ref))
+                .findFirst().orElse(null);
+    }
+
+    /**
+     * The Managed Instances provider a task runs through: the one its strategy names, which must
+     * belong to the task's cluster, or for a bare {@code MANAGED_INSTANCES} launch type the
+     * cluster's own provider, if it has one.
+     */
+    private CapacityProvider managedCapacityProviderFor(EcsCluster cluster, String ref) {
+        if (ref == null) {
+            return capacityProviders.values().stream()
+                    .filter(cp -> cluster.getClusterName().equals(cp.getCluster()))
+                    .findFirst().orElse(null);
+        }
+        CapacityProvider cp = findManagedCapacityProvider(cluster.getClusterName(), ref);
+        if (cp == null) {
+            throw new AwsException("InvalidParameterException",
+                    "The capacity provider " + ref + " does not belong to cluster "
+                            + cluster.getClusterName() + ".", 400);
+        }
+        return cp;
+    }
+
+    private static void requireManagedInstancesProvider(Map<String, Object> provider) {
+        if (!(provider.get("infrastructureRoleArn") instanceof String role) || role.isBlank()) {
+            throw new AwsException("InvalidParameterException",
+                    "managedInstancesProvider.infrastructureRoleArn is required.", 400);
+        }
+        if (!(provider.get("instanceLaunchTemplate") instanceof Map<?, ?> template)) {
+            throw new AwsException("InvalidParameterException",
+                    "managedInstancesProvider.instanceLaunchTemplate is required.", 400);
+        }
+        if (!(template.get("ec2InstanceProfileArn") instanceof String profile) || profile.isBlank()) {
+            throw new AwsException("InvalidParameterException",
+                    "instanceLaunchTemplate.ec2InstanceProfileArn is required.", 400);
+        }
+        if (!(template.get("networkConfiguration") instanceof Map<?, ?> network)
+                || !(network.get("subnets") instanceof List<?> subnets) || subnets.isEmpty()) {
+            throw new AwsException("InvalidParameterException",
+                    "instanceLaunchTemplate.networkConfiguration.subnets is required.", 400);
+        }
+        // "Local storage and Nitro Enclaves can't be enabled together."
+        if (Boolean.TRUE.equals(template.get("nitroEnclavesEnabled"))
+                && template.get("localStorageConfiguration") instanceof Map<?, ?> local
+                && Boolean.TRUE.equals(local.get("useLocalStorage"))) {
+            throw new AwsException("InvalidParameterException",
+                    "nitroEnclavesEnabled can't be combined with local storage.", 400);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> mergeManagedInstancesProvider(Map<String, Object> current,
+                                                                     Map<String, Object> update) {
+        Map<String, Object> merged = new LinkedHashMap<>(current == null ? Map.of() : current);
+        update.forEach((key, value) -> {
+            if ("instanceLaunchTemplate".equals(key) && value instanceof Map<?, ?> templateUpdate) {
+                Map<String, Object> template = new LinkedHashMap<>(
+                        merged.get(key) instanceof Map<?, ?> existing ? (Map<String, Object>) existing : Map.of());
+                template.putAll((Map<String, Object>) templateUpdate);
+                merged.put(key, template);
+            } else {
+                merged.put(key, value);
+            }
+        });
+        return merged;
+    }
+
+    /** The task definition's isolation mode, or {@code null} for the default SHARED. */
+    private static String isolationModeOf(TaskDefinition taskDef) {
+        Map<String, Object> unparsed = taskDef.getUnparsed();
+        if (unparsed != null && unparsed.get("trustedExecutionConfiguration") instanceof Map<?, ?> config
+                && config.get("isolationMode") instanceof String mode && !ISOLATION_MODE_SHARED.equals(mode)) {
+            return mode;
+        }
+        return null;
+    }
+
+    /**
+     * A Nitro Sandbox task needs a Managed Instances provider whose instances have Nitro Enclaves
+     * enabled; ECS has nowhere else to place it.
+     */
+    private static void requireSandboxCapacity(TaskDefinition taskDef, String isolationMode, CapacityProvider managed) {
+        if (isolationMode == null) {
+            return;
+        }
+        boolean enclaves = managed != null
+                && managed.getManagedInstancesProvider() != null
+                && managed.getManagedInstancesProvider().get("instanceLaunchTemplate") instanceof Map<?, ?> template
+                && Boolean.TRUE.equals(template.get("nitroEnclavesEnabled"));
+        if (!enclaves) {
+            throw new AwsException("InvalidParameterException",
+                    "Task definition " + taskDef.getTaskDefinitionArn() + " uses isolation mode "
+                            + isolationMode + ", which needs a Managed Instances capacity provider with "
+                            + "nitroEnclavesEnabled.", 400);
+        }
+    }
+
+    /**
+     * The container instance a Managed Instances task runs on: the provider's existing instance,
+     * or one launched for it now and registered with the cluster.
+     */
+    private synchronized String ensureManagedContainerInstance(EcsCluster cluster, CapacityProvider cp, String region) {
+        String prefix = containerInstanceKey(cluster.getClusterArn(), "");
+        ContainerInstance existing = containerInstances.entrySet().stream()
+                .filter(e -> e.getKey().startsWith(prefix))
+                .map(Map.Entry::getValue)
+                .filter(ci -> cp.getName().equals(ci.getCapacityProviderName()))
+                .filter(ci -> STATUS_ACTIVE.equals(ci.getStatus()))
+                .findFirst().orElse(null);
+        if (existing != null) {
+            return existing.getContainerInstanceArn();
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> template = cp.getManagedInstancesProvider().get("instanceLaunchTemplate")
+                instanceof Map<?, ?> t ? (Map<String, Object>) t : Map.of();
+        String ec2InstanceId = managedInstances != null && managedInstances.isResolvable()
+                ? managedInstances.get().launch(region, cluster.getClusterName(), cp.getName(), template)
+                : "i-floci-" + UUID.randomUUID().toString().substring(0, 8);
+        RegisterContainerInstanceRequest request = new RegisterContainerInstanceRequest();
+        request.setCluster(cluster.getClusterArn());
+        ContainerInstance instance = registerContainerInstance(request, region);
+        instance.setEc2InstanceId(ec2InstanceId);
+        instance.setCapacityProviderName(cp.getName());
+        containerInstances.put(containerInstanceKey(cluster.getClusterArn(), instance.getContainerInstanceArn()), instance);
+        return instance.getContainerInstanceArn();
+    }
+
+    /** Stops the provider's tasks, deregisters its container instances and terminates them. */
+    private void releaseManagedInstances(CapacityProvider cp, String region) {
+        EcsCluster cluster = resolveClusterOrThrow(cp.getCluster(), region);
+        String prefix = containerInstanceKey(cluster.getClusterArn(), "");
+        List<ContainerInstance> owned = containerInstances.entrySet().stream()
+                .filter(e -> e.getKey().startsWith(prefix))
+                .map(Map.Entry::getValue)
+                .filter(ci -> cp.getName().equals(ci.getCapacityProviderName()))
+                .filter(ci -> !STATUS_INACTIVE.equals(ci.getStatus()))
+                .toList();
+        List<String> ownedArns = owned.stream().map(ContainerInstance::getContainerInstanceArn).toList();
+        tasks.values().stream()
+                .filter(t -> ownedArns.contains(t.getContainerInstanceArn()))
+                .filter(t -> !TaskStatus.STOPPED.name().equals(t.getDesiredStatus()))
+                .map(EcsTask::getTaskArn)
+                .toList()
+                .forEach(taskArn -> stopTask(cluster.getClusterName(), taskArn,
+                        "Capacity provider " + cp.getName() + " was deleted", region));
+        for (ContainerInstance ci : owned) {
+            deregisterContainerInstance(cluster.getClusterName(), ci.getContainerInstanceArn(), true, region);
+        }
+        if (managedInstances != null && managedInstances.isResolvable()) {
+            managedInstances.get().terminate(region, owned.stream()
+                    .map(ContainerInstance::getEc2InstanceId)
+                    .filter(id -> !id.startsWith("i-floci-"))
+                    .toList());
+        }
     }
 
     /** The cluster a capacity provider is attached to, or {@code null} when none is. */
@@ -6217,6 +6512,15 @@ public class EcsService implements ContainerTeardown, ResourceProvider, Resettab
                     "Container instance not found: " + ref, 400);
         }
         return instance;
+    }
+
+    private CapacityProvider resolveCapacityProviderOrThrow(String nameOrArn, String clusterRef, String region) {
+        if (clusterRef == null || clusterRef.isBlank()) {
+            return resolveCapacityProviderOrThrow(nameOrArn);
+        }
+        EcsCluster cluster = resolveClusterOrThrow(clusterRef, region);
+        CapacityProvider cp = findManagedCapacityProvider(cluster.getClusterName(), nameOrArn);
+        return cp != null ? cp : resolveCapacityProviderOrThrow(nameOrArn);
     }
 
     private CapacityProvider resolveCapacityProviderOrThrow(String nameOrArn) {

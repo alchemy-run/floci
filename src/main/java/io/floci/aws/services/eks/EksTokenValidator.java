@@ -1,5 +1,6 @@
 package io.floci.aws.services.eks;
 
+import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.services.iam.IamService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -41,17 +42,30 @@ class EksTokenValidator {
     private static final DateTimeFormatter DATETIME_FORMAT =
             DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'").withZone(ZoneOffset.UTC);
 
+    /** The documented public local-development pairs, by access key ID. */
+    private static final Map<String, String> PUBLIC_CREDENTIALS = Map.of("test", "test", "floci", "floci");
+
     private final IamService iamService;
     private final Clock clock;
+    private final boolean allowPublicCredentials;
 
     @Inject
+    EksTokenValidator(IamService iamService, EmulatorConfig config) {
+        this(iamService, Clock.systemUTC(), config.services().eks().iamAuthAllowPublicCredentials());
+    }
+
     EksTokenValidator(IamService iamService) {
-        this(iamService, Clock.systemUTC());
+        this(iamService, Clock.systemUTC(), false);
     }
 
     EksTokenValidator(IamService iamService, Clock clock) {
+        this(iamService, clock, false);
+    }
+
+    EksTokenValidator(IamService iamService, Clock clock, boolean allowPublicCredentials) {
         this.iamService = iamService;
         this.clock = clock;
+        this.allowPublicCredentials = allowPublicCredentials;
     }
 
     record VerifiedToken(String accessKeyId, String region) {}
@@ -163,8 +177,8 @@ class EksTokenValidator {
     }
 
     private String secretKey(String accessKeyId, String sessionToken) {
-        if (iamService.isSeededDeployerAccessKey(accessKeyId)) {
-            return null;
+        if (PUBLIC_CREDENTIALS.containsKey(accessKeyId)) {
+            return allowPublicCredentials ? PUBLIC_CREDENTIALS.get(accessKeyId) : null;
         }
         Optional<String> secretKey = iamService.findSecretKey(accessKeyId, sessionToken);
         return secretKey.orElse(null);

@@ -91,6 +91,30 @@ public class EksClusterManager {
     static final String K3S_DATA_DIR = "/var/lib/rancher/k3s";
     static final String POD_IDENTITY_MANIFEST_FILE = "floci-eks-pod-identity.yaml";
     static final String POD_IDENTITY_MANIFEST_TAR_ENTRY = "server/manifests/" + POD_IDENTITY_MANIFEST_FILE;
+    static final String SANDBOX_RUNTIME_CLASSES_FILE = "floci-eks-nitro-sandboxes.yaml";
+    static final String SANDBOX_RUNTIME_CLASSES_TAR_ENTRY = "server/manifests/" + SANDBOX_RUNTIME_CLASSES_FILE;
+    /**
+     * The RuntimeClasses EKS Auto Mode provides for Nitro Sandboxes. k3s has no Nitro hypervisor, so
+     * both map to its default runc handler: a pod that names one is scheduled and runs as an
+     * ordinary container instead of staying Pending on a RuntimeClass that does not exist.
+     */
+    static final String SANDBOX_RUNTIME_CLASSES_MANIFEST = """
+            apiVersion: node.k8s.io/v1
+            kind: RuntimeClass
+            metadata:
+              name: isolated-sandbox
+              labels:
+                app.kubernetes.io/managed-by: floci
+            handler: runc
+            ---
+            apiVersion: node.k8s.io/v1
+            kind: RuntimeClass
+            metadata:
+              name: confidential-sandbox
+              labels:
+                app.kubernetes.io/managed-by: floci
+            handler: runc
+            """;
     private static final String ENDPOINT_MODE_NETWORK = "network";
     public static final String DEFAULT_POD_CIDR = "10.42.0.0/16";
 
@@ -408,6 +432,7 @@ public class EksClusterManager {
         }
         injectEcrRegistryMirror(containerId, cluster.getName());
         registerPodIdentityWebhook(containerId, cluster);
+        registerSandboxRuntimeClasses(containerId, cluster);
         if (signingKeyFiles != null) {
             copySigningKeysIntoContainer(containerId, signingKeyFiles, cluster.getName());
         }
@@ -1494,6 +1519,33 @@ public class EksClusterManager {
             LOG.warnv("EKS cluster {0} gets no pod identity injection: could not copy {1} into the k3s "
                     + "container: {2}", clusterName, POD_IDENTITY_MANIFEST_FILE, e.getMessage());
         }
+    }
+
+    /**
+     * Installs the {@code isolated-sandbox} and {@code confidential-sandbox} RuntimeClasses on an
+     * Auto Mode cluster, where EKS provides them without setup. Other clusters get them from their
+     * nodes, as on AWS. A failure leaves the cluster running without them.
+     */
+    void registerSandboxRuntimeClasses(String containerId, Cluster cluster) {
+        if (!isAutoMode(cluster)) {
+            return;
+        }
+        try {
+            lifecycleManager.getDockerClient()
+                    .copyArchiveToContainerCmd(containerId)
+                    .withTarInputStream(new ByteArrayInputStream(
+                            tarSingleFile(SANDBOX_RUNTIME_CLASSES_TAR_ENTRY, SANDBOX_RUNTIME_CLASSES_MANIFEST)))
+                    .withRemotePath(K3S_DATA_DIR)
+                    .exec();
+        } catch (Exception e) {
+            LOG.warnv("EKS cluster {0} has no Nitro Sandbox RuntimeClasses: could not copy {1} into the "
+                    + "k3s container: {2}", cluster.getName(), SANDBOX_RUNTIME_CLASSES_FILE, e.getMessage());
+        }
+    }
+
+    static boolean isAutoMode(Cluster cluster) {
+        Map<String, Object> computeConfig = cluster.getComputeConfig();
+        return computeConfig != null && Boolean.TRUE.equals(computeConfig.get("enabled"));
     }
 
     /**
