@@ -466,6 +466,8 @@ floci:
       enabled: true
     location:
       enabled: true
+    route53-domains:
+      enabled: true
     rekognition:
       enabled: true
     translate:

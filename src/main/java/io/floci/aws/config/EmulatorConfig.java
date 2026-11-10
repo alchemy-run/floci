@@ -852,6 +852,7 @@ public interface EmulatorConfig {
         ComprehendMedicalServiceConfig comprehendMedical();
         PollyServiceConfig polly();
         LocationServiceConfig location();
+        Route53DomainsServiceConfig route53Domains();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2823,6 +2824,11 @@ public interface EmulatorConfig {
     }
 
     interface LocationServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface Route53DomainsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

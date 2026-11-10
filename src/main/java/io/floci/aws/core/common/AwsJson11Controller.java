@@ -50,6 +50,7 @@ import io.floci.aws.services.redshiftdata.RedshiftDataJsonHandler;
 import io.floci.aws.services.redshiftserverless.RedshiftServerlessJsonHandler;
 import io.floci.aws.services.rekognition.RekognitionJsonHandler;
 import io.floci.aws.services.resourcegroupstagging.ResourceGroupsTaggingJsonHandler;
+import io.floci.aws.services.route53domains.Route53DomainsJsonHandler;
 import io.floci.aws.services.route53resolver.Route53ResolverJsonHandler;
 import io.floci.aws.services.sagemaker.SageMakerJsonHandler;
 import io.floci.aws.services.secretsmanager.SecretsManagerJsonHandler;
@@ -120,6 +121,7 @@ public class AwsJson11Controller {
     private final TextractJsonHandler textractJsonHandler;
     private final ComprehendJsonHandler comprehendJsonHandler;
     private final ComprehendMedicalJsonHandler comprehendMedicalJsonHandler;
+    private final Route53DomainsJsonHandler route53DomainsJsonHandler;
     private final RekognitionJsonHandler rekognitionJsonHandler;
     private final PricingJsonHandler pricingJsonHandler;
     private final TranscribeJsonHandler transcribeJsonHandler;
@@ -178,6 +180,7 @@ public class AwsJson11Controller {
                                TextractJsonHandler textractJsonHandler,
                                ComprehendJsonHandler comprehendJsonHandler,
                                ComprehendMedicalJsonHandler comprehendMedicalJsonHandler,
+                               Route53DomainsJsonHandler route53DomainsJsonHandler,
                                RekognitionJsonHandler rekognitionJsonHandler,
                                PricingJsonHandler pricingJsonHandler,
                                TranscribeJsonHandler transcribeJsonHandler,
@@ -240,6 +243,7 @@ public class AwsJson11Controller {
         this.textractJsonHandler = textractJsonHandler;
         this.comprehendJsonHandler = comprehendJsonHandler;
         this.comprehendMedicalJsonHandler = comprehendMedicalJsonHandler;
+        this.route53DomainsJsonHandler = route53DomainsJsonHandler;
         this.rekognitionJsonHandler = rekognitionJsonHandler;
         this.pricingJsonHandler = pricingJsonHandler;
         this.transcribeJsonHandler = transcribeJsonHandler;
@@ -348,6 +352,7 @@ public class AwsJson11Controller {
                 case "textract" -> textractJsonHandler.handle(action, request, region);
                 case "comprehend" -> comprehendJsonHandler.handle(action, request, region);
                 case "comprehendmedical" -> comprehendMedicalJsonHandler.handle(action, request, region);
+                case "route53domains" -> route53DomainsJsonHandler.handle(action, request, region);
                 case "rekognition" -> rekognitionJsonHandler.handle(action, request, region);
                 case "pricing" -> pricingJsonHandler.handle(action, request, region);
                 case "transcribe" -> transcribeJsonHandler.handle(action, request, region);

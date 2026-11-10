@@ -169,6 +169,10 @@ services:
       - { path: services/location/GeoMapsController.java, mode: rest }
       - { path: services/location/GeoPlacesController.java, mode: rest }
       - { path: services/location/GeoRoutesController.java, mode: rest }
+  - service: route53domains
+    doc: docs/services/route53domains.md
+    sources:
+      - { path: services/route53domains/Route53DomainsJsonHandler.java, mode: switch }
   - service: polly
     doc: docs/services/polly.md
     sources:

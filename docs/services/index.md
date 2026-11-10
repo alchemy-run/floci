@@ -146,6 +146,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Comprehend](comprehend.md) | `POST /` + `X-Amz-Target: Comprehend_20171127.*` | JSON 1.1 | 53 |
 | [Comprehend Medical](comprehendmedical.md) | `POST /` + `X-Amz-Target: ComprehendMedical_20181030.*` | JSON 1.1 | 26 |
 | [Location](location.md) | `/maps/v0`, `/places/v0`, `/routes/v0`, `/geofencing/v0`, `/tracking/v0`, `/metadata/v0`, `/v2/*` | REST JSON | 76 |
+| [Route 53 Domains](route53domains.md) | `POST /` + `X-Amz-Target: Route53Domains_v20140515.*` | JSON 1.1 | 35 |
 | [Polly](polly.md) | `/v1/lexicons`, `/v1/voices`, `/v1/speech`, `/v1/synthesisTasks`, `/v1/synthesisStream` | REST JSON | 10 |
 | [Rekognition](rekognition.md) | `POST /` + `X-Amz-Target: RekognitionService.*` | JSON 1.1 | 61 |
 | [Translate](translate.md) | `POST /` + `X-Amz-Target: AWSShineFrontendService_20170701.*` | JSON 1.1 | 19 |
