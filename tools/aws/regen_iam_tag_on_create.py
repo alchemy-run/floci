@@ -108,6 +108,7 @@ _NO_ROUTES = "REST routes no rule maps yet"
 # Namespaces Floci serves whose operations list a tagging action but are not read here yet, each with
 # why. `TagOnCreateNamespacesIntegrationTest` fails for a namespace Floci serves that is in neither list.
 NOT_COVERED = {
+    "b2bi": "not read yet: its Create* operations take Tags",
     "apprunner": "not read yet: its Create* operations take Tags",
     "auditmanager": "REST routes no rule maps yet",
     "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",

@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import io.floci.aws.services.apprunner.AppRunnerJsonHandler;
+import io.floci.aws.services.b2bi.B2biJsonHandler;
 import io.floci.aws.services.bcmpricingcalculator.BcmPricingCalculatorJsonHandler;
 import io.floci.aws.services.cloudcontrol.CloudControlJsonHandler;
 import io.floci.aws.services.cloudwatch.metrics.CloudWatchMetricsJsonHandler;
@@ -67,6 +68,7 @@ public class AwsJsonController {
     private final NetworkFirewallJsonHandler networkFirewallJsonHandler;
     private final PaymentCryptographyJsonHandler paymentCryptographyJsonHandler;
     private final AppRunnerJsonHandler appRunnerJsonHandler;
+    private final B2biJsonHandler b2biJsonHandler;
     private final MarketplaceJsonHandler marketplaceJsonHandler;
     private final VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler;
     private final BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler;
@@ -87,6 +89,7 @@ public class AwsJsonController {
                              NetworkFirewallJsonHandler networkFirewallJsonHandler,
                              PaymentCryptographyJsonHandler paymentCryptographyJsonHandler,
                              AppRunnerJsonHandler appRunnerJsonHandler,
+                             B2biJsonHandler b2biJsonHandler,
                              MarketplaceJsonHandler marketplaceJsonHandler,
                              VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler,
                              BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler,
@@ -106,6 +109,7 @@ public class AwsJsonController {
         this.networkFirewallJsonHandler = networkFirewallJsonHandler;
         this.paymentCryptographyJsonHandler = paymentCryptographyJsonHandler;
         this.appRunnerJsonHandler = appRunnerJsonHandler;
+        this.b2biJsonHandler = b2biJsonHandler;
         this.marketplaceJsonHandler = marketplaceJsonHandler;
         this.verifiedPermissionsJsonHandler = verifiedPermissionsJsonHandler;
         this.bcmPricingCalculatorJsonHandler = bcmPricingCalculatorJsonHandler;
@@ -203,6 +207,7 @@ public class AwsJsonController {
                 // PaymentCryptographyControlPlane.<Operation>.
                 case "paymentcryptography" -> paymentCryptographyJsonHandler.handle(action, request, region);
                 case "apprunner" -> appRunnerJsonHandler.handle(action, request, region);
+                case "b2bi" -> b2biJsonHandler.handle(action, request, region);
                 case "marketplace" -> marketplaceJsonHandler.handle(action, request, region);
                 case "verifiedpermissions" -> verifiedPermissionsJsonHandler.handle(action, request, region);
                 case "bcm-pricing-calculator" -> bcmPricingCalculatorJsonHandler.handle(action, request, region);

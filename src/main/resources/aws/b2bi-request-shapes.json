@@ -1,0 +1,1480 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_b2bi_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateCapability": "CreateCapabilityRequest",
+    "CreatePartnership": "CreatePartnershipRequest",
+    "CreateProfile": "CreateProfileRequest",
+    "CreateStarterMappingTemplate": "CreateStarterMappingTemplateRequest",
+    "CreateTransformer": "CreateTransformerRequest",
+    "DeleteCapability": "DeleteCapabilityRequest",
+    "DeletePartnership": "DeletePartnershipRequest",
+    "DeleteProfile": "DeleteProfileRequest",
+    "DeleteTransformer": "DeleteTransformerRequest",
+    "GenerateMapping": "GenerateMappingRequest",
+    "GetCapability": "GetCapabilityRequest",
+    "GetPartnership": "GetPartnershipRequest",
+    "GetProfile": "GetProfileRequest",
+    "GetTransformer": "GetTransformerRequest",
+    "GetTransformerJob": "GetTransformerJobRequest",
+    "ListCapabilities": "ListCapabilitiesRequest",
+    "ListPartnerships": "ListPartnershipsRequest",
+    "ListProfiles": "ListProfilesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTransformers": "ListTransformersRequest",
+    "StartTransformerJob": "StartTransformerJobRequest",
+    "TagResource": "TagResourceRequest",
+    "TestConversion": "TestConversionRequest",
+    "TestMapping": "TestMappingRequest",
+    "TestParsing": "TestParsingRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateCapability": "UpdateCapabilityRequest",
+    "UpdatePartnership": "UpdatePartnershipRequest",
+    "UpdateProfile": "UpdateProfileRequest",
+    "UpdateTransformer": "UpdateTransformerRequest"
+  },
+  "shapes": {
+    "AdvancedOptions": {
+      "type": "structure",
+      "members": {
+        "x12": "X12AdvancedOptions"
+      }
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "BucketName": {
+      "type": "string",
+      "min": 3,
+      "max": 63
+    },
+    "BusinessName": {
+      "type": "string",
+      "min": 1,
+      "max": 254
+    },
+    "CapabilityConfiguration": {
+      "type": "structure",
+      "members": {
+        "edi": "EdiConfiguration"
+      }
+    },
+    "CapabilityDirection": {
+      "type": "string",
+      "enum": [
+        "INBOUND",
+        "OUTBOUND"
+      ]
+    },
+    "CapabilityId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "CapabilityName": {
+      "type": "string",
+      "min": 1,
+      "max": 254
+    },
+    "CapabilityOptions": {
+      "type": "structure",
+      "members": {
+        "outboundEdi": "OutboundEdiOptions",
+        "inboundEdi": "InboundEdiOptions"
+      }
+    },
+    "CapabilityType": {
+      "type": "string",
+      "enum": [
+        "edi"
+      ]
+    },
+    "CodeList": {
+      "type": "list",
+      "member": "String"
+    },
+    "ConversionSource": {
+      "type": "structure",
+      "required": [
+        "fileFormat",
+        "inputFile"
+      ],
+      "members": {
+        "fileFormat": "ConversionSourceFormat",
+        "inputFile": "InputFileSource"
+      }
+    },
+    "ConversionSourceFormat": {
+      "type": "string",
+      "enum": [
+        "JSON",
+        "XML"
+      ]
+    },
+    "ConversionTarget": {
+      "type": "structure",
+      "required": [
+        "fileFormat"
+      ],
+      "members": {
+        "fileFormat": "ConversionTargetFormat",
+        "formatDetails": "ConversionTargetFormatDetails",
+        "outputSampleFile": "OutputSampleFileSource",
+        "advancedOptions": "AdvancedOptions"
+      }
+    },
+    "ConversionTargetFormat": {
+      "type": "string",
+      "enum": [
+        "X12"
+      ]
+    },
+    "ConversionTargetFormatDetails": {
+      "type": "structure",
+      "members": {
+        "x12": "X12Details"
+      }
+    },
+    "CreateCapabilityRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "type",
+        "configuration"
+      ],
+      "members": {
+        "name": "CapabilityName",
+        "type": "CapabilityType",
+        "configuration": "CapabilityConfiguration",
+        "instructionsDocuments": "InstructionsDocuments",
+        "clientToken": "String",
+        "tags": "TagList"
+      }
+    },
+    "CreatePartnershipRequest": {
+      "type": "structure",
+      "required": [
+        "profileId",
+        "name",
+        "email",
+        "capabilities"
+      ],
+      "members": {
+        "profileId": "ProfileId",
+        "name": "PartnerName",
+        "email": "Email",
+        "phone": "Phone",
+        "capabilities": "PartnershipCapabilities",
+        "capabilityOptions": "CapabilityOptions",
+        "clientToken": "String",
+        "tags": "TagList"
+      }
+    },
+    "CreateProfileRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "phone",
+        "businessName",
+        "logging"
+      ],
+      "members": {
+        "name": "ProfileName",
+        "email": "Email",
+        "phone": "Phone",
+        "businessName": "BusinessName",
+        "logging": "Logging",
+        "clientToken": "String",
+        "tags": "TagList"
+      }
+    },
+    "CreateStarterMappingTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "mappingType",
+        "templateDetails"
+      ],
+      "members": {
+        "outputSampleLocation": "S3Location",
+        "mappingType": "MappingType",
+        "templateDetails": "TemplateDetails"
+      }
+    },
+    "CreateTransformerRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "TransformerName",
+        "clientToken": "String",
+        "tags": "TagList",
+        "fileFormat": "FileFormat",
+        "mappingTemplate": "MappingTemplate",
+        "ediType": "EdiType",
+        "sampleDocument": "FileLocation",
+        "inputConversion": "InputConversion",
+        "mapping": "Mapping",
+        "outputConversion": "OutputConversion",
+        "sampleDocuments": "SampleDocuments"
+      }
+    },
+    "DeleteCapabilityRequest": {
+      "type": "structure",
+      "required": [
+        "capabilityId"
+      ],
+      "members": {
+        "capabilityId": "CapabilityId"
+      }
+    },
+    "DeletePartnershipRequest": {
+      "type": "structure",
+      "required": [
+        "partnershipId"
+      ],
+      "members": {
+        "partnershipId": "PartnershipId"
+      }
+    },
+    "DeleteProfileRequest": {
+      "type": "structure",
+      "required": [
+        "profileId"
+      ],
+      "members": {
+        "profileId": "ProfileId"
+      }
+    },
+    "DeleteTransformerRequest": {
+      "type": "structure",
+      "required": [
+        "transformerId"
+      ],
+      "members": {
+        "transformerId": "TransformerId"
+      }
+    },
+    "EdiConfiguration": {
+      "type": "structure",
+      "required": [
+        "type",
+        "inputLocation",
+        "outputLocation",
+        "transformerId"
+      ],
+      "members": {
+        "capabilityDirection": "CapabilityDirection",
+        "type": "EdiType",
+        "inputLocation": "S3Location",
+        "outputLocation": "S3Location",
+        "transformerId": "TransformerId"
+      }
+    },
+    "EdiType": {
+      "type": "structure",
+      "members": {
+        "x12Details": "X12Details"
+      }
+    },
+    "ElementId": {
+      "type": "string"
+    },
+    "ElementPosition": {
+      "type": "string"
+    },
+    "ElementRequirement": {
+      "type": "string",
+      "enum": [
+        "OPTIONAL",
+        "MANDATORY"
+      ]
+    },
+    "Email": {
+      "type": "string",
+      "min": 5,
+      "max": 254,
+      "pattern": "[\\w\\.\\-]+@[\\w\\.\\-]+"
+    },
+    "FileFormat": {
+      "type": "string",
+      "enum": [
+        "XML",
+        "JSON",
+        "NOT_USED"
+      ]
+    },
+    "FileLocation": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "FormatOptions": {
+      "type": "structure",
+      "members": {
+        "x12": "X12Details"
+      }
+    },
+    "FromFormat": {
+      "type": "string",
+      "enum": [
+        "X12"
+      ]
+    },
+    "GenerateMappingInputFileContent": {
+      "type": "string",
+      "min": 0,
+      "max": 5000000
+    },
+    "GenerateMappingOutputFileContent": {
+      "type": "string",
+      "min": 0,
+      "max": 5000000
+    },
+    "GenerateMappingRequest": {
+      "type": "structure",
+      "required": [
+        "inputFileContent",
+        "outputFileContent",
+        "mappingType"
+      ],
+      "members": {
+        "inputFileContent": "GenerateMappingInputFileContent",
+        "outputFileContent": "GenerateMappingOutputFileContent",
+        "mappingType": "MappingType"
+      }
+    },
+    "GetCapabilityRequest": {
+      "type": "structure",
+      "required": [
+        "capabilityId"
+      ],
+      "members": {
+        "capabilityId": "CapabilityId"
+      }
+    },
+    "GetPartnershipRequest": {
+      "type": "structure",
+      "required": [
+        "partnershipId"
+      ],
+      "members": {
+        "partnershipId": "PartnershipId"
+      }
+    },
+    "GetProfileRequest": {
+      "type": "structure",
+      "required": [
+        "profileId"
+      ],
+      "members": {
+        "profileId": "ProfileId"
+      }
+    },
+    "GetTransformerJobRequest": {
+      "type": "structure",
+      "required": [
+        "transformerJobId",
+        "transformerId"
+      ],
+      "members": {
+        "transformerJobId": "TransformerJobId",
+        "transformerId": "TransformerId"
+      }
+    },
+    "GetTransformerRequest": {
+      "type": "structure",
+      "required": [
+        "transformerId"
+      ],
+      "members": {
+        "transformerId": "TransformerId"
+      }
+    },
+    "InboundEdiOptions": {
+      "type": "structure",
+      "members": {
+        "x12": "X12InboundEdiOptions"
+      }
+    },
+    "InputConversion": {
+      "type": "structure",
+      "required": [
+        "fromFormat"
+      ],
+      "members": {
+        "fromFormat": "FromFormat",
+        "formatOptions": "FormatOptions",
+        "advancedOptions": "AdvancedOptions"
+      }
+    },
+    "InputFileSource": {
+      "type": "structure",
+      "members": {
+        "fileContent": "InputFileSourceFileContentString"
+      }
+    },
+    "InputFileSourceFileContentString": {
+      "type": "string",
+      "min": 1,
+      "max": 5000000
+    },
+    "InstructionsDocuments": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "S3Location"
+    },
+    "KeyList": {
+      "type": "list",
+      "member": "SampleDocumentKeys"
+    },
+    "LineLength": {
+      "type": "integer",
+      "min": 1
+    },
+    "LineTerminator": {
+      "type": "string",
+      "enum": [
+        "CRLF",
+        "LF",
+        "CR"
+      ]
+    },
+    "ListCapabilitiesRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PageToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListPartnershipsRequest": {
+      "type": "structure",
+      "members": {
+        "profileId": "ProfileId",
+        "nextToken": "PageToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListProfilesRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PageToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName"
+      }
+    },
+    "ListTransformersRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PageToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "Logging": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "Mapping": {
+      "type": "structure",
+      "required": [
+        "templateLanguage"
+      ],
+      "members": {
+        "templateLanguage": "MappingTemplateLanguage",
+        "template": "MappingTemplate"
+      }
+    },
+    "MappingTemplate": {
+      "type": "string",
+      "min": 0,
+      "max": 350000
+    },
+    "MappingTemplateLanguage": {
+      "type": "string",
+      "enum": [
+        "XSLT",
+        "JSONATA"
+      ]
+    },
+    "MappingType": {
+      "type": "string",
+      "enum": [
+        "JSONATA",
+        "XSLT"
+      ]
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "OutboundEdiOptions": {
+      "type": "structure",
+      "members": {
+        "x12": "X12Envelope"
+      }
+    },
+    "OutputConversion": {
+      "type": "structure",
+      "required": [
+        "toFormat"
+      ],
+      "members": {
+        "toFormat": "ToFormat",
+        "formatOptions": "FormatOptions",
+        "advancedOptions": "AdvancedOptions"
+      }
+    },
+    "OutputSampleFileSource": {
+      "type": "structure",
+      "members": {
+        "fileLocation": "S3Location"
+      }
+    },
+    "PageToken": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "PartnerName": {
+      "type": "string",
+      "min": 1,
+      "max": 254
+    },
+    "PartnershipCapabilities": {
+      "type": "list",
+      "member": "CapabilityId"
+    },
+    "PartnershipId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "Phone": {
+      "type": "string",
+      "min": 7,
+      "max": 22,
+      "pattern": "\\+?([0-9 \\t\\-()\\/]{7,})(?:\\s*(?:#|x\\.?|ext\\.?|extension) \\t*(\\d+))?"
+    },
+    "ProfileId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "ProfileName": {
+      "type": "string",
+      "min": 1,
+      "max": 254
+    },
+    "S3Key": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "S3Location": {
+      "type": "structure",
+      "members": {
+        "bucketName": "BucketName",
+        "key": "S3Key"
+      }
+    },
+    "SampleDocumentKeys": {
+      "type": "structure",
+      "members": {
+        "input": "S3Key",
+        "output": "S3Key"
+      }
+    },
+    "SampleDocuments": {
+      "type": "structure",
+      "required": [
+        "bucketName",
+        "keys"
+      ],
+      "members": {
+        "bucketName": "BucketName",
+        "keys": "KeyList"
+      }
+    },
+    "StartTransformerJobRequest": {
+      "type": "structure",
+      "required": [
+        "inputFile",
+        "outputLocation",
+        "transformerId"
+      ],
+      "members": {
+        "inputFile": "S3Location",
+        "outputLocation": "S3Location",
+        "transformerId": "TransformerId",
+        "clientToken": "String"
+      }
+    },
+    "StartingFunctionalGroupControlNumber": {
+      "type": "integer",
+      "min": 1,
+      "max": 999999999
+    },
+    "StartingInterchangeControlNumber": {
+      "type": "integer",
+      "min": 1,
+      "max": 999999999
+    },
+    "StartingTransactionSetControlNumber": {
+      "type": "integer",
+      "min": 1,
+      "max": 999999999
+    },
+    "String": {
+      "type": "string"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Tags"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TemplateDetails": {
+      "type": "structure",
+      "members": {
+        "x12": "X12Details"
+      }
+    },
+    "TestConversionRequest": {
+      "type": "structure",
+      "required": [
+        "source",
+        "target"
+      ],
+      "members": {
+        "source": "ConversionSource",
+        "target": "ConversionTarget"
+      }
+    },
+    "TestMappingInputFileContent": {
+      "type": "string",
+      "min": 0,
+      "max": 5000000
+    },
+    "TestMappingRequest": {
+      "type": "structure",
+      "required": [
+        "inputFileContent",
+        "mappingTemplate",
+        "fileFormat"
+      ],
+      "members": {
+        "inputFileContent": "TestMappingInputFileContent",
+        "mappingTemplate": "MappingTemplate",
+        "fileFormat": "FileFormat"
+      }
+    },
+    "TestParsingRequest": {
+      "type": "structure",
+      "required": [
+        "inputFile",
+        "fileFormat",
+        "ediType"
+      ],
+      "members": {
+        "inputFile": "S3Location",
+        "fileFormat": "FileFormat",
+        "ediType": "EdiType",
+        "advancedOptions": "AdvancedOptions"
+      }
+    },
+    "ToFormat": {
+      "type": "string",
+      "enum": [
+        "X12"
+      ]
+    },
+    "TransformerId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "TransformerJobId": {
+      "type": "string",
+      "min": 25,
+      "max": 25,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "TransformerName": {
+      "type": "string",
+      "min": 1,
+      "max": 254,
+      "pattern": "[a-zA-Z0-9_-]{1,512}"
+    },
+    "TransformerStatus": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateCapabilityRequest": {
+      "type": "structure",
+      "required": [
+        "capabilityId"
+      ],
+      "members": {
+        "capabilityId": "CapabilityId",
+        "name": "CapabilityName",
+        "configuration": "CapabilityConfiguration",
+        "instructionsDocuments": "InstructionsDocuments"
+      }
+    },
+    "UpdatePartnershipRequest": {
+      "type": "structure",
+      "required": [
+        "partnershipId"
+      ],
+      "members": {
+        "partnershipId": "PartnershipId",
+        "name": "PartnerName",
+        "capabilities": "PartnershipCapabilities",
+        "capabilityOptions": "CapabilityOptions"
+      }
+    },
+    "UpdateProfileRequest": {
+      "type": "structure",
+      "required": [
+        "profileId"
+      ],
+      "members": {
+        "profileId": "ProfileId",
+        "name": "ProfileName",
+        "email": "Email",
+        "phone": "Phone",
+        "businessName": "BusinessName"
+      }
+    },
+    "UpdateTransformerRequest": {
+      "type": "structure",
+      "required": [
+        "transformerId"
+      ],
+      "members": {
+        "transformerId": "TransformerId",
+        "name": "TransformerName",
+        "status": "TransformerStatus",
+        "fileFormat": "FileFormat",
+        "mappingTemplate": "MappingTemplate",
+        "ediType": "EdiType",
+        "sampleDocument": "FileLocation",
+        "inputConversion": "InputConversion",
+        "mapping": "Mapping",
+        "outputConversion": "OutputConversion",
+        "sampleDocuments": "SampleDocuments"
+      }
+    },
+    "WrapFormat": {
+      "type": "string",
+      "enum": [
+        "SEGMENT",
+        "ONE_LINE",
+        "LINE_LENGTH"
+      ]
+    },
+    "WrapOptions": {
+      "type": "structure",
+      "required": [
+        "wrapBy"
+      ],
+      "members": {
+        "wrapBy": "WrapFormat",
+        "lineTerminator": "LineTerminator",
+        "lineLength": "LineLength"
+      }
+    },
+    "X12AcknowledgmentOptions": {
+      "type": "structure",
+      "required": [
+        "functionalAcknowledgment",
+        "technicalAcknowledgment"
+      ],
+      "members": {
+        "functionalAcknowledgment": "X12FunctionalAcknowledgment",
+        "technicalAcknowledgment": "X12TechnicalAcknowledgment"
+      }
+    },
+    "X12AcknowledgmentRequestedCode": {
+      "type": "string",
+      "min": 1,
+      "max": 1,
+      "pattern": "[a-zA-Z0-9]*"
+    },
+    "X12AdvancedOptions": {
+      "type": "structure",
+      "members": {
+        "splitOptions": "X12SplitOptions",
+        "validationOptions": "X12ValidationOptions"
+      }
+    },
+    "X12ApplicationReceiverCode": {
+      "type": "string",
+      "min": 2,
+      "max": 15,
+      "pattern": "[a-zA-Z0-9 ]*"
+    },
+    "X12ApplicationSenderCode": {
+      "type": "string",
+      "min": 2,
+      "max": 15,
+      "pattern": "[a-zA-Z0-9 ]*"
+    },
+    "X12CodeListValidationRule": {
+      "type": "structure",
+      "required": [
+        "elementId"
+      ],
+      "members": {
+        "elementId": "ElementId",
+        "codesToAdd": "CodeList",
+        "codesToRemove": "CodeList"
+      }
+    },
+    "X12ComponentSeparator": {
+      "type": "string",
+      "min": 1,
+      "max": 1,
+      "pattern": "[!&'()*+,\\-./:;?=%@\\[\\]_{}|<>~^`\"]"
+    },
+    "X12ControlNumbers": {
+      "type": "structure",
+      "members": {
+        "startingInterchangeControlNumber": "StartingInterchangeControlNumber",
+        "startingFunctionalGroupControlNumber": "StartingFunctionalGroupControlNumber",
+        "startingTransactionSetControlNumber": "StartingTransactionSetControlNumber"
+      }
+    },
+    "X12DataElementSeparator": {
+      "type": "string",
+      "min": 1,
+      "max": 1,
+      "pattern": "[!&'()*+,\\-./:;?=%@\\[\\]_{}|<>~^`\"]"
+    },
+    "X12Delimiters": {
+      "type": "structure",
+      "members": {
+        "componentSeparator": "X12ComponentSeparator",
+        "dataElementSeparator": "X12DataElementSeparator",
+        "segmentTerminator": "X12SegmentTerminator"
+      }
+    },
+    "X12Details": {
+      "type": "structure",
+      "members": {
+        "transactionSet": "X12TransactionSet",
+        "version": "X12Version"
+      }
+    },
+    "X12ElementLengthValidationRule": {
+      "type": "structure",
+      "required": [
+        "elementId",
+        "maxLength",
+        "minLength"
+      ],
+      "members": {
+        "elementId": "ElementId",
+        "maxLength": "X12ElementLengthValidationRuleMaxLengthInteger",
+        "minLength": "X12ElementLengthValidationRuleMinLengthInteger"
+      }
+    },
+    "X12ElementLengthValidationRuleMaxLengthInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000000
+    },
+    "X12ElementLengthValidationRuleMinLengthInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000000
+    },
+    "X12ElementRequirementValidationRule": {
+      "type": "structure",
+      "required": [
+        "elementPosition",
+        "requirement"
+      ],
+      "members": {
+        "elementPosition": "ElementPosition",
+        "requirement": "ElementRequirement"
+      }
+    },
+    "X12Envelope": {
+      "type": "structure",
+      "members": {
+        "common": "X12OutboundEdiHeaders",
+        "wrapOptions": "WrapOptions"
+      }
+    },
+    "X12FunctionalAcknowledgment": {
+      "type": "string",
+      "enum": [
+        "DO_NOT_GENERATE",
+        "GENERATE_ALL_SEGMENTS",
+        "GENERATE_WITHOUT_TRANSACTION_SET_RESPONSE_LOOP"
+      ]
+    },
+    "X12FunctionalGroupHeaders": {
+      "type": "structure",
+      "members": {
+        "applicationSenderCode": "X12ApplicationSenderCode",
+        "applicationReceiverCode": "X12ApplicationReceiverCode",
+        "responsibleAgencyCode": "X12ResponsibleAgencyCode"
+      }
+    },
+    "X12GS05TimeFormat": {
+      "type": "string",
+      "enum": [
+        "HHMM",
+        "HHMMSS",
+        "HHMMSSDD"
+      ]
+    },
+    "X12IdQualifier": {
+      "type": "string",
+      "min": 2,
+      "max": 2,
+      "pattern": "[a-zA-Z0-9]*"
+    },
+    "X12InboundEdiOptions": {
+      "type": "structure",
+      "members": {
+        "acknowledgmentOptions": "X12AcknowledgmentOptions"
+      }
+    },
+    "X12InterchangeControlHeaders": {
+      "type": "structure",
+      "members": {
+        "senderIdQualifier": "X12IdQualifier",
+        "senderId": "X12SenderId",
+        "receiverIdQualifier": "X12IdQualifier",
+        "receiverId": "X12ReceiverId",
+        "repetitionSeparator": "X12RepetitionSeparator",
+        "acknowledgmentRequestedCode": "X12AcknowledgmentRequestedCode",
+        "usageIndicatorCode": "X12UsageIndicatorCode"
+      }
+    },
+    "X12OutboundEdiHeaders": {
+      "type": "structure",
+      "members": {
+        "interchangeControlHeaders": "X12InterchangeControlHeaders",
+        "functionalGroupHeaders": "X12FunctionalGroupHeaders",
+        "delimiters": "X12Delimiters",
+        "validateEdi": "X12ValidateEdi",
+        "controlNumbers": "X12ControlNumbers",
+        "gs05TimeFormat": "X12GS05TimeFormat"
+      }
+    },
+    "X12ReceiverId": {
+      "type": "string",
+      "min": 15,
+      "max": 15,
+      "pattern": "[a-zA-Z0-9 ]*"
+    },
+    "X12RepetitionSeparator": {
+      "type": "string",
+      "min": 1,
+      "max": 1
+    },
+    "X12ResponsibleAgencyCode": {
+      "type": "string",
+      "min": 1,
+      "max": 2,
+      "pattern": "[a-zA-Z0-9]*"
+    },
+    "X12SegmentTerminator": {
+      "type": "string",
+      "min": 1,
+      "max": 1,
+      "pattern": "[!&'()*+,\\-./:;?=%@\\[\\]_{}|<>~^`\"]"
+    },
+    "X12SenderId": {
+      "type": "string",
+      "min": 15,
+      "max": 15,
+      "pattern": "[a-zA-Z0-9 ]*"
+    },
+    "X12SplitBy": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "TRANSACTION"
+      ]
+    },
+    "X12SplitOptions": {
+      "type": "structure",
+      "required": [
+        "splitBy"
+      ],
+      "members": {
+        "splitBy": "X12SplitBy"
+      }
+    },
+    "X12TechnicalAcknowledgment": {
+      "type": "string",
+      "enum": [
+        "DO_NOT_GENERATE",
+        "GENERATE_ALL_SEGMENTS"
+      ]
+    },
+    "X12TransactionSet": {
+      "type": "string",
+      "enum": [
+        "X12_100",
+        "X12_101",
+        "X12_102",
+        "X12_103",
+        "X12_104",
+        "X12_105",
+        "X12_106",
+        "X12_107",
+        "X12_108",
+        "X12_109",
+        "X12_110",
+        "X12_111",
+        "X12_112",
+        "X12_113",
+        "X12_120",
+        "X12_121",
+        "X12_124",
+        "X12_125",
+        "X12_126",
+        "X12_127",
+        "X12_128",
+        "X12_129",
+        "X12_130",
+        "X12_131",
+        "X12_132",
+        "X12_133",
+        "X12_135",
+        "X12_138",
+        "X12_139",
+        "X12_140",
+        "X12_141",
+        "X12_142",
+        "X12_143",
+        "X12_144",
+        "X12_146",
+        "X12_147",
+        "X12_148",
+        "X12_149",
+        "X12_150",
+        "X12_151",
+        "X12_152",
+        "X12_153",
+        "X12_154",
+        "X12_155",
+        "X12_157",
+        "X12_158",
+        "X12_159",
+        "X12_160",
+        "X12_161",
+        "X12_163",
+        "X12_170",
+        "X12_175",
+        "X12_176",
+        "X12_179",
+        "X12_180",
+        "X12_185",
+        "X12_186",
+        "X12_187",
+        "X12_188",
+        "X12_189",
+        "X12_190",
+        "X12_191",
+        "X12_194",
+        "X12_195",
+        "X12_196",
+        "X12_197",
+        "X12_198",
+        "X12_199",
+        "X12_200",
+        "X12_201",
+        "X12_202",
+        "X12_203",
+        "X12_204",
+        "X12_205",
+        "X12_206",
+        "X12_210",
+        "X12_211",
+        "X12_212",
+        "X12_213",
+        "X12_214",
+        "X12_215",
+        "X12_216",
+        "X12_217",
+        "X12_218",
+        "X12_219",
+        "X12_220",
+        "X12_222",
+        "X12_223",
+        "X12_224",
+        "X12_225",
+        "X12_227",
+        "X12_228",
+        "X12_240",
+        "X12_242",
+        "X12_244",
+        "X12_245",
+        "X12_248",
+        "X12_249",
+        "X12_250",
+        "X12_251",
+        "X12_252",
+        "X12_255",
+        "X12_256",
+        "X12_259",
+        "X12_260",
+        "X12_261",
+        "X12_262",
+        "X12_263",
+        "X12_264",
+        "X12_265",
+        "X12_266",
+        "X12_267",
+        "X12_268",
+        "X12_269",
+        "X12_270",
+        "X12_271",
+        "X12_272",
+        "X12_273",
+        "X12_274",
+        "X12_275",
+        "X12_276",
+        "X12_277",
+        "X12_278",
+        "X12_280",
+        "X12_283",
+        "X12_284",
+        "X12_285",
+        "X12_286",
+        "X12_288",
+        "X12_290",
+        "X12_300",
+        "X12_301",
+        "X12_303",
+        "X12_304",
+        "X12_309",
+        "X12_310",
+        "X12_311",
+        "X12_312",
+        "X12_313",
+        "X12_315",
+        "X12_317",
+        "X12_319",
+        "X12_322",
+        "X12_323",
+        "X12_324",
+        "X12_325",
+        "X12_326",
+        "X12_350",
+        "X12_352",
+        "X12_353",
+        "X12_354",
+        "X12_355",
+        "X12_356",
+        "X12_357",
+        "X12_358",
+        "X12_361",
+        "X12_362",
+        "X12_404",
+        "X12_410",
+        "X12_412",
+        "X12_414",
+        "X12_417",
+        "X12_418",
+        "X12_419",
+        "X12_420",
+        "X12_421",
+        "X12_422",
+        "X12_423",
+        "X12_424",
+        "X12_425",
+        "X12_426",
+        "X12_429",
+        "X12_431",
+        "X12_432",
+        "X12_433",
+        "X12_434",
+        "X12_435",
+        "X12_436",
+        "X12_437",
+        "X12_440",
+        "X12_451",
+        "X12_452",
+        "X12_453",
+        "X12_455",
+        "X12_456",
+        "X12_460",
+        "X12_463",
+        "X12_466",
+        "X12_468",
+        "X12_470",
+        "X12_475",
+        "X12_485",
+        "X12_486",
+        "X12_490",
+        "X12_492",
+        "X12_494",
+        "X12_500",
+        "X12_501",
+        "X12_503",
+        "X12_504",
+        "X12_511",
+        "X12_517",
+        "X12_521",
+        "X12_527",
+        "X12_536",
+        "X12_540",
+        "X12_561",
+        "X12_567",
+        "X12_568",
+        "X12_601",
+        "X12_602",
+        "X12_620",
+        "X12_625",
+        "X12_650",
+        "X12_715",
+        "X12_753",
+        "X12_754",
+        "X12_805",
+        "X12_806",
+        "X12_810",
+        "X12_811",
+        "X12_812",
+        "X12_813",
+        "X12_814",
+        "X12_815",
+        "X12_816",
+        "X12_818",
+        "X12_819",
+        "X12_820",
+        "X12_821",
+        "X12_822",
+        "X12_823",
+        "X12_824",
+        "X12_826",
+        "X12_827",
+        "X12_828",
+        "X12_829",
+        "X12_830",
+        "X12_831",
+        "X12_832",
+        "X12_833",
+        "X12_834",
+        "X12_835",
+        "X12_836",
+        "X12_837",
+        "X12_838",
+        "X12_839",
+        "X12_840",
+        "X12_841",
+        "X12_842",
+        "X12_843",
+        "X12_844",
+        "X12_845",
+        "X12_846",
+        "X12_847",
+        "X12_848",
+        "X12_849",
+        "X12_850",
+        "X12_851",
+        "X12_852",
+        "X12_853",
+        "X12_854",
+        "X12_855",
+        "X12_856",
+        "X12_857",
+        "X12_858",
+        "X12_859",
+        "X12_860",
+        "X12_861",
+        "X12_862",
+        "X12_863",
+        "X12_864",
+        "X12_865",
+        "X12_866",
+        "X12_867",
+        "X12_868",
+        "X12_869",
+        "X12_870",
+        "X12_871",
+        "X12_872",
+        "X12_873",
+        "X12_874",
+        "X12_875",
+        "X12_876",
+        "X12_877",
+        "X12_878",
+        "X12_879",
+        "X12_880",
+        "X12_881",
+        "X12_882",
+        "X12_883",
+        "X12_884",
+        "X12_885",
+        "X12_886",
+        "X12_887",
+        "X12_888",
+        "X12_889",
+        "X12_891",
+        "X12_893",
+        "X12_894",
+        "X12_895",
+        "X12_896",
+        "X12_920",
+        "X12_924",
+        "X12_925",
+        "X12_926",
+        "X12_928",
+        "X12_940",
+        "X12_943",
+        "X12_944",
+        "X12_945",
+        "X12_947",
+        "X12_980",
+        "X12_990",
+        "X12_993",
+        "X12_996",
+        "X12_997",
+        "X12_998",
+        "X12_999",
+        "X12_270_X279",
+        "X12_271_X279",
+        "X12_275_X210",
+        "X12_275_X211",
+        "X12_276_X212",
+        "X12_277_X212",
+        "X12_277_X214",
+        "X12_277_X364",
+        "X12_278_X217",
+        "X12_820_X218",
+        "X12_820_X306",
+        "X12_824_X186",
+        "X12_834_X220",
+        "X12_834_X307",
+        "X12_834_X318",
+        "X12_835_X221",
+        "X12_837_X222",
+        "X12_837_X223",
+        "X12_837_X224",
+        "X12_837_X291",
+        "X12_837_X292",
+        "X12_837_X298",
+        "X12_999_X231"
+      ]
+    },
+    "X12UsageIndicatorCode": {
+      "type": "string",
+      "min": 1,
+      "max": 1,
+      "pattern": "[a-zA-Z0-9]*"
+    },
+    "X12ValidateEdi": {
+      "type": "boolean"
+    },
+    "X12ValidationOptions": {
+      "type": "structure",
+      "members": {
+        "validationRules": "X12ValidationRules"
+      }
+    },
+    "X12ValidationRule": {
+      "type": "structure",
+      "members": {
+        "codeListValidationRule": "X12CodeListValidationRule",
+        "elementLengthValidationRule": "X12ElementLengthValidationRule",
+        "elementRequirementValidationRule": "X12ElementRequirementValidationRule"
+      }
+    },
+    "X12ValidationRules": {
+      "type": "list",
+      "member": "X12ValidationRule"
+    },
+    "X12Version": {
+      "type": "string",
+      "enum": [
+        "VERSION_4010",
+        "VERSION_4030",
+        "VERSION_4050",
+        "VERSION_4060",
+        "VERSION_5010",
+        "VERSION_5010_HIPAA"
+      ]
+    }
+  }
+}

@@ -482,6 +482,8 @@ floci:
       enabled: true
     audit-manager:
       enabled: true
+    b2bi:
+      enabled: true
     rekognition:
       enabled: true
     translate:

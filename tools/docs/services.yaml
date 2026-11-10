@@ -223,6 +223,10 @@ services:
     doc: docs/services/apprunner.md
     sources:
       - { path: services/apprunner/AppRunnerJsonHandler.java, mode: switch }
+  - service: b2bi
+    doc: docs/services/b2bi.md
+    sources:
+      - { path: services/b2bi/B2biJsonHandler.java, mode: switch }
   - service: auditmanager
     doc: docs/services/auditmanager.md
     sources:

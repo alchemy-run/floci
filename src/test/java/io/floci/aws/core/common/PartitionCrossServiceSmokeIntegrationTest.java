@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1327,6 +1327,20 @@ class PartitionCrossServiceSmokeIntegrationTest {
         cleanup.register(() -> signed(region, "apprunner")
                 .header("X-Amz-Target", "AppRunner.DeleteAutoScalingConfiguration").contentType(JSON_1_0)
                 .body("{\"AutoScalingConfigurationArn\":\"" + arn + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void b2biProfileArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "b2bi");
+        String id = signed(region, "b2bi").header("X-Amz-Target", "B2BI.CreateProfile").contentType(JSON_1_0)
+                .body("{\"name\":\"smoke\",\"businessName\":\"Smoke\",\"phone\":\"+15555550100\","
+                        + "\"logging\":\"DISABLED\"}").post("/").then().statusCode(200).extract().path("profileId");
+        cleanup.register(() -> signed(region, "b2bi").header("X-Amz-Target", "B2BI.DeleteProfile")
+                .contentType(JSON_1_0).body("{\"profileId\":\"" + id + "\"}").post("/"));
+        String arn = signed(region, "b2bi").header("X-Amz-Target", "B2BI.GetProfile").contentType(JSON_1_0)
+                .body("{\"profileId\":\"" + id + "\"}").post("/").then().statusCode(200).extract().path("profileArn");
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 

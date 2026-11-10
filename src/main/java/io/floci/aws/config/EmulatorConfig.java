@@ -860,6 +860,7 @@ public interface EmulatorConfig {
         AppRegistryServiceConfig appRegistry();
         AppRunnerServiceConfig appRunner();
         AuditManagerServiceConfig auditManager();
+        B2biServiceConfig b2bi();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2871,6 +2872,11 @@ public interface EmulatorConfig {
     }
 
     interface AuditManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface B2biServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }
