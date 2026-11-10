@@ -142,7 +142,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [AWS Config](config.md) | `POST /` + `X-Amz-Target: StarlingDoveService.*` | JSON 1.1 | 46 |
 | [CloudTrail](cloudtrail.md) | `POST /` + `X-Amz-Target: com.amazonaws.cloudtrail.v20131101.CloudTrail_20131101.*` | JSON 1.1 | 32 |
 | [Textract](textract.md) | `POST /` + `X-Amz-Target: Textract.*` | JSON 1.1 | 6 |
-| [Comprehend](comprehend.md) | `POST /` + `X-Amz-Target: Comprehend_20171127.*` | JSON 1.1 | 5 |
+| [Comprehend](comprehend.md) | `POST /` + `X-Amz-Target: Comprehend_20171127.*` | JSON 1.1 | 53 |
 | [Rekognition](rekognition.md) | `POST /` + `X-Amz-Target: RekognitionService.*` | JSON 1.1 | 5 |
 | [Translate](translate.md) | `POST /` + `X-Amz-Target: AWSShineFrontendService_20170701.*` | JSON 1.1 | 19 |
 | [Transcribe](transcribe.md) | `POST /` + `X-Amz-Target: Transcribe.*` | JSON 1.1 | 8 |

@@ -105,7 +105,7 @@ class ComprehendIntegrationTest {
             .body("__type", equalTo("SerializationException"));
     }
     @Test
-    void detectKeyPhrases_returnsStubPhrase() {
+    void detectKeyPhrases_returnsNounPhrases() {
         given()
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Comprehend_20171127.DetectKeyPhrases")
@@ -115,8 +115,7 @@ class ComprehendIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("KeyPhrases", hasSize(1))
-            .body("KeyPhrases[0].Text", equalTo("Floci"))
+            .body("KeyPhrases.Text", hasItem("Floci"))
             .body("KeyPhrases[0].Score", notNullValue())
             .body("KeyPhrases[0].BeginOffset", notNullValue())
             .body("KeyPhrases[0].EndOffset", notNullValue());
@@ -150,7 +149,7 @@ class ComprehendIntegrationTest {
             .body("__type", equalTo("InvalidRequestException"));
     }
     @Test
-    void detectPiiEntities_returnsEmptyEntities() {
+    void detectPiiEntities_findsTheSsnWithItsOffsets() {
         given()
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Comprehend_20171127.DetectPiiEntities")
@@ -160,7 +159,10 @@ class ComprehendIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("Entities", hasSize(0));
+            .body("Entities", hasSize(1))
+            .body("Entities[0].Type", equalTo("SSN"))
+            .body("Entities[0].BeginOffset", equalTo(10))
+            .body("Entities[0].EndOffset", equalTo(21));
     }
     @Test
     void detectPiiEntities_rejectsLanguageOutsideEnEs() {
@@ -191,7 +193,7 @@ class ComprehendIntegrationTest {
             .body("__type", equalTo("UnsupportedLanguageException"));
     }
     @Test
-    void containsPiiEntities_returnsEmptyLabels() {
+    void containsPiiEntities_labelsTheSsn() {
         given()
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Comprehend_20171127.ContainsPiiEntities")
@@ -201,13 +203,13 @@ class ComprehendIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("Labels", hasSize(0));
+            .body("Labels.Name", contains("SSN"));
     }
     @Test
     void unknownAction_returnsUnknownOperationError() {
         given()
             .contentType(CONTENT_TYPE)
-            .header("X-Amz-Target", "Comprehend_20171127.DetectEntities")
+            .header("X-Amz-Target", "Comprehend_20171127.NotAnOperation")
             .header("Authorization", AUTH_HEADER)
             .body("{}")
         .when()
