@@ -864,6 +864,7 @@ public interface EmulatorConfig {
         BackupSearchServiceConfig backupSearch();
         BedrockDataAutomationServiceConfig bedrockDataAutomation();
         ChatbotServiceConfig chatbot();
+        CodeConnectionsServiceConfig codeConnections();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2895,6 +2896,11 @@ public interface EmulatorConfig {
     }
 
     interface ChatbotServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface CodeConnectionsServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

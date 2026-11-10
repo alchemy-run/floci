@@ -10,6 +10,7 @@ import com.fasterxml.jackson.dataformat.cbor.CBORFactory;
 import com.fasterxml.jackson.dataformat.cbor.CBORGenerator;
 import com.google.gson.JsonParseException;
 import io.floci.aws.services.cloudwatch.metrics.CloudWatchMetricsJsonHandler;
+import io.floci.aws.services.codeconnections.CodeConnectionsJsonHandler;
 import io.floci.aws.services.dynamodb.DynamoDbJsonHandler;
 import io.floci.aws.services.dynamodb.DynamoDbStreamsJsonHandler;
 import io.floci.aws.services.eventbridgev2.EventBridgeV2Handler;
@@ -19,6 +20,7 @@ import io.floci.aws.services.sns.SnsJsonHandler;
 import io.floci.aws.services.sqs.SqsJsonHandler;
 import io.floci.aws.services.stepfunctions.StepFunctionsJsonHandler;
 import io.smallrye.common.annotation.RunOnVirtualThread;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.*;
 import jakarta.ws.rs.core.Context;
@@ -50,6 +52,11 @@ import java.util.zip.GZIPInputStream;
  */
 @Path("/")
 public class AwsJsonCborController {
+
+    /** AWS CodeConnections, whose SDKs speak Smithy RPC v2 CBOR. */
+    @Inject
+    Instance<CodeConnectionsJsonHandler> codeConnections;
+
 
     private static final Logger LOG = Logger.getLogger(AwsJsonCborController.class);
     private static final ObjectMapper CBOR_MAPPER = new ObjectMapper(new CBORFactory());
@@ -516,6 +523,7 @@ public class AwsJsonCborController {
             case "monitoring" -> cloudWatchMetricsJsonHandler.handle(operation, request, region);
             case "marketplace" -> marketplaceEntitlementController.handle(operation, request, region);
             case "eventsv2" -> eventBridgeV2Handler.handle(operation, request, region);
+            case "codeconnections" -> codeConnections.get().handle(operation, request, region);
             default -> null;
         };
     }

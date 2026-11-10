@@ -223,6 +223,10 @@ services:
     doc: docs/services/apprunner.md
     sources:
       - { path: services/apprunner/AppRunnerJsonHandler.java, mode: switch }
+  - service: codeconnections
+    doc: docs/services/codeconnections.md
+    sources:
+      - { path: services/codeconnections/CodeConnectionsJsonHandler.java, mode: switch }
   - service: chatbot
     doc: docs/services/chatbot.md
     sources:

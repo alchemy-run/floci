@@ -200,6 +200,7 @@ _REST = ("REST: its requests name their resources in the path, which RequestReso
 
 # Namespaces Floci serves whose resources are not read yet, and why.
 NOT_COVERED: dict[str, str] = {
+    "codeconnections": "not read yet: its JSON operations name connections, hosts and repository links by ARN or ID",
     "chatbot": "REST routes no rule maps yet",
     "backup-search": "REST routes no rule maps yet",
     "b2bi": "not read yet: its JSON operations name profiles, capabilities, partnerships and transformers by ID",

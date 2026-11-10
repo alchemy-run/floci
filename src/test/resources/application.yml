@@ -490,6 +490,8 @@ floci:
       enabled: true
     chatbot:
       enabled: true
+    code-connections:
+      enabled: true
     rekognition:
       enabled: true
     translate:
