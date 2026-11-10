@@ -209,6 +209,7 @@ NOT_COVERED: dict[str, str] = {
     "geo-routes": _REST,
     "polly": _REST,
     "account": _REST,
+    "aiops": _REST,
     "airflow": _REST,
     "app-integrations": _REST,
     "appconfig": _REST,

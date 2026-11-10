@@ -41,7 +41,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "amazonmq", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1316,6 +1316,27 @@ class PartitionCrossServiceSmokeIntegrationTest {
      * A service no partition lists (the newer ones {@code endpoints.json} omits) runs everywhere,
      * the same reading strict partition mode applies: silence there is not absence.
      */
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void investigationGroupArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "aiops");
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"aiops.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+        String roleName = unique("smoke-aiops", partitionCase);
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", roleName)
+                .formParam("AssumeRolePolicyDocument", trust)
+                .post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        cleanup.register(() -> signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteRole").formParam("RoleName", roleName).post("/"));
+        String arn = signed(region, "aiops").contentType(JSON)
+                .body("{\"name\":\"smoke\",\"roleArn\":\"" + role + "\"}")
+                .post("/investigationGroups").then().statusCode(201).extract().path("arn");
+        cleanup.register(() -> signed(region, "aiops").delete("/investigationGroups/smoke"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
     void privateCaArn(PartitionCase partitionCase) {

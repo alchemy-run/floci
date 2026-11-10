@@ -470,6 +470,8 @@ floci:
       enabled: true
     acm-pca:
       enabled: true
+    ai-ops:
+      enabled: true
     rekognition:
       enabled: true
     translate:

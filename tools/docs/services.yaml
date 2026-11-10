@@ -180,6 +180,19 @@ services:
       - PostOperation
       - PatchOperation
       - DeleteOperation
+  - service: aiops
+    doc: docs/services/aiops.md
+    sources:
+      - { path: services/aiops/AiOpsController.java, mode: rest }
+      - { path: core/common/SharedTagsController.java, mode: rest }
+    rename_actions:
+      ListTags: ListTagsForResource
+      TagResourcePost: TagResource
+    exclude_actions:
+      - ListTagsByQuery
+      - TagResourceByBody
+      - TagResourcePut
+      - UntagResourceByQuery
   - service: acmpca
     doc: docs/services/acmpca.md
     sources:
