@@ -21,6 +21,7 @@
 aliases:
   servicecatalog-appregistry: appregistry   # AppRegistry's endpoint prefix; it signs with "servicecatalog"
   acm-pca: acmpca                       # Private CA's SigV4 signing name is "acm-pca"
+  backup-search: backupsearch            # Backup Search's SigV4 signing name is "backup-search"
   geo: location                         # Location's SigV4 signing name is "geo"
   geo-maps: location                    # Maps API facet, documented in location.md
   geo-places: location                  # Places API facet, documented in location.md
