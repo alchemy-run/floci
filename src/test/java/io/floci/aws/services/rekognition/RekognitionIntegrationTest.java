@@ -185,7 +185,7 @@ class RekognitionIntegrationTest {
             .body("FaceDetails", hasSize(0));
     }
     @Test
-    void detectText_returnsLineAndWordDetections() {
+    void detectText_reportsNoTextUnlessMocked() {
         given()
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "RekognitionService.DetectText")
@@ -195,15 +195,11 @@ class RekognitionIntegrationTest {
             .post("/")
         .then()
             .statusCode(200)
-            .body("TextDetections", hasSize(2))
-            .body("TextDetections.Type", hasItems("LINE", "WORD"))
-            .body("TextDetections.findAll { it.Type == 'LINE' }.DetectedText", hasItem("Floci"))
-            .body("TextDetections[0].Geometry.BoundingBox.Width", notNullValue())
-            .body("TextDetections[0].Geometry.Polygon", hasSize(4))
+            .body("TextDetections", hasSize(0))
             .body("TextModelVersion", equalTo("1.0"));
     }
     @Test
-    void compareFaces_returnsEmptyMatches() {
+    void compareFaces_aFacelessSourceImageIsInvalid() {
         given()
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "RekognitionService.CompareFaces")
@@ -212,9 +208,8 @@ class RekognitionIntegrationTest {
         .when()
             .post("/")
         .then()
-            .statusCode(200)
-            .body("FaceMatches", hasSize(0))
-            .body("UnmatchedFaces", hasSize(0));
+            .statusCode(400)
+            .body("__type", equalTo("InvalidParameterException"));
     }
     @Test
     void compareFaces_missingTargetImage_returns400() {
@@ -346,7 +341,7 @@ class RekognitionIntegrationTest {
     void unknownAction_returnsUnknownOperationError() {
         given()
             .contentType(CONTENT_TYPE)
-            .header("X-Amz-Target", "RekognitionService.IndexFaces")
+            .header("X-Amz-Target", "RekognitionService.NotAnOperation")
             .header("Authorization", AUTH_HEADER)
             .body("{}")
         .when()

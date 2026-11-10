@@ -19,18 +19,22 @@ public class RekognitionJsonHandler {
     private static final Logger LOG = Logger.getLogger(RekognitionJsonHandler.class);
     private final RekognitionService rekognitionService;
     private final RekognitionImageValidator imageValidator;
+    private final RekognitionCollectionService collections;
+    private final RekognitionVideoService video;
     @Inject
-    public RekognitionJsonHandler(RekognitionService rekognitionService, RekognitionImageValidator imageValidator) {
+    public RekognitionJsonHandler(RekognitionService rekognitionService, RekognitionImageValidator imageValidator,
+                                  RekognitionCollectionService collections, RekognitionVideoService video) {
         this.rekognitionService = rekognitionService;
         this.imageValidator = imageValidator;
+        this.collections = collections;
+        this.video = video;
     }
     /**
-     * Dispatches Rekognition actions received via the AwsJson11Controller.
-     * Only sync image-analysis actions are implemented; face-collection persistence
-     * (CreateCollection/IndexFaces/SearchFaces), custom-model training (Projects/
-     * Datasets/ProjectVersions), live video (StreamProcessor), async video jobs
-     * (the Start and Get pairs for Celebrity/Content/Face/Label/Person/Segment/Text
-     * detection), and Face Liveness sessions are out of scope.
+     * Dispatches Rekognition actions received via the AwsJson11Controller: image
+     * analysis to {@link RekognitionService}, collections, users, liveness sessions,
+     * projects, stream processors, and tags to {@link RekognitionCollectionService},
+     * and stored-video and media analysis jobs to {@link RekognitionVideoService}.
+     * Model training (datasets, project versions) is not emulated.
      */
     public Response handle(String action, JsonNode request, String region) {
         LOG.debugv("Rekognition action: {0}", action);
@@ -45,12 +49,67 @@ public class RekognitionJsonHandler {
                 yield rekognitionService.compareFaces(sourceKey);
             }
             case "DetectModerationLabels" -> rekognitionService.detectModerationLabels(validImage(action, request, region));
+            case "DetectProtectiveEquipment" -> rekognitionService.detectProtectiveEquipment(
+                    validImage(action, request, region));
+            case "RecognizeCelebrities" -> rekognitionService.recognizeCelebrities(validImage(action, request, region));
+            case "GetCelebrityInfo" -> rekognitionService.getCelebrityInfo(RekognitionCollectionService.text(request, "Id"));
+            case "CreateCollection" -> ok(collections.createCollection(request, region));
+            case "DescribeCollection" -> ok(collections.describeCollection(request, region));
+            case "ListCollections" -> ok(collections.listCollections(request, region));
+            case "DeleteCollection" -> ok(collections.deleteCollection(request, region));
+            case "IndexFaces" -> ok(collections.indexFaces(request, region, validImage(action, request, region)));
+            case "ListFaces" -> ok(collections.listFaces(request, region));
+            case "DeleteFaces" -> ok(collections.deleteFaces(request, region));
+            case "SearchFaces" -> ok(collections.searchFaces(request, region));
+            case "SearchFacesByImage" -> ok(collections.searchFacesByImage(request, region,
+                    validImage(action, request, region)));
+            case "CreateUser" -> ok(collections.createUser(request, region));
+            case "DeleteUser" -> ok(collections.deleteUser(request, region));
+            case "ListUsers" -> ok(collections.listUsers(request, region));
+            case "AssociateFaces" -> ok(collections.associateFaces(request, region));
+            case "DisassociateFaces" -> ok(collections.disassociateFaces(request, region));
+            case "SearchUsers" -> ok(collections.searchUsers(request, region));
+            case "SearchUsersByImage" -> ok(collections.searchUsersByImage(request, region,
+                    validImage(action, request, region)));
+            case "CreateFaceLivenessSession" -> ok(collections.createFaceLivenessSession(request, region));
+            case "GetFaceLivenessSessionResults" -> ok(collections.getFaceLivenessSessionResults(request));
+            case "CreateProject" -> ok(collections.createProject(request, region));
+            case "DeleteProject" -> ok(collections.deleteProject(request, region));
+            case "DescribeProjects" -> ok(collections.describeProjects(request, region));
+            case "DescribeProjectVersions" -> ok(collections.describeProjectVersions(request, region));
+            case "DetectCustomLabels" -> {
+                validImage(action, request, region);
+                yield ok(collections.unknownProjectVersion(request));
+            }
+            case "StartProjectVersion", "StopProjectVersion" -> ok(collections.unknownProjectVersion(request));
+            case "CreateStreamProcessor" -> ok(collections.createStreamProcessor(request, region));
+            case "DescribeStreamProcessor" -> ok(collections.describeStreamProcessor(request, region));
+            case "ListStreamProcessors" -> ok(collections.listStreamProcessors(request, region));
+            case "StartStreamProcessor" -> ok(collections.startStreamProcessor(request, region));
+            case "StopStreamProcessor" -> ok(collections.stopStreamProcessor(request, region));
+            case "DeleteStreamProcessor" -> ok(collections.deleteStreamProcessor(request, region));
+            case "TagResource" -> ok(collections.tagResource(request));
+            case "UntagResource" -> ok(collections.untagResource(request));
+            case "ListTagsForResource" -> ok(collections.listTagsForResource(request));
+            case "StartCelebrityRecognition", "StartContentModeration", "StartFaceDetection", "StartFaceSearch",
+                    "StartLabelDetection", "StartPersonTracking", "StartSegmentDetection", "StartTextDetection"
+                    -> ok(video.start(RekognitionVideoService.Family.of(action), request, region));
+            case "GetCelebrityRecognition", "GetContentModeration", "GetFaceDetection", "GetFaceSearch",
+                    "GetLabelDetection", "GetPersonTracking", "GetSegmentDetection", "GetTextDetection"
+                    -> ok(video.get(RekognitionVideoService.Family.of(action), request));
+            case "StartMediaAnalysisJob" -> ok(video.startMediaAnalysisJob(request, region));
+            case "GetMediaAnalysisJob" -> ok(video.getMediaAnalysisJob(request));
+            case "ListMediaAnalysisJobs" -> ok(video.listMediaAnalysisJobs(request, region));
             default -> Response.status(400)
                     .entity(new AwsErrorResponse("UnknownOperationException",
                             "Unknown operation: RekognitionService." + action))
                     .build();
         };
     }
+    private static Response ok(Object body) {
+        return Response.ok(body).build();
+    }
+
     /** The image's mock-response key, once the image has the shape and content Rekognition accepts. */
     private String validImage(String action, JsonNode request, String region) {
         String mockKey = requireImage(request, "Image");
