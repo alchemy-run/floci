@@ -849,6 +849,7 @@ public interface EmulatorConfig {
         TransferServiceConfig transfer();
         TextractServiceConfig textract();
         ComprehendServiceConfig comprehend();
+        ComprehendMedicalServiceConfig comprehendMedical();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2805,6 +2806,11 @@ public interface EmulatorConfig {
     }
 
     interface ComprehendServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ComprehendMedicalServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

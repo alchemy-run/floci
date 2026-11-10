@@ -23,6 +23,7 @@ import io.floci.aws.services.codepipeline.CodePipelineJsonHandler;
 import io.floci.aws.services.cognito.CognitoJsonHandler;
 import io.floci.aws.services.cognitoidentity.CognitoIdentityJsonHandler;
 import io.floci.aws.services.comprehend.ComprehendJsonHandler;
+import io.floci.aws.services.comprehendmedical.ComprehendMedicalJsonHandler;
 import io.floci.aws.services.configservice.ConfigServiceJsonHandler;
 import io.floci.aws.services.cur.CurJsonHandler;
 import io.floci.aws.services.datasync.DataSyncJsonHandler;
@@ -118,6 +119,7 @@ public class AwsJson11Controller {
     private final TransferHandler transferHandler;
     private final TextractJsonHandler textractJsonHandler;
     private final ComprehendJsonHandler comprehendJsonHandler;
+    private final ComprehendMedicalJsonHandler comprehendMedicalJsonHandler;
     private final RekognitionJsonHandler rekognitionJsonHandler;
     private final PricingJsonHandler pricingJsonHandler;
     private final TranscribeJsonHandler transcribeJsonHandler;
@@ -175,6 +177,7 @@ public class AwsJson11Controller {
                                TransferHandler transferHandler,
                                TextractJsonHandler textractJsonHandler,
                                ComprehendJsonHandler comprehendJsonHandler,
+                               ComprehendMedicalJsonHandler comprehendMedicalJsonHandler,
                                RekognitionJsonHandler rekognitionJsonHandler,
                                PricingJsonHandler pricingJsonHandler,
                                TranscribeJsonHandler transcribeJsonHandler,
@@ -236,6 +239,7 @@ public class AwsJson11Controller {
         this.transferHandler = transferHandler;
         this.textractJsonHandler = textractJsonHandler;
         this.comprehendJsonHandler = comprehendJsonHandler;
+        this.comprehendMedicalJsonHandler = comprehendMedicalJsonHandler;
         this.rekognitionJsonHandler = rekognitionJsonHandler;
         this.pricingJsonHandler = pricingJsonHandler;
         this.transcribeJsonHandler = transcribeJsonHandler;
@@ -343,6 +347,7 @@ public class AwsJson11Controller {
                 case "transfer" -> transferHandler.handle(action, request, region);
                 case "textract" -> textractJsonHandler.handle(action, request, region);
                 case "comprehend" -> comprehendJsonHandler.handle(action, request, region);
+                case "comprehendmedical" -> comprehendMedicalJsonHandler.handle(action, request, region);
                 case "rekognition" -> rekognitionJsonHandler.handle(action, request, region);
                 case "pricing" -> pricingJsonHandler.handle(action, request, region);
                 case "transcribe" -> transcribeJsonHandler.handle(action, request, region);

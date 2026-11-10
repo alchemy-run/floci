@@ -972,6 +972,8 @@ floci:
       enabled: true
     comprehend:
       enabled: true
+    comprehend-medical:
+      enabled: true
     rekognition:
       enabled: true
     translate:

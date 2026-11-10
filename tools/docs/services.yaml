@@ -162,6 +162,10 @@ services:
     doc: docs/services/comprehend.md
     sources:
       - { path: services/comprehend/ComprehendJsonHandler.java, mode: switch }
+  - service: comprehendmedical
+    doc: docs/services/comprehendmedical.md
+    sources:
+      - { path: services/comprehendmedical/ComprehendMedicalJsonHandler.java, mode: switch }
   - service: controlcatalog
     doc: docs/services/controlcatalog.md
     sources:

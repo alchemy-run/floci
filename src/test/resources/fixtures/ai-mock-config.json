@@ -56,5 +56,16 @@
         "TargetLanguageCode": "es"
       }
     }
+  },
+  "comprehendmedical": {
+    "Mocked clinical note.": {
+      "DetectPHI": {
+        "Entities": [
+          { "Id": 0, "BeginOffset": 0, "EndOffset": 6, "Score": 0.99, "Text": "Mocked",
+            "Category": "PROTECTED_HEALTH_INFORMATION", "Type": "NAME", "Traits": [] }
+        ],
+        "ModelVersion": "mock"
+      }
+    }
   }
 }
