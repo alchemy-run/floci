@@ -165,7 +165,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Translate](translate.md) | `POST /` + `X-Amz-Target: AWSShineFrontendService_20170701.*` | JSON 1.1 | 19 |
 | [Transcribe](transcribe.md) | `POST /` + `X-Amz-Target: Transcribe.*` | JSON 1.1 | 43 |
 | [Pricing](pricing.md) | `POST /` + `X-Amz-Target: AWSPriceListService.*` | JSON 1.1 | 5 |
-| [Cost Explorer](ce.md) | `POST /` + `X-Amz-Target: AWSInsightsIndexService.*` | JSON 1.1 | 20 |
+| [Cost Explorer](ce.md) | `POST /` + `X-Amz-Target: AWSInsightsIndexService.*` | JSON 1.1 | 47 |
 | [Cost and Usage Reports](cur.md) | `POST /` + `X-Amz-Target: AWSOrigamiServiceGatewayService.*` | JSON 1.1 | 6 |
 | [BCM Pricing Calculator](bcm-pricing-calculator.md) | `POST /` + `X-Amz-Target: AWSBCMPricingCalculator.*` | JSON 1.0 | 4 |
 | [BCM Data Exports](bcm-data-exports.md) | `POST /` + `X-Amz-Target: AWSBillingAndCostManagementDataExports.*` | JSON 1.1 | 7 |
