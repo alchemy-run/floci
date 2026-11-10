@@ -232,6 +232,7 @@ services:
     doc: docs/services/dsql.md
     sources:
       - { path: services/dsql/DsqlController.java, mode: rest }
+      - { path: services/dsql/DsqlStreamController.java, mode: rest }
   - service: efs
     doc: docs/services/efs.md
     sources:

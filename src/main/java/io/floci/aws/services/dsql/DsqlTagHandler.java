@@ -12,10 +12,12 @@ import java.util.Map;
 public class DsqlTagHandler implements TagHandler {
 
     private final DsqlService service;
+    private final DsqlStreamService streams;
 
     @Inject
-    public DsqlTagHandler(DsqlService service) {
+    public DsqlTagHandler(DsqlService service, DsqlStreamService streams) {
         this.service = service;
+        this.streams = streams;
     }
 
     @Override
@@ -35,16 +37,27 @@ public class DsqlTagHandler implements TagHandler {
 
     @Override
     public Map<String, String> listTags(String region, String arn) {
+        if (DsqlStreamService.isStreamArn(arn)) {
+            return streams.listTags(region, arn);
+        }
         return service.listTags(region, arn);
     }
 
     @Override
     public void tagResource(String region, String arn, Map<String, String> tags) {
+        if (DsqlStreamService.isStreamArn(arn)) {
+            streams.tagResource(region, arn, tags);
+            return;
+        }
         service.tagResource(region, arn, tags);
     }
 
     @Override
     public void untagResource(String region, String arn, List<String> tagKeys) {
+        if (DsqlStreamService.isStreamArn(arn)) {
+            streams.untagResource(region, arn, tagKeys);
+            return;
+        }
         service.untagResource(region, arn, tagKeys);
     }
 }
