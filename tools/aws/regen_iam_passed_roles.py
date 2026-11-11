@@ -80,7 +80,7 @@ SERVICE_SUFFIX = ".amazonaws.com"
 NAMESPACES = (
     "application-autoscaling", "athena", "autoscaling", "budgets", "cloudformation", "cloudtrail",
     "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito-identity", "cognito-idp",
-    "comprehend", "config", "databrew", "dataexchange", "datasync", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
+    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
     "events", "firehose", "glue", "iam", "kinesis", "kinesisanalytics", "lambda", "logs", "pipes",
     "rds", "redshift", "redshift-serverless", "rekognition", "resource-groups", "s3", "sagemaker", "scheduler",
     "secretsmanager", "servicecatalog", "ses", "sns", "ssm", "states", "swf", "textract",
@@ -257,12 +257,14 @@ BY_HAND.update({
 NO_ROLE_MEMBER = "no member of the request names a role"
 RUNBOOK_PARAMETER = "the role is a parameter of the runbook it runs, not a member of the request"
 XML_BODY = "the request body is XML, which PassedRoles does not read"
+URI_LABEL = "the role is a label of the request URI, which PassedRoles does not read"
 
 # Operations whose request names no role this file can read.
 NOT_READ = {
     "config:PutConformancePack": NO_ROLE_MEMBER,
     "config:PutOrganizationConformancePack": NO_ROLE_MEMBER,
     "config:PutRemediationConfigurations": RUNBOOK_PARAMETER,
+    "datazone:AssociateEnvironmentRole": URI_LABEL,
     "dms:CreateInstanceProfile": NO_ROLE_MEMBER,
     "dms:ModifyInstanceProfile": NO_ROLE_MEMBER,
     "ec2:RequestSpotFleet": "the request names its roles in EC2's own protocol, one of them as an instance profile",

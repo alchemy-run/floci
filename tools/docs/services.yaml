@@ -235,6 +235,10 @@ services:
     doc: docs/services/dataexchange.md
     sources:
       - { path: services/dataexchange/DataExchangeController.java, mode: rest }
+  - service: datazone
+    doc: docs/services/datazone.md
+    sources:
+      - { path: services/datazone/DataZoneController.java, mode: switch }
   - service: dax
     doc: docs/services/dax.md
     sources:

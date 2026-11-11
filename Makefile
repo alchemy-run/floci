@@ -44,6 +44,10 @@
 # maps by, and IamRestRouteCoverageTest checks the rules against, is generated from botocore's models
 # by tools/aws/regen_rest_routes.py. A model it adds also needs make iam-authorized-actions-sync, whose
 # check fails until the actions of no resource type list the model's scope.
+# src/main/resources/aws/datazone-request-shapes.json, the constraints DataZone requests are checked
+# against, is generated from botocore's DataZone model by tools/aws/regen_datazone_shapes.py.
+# src/main/resources/aws/rest-json/*.json, the HTTP bindings RestJsonDispatcher routes REST JSON
+# requests by, are generated from botocore's models by tools/aws/regen_rest_json_bindings.py.
 # src/main/resources/aws/iam-paginators.json, what each paged IAM list pages by, is generated
 # from botocore's IAM model and paginators by tools/aws/regen_iam_paginators.py.
 
@@ -288,6 +292,8 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_codeconnections_shapes.py
 	$(PYTHON) tools/aws/regen_databrew_shapes.py
 	$(PYTHON) tools/aws/regen_dataexchange_shapes.py
+	$(PYTHON) tools/aws/regen_datazone_shapes.py
+	$(PYTHON) tools/aws/regen_rest_json_bindings.py
 	$(PYTHON) tools/aws/regen_dax_shapes.py
 	$(PYTHON) tools/aws/regen_rest_xml_shapes.py
 	$(PYTHON) tools/aws/regen_logs_delivery_shapes.py
@@ -430,6 +436,15 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_dataexchange_shapes.py --check || { \
 		echo "error: Data Exchange request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_datazone_shapes.py --check || { \
+		echo "error: DataZone request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_rest_json_bindings.py --check || { \
+		echo "error: the REST JSON bindings under src/main/resources/aws/rest-json are out of date."; \
+		echo "       Run 'make aws-data-sync' and commit the result."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_dax_shapes.py --check || { \

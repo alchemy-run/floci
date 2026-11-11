@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1368,6 +1368,30 @@ class PartitionCrossServiceSmokeIntegrationTest {
         cleanup.register(() -> signed(region, "dataexchange").delete("/v1/data-sets/" + id));
         String arn = signed(region, "dataexchange").get("/v1/data-sets/" + id).then().statusCode(200).extract()
                 .path("Arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void dataZoneDomainArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "datazone");
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"datazone.amazonaws.com\"},\"Action\":[\"sts:AssumeRole\",\"sts:TagSession\"]}]}";
+        String roleName = unique("smoke-datazone", partitionCase);
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", roleName)
+                .formParam("AssumeRolePolicyDocument", trust)
+                .post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        cleanup.register(() -> signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteRole").formParam("RoleName", roleName).post("/"));
+        String id = signed(region, "datazone").contentType(JSON)
+                .body("{\"name\":\"" + unique("smoke", partitionCase) + "\",\"domainExecutionRole\":\"" + role
+                        + "\"}")
+                .post("/v2/domains").then().statusCode(201).extract().path("id");
+        cleanup.register(() -> signed(region, "datazone").delete("/v2/domains/" + id));
+        String arn = signed(region, "datazone").get("/v2/domains/" + id).then().statusCode(200).extract()
+                .path("arn");
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 

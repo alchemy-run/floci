@@ -1013,6 +1013,8 @@ floci:
       enabled: true
     dataexchange:
       enabled: true
+    datazone:
+      enabled: true
     dax:
       enabled: true
     rekognition:

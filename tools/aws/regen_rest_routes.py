@@ -52,6 +52,9 @@ MODELS: dict[str, str] = {
     "accessanalyzer": "access-analyzer",
     "apigateway": "apigateway",
     "apigatewayv2": "apigateway",
+    "databrew": "databrew",
+    "dataexchange": "dataexchange",
+    "datazone": "datazone",
     "dsql": "dsql",
     "eks": "eks",
     "es": "es",
@@ -76,6 +79,11 @@ INTERNAL_ROUTES: dict[str, tuple[str, bool]] = {
     # them onto, and the key they name is an ARN, whose slashes the rewritten path holds: the label
     # spans them, as the controller's own path does.
     "payment-cryptography-data": ("/_paymentcryptography", True),
+    # Services whose paths other REST services also serve (/jobs, /tags/{ResourceArn}, /v1) sit under the
+    # prefix their route filter rewrites requests signed for them onto.
+    "databrew": ("/_databrew", False),
+    "dataexchange": ("/_dataexchange", False),
+    "datazone": ("/_datazone", False),
 }
 
 

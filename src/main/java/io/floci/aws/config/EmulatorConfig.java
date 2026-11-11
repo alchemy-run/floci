@@ -868,6 +868,7 @@ public interface EmulatorConfig {
         DaxServiceConfig dax();
         DataBrewServiceConfig databrew();
         DataExchangeServiceConfig dataexchange();
+        DataZoneServiceConfig datazone();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2928,6 +2929,15 @@ public interface EmulatorConfig {
         /** How long a started job stays IN_PROGRESS before it completes. */
         @WithDefault("1000")
         long jobMillis();
+    }
+
+    interface DataZoneServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a domain, environment, data source or run stays in its transitional state before it settles. */
+        @WithDefault("2000")
+        long transitionMillis();
     }
 
     interface DaxServiceConfig {

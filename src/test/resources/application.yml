@@ -499,6 +499,9 @@ floci:
     dataexchange:
       enabled: true
       job-millis: 200
+    datazone:
+      enabled: true
+      transition-millis: 0
     dax:
       enabled: true
       transition-millis: 0

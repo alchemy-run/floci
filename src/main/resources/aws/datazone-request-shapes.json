@@ -1,0 +1,7178 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_datazone_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AcceptPredictions": "AcceptPredictionsInput",
+    "AcceptSubscriptionRequest": "AcceptSubscriptionRequestInput",
+    "AddEntityOwner": "AddEntityOwnerInput",
+    "AddPolicyGrant": "AddPolicyGrantInput",
+    "AssociateEnvironmentRole": "AssociateEnvironmentRoleInput",
+    "AssociateGovernedTerms": "AssociateGovernedTermsInput",
+    "BatchGetAttributesMetadata": "BatchGetAttributesMetadataInput",
+    "BatchPutAttributesMetadata": "BatchPutAttributesMetadataInput",
+    "CancelMetadataGenerationRun": "CancelMetadataGenerationRunInput",
+    "CancelSubscription": "CancelSubscriptionInput",
+    "CreateAccountPool": "CreateAccountPoolInput",
+    "CreateAsset": "CreateAssetInput",
+    "CreateAssetFilter": "CreateAssetFilterInput",
+    "CreateAssetRevision": "CreateAssetRevisionInput",
+    "CreateAssetType": "CreateAssetTypeInput",
+    "CreateConnection": "CreateConnectionInput",
+    "CreateDataProduct": "CreateDataProductInput",
+    "CreateDataProductRevision": "CreateDataProductRevisionInput",
+    "CreateDataSource": "CreateDataSourceInput",
+    "CreateDesignation": "CreateDesignationInput",
+    "CreateDomain": "CreateDomainInput",
+    "CreateDomainUnit": "CreateDomainUnitInput",
+    "CreateEnvironment": "CreateEnvironmentInput",
+    "CreateEnvironmentAction": "CreateEnvironmentActionInput",
+    "CreateEnvironmentBlueprint": "CreateEnvironmentBlueprintInput",
+    "CreateEnvironmentProfile": "CreateEnvironmentProfileInput",
+    "CreateFormType": "CreateFormTypeInput",
+    "CreateGlossary": "CreateGlossaryInput",
+    "CreateGlossaryTerm": "CreateGlossaryTermInput",
+    "CreateGroupProfile": "CreateGroupProfileInput",
+    "CreateListingChangeSet": "CreateListingChangeSetInput",
+    "CreateNotebook": "CreateNotebookInput",
+    "CreateProject": "CreateProjectInput",
+    "CreateProjectMembership": "CreateProjectMembershipInput",
+    "CreateProjectProfile": "CreateProjectProfileInput",
+    "CreateRule": "CreateRuleInput",
+    "CreateSubscriptionGrant": "CreateSubscriptionGrantInput",
+    "CreateSubscriptionRequest": "CreateSubscriptionRequestInput",
+    "CreateSubscriptionTarget": "CreateSubscriptionTargetInput",
+    "CreateUserProfile": "CreateUserProfileInput",
+    "DeleteAccountPool": "DeleteAccountPoolInput",
+    "DeleteAsset": "DeleteAssetInput",
+    "DeleteAssetFilter": "DeleteAssetFilterInput",
+    "DeleteAssetType": "DeleteAssetTypeInput",
+    "DeleteConnection": "DeleteConnectionInput",
+    "DeleteDataExportConfiguration": "DeleteDataExportConfigurationInput",
+    "DeleteDataProduct": "DeleteDataProductInput",
+    "DeleteDataSource": "DeleteDataSourceInput",
+    "DeleteDesignation": "DeleteDesignationInput",
+    "DeleteDomain": "DeleteDomainInput",
+    "DeleteDomainUnit": "DeleteDomainUnitInput",
+    "DeleteEnvironment": "DeleteEnvironmentInput",
+    "DeleteEnvironmentAction": "DeleteEnvironmentActionInput",
+    "DeleteEnvironmentBlueprint": "DeleteEnvironmentBlueprintInput",
+    "DeleteEnvironmentBlueprintConfiguration": "DeleteEnvironmentBlueprintConfigurationInput",
+    "DeleteEnvironmentProfile": "DeleteEnvironmentProfileInput",
+    "DeleteFormType": "DeleteFormTypeInput",
+    "DeleteGlossary": "DeleteGlossaryInput",
+    "DeleteGlossaryTerm": "DeleteGlossaryTermInput",
+    "DeleteLineageEvent": "DeleteLineageEventInput",
+    "DeleteListing": "DeleteListingInput",
+    "DeleteNotebook": "DeleteNotebookInput",
+    "DeleteProject": "DeleteProjectInput",
+    "DeleteProjectMembership": "DeleteProjectMembershipInput",
+    "DeleteProjectProfile": "DeleteProjectProfileInput",
+    "DeleteRule": "DeleteRuleInput",
+    "DeleteSubscriptionGrant": "DeleteSubscriptionGrantInput",
+    "DeleteSubscriptionRequest": "DeleteSubscriptionRequestInput",
+    "DeleteSubscriptionTarget": "DeleteSubscriptionTargetInput",
+    "DeleteTimeSeriesDataPoints": "DeleteTimeSeriesDataPointsInput",
+    "DisassociateEnvironmentRole": "DisassociateEnvironmentRoleInput",
+    "DisassociateGovernedTerms": "DisassociateGovernedTermsInput",
+    "GetAccountPool": "GetAccountPoolInput",
+    "GetAsset": "GetAssetInput",
+    "GetAssetFilter": "GetAssetFilterInput",
+    "GetAssetType": "GetAssetTypeInput",
+    "GetConnection": "GetConnectionInput",
+    "GetDataExportConfiguration": "GetDataExportConfigurationInput",
+    "GetDataProduct": "GetDataProductInput",
+    "GetDataSource": "GetDataSourceInput",
+    "GetDataSourceRun": "GetDataSourceRunInput",
+    "GetDesignation": "GetDesignationInput",
+    "GetDomain": "GetDomainInput",
+    "GetDomainUnit": "GetDomainUnitInput",
+    "GetEnvironment": "GetEnvironmentInput",
+    "GetEnvironmentAction": "GetEnvironmentActionInput",
+    "GetEnvironmentBlueprint": "GetEnvironmentBlueprintInput",
+    "GetEnvironmentBlueprintConfiguration": "GetEnvironmentBlueprintConfigurationInput",
+    "GetEnvironmentCredentials": "GetEnvironmentCredentialsInput",
+    "GetEnvironmentProfile": "GetEnvironmentProfileInput",
+    "GetFormType": "GetFormTypeInput",
+    "GetGlossary": "GetGlossaryInput",
+    "GetGlossaryTerm": "GetGlossaryTermInput",
+    "GetGroupProfile": "GetGroupProfileInput",
+    "GetIamPortalLoginUrl": "GetIamPortalLoginUrlInput",
+    "GetJobRun": "GetJobRunInput",
+    "GetLineageEvent": "GetLineageEventInput",
+    "GetLineageNode": "GetLineageNodeInput",
+    "GetListing": "GetListingInput",
+    "GetMetadataGenerationRun": "GetMetadataGenerationRunInput",
+    "GetNotebook": "GetNotebookInput",
+    "GetNotebookExport": "GetNotebookExportInput",
+    "GetNotebookRun": "GetNotebookRunInput",
+    "GetProject": "GetProjectInput",
+    "GetProjectProfile": "GetProjectProfileInput",
+    "GetRule": "GetRuleInput",
+    "GetSubscription": "GetSubscriptionInput",
+    "GetSubscriptionGrant": "GetSubscriptionGrantInput",
+    "GetSubscriptionRequestDetails": "GetSubscriptionRequestDetailsInput",
+    "GetSubscriptionTarget": "GetSubscriptionTargetInput",
+    "GetTimeSeriesDataPoint": "GetTimeSeriesDataPointInput",
+    "GetUserProfile": "GetUserProfileInput",
+    "ListAccountPools": "ListAccountPoolsInput",
+    "ListAccountsInAccountPool": "ListAccountsInAccountPoolInput",
+    "ListAssetFilters": "ListAssetFiltersInput",
+    "ListAssetRevisions": "ListAssetRevisionsInput",
+    "ListConnections": "ListConnectionsInput",
+    "ListDataProductRevisions": "ListDataProductRevisionsInput",
+    "ListDataSourceRunActivities": "ListDataSourceRunActivitiesInput",
+    "ListDataSourceRuns": "ListDataSourceRunsInput",
+    "ListDataSources": "ListDataSourcesInput",
+    "ListDesignations": "ListDesignationsInput",
+    "ListDomainUnitsForParent": "ListDomainUnitsForParentInput",
+    "ListDomains": "ListDomainsInput",
+    "ListEntityOwners": "ListEntityOwnersInput",
+    "ListEnvironmentActions": "ListEnvironmentActionsInput",
+    "ListEnvironmentBlueprintConfigurations": "ListEnvironmentBlueprintConfigurationsInput",
+    "ListEnvironmentBlueprints": "ListEnvironmentBlueprintsInput",
+    "ListEnvironmentProfiles": "ListEnvironmentProfilesInput",
+    "ListEnvironments": "ListEnvironmentsInput",
+    "ListJobRuns": "ListJobRunsInput",
+    "ListLineageEvents": "ListLineageEventsInput",
+    "ListLineageNodeHistory": "ListLineageNodeHistoryInput",
+    "ListMetadataGenerationRuns": "ListMetadataGenerationRunsInput",
+    "ListNotebookRuns": "ListNotebookRunsInput",
+    "ListNotebooks": "ListNotebooksInput",
+    "ListNotifications": "ListNotificationsInput",
+    "ListPolicyGrants": "ListPolicyGrantsInput",
+    "ListProjectMemberships": "ListProjectMembershipsInput",
+    "ListProjectProfiles": "ListProjectProfilesInput",
+    "ListProjects": "ListProjectsInput",
+    "ListRules": "ListRulesInput",
+    "ListSubscriptionGrants": "ListSubscriptionGrantsInput",
+    "ListSubscriptionRequests": "ListSubscriptionRequestsInput",
+    "ListSubscriptionTargets": "ListSubscriptionTargetsInput",
+    "ListSubscriptions": "ListSubscriptionsInput",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTimeSeriesDataPoints": "ListTimeSeriesDataPointsInput",
+    "PostLineageEvent": "PostLineageEventInput",
+    "PostTimeSeriesDataPoints": "PostTimeSeriesDataPointsInput",
+    "PutDataExportConfiguration": "PutDataExportConfigurationInput",
+    "PutEnvironmentBlueprintConfiguration": "PutEnvironmentBlueprintConfigurationInput",
+    "QueryGraph": "QueryGraphInput",
+    "RejectPredictions": "RejectPredictionsInput",
+    "RejectSubscriptionRequest": "RejectSubscriptionRequestInput",
+    "RemoveEntityOwner": "RemoveEntityOwnerInput",
+    "RemovePolicyGrant": "RemovePolicyGrantInput",
+    "RevokeSubscription": "RevokeSubscriptionInput",
+    "Search": "SearchInput",
+    "SearchGroupProfiles": "SearchGroupProfilesInput",
+    "SearchListings": "SearchListingsInput",
+    "SearchTypes": "SearchTypesInput",
+    "SearchUserProfiles": "SearchUserProfilesInput",
+    "StartDataSourceRun": "StartDataSourceRunInput",
+    "StartMetadataGenerationRun": "StartMetadataGenerationRunInput",
+    "StartNotebookExport": "StartNotebookExportInput",
+    "StartNotebookImport": "StartNotebookImportInput",
+    "StartNotebookRun": "StartNotebookRunInput",
+    "StartNotebookSync": "StartNotebookSyncInput",
+    "StopNotebookRun": "StopNotebookRunInput",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateAccountPool": "UpdateAccountPoolInput",
+    "UpdateAssetFilter": "UpdateAssetFilterInput",
+    "UpdateConnection": "UpdateConnectionInput",
+    "UpdateDataSource": "UpdateDataSourceInput",
+    "UpdateDesignation": "UpdateDesignationInput",
+    "UpdateDomain": "UpdateDomainInput",
+    "UpdateDomainUnit": "UpdateDomainUnitInput",
+    "UpdateEnvironment": "UpdateEnvironmentInput",
+    "UpdateEnvironmentAction": "UpdateEnvironmentActionInput",
+    "UpdateEnvironmentBlueprint": "UpdateEnvironmentBlueprintInput",
+    "UpdateEnvironmentProfile": "UpdateEnvironmentProfileInput",
+    "UpdateGlossary": "UpdateGlossaryInput",
+    "UpdateGlossaryTerm": "UpdateGlossaryTermInput",
+    "UpdateGroupProfile": "UpdateGroupProfileInput",
+    "UpdateNotebook": "UpdateNotebookInput",
+    "UpdateProject": "UpdateProjectInput",
+    "UpdateProjectProfile": "UpdateProjectProfileInput",
+    "UpdateRootDomainUnitOwner": "UpdateRootDomainUnitOwnerInput",
+    "UpdateRule": "UpdateRuleInput",
+    "UpdateSubscriptionGrantStatus": "UpdateSubscriptionGrantStatusInput",
+    "UpdateSubscriptionRequest": "UpdateSubscriptionRequestInput",
+    "UpdateSubscriptionTarget": "UpdateSubscriptionTargetInput",
+    "UpdateUserProfile": "UpdateUserProfileInput"
+  },
+  "shapes": {
+    "AcceptChoice": {
+      "type": "structure",
+      "required": [
+        "predictionTarget"
+      ],
+      "members": {
+        "predictionTarget": "String",
+        "predictionChoice": "Integer",
+        "editedValue": "EditedValue"
+      }
+    },
+    "AcceptChoices": {
+      "type": "list",
+      "member": "AcceptChoice"
+    },
+    "AcceptPredictionsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "AssetIdentifier",
+        "revision": "Revision",
+        "acceptRule": "AcceptRule",
+        "acceptChoices": "AcceptChoices",
+        "clientToken": "ClientToken"
+      }
+    },
+    "AcceptRule": {
+      "type": "structure",
+      "members": {
+        "rule": "AcceptRuleBehavior",
+        "threshold": "Float"
+      }
+    },
+    "AcceptRuleBehavior": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "NONE"
+      ]
+    },
+    "AcceptSubscriptionRequestInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "SubscriptionRequestId",
+        "decisionComment": "DecisionComment",
+        "assetScopes": "AcceptedAssetScopes",
+        "assetPermissions": "AssetPermissions"
+      }
+    },
+    "AcceptedAssetScope": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "filterIds"
+      ],
+      "members": {
+        "assetId": "AssetId",
+        "filterIds": "FilterIds"
+      }
+    },
+    "AcceptedAssetScopes": {
+      "type": "list",
+      "member": "AcceptedAssetScope"
+    },
+    "AccountInfo": {
+      "type": "structure",
+      "required": [
+        "awsAccountId",
+        "supportedRegions"
+      ],
+      "members": {
+        "awsAccountId": "AwsAccountId",
+        "supportedRegions": "AwsRegionList",
+        "awsAccountName": "AwsAccountName"
+      }
+    },
+    "AccountInfoList": {
+      "type": "list",
+      "min": 1,
+      "max": 25,
+      "member": "AccountInfo"
+    },
+    "AccountPoolId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "AccountPoolList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "AccountPoolId"
+    },
+    "AccountPoolName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[\\w -]+"
+    },
+    "AccountSource": {
+      "type": "structure",
+      "members": {
+        "accounts": "AccountInfoList",
+        "customAccountPoolHandler": "CustomAccountPoolHandler"
+      }
+    },
+    "ActionParameters": {
+      "type": "structure",
+      "members": {
+        "awsConsoleLink": "AwsConsoleLinkParameters"
+      }
+    },
+    "AddEntityOwnerInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityType",
+        "entityIdentifier",
+        "owner"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityType": "DataZoneEntityType",
+        "entityIdentifier": "String",
+        "owner": "OwnerProperties",
+        "clientToken": "ClientToken"
+      }
+    },
+    "AddPolicyGrantInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityType",
+        "entityIdentifier",
+        "policyType",
+        "principal",
+        "detail"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityType": "TargetEntityType",
+        "entityIdentifier": "String",
+        "policyType": "ManagedPolicyType",
+        "principal": "PolicyGrantPrincipal",
+        "detail": "PolicyGrantDetail",
+        "clientToken": "ClientToken"
+      }
+    },
+    "AddToProjectMemberPoolPolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "includeChildDomainUnits": "Boolean"
+      }
+    },
+    "AdditionalAttributes": {
+      "type": "structure",
+      "members": {
+        "formNames": "FormNameList"
+      }
+    },
+    "AggregationDisplayValue": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "AggregationList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "AggregationListItem"
+    },
+    "AggregationListItem": {
+      "type": "structure",
+      "required": [
+        "attribute"
+      ],
+      "members": {
+        "attribute": "Attribute",
+        "displayValue": "AggregationDisplayValue"
+      }
+    },
+    "AllDomainUnitsGrantFilter": {
+      "type": "structure",
+      "members": {}
+    },
+    "AllUsersGrantFilter": {
+      "type": "structure",
+      "members": {}
+    },
+    "AmazonQPropertiesInput": {
+      "type": "structure",
+      "required": [
+        "isEnabled"
+      ],
+      "members": {
+        "isEnabled": "Boolean",
+        "profileArn": "AmazonQPropertiesInputProfileArnString",
+        "authMode": "AmazonQPropertiesInputAuthModeString"
+      }
+    },
+    "AmazonQPropertiesInputAuthModeString": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "AmazonQPropertiesInputProfileArnString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "arn:aws[a-z\\-]*:[a-z0-9\\-]+:[a-z0-9\\-]*:[0-9]*:.*"
+    },
+    "AmazonQPropertiesPatch": {
+      "type": "structure",
+      "required": [
+        "isEnabled"
+      ],
+      "members": {
+        "isEnabled": "Boolean",
+        "profileArn": "AmazonQPropertiesPatchProfileArnString",
+        "authMode": "AmazonQPropertiesPatchAuthModeString"
+      }
+    },
+    "AmazonQPropertiesPatchAuthModeString": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "AmazonQPropertiesPatchProfileArnString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "arn:aws[a-z\\-]*:[a-z0-9\\-]+:[a-z0-9\\-]*:[0-9]*:.*"
+    },
+    "ApplicableAssetTypes": {
+      "type": "list",
+      "member": "TypeName"
+    },
+    "AssetFilterConfiguration": {
+      "type": "structure",
+      "members": {
+        "columnConfiguration": "ColumnFilterConfiguration",
+        "rowConfiguration": "RowFilterConfiguration"
+      }
+    },
+    "AssetId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "AssetIdentifier": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "AssetName": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "AssetPermission": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "permissions"
+      ],
+      "members": {
+        "assetId": "AssetId",
+        "permissions": "Permissions"
+      }
+    },
+    "AssetPermissions": {
+      "type": "list",
+      "member": "AssetPermission"
+    },
+    "AssetTargetNameMap": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "targetName"
+      ],
+      "members": {
+        "assetId": "AssetId",
+        "targetName": "String"
+      }
+    },
+    "AssetTargetNames": {
+      "type": "list",
+      "member": "AssetTargetNameMap"
+    },
+    "AssetTypeIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 513,
+      "pattern": "(?!\\.)[\\w\\.]*\\w"
+    },
+    "AssetTypeIdentifiers": {
+      "type": "list",
+      "member": "AssetTypeIdentifier"
+    },
+    "AssetTypesForRule": {
+      "type": "structure",
+      "required": [
+        "selectionMode"
+      ],
+      "members": {
+        "selectionMode": "RuleScopeSelectionMode",
+        "specificAssetTypes": "RuleAssetTypeList"
+      }
+    },
+    "AssociateEnvironmentRoleInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier",
+        "environmentRoleArn"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "environmentRoleArn": "String"
+      }
+    },
+    "AssociateGovernedTermsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityIdentifier",
+        "entityType",
+        "governedGlossaryTerms"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityIdentifier": "EntityIdentifier",
+        "entityType": "GovernedEntityType",
+        "governedGlossaryTerms": "AssociateGovernedTermsInputGovernedGlossaryTermsList"
+      }
+    },
+    "AssociateGovernedTermsInputGovernedGlossaryTermsList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "GlossaryTermId"
+    },
+    "AthenaPropertiesInput": {
+      "type": "structure",
+      "members": {
+        "workgroupName": "AthenaPropertiesInputWorkgroupNameString"
+      }
+    },
+    "AthenaPropertiesInputWorkgroupNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 64
+    },
+    "AthenaPropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "workgroupName": "AthenaPropertiesPatchWorkgroupNameString"
+      }
+    },
+    "AthenaPropertiesPatchWorkgroupNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 64
+    },
+    "Attribute": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "AttributeEntityType": {
+      "type": "string",
+      "enum": [
+        "ASSET",
+        "LISTING"
+      ]
+    },
+    "AttributeIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "AttributeInput": {
+      "type": "structure",
+      "required": [
+        "attributeIdentifier",
+        "forms"
+      ],
+      "members": {
+        "attributeIdentifier": "AttributeIdentifier",
+        "forms": "FormInputList"
+      }
+    },
+    "Attributes": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "AttributeInput"
+    },
+    "AttributesList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "AttributeIdentifier"
+    },
+    "AuthType": {
+      "type": "string",
+      "enum": [
+        "IAM_IDC",
+        "DISABLED"
+      ]
+    },
+    "AuthenticationConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "authenticationType": "AuthenticationType",
+        "oAuth2Properties": "OAuth2Properties",
+        "secretArn": "AuthenticationConfigurationInputSecretArnString",
+        "kmsKeyArn": "AuthenticationConfigurationInputKmsKeyArnString",
+        "basicAuthenticationCredentials": "BasicAuthenticationCredentials",
+        "customAuthenticationCredentials": "CredentialMap"
+      }
+    },
+    "AuthenticationConfigurationInputKmsKeyArnString": {
+      "type": "string",
+      "pattern": "$|arn:aws[a-z0-9-]*:kms:.*"
+    },
+    "AuthenticationConfigurationInputSecretArnString": {
+      "type": "string",
+      "pattern": "arn:aws(-(cn|us-gov|iso(-[bef])?))?:secretsmanager:.*"
+    },
+    "AuthenticationConfigurationPatch": {
+      "type": "structure",
+      "members": {
+        "secretArn": "AuthenticationConfigurationPatchSecretArnString",
+        "basicAuthenticationCredentials": "BasicAuthenticationCredentials"
+      }
+    },
+    "AuthenticationConfigurationPatchSecretArnString": {
+      "type": "string",
+      "pattern": "arn:aws(-(cn|us-gov|iso(-[bef])?))?:secretsmanager:.*"
+    },
+    "AuthenticationType": {
+      "type": "string",
+      "enum": [
+        "BASIC",
+        "OAUTH2",
+        "CUSTOM"
+      ]
+    },
+    "AuthorizationCodeProperties": {
+      "type": "structure",
+      "members": {
+        "authorizationCode": "AuthorizationCodePropertiesAuthorizationCodeString",
+        "redirectUri": "AuthorizationCodePropertiesRedirectUriString"
+      }
+    },
+    "AuthorizationCodePropertiesAuthorizationCodeString": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "AuthorizationCodePropertiesRedirectUriString": {
+      "type": "string",
+      "min": 0,
+      "max": 512
+    },
+    "AuthorizedPrincipalIdentifier": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9:/._-]*"
+    },
+    "AuthorizedPrincipalIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "AuthorizedPrincipalIdentifier"
+    },
+    "AwsAccount": {
+      "type": "structure",
+      "members": {
+        "awsAccountId": "AwsAccountId",
+        "awsAccountIdPath": "ParameterStorePath"
+      }
+    },
+    "AwsAccountId": {
+      "type": "string",
+      "pattern": "\\d{12}"
+    },
+    "AwsAccountName": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "AwsConsoleLinkParameters": {
+      "type": "structure",
+      "members": {
+        "uri": "String"
+      }
+    },
+    "AwsLocation": {
+      "type": "structure",
+      "members": {
+        "accessRole": "AwsLocationAccessRoleString",
+        "awsAccountId": "AwsAccountId",
+        "awsRegion": "AwsRegion",
+        "iamConnectionId": "ConnectionId"
+      }
+    },
+    "AwsLocationAccessRoleString": {
+      "type": "string",
+      "pattern": "arn:aws[^:]*:iam::\\d{12}:(role|role/service-role)/[\\w+=,.@-]*"
+    },
+    "AwsRegion": {
+      "type": "string",
+      "pattern": "[a-z]{2}-[a-z]{4,10}-\\d"
+    },
+    "AwsRegionList": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "AwsRegion"
+    },
+    "BasicAuthenticationCredentials": {
+      "type": "structure",
+      "members": {
+        "userName": "BasicAuthenticationCredentialsUserNameString",
+        "password": "BasicAuthenticationCredentialsPasswordString"
+      }
+    },
+    "BasicAuthenticationCredentialsPasswordString": {
+      "type": "string",
+      "min": 0,
+      "max": 512,
+      "pattern": ".*"
+    },
+    "BasicAuthenticationCredentialsUserNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 512,
+      "pattern": "\\S+"
+    },
+    "BatchGetAttributesMetadataInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityType",
+        "entityIdentifier",
+        "attributeIdentifiers"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityType": "AttributeEntityType",
+        "entityIdentifier": "EntityId",
+        "entityRevision": "Revision",
+        "attributeIdentifiers": "AttributesList"
+      }
+    },
+    "BatchPutAttributesMetadataInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityType",
+        "entityIdentifier",
+        "attributes"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityType": "AttributeEntityType",
+        "entityIdentifier": "EntityId",
+        "clientToken": "ClientToken",
+        "attributes": "Attributes"
+      }
+    },
+    "BlueprintCategory": {
+      "type": "string",
+      "enum": [
+        "TOOLING"
+      ]
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BusinessNameGenerationConfiguration": {
+      "type": "structure",
+      "members": {
+        "enabled": "Boolean"
+      }
+    },
+    "CancelMetadataGenerationRunInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "MetadataGenerationRunIdentifier"
+      }
+    },
+    "CancelSubscriptionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "SubscriptionId"
+      }
+    },
+    "CedarDesignationPolicy": {
+      "type": "string",
+      "min": 1,
+      "max": 10000
+    },
+    "CellInformation": {
+      "type": "structure",
+      "members": {}
+    },
+    "CellOrder": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "CellInformation"
+    },
+    "ChangeAction": {
+      "type": "string",
+      "enum": [
+        "PUBLISH",
+        "UNPUBLISH"
+      ]
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\x21-\\x7E]+"
+    },
+    "CloudFormationProperties": {
+      "type": "structure",
+      "required": [
+        "templateUrl"
+      ],
+      "members": {
+        "templateUrl": "String"
+      }
+    },
+    "ColumnFilterConfiguration": {
+      "type": "structure",
+      "members": {
+        "includedColumnNames": "ColumnNameList"
+      }
+    },
+    "ColumnNameList": {
+      "type": "list",
+      "member": "String"
+    },
+    "CommitHash": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9]+"
+    },
+    "CommitMessage": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "ComputeConfig": {
+      "type": "structure",
+      "members": {
+        "instanceType": "InstanceType",
+        "environmentVersion": "String"
+      }
+    },
+    "ComputeEnvironments": {
+      "type": "string",
+      "enum": [
+        "SPARK",
+        "ATHENA",
+        "PYTHON"
+      ]
+    },
+    "ComputeEnvironmentsList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "ComputeEnvironments"
+    },
+    "Configuration": {
+      "type": "structure",
+      "members": {
+        "classification": "ConfigurationClassificationString",
+        "properties": "PropertyMap"
+      }
+    },
+    "ConfigurationClassificationString": {
+      "type": "string",
+      "min": 0,
+      "max": 64,
+      "pattern": "[\\w][\\w\\.\\-\\_]*"
+    },
+    "Configurations": {
+      "type": "list",
+      "member": "Configuration"
+    },
+    "ConnectionId": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "ConnectionName": {
+      "type": "string",
+      "min": 0,
+      "max": 64
+    },
+    "ConnectionProperties": {
+      "type": "map",
+      "key": "String",
+      "value": "ConnectionPropertiesValueString"
+    },
+    "ConnectionPropertiesInput": {
+      "type": "structure",
+      "members": {
+        "athenaProperties": "AthenaPropertiesInput",
+        "glueProperties": "GluePropertiesInput",
+        "hyperPodProperties": "HyperPodPropertiesInput",
+        "iamProperties": "IamPropertiesInput",
+        "redshiftProperties": "RedshiftPropertiesInput",
+        "sparkEmrProperties": "SparkEmrPropertiesInput",
+        "sparkGlueProperties": "SparkGluePropertiesInput",
+        "s3Properties": "S3PropertiesInput",
+        "snowflakeProperties": "SnowflakePropertiesInput",
+        "amazonQProperties": "AmazonQPropertiesInput",
+        "mlflowProperties": "MlflowPropertiesInput",
+        "workflowsMwaaProperties": "WorkflowsMwaaPropertiesInput",
+        "workflowsServerlessProperties": "WorkflowsServerlessPropertiesInput",
+        "lakehouseProperties": "LakehousePropertiesInput",
+        "vpcProperties": "VpcPropertiesInput",
+        "gitProperties": "GitPropertiesInput"
+      }
+    },
+    "ConnectionPropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "athenaProperties": "AthenaPropertiesPatch",
+        "glueProperties": "GluePropertiesPatch",
+        "iamProperties": "IamPropertiesPatch",
+        "redshiftProperties": "RedshiftPropertiesPatch",
+        "sparkEmrProperties": "SparkEmrPropertiesPatch",
+        "s3Properties": "S3PropertiesPatch",
+        "snowflakeProperties": "SnowflakePropertiesPatch",
+        "amazonQProperties": "AmazonQPropertiesPatch",
+        "mlflowProperties": "MlflowPropertiesPatch",
+        "lakehouseProperties": "LakehousePropertiesPatch",
+        "vpcProperties": "VpcPropertiesPatch",
+        "gitProperties": "GitPropertiesPatch"
+      }
+    },
+    "ConnectionPropertiesValueString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "ConnectionScope": {
+      "type": "string",
+      "enum": [
+        "DOMAIN",
+        "PROJECT"
+      ]
+    },
+    "ConnectionType": {
+      "type": "string",
+      "enum": [
+        "ATHENA",
+        "BIGQUERY",
+        "DATABRICKS",
+        "DOCUMENTDB",
+        "DYNAMODB",
+        "HYPERPOD",
+        "IAM",
+        "MYSQL",
+        "OPENSEARCH",
+        "ORACLE",
+        "POSTGRESQL",
+        "REDSHIFT",
+        "S3",
+        "SAPHANA",
+        "SNOWFLAKE",
+        "SPARK",
+        "SQLSERVER",
+        "TERADATA",
+        "VERTICA",
+        "WORKFLOWS_MWAA",
+        "AMAZON_Q",
+        "MLFLOW",
+        "VPC",
+        "GIT",
+        "ICEBERGRESTCATALOG",
+        "SNOWFLAKEICEBERGRESTCATALOG",
+        "DATABRICKSICEBERGRESTCATALOG"
+      ]
+    },
+    "ConnectivityProperties": {
+      "type": "structure",
+      "members": {
+        "connectionProperties": "ConnectionProperties",
+        "physicalConnectionRequirements": "PhysicalConnectionRequirements",
+        "name": "ConnectivityPropertiesNameString",
+        "description": "ConnectivityPropertiesDescriptionString",
+        "validateCredentials": "Boolean",
+        "validateForComputeEnvironments": "ComputeEnvironmentsList",
+        "sparkProperties": "PropertyMap",
+        "athenaProperties": "PropertyMap",
+        "pythonProperties": "PropertyMap",
+        "authenticationConfiguration": "AuthenticationConfigurationInput"
+      }
+    },
+    "ConnectivityPropertiesDescriptionString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "[\\u0020-\\uD7FF\\uE000-\\uFFFF\\r\\n\\t]*"
+    },
+    "ConnectivityPropertiesNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 41,
+      "pattern": "[\\u0020-\\uD7FF\\uE000-\\uFFFF\\t]*"
+    },
+    "ConnectivityPropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "description": "ConnectivityPropertiesPatchDescriptionString",
+        "connectionProperties": "ConnectionProperties",
+        "authenticationConfiguration": "AuthenticationConfigurationPatch"
+      }
+    },
+    "ConnectivityPropertiesPatchDescriptionString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "[\\S\\s]*"
+    },
+    "CreateAccountPoolInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name",
+        "resolutionStrategy",
+        "accountSource"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "AccountPoolName",
+        "description": "Description",
+        "resolutionStrategy": "ResolutionStrategy",
+        "accountSource": "AccountSource"
+      }
+    },
+    "CreateAssetFilterInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "assetIdentifier",
+        "name",
+        "configuration"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "assetIdentifier": "AssetId",
+        "name": "FilterName",
+        "description": "Description",
+        "configuration": "AssetFilterConfiguration",
+        "clientToken": "String"
+      }
+    },
+    "CreateAssetInput": {
+      "type": "structure",
+      "required": [
+        "name",
+        "domainIdentifier",
+        "typeIdentifier",
+        "owningProjectIdentifier"
+      ],
+      "members": {
+        "name": "AssetName",
+        "domainIdentifier": "DomainId",
+        "externalIdentifier": "ExternalIdentifier",
+        "typeIdentifier": "AssetTypeIdentifier",
+        "typeRevision": "Revision",
+        "description": "Description",
+        "glossaryTerms": "GlossaryTerms",
+        "formsInput": "FormInputList",
+        "owningProjectIdentifier": "ProjectId",
+        "predictionConfiguration": "PredictionConfiguration",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateAssetRevisionInput": {
+      "type": "structure",
+      "required": [
+        "name",
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "name": "AssetName",
+        "domainIdentifier": "DomainId",
+        "identifier": "AssetIdentifier",
+        "typeRevision": "Revision",
+        "description": "Description",
+        "glossaryTerms": "GlossaryTerms",
+        "formsInput": "FormInputList",
+        "predictionConfiguration": "PredictionConfiguration",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateAssetTypeInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name",
+        "formsInput",
+        "owningProjectIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "TypeName",
+        "description": "Description",
+        "formsInput": "FormsInputMap",
+        "owningProjectIdentifier": "ProjectId"
+      }
+    },
+    "CreateAssetTypePolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "includeChildDomainUnits": "Boolean"
+      }
+    },
+    "CreateConnectionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name"
+      ],
+      "members": {
+        "awsLocation": "AwsLocation",
+        "clientToken": "String",
+        "configurations": "Configurations",
+        "description": "CreateConnectionInputDescriptionString",
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "name": "ConnectionName",
+        "props": "ConnectionPropertiesInput",
+        "enableTrustedIdentityPropagation": "Boolean",
+        "scope": "ConnectionScope"
+      }
+    },
+    "CreateConnectionInputDescriptionString": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "CreateDataProductInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name",
+        "owningProjectIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "DataProductName",
+        "owningProjectIdentifier": "ProjectId",
+        "description": "DataProductDescription",
+        "glossaryTerms": "GlossaryTerms",
+        "formsInput": "FormInputList",
+        "items": "DataProductItems",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateDataProductRevisionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier",
+        "name"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DataProductId",
+        "name": "DataProductName",
+        "description": "DataProductDescription",
+        "glossaryTerms": "GlossaryTerms",
+        "items": "DataProductItems",
+        "formsInput": "FormInputList",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateDataSourceInput": {
+      "type": "structure",
+      "required": [
+        "name",
+        "domainIdentifier",
+        "projectIdentifier",
+        "type"
+      ],
+      "members": {
+        "name": "Name",
+        "description": "Description",
+        "domainIdentifier": "DomainId",
+        "projectIdentifier": "CreateDataSourceInputProjectIdentifierString",
+        "environmentIdentifier": "CreateDataSourceInputEnvironmentIdentifierString",
+        "connectionIdentifier": "CreateDataSourceInputConnectionIdentifierString",
+        "type": "DataSourceType",
+        "configuration": "DataSourceConfigurationInput",
+        "recommendation": "RecommendationConfiguration",
+        "enableSetting": "EnableSetting",
+        "schedule": "ScheduleConfiguration",
+        "publishOnImport": "Boolean",
+        "assetFormsInput": "FormInputList",
+        "clientToken": "String"
+      }
+    },
+    "CreateDataSourceInputConnectionIdentifierString": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "CreateDataSourceInputEnvironmentIdentifierString": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "CreateDataSourceInputProjectIdentifierString": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "CreateDesignationInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name",
+        "policy"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "DesignationName",
+        "description": "Description",
+        "policy": "CedarDesignationPolicy",
+        "deletionProtection": "Boolean"
+      }
+    },
+    "CreateDomainInput": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "String",
+        "description": "String",
+        "singleSignOn": "SingleSignOn",
+        "domainExecutionRole": "RoleArn",
+        "kmsKeyIdentifier": "KmsKeyArn",
+        "tags": "Tags",
+        "domainVersion": "DomainVersion",
+        "serviceRole": "RoleArn",
+        "clientToken": "String"
+      }
+    },
+    "CreateDomainUnitInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name",
+        "parentDomainUnitIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "DomainUnitName",
+        "parentDomainUnitIdentifier": "DomainUnitId",
+        "description": "DomainUnitDescription",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateDomainUnitPolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "includeChildDomainUnits": "Boolean"
+      }
+    },
+    "CreateEnvironmentActionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier",
+        "name",
+        "parameters"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "name": "String",
+        "parameters": "ActionParameters",
+        "description": "String"
+      }
+    },
+    "CreateEnvironmentBlueprintInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name",
+        "provisioningProperties"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "EnvironmentBlueprintName",
+        "description": "Description",
+        "provisioningProperties": "ProvisioningProperties",
+        "userParameters": "CustomParameterList",
+        "blueprintCategory": "BlueprintCategory"
+      }
+    },
+    "CreateEnvironmentInput": {
+      "type": "structure",
+      "required": [
+        "projectIdentifier",
+        "domainIdentifier",
+        "name"
+      ],
+      "members": {
+        "projectIdentifier": "ProjectId",
+        "domainIdentifier": "DomainId",
+        "description": "String",
+        "name": "String",
+        "environmentProfileIdentifier": "EnvironmentProfileId",
+        "userParameters": "EnvironmentParametersList",
+        "glossaryTerms": "GlossaryTerms",
+        "environmentAccountIdentifier": "String",
+        "environmentAccountRegion": "String",
+        "environmentBlueprintIdentifier": "String",
+        "deploymentOrder": "Integer",
+        "environmentConfigurationId": "String",
+        "environmentConfigurationName": "EnvironmentConfigurationName"
+      }
+    },
+    "CreateEnvironmentProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name",
+        "environmentBlueprintIdentifier",
+        "projectIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "EnvironmentProfileName",
+        "description": "Description",
+        "environmentBlueprintIdentifier": "EnvironmentBlueprintId",
+        "projectIdentifier": "ProjectId",
+        "userParameters": "EnvironmentParametersList",
+        "awsAccountId": "AwsAccountId",
+        "awsAccountRegion": "AwsRegion"
+      }
+    },
+    "CreateEnvironmentProfilePolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "domainUnitId": "DomainUnitId"
+      }
+    },
+    "CreateFormTypeInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name",
+        "model",
+        "owningProjectIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "FormTypeName",
+        "model": "Model",
+        "owningProjectIdentifier": "ProjectId",
+        "status": "FormTypeStatus",
+        "description": "Description"
+      }
+    },
+    "CreateFormTypePolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "includeChildDomainUnits": "Boolean"
+      }
+    },
+    "CreateGlossaryInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name",
+        "owningProjectIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "GlossaryName",
+        "owningProjectIdentifier": "ProjectId",
+        "description": "GlossaryDescription",
+        "status": "GlossaryStatus",
+        "usageRestrictions": "GlossaryUsageRestrictions",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateGlossaryPolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "includeChildDomainUnits": "Boolean"
+      }
+    },
+    "CreateGlossaryTermInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "glossaryIdentifier",
+        "name"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "glossaryIdentifier": "GlossaryTermId",
+        "name": "GlossaryTermName",
+        "status": "GlossaryTermStatus",
+        "shortDescription": "ShortDescription",
+        "longDescription": "LongDescription",
+        "termRelations": "TermRelations",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateGroupProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "groupIdentifier": "GroupIdentifier",
+        "rolePrincipalArn": "String",
+        "clientToken": "String"
+      }
+    },
+    "CreateListingChangeSetInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityIdentifier",
+        "entityType",
+        "action"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityIdentifier": "EntityIdentifier",
+        "entityType": "EntityType",
+        "entityRevision": "Revision",
+        "action": "ChangeAction",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateNotebookInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "owningProjectIdentifier",
+        "name"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "owningProjectIdentifier": "ProjectId",
+        "name": "NotebookName",
+        "description": "Description",
+        "type": "NotebookType",
+        "metadata": "Metadata",
+        "parameters": "Parameters",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateProjectFromProjectProfilePolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "includeChildDomainUnits": "Boolean",
+        "projectProfiles": "ProjectProfileList"
+      }
+    },
+    "CreateProjectInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "ProjectName",
+        "description": "Description",
+        "resourceTags": "CreateProjectInputResourceTagsMap",
+        "glossaryTerms": "GlossaryTerms",
+        "domainUnitId": "DomainUnitId",
+        "projectProfileId": "ProjectProfileId",
+        "userParameters": "EnvironmentConfigurationUserParametersList",
+        "projectCategory": "String",
+        "projectExecutionRole": "RoleArn",
+        "membershipAssignments": "ProjectMembershipAssignments"
+      }
+    },
+    "CreateProjectInputResourceTagsMap": {
+      "type": "map",
+      "min": 0,
+      "max": 25,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "CreateProjectMembershipInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "projectIdentifier",
+        "member",
+        "designation"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "projectIdentifier": "ProjectId",
+        "member": "Member",
+        "designation": "UserDesignation",
+        "userCreatedDesignationId": "DesignationId"
+      }
+    },
+    "CreateProjectPolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "includeChildDomainUnits": "Boolean"
+      }
+    },
+    "CreateProjectProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "ProjectProfileName",
+        "description": "Description",
+        "status": "Status",
+        "projectResourceTags": "ProjectResourceTagParameters",
+        "allowCustomProjectResourceTags": "Boolean",
+        "projectResourceTagsDescription": "Description",
+        "environmentConfigurations": "EnvironmentConfigurationsList",
+        "domainUnitIdentifier": "DomainUnitId"
+      }
+    },
+    "CreateRuleInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "name",
+        "target",
+        "action",
+        "scope",
+        "detail"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "RuleName",
+        "target": "RuleTarget",
+        "action": "RuleAction",
+        "scope": "RuleScope",
+        "detail": "RuleDetail",
+        "description": "Description",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateSubscriptionGrantInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier",
+        "grantedEntity"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "subscriptionTargetIdentifier": "SubscriptionTargetId",
+        "grantedEntity": "GrantedEntityInput",
+        "assetTargetNames": "AssetTargetNames",
+        "clientToken": "String"
+      }
+    },
+    "CreateSubscriptionRequestInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "subscribedPrincipals",
+        "subscribedListings",
+        "requestReason"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "subscribedPrincipals": "SubscribedPrincipalInputs",
+        "subscribedListings": "SubscribedListingInputs",
+        "requestReason": "RequestReason",
+        "clientToken": "String",
+        "metadataForms": "MetadataFormInputs",
+        "assetPermissions": "AssetPermissions",
+        "assetScopes": "AcceptedAssetScopes"
+      }
+    },
+    "CreateSubscriptionTargetInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier",
+        "name",
+        "type",
+        "subscriptionTargetConfig",
+        "authorizedPrincipals",
+        "manageAccessRole",
+        "applicableAssetTypes"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "name": "SubscriptionTargetName",
+        "type": "String",
+        "subscriptionTargetConfig": "SubscriptionTargetForms",
+        "authorizedPrincipals": "AuthorizedPrincipalIdentifiers",
+        "manageAccessRole": "IamRoleArn",
+        "applicableAssetTypes": "ApplicableAssetTypes",
+        "provider": "String",
+        "clientToken": "String",
+        "subscriptionGrantCreationMode": "SubscriptionGrantCreationMode"
+      }
+    },
+    "CreateUserProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "userIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "userIdentifier": "UserIdentifier",
+        "userType": "UserType",
+        "sessionName": "CreateUserProfileInputSessionNameString",
+        "clientToken": "String"
+      }
+    },
+    "CreateUserProfileInputSessionNameString": {
+      "type": "string",
+      "min": 2,
+      "max": 64
+    },
+    "CredentialMap": {
+      "type": "map",
+      "key": "CredentialMapKeyString",
+      "value": "CredentialMapValueString"
+    },
+    "CredentialMapKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "CredentialMapValueString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "CronString": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": ".*cron\\((\\b[0-5]?[0-9]\\b) (\\b2[0-3]\\b|\\b[0-1]?[0-9]\\b) ([-?*,/\\dLW]){1,83} ([-*,/\\d]|[a-zA-Z]{3}){1,23} ([-?#*,/\\dL]|[a-zA-Z]{3}){1,13} ([^\\)]+)\\).*"
+    },
+    "CustomAccountPoolHandler": {
+      "type": "structure",
+      "required": [
+        "lambdaFunctionArn"
+      ],
+      "members": {
+        "lambdaFunctionArn": "LambdaFunctionArn",
+        "lambdaExecutionRoleArn": "LambdaExecutionRoleArn"
+      }
+    },
+    "CustomParameter": {
+      "type": "structure",
+      "required": [
+        "keyName",
+        "fieldType"
+      ],
+      "members": {
+        "keyName": "CustomParameterKeyNameString",
+        "description": "Description",
+        "fieldType": "String",
+        "defaultValue": "String",
+        "isEditable": "Boolean",
+        "isOptional": "Boolean",
+        "isUpdateSupported": "Boolean"
+      }
+    },
+    "CustomParameterKeyNameString": {
+      "type": "string",
+      "pattern": "[a-zA-Z_][a-zA-Z0-9_]*"
+    },
+    "CustomParameterList": {
+      "type": "list",
+      "member": "CustomParameter"
+    },
+    "DataAssetActivityStatus": {
+      "type": "string",
+      "enum": [
+        "FAILED",
+        "PUBLISHING_FAILED",
+        "SUCCEEDED_CREATED",
+        "SUCCEEDED_UPDATED",
+        "SKIPPED_ALREADY_IMPORTED",
+        "SKIPPED_ARCHIVED",
+        "SKIPPED_NO_ACCESS",
+        "UNCHANGED"
+      ]
+    },
+    "DataProductDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "DataProductId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "DataProductItem": {
+      "type": "structure",
+      "required": [
+        "itemType",
+        "identifier"
+      ],
+      "members": {
+        "itemType": "DataProductItemType",
+        "identifier": "EntityIdentifier",
+        "revision": "Revision",
+        "glossaryTerms": "ItemGlossaryTerms"
+      }
+    },
+    "DataProductItemType": {
+      "type": "string",
+      "enum": [
+        "ASSET"
+      ]
+    },
+    "DataProductItems": {
+      "type": "list",
+      "min": 1,
+      "member": "DataProductItem"
+    },
+    "DataProductName": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "DataSourceConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "glueRunConfiguration": "GlueRunConfigurationInput",
+        "redshiftRunConfiguration": "RedshiftRunConfigurationInput",
+        "sageMakerRunConfiguration": "SageMakerRunConfigurationInput"
+      }
+    },
+    "DataSourceId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "DataSourceRunId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "DataSourceRunStatus": {
+      "type": "string",
+      "enum": [
+        "REQUESTED",
+        "RUNNING",
+        "FAILED",
+        "PARTIALLY_SUCCEEDED",
+        "SUCCESS"
+      ]
+    },
+    "DataSourceStatus": {
+      "type": "string",
+      "enum": [
+        "CREATING",
+        "FAILED_CREATION",
+        "READY",
+        "UPDATING",
+        "FAILED_UPDATE",
+        "RUNNING",
+        "DELETING",
+        "FAILED_DELETION"
+      ]
+    },
+    "DataSourceType": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "DataZoneEntityType": {
+      "type": "string",
+      "enum": [
+        "DOMAIN_UNIT"
+      ]
+    },
+    "DecisionComment": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "DeleteAccountPoolInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "AccountPoolId"
+      }
+    },
+    "DeleteAssetFilterInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "assetIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "assetIdentifier": "AssetId",
+        "identifier": "FilterId"
+      }
+    },
+    "DeleteAssetInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "AssetIdentifier"
+      }
+    },
+    "DeleteAssetTypeInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "AssetTypeIdentifier"
+      }
+    },
+    "DeleteConnectionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "ConnectionId"
+      }
+    },
+    "DeleteDataExportConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId"
+      }
+    },
+    "DeleteDataProductInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DataProductId"
+      }
+    },
+    "DeleteDataSourceInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DataSourceId",
+        "clientToken": "String",
+        "retainPermissionsOnRevokeFailure": "Boolean"
+      }
+    },
+    "DeleteDesignationInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DesignationId"
+      }
+    },
+    "DeleteDomainInput": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "DomainId",
+        "clientToken": "String",
+        "skipDeletionCheck": "Boolean",
+        "cascadeDelete": "Boolean"
+      }
+    },
+    "DeleteDomainUnitInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DomainUnitId"
+      }
+    },
+    "DeleteEnvironmentActionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "identifier": "String"
+      }
+    },
+    "DeleteEnvironmentBlueprintConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentBlueprintIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentBlueprintIdentifier": "EnvironmentBlueprintId"
+      }
+    },
+    "DeleteEnvironmentBlueprintInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "EnvironmentBlueprintId"
+      }
+    },
+    "DeleteEnvironmentInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "EnvironmentId"
+      }
+    },
+    "DeleteEnvironmentProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "EnvironmentProfileId"
+      }
+    },
+    "DeleteFormTypeInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "formTypeIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "formTypeIdentifier": "FormTypeIdentifier"
+      }
+    },
+    "DeleteGlossaryInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "GlossaryId"
+      }
+    },
+    "DeleteGlossaryTermInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "GlossaryTermId"
+      }
+    },
+    "DeleteLineageEventInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "LineageEventIdentifier"
+      }
+    },
+    "DeleteListingInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "ListingId"
+      }
+    },
+    "DeleteNotebookInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "NotebookId"
+      }
+    },
+    "DeleteProjectInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "ProjectId",
+        "skipDeletionCheck": "Boolean"
+      }
+    },
+    "DeleteProjectMembershipInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "projectIdentifier",
+        "member"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "projectIdentifier": "ProjectId",
+        "member": "Member"
+      }
+    },
+    "DeleteProjectProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "ProjectProfileId"
+      }
+    },
+    "DeleteRuleInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "RuleId"
+      }
+    },
+    "DeleteSubscriptionGrantInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "SubscriptionGrantId"
+      }
+    },
+    "DeleteSubscriptionRequestInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "SubscriptionRequestId"
+      }
+    },
+    "DeleteSubscriptionTargetInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "identifier": "SubscriptionTargetId"
+      }
+    },
+    "DeleteTimeSeriesDataPointsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityIdentifier",
+        "entityType",
+        "formName"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityIdentifier": "EntityIdentifier",
+        "entityType": "TimeSeriesEntityType",
+        "formName": "TimeSeriesFormName",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeploymentMode": {
+      "type": "string",
+      "enum": [
+        "ON_CREATE",
+        "ON_DEMAND"
+      ]
+    },
+    "DeploymentOrder": {
+      "type": "integer",
+      "min": 0,
+      "max": 16
+    },
+    "Description": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "DesignationId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "DesignationName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[\\w -]+"
+    },
+    "DisassociateEnvironmentRoleInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier",
+        "environmentRoleArn"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "environmentRoleArn": "String"
+      }
+    },
+    "DisassociateGovernedTermsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityIdentifier",
+        "entityType",
+        "governedGlossaryTerms"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityIdentifier": "EntityIdentifier",
+        "entityType": "GovernedEntityType",
+        "governedGlossaryTerms": "DisassociateGovernedTermsInputGovernedGlossaryTermsList"
+      }
+    },
+    "DisassociateGovernedTermsInputGovernedGlossaryTermsList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "GlossaryTermId"
+    },
+    "DomainId": {
+      "type": "string",
+      "pattern": "dzd[-_][a-zA-Z0-9_-]{1,36}"
+    },
+    "DomainStatus": {
+      "type": "string",
+      "enum": [
+        "CREATING",
+        "AVAILABLE",
+        "CREATION_FAILED",
+        "DELETING",
+        "DELETED",
+        "DELETION_FAILED"
+      ]
+    },
+    "DomainUnitDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "DomainUnitDesignation": {
+      "type": "string",
+      "enum": [
+        "OWNER"
+      ]
+    },
+    "DomainUnitFilterForProject": {
+      "type": "structure",
+      "required": [
+        "domainUnit"
+      ],
+      "members": {
+        "domainUnit": "DomainUnitId",
+        "includeChildDomainUnits": "Boolean"
+      }
+    },
+    "DomainUnitGrantFilter": {
+      "type": "structure",
+      "members": {
+        "allDomainUnitsGrantFilter": "AllDomainUnitsGrantFilter"
+      }
+    },
+    "DomainUnitId": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-z0-9_\\-]+"
+    },
+    "DomainUnitName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\w -]+"
+    },
+    "DomainUnitPolicyGrantPrincipal": {
+      "type": "structure",
+      "required": [
+        "domainUnitDesignation"
+      ],
+      "members": {
+        "domainUnitDesignation": "DomainUnitDesignation",
+        "domainUnitIdentifier": "DomainUnitId",
+        "domainUnitGrantFilter": "DomainUnitGrantFilter"
+      }
+    },
+    "DomainUnitTarget": {
+      "type": "structure",
+      "required": [
+        "domainUnitId"
+      ],
+      "members": {
+        "domainUnitId": "DomainUnitId",
+        "includeChildDomainUnits": "Boolean"
+      }
+    },
+    "DomainVersion": {
+      "type": "string",
+      "enum": [
+        "V1",
+        "V2"
+      ]
+    },
+    "EdgeDirection": {
+      "type": "string",
+      "enum": [
+        "UPSTREAM",
+        "DOWNSTREAM"
+      ]
+    },
+    "EditedValue": {
+      "type": "string",
+      "min": 1,
+      "max": 5000
+    },
+    "EnableSetting": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "EnabledRegionList": {
+      "type": "list",
+      "min": 0,
+      "member": "RegionName"
+    },
+    "EncryptionConfiguration": {
+      "type": "structure",
+      "members": {
+        "kmsKeyArn": "String",
+        "sseAlgorithm": "String"
+      }
+    },
+    "EntityId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "EntityIdentifier": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "EntityPattern": {
+      "type": "structure",
+      "required": [
+        "entityType",
+        "identifier"
+      ],
+      "members": {
+        "entityType": "GraphEntityType",
+        "identifier": "EntityPatternIdentifierString",
+        "filters": "FilterClause"
+      }
+    },
+    "EntityPatternIdentifierString": {
+      "type": "string",
+      "min": 1,
+      "max": 2086
+    },
+    "EntityType": {
+      "type": "string",
+      "enum": [
+        "ASSET",
+        "DATA_PRODUCT"
+      ]
+    },
+    "EnvironmentBlueprintId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "EnvironmentBlueprintName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[\\w -]+"
+    },
+    "EnvironmentConfig": {
+      "type": "structure",
+      "members": {
+        "imageVersion": "String",
+        "packageConfig": "PackageConfig"
+      }
+    },
+    "EnvironmentConfiguration": {
+      "type": "structure",
+      "required": [
+        "name",
+        "environmentBlueprintId"
+      ],
+      "members": {
+        "name": "EnvironmentConfigurationName",
+        "id": "EnvironmentConfigurationId",
+        "environmentBlueprintId": "EnvironmentBlueprintId",
+        "description": "Description",
+        "deploymentMode": "DeploymentMode",
+        "configurationParameters": "EnvironmentConfigurationParametersDetails",
+        "awsAccount": "AwsAccount",
+        "accountPools": "AccountPoolList",
+        "awsRegion": "Region",
+        "deploymentOrder": "DeploymentOrder"
+      }
+    },
+    "EnvironmentConfigurationId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "EnvironmentConfigurationName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[\\w -]+"
+    },
+    "EnvironmentConfigurationParameter": {
+      "type": "structure",
+      "members": {
+        "name": "EnvironmentConfigurationParameterName",
+        "value": "String",
+        "isEditable": "Boolean"
+      }
+    },
+    "EnvironmentConfigurationParameterName": {
+      "type": "string",
+      "pattern": "[a-zA-Z_][a-zA-Z0-9_]*"
+    },
+    "EnvironmentConfigurationParametersDetails": {
+      "type": "structure",
+      "members": {
+        "ssmPath": "ParameterStorePath",
+        "parameterOverrides": "EnvironmentConfigurationParametersList",
+        "resolvedParameters": "EnvironmentConfigurationParametersList"
+      }
+    },
+    "EnvironmentConfigurationParametersList": {
+      "type": "list",
+      "member": "EnvironmentConfigurationParameter"
+    },
+    "EnvironmentConfigurationUserParameter": {
+      "type": "structure",
+      "members": {
+        "environmentId": "EnvironmentId",
+        "environmentResolvedAccount": "EnvironmentResolvedAccount",
+        "environmentConfigurationName": "EnvironmentConfigurationName",
+        "environmentParameters": "EnvironmentParametersList"
+      }
+    },
+    "EnvironmentConfigurationUserParametersList": {
+      "type": "list",
+      "member": "EnvironmentConfigurationUserParameter"
+    },
+    "EnvironmentConfigurationsList": {
+      "type": "list",
+      "member": "EnvironmentConfiguration"
+    },
+    "EnvironmentDeploymentDetails": {
+      "type": "structure",
+      "members": {
+        "overallDeploymentStatus": "OverallDeploymentStatus",
+        "environmentFailureReasons": "EnvironmentFailureReasons"
+      }
+    },
+    "EnvironmentError": {
+      "type": "structure",
+      "required": [
+        "message"
+      ],
+      "members": {
+        "code": "String",
+        "message": "String"
+      }
+    },
+    "EnvironmentFailureReasons": {
+      "type": "map",
+      "key": "String",
+      "value": "EnvironmentFailureReasonsList"
+    },
+    "EnvironmentFailureReasonsList": {
+      "type": "list",
+      "member": "EnvironmentError"
+    },
+    "EnvironmentId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "EnvironmentParameter": {
+      "type": "structure",
+      "members": {
+        "name": "String",
+        "value": "String"
+      }
+    },
+    "EnvironmentParametersList": {
+      "type": "list",
+      "member": "EnvironmentParameter"
+    },
+    "EnvironmentProfileId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{0,36}"
+    },
+    "EnvironmentProfileName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[\\w -]+"
+    },
+    "EnvironmentResolvedAccount": {
+      "type": "structure",
+      "required": [
+        "awsAccountId",
+        "regionName"
+      ],
+      "members": {
+        "awsAccountId": "AwsAccountId",
+        "regionName": "AwsRegion",
+        "sourceAccountPoolId": "AccountPoolId"
+      }
+    },
+    "EnvironmentStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "CREATING",
+        "UPDATING",
+        "DELETING",
+        "CREATE_FAILED",
+        "UPDATE_FAILED",
+        "DELETE_FAILED",
+        "VALIDATION_FAILED",
+        "SUSPENDED",
+        "DISABLED",
+        "EXPIRED",
+        "DELETED",
+        "INACCESSIBLE"
+      ]
+    },
+    "EqualToExpression": {
+      "type": "structure",
+      "required": [
+        "columnName",
+        "value"
+      ],
+      "members": {
+        "columnName": "String",
+        "value": "String"
+      }
+    },
+    "ExportId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "ExternalIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 600
+    },
+    "FailureCause": {
+      "type": "structure",
+      "members": {
+        "message": "String"
+      }
+    },
+    "FileFormat": {
+      "type": "string",
+      "enum": [
+        "PDF",
+        "IPYNB"
+      ]
+    },
+    "FileName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "Filter": {
+      "type": "structure",
+      "required": [
+        "attribute"
+      ],
+      "members": {
+        "attribute": "Attribute",
+        "value": "FilterValueString",
+        "intValue": "Long",
+        "operator": "FilterOperator"
+      }
+    },
+    "FilterClause": {
+      "type": "structure",
+      "members": {
+        "filter": "Filter",
+        "and": "FilterList",
+        "or": "FilterList"
+      }
+    },
+    "FilterExpression": {
+      "type": "structure",
+      "required": [
+        "type",
+        "expression"
+      ],
+      "members": {
+        "type": "FilterExpressionType",
+        "expression": "FilterExpressionExpressionString"
+      }
+    },
+    "FilterExpressionExpressionString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "FilterExpressionType": {
+      "type": "string",
+      "enum": [
+        "INCLUDE",
+        "EXCLUDE"
+      ]
+    },
+    "FilterExpressions": {
+      "type": "list",
+      "member": "FilterExpression"
+    },
+    "FilterId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "FilterIds": {
+      "type": "list",
+      "member": "FilterId"
+    },
+    "FilterList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "FilterClause"
+    },
+    "FilterName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[\\w -]+"
+    },
+    "FilterOperator": {
+      "type": "string",
+      "enum": [
+        "EQ",
+        "LE",
+        "LT",
+        "GE",
+        "GT",
+        "TEXT_SEARCH"
+      ]
+    },
+    "FilterStatus": {
+      "type": "string",
+      "enum": [
+        "VALID",
+        "INVALID"
+      ]
+    },
+    "FilterValueString": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "Float": {
+      "type": "float"
+    },
+    "FormEntryInput": {
+      "type": "structure",
+      "required": [
+        "typeIdentifier",
+        "typeRevision"
+      ],
+      "members": {
+        "typeIdentifier": "FormTypeIdentifier",
+        "typeRevision": "Revision",
+        "required": "Boolean"
+      }
+    },
+    "FormInput": {
+      "type": "structure",
+      "required": [
+        "formName"
+      ],
+      "members": {
+        "formName": "FormName",
+        "typeIdentifier": "FormTypeIdentifier",
+        "typeRevision": "RevisionInput",
+        "content": "FormInputContentString"
+      }
+    },
+    "FormInputContentString": {
+      "type": "string",
+      "min": 0,
+      "max": 300000
+    },
+    "FormInputList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "FormInput"
+    },
+    "FormName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "(?![0-9_])\\w+$|^_\\w*[a-zA-Z0-9]\\w*"
+    },
+    "FormNameList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "FormName"
+    },
+    "FormTypeIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 385,
+      "pattern": "(?!\\.)[\\w\\.]*\\w"
+    },
+    "FormTypeName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "(amazon.datazone.)?(?![0-9_])\\w+$|^_\\w*[a-zA-Z0-9]\\w*"
+    },
+    "FormTypeStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "FormsInputMap": {
+      "type": "map",
+      "min": 0,
+      "max": 10,
+      "key": "FormName",
+      "value": "FormEntryInput"
+    },
+    "GetAccountPoolInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "AccountPoolId"
+      }
+    },
+    "GetAssetFilterInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "assetIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "assetIdentifier": "AssetId",
+        "identifier": "FilterId"
+      }
+    },
+    "GetAssetInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "AssetIdentifier",
+        "revision": "Revision"
+      }
+    },
+    "GetAssetTypeInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "AssetTypeIdentifier",
+        "revision": "Revision"
+      }
+    },
+    "GetConnectionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "ConnectionId",
+        "withSecret": "Boolean"
+      }
+    },
+    "GetDataExportConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId"
+      }
+    },
+    "GetDataProductInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DataProductId",
+        "revision": "Revision"
+      }
+    },
+    "GetDataSourceInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DataSourceId"
+      }
+    },
+    "GetDataSourceRunInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DataSourceRunId"
+      }
+    },
+    "GetDesignationInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DesignationId"
+      }
+    },
+    "GetDomainInput": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "DomainId"
+      }
+    },
+    "GetDomainUnitInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DomainUnitId"
+      }
+    },
+    "GetEnvironmentActionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "identifier": "String"
+      }
+    },
+    "GetEnvironmentBlueprintConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentBlueprintIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentBlueprintIdentifier": "EnvironmentBlueprintId"
+      }
+    },
+    "GetEnvironmentBlueprintInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "EnvironmentBlueprintId"
+      }
+    },
+    "GetEnvironmentCredentialsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId"
+      }
+    },
+    "GetEnvironmentInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "EnvironmentId"
+      }
+    },
+    "GetEnvironmentProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "EnvironmentProfileId"
+      }
+    },
+    "GetFormTypeInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "formTypeIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "formTypeIdentifier": "FormTypeIdentifier",
+        "revision": "Revision"
+      }
+    },
+    "GetGlossaryInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "GlossaryId"
+      }
+    },
+    "GetGlossaryTermInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "GlossaryTermId"
+      }
+    },
+    "GetGroupProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "groupIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "groupIdentifier": "GroupIdentifier"
+      }
+    },
+    "GetIamPortalLoginUrlInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId"
+      }
+    },
+    "GetJobRunInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "RunIdentifier"
+      }
+    },
+    "GetLineageEventInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "LineageEventIdentifier"
+      }
+    },
+    "GetLineageNodeInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "LineageNodeIdentifier",
+        "eventTimestamp": "Timestamp"
+      }
+    },
+    "GetListingInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "ListingId",
+        "listingRevision": "Revision"
+      }
+    },
+    "GetMetadataGenerationRunInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "MetadataGenerationRunIdentifier",
+        "type": "MetadataGenerationRunType"
+      }
+    },
+    "GetNotebookExportInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "ExportId"
+      }
+    },
+    "GetNotebookInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "NotebookId"
+      }
+    },
+    "GetNotebookRunInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "NotebookRunId"
+      }
+    },
+    "GetProjectInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "ProjectId"
+      }
+    },
+    "GetProjectProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "ProjectProfileId"
+      }
+    },
+    "GetRuleInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "RuleId",
+        "revision": "Revision"
+      }
+    },
+    "GetSubscriptionGrantInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "SubscriptionGrantId"
+      }
+    },
+    "GetSubscriptionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "SubscriptionId"
+      }
+    },
+    "GetSubscriptionRequestDetailsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "SubscriptionRequestId"
+      }
+    },
+    "GetSubscriptionTargetInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "identifier": "SubscriptionTargetId"
+      }
+    },
+    "GetTimeSeriesDataPointInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityIdentifier",
+        "entityType",
+        "identifier",
+        "formName"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityIdentifier": "EntityIdentifier",
+        "entityType": "TimeSeriesEntityType",
+        "identifier": "TimeSeriesDataPointIdentifier",
+        "formName": "TimeSeriesFormName"
+      }
+    },
+    "GetUserProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "userIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "userIdentifier": "UserIdentifier",
+        "type": "UserProfileType",
+        "sessionName": "GetUserProfileInputSessionNameString"
+      }
+    },
+    "GetUserProfileInputSessionNameString": {
+      "type": "string",
+      "min": 2,
+      "max": 64
+    },
+    "GitBranch": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "GitConnectionId": {
+      "type": "string",
+      "min": 1,
+      "max": 40,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "GitMetadata": {
+      "type": "structure",
+      "required": [
+        "connectionId",
+        "repository",
+        "branch",
+        "commitHash"
+      ],
+      "members": {
+        "connectionId": "GitConnectionId",
+        "repository": "GitRepository",
+        "branch": "GitBranch",
+        "commitHash": "CommitHash",
+        "fileName": "FileName",
+        "committedAt": "Timestamp",
+        "commitMessage": "CommitMessage"
+      }
+    },
+    "GitPropertiesInput": {
+      "type": "structure",
+      "required": [
+        "codeConnectionArn",
+        "repositoryId",
+        "defaultBranch"
+      ],
+      "members": {
+        "codeConnectionArn": "GitPropertiesInputCodeConnectionArnString",
+        "repositoryId": "GitPropertiesInputRepositoryIdString",
+        "defaultBranch": "GitPropertiesInputDefaultBranchString"
+      }
+    },
+    "GitPropertiesInputCodeConnectionArnString": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "arn:aws[^:]*:(codeconnections|codestar-connections):[a-z0-9\\-]+:\\d{12}:connection/[a-f0-9\\-]+"
+    },
+    "GitPropertiesInputDefaultBranchString": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9._\\-/]+"
+    },
+    "GitPropertiesInputRepositoryIdString": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9._\\-]+(/[a-zA-Z0-9._\\-]+)+"
+    },
+    "GitPropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "codeConnectionArn": "GitPropertiesPatchCodeConnectionArnString",
+        "defaultBranch": "GitPropertiesPatchDefaultBranchString"
+      }
+    },
+    "GitPropertiesPatchCodeConnectionArnString": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "arn:aws[^:]*:(codeconnections|codestar-connections):[a-z0-9\\-]+:\\d{12}:connection/[a-f0-9\\-]+"
+    },
+    "GitPropertiesPatchDefaultBranchString": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9._\\-/]+"
+    },
+    "GitRepository": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "GlobalParameterMap": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "GlossaryDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 4096
+    },
+    "GlossaryId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "GlossaryName": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "GlossaryStatus": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "GlossaryTermEnforcementDetail": {
+      "type": "structure",
+      "members": {
+        "requiredGlossaryTermIds": "GlossaryTermIdentifiers"
+      }
+    },
+    "GlossaryTermId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "GlossaryTermIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "GlossaryTermId"
+    },
+    "GlossaryTermName": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "GlossaryTermStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "GlossaryTerms": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "GlossaryTermId"
+    },
+    "GlossaryUsageRestriction": {
+      "type": "string",
+      "enum": [
+        "ASSET_GOVERNED_TERMS"
+      ]
+    },
+    "GlossaryUsageRestrictions": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "GlossaryUsageRestriction"
+    },
+    "GlueConnectionInput": {
+      "type": "structure",
+      "members": {
+        "connectionProperties": "ConnectionProperties",
+        "physicalConnectionRequirements": "PhysicalConnectionRequirements",
+        "name": "GlueConnectionInputNameString",
+        "description": "String",
+        "connectionType": "GlueConnectionType",
+        "matchCriteria": "GlueConnectionInputMatchCriteriaString",
+        "validateCredentials": "Boolean",
+        "validateForComputeEnvironments": "ComputeEnvironmentsList",
+        "sparkProperties": "PropertyMap",
+        "athenaProperties": "PropertyMap",
+        "pythonProperties": "PropertyMap",
+        "authenticationConfiguration": "AuthenticationConfigurationInput"
+      }
+    },
+    "GlueConnectionInputMatchCriteriaString": {
+      "type": "string",
+      "min": 0,
+      "max": 10
+    },
+    "GlueConnectionInputNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "GlueConnectionName": {
+      "type": "string",
+      "min": 0,
+      "max": 64
+    },
+    "GlueConnectionNames": {
+      "type": "list",
+      "min": 1,
+      "max": 16,
+      "member": "GlueConnectionName"
+    },
+    "GlueConnectionPatch": {
+      "type": "structure",
+      "members": {
+        "description": "String",
+        "connectionProperties": "ConnectionProperties",
+        "authenticationConfiguration": "AuthenticationConfigurationPatch"
+      }
+    },
+    "GlueConnectionType": {
+      "type": "string",
+      "enum": [
+        "SNOWFLAKE",
+        "BIGQUERY",
+        "DOCUMENTDB",
+        "DYNAMODB",
+        "MYSQL",
+        "OPENSEARCH",
+        "ORACLE",
+        "POSTGRESQL",
+        "REDSHIFT",
+        "SAPHANA",
+        "SQLSERVER",
+        "TERADATA",
+        "VERTICA",
+        "ICEBERGRESTCATALOG",
+        "SNOWFLAKEICEBERGRESTCATALOG",
+        "DATABRICKSICEBERGRESTCATALOG"
+      ]
+    },
+    "GlueOAuth2Credentials": {
+      "type": "structure",
+      "members": {
+        "userManagedClientApplicationClientSecret": "GlueOAuth2CredentialsUserManagedClientApplicationClientSecretString",
+        "accessToken": "GlueOAuth2CredentialsAccessTokenString",
+        "refreshToken": "GlueOAuth2CredentialsRefreshTokenString",
+        "jwtToken": "GlueOAuth2CredentialsJwtTokenString"
+      }
+    },
+    "GlueOAuth2CredentialsAccessTokenString": {
+      "type": "string",
+      "min": 0,
+      "max": 4096,
+      "pattern": "[\\x20-\\x7E]*"
+    },
+    "GlueOAuth2CredentialsJwtTokenString": {
+      "type": "string",
+      "min": 0,
+      "max": 8000,
+      "pattern": "([a-zA-Z0-9_=]+)\\.([a-zA-Z0-9_=]+)\\.([a-zA-Z0-9_\\-\\+\\/=]*)"
+    },
+    "GlueOAuth2CredentialsRefreshTokenString": {
+      "type": "string",
+      "min": 0,
+      "max": 4096,
+      "pattern": "[\\x20-\\x7E]*"
+    },
+    "GlueOAuth2CredentialsUserManagedClientApplicationClientSecretString": {
+      "type": "string",
+      "min": 0,
+      "max": 512,
+      "pattern": "[\\x20-\\x7E]*"
+    },
+    "GluePropertiesInput": {
+      "type": "structure",
+      "members": {
+        "glueConnectionInput": "GlueConnectionInput"
+      }
+    },
+    "GluePropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "glueConnectionInput": "GlueConnectionPatch"
+      }
+    },
+    "GlueRunConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "relationalFilterConfigurations"
+      ],
+      "members": {
+        "dataAccessRole": "GlueRunConfigurationInputDataAccessRoleString",
+        "relationalFilterConfigurations": "RelationalFilterConfigurations",
+        "autoImportDataQualityResult": "Boolean",
+        "catalogName": "GlueRunConfigurationInputCatalogNameString"
+      }
+    },
+    "GlueRunConfigurationInputCatalogNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "GlueRunConfigurationInputDataAccessRoleString": {
+      "type": "string",
+      "pattern": "arn:aws[^:]*:iam::\\d{12}:(role|role/service-role)/[\\w+=,.@-]{1,128}"
+    },
+    "GovernedEntityType": {
+      "type": "string",
+      "enum": [
+        "ASSET"
+      ]
+    },
+    "GrantIdentifier": {
+      "type": "string",
+      "pattern": "[A-Za-z0-9+/]{10}"
+    },
+    "GrantedEntityInput": {
+      "type": "structure",
+      "members": {
+        "listing": "ListingRevisionInput"
+      }
+    },
+    "GraphEntityType": {
+      "type": "string",
+      "enum": [
+        "LINEAGE_NODE"
+      ]
+    },
+    "GreaterThanExpression": {
+      "type": "structure",
+      "required": [
+        "columnName",
+        "value"
+      ],
+      "members": {
+        "columnName": "String",
+        "value": "String"
+      }
+    },
+    "GreaterThanOrEqualToExpression": {
+      "type": "structure",
+      "required": [
+        "columnName",
+        "value"
+      ],
+      "members": {
+        "columnName": "String",
+        "value": "String"
+      }
+    },
+    "GroupIdentifier": {
+      "type": "string",
+      "pattern": ".*(^([0-9a-f]{10}-|)[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$|[\\p{L}\\p{M}\\p{S}\\p{N}\\p{P}\\t\\n\\r  ]+).*"
+    },
+    "GroupPolicyGrantPrincipal": {
+      "type": "structure",
+      "members": {
+        "groupIdentifier": "GroupIdentifier"
+      }
+    },
+    "GroupProfileId": {
+      "type": "string",
+      "pattern": "([0-9a-f]{10}-|)[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}"
+    },
+    "GroupProfileStatus": {
+      "type": "string",
+      "enum": [
+        "ASSIGNED",
+        "NOT_ASSIGNED"
+      ]
+    },
+    "GroupSearchText": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "GroupSearchType": {
+      "type": "string",
+      "enum": [
+        "SSO_GROUP",
+        "DATAZONE_SSO_GROUP",
+        "IAM_ROLE_SESSION_GROUP"
+      ]
+    },
+    "HyperPodPropertiesInput": {
+      "type": "structure",
+      "required": [
+        "clusterName"
+      ],
+      "members": {
+        "clusterName": "HyperPodPropertiesInputClusterNameString"
+      }
+    },
+    "HyperPodPropertiesInputClusterNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "IamPrincipalArn": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "arn:aws[^:]*:iam::\\d{12}:(role|user)(/[\\w+=,.@-]*)*/[\\w+=,.@-]+"
+    },
+    "IamPropertiesInput": {
+      "type": "structure",
+      "members": {
+        "glueLineageSyncEnabled": "Boolean",
+        "roleArn": "RoleArn"
+      }
+    },
+    "IamPropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "glueLineageSyncEnabled": "Boolean"
+      }
+    },
+    "IamRoleArn": {
+      "type": "string",
+      "pattern": "arn:aws(|-cn|-us-gov):iam::\\d{12}:(role|role/service-role)/[\\w+=,.@-]*"
+    },
+    "IdentityMapping": {
+      "type": "structure",
+      "required": [
+        "usernameAttribute"
+      ],
+      "members": {
+        "usernameAttribute": "String",
+        "prefix": "String"
+      }
+    },
+    "InExpression": {
+      "type": "structure",
+      "required": [
+        "columnName",
+        "values"
+      ],
+      "members": {
+        "columnName": "String",
+        "values": "StringList"
+      }
+    },
+    "InstanceType": {
+      "type": "string",
+      "pattern": "(ml|sc)\\.[a-z][0-9]+[a-z]*\\.[a-z0-9]+"
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "InventorySearchScope": {
+      "type": "string",
+      "enum": [
+        "ASSET",
+        "GLOSSARY",
+        "GLOSSARY_TERM",
+        "DATA_PRODUCT"
+      ]
+    },
+    "IsNotNullExpression": {
+      "type": "structure",
+      "required": [
+        "columnName"
+      ],
+      "members": {
+        "columnName": "String"
+      }
+    },
+    "IsNullExpression": {
+      "type": "structure",
+      "required": [
+        "columnName"
+      ],
+      "members": {
+        "columnName": "String"
+      }
+    },
+    "ItemGlossaryTerms": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "GlossaryTermId"
+    },
+    "JobRunStatus": {
+      "type": "string",
+      "enum": [
+        "SCHEDULED",
+        "IN_PROGRESS",
+        "SUCCESS",
+        "PARTIALLY_SUCCEEDED",
+        "FAILED",
+        "ABORTED",
+        "TIMED_OUT",
+        "CANCELED"
+      ]
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "arn:aws(|-cn|-us-gov):kms:[a-zA-Z0-9-]*:[0-9]{12}:key/[a-zA-Z0-9-]{36}"
+    },
+    "LakeFormationConfiguration": {
+      "type": "structure",
+      "members": {
+        "locationRegistrationRole": "RoleArn",
+        "locationRegistrationExcludeS3Locations": "S3LocationList"
+      }
+    },
+    "LakehousePropertiesInput": {
+      "type": "structure",
+      "members": {
+        "glueLineageSyncEnabled": "Boolean"
+      }
+    },
+    "LakehousePropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "glueLineageSyncEnabled": "Boolean"
+      }
+    },
+    "LambdaExecutionRoleArn": {
+      "type": "string",
+      "pattern": "arn:aws[^:]*:iam::\\d{12}:(role|role/service-role)/[\\w+=,.@-]*"
+    },
+    "LambdaFunctionArn": {
+      "type": "string",
+      "pattern": "arn:(?:aws|aws-cn|aws-us-gov):lambda:(?:[a-z]{2}(?:-gov)?-[a-z]+-\\d{1,}):(\\d{12}):function:[a-zA-Z0-9-_]+(?::[a-zA-Z0-9-_]+)?(?:\\$[\\w-]+)?"
+    },
+    "LessThanExpression": {
+      "type": "structure",
+      "required": [
+        "columnName",
+        "value"
+      ],
+      "members": {
+        "columnName": "String",
+        "value": "String"
+      }
+    },
+    "LessThanOrEqualToExpression": {
+      "type": "structure",
+      "required": [
+        "columnName",
+        "value"
+      ],
+      "members": {
+        "columnName": "String",
+        "value": "String"
+      }
+    },
+    "LikeExpression": {
+      "type": "structure",
+      "required": [
+        "columnName",
+        "value"
+      ],
+      "members": {
+        "columnName": "String",
+        "value": "String"
+      }
+    },
+    "LineageEvent": {
+      "type": "blob",
+      "min": 0,
+      "max": 300000
+    },
+    "LineageEventIdentifier": {
+      "type": "string",
+      "pattern": "[a-z0-9]{14}"
+    },
+    "LineageEventProcessingStatus": {
+      "type": "string",
+      "enum": [
+        "REQUESTED",
+        "PROCESSING",
+        "SUCCESS",
+        "FAILED"
+      ]
+    },
+    "LineageNodeIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 2086
+    },
+    "LineageSyncInput": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "timezone": "Timezone",
+        "enabled": "Boolean",
+        "schedule": "LineageSyncScheduleCronString"
+      }
+    },
+    "LineageSyncSchedule": {
+      "type": "structure",
+      "members": {
+        "schedule": "LineageSyncScheduleScheduleString"
+      }
+    },
+    "LineageSyncScheduleCronString": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "cron\\((\\b[0-5]?[0-9]\\b) ([*]|\\b2[0-3]\\b|\\b[0-1]?[0-9]\\b) ([-?*,/\\dLW]){1,83} ([-*,/\\d]|[a-zA-Z]{3}){1,23} ([-?#*,/\\dL]|[a-zA-Z]{3}){1,13} ([^\\)]+)\\)"
+    },
+    "LineageSyncScheduleScheduleString": {
+      "type": "string",
+      "pattern": "cron\\((\\b[0-5]?[0-9]\\b) (\\b2[0-3]\\b|\\b[0-1]?[0-9]\\b) ([-?*,/\\dLW]){1,83} ([-*,/\\d]|[a-zA-Z]{3}){1,23} ([-?#*,/\\dL]|[a-zA-Z]{3}){1,13} ([^\\)]+)\\)"
+    },
+    "ListAccountPoolsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "AccountPoolName",
+        "sortBy": "SortFieldAccountPool",
+        "sortOrder": "SortOrder",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAccountsInAccountPoolInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "AccountPoolId",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAssetFiltersInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "assetIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "assetIdentifier": "AssetId",
+        "status": "FilterStatus",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAssetRevisionsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "AssetIdentifier",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListConnectionsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken",
+        "sortBy": "SortFieldConnection",
+        "sortOrder": "SortOrder",
+        "name": "ConnectionName",
+        "environmentIdentifier": "EnvironmentId",
+        "projectIdentifier": "ProjectId",
+        "type": "ConnectionType",
+        "scope": "ConnectionScope"
+      }
+    },
+    "ListDataProductRevisionsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DataProductId",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListDataSourceRunActivitiesInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DataSourceRunId",
+        "status": "DataAssetActivityStatus",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListDataSourceRunsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "dataSourceIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "dataSourceIdentifier": "DataSourceId",
+        "status": "DataSourceRunStatus",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListDataSourcesInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "projectIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "projectIdentifier": "String",
+        "environmentIdentifier": "String",
+        "connectionIdentifier": "String",
+        "type": "DataSourceType",
+        "status": "DataSourceStatus",
+        "name": "Name",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListDesignationsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "nextToken": "PaginationToken",
+        "maxResults": "ListDesignationsMaxResults"
+      }
+    },
+    "ListDesignationsMaxResults": {
+      "type": "integer",
+      "min": 10,
+      "max": 50
+    },
+    "ListDomainUnitsForParentInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "parentDomainUnitIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "parentDomainUnitIdentifier": "DomainUnitId",
+        "maxResults": "MaxResultsForListDomains",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListDomainsInput": {
+      "type": "structure",
+      "members": {
+        "status": "DomainStatus",
+        "maxResults": "MaxResultsForListDomains",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListEntityOwnersInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityType",
+        "entityIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityType": "DataZoneEntityType",
+        "entityIdentifier": "String",
+        "maxResults": "MaxResultsForListDomains",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListEnvironmentActionsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListEnvironmentBlueprintConfigurationsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListEnvironmentBlueprintsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken",
+        "name": "EnvironmentBlueprintName",
+        "managed": "Boolean"
+      }
+    },
+    "ListEnvironmentProfilesInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "awsAccountId": "AwsAccountId",
+        "awsAccountRegion": "AwsRegion",
+        "environmentBlueprintIdentifier": "EnvironmentBlueprintId",
+        "projectIdentifier": "ProjectId",
+        "name": "EnvironmentProfileName",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListEnvironmentsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "projectIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "awsAccountId": "AwsAccountId",
+        "status": "EnvironmentStatus",
+        "awsAccountRegion": "AwsRegion",
+        "projectIdentifier": "ProjectId",
+        "environmentProfileIdentifier": "EnvironmentProfileId",
+        "environmentBlueprintIdentifier": "EnvironmentBlueprintId",
+        "provider": "String",
+        "name": "String",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListJobRunsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "jobIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "jobIdentifier": "ListJobRunsInputJobIdentifierString",
+        "status": "JobRunStatus",
+        "sortOrder": "SortOrder",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListJobRunsInputJobIdentifierString": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "ListLineageEventsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "maxResults": "MaxResults",
+        "timestampAfter": "Timestamp",
+        "timestampBefore": "Timestamp",
+        "processingStatus": "LineageEventProcessingStatus",
+        "sortOrder": "SortOrder",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListLineageNodeHistoryInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken",
+        "identifier": "LineageNodeIdentifier",
+        "direction": "EdgeDirection",
+        "eventTimestampGTE": "Timestamp",
+        "eventTimestampLTE": "Timestamp",
+        "sortOrder": "SortOrder"
+      }
+    },
+    "ListMetadataGenerationRunsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "status": "MetadataGenerationRunStatus",
+        "type": "MetadataGenerationRunType",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults",
+        "targetIdentifier": "EntityId"
+      }
+    },
+    "ListNotebookRunsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "owningProjectIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "owningProjectIdentifier": "ProjectId",
+        "notebookIdentifier": "NotebookId",
+        "status": "NotebookRunStatus",
+        "scheduleIdentifier": "ScheduleId",
+        "maxResults": "MaxResults",
+        "sortOrder": "SortOrder",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListNotebooksInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "owningProjectIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "owningProjectIdentifier": "ProjectId",
+        "maxResults": "MaxResults",
+        "sortOrder": "SortOrder",
+        "sortBy": "SortKey",
+        "status": "NotebookStatus",
+        "type": "NotebookType",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListNotificationsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "type"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "type": "NotificationType",
+        "afterTimestamp": "Timestamp",
+        "beforeTimestamp": "Timestamp",
+        "subjects": "NotificationSubjects",
+        "taskStatus": "TaskStatus",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListPolicyGrantsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityType",
+        "entityIdentifier",
+        "policyType"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityType": "TargetEntityType",
+        "entityIdentifier": "String",
+        "policyType": "ManagedPolicyType",
+        "maxResults": "MaxResultsForListDomains",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListProjectMembershipsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "projectIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "projectIdentifier": "ProjectId",
+        "sortBy": "SortFieldProject",
+        "sortOrder": "SortOrder",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListProjectProfilesInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "name": "ProjectProfileName",
+        "sortBy": "SortFieldProject",
+        "sortOrder": "SortOrder",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListProjectsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "userIdentifier": "String",
+        "groupIdentifier": "String",
+        "name": "ProjectName",
+        "projectCategory": "String",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListRulesInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "targetType",
+        "targetIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "targetType": "RuleTargetType",
+        "targetIdentifier": "String",
+        "ruleType": "RuleType",
+        "action": "RuleAction",
+        "projectIds": "ProjectIds",
+        "assetTypes": "AssetTypeIdentifiers",
+        "dataProduct": "Boolean",
+        "includeCascaded": "Boolean",
+        "maxResults": "ListRulesInputMaxResultsInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListRulesInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 25,
+      "max": 50
+    },
+    "ListSubscriptionGrantsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentId": "EnvironmentId",
+        "subscriptionTargetId": "SubscriptionTargetId",
+        "subscribedListingId": "ListingId",
+        "subscriptionId": "SubscriptionId",
+        "owningProjectId": "ProjectId",
+        "owningIamPrincipalArn": "IamPrincipalArn",
+        "owningUserId": "UserProfileId",
+        "owningGroupId": "GroupProfileId",
+        "sortBy": "SortKey",
+        "sortOrder": "SortOrder",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListSubscriptionRequestsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "status": "SubscriptionRequestStatus",
+        "subscribedListingId": "ListingId",
+        "owningProjectId": "ProjectId",
+        "owningIamPrincipalArn": "IamPrincipalArn",
+        "approverProjectId": "ProjectId",
+        "owningUserId": "UserProfileId",
+        "owningGroupId": "GroupProfileId",
+        "sortBy": "SortKey",
+        "sortOrder": "SortOrder",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListSubscriptionTargetsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "sortBy": "SortKey",
+        "sortOrder": "SortOrder",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListSubscriptionsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "subscriptionRequestIdentifier": "SubscriptionRequestId",
+        "status": "SubscriptionStatus",
+        "subscribedListingId": "ListingId",
+        "owningProjectId": "ProjectId",
+        "owningIamPrincipalArn": "IamPrincipalArn",
+        "owningUserId": "UserProfileId",
+        "owningGroupId": "GroupProfileId",
+        "approverProjectId": "ProjectId",
+        "sortBy": "SortKey",
+        "sortOrder": "SortOrder",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "String"
+      }
+    },
+    "ListTimeSeriesDataPointsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityIdentifier",
+        "entityType",
+        "formName"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityIdentifier": "EntityIdentifier",
+        "entityType": "TimeSeriesEntityType",
+        "formName": "TimeSeriesFormName",
+        "startedAt": "Timestamp",
+        "endedAt": "Timestamp",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListingId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "ListingRevisionInput": {
+      "type": "structure",
+      "required": [
+        "identifier",
+        "revision"
+      ],
+      "members": {
+        "identifier": "ListingId",
+        "revision": "Revision"
+      }
+    },
+    "Long": {
+      "type": "long"
+    },
+    "LongDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 4096
+    },
+    "ManagedPolicyType": {
+      "type": "string",
+      "enum": [
+        "CREATE_DOMAIN_UNIT",
+        "OVERRIDE_DOMAIN_UNIT_OWNERS",
+        "ADD_TO_PROJECT_MEMBER_POOL",
+        "OVERRIDE_PROJECT_OWNERS",
+        "CREATE_GLOSSARY",
+        "CREATE_FORM_TYPE",
+        "CREATE_ASSET_TYPE",
+        "CREATE_PROJECT",
+        "CREATE_ENVIRONMENT_PROFILE",
+        "DELEGATE_CREATE_ENVIRONMENT_PROFILE",
+        "CREATE_ENVIRONMENT",
+        "CREATE_ENVIRONMENT_FROM_BLUEPRINT",
+        "CREATE_PROJECT_FROM_PROJECT_PROFILE",
+        "USE_ASSET_TYPE"
+      ]
+    },
+    "MatchClause": {
+      "type": "structure",
+      "members": {
+        "relationPattern": "RelationPattern",
+        "entityPattern": "EntityPattern"
+      }
+    },
+    "MatchClauses": {
+      "type": "list",
+      "min": 2,
+      "max": 2,
+      "member": "MatchClause"
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "MaxResultsForListDomains": {
+      "type": "integer",
+      "min": 1,
+      "max": 25
+    },
+    "Member": {
+      "type": "structure",
+      "members": {
+        "userIdentifier": "String",
+        "groupIdentifier": "String"
+      }
+    },
+    "Metadata": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "MetadataKey",
+      "value": "MetadataValue"
+    },
+    "MetadataFormEnforcementDetail": {
+      "type": "structure",
+      "members": {
+        "requiredMetadataForms": "RequiredMetadataFormList"
+      }
+    },
+    "MetadataFormInputs": {
+      "type": "list",
+      "member": "FormInput"
+    },
+    "MetadataFormReference": {
+      "type": "structure",
+      "required": [
+        "typeIdentifier",
+        "typeRevision"
+      ],
+      "members": {
+        "typeIdentifier": "FormTypeIdentifier",
+        "typeRevision": "Revision"
+      }
+    },
+    "MetadataGenerationRunIdentifier": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "MetadataGenerationRunStatus": {
+      "type": "string",
+      "enum": [
+        "SUBMITTED",
+        "IN_PROGRESS",
+        "CANCELED",
+        "SUCCEEDED",
+        "FAILED",
+        "PARTIALLY_SUCCEEDED"
+      ]
+    },
+    "MetadataGenerationRunTarget": {
+      "type": "structure",
+      "required": [
+        "type",
+        "identifier"
+      ],
+      "members": {
+        "type": "MetadataGenerationTargetType",
+        "identifier": "String",
+        "revision": "Revision"
+      }
+    },
+    "MetadataGenerationRunType": {
+      "type": "string",
+      "enum": [
+        "BUSINESS_DESCRIPTIONS",
+        "BUSINESS_NAMES",
+        "BUSINESS_GLOSSARY_ASSOCIATIONS"
+      ]
+    },
+    "MetadataGenerationRunTypes": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "MetadataGenerationRunType"
+    },
+    "MetadataGenerationTargetType": {
+      "type": "string",
+      "enum": [
+        "ASSET"
+      ]
+    },
+    "MetadataKey": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "MetadataValue": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "MlflowPropertiesInput": {
+      "type": "structure",
+      "members": {
+        "trackingServerArn": "String"
+      }
+    },
+    "MlflowPropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "trackingServerArn": "String"
+      }
+    },
+    "Model": {
+      "type": "structure",
+      "members": {
+        "smithy": "Smithy"
+      }
+    },
+    "Name": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "NetworkAccessType": {
+      "type": "string",
+      "enum": [
+        "PUBLIC_INTERNET_ONLY",
+        "VPC_ONLY"
+      ]
+    },
+    "NetworkConfig": {
+      "type": "structure",
+      "required": [
+        "networkAccessType"
+      ],
+      "members": {
+        "networkAccessType": "NetworkAccessType",
+        "vpcId": "String",
+        "subnetIds": "SubnetIds",
+        "securityGroupIds": "SecurityGroupIds"
+      }
+    },
+    "NotEqualToExpression": {
+      "type": "structure",
+      "required": [
+        "columnName",
+        "value"
+      ],
+      "members": {
+        "columnName": "String",
+        "value": "String"
+      }
+    },
+    "NotInExpression": {
+      "type": "structure",
+      "required": [
+        "columnName",
+        "values"
+      ],
+      "members": {
+        "columnName": "String",
+        "values": "StringList"
+      }
+    },
+    "NotLikeExpression": {
+      "type": "structure",
+      "required": [
+        "columnName",
+        "value"
+      ],
+      "members": {
+        "columnName": "String",
+        "value": "String"
+      }
+    },
+    "NotebookId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "NotebookName": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "NotebookRunId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "NotebookRunStatus": {
+      "type": "string",
+      "enum": [
+        "QUEUED",
+        "STARTING",
+        "RUNNING",
+        "STOPPING",
+        "STOPPED",
+        "SUCCEEDED",
+        "FAILED"
+      ]
+    },
+    "NotebookStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "ARCHIVED",
+        "SYNC_IN_PROGRESS",
+        "SYNC_FAILED"
+      ]
+    },
+    "NotebookType": {
+      "type": "string",
+      "enum": [
+        "DATA",
+        "SQL"
+      ]
+    },
+    "NotificationConfig": {
+      "type": "structure",
+      "required": [
+        "notifyOn"
+      ],
+      "members": {
+        "notifyOn": "NotifyOnStates"
+      }
+    },
+    "NotificationSubjects": {
+      "type": "list",
+      "member": "String"
+    },
+    "NotificationType": {
+      "type": "string",
+      "enum": [
+        "TASK",
+        "EVENT"
+      ]
+    },
+    "NotifyOnState": {
+      "type": "string",
+      "enum": [
+        "SUCCEEDED",
+        "FAILED",
+        "STOPPED",
+        "QUEUED",
+        "STARTING",
+        "RUNNING",
+        "STOPPING"
+      ]
+    },
+    "NotifyOnStates": {
+      "type": "list",
+      "min": 0,
+      "max": 7,
+      "member": "NotifyOnState"
+    },
+    "OAuth2ClientApplication": {
+      "type": "structure",
+      "members": {
+        "userManagedClientApplicationClientId": "OAuth2ClientApplicationUserManagedClientApplicationClientIdString",
+        "aWSManagedClientApplicationReference": "OAuth2ClientApplicationAWSManagedClientApplicationReferenceString"
+      }
+    },
+    "OAuth2ClientApplicationAWSManagedClientApplicationReferenceString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "\\S+"
+    },
+    "OAuth2ClientApplicationUserManagedClientApplicationClientIdString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "\\S+"
+    },
+    "OAuth2GrantType": {
+      "type": "string",
+      "enum": [
+        "AUTHORIZATION_CODE",
+        "CLIENT_CREDENTIALS",
+        "JWT_BEARER"
+      ]
+    },
+    "OAuth2Properties": {
+      "type": "structure",
+      "members": {
+        "oAuth2GrantType": "OAuth2GrantType",
+        "oAuth2ClientApplication": "OAuth2ClientApplication",
+        "tokenUrl": "OAuth2PropertiesTokenUrlString",
+        "tokenUrlParametersMap": "TokenUrlParametersMap",
+        "authorizationCodeProperties": "AuthorizationCodeProperties",
+        "oAuth2Credentials": "GlueOAuth2Credentials"
+      }
+    },
+    "OAuth2PropertiesTokenUrlString": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "(https?)://[-a-zA-Z0-9+&@#/%?=~_|!:,.;]*[-a-zA-Z0-9+&@#/%=~_|]"
+    },
+    "OverallDeploymentStatus": {
+      "type": "string",
+      "enum": [
+        "PENDING_DEPLOYMENT",
+        "IN_PROGRESS",
+        "SUCCESSFUL",
+        "FAILED_VALIDATION",
+        "FAILED_DEPLOYMENT"
+      ]
+    },
+    "OverrideDomainUnitOwnersPolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "includeChildDomainUnits": "Boolean"
+      }
+    },
+    "OverrideProjectOwnersPolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "includeChildDomainUnits": "Boolean"
+      }
+    },
+    "OwnerGroupProperties": {
+      "type": "structure",
+      "required": [
+        "groupIdentifier"
+      ],
+      "members": {
+        "groupIdentifier": "GroupIdentifier"
+      }
+    },
+    "OwnerProperties": {
+      "type": "structure",
+      "members": {
+        "user": "OwnerUserProperties",
+        "group": "OwnerGroupProperties"
+      }
+    },
+    "OwnerUserProperties": {
+      "type": "structure",
+      "required": [
+        "userIdentifier"
+      ],
+      "members": {
+        "userIdentifier": "UserIdentifier"
+      }
+    },
+    "PackageConfig": {
+      "type": "structure",
+      "required": [
+        "packageManager"
+      ],
+      "members": {
+        "packageManager": "PackageManager",
+        "packageSpecification": "PackageConfigPackageSpecificationString"
+      }
+    },
+    "PackageConfigPackageSpecificationString": {
+      "type": "string",
+      "min": 0,
+      "max": 10240
+    },
+    "PackageManager": {
+      "type": "string",
+      "enum": [
+        "UV"
+      ]
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 1,
+      "max": 8192
+    },
+    "ParameterKey": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "ParameterStorePath": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "ParameterValue": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "Parameters": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "ParameterKey",
+      "value": "ParameterValue"
+    },
+    "Password": {
+      "type": "string",
+      "min": 0,
+      "max": 64
+    },
+    "Permissions": {
+      "type": "structure",
+      "members": {
+        "s3": "S3Permissions"
+      }
+    },
+    "PhysicalConnectionRequirements": {
+      "type": "structure",
+      "members": {
+        "subnetId": "SubnetId",
+        "subnetIdList": "SubnetIdList",
+        "securityGroupIdList": "SecurityGroupIdList",
+        "availabilityZone": "PhysicalConnectionRequirementsAvailabilityZoneString"
+      }
+    },
+    "PhysicalConnectionRequirementsAvailabilityZoneString": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "PolicyArn": {
+      "type": "string",
+      "pattern": "arn:aws[^:]*:iam::(aws|\\d{12}):policy/[\\w+=,.@-]*"
+    },
+    "PolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "createDomainUnit": "CreateDomainUnitPolicyGrantDetail",
+        "overrideDomainUnitOwners": "OverrideDomainUnitOwnersPolicyGrantDetail",
+        "addToProjectMemberPool": "AddToProjectMemberPoolPolicyGrantDetail",
+        "overrideProjectOwners": "OverrideProjectOwnersPolicyGrantDetail",
+        "createGlossary": "CreateGlossaryPolicyGrantDetail",
+        "createFormType": "CreateFormTypePolicyGrantDetail",
+        "createAssetType": "CreateAssetTypePolicyGrantDetail",
+        "createProject": "CreateProjectPolicyGrantDetail",
+        "createEnvironmentProfile": "CreateEnvironmentProfilePolicyGrantDetail",
+        "delegateCreateEnvironmentProfile": "Unit",
+        "createEnvironment": "Unit",
+        "createEnvironmentFromBlueprint": "Unit",
+        "createProjectFromProjectProfile": "CreateProjectFromProjectProfilePolicyGrantDetail",
+        "useAssetType": "UseAssetTypePolicyGrantDetail"
+      }
+    },
+    "PolicyGrantPrincipal": {
+      "type": "structure",
+      "members": {
+        "user": "UserPolicyGrantPrincipal",
+        "group": "GroupPolicyGrantPrincipal",
+        "project": "ProjectPolicyGrantPrincipal",
+        "domainUnit": "DomainUnitPolicyGrantPrincipal"
+      }
+    },
+    "PostLineageEventInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "event"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "event": "LineageEvent",
+        "clientToken": "ClientToken"
+      }
+    },
+    "PostTimeSeriesDataPointsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityIdentifier",
+        "entityType",
+        "forms"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityIdentifier": "EntityIdentifier",
+        "entityType": "TimeSeriesEntityType",
+        "forms": "TimeSeriesDataPointFormInputList",
+        "clientToken": "ClientToken"
+      }
+    },
+    "PredictionChoices": {
+      "type": "list",
+      "member": "Integer"
+    },
+    "PredictionConfiguration": {
+      "type": "structure",
+      "members": {
+        "businessNameGeneration": "BusinessNameGenerationConfiguration"
+      }
+    },
+    "ProjectDesignation": {
+      "type": "string",
+      "enum": [
+        "OWNER",
+        "CONTRIBUTOR",
+        "PROJECT_CATALOG_STEWARD",
+        "USER_CREATED_DESIGNATION"
+      ]
+    },
+    "ProjectGrantFilter": {
+      "type": "structure",
+      "members": {
+        "domainUnitFilter": "DomainUnitFilterForProject"
+      }
+    },
+    "ProjectId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "ProjectIds": {
+      "type": "list",
+      "member": "ProjectId"
+    },
+    "ProjectMembershipAssignment": {
+      "type": "structure",
+      "required": [
+        "member",
+        "designation"
+      ],
+      "members": {
+        "member": "Member",
+        "designation": "UserDesignation",
+        "userCreatedDesignationId": "DesignationId"
+      }
+    },
+    "ProjectMembershipAssignments": {
+      "type": "list",
+      "member": "ProjectMembershipAssignment"
+    },
+    "ProjectName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[\\w -]+"
+    },
+    "ProjectPolicyGrantPrincipal": {
+      "type": "structure",
+      "required": [
+        "projectDesignation"
+      ],
+      "members": {
+        "projectDesignation": "ProjectDesignation",
+        "userCreatedDesignationId": "DesignationId",
+        "projectIdentifier": "ProjectId",
+        "projectGrantFilter": "ProjectGrantFilter"
+      }
+    },
+    "ProjectProfileId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "ProjectProfileList": {
+      "type": "list",
+      "member": "String"
+    },
+    "ProjectProfileName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[\\w -]+"
+    },
+    "ProjectResourceTagParameters": {
+      "type": "list",
+      "min": 0,
+      "max": 25,
+      "member": "ResourceTagParameter"
+    },
+    "ProjectsForRule": {
+      "type": "structure",
+      "required": [
+        "selectionMode"
+      ],
+      "members": {
+        "selectionMode": "RuleScopeSelectionMode",
+        "specificProjects": "RuleProjectIdentifierList"
+      }
+    },
+    "PropertyMap": {
+      "type": "map",
+      "key": "PropertyMapKeyString",
+      "value": "PropertyMapValueString"
+    },
+    "PropertyMapKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "PropertyMapValueString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "ProvisioningConfiguration": {
+      "type": "structure",
+      "members": {
+        "lakeFormationConfiguration": "LakeFormationConfiguration"
+      }
+    },
+    "ProvisioningConfigurationList": {
+      "type": "list",
+      "member": "ProvisioningConfiguration"
+    },
+    "ProvisioningProperties": {
+      "type": "structure",
+      "members": {
+        "cloudFormation": "CloudFormationProperties"
+      }
+    },
+    "PutDataExportConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "enableExport"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "enableExport": "Boolean",
+        "encryptionConfiguration": "EncryptionConfiguration",
+        "clientToken": "ClientToken"
+      }
+    },
+    "PutEnvironmentBlueprintConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentBlueprintIdentifier",
+        "enabledRegions"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentBlueprintIdentifier": "EnvironmentBlueprintId",
+        "provisioningRoleArn": "RoleArn",
+        "manageAccessRoleArn": "RoleArn",
+        "environmentRolePermissionBoundary": "PolicyArn",
+        "enabledRegions": "EnabledRegionList",
+        "regionalParameters": "RegionalParameterMap",
+        "resourceConfigurations": "PutResourceConfigurations",
+        "allowUserProvidedConfigurations": "Boolean",
+        "globalParameters": "GlobalParameterMap",
+        "provisioningConfigurations": "ProvisioningConfigurationList"
+      }
+    },
+    "PutResourceConfiguration": {
+      "type": "structure",
+      "required": [
+        "name",
+        "region",
+        "parameters"
+      ],
+      "members": {
+        "name": "PutResourceConfigurationNameString",
+        "description": "String",
+        "region": "RegionName",
+        "parameters": "ResourceConfigurationParameterMap"
+      }
+    },
+    "PutResourceConfigurationNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "PutResourceConfigurations": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "PutResourceConfiguration"
+    },
+    "QueryGraphInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "match"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "match": "MatchClauses",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken",
+        "additionalAttributes": "AdditionalAttributes"
+      }
+    },
+    "RecommendationConfiguration": {
+      "type": "structure",
+      "members": {
+        "enableBusinessNameGeneration": "Boolean"
+      }
+    },
+    "RedshiftClusterStorage": {
+      "type": "structure",
+      "required": [
+        "clusterName"
+      ],
+      "members": {
+        "clusterName": "RedshiftClusterStorageClusterNameString"
+      }
+    },
+    "RedshiftClusterStorageClusterNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 63,
+      "pattern": "[0-9a-z].[a-z0-9\\-]*"
+    },
+    "RedshiftCredentialConfiguration": {
+      "type": "structure",
+      "required": [
+        "secretManagerArn"
+      ],
+      "members": {
+        "secretManagerArn": "RedshiftCredentialConfigurationSecretManagerArnString"
+      }
+    },
+    "RedshiftCredentialConfigurationSecretManagerArnString": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "arn:aws[^:]*:secretsmanager:[a-z]{2}-?(iso|gov)?-{1}[a-z]*-{1}[0-9]:\\d{12}:secret:.*"
+    },
+    "RedshiftCredentials": {
+      "type": "structure",
+      "members": {
+        "secretArn": "RedshiftCredentialsSecretArnString",
+        "usernamePassword": "UsernamePassword"
+      }
+    },
+    "RedshiftCredentialsSecretArnString": {
+      "type": "string",
+      "pattern": "arn:aws[^:]*:secretsmanager:[a-z]{2}-?(iso|gov)?-{1}[a-z]*-{1}[0-9]:\\d{12}:secret:.*"
+    },
+    "RedshiftLineageSyncConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "enabled": "Boolean",
+        "schedule": "LineageSyncSchedule"
+      }
+    },
+    "RedshiftPropertiesInput": {
+      "type": "structure",
+      "members": {
+        "storage": "RedshiftStorageProperties",
+        "databaseName": "RedshiftPropertiesInputDatabaseNameString",
+        "host": "RedshiftPropertiesInputHostString",
+        "port": "Integer",
+        "credentials": "RedshiftCredentials",
+        "lineageSync": "RedshiftLineageSyncConfigurationInput"
+      }
+    },
+    "RedshiftPropertiesInputDatabaseNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "RedshiftPropertiesInputHostString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "RedshiftPropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "storage": "RedshiftStorageProperties",
+        "databaseName": "RedshiftPropertiesPatchDatabaseNameString",
+        "host": "RedshiftPropertiesPatchHostString",
+        "port": "Integer",
+        "credentials": "RedshiftCredentials",
+        "lineageSync": "RedshiftLineageSyncConfigurationInput"
+      }
+    },
+    "RedshiftPropertiesPatchDatabaseNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "RedshiftPropertiesPatchHostString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "RedshiftRunConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "relationalFilterConfigurations"
+      ],
+      "members": {
+        "dataAccessRole": "RedshiftRunConfigurationInputDataAccessRoleString",
+        "relationalFilterConfigurations": "RelationalFilterConfigurations",
+        "redshiftCredentialConfiguration": "RedshiftCredentialConfiguration",
+        "redshiftStorage": "RedshiftStorage"
+      }
+    },
+    "RedshiftRunConfigurationInputDataAccessRoleString": {
+      "type": "string",
+      "pattern": "arn:aws[^:]*:iam::\\d{12}:(role|role/service-role)/[\\w+=,.@-]{1,128}"
+    },
+    "RedshiftServerlessStorage": {
+      "type": "structure",
+      "required": [
+        "workgroupName"
+      ],
+      "members": {
+        "workgroupName": "RedshiftServerlessStorageWorkgroupNameString"
+      }
+    },
+    "RedshiftServerlessStorageWorkgroupNameString": {
+      "type": "string",
+      "min": 3,
+      "max": 64,
+      "pattern": "[a-z0-9-]+"
+    },
+    "RedshiftStorage": {
+      "type": "structure",
+      "members": {
+        "redshiftClusterSource": "RedshiftClusterStorage",
+        "redshiftServerlessSource": "RedshiftServerlessStorage"
+      }
+    },
+    "RedshiftStorageProperties": {
+      "type": "structure",
+      "members": {
+        "clusterName": "RedshiftStoragePropertiesClusterNameString",
+        "workgroupName": "RedshiftStoragePropertiesWorkgroupNameString"
+      }
+    },
+    "RedshiftStoragePropertiesClusterNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "RedshiftStoragePropertiesWorkgroupNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "Region": {
+      "type": "structure",
+      "members": {
+        "regionName": "RegionName",
+        "regionNamePath": "ParameterStorePath"
+      }
+    },
+    "RegionName": {
+      "type": "string",
+      "min": 4,
+      "max": 16,
+      "pattern": "[a-z]{2}-?(iso|gov)?-{1}[a-z]*-{1}[0-9]"
+    },
+    "RegionalParameter": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "RegionalParameterMap": {
+      "type": "map",
+      "key": "RegionName",
+      "value": "RegionalParameter"
+    },
+    "RejectChoice": {
+      "type": "structure",
+      "required": [
+        "predictionTarget"
+      ],
+      "members": {
+        "predictionTarget": "String",
+        "predictionChoices": "PredictionChoices"
+      }
+    },
+    "RejectChoices": {
+      "type": "list",
+      "member": "RejectChoice"
+    },
+    "RejectPredictionsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "AssetIdentifier",
+        "revision": "Revision",
+        "rejectRule": "RejectRule",
+        "rejectChoices": "RejectChoices",
+        "clientToken": "ClientToken"
+      }
+    },
+    "RejectRule": {
+      "type": "structure",
+      "members": {
+        "rule": "RejectRuleBehavior",
+        "threshold": "Float"
+      }
+    },
+    "RejectRuleBehavior": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "NONE"
+      ]
+    },
+    "RejectSubscriptionRequestInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "SubscriptionRequestId",
+        "decisionComment": "DecisionComment"
+      }
+    },
+    "RelationDirection": {
+      "type": "string",
+      "enum": [
+        "IN",
+        "OUT"
+      ]
+    },
+    "RelationPattern": {
+      "type": "structure",
+      "required": [
+        "relationType",
+        "relationDirection"
+      ],
+      "members": {
+        "relationType": "RelationType",
+        "relationDirection": "RelationDirection",
+        "maxPathLength": "RelationPatternMaxPathLengthInteger"
+      }
+    },
+    "RelationPatternMaxPathLengthInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 5
+    },
+    "RelationType": {
+      "type": "string",
+      "enum": [
+        "LINEAGE"
+      ]
+    },
+    "RelationalFilterConfiguration": {
+      "type": "structure",
+      "required": [
+        "databaseName"
+      ],
+      "members": {
+        "databaseName": "RelationalFilterConfigurationDatabaseNameString",
+        "schemaName": "RelationalFilterConfigurationSchemaNameString",
+        "filterExpressions": "FilterExpressions"
+      }
+    },
+    "RelationalFilterConfigurationDatabaseNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "RelationalFilterConfigurationSchemaNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "RelationalFilterConfigurations": {
+      "type": "list",
+      "member": "RelationalFilterConfiguration"
+    },
+    "RemoveEntityOwnerInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityType",
+        "entityIdentifier",
+        "owner"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityType": "DataZoneEntityType",
+        "entityIdentifier": "String",
+        "owner": "OwnerProperties",
+        "clientToken": "ClientToken"
+      }
+    },
+    "RemovePolicyGrantInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "entityType",
+        "entityIdentifier",
+        "policyType",
+        "principal"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "entityType": "TargetEntityType",
+        "entityIdentifier": "String",
+        "policyType": "ManagedPolicyType",
+        "principal": "PolicyGrantPrincipal",
+        "grantIdentifier": "GrantIdentifier",
+        "clientToken": "ClientToken"
+      }
+    },
+    "RequestReason": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "RequiredMetadataFormList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "MetadataFormReference"
+    },
+    "ResolutionStrategy": {
+      "type": "string",
+      "enum": [
+        "MANUAL"
+      ]
+    },
+    "ResourceConfigurationParameterMap": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "ResourceTagParameter": {
+      "type": "structure",
+      "required": [
+        "key",
+        "value",
+        "isValueEditable"
+      ],
+      "members": {
+        "key": "TagKey",
+        "value": "TagValue",
+        "isValueEditable": "Boolean"
+      }
+    },
+    "Revision": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "RevisionInput": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "RevokeSubscriptionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "SubscriptionId",
+        "retainPermissions": "Boolean"
+      }
+    },
+    "RoleArn": {
+      "type": "string",
+      "pattern": "arn:aws[^:]*:iam::\\d{12}:role(/[a-zA-Z0-9+=,.@_-]+)*/[a-zA-Z0-9+=,.@_-]+"
+    },
+    "RowFilter": {
+      "type": "structure",
+      "members": {
+        "expression": "RowFilterExpression",
+        "and": "RowFilterList",
+        "or": "RowFilterList"
+      }
+    },
+    "RowFilterConfiguration": {
+      "type": "structure",
+      "required": [
+        "rowFilter"
+      ],
+      "members": {
+        "rowFilter": "RowFilter",
+        "sensitive": "Boolean"
+      }
+    },
+    "RowFilterExpression": {
+      "type": "structure",
+      "members": {
+        "equalTo": "EqualToExpression",
+        "notEqualTo": "NotEqualToExpression",
+        "greaterThan": "GreaterThanExpression",
+        "lessThan": "LessThanExpression",
+        "greaterThanOrEqualTo": "GreaterThanOrEqualToExpression",
+        "lessThanOrEqualTo": "LessThanOrEqualToExpression",
+        "isNull": "IsNullExpression",
+        "isNotNull": "IsNotNullExpression",
+        "in": "InExpression",
+        "notIn": "NotInExpression",
+        "like": "LikeExpression",
+        "notLike": "NotLikeExpression"
+      }
+    },
+    "RowFilterList": {
+      "type": "list",
+      "member": "RowFilter"
+    },
+    "RuleAction": {
+      "type": "string",
+      "enum": [
+        "CREATE_LISTING_CHANGE_SET",
+        "CREATE_SUBSCRIPTION_REQUEST"
+      ]
+    },
+    "RuleAssetTypeList": {
+      "type": "list",
+      "min": 1,
+      "member": "AssetTypeIdentifier"
+    },
+    "RuleDetail": {
+      "type": "structure",
+      "members": {
+        "metadataFormEnforcementDetail": "MetadataFormEnforcementDetail",
+        "glossaryTermEnforcementDetail": "GlossaryTermEnforcementDetail"
+      }
+    },
+    "RuleId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "RuleName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\w -]+"
+    },
+    "RuleProjectIdentifierList": {
+      "type": "list",
+      "min": 1,
+      "member": "ProjectId"
+    },
+    "RuleScope": {
+      "type": "structure",
+      "members": {
+        "assetType": "AssetTypesForRule",
+        "dataProduct": "Boolean",
+        "project": "ProjectsForRule"
+      }
+    },
+    "RuleScopeSelectionMode": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "SPECIFIC"
+      ]
+    },
+    "RuleTarget": {
+      "type": "structure",
+      "members": {
+        "domainUnitTarget": "DomainUnitTarget"
+      }
+    },
+    "RuleTargetType": {
+      "type": "string",
+      "enum": [
+        "DOMAIN_UNIT"
+      ]
+    },
+    "RuleType": {
+      "type": "string",
+      "enum": [
+        "METADATA_FORM_ENFORCEMENT",
+        "GLOSSARY_TERM_ENFORCEMENT"
+      ]
+    },
+    "RunIdentifier": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "S3AccessGrantLocationId": {
+      "type": "string",
+      "min": 0,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9\\-]+"
+    },
+    "S3BucketName": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]"
+    },
+    "S3File": {
+      "type": "structure",
+      "required": [
+        "key"
+      ],
+      "members": {
+        "key": "S3ObjectKey"
+      }
+    },
+    "S3FileList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "S3File"
+    },
+    "S3FilesLocation": {
+      "type": "structure",
+      "required": [
+        "bucket",
+        "fileList"
+      ],
+      "members": {
+        "bucket": "S3BucketName",
+        "fileList": "S3FileList"
+      }
+    },
+    "S3Location": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "s3://.+"
+    },
+    "S3LocationList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "S3Location"
+    },
+    "S3ObjectKey": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "S3Permission": {
+      "type": "string",
+      "enum": [
+        "READ",
+        "WRITE"
+      ]
+    },
+    "S3Permissions": {
+      "type": "list",
+      "member": "S3Permission"
+    },
+    "S3PropertiesInput": {
+      "type": "structure",
+      "required": [
+        "s3Uri"
+      ],
+      "members": {
+        "s3Uri": "S3Uri",
+        "s3AccessGrantLocationId": "S3AccessGrantLocationId",
+        "registerS3AccessGrantLocation": "Boolean"
+      }
+    },
+    "S3PropertiesPatch": {
+      "type": "structure",
+      "required": [
+        "s3Uri"
+      ],
+      "members": {
+        "s3Uri": "S3Uri",
+        "s3AccessGrantLocationId": "S3AccessGrantLocationId",
+        "registerS3AccessGrantLocation": "Boolean"
+      }
+    },
+    "S3SourceLocation": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "s3://.+"
+    },
+    "S3Uri": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "s3://.+"
+    },
+    "SageMakerAssetType": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "SageMakerResourceArn": {
+      "type": "string",
+      "pattern": "arn:aws[^:]*:sagemaker:[a-z]{2}-?(iso|gov)?-{1}[a-z]*-{1}[0-9]:\\d{12}:[\\w+=,.@-]{1,128}/[\\w+=,.@-]{1,256}"
+    },
+    "SageMakerRunConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "trackingAssets"
+      ],
+      "members": {
+        "trackingAssets": "TrackingAssets"
+      }
+    },
+    "ScheduleConfiguration": {
+      "type": "structure",
+      "members": {
+        "timezone": "Timezone",
+        "schedule": "CronString"
+      }
+    },
+    "ScheduleId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "SearchGroupProfilesInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "groupType"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "groupType": "GroupSearchType",
+        "searchText": "GroupSearchText",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "SearchInItem": {
+      "type": "structure",
+      "required": [
+        "attribute"
+      ],
+      "members": {
+        "attribute": "Attribute"
+      }
+    },
+    "SearchInList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "SearchInItem"
+    },
+    "SearchInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "searchScope"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "owningProjectIdentifier": "ProjectId",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken",
+        "searchScope": "InventorySearchScope",
+        "searchText": "SearchText",
+        "searchIn": "SearchInList",
+        "filters": "FilterClause",
+        "sort": "SearchSort",
+        "additionalAttributes": "SearchOutputAdditionalAttributes"
+      }
+    },
+    "SearchListingsInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "searchText": "SearchListingsInputSearchTextString",
+        "searchIn": "SearchInList",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken",
+        "filters": "FilterClause",
+        "aggregations": "AggregationList",
+        "sort": "SearchSort",
+        "additionalAttributes": "SearchOutputAdditionalAttributes"
+      }
+    },
+    "SearchListingsInputSearchTextString": {
+      "type": "string",
+      "min": 0,
+      "max": 512
+    },
+    "SearchOutputAdditionalAttribute": {
+      "type": "string",
+      "enum": [
+        "FORMS",
+        "TIME_SERIES_DATA_POINT_FORMS",
+        "TEXT_MATCH_RATIONALE"
+      ]
+    },
+    "SearchOutputAdditionalAttributes": {
+      "type": "list",
+      "member": "SearchOutputAdditionalAttribute"
+    },
+    "SearchSort": {
+      "type": "structure",
+      "required": [
+        "attribute"
+      ],
+      "members": {
+        "attribute": "Attribute",
+        "order": "SortOrder"
+      }
+    },
+    "SearchText": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "SearchTypesInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "searchScope",
+        "managed"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken",
+        "searchScope": "TypesSearchScope",
+        "searchText": "SearchText",
+        "searchIn": "SearchInList",
+        "filters": "FilterClause",
+        "sort": "SearchSort",
+        "managed": "Boolean"
+      }
+    },
+    "SearchUserProfilesInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "userType"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "userType": "UserSearchType",
+        "searchText": "UserSearchText",
+        "maxResults": "MaxResults",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "SecurityGroupId": {
+      "type": "string",
+      "min": 0,
+      "max": 32,
+      "pattern": "sg-[a-z0-9]+"
+    },
+    "SecurityGroupIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "SecurityGroupIdListMemberString"
+    },
+    "SecurityGroupIdListMemberString": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "SecurityGroupIds": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "String"
+    },
+    "ShortDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "SingleSignOn": {
+      "type": "structure",
+      "members": {
+        "type": "AuthType",
+        "userAssignment": "UserAssignment",
+        "idcInstanceArn": "SingleSignOnIdcInstanceArnString"
+      }
+    },
+    "SingleSignOnIdcInstanceArnString": {
+      "type": "string",
+      "pattern": ".*arn:(aws|aws-us-gov|aws-cn|aws-iso|aws-iso-b):sso:::instance/(sso)?ins-[a-zA-Z0-9-.]{16}.*"
+    },
+    "Smithy": {
+      "type": "string",
+      "min": 1,
+      "max": 100000
+    },
+    "SnowflakePropertiesInput": {
+      "type": "structure",
+      "required": [
+        "snowflakeRole",
+        "identityMapping"
+      ],
+      "members": {
+        "connectivityProperties": "ConnectivityProperties",
+        "snowflakeRole": "SnowflakeRole",
+        "identityMapping": "IdentityMapping",
+        "lineageSync": "LineageSyncInput"
+      }
+    },
+    "SnowflakePropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "connectivityPropertiesPatch": "ConnectivityPropertiesPatch",
+        "snowflakeRole": "SnowflakeRole",
+        "lineageSync": "LineageSyncInput"
+      }
+    },
+    "SnowflakeRole": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9_$]+"
+    },
+    "SortFieldAccountPool": {
+      "type": "string",
+      "enum": [
+        "NAME"
+      ]
+    },
+    "SortFieldConnection": {
+      "type": "string",
+      "enum": [
+        "NAME"
+      ]
+    },
+    "SortFieldProject": {
+      "type": "string",
+      "enum": [
+        "NAME"
+      ]
+    },
+    "SortKey": {
+      "type": "string",
+      "enum": [
+        "CREATED_AT",
+        "UPDATED_AT"
+      ]
+    },
+    "SortOrder": {
+      "type": "string",
+      "enum": [
+        "ASCENDING",
+        "DESCENDING"
+      ]
+    },
+    "SourceLocation": {
+      "type": "structure",
+      "members": {
+        "s3": "S3SourceLocation",
+        "s3Files": "S3FilesLocation"
+      }
+    },
+    "SparkEmrPropertiesInput": {
+      "type": "structure",
+      "members": {
+        "computeArn": "SparkEmrPropertiesInputComputeArnString",
+        "instanceProfileArn": "SparkEmrPropertiesInputInstanceProfileArnString",
+        "javaVirtualEnv": "SparkEmrPropertiesInputJavaVirtualEnvString",
+        "logUri": "SparkEmrPropertiesInputLogUriString",
+        "pythonVirtualEnv": "SparkEmrPropertiesInputPythonVirtualEnvString",
+        "runtimeRole": "SparkEmrPropertiesInputRuntimeRoleString",
+        "trustedCertificatesS3Uri": "SparkEmrPropertiesInputTrustedCertificatesS3UriString",
+        "managedEndpointArn": "SparkEmrPropertiesInputManagedEndpointArnString"
+      }
+    },
+    "SparkEmrPropertiesInputComputeArnString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "arn:aws(-(cn|us-gov|iso(-[bef])?))?:(elasticmapreduce|emr-serverless|emr-containers):.*"
+    },
+    "SparkEmrPropertiesInputInstanceProfileArnString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkEmrPropertiesInputJavaVirtualEnvString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkEmrPropertiesInputLogUriString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkEmrPropertiesInputManagedEndpointArnString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "SparkEmrPropertiesInputPythonVirtualEnvString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkEmrPropertiesInputRuntimeRoleString": {
+      "type": "string",
+      "pattern": "arn:aws[^:]*:iam::\\d{12}:(role|role/service-role)/[\\w+=,.@-]*"
+    },
+    "SparkEmrPropertiesInputTrustedCertificatesS3UriString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkEmrPropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "computeArn": "SparkEmrPropertiesPatchComputeArnString",
+        "instanceProfileArn": "SparkEmrPropertiesPatchInstanceProfileArnString",
+        "javaVirtualEnv": "SparkEmrPropertiesPatchJavaVirtualEnvString",
+        "logUri": "SparkEmrPropertiesPatchLogUriString",
+        "pythonVirtualEnv": "SparkEmrPropertiesPatchPythonVirtualEnvString",
+        "runtimeRole": "SparkEmrPropertiesPatchRuntimeRoleString",
+        "trustedCertificatesS3Uri": "SparkEmrPropertiesPatchTrustedCertificatesS3UriString",
+        "managedEndpointArn": "SparkEmrPropertiesPatchManagedEndpointArnString"
+      }
+    },
+    "SparkEmrPropertiesPatchComputeArnString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "arn:aws(-(cn|us-gov|iso(-[bef])?))?:(elasticmapreduce|emr-serverless|emr-containers):.*"
+    },
+    "SparkEmrPropertiesPatchInstanceProfileArnString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkEmrPropertiesPatchJavaVirtualEnvString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkEmrPropertiesPatchLogUriString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkEmrPropertiesPatchManagedEndpointArnString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "SparkEmrPropertiesPatchPythonVirtualEnvString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkEmrPropertiesPatchRuntimeRoleString": {
+      "type": "string",
+      "pattern": "arn:aws[^:]*:iam::\\d{12}:(role|role/service-role)/[\\w+=,.@-]*"
+    },
+    "SparkEmrPropertiesPatchTrustedCertificatesS3UriString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkGlueArgs": {
+      "type": "structure",
+      "members": {
+        "connection": "String"
+      }
+    },
+    "SparkGluePropertiesInput": {
+      "type": "structure",
+      "members": {
+        "additionalArgs": "SparkGlueArgs",
+        "glueConnectionName": "SparkGluePropertiesInputGlueConnectionNameString",
+        "glueConnectionNames": "GlueConnectionNames",
+        "glueVersion": "SparkGluePropertiesInputGlueVersionString",
+        "idleTimeout": "Integer",
+        "javaVirtualEnv": "SparkGluePropertiesInputJavaVirtualEnvString",
+        "numberOfWorkers": "Integer",
+        "pythonVirtualEnv": "SparkGluePropertiesInputPythonVirtualEnvString",
+        "workerType": "SparkGluePropertiesInputWorkerTypeString"
+      }
+    },
+    "SparkGluePropertiesInputGlueConnectionNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkGluePropertiesInputGlueVersionString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkGluePropertiesInputJavaVirtualEnvString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkGluePropertiesInputPythonVirtualEnvString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "SparkGluePropertiesInputWorkerTypeString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "StartDataSourceRunInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "dataSourceIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "dataSourceIdentifier": "DataSourceId",
+        "clientToken": "String"
+      }
+    },
+    "StartMetadataGenerationRunInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "target",
+        "owningProjectIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "type": "MetadataGenerationRunType",
+        "types": "MetadataGenerationRunTypes",
+        "target": "MetadataGenerationRunTarget",
+        "clientToken": "ClientToken",
+        "owningProjectIdentifier": "ProjectId"
+      }
+    },
+    "StartNotebookExportInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "notebookIdentifier",
+        "owningProjectIdentifier",
+        "fileFormat"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "notebookIdentifier": "NotebookId",
+        "owningProjectIdentifier": "ProjectId",
+        "fileFormat": "FileFormat",
+        "clientToken": "ClientToken"
+      }
+    },
+    "StartNotebookImportInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "owningProjectIdentifier",
+        "sourceLocation",
+        "name"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "owningProjectIdentifier": "ProjectId",
+        "sourceLocation": "SourceLocation",
+        "name": "NotebookName",
+        "description": "Description",
+        "type": "NotebookType",
+        "clientToken": "ClientToken"
+      }
+    },
+    "StartNotebookRunInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "owningProjectIdentifier",
+        "notebookIdentifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "owningProjectIdentifier": "ProjectId",
+        "notebookIdentifier": "NotebookId",
+        "scheduleIdentifier": "ScheduleId",
+        "computeConfiguration": "ComputeConfig",
+        "networkConfiguration": "NetworkConfig",
+        "timeoutConfiguration": "TimeoutConfig",
+        "notificationConfiguration": "NotificationConfig",
+        "triggerSource": "TriggerSource",
+        "metadata": "Metadata",
+        "parameters": "Parameters",
+        "clientToken": "ClientToken"
+      }
+    },
+    "StartNotebookSyncInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "owningProjectIdentifier",
+        "sourceLocation"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "owningProjectIdentifier": "ProjectId",
+        "sourceLocation": "SourceLocation",
+        "gitMetadata": "GitMetadata",
+        "notebookId": "NotebookId",
+        "name": "NotebookName",
+        "description": "Description",
+        "clientToken": "ClientToken"
+      }
+    },
+    "Status": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "StopNotebookRunInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "NotebookRunId",
+        "clientToken": "ClientToken"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringList": {
+      "type": "list",
+      "member": "String"
+    },
+    "SubnetId": {
+      "type": "string",
+      "min": 0,
+      "max": 32,
+      "pattern": "subnet-[a-z0-9]+"
+    },
+    "SubnetIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "SubnetId"
+    },
+    "SubnetIds": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "String"
+    },
+    "SubscribedGroupInput": {
+      "type": "structure",
+      "members": {
+        "identifier": "GroupProfileId"
+      }
+    },
+    "SubscribedIamPrincipalInput": {
+      "type": "structure",
+      "members": {
+        "identifier": "IamPrincipalArn"
+      }
+    },
+    "SubscribedListingInput": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "ListingId"
+      }
+    },
+    "SubscribedListingInputs": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "SubscribedListingInput"
+    },
+    "SubscribedPrincipalInput": {
+      "type": "structure",
+      "members": {
+        "project": "SubscribedProjectInput",
+        "user": "SubscribedUserInput",
+        "group": "SubscribedGroupInput",
+        "iam": "SubscribedIamPrincipalInput"
+      }
+    },
+    "SubscribedPrincipalInputs": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "SubscribedPrincipalInput"
+    },
+    "SubscribedProjectInput": {
+      "type": "structure",
+      "members": {
+        "identifier": "ProjectId"
+      }
+    },
+    "SubscribedUserInput": {
+      "type": "structure",
+      "members": {
+        "identifier": "UserProfileId"
+      }
+    },
+    "SubscriptionGrantCreationMode": {
+      "type": "string",
+      "enum": [
+        "AUTOMATIC",
+        "MANUAL"
+      ]
+    },
+    "SubscriptionGrantId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "SubscriptionGrantStatus": {
+      "type": "string",
+      "enum": [
+        "GRANT_PENDING",
+        "REVOKE_PENDING",
+        "GRANT_IN_PROGRESS",
+        "REVOKE_IN_PROGRESS",
+        "GRANTED",
+        "REVOKED",
+        "GRANT_FAILED",
+        "REVOKE_FAILED"
+      ]
+    },
+    "SubscriptionId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "SubscriptionRequestId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "SubscriptionRequestStatus": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "ACCEPTED",
+        "REJECTED"
+      ]
+    },
+    "SubscriptionStatus": {
+      "type": "string",
+      "enum": [
+        "APPROVED",
+        "REVOKED",
+        "CANCELLED"
+      ]
+    },
+    "SubscriptionTargetForm": {
+      "type": "structure",
+      "required": [
+        "formName",
+        "content"
+      ],
+      "members": {
+        "formName": "FormName",
+        "content": "String"
+      }
+    },
+    "SubscriptionTargetForms": {
+      "type": "list",
+      "member": "SubscriptionTargetForm"
+    },
+    "SubscriptionTargetId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "SubscriptionTargetName": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\w \\.:/=+@-]+"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "String",
+        "tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[\\w \\.:/=+@-]*"
+    },
+    "Tags": {
+      "type": "map",
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TargetEntityType": {
+      "type": "string",
+      "enum": [
+        "DOMAIN_UNIT",
+        "ENVIRONMENT_BLUEPRINT_CONFIGURATION",
+        "ENVIRONMENT_PROFILE",
+        "ASSET_TYPE"
+      ]
+    },
+    "TaskStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "INACTIVE"
+      ]
+    },
+    "TermRelations": {
+      "type": "structure",
+      "members": {
+        "isA": "TermRelationsIsAList",
+        "classifies": "TermRelationsClassifiesList"
+      }
+    },
+    "TermRelationsClassifiesList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "GlossaryTermId"
+    },
+    "TermRelationsIsAList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "GlossaryTermId"
+    },
+    "TimeSeriesDataPointFormInput": {
+      "type": "structure",
+      "required": [
+        "formName",
+        "typeIdentifier",
+        "timestamp"
+      ],
+      "members": {
+        "formName": "TimeSeriesFormName",
+        "typeIdentifier": "FormTypeIdentifier",
+        "typeRevision": "Revision",
+        "timestamp": "Timestamp",
+        "content": "TimeSeriesDataPointFormInputContentString"
+      }
+    },
+    "TimeSeriesDataPointFormInputContentString": {
+      "type": "string",
+      "min": 0,
+      "max": 500000
+    },
+    "TimeSeriesDataPointFormInputList": {
+      "type": "list",
+      "member": "TimeSeriesDataPointFormInput"
+    },
+    "TimeSeriesDataPointIdentifier": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_-]{1,36}"
+    },
+    "TimeSeriesEntityType": {
+      "type": "string",
+      "enum": [
+        "ASSET",
+        "LISTING"
+      ]
+    },
+    "TimeSeriesFormName": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TimeoutConfig": {
+      "type": "structure",
+      "members": {
+        "runTimeoutInMinutes": "TimeoutConfigRunTimeoutInMinutesInteger"
+      }
+    },
+    "TimeoutConfigRunTimeoutInMinutesInteger": {
+      "type": "integer",
+      "min": 60,
+      "max": 1440
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "Timezone": {
+      "type": "string",
+      "enum": [
+        "UTC",
+        "AFRICA_JOHANNESBURG",
+        "AMERICA_MONTREAL",
+        "AMERICA_SAO_PAULO",
+        "ASIA_BAHRAIN",
+        "ASIA_BANGKOK",
+        "ASIA_CALCUTTA",
+        "ASIA_DUBAI",
+        "ASIA_HONG_KONG",
+        "ASIA_JAKARTA",
+        "ASIA_KUALA_LUMPUR",
+        "ASIA_SEOUL",
+        "ASIA_SHANGHAI",
+        "ASIA_SINGAPORE",
+        "ASIA_TAIPEI",
+        "ASIA_TOKYO",
+        "AUSTRALIA_MELBOURNE",
+        "AUSTRALIA_SYDNEY",
+        "CANADA_CENTRAL",
+        "CET",
+        "CST6CDT",
+        "ETC_GMT",
+        "ETC_GMT0",
+        "ETC_GMT_ADD_0",
+        "ETC_GMT_ADD_1",
+        "ETC_GMT_ADD_10",
+        "ETC_GMT_ADD_11",
+        "ETC_GMT_ADD_12",
+        "ETC_GMT_ADD_2",
+        "ETC_GMT_ADD_3",
+        "ETC_GMT_ADD_4",
+        "ETC_GMT_ADD_5",
+        "ETC_GMT_ADD_6",
+        "ETC_GMT_ADD_7",
+        "ETC_GMT_ADD_8",
+        "ETC_GMT_ADD_9",
+        "ETC_GMT_NEG_0",
+        "ETC_GMT_NEG_1",
+        "ETC_GMT_NEG_10",
+        "ETC_GMT_NEG_11",
+        "ETC_GMT_NEG_12",
+        "ETC_GMT_NEG_13",
+        "ETC_GMT_NEG_14",
+        "ETC_GMT_NEG_2",
+        "ETC_GMT_NEG_3",
+        "ETC_GMT_NEG_4",
+        "ETC_GMT_NEG_5",
+        "ETC_GMT_NEG_6",
+        "ETC_GMT_NEG_7",
+        "ETC_GMT_NEG_8",
+        "ETC_GMT_NEG_9",
+        "EUROPE_DUBLIN",
+        "EUROPE_LONDON",
+        "EUROPE_PARIS",
+        "EUROPE_STOCKHOLM",
+        "EUROPE_ZURICH",
+        "ISRAEL",
+        "MEXICO_GENERAL",
+        "MST7MDT",
+        "PACIFIC_AUCKLAND",
+        "US_CENTRAL",
+        "US_EASTERN",
+        "US_MOUNTAIN",
+        "US_PACIFIC"
+      ]
+    },
+    "TokenUrlParametersMap": {
+      "type": "map",
+      "key": "TokenUrlParametersMapKeyString",
+      "value": "TokenUrlParametersMapValueString"
+    },
+    "TokenUrlParametersMapKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TokenUrlParametersMapValueString": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "TrackingAssetArns": {
+      "type": "list",
+      "min": 0,
+      "max": 500,
+      "member": "SageMakerResourceArn"
+    },
+    "TrackingAssets": {
+      "type": "map",
+      "min": 1,
+      "max": 1,
+      "key": "SageMakerAssetType",
+      "value": "TrackingAssetArns"
+    },
+    "TriggerSource": {
+      "type": "structure",
+      "members": {
+        "type": "TriggerSourceType",
+        "name": "String"
+      }
+    },
+    "TriggerSourceType": {
+      "type": "string",
+      "enum": [
+        "MANUAL",
+        "SCHEDULED",
+        "WORKFLOW"
+      ]
+    },
+    "TypeName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[^\\.]*.*"
+    },
+    "TypesSearchScope": {
+      "type": "string",
+      "enum": [
+        "ASSET_TYPE",
+        "FORM_TYPE",
+        "LINEAGE_NODE_TYPE"
+      ]
+    },
+    "Unit": {
+      "type": "structure",
+      "members": {}
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "String",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateAccountPoolInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "AccountPoolId",
+        "name": "AccountPoolName",
+        "description": "Description",
+        "resolutionStrategy": "ResolutionStrategy",
+        "accountSource": "AccountSource"
+      }
+    },
+    "UpdateAssetFilterInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "assetIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "assetIdentifier": "AssetId",
+        "identifier": "FilterId",
+        "name": "String",
+        "description": "Description",
+        "configuration": "AssetFilterConfiguration"
+      }
+    },
+    "UpdateConnectionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "configurations": "Configurations",
+        "domainIdentifier": "DomainId",
+        "identifier": "ConnectionId",
+        "description": "UpdateConnectionInputDescriptionString",
+        "awsLocation": "AwsLocation",
+        "props": "ConnectionPropertiesPatch"
+      }
+    },
+    "UpdateConnectionInputDescriptionString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "UpdateDataSourceInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DataSourceId",
+        "name": "Name",
+        "description": "Description",
+        "enableSetting": "EnableSetting",
+        "publishOnImport": "Boolean",
+        "assetFormsInput": "FormInputList",
+        "schedule": "ScheduleConfiguration",
+        "configuration": "DataSourceConfigurationInput",
+        "recommendation": "RecommendationConfiguration",
+        "retainPermissionsOnRevokeFailure": "Boolean"
+      }
+    },
+    "UpdateDesignationInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DesignationId",
+        "name": "DesignationName",
+        "description": "Description",
+        "policy": "CedarDesignationPolicy",
+        "deletionProtection": "Boolean"
+      }
+    },
+    "UpdateDomainInput": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "DomainId",
+        "description": "String",
+        "singleSignOn": "SingleSignOn",
+        "domainExecutionRole": "RoleArn",
+        "serviceRole": "RoleArn",
+        "name": "String",
+        "clientToken": "String"
+      }
+    },
+    "UpdateDomainUnitInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "DomainUnitId",
+        "description": "DomainUnitDescription",
+        "name": "DomainUnitName"
+      }
+    },
+    "UpdateEnvironmentActionInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "identifier": "String",
+        "parameters": "ActionParameters",
+        "name": "String",
+        "description": "String"
+      }
+    },
+    "UpdateEnvironmentBlueprintInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "EnvironmentBlueprintId",
+        "description": "String",
+        "provisioningProperties": "ProvisioningProperties",
+        "userParameters": "CustomParameterList",
+        "blueprintCategory": "BlueprintCategory"
+      }
+    },
+    "UpdateEnvironmentInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "EnvironmentId",
+        "name": "String",
+        "description": "String",
+        "glossaryTerms": "GlossaryTerms",
+        "blueprintVersion": "String",
+        "userParameters": "EnvironmentParametersList",
+        "environmentConfigurationName": "EnvironmentConfigurationName"
+      }
+    },
+    "UpdateEnvironmentProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "EnvironmentProfileId",
+        "name": "EnvironmentProfileName",
+        "description": "String",
+        "userParameters": "EnvironmentParametersList",
+        "awsAccountId": "AwsAccountId",
+        "awsAccountRegion": "AwsRegion"
+      }
+    },
+    "UpdateGlossaryInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "GlossaryId",
+        "name": "GlossaryName",
+        "description": "GlossaryDescription",
+        "status": "GlossaryStatus",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateGlossaryTermInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "glossaryIdentifier": "GlossaryTermId",
+        "identifier": "GlossaryTermId",
+        "name": "GlossaryTermName",
+        "shortDescription": "ShortDescription",
+        "longDescription": "LongDescription",
+        "termRelations": "TermRelations",
+        "status": "GlossaryTermStatus"
+      }
+    },
+    "UpdateGroupProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "groupIdentifier",
+        "status"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "groupIdentifier": "GroupIdentifier",
+        "status": "GroupProfileStatus"
+      }
+    },
+    "UpdateNotebookInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "NotebookId",
+        "description": "Description",
+        "status": "NotebookStatus",
+        "name": "NotebookName",
+        "cellOrder": "CellOrder",
+        "type": "NotebookType",
+        "metadata": "Metadata",
+        "parameters": "Parameters",
+        "environmentConfiguration": "EnvironmentConfig",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateProjectInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "ProjectId",
+        "name": "ProjectName",
+        "description": "Description",
+        "resourceTags": "UpdateProjectInputResourceTagsMap",
+        "glossaryTerms": "GlossaryTerms",
+        "domainUnitId": "DomainUnitId",
+        "environmentDeploymentDetails": "EnvironmentDeploymentDetails",
+        "userParameters": "EnvironmentConfigurationUserParametersList",
+        "projectProfileVersion": "String"
+      }
+    },
+    "UpdateProjectInputResourceTagsMap": {
+      "type": "map",
+      "min": 0,
+      "max": 25,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "UpdateProjectProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "ProjectProfileId",
+        "name": "ProjectProfileName",
+        "description": "Description",
+        "status": "Status",
+        "projectResourceTags": "ProjectResourceTagParameters",
+        "allowCustomProjectResourceTags": "Boolean",
+        "projectResourceTagsDescription": "Description",
+        "environmentConfigurations": "EnvironmentConfigurationsList",
+        "domainUnitIdentifier": "DomainUnitId"
+      }
+    },
+    "UpdateRootDomainUnitOwnerInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "currentOwner",
+        "newOwner"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "currentOwner": "UserIdentifier",
+        "newOwner": "String",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateRuleInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "RuleId",
+        "name": "RuleName",
+        "description": "Description",
+        "scope": "RuleScope",
+        "detail": "RuleDetail",
+        "includeChildDomainUnits": "Boolean"
+      }
+    },
+    "UpdateSubscriptionGrantStatusInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier",
+        "assetIdentifier",
+        "status"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "SubscriptionGrantId",
+        "assetIdentifier": "AssetId",
+        "status": "SubscriptionGrantStatus",
+        "failureCause": "FailureCause",
+        "targetName": "String"
+      }
+    },
+    "UpdateSubscriptionRequestInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "identifier",
+        "requestReason"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "identifier": "SubscriptionRequestId",
+        "requestReason": "RequestReason"
+      }
+    },
+    "UpdateSubscriptionTargetInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "environmentIdentifier",
+        "identifier"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "environmentIdentifier": "EnvironmentId",
+        "identifier": "SubscriptionTargetId",
+        "name": "SubscriptionTargetName",
+        "authorizedPrincipals": "AuthorizedPrincipalIdentifiers",
+        "applicableAssetTypes": "ApplicableAssetTypes",
+        "subscriptionTargetConfig": "SubscriptionTargetForms",
+        "manageAccessRole": "IamRoleArn",
+        "provider": "String",
+        "subscriptionGrantCreationMode": "SubscriptionGrantCreationMode"
+      }
+    },
+    "UpdateUserProfileInput": {
+      "type": "structure",
+      "required": [
+        "domainIdentifier",
+        "userIdentifier",
+        "status"
+      ],
+      "members": {
+        "domainIdentifier": "DomainId",
+        "userIdentifier": "UserIdentifier",
+        "type": "UserProfileType",
+        "status": "UserProfileStatus",
+        "sessionName": "UpdateUserProfileInputSessionNameString"
+      }
+    },
+    "UpdateUserProfileInputSessionNameString": {
+      "type": "string",
+      "min": 2,
+      "max": 64
+    },
+    "UseAssetTypePolicyGrantDetail": {
+      "type": "structure",
+      "members": {
+        "domainUnitId": "DomainUnitId"
+      }
+    },
+    "UserAssignment": {
+      "type": "string",
+      "enum": [
+        "AUTOMATIC",
+        "MANUAL"
+      ]
+    },
+    "UserDesignation": {
+      "type": "string",
+      "enum": [
+        "PROJECT_OWNER",
+        "PROJECT_CONTRIBUTOR",
+        "PROJECT_CATALOG_VIEWER",
+        "PROJECT_CATALOG_CONSUMER",
+        "PROJECT_CATALOG_STEWARD",
+        "USER_CREATED_DESIGNATION"
+      ]
+    },
+    "UserIdentifier": {
+      "type": "string",
+      "pattern": ".*(^([0-9a-f]{10}-|)[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$|^[a-zA-Z_0-9+=,.@-]+$|^arn:aws:iam::\\d{12}:.+$).*"
+    },
+    "UserPolicyGrantPrincipal": {
+      "type": "structure",
+      "members": {
+        "userIdentifier": "UserIdentifier",
+        "allUsersGrantFilter": "AllUsersGrantFilter"
+      }
+    },
+    "UserProfileId": {
+      "type": "string",
+      "pattern": "([0-9a-f]{10}-|)[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}"
+    },
+    "UserProfileStatus": {
+      "type": "string",
+      "enum": [
+        "ASSIGNED",
+        "NOT_ASSIGNED",
+        "ACTIVATED",
+        "DEACTIVATED"
+      ]
+    },
+    "UserProfileType": {
+      "type": "string",
+      "enum": [
+        "IAM",
+        "SSO"
+      ]
+    },
+    "UserSearchText": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "UserSearchType": {
+      "type": "string",
+      "enum": [
+        "SSO_USER",
+        "DATAZONE_USER",
+        "DATAZONE_SSO_USER",
+        "DATAZONE_IAM_USER"
+      ]
+    },
+    "UserType": {
+      "type": "string",
+      "enum": [
+        "IAM_USER",
+        "IAM_ROLE",
+        "SSO_USER",
+        "IAM_ROLE_SESSION"
+      ]
+    },
+    "Username": {
+      "type": "string",
+      "min": 0,
+      "max": 64
+    },
+    "UsernamePassword": {
+      "type": "structure",
+      "required": [
+        "password",
+        "username"
+      ],
+      "members": {
+        "password": "Password",
+        "username": "Username"
+      }
+    },
+    "VpcConnectionSubnetIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 16,
+      "member": "SubnetId"
+    },
+    "VpcId": {
+      "type": "string",
+      "min": 0,
+      "max": 32,
+      "pattern": "vpc-[a-z0-9]+"
+    },
+    "VpcPropertiesInput": {
+      "type": "structure",
+      "required": [
+        "vpcId",
+        "subnetIds"
+      ],
+      "members": {
+        "vpcId": "VpcId",
+        "subnetIds": "VpcConnectionSubnetIdList",
+        "securityGroupId": "SecurityGroupId"
+      }
+    },
+    "VpcPropertiesPatch": {
+      "type": "structure",
+      "members": {
+        "vpcId": "VpcId",
+        "subnetIds": "VpcConnectionSubnetIdList",
+        "securityGroupId": "SecurityGroupId"
+      }
+    },
+    "WorkflowsMwaaPropertiesInput": {
+      "type": "structure",
+      "members": {
+        "mwaaEnvironmentName": "String"
+      }
+    },
+    "WorkflowsServerlessPropertiesInput": {
+      "type": "structure",
+      "members": {}
+    }
+  }
+}
