@@ -259,6 +259,10 @@ services:
     doc: docs/services/ecrpublic.md
     sources:
       - { path: services/ecrpublic/EcrPublicJsonHandler.java, mode: switch }
+  - service: emrcontainers
+    doc: docs/services/emrcontainers.md
+    sources:
+      - { path: services/emrcontainers/EmrContainersController.java, mode: switch }
   - service: dax
     doc: docs/services/dax.md
     sources:

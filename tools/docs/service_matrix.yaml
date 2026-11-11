@@ -22,6 +22,7 @@ aliases:
   servicecatalog-appregistry: appregistry   # AppRegistry's endpoint prefix; it signs with "servicecatalog"
   acm-pca: acmpca                       # Private CA's SigV4 signing name is "acm-pca"
   backup-search: backupsearch            # Backup Search's SigV4 signing name is "backup-search"
+  emr-containers: emrcontainers          # EMR on EKS's SigV4 signing name is "emr-containers"
   ecr-public: ecrpublic                  # ECR Public's SigV4 signing name is "ecr-public"
   docdb-elastic: docdbelastic            # DocumentDB Elastic Clusters' SigV4 signing name is "docdb-elastic"
   bedrock-data-automation-runtime: bedrock-data-automation  # the runtime half of Bedrock Data Automation

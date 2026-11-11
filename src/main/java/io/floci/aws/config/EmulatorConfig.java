@@ -873,6 +873,7 @@ public interface EmulatorConfig {
         DevOpsGuruServiceConfig devopsguru();
         DocDbElasticServiceConfig docdbElastic();
         EcrPublicServiceConfig ecrPublic();
+        EmrContainersServiceConfig emrContainers();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -2961,6 +2962,27 @@ public interface EmulatorConfig {
         /** How long a cost estimation stays ONGOING. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface EmrContainersServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a job run stays in each state it passes through in the immediate runner mode. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /**
+         * {@code immediate} follows the job run states without running anything; {@code docker} runs each
+         * {@code spark-submit} job run's driver in a container of the release's EMR image, as EMR Serverless does.
+         */
+        @WithDefault("immediate")
+        String runnerMode();
+
+        /** The image a {@code docker} job run uses, {@code %s} standing for its release; the EMR image if omitted. */
+        Optional<String> imageTemplate();
+
+        Optional<String> dockerNetwork();
     }
 
     interface EcrPublicServiceConfig {

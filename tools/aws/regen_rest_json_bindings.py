@@ -30,6 +30,7 @@ MODELS = {
     "deadline": "deadline",
     "devops-guru": "devopsguru",
     "docdb-elastic": "docdbelastic",
+    "emr-containers": "emrcontainers",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

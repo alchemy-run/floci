@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1447,6 +1447,29 @@ class PartitionCrossServiceSmokeIntegrationTest {
         String arn = signed(region, "ecr-public").header("X-Amz-Target", "SpencerFrontendService.DescribeRegistries")
                 .contentType(JSON_1_1).body("{}").post("/").then().statusCode(200).extract()
                 .path("registries[0].registryArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void emrContainersJobTemplateArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "emr-containers");
+        String roleName = unique("smoke-emrc", partitionCase);
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"pods.eks.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", roleName)
+                .formParam("AssumeRolePolicyDocument", trust).post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        cleanup.register(() -> signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteRole").formParam("RoleName", roleName).post("/"));
+        String arn = signed(region, "emr-containers").contentType(JSON).body("{\"name\":\"" + roleName
+                        + "\",\"clientToken\":\"" + roleName + "\",\"jobTemplateData\":{\"executionRoleArn\":\""
+                        + role + "\",\"releaseLabel\":\"emr-7.5.0-latest\",\"jobDriver\":{\"sparkSubmitJobDriver\":"
+                        + "{\"entryPoint\":\"local:///app.py\"}}}}")
+                .post("/jobtemplates").then().statusCode(200).extract().path("arn");
+        String id = arn.substring(arn.lastIndexOf('/') + 1);
+        cleanup.register(() -> signed(region, "emr-containers").delete("/jobtemplates/" + id));
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 

@@ -886,6 +886,37 @@
         "UpdatePodIdentityAssociation": {"method": "POST", "requestUri": "/clusters/{name}/pod-identity-associations/{associationId}"}
       }
     },
+    "emr-containers": {
+      "credentialScope": "emr-containers",
+      "apiVersion": "2020-10-01",
+      "operations": {
+        "CancelJobRun": {"method": "DELETE", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}/jobruns/{jobRunId}"},
+        "CreateJobTemplate": {"method": "POST", "requestUri": "/_emrcontainers/jobtemplates"},
+        "CreateManagedEndpoint": {"method": "POST", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}/endpoints"},
+        "CreateSecurityConfiguration": {"method": "POST", "requestUri": "/_emrcontainers/securityconfigurations"},
+        "CreateVirtualCluster": {"method": "POST", "requestUri": "/_emrcontainers/virtualclusters"},
+        "DeleteJobTemplate": {"method": "DELETE", "requestUri": "/_emrcontainers/jobtemplates/{templateId}"},
+        "DeleteManagedEndpoint": {"method": "DELETE", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}/endpoints/{endpointId}"},
+        "DeleteSecurityConfiguration": {"method": "DELETE", "requestUri": "/_emrcontainers/securityconfigurations/{securityConfigurationId}"},
+        "DeleteVirtualCluster": {"method": "DELETE", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}"},
+        "DescribeJobRun": {"method": "GET", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}/jobruns/{jobRunId}"},
+        "DescribeJobTemplate": {"method": "GET", "requestUri": "/_emrcontainers/jobtemplates/{templateId}"},
+        "DescribeManagedEndpoint": {"method": "GET", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}/endpoints/{endpointId}"},
+        "DescribeSecurityConfiguration": {"method": "GET", "requestUri": "/_emrcontainers/securityconfigurations/{securityConfigurationId}"},
+        "DescribeVirtualCluster": {"method": "GET", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}"},
+        "GetManagedEndpointSessionCredentials": {"method": "POST", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}/endpoints/{endpointId}/credentials"},
+        "ListJobRuns": {"method": "GET", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}/jobruns"},
+        "ListJobTemplates": {"method": "GET", "requestUri": "/_emrcontainers/jobtemplates"},
+        "ListManagedEndpoints": {"method": "GET", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}/endpoints"},
+        "ListSecurityConfigurations": {"method": "GET", "requestUri": "/_emrcontainers/securityconfigurations"},
+        "ListTagsForResource": {"method": "GET", "requestUri": "/_emrcontainers/tags/{resourceArn}"},
+        "ListVirtualClusters": {"method": "GET", "requestUri": "/_emrcontainers/virtualclusters"},
+        "StartJobRun": {"method": "POST", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}/jobruns"},
+        "TagResource": {"method": "POST", "requestUri": "/_emrcontainers/tags/{resourceArn}"},
+        "UntagResource": {"method": "DELETE", "requestUri": "/_emrcontainers/tags/{resourceArn}"},
+        "UpdateVirtualCluster": {"method": "PATCH", "requestUri": "/_emrcontainers/virtualclusters/{virtualClusterId}"}
+      }
+    },
     "es": {
       "credentialScope": "es",
       "apiVersion": "2015-01-01",

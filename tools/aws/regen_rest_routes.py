@@ -58,6 +58,7 @@ MODELS: dict[str, str] = {
     "deadline": "deadline",
     "devops-guru": "devops-guru",
     "docdb-elastic": "docdb-elastic",
+    "emr-containers": "emr-containers",
     "dsql": "dsql",
     "eks": "eks",
     "es": "es",
@@ -90,6 +91,7 @@ INTERNAL_ROUTES: dict[str, tuple[str, bool]] = {
     "deadline": ("/_deadline", False),
     "devops-guru": ("/_devopsguru", False),
     "docdb-elastic": ("/_docdbelastic", False),
+    "emr-containers": ("/_emrcontainers", False),
 }
 
 
