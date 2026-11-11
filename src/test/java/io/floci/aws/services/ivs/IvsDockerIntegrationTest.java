@@ -60,6 +60,8 @@ class IvsDockerIntegrationTest {
             return Map.of("floci.services.ivs.mock", "false",
                     "floci.services.ivs.rtmp-port", "19350",
                     "floci.services.ivs.srt-port", "19400",
+                    "floci.services.ivs.rtmps-port", "19370",
+                    "floci.services.ivs.webrtc-port", "18189",
                     "floci.services.ivs.host-port-base", "18500",
                     "floci.services.ivs.host-port-max", "18599",
                     "floci.services.ivs.poll-millis", "500");

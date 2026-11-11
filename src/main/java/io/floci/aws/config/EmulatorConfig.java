@@ -3043,6 +3043,21 @@ public interface EmulatorConfig {
         @WithDefault("9000")
         int srtPort();
 
+        /** The host port stage publishers send RTMPS to: a stage's {@code rtmps} endpoint. */
+        @WithDefault("1937")
+        int rtmpsPort();
+
+        /**
+         * The UDP port WHIP publishers send a stage their WebRTC media on, the same on the host and in the media
+         * server, as its ICE candidates name it.
+         */
+        @WithDefault("8189")
+        int webrtcPort();
+
+        /** How long a composition runs with no publisher on its stage before it stops itself. */
+        @WithDefault("60")
+        int compositionIdleSeconds();
+
         /** Lowest host port the media server's API and HLS are published on, for floci to reach. */
         @WithDefault("13200")
         int hostPortBase();

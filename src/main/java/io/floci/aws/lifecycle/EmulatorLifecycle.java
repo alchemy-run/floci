@@ -27,6 +27,7 @@ import io.floci.aws.services.elbv2.ElbV2Service;
 import io.floci.aws.services.floci.ui.FlociUiManager;
 import io.floci.aws.services.grafana.GrafanaService;
 import io.floci.aws.services.iam.IamService;
+import io.floci.aws.services.ivs.IvsRealtimeLive;
 import io.floci.aws.services.ivs.IvsService;
 import io.floci.aws.services.kinesisanalytics.container.FlinkContainerManager;
 import io.floci.aws.services.lambda.DynamoDbStreamsEventSourcePoller;
@@ -105,6 +106,7 @@ public class EmulatorLifecycle {
     private final TimestreamInfluxDbService timestreamInfluxDbService;
     private final GrafanaService grafanaService;
     private final IvsService ivsService;
+    private final IvsRealtimeLive ivsRealtimeLive;
     private final ElbV2Service elbV2Service;
     private final EcsService ecsService;
     private final ElbClassicService elbClassicService;
@@ -152,6 +154,7 @@ public class EmulatorLifecycle {
                              TimestreamInfluxDbService timestreamInfluxDbService,
                              GrafanaService grafanaService,
                              IvsService ivsService,
+                             IvsRealtimeLive ivsRealtimeLive,
                              ElbV2Service elbV2Service,
                              ElbClassicService elbClassicService,
                              EcsService ecsService,
@@ -196,6 +199,7 @@ public class EmulatorLifecycle {
         this.timestreamInfluxDbService = timestreamInfluxDbService;
         this.grafanaService = grafanaService;
         this.ivsService = ivsService;
+        this.ivsRealtimeLive = ivsRealtimeLive;
         this.elbV2Service = elbV2Service;
         this.elbClassicService = elbClassicService;
         this.ecsService = ecsService;
@@ -281,6 +285,7 @@ public class EmulatorLifecycle {
         }
         if (config.services().ivs().enabled()) {
             ivsService.restorePersistedRuntime();
+            ivsRealtimeLive.restorePersistedRuntime();
         }
         if (config.services().elasticache().enabled()) {
             elastiCacheService.restorePersistedRuntime().exceptionally(ex -> {

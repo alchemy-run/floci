@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Vendor Amazon IVS request constraints from botocore's Apache-2.0 service models."""
+"""Vendor Amazon IVS and IVS Real-Time request constraints from botocore's Apache-2.0 service models."""
 from __future__ import annotations
 
 import argparse
@@ -9,7 +9,7 @@ from pathlib import Path
 from regen_partitions import resolve_botocore_data, strip_source
 from request_shapes import REPO_ROOT, build_constraints, load_model, widen_partition_and_region
 
-SERVICES = {"ivs": "ivs/2020-07-14"}
+SERVICES = {"ivs": "ivs/2020-07-14", "ivs-realtime": "ivs-realtime/2020-07-14"}
 
 
 def output(service: str) -> Path:

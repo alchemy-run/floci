@@ -64,6 +64,7 @@ MODELS: dict[str, str] = {
     "grafana": "grafana",
     "greengrassv2": "greengrass",
     "ivs": "ivs",
+    "ivs-realtime": "ivs",
     "ivschat": "ivschat",
     "dsql": "dsql",
     "eks": "eks",
@@ -104,6 +105,7 @@ INTERNAL_ROUTES: dict[str, tuple[str, bool]] = {
     "greengrassv2": ("/_greengrass", False),
     # IVS names a resource to tag by its ARN, whose slashes the label spans.
     "ivs": ("/_ivs", True),
+    "ivs-realtime": ("/_ivsrealtime", True),
     "ivschat": ("/_ivschat", True),
 }
 

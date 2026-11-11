@@ -74,6 +74,10 @@ public class IvsService {
         this.live = live;
         this.media = media;
         this.s3 = s3;
+        media.onStart(() -> {
+            live.startPolling();
+            configureAllPaths();
+        });
     }
 
     private EmulatorConfig.IvsServiceConfig config() {
@@ -94,8 +98,6 @@ public class IvsService {
                     return;
                 }
                 media.ensureStarted();
-                live.startPolling();
-                configureAllPaths();
             } catch (RuntimeException e) {
                 LOG.warnv("The IVS media server could not be started: {0}", e.getMessage());
             }
@@ -608,7 +610,7 @@ public class IvsService {
     }
 
     /** The DER of an ECDSA P-384 public key given as PEM or base64. */
-    private static byte[] publicKey(String material) {
+    static byte[] publicKey(String material) {
         String body = material.replaceAll("-----(BEGIN|END) PUBLIC KEY-----", "").replaceAll("\\s", "");
         byte[] der;
         try {
@@ -624,7 +626,7 @@ public class IvsService {
         return der;
     }
 
-    private static String fingerprint(byte[] der) {
+    static String fingerprint(byte[] der) {
         try {
             byte[] digest = MessageDigest.getInstance("MD5").digest(der);
             return HexFormat.ofDelimiter(":").formatHex(digest);

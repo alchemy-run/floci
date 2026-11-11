@@ -126,7 +126,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Managed Grafana](grafana.md) | `/workspaces/*`, `/tags/*`, `/versions` | REST JSON | 25 |
 | [IoT Greengrass V2](greengrassv2.md) | `/greengrass/v2/*`, `/greengrass/things/*`, `/greengrass/servicerole`, `/tags/*` | REST JSON | 29 |
 | [HealthLake](healthlake.md) | `POST /` + `X-Amz-Target: HealthLake.*` | JSON 1.0 | 26 |
-| [IVS](ivs.md) | `POST /<Operation>`, `/tags/*` signed for `ivs` | REST JSON | 41 |
+| [IVS](ivs.md) | `POST /<Operation>`, `/tags/*` signed for `ivs` (with Real-Time) | REST JSON | 78 |
 | [IVS Chat](ivschat.md) | `POST /<Operation>`, `/tags/*` signed for `ivschat` | REST JSON | 17 |
 | [FSx](fsx.md) | `POST /` + `X-Amz-Target: AWSSimbaAPIService_v20180301.*` | JSON 1.1 | 48 |
 | [FinSpace](finspace.md) (end of support) | requests signed `finspace-api` | REST JSON | 0 |

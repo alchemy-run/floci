@@ -8,6 +8,7 @@ import com.github.dockerjava.api.command.ExecCreateCmdResponse;
 import com.github.dockerjava.api.command.InspectContainerResponse;
 import com.github.dockerjava.api.model.Frame;
 import io.floci.aws.config.EmulatorConfig;
+import io.floci.aws.config.FlociCertificateAuthority;
 import io.floci.aws.core.common.ContainerTeardown;
 import io.floci.aws.core.common.docker.ContainerBuilder;
 import io.floci.aws.core.common.docker.ContainerLifecycleManager;
@@ -16,7 +17,10 @@ import io.floci.aws.core.common.docker.ContainerLifecycleManager.EndpointInfo;
 import io.floci.aws.core.common.docker.ContainerSpec;
 import io.floci.aws.core.common.docker.ContainerStorageHelper;
 import io.floci.aws.core.common.docker.PortAllocator;
+import io.floci.aws.services.acm.CertificateGenerator;
+import io.floci.aws.services.acm.model.KeyAlgorithm;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.apache.commons.compress.archivers.tar.TarArchiveEntry;
 import org.apache.commons.compress.archivers.tar.TarArchiveInputStream;
@@ -38,6 +42,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -57,10 +62,14 @@ public class IvsMediaServer implements ContainerTeardown {
     private static final int API_PORT = 9997;
     private static final int HLS_PORT = 8888;
     private static final int RTMP_PORT = 1935;
+    private static final int RTMPS_PORT = 1936;
     private static final int SRT_PORT = 8890;
+    private static final int WEBRTC_PORT = 8889;
+    /** The server's own RTSP, which compositions and replication read published paths from. */
+    static final String RTSP = "rtsp://127.0.0.1:8554/";
 
-    /** Where floci reaches the server: its API and its HLS. */
-    record Endpoint(String containerId, String api, String hls) {
+    /** Where floci reaches the server: its API, its HLS and its WebRTC (WHIP). */
+    record Endpoint(String containerId, String api, String hls, String webrtc) {
     }
 
     private final ContainerBuilder containerBuilder;
@@ -68,14 +77,19 @@ public class IvsMediaServer implements ContainerTeardown {
     private final PortAllocator portAllocator;
     private final EmulatorConfig config;
     private final ObjectMapper mapper;
+    private final Instance<FlociCertificateAuthority> certificateAuthority;
     private final HttpClient http = HttpClient.newBuilder().version(HttpClient.Version.HTTP_1_1)
             .connectTimeout(Duration.ofSeconds(5)).build();
     private volatile Endpoint endpoint;
     private final List<Integer> allocated = new ArrayList<>();
+    /** What IVS and IVS Real-Time configure on the server whenever it starts: their paths, their polling. */
+    private final List<Runnable> startListeners = new CopyOnWriteArrayList<>();
 
     @Inject
     public IvsMediaServer(ContainerBuilder containerBuilder, ContainerLifecycleManager lifecycleManager,
-                          PortAllocator portAllocator, EmulatorConfig config, ObjectMapper mapper) {
+                          PortAllocator portAllocator, EmulatorConfig config, ObjectMapper mapper,
+                          Instance<FlociCertificateAuthority> certificateAuthority) {
+        this.certificateAuthority = certificateAuthority;
         this.containerBuilder = containerBuilder;
         this.lifecycleManager = lifecycleManager;
         this.portAllocator = portAllocator;
@@ -90,6 +104,14 @@ public class IvsMediaServer implements ContainerTeardown {
         } catch (RuntimeException e) {
             LOG.debugv("Docker daemon is not reachable: {0}", e.getMessage());
             return false;
+        }
+    }
+
+    /** Runs a listener each time the server starts, once it is ready, and now when it already runs. */
+    void onStart(Runnable listener) {
+        startListeners.add(listener);
+        if (endpoint != null) {
+            listener.run();
         }
     }
 
@@ -109,8 +131,10 @@ public class IvsMediaServer implements ContainerTeardown {
         releasePorts();
         int apiPort = portAllocator.allocate(serviceConfig.hostPortBase(), serviceConfig.hostPortMax());
         int hlsPort = portAllocator.allocate(serviceConfig.hostPortBase(), serviceConfig.hostPortMax());
+        int webrtcPort = portAllocator.allocate(serviceConfig.hostPortBase(), serviceConfig.hostPortMax());
         allocated.add(apiPort);
         allocated.add(hlsPort);
+        allocated.add(webrtcPort);
         ContainerBuilder.Builder builder = containerBuilder.newContainer(serviceConfig.image())
                 .withName(CONTAINER)
                 .withDockerNetwork(serviceConfig.dockerNetwork())
@@ -118,8 +142,11 @@ public class IvsMediaServer implements ContainerTeardown {
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(SERVICE, "media", "", ""))
                 .withPortBinding(API_PORT, apiPort)
                 .withPortBinding(HLS_PORT, hlsPort)
+                .withPortBinding(WEBRTC_PORT, webrtcPort)
                 .withPortBinding(RTMP_PORT, serviceConfig.rtmpPort())
-                .withUdpPortBinding(SRT_PORT, serviceConfig.srtPort());
+                .withPortBinding(RTMPS_PORT, serviceConfig.rtmpsPort())
+                .withUdpPortBinding(SRT_PORT, serviceConfig.srtPort())
+                .withUdpPortBinding(serviceConfig.webrtcPort(), serviceConfig.webrtcPort());
         if (ContainerStorageHelper.isNamedVolumeMode(config)) {
             ContainerStorageHelper.applyStorage(builder, lifecycleManager, config, SERVICE, null, "recordings",
                     RECORDINGS);
@@ -129,7 +156,12 @@ public class IvsMediaServer implements ContainerTeardown {
         ContainerInfo info;
         try {
             id = lifecycleManager.create(spec);
-            copy(id, "/", Map.of("mediamtx.yml", configuration()));
+            String host = ingestHost();
+            CertificateGenerator.GeneratedCertificate certificate = certificateAuthority.get()
+                    .issueServerCertificate(host, List.of(host, "localhost", "127.0.0.1"), KeyAlgorithm.RSA_2048, null);
+            copy(id, "/", Map.of("mediamtx.yml", configuration(serviceConfig, host)));
+            copy(id, "/", Map.of("certs/server.crt", certificate.certificatePem(),
+                    "certs/server.key", certificate.privateKeyPem()));
             info = lifecycleManager.startCreated(id, spec);
         } catch (RuntimeException e) {
             lifecycleManager.removeIfExists(CONTAINER);
@@ -138,8 +170,9 @@ public class IvsMediaServer implements ContainerTeardown {
         }
         EndpointInfo api = info.getEndpoint(API_PORT);
         EndpointInfo hls = info.getEndpoint(HLS_PORT);
+        EndpointInfo webrtc = info.getEndpoint(WEBRTC_PORT);
         Endpoint started = new Endpoint(id, "http://" + api.host() + ":" + api.port(),
-                "http://" + hls.host() + ":" + hls.port());
+                "http://" + hls.host() + ":" + hls.port(), "http://" + webrtc.host() + ":" + webrtc.port());
         long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(serviceConfig.readinessTimeoutSeconds());
         while (System.currentTimeMillis() < deadline) {
             if (!running(id)) {
@@ -150,6 +183,13 @@ public class IvsMediaServer implements ContainerTeardown {
                     endpoint = started;
                     LOG.infov("The IVS media server is ready: RTMP on {0}, SRT on {1}",
                             String.valueOf(serviceConfig.rtmpPort()), String.valueOf(serviceConfig.srtPort()));
+                    for (Runnable listener : startListeners) {
+                        try {
+                            listener.run();
+                        } catch (RuntimeException e) {
+                            LOG.warnv("Configuring the IVS media server failed: {0}", e.getMessage());
+                        }
+                    }
                     return started;
                 }
             } catch (IllegalStateException e) {
@@ -161,8 +201,19 @@ public class IvsMediaServer implements ContainerTeardown {
                 + serviceConfig.readinessTimeoutSeconds() + "s");
     }
 
-    /** The server's configuration: only configured paths (stream keys) take publishers, and anyone may read. */
-    private static String configuration() {
+    /** The host broadcasters reach the server on: the gateway's host. */
+    private String ingestHost() {
+        URI base = URI.create(config.effectiveBaseUrl());
+        return base.getHost() == null ? "localhost" : base.getHost();
+    }
+
+    /**
+     * The server's configuration: only configured paths (stream keys, stage participants) take publishers, and anyone
+     * may read. WebRTC media flows on the configured UDP port, which its ICE candidates name with the gateway's host,
+     * and RTMPS presents a certificate Floci's CA issued for that host.
+     */
+    private static String configuration(EmulatorConfig.IvsServiceConfig serviceConfig, String host) {
+        String additional = "localhost".equals(host) ? "127.0.0.1" : host;
         return """
                 logLevel: info
                 authMethod: internal
@@ -177,11 +228,22 @@ public class IvsMediaServer implements ContainerTeardown {
                       - action: api
                 api: true
                 apiAddress: :9997
-                rtsp: false
-                webrtc: false
+                rtsp: true
+                rtspTransports: [tcp]
+                rtspAddress: :8554
+                webrtc: true
+                webrtcAddress: :8889
+                webrtcLocalUDPAddress: :WEBRTC_PORT
+                webrtcLocalTCPAddress: ''
+                webrtcIPsFromInterfaces: true
+                webrtcAdditionalHosts: [ADDITIONAL_HOST]
                 moq: false
                 rtmp: true
                 rtmpAddress: :1935
+                rtmpEncryption: optional
+                rtmpsAddress: :1936
+                rtmpServerKey: /certs/server.key
+                rtmpServerCert: /certs/server.crt
                 srt: true
                 srtAddress: :8890
                 hls: true
@@ -195,7 +257,8 @@ public class IvsMediaServer implements ContainerTeardown {
                   recordSegmentDuration: 10s
                   recordDeleteAfter: 0s
                 paths: {}
-                """;
+                """.replace("WEBRTC_PORT", Integer.toString(serviceConfig.webrtcPort()))
+                .replace("ADDITIONAL_HOST", additional);
     }
 
     private boolean running(String containerId) {
@@ -256,6 +319,31 @@ public class IvsMediaServer implements ContainerTeardown {
         }
     }
 
+    /** Configures (or reconfigures) a path by name: whether it records, and where it pulls its media from. */
+    void configureNamedPath(String path, boolean record, String source) {
+        Endpoint server = endpoint;
+        if (server == null) {
+            return;
+        }
+        ObjectNode body = mapper.createObjectNode();
+        body.put("record", record);
+        if (source != null) {
+            body.put("source", source).put("sourceOnDemand", false);
+        }
+        String name = encode(path);
+        if (send(server, "PATCH", "/v3/config/paths/patch/" + name, body) == 404) {
+            send(server, "POST", "/v3/config/paths/add/" + name, body);
+        }
+    }
+
+    /** Removes a path by name, which disconnects its publisher. */
+    void removeNamedPath(String path) {
+        Endpoint server = endpoint;
+        if (server != null) {
+            send(server, "DELETE", "/v3/config/paths/delete/" + encode(path), null);
+        }
+    }
+
     /** The paths with a source: their name, readiness, tracks and byte counts. */
     List<JsonNode> livePaths() {
         Endpoint server = endpoint;
@@ -284,14 +372,14 @@ public class IvsMediaServer implements ContainerTeardown {
         return viewers;
     }
 
-    /** Disconnects whoever publishes to a path, over RTMP or SRT. */
+    /** Disconnects whoever publishes to a path, over RTMP, RTMPS, SRT or WebRTC. */
     boolean kick(String path) {
         Endpoint server = endpoint;
         if (server == null) {
             return false;
         }
         boolean kicked = false;
-        for (String kind : List.of("rtmpconns", "srtconns")) {
+        for (String kind : List.of("rtmpconns", "rtmpsconns", "srtconns", "webrtcsessions")) {
             JsonNode list = get(server, "/v3/" + kind + "/list?itemsPerPage=1000");
             if (list == null) {
                 continue;
@@ -387,6 +475,31 @@ public class IvsMediaServer implements ContainerTeardown {
     }
 
     record ExecResult(int code, String output) {
+    }
+
+    /** Starts a shell script in the background in the server's container: its process ID, or -1. */
+    int startProcess(String script, String log) {
+        ExecResult result = exec(List.of("sh", "-c", "nohup sh -c '" + script.replace("'", "'\\''")
+                + "' > " + log + " 2>&1 & echo $!"));
+        try {
+            return Integer.parseInt(result.output().trim());
+        } catch (NumberFormatException e) {
+            LOG.warnv("A media process could not be started: {0}", result.output().trim());
+            return -1;
+        }
+    }
+
+    /** Whether a background process of the container is still running. */
+    boolean processRunning(int pid) {
+        return pid > 0 && exec(List.of("sh", "-c", "kill -0 " + pid)).code() == 0;
+    }
+
+    /** Stops a background process, letting ffmpeg finish its outputs, and waits for it to exit. */
+    void stopProcess(int pid) {
+        if (pid > 0) {
+            exec(List.of("sh", "-c", "kill -INT " + pid + " 2>/dev/null; for i in $(seq 1 100); do kill -0 " + pid
+                    + " 2>/dev/null || exit 0; sleep 0.1; done; kill -KILL " + pid + " 2>/dev/null; true"));
+        }
     }
 
     /** The files under a directory of the container, by path relative to it. */

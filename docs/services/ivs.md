@@ -37,6 +37,44 @@ into the HLS segments. `InsertAdBreak` needs a live channel with an ad configura
 Live channels cannot be updated or deleted. With `floci.services.ivs.mock: true`, or without Docker, channels are never
 live.
 
+## Real-Time Streaming (stages)
+
+IVS Real-Time's API signs as `ivs` too and is served alongside: stages, participant tokens, encoder, storage and
+ingest configurations, public keys, compositions and participant replication. Stages are published to for real,
+through the same media server, over the two protocols IVS takes from encoders other than its broadcast SDK:
+
+- **WHIP**: a stage's `endpoints.whip` is `<gateway>/_floci/ivsrealtime/whip`. A WHIP client (OBS, ffmpeg's `whip`
+  muxer, a browser) POSTs its SDP offer with a participant token as its bearer token. The token is verified as IVS
+  does: an ES384 JWT that `CreateParticipantToken` issued, or one the application signed with a key it imported
+  (`ImportPublicKey`, the key's ARN as `kid`), unexpired, for a stage that exists, of a participant not
+  disconnected. A token without `PUBLISH`, or an offer without H.264 video, is refused with a `PUBLISH_ERROR`.
+  WebRTC media flows on `floci.services.ivs.webrtc-port` (8189/udp).
+- **RTMP and RTMPS**: an ingest configuration's stream key publishes to the stage's `endpoints.rtmp`
+  (`floci.services.ivs.rtmp-port`) or `endpoints.rtmps` (`floci.services.ivs.rtmps-port`, 1937, with a certificate
+  Floci's CA issues), as `rtmp(s)://<endpoint>/app/<stream key>`. An RTMPS configuration refuses plain RTMP unless
+  `insecureIngest`, and a key whose configuration names no stage is refused.
+
+A publisher joins the stage's session (started by its first participant, ended after its last) as a participant,
+`CONNECTED` and `published` while its media flows, with `JOINED`, `PUBLISH_STARTED`, `PUBLISH_STOPPED` and `LEFT`
+participant events and `IVS Stage Update` events (Participant Published, Unpublished, Publish Error, Replication Start
+and End). `DisconnectParticipant` disconnects a participant and refuses it from then on.
+
+A stage with an `autoParticipantRecordingConfiguration` records each publisher to its storage configuration's bucket
+in IVS's layout, `<stage>/<session>/<participant>/<time>/`: `events/recording-started.json` and
+`recording-ended.json`, `media/hls/multivariant.m3u8` and `high/playlist.m3u8` with fMP4 segments and
+`EXT-X-PROGRAM-DATE-TIME`, and thumbnails, with `IVS Participant Recording State Change` events. A publisher that
+returns within the reconnect window continues the same recording.
+
+`StartComposition` mixes the stage's publishers (a grid, or picture-in-picture) with ffmpeg at its encoder
+configuration's size, into a channel, which goes live as if broadcast to, and into an S3 composite recording at
+`<stage>/<composition>/<destination>/composite/` with HLS, thumbnails and metadata files, re-laid out as publishers
+come and go, with `IVS Composition State Change` events. A composition stops itself after
+`floci.services.ivs.composition-idle-seconds` (60) without publishers, and is deleted five minutes after it stops.
+`StartParticipantReplication` pulls a publisher into another stage, where it appears as a `REPLICA` participant.
+
+The `events` endpoint, which IVS's broadcast SDKs use to subscribe, is not served: subscribing to a stage needs the
+IVS SDKs' own signaling.
+
 ## Supported Actions
 
 <!-- floci:actions:start -->
@@ -83,4 +121,41 @@ live.
 | `ListTagsForResource` | List a resource's tags |
 | `TagResource` | Add tags to a resource |
 | `UntagResource` | Remove tags from a resource |
+| `CreateEncoderConfiguration` | Create a composition encoder configuration (size, frame rate, bitrate) |
+| `CreateIngestConfiguration` | Create an RTMP(S) ingest configuration and its stream key for a stage |
+| `CreateParticipantToken` | Issue an ES384 participant token for a stage |
+| `CreateStage` | Create a stage with its WHIP and RTMP(S) endpoints, participant recording and tokens |
+| `CreateStorageConfiguration` | Create a storage configuration for an existing S3 bucket |
+| `DeleteEncoderConfiguration` | Delete an encoder configuration no running composition uses |
+| `DeleteIngestConfiguration` | Delete an ingest configuration (force disconnects a live one) |
+| `DeletePublicKey` | Delete an imported public key; tokens it signed are refused |
+| `DeleteStage` | Delete a stage, disconnecting its participants and failing its compositions |
+| `DeleteStorageConfiguration` | Delete a storage configuration no stage or composition uses |
+| `DisconnectParticipant` | Disconnect a participant and refuse it from then on |
+| `GetComposition` | Get a composition and its destinations' states |
+| `GetEncoderConfiguration` | Get an encoder configuration |
+| `GetIngestConfiguration` | Get an ingest configuration, ACTIVE while publishing |
+| `GetParticipant` | Get a participant of a session, with its protocol and recording |
+| `GetPublicKey` | Get an imported public key |
+| `GetStage` | Get a stage and its active session |
+| `GetStageSession` | Get a stage session |
+| `GetStorageConfiguration` | Get a storage configuration |
+| `ImportPublicKey` | Import a P-384 public key for self-signed participant tokens (3 per account) |
+| `ListCompositions` | List compositions, filtered by stage or encoder configuration |
+| `ListEncoderConfigurations` | List encoder configurations |
+| `ListIngestConfigurations` | List ingest configurations, filtered by stage or state |
+| `ListParticipantEvents` | List a participant's events in a session |
+| `ListParticipantReplicas` | List a participant's replications |
+| `ListParticipants` | List a session's participants, with one filter |
+| `ListPublicKeys` | List imported public keys |
+| `ListStageSessions` | List a stage's sessions, newest first |
+| `ListStages` | List stages |
+| `ListStorageConfigurations` | List storage configurations |
+| `RevokeConnectionToken` | Revoke a connection token |
+| `StartComposition` | Mix a stage's publishers into a channel and/or an S3 composite recording |
+| `StartParticipantReplication` | Replicate a publishing participant into another stage |
+| `StopComposition` | Stop a composition, finishing its recordings |
+| `StopParticipantReplication` | Stop a participant's replication |
+| `UpdateIngestConfiguration` | Move an ingest configuration to another stage, or change redundant ingest |
+| `UpdateStage` | Update a stage's name and participant recording |
 <!-- floci:actions:end -->

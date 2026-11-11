@@ -1574,6 +1574,17 @@ class PartitionCrossServiceSmokeIntegrationTest {
 
     @ParameterizedTest
     @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void ivsRealtimeStageArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "ivs");
+        String arn = signed(region, "ivs").contentType("application/json").body("{}").post("/CreateStage")
+                .then().statusCode(200).extract().path("stage.arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "ivs").contentType("application/json").body("{\"arn\":\"" + arn + "\"}")
+                .post("/GetStage").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
     void ivsChatRoomArn(PartitionCase partitionCase) {
         String region = offered(partitionCase, "ivschat");
         String arn = signed(region, "ivschat").contentType("application/json").body("{}").post("/CreateRoom")
