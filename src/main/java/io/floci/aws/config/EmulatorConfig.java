@@ -891,6 +891,8 @@ public interface EmulatorConfig {
         IvsServiceConfig ivs();
 
         IvsChatServiceConfig ivschat();
+
+        ImageBuilderServiceConfig imagebuilder();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -3004,6 +3006,22 @@ public interface EmulatorConfig {
          */
         @WithDefault("true")
         boolean existingCustomer();
+    }
+
+    interface ImageBuilderServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * Where AWSTOE, the component executor builds run, is downloaded from: {@code {region}} and {@code {arch}}
+         * (amd64 or arm64) are filled in. Floci downloads it once per architecture.
+         */
+        @WithDefault("https://awstoe-{region}.s3.{region}.amazonaws.com/latest/linux/{arch}/awstoe") // partition-literal: AWS's public AWSTOE download
+        String awstoeUrl();
+
+        /** How often enabled lifecycle policies are evaluated; Image Builder evaluates them daily. */
+        @WithDefault("3600")
+        long lifecycleIntervalSeconds();
     }
 
     interface IvsChatServiceConfig {

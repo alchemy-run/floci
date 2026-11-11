@@ -279,6 +279,10 @@ services:
     doc: docs/services/fsx.md
     sources:
       - { path: services/fsx/FsxJsonHandler.java, mode: switch }
+  - service: imagebuilder
+    doc: docs/services/imagebuilder.md
+    sources:
+      - { path: services/imagebuilder/ImageBuilderController.java, mode: rest }
   - service: ivschat
     doc: docs/services/ivschat.md
     sources:

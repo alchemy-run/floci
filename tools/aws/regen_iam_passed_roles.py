@@ -80,7 +80,7 @@ SERVICE_SUFFIX = ".amazonaws.com"
 NAMESPACES = (
     "application-autoscaling", "athena", "autoscaling", "budgets", "cloudformation", "cloudtrail",
     "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito-identity", "cognito-idp",
-    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
+    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
     "events", "firehose", "glue", "iam", "kinesis", "kinesisanalytics", "lambda", "logs", "pipes",
     "rds", "redshift", "redshift-serverless", "rekognition", "resource-groups", "s3", "sagemaker", "scheduler",
     "secretsmanager", "servicecatalog", "ses", "sns", "ssm", "states", "swf", "textract",
@@ -198,6 +198,8 @@ BY_HAND = {
     "events:PutRule": "the rule's role",
     "events:PutTargets": "each target's role",
     "iam:AddRoleToInstanceProfile": "the role it adds, on the ARN IAM holds it under",
+    "imagebuilder:CreateInfrastructureConfiguration": "the roles of the instance profile it names",
+    "imagebuilder:UpdateInfrastructureConfiguration": "the roles of the instance profile it names",
     "lambda:CreateFunction": "the execution role",
     "lambda:CreateMicrovmImage": "the build role",
     "lambda:CreateNetworkConnector": "the operator role",

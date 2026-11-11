@@ -27,6 +27,7 @@ import io.floci.aws.services.elbv2.ElbV2Service;
 import io.floci.aws.services.floci.ui.FlociUiManager;
 import io.floci.aws.services.grafana.GrafanaService;
 import io.floci.aws.services.iam.IamService;
+import io.floci.aws.services.imagebuilder.ImageBuilderService;
 import io.floci.aws.services.ivs.IvsRealtimeLive;
 import io.floci.aws.services.ivs.IvsService;
 import io.floci.aws.services.kinesisanalytics.container.FlinkContainerManager;
@@ -107,6 +108,7 @@ public class EmulatorLifecycle {
     private final GrafanaService grafanaService;
     private final IvsService ivsService;
     private final IvsRealtimeLive ivsRealtimeLive;
+    private final ImageBuilderService imageBuilderService;
     private final ElbV2Service elbV2Service;
     private final EcsService ecsService;
     private final ElbClassicService elbClassicService;
@@ -155,6 +157,7 @@ public class EmulatorLifecycle {
                              GrafanaService grafanaService,
                              IvsService ivsService,
                              IvsRealtimeLive ivsRealtimeLive,
+                             ImageBuilderService imageBuilderService,
                              ElbV2Service elbV2Service,
                              ElbClassicService elbClassicService,
                              EcsService ecsService,
@@ -200,6 +203,7 @@ public class EmulatorLifecycle {
         this.grafanaService = grafanaService;
         this.ivsService = ivsService;
         this.ivsRealtimeLive = ivsRealtimeLive;
+        this.imageBuilderService = imageBuilderService;
         this.elbV2Service = elbV2Service;
         this.elbClassicService = elbClassicService;
         this.ecsService = ecsService;
@@ -286,6 +290,9 @@ public class EmulatorLifecycle {
         if (config.services().ivs().enabled()) {
             ivsService.restorePersistedRuntime();
             ivsRealtimeLive.restorePersistedRuntime();
+        }
+        if (config.services().imagebuilder().enabled()) {
+            imageBuilderService.restorePersistedRuntime();
         }
         if (config.services().elasticache().enabled()) {
             elastiCacheService.restorePersistedRuntime().exceptionally(ex -> {
