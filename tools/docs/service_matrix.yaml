@@ -26,6 +26,7 @@ aliases:
   ecr-public: ecrpublic                  # ECR Public's SigV4 signing name is "ecr-public"
   docdb-elastic: docdbelastic            # DocumentDB Elastic Clusters' SigV4 signing name is "docdb-elastic"
   bedrock-data-automation-runtime: bedrock-data-automation  # the runtime half of Bedrock Data Automation
+  forecastquery: forecast                # Forecast's query API, documented in forecast.md
   geo: location                         # Location's SigV4 signing name is "geo"
   geo-maps: location                    # Maps API facet, documented in location.md
   geo-places: location                  # Places API facet, documented in location.md

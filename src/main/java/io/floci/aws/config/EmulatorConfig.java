@@ -876,6 +876,8 @@ public interface EmulatorConfig {
         EmrContainersServiceConfig emrContainers();
         EntityResolutionServiceConfig entityresolution();
         FmsServiceConfig fms();
+
+        ForecastServiceConfig forecast();
         FsxServiceConfig fsx();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
@@ -2974,6 +2976,22 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface ForecastServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long each step of a Forecast job's status takes. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /**
+         * Whether the account is an existing Amazon Forecast customer. Forecast is closed to new customers; with
+         * false, every create is refused as AWS refuses a new customer.
+         */
+        @WithDefault("true")
+        boolean existingCustomer();
     }
 
     interface FmsServiceConfig {

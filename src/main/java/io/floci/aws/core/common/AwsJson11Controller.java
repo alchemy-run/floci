@@ -39,6 +39,7 @@ import io.floci.aws.services.emr.EmrHandler;
 import io.floci.aws.services.eventbridge.EventBridgeHandler;
 import io.floci.aws.services.firehose.FirehoseJsonHandler;
 import io.floci.aws.services.fms.FmsJsonHandler;
+import io.floci.aws.services.forecast.ForecastJsonHandler;
 import io.floci.aws.services.fsx.FsxJsonHandler;
 import io.floci.aws.services.globalaccelerator.GlobalAcceleratorJsonHandler;
 import io.floci.aws.services.glue.GlueJsonHandler;
@@ -139,6 +140,7 @@ public class AwsJson11Controller {
     private final DirectoryJsonHandler directoryJsonHandler;
     private final EcrPublicJsonHandler ecrPublicJsonHandler;
     private final FmsJsonHandler fmsJsonHandler;
+    private final ForecastJsonHandler forecastJsonHandler;
     private final FsxJsonHandler fsxJsonHandler;
     private final CostExplorerJsonHandler costExplorerJsonHandler;
     private final CurJsonHandler curJsonHandler;
@@ -205,6 +207,7 @@ public class AwsJson11Controller {
                                DirectoryJsonHandler directoryJsonHandler,
                                EcrPublicJsonHandler ecrPublicJsonHandler,
                                FmsJsonHandler fmsJsonHandler,
+                               ForecastJsonHandler forecastJsonHandler,
                                FsxJsonHandler fsxJsonHandler,
                                CostExplorerJsonHandler costExplorerJsonHandler,
                                CurJsonHandler curJsonHandler,
@@ -275,6 +278,7 @@ public class AwsJson11Controller {
         this.directoryJsonHandler = directoryJsonHandler;
         this.ecrPublicJsonHandler = ecrPublicJsonHandler;
         this.fmsJsonHandler = fmsJsonHandler;
+        this.forecastJsonHandler = forecastJsonHandler;
         this.fsxJsonHandler = fsxJsonHandler;
         this.costExplorerJsonHandler = costExplorerJsonHandler;
         this.curJsonHandler = curJsonHandler;
@@ -391,6 +395,8 @@ public class AwsJson11Controller {
                 case "ds" -> directoryJsonHandler.handle(action, request, region);
                 case "ecr-public" -> ecrPublicJsonHandler.handle(action, request, region);
                 case "fms" -> fmsJsonHandler.handle(action, request, region);
+                case "forecast" -> forecastJsonHandler.handle(action, request, region);
+                case "forecastquery" -> forecastJsonHandler.handleQuery(action, request, region);
                 case "fsx" -> fsxJsonHandler.handle(action, request, region);
                 case "ce" -> costExplorerJsonHandler.handle(action, request, region);
                 case "cur" -> curJsonHandler.handle(action, request, region);

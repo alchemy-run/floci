@@ -82,8 +82,14 @@ public final class RequestConstraintCheck {
         return new RequestConstraintCheck(model, messages, names);
     }
 
-    /** Checks {@code request}, the body of {@code operation}, against the operation's input shape. */
+    /**
+     * Checks {@code request}, the body of {@code operation}, against the operation's input shape; an operation the
+     * model doesn't have is left to the handler to refuse as unknown.
+     */
     public void check(String operation, JsonNode request) {
+        if (!model.path("operations").has(operation)) {
+            return;
+        }
         checkValue(model.path("operations").path(operation).asText(), request, operation);
     }
 

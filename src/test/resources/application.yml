@@ -511,6 +511,9 @@ floci:
     fsx:
       enabled: true
       transition-millis: 0
+    forecast:
+      enabled: true
+      transition-millis: 0
     fms:
       enabled: true
       transition-millis: 0

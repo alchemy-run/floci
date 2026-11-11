@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "fsx", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1503,6 +1503,18 @@ class PartitionCrossServiceSmokeIntegrationTest {
                 .contentType(JSON_1_1).body("{\"FileSystemIds\":[\"fs-00000000000000000\"]}").post("/").then()
                 .statusCode(400).extract().path("__type");
         assertTrue(type.contains("FileSystemNotFound"), type);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void forecastDatasetGroupArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "forecast");
+        String arn = signed(region, "forecast").header("X-Amz-Target", "AmazonForecast.CreateDatasetGroup")
+                .contentType(JSON_1_1).body("{\"DatasetGroupName\":\"partition_smoke\",\"Domain\":\"CUSTOM\"}")
+                .post("/").then().statusCode(200).extract().path("DatasetGroupArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "forecast").header("X-Amz-Target", "AmazonForecast.DeleteDatasetGroup").contentType(JSON_1_1)
+                .body("{\"DatasetGroupArn\":\"" + arn + "\"}").post("/").then().statusCode(200);
     }
 
     @ParameterizedTest

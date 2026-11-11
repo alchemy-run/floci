@@ -1021,6 +1021,8 @@ floci:
       enabled: true
     fsx:
       enabled: true
+    forecast:
+      enabled: true
     fms:
       enabled: true
     entityresolution:
