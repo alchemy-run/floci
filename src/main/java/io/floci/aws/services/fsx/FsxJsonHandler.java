@@ -21,7 +21,10 @@ import java.util.Set;
 @ApplicationScoped
 public class FsxJsonHandler {
 
-    /** FSx's request constraints; it reports a violation as BadRequest. */
+    /**
+     * FSx's request constraints; it reports a violation as BadRequest. Subnet, security group and VPC ids are
+     * checked against EC2 instead, which accepts its own default subnets' longer ids.
+     */
     private static final RequestConstraintCheck SHAPES = RequestConstraintCheck.load(
             "aws/fsx-request-shapes.json", "FSx request shapes", new RequestConstraintCheck.Messages() {
                 @Override
@@ -53,7 +56,7 @@ public class FsxJsonHandler {
                 public AwsException required(String path) {
                     return violation(path, "Member must not be null");
                 }
-            });
+            }).withLenientShapes(Set.of("SubnetId", "SecurityGroupId", "VpcId"));
 
     /** The kinds of resource FSx tags, by the first segment of their ARN's resource. */
     private static final Set<String> TAGGABLE = Set.of(FsxStore.FILE_SYSTEM, FsxStore.BACKUP, FsxStore.VOLUME,

@@ -235,6 +235,18 @@ class FsxIntegrationTest {
     }
 
     @Test
+    void aFileSystemTakesFlocisDefaultSubnets() {
+        String id = fsx("CreateFileSystem", "{\"FileSystemType\":\"LUSTRE\",\"StorageCapacity\":1200,"
+                + "\"SubnetIds\":[\"subnet-default-us-east-1-a\"],\"LustreConfiguration\":{\"DeploymentType\":"
+                + "\"SCRATCH_2\"}}").statusCode(200).body("FileSystem.SubnetIds[0]",
+                        equalTo("subnet-default-us-east-1-a")).extract().path("FileSystem.FileSystemId");
+        fsx("CreateFileSystem", "{\"FileSystemType\":\"LUSTRE\",\"StorageCapacity\":1200,\"SubnetIds\":"
+                + "[\"subnet-unknown\"],\"LustreConfiguration\":{\"DeploymentType\":\"SCRATCH_2\"}}")
+                .statusCode(400).body("__type", containsString("InvalidNetworkSettings"));
+        fsx("DeleteFileSystem", "{\"FileSystemId\":\"" + id + "\"}").statusCode(200);
+    }
+
+    @Test
     void missingResourcesAnswerWithFsxErrors() {
         fsx("DescribeFileSystems", "{\"FileSystemIds\":[\"fs-00000000000000000\"]}").statusCode(400)
                 .body("__type", containsString("FileSystemNotFound"));
