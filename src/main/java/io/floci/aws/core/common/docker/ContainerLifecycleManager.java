@@ -299,11 +299,13 @@ public class ContainerLifecycleManager {
         if (spec.workingDir() != null && !spec.workingDir().isBlank()) {
             createCmd.withWorkingDir(spec.workingDir());
         }
-        if (spec.exposedPorts() != null && !spec.exposedPorts().isEmpty()) {
-            ExposedPort[] exposed = spec.exposedPorts().stream()
-                    .map(ExposedPort::tcp)
-                    .toArray(ExposedPort[]::new);
-            createCmd.withExposedPorts(exposed);
+        if ((spec.exposedPorts() != null && !spec.exposedPorts().isEmpty()) || !spec.udpPortBindings().isEmpty()) {
+            List<ExposedPort> exposed = new ArrayList<>();
+            if (spec.exposedPorts() != null) {
+                spec.exposedPorts().forEach(port -> exposed.add(ExposedPort.tcp(port)));
+            }
+            spec.udpPortBindings().keySet().forEach(port -> exposed.add(ExposedPort.udp(port)));
+            createCmd.withExposedPorts(exposed.toArray(ExposedPort[]::new));
         }
         // A fresh id per create() call, not per spec: two calls can carry identical image, name,
         // and labels (a second, genuinely concurrent caller racing on the same fixed name), and
@@ -1604,6 +1606,8 @@ public class ContainerLifecycleManager {
                 LOG.debugv("Port binding: {0} -> {1}", String.valueOf(containerPort),
                         hostPort == 0 ? "dynamic" : String.valueOf(hostPort));
             }
+            spec.udpPortBindings().forEach((containerPort, hostPort) -> ports.bind(ExposedPort.udp(containerPort),
+                    Ports.Binding.bindPort(hostPort)));
             hostConfig.withPortBindings(ports);
         } else if (spec.hasPortBindings()) {
             LOG.infov("Container {0} joins network {1}, which publishes no host ports; it serves {2} directly there",

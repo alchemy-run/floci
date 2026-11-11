@@ -95,7 +95,7 @@ OUTPUT = REPO_ROOT / "src/main/resources/aws/iam-tag-on-create.json"
 NAMESPACES = (
     "access-analyzer", "acm", "application-autoscaling", "athena", "autoscaling", "bcm-data-exports",
     "bcm-pricing-calculator", "budgets", "ce", "cloudformation", "cloudhsm", "cloudtrail", "cloudwatch",
-    "codedeploy", "codepipeline", "cognito-identity", "cognito-idp", "comprehend", "config", "cur", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "dax",
+    "codedeploy", "codepipeline", "cognito-identity", "cognito-idp", "comprehend", "config", "cur", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "ivs", "dax",
     "dms", "dsql", "dynamodb", "ec2", "ecr", "ecs", "eks", "elasticache", "elasticloadbalancing",
     "elasticmapreduce", "events", "firehose", "globalaccelerator", "glue", "iam", "kinesis", "kinesisanalytics",
     "kms", "lambda", "lightsail", "logs", "memorydb", "network-firewall", "organizations", "payment-cryptography",
@@ -170,6 +170,8 @@ NOT_READ = {
     "fsx:DeleteVolume": "its tags are the FinalBackupTags of the per-type configuration, deeper than the members "
                         "this file reads",
     "iam:AcquireRole": NO_TAGS,
+    "ivs:CreateFailoverSlateConfiguration": "failover slates are newer than botocore's IVS model, which has no "
+                                            "operation of this name to read, and Floci does not serve them",
     "rds:CreateDBCapacityReservation": NO_TAGS,
     "rds:DeleteDBCluster": NO_TAGS,
     "rds:DeleteDBInstance": NO_TAGS,

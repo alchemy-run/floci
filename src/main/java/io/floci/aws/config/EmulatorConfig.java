@@ -887,6 +887,8 @@ public interface EmulatorConfig {
         GreengrassV2ServiceConfig greengrassv2();
 
         HealthLakeServiceConfig healthlake();
+
+        IvsServiceConfig ivs();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -3000,6 +3002,56 @@ public interface EmulatorConfig {
          */
         @WithDefault("true")
         boolean existingCustomer();
+    }
+
+    interface IvsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** When true, channels are never live: no media server is started. */
+        @WithDefault("false")
+        boolean mock();
+
+        /** The MediaMTX image of the media server channels are broadcast to (with ffmpeg, for recordings). */
+        @WithDefault("bluenviron/mediamtx:1.21.3-ffmpeg")
+        String image();
+
+        /** The host port broadcasters publish RTMP to: a channel's ingest endpoint. */
+        @WithDefault("1935")
+        int rtmpPort();
+
+        /** The host UDP port broadcasters publish SRT to: a channel's SRT endpoint. */
+        @WithDefault("9000")
+        int srtPort();
+
+        /** Lowest host port the media server's API and HLS are published on, for floci to reach. */
+        @WithDefault("13200")
+        int hostPortBase();
+
+        /** Highest host port the media server's API and HLS are published on. */
+        @WithDefault("13299")
+        int hostPortMax();
+
+        /** Seconds to wait for a started media server to answer. */
+        @WithDefault("60")
+        int readinessTimeoutSeconds();
+
+        /** How often floci reads the media server's streams. */
+        @WithDefault("1000")
+        long pollMillis();
+
+        /** How long a new recording configuration reports CREATING. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /**
+         * The country viewers play from, for playback restriction policies' allowed countries. Unset, countries
+         * are not restricted.
+         */
+        Optional<String> viewerCountry();
+
+        /** Docker network to attach the media server to. Empty uses the default network. */
+        Optional<String> dockerNetwork();
     }
 
     interface HealthLakeServiceConfig {
