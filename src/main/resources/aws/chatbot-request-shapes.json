@@ -44,13 +44,13 @@
       "type": "string",
       "min": 1,
       "max": 1011,
-      "pattern": "arn:aws:(wheatley|chatbot):[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]{0,1023}"
+      "pattern": "arn:aws[a-z0-9-]*:(wheatley|chatbot):[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]{0,1023}"
     },
     "Arn": {
       "type": "string",
       "min": 12,
       "max": 1224,
-      "pattern": "arn:aws:[A-Za-z0-9][A-Za-z0-9_/.-]{0,62}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]{0,1023}"
+      "pattern": "arn:aws[a-z0-9-]*:[A-Za-z0-9][A-Za-z0-9_/.-]{0,62}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]{0,1023}"
     },
     "AssociateToConfigurationRequest": {
       "type": "structure",
@@ -70,7 +70,7 @@
       "type": "string",
       "min": 19,
       "max": 1169,
-      "pattern": "arn:aws:(wheatley|chatbot):[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]{0,1023}"
+      "pattern": "arn:aws[a-z0-9-]*:(wheatley|chatbot):[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_/+=,@.-]{0,1023}"
     },
     "ChimeWebhookDescription": {
       "type": "string",
@@ -184,7 +184,7 @@
       "type": "string",
       "min": 1,
       "max": 1011,
-      "pattern": "arn:aws:chatbot:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:custom-action/[a-zA-Z0-9_-]{1,64}"
+      "pattern": "arn:aws[a-z0-9-]*:chatbot:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:custom-action/[a-zA-Z0-9_-]{1,64}"
     },
     "CustomActionAttachment": {
       "type": "structure",
@@ -440,7 +440,7 @@
       "type": "string",
       "min": 11,
       "max": 1163,
-      "pattern": "(^$|(?!.*\\/aws-service-role\\/.*)arn:aws:iam:[A-Za-z0-9_\\/.-]{0,63}:[A-Za-z0-9_\\/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_\\/+=,@.-]{0,1023})"
+      "pattern": "(^$|(?!.*\\/aws-service-role\\/.*)arn:aws[a-z0-9-]*:iam:[A-Za-z0-9_\\/.-]{0,63}:[A-Za-z0-9_\\/.-]{0,63}:[A-Za-z0-9][A-Za-z0-9:_\\/+=,@.-]{0,1023})"
     },
     "GuardrailPolicyArnList": {
       "type": "list",
@@ -533,7 +533,7 @@
       "type": "string",
       "min": 1,
       "max": 1011,
-      "pattern": "arn:aws:chatbot:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:custom-action/[a-zA-Z0-9_-]{1,64}"
+      "pattern": "arn:aws[a-z0-9-]*:chatbot:[A-Za-z0-9_/.-]{0,63}:[A-Za-z0-9_/.-]{0,63}:custom-action/[a-zA-Z0-9_-]{1,64}"
     },
     "SlackChannelDisplayName": {
       "type": "string",

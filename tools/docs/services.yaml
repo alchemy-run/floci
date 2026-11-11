@@ -279,6 +279,10 @@ services:
     doc: docs/services/fsx.md
     sources:
       - { path: services/fsx/FsxJsonHandler.java, mode: switch }
+  - service: ivschat
+    doc: docs/services/ivschat.md
+    sources:
+      - { path: services/ivschat/IvsChatController.java, mode: rest }
   - service: ivs
     doc: docs/services/ivs.md
     sources:

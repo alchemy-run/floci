@@ -957,7 +957,7 @@
     "KMSKeyArn": {
       "type": "string",
       "max": 256,
-      "pattern": "arn:aws:kms:.*:key/.*"
+      "pattern": "arn:aws[a-z0-9-]*:kms:.*:key/.*"
     },
     "ListDatasetGroupsRequest": {
       "type": "structure",

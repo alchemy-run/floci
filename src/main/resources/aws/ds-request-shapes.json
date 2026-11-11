@@ -1277,7 +1277,7 @@
     },
     "SecretArn": {
       "type": "string",
-      "pattern": "^arn:aws:secretsmanager:[a-z0-9-]+:\\d{12}:secret:[a-zA-Z0-9/_+=.@-]+-[a-zA-Z0-9]{6}$"
+      "pattern": "^arn:aws[a-z0-9-]*:secretsmanager:[a-z0-9-]+:\\d{12}:secret:[a-zA-Z0-9/_+=.@-]+-[a-zA-Z0-9]{6}$"
     },
     "SecurityGroupId": {
       "type": "string",

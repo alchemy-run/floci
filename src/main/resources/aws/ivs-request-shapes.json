@@ -51,7 +51,7 @@
       "type": "string",
       "min": 0,
       "max": 128,
-      "pattern": "arn:aws:ivs:[a-z0-9-]+:[0-9]+:ad-configuration/[a-zA-Z0-9-]+"
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:ad-configuration/[a-zA-Z0-9-]+"
     },
     "AdConfigurationName": {
       "type": "string",
@@ -116,13 +116,13 @@
       "type": "string",
       "min": 0,
       "max": 128,
-      "pattern": "^$|^arn:aws:ivs:[a-z0-9-]+:[0-9]+:ad-configuration/[a-zA-Z0-9-]+$"
+      "pattern": "^$|^arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:ad-configuration/[a-zA-Z0-9-]+$"
     },
     "ChannelArn": {
       "type": "string",
       "min": 1,
       "max": 128,
-      "pattern": "arn:aws:ivs:[a-z0-9-]+:[0-9]+:channel/[a-zA-Z0-9-]+"
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:channel/[a-zA-Z0-9-]+"
     },
     "ChannelArnList": {
       "type": "list",
@@ -147,13 +147,13 @@
       "type": "string",
       "min": 0,
       "max": 128,
-      "pattern": "^$|^arn:aws:ivs:[a-z0-9-]+:[0-9]+:playback-restriction-policy/[a-zA-Z0-9-]+$"
+      "pattern": "^$|^arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:playback-restriction-policy/[a-zA-Z0-9-]+$"
     },
     "ChannelRecordingConfigurationArn": {
       "type": "string",
       "min": 0,
       "max": 128,
-      "pattern": "^$|^arn:aws:ivs:[a-z0-9-]+:[0-9]+:recording-configuration/[a-zA-Z0-9-]+$"
+      "pattern": "^$|^arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:recording-configuration/[a-zA-Z0-9-]+$"
     },
     "ChannelType": {
       "type": "string",
@@ -515,7 +515,7 @@
       "type": "string",
       "min": 0,
       "max": 128,
-      "pattern": "arn:aws:mediatailor:[a-z0-9-]+:[0-9]+:playbackConfiguration/[a-zA-Z0-9-]+"
+      "pattern": "arn:aws[a-z0-9-]*:mediatailor:[a-z0-9-]+:[0-9]+:playbackConfiguration/[a-zA-Z0-9-]+"
     },
     "MediaTailorPlaybackConfigurationsList": {
       "type": "list",
@@ -556,7 +556,7 @@
       "type": "string",
       "min": 1,
       "max": 128,
-      "pattern": "arn:aws:ivs:[a-z0-9-]+:[0-9]+:playback-key/[a-zA-Z0-9-]+"
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:playback-key/[a-zA-Z0-9-]+"
     },
     "PlaybackKeyPairName": {
       "type": "string",
@@ -589,7 +589,7 @@
       "type": "string",
       "min": 1,
       "max": 128,
-      "pattern": "arn:aws:ivs:[a-z0-9-]+:[0-9]+:playback-restriction-policy/[a-zA-Z0-9-]+"
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:playback-restriction-policy/[a-zA-Z0-9-]+"
     },
     "PlaybackRestrictionPolicyEnableStrictOriginEnforcement": {
       "type": "boolean"
@@ -626,7 +626,7 @@
       "type": "string",
       "min": 0,
       "max": 128,
-      "pattern": "arn:aws:ivs:[a-z0-9-]+:[0-9]+:recording-configuration/[a-zA-Z0-9-]+"
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:recording-configuration/[a-zA-Z0-9-]+"
     },
     "RecordingConfigurationName": {
       "type": "string",
@@ -678,7 +678,7 @@
       "type": "string",
       "min": 1,
       "max": 128,
-      "pattern": "arn:aws:ivs:[a-z0-9-]+:[0-9]+:[a-z-]/[a-zA-Z0-9-]+"
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:[a-z-]/[a-zA-Z0-9-]+"
     },
     "S3DestinationBucketName": {
       "type": "string",
@@ -740,7 +740,7 @@
       "type": "string",
       "min": 1,
       "max": 128,
-      "pattern": "arn:aws:ivs:[a-z0-9-]+:[0-9]+:stream-key/[a-zA-Z0-9-]+"
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:stream-key/[a-zA-Z0-9-]+"
     },
     "StreamKeyArnList": {
       "type": "list",

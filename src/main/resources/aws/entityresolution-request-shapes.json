@@ -398,7 +398,7 @@
       "type": "string",
       "min": 0,
       "max": 512,
-      "pattern": "$|^arn:aws:iam::\\d{12}:role/?[a-zA-Z_0-9+=,.@\\-_/]+"
+      "pattern": "$|^arn:aws[a-z0-9-]*:iam::\\d{12}:role/?[a-zA-Z_0-9+=,.@\\-_/]+"
     },
     "IdMappingRuleBasedProperties": {
       "type": "structure",
@@ -579,7 +579,7 @@
     },
     "KMSArn": {
       "type": "string",
-      "pattern": "arn:aws:kms:.*:[0-9]+:.*"
+      "pattern": "arn:aws[a-z0-9-]*:kms:.*:[0-9]+:.*"
     },
     "ListIdMappingJobsInput": {
       "type": "structure",
@@ -893,7 +893,7 @@
       "type": "string",
       "min": 32,
       "max": 512,
-      "pattern": "arn:aws:iam::\\d{12}:role/?[a-zA-Z_0-9+=,.@\\-_/]+"
+      "pattern": "arn:aws[a-z0-9-]*:iam::\\d{12}:role/?[a-zA-Z_0-9+=,.@\\-_/]+"
     },
     "Rule": {
       "type": "structure",

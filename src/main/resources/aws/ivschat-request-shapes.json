@@ -1,0 +1,416 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_ivschat_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateChatToken": "CreateChatTokenRequest",
+    "CreateLoggingConfiguration": "CreateLoggingConfigurationRequest",
+    "CreateRoom": "CreateRoomRequest",
+    "DeleteLoggingConfiguration": "DeleteLoggingConfigurationRequest",
+    "DeleteMessage": "DeleteMessageRequest",
+    "DeleteRoom": "DeleteRoomRequest",
+    "DisconnectUser": "DisconnectUserRequest",
+    "GetLoggingConfiguration": "GetLoggingConfigurationRequest",
+    "GetRoom": "GetRoomRequest",
+    "ListLoggingConfigurations": "ListLoggingConfigurationsRequest",
+    "ListRooms": "ListRoomsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "SendEvent": "SendEventRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateLoggingConfiguration": "UpdateLoggingConfigurationRequest",
+    "UpdateRoom": "UpdateRoomRequest"
+  },
+  "shapes": {
+    "BucketName": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "[a-z0-9-.]+"
+    },
+    "ChatTokenAttributes": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "ChatTokenCapabilities": {
+      "type": "list",
+      "member": "ChatTokenCapability"
+    },
+    "ChatTokenCapability": {
+      "type": "string",
+      "enum": [
+        "SEND_MESSAGE",
+        "DISCONNECT_USER",
+        "DELETE_MESSAGE"
+      ]
+    },
+    "CloudWatchLogsDestinationConfiguration": {
+      "type": "structure",
+      "required": [
+        "logGroupName"
+      ],
+      "members": {
+        "logGroupName": "LogGroupName"
+      }
+    },
+    "CreateChatTokenRequest": {
+      "type": "structure",
+      "required": [
+        "roomIdentifier",
+        "userId"
+      ],
+      "members": {
+        "roomIdentifier": "RoomIdentifier",
+        "userId": "UserID",
+        "capabilities": "ChatTokenCapabilities",
+        "sessionDurationInMinutes": "SessionDurationInMinutes",
+        "attributes": "ChatTokenAttributes"
+      }
+    },
+    "CreateLoggingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "destinationConfiguration"
+      ],
+      "members": {
+        "name": "LoggingConfigurationName",
+        "destinationConfiguration": "DestinationConfiguration",
+        "tags": "Tags"
+      }
+    },
+    "CreateRoomRequest": {
+      "type": "structure",
+      "members": {
+        "name": "RoomName",
+        "maximumMessageRatePerSecond": "RoomMaxMessageRatePerSecond",
+        "maximumMessageLength": "RoomMaxMessageLength",
+        "messageReviewHandler": "MessageReviewHandler",
+        "tags": "Tags",
+        "loggingConfigurationIdentifiers": "LoggingConfigurationIdentifierList"
+      }
+    },
+    "DeleteLoggingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "LoggingConfigurationIdentifier"
+      }
+    },
+    "DeleteMessageRequest": {
+      "type": "structure",
+      "required": [
+        "roomIdentifier",
+        "id"
+      ],
+      "members": {
+        "roomIdentifier": "RoomIdentifier",
+        "id": "MessageID",
+        "reason": "Reason"
+      }
+    },
+    "DeleteRoomRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "RoomIdentifier"
+      }
+    },
+    "DeliveryStreamName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "DestinationConfiguration": {
+      "type": "structure",
+      "members": {
+        "s3": "S3DestinationConfiguration",
+        "cloudWatchLogs": "CloudWatchLogsDestinationConfiguration",
+        "firehose": "FirehoseDestinationConfiguration"
+      }
+    },
+    "DisconnectUserRequest": {
+      "type": "structure",
+      "required": [
+        "roomIdentifier",
+        "userId"
+      ],
+      "members": {
+        "roomIdentifier": "RoomIdentifier",
+        "userId": "UserID",
+        "reason": "Reason"
+      }
+    },
+    "EventAttributes": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "EventName": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "FallbackResult": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "DENY"
+      ]
+    },
+    "FirehoseDestinationConfiguration": {
+      "type": "structure",
+      "required": [
+        "deliveryStreamName"
+      ],
+      "members": {
+        "deliveryStreamName": "DeliveryStreamName"
+      }
+    },
+    "GetLoggingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "LoggingConfigurationIdentifier"
+      }
+    },
+    "GetRoomRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "RoomIdentifier"
+      }
+    },
+    "LambdaArn": {
+      "type": "string",
+      "min": 0,
+      "max": 170,
+      "pattern": "$|^arn:aws[a-z0-9-]*:lambda:[a-z0-9-]+:[0-9]{12}:function:.+.*"
+    },
+    "ListLoggingConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxLoggingConfigurationResults"
+      }
+    },
+    "ListRoomsRequest": {
+      "type": "structure",
+      "members": {
+        "name": "RoomName",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxRoomResults",
+        "messageReviewHandlerUri": "LambdaArn",
+        "loggingConfigurationIdentifier": "LoggingConfigurationIdentifier"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn"
+      }
+    },
+    "LogGroupName": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "[\\.\\-_/#A-Za-z0-9]+"
+    },
+    "LoggingConfigurationIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivschat:[a-z0-9-]+:[0-9]+:logging-configuration/[a-zA-Z0-9-]+"
+    },
+    "LoggingConfigurationIdentifierList": {
+      "type": "list",
+      "min": 0,
+      "max": 3,
+      "member": "LoggingConfigurationIdentifier"
+    },
+    "LoggingConfigurationName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "MaxLoggingConfigurationResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "MaxRoomResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "MessageID": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "[a-zA-Z0-9]+"
+    },
+    "MessageReviewHandler": {
+      "type": "structure",
+      "members": {
+        "uri": "LambdaArn",
+        "fallbackResult": "FallbackResult"
+      }
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "Reason": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "ResourceArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivschat:[a-z0-9-]+:[0-9]+:[a-z-]/[a-zA-Z0-9-]+"
+    },
+    "RoomIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivschat:[a-z0-9-]+:[0-9]+:room/[a-zA-Z0-9-]+"
+    },
+    "RoomMaxMessageLength": {
+      "type": "integer",
+      "min": 1,
+      "max": 500
+    },
+    "RoomMaxMessageRatePerSecond": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "RoomName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "S3DestinationConfiguration": {
+      "type": "structure",
+      "required": [
+        "bucketName"
+      ],
+      "members": {
+        "bucketName": "BucketName"
+      }
+    },
+    "SendEventRequest": {
+      "type": "structure",
+      "required": [
+        "roomIdentifier",
+        "eventName"
+      ],
+      "members": {
+        "roomIdentifier": "RoomIdentifier",
+        "eventName": "EventName",
+        "attributes": "EventAttributes"
+      }
+    },
+    "SessionDurationInMinutes": {
+      "type": "integer",
+      "min": 1,
+      "max": 180
+    },
+    "String": {
+      "type": "string"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn",
+        "tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "Tags": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateLoggingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "LoggingConfigurationIdentifier",
+        "name": "LoggingConfigurationName",
+        "destinationConfiguration": "DestinationConfiguration"
+      }
+    },
+    "UpdateRoomRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "RoomIdentifier",
+        "name": "RoomName",
+        "maximumMessageRatePerSecond": "RoomMaxMessageRatePerSecond",
+        "maximumMessageLength": "RoomMaxMessageLength",
+        "messageReviewHandler": "MessageReviewHandler",
+        "loggingConfigurationIdentifiers": "LoggingConfigurationIdentifierList"
+      }
+    },
+    "UserID": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    }
+  }
+}

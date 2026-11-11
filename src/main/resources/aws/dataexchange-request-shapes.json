@@ -237,11 +237,11 @@
     },
     "DataGrantArn": {
       "type": "string",
-      "pattern": "arn:aws:dataexchange:[\\-a-z0-9]*:(\\d{12}):data-grants\\/[a-zA-Z0-9]{30,40}"
+      "pattern": "arn:aws[a-z0-9-]*:dataexchange:[\\-a-z0-9]*:(\\d{12}):data-grants\\/[a-zA-Z0-9]{30,40}"
     },
     "DataGrantId": {
       "type": "string",
-      "pattern": "[a-zA-Z0-9]{30,40}$|^arn:aws:dataexchange:[\\-a-z0-9]*:(\\d{12}):data-grants\\/[a-zA-Z0-9]{30,40}"
+      "pattern": "[a-zA-Z0-9]{30,40}$|^arn:aws[a-z0-9-]*:dataexchange:[\\-a-z0-9]*:(\\d{12}):data-grants\\/[a-zA-Z0-9]{30,40}"
     },
     "DataGrantName": {
       "type": "string",
@@ -833,7 +833,7 @@
     },
     "RoleArn": {
       "type": "string",
-      "pattern": "arn:aws:iam::(\\d{12}):role\\/.+"
+      "pattern": "arn:aws[a-z0-9-]*:iam::(\\d{12}):role\\/.+"
     },
     "S3DataAccessAssetSourceEntry": {
       "type": "structure",

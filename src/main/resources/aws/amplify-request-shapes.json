@@ -98,7 +98,7 @@
     "AutoSubDomainIAMRole": {
       "type": "string",
       "max": 1000,
-      "pattern": "^$|^arn:aws:iam::\\d{12}:role.+"
+      "pattern": "^$|^arn:aws[a-z0-9-]*:iam::\\d{12}:role.+"
     },
     "Backend": {
       "type": "structure",
@@ -157,7 +157,7 @@
       "type": "string",
       "min": 0,
       "max": 1000,
-      "pattern": "^arn:aws:acm:[a-z0-9-]+:\\d{12}:certificate\\/.+$"
+      "pattern": "^arn:aws[a-z0-9-]*:acm:[a-z0-9-]+:\\d{12}:certificate\\/.+$"
     },
     "CertificateSettings": {
       "type": "structure",
@@ -754,7 +754,7 @@
       "type": "string",
       "min": 0,
       "max": 2048,
-      "pattern": "^arn:aws:amplify:.*"
+      "pattern": "^arn:aws[a-z0-9-]*:amplify:.*"
     },
     "ServiceRoleArn": {
       "type": "string",
@@ -784,7 +784,7 @@
       "type": "string",
       "min": 20,
       "max": 2048,
-      "pattern": "^arn:aws:cloudformation:[a-z0-9-]+:\\d{12}:stack/.+/.+$"
+      "pattern": "^arn:aws[a-z0-9-]*:cloudformation:[a-z0-9-]+:\\d{12}:stack/.+/.+$"
     },
     "StackName": {
       "type": "string",

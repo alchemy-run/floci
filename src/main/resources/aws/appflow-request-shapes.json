@@ -34,7 +34,7 @@
     "ARN": {
       "type": "string",
       "max": 512,
-      "pattern": "arn:aws:.*:.*:[0-9]+:.*"
+      "pattern": "arn:aws[a-z0-9-]*:.*:.*:[0-9]+:.*"
     },
     "AccessKeyId": {
       "type": "string",
@@ -203,7 +203,7 @@
       "type": "string",
       "min": 20,
       "max": 2048,
-      "pattern": "arn:aws:secretsmanager:.*:[0-9]+:.*"
+      "pattern": "arn:aws[a-z0-9-]*:secretsmanager:.*:[0-9]+:.*"
     },
     "ClientId": {
       "type": "string",
@@ -544,7 +544,7 @@
     "DataApiRoleArn": {
       "type": "string",
       "max": 512,
-      "pattern": "arn:aws:iam:.*:[0-9]+:.*"
+      "pattern": "arn:aws[a-z0-9-]*:iam:.*:[0-9]+:.*"
     },
     "DataPullMode": {
       "type": "string",
@@ -905,7 +905,7 @@
     "GlueDataCatalogIAMRole": {
       "type": "string",
       "max": 512,
-      "pattern": "arn:aws:iam:.*:[0-9]+:.*"
+      "pattern": "arn:aws[a-z0-9-]*:iam:.*:[0-9]+:.*"
     },
     "GlueDataCatalogTablePrefix": {
       "type": "string",
@@ -1049,7 +1049,7 @@
       "type": "string",
       "min": 20,
       "max": 2048,
-      "pattern": "arn:aws:kms:.*:[0-9]+:.*"
+      "pattern": "arn:aws[a-z0-9-]*:kms:.*:[0-9]+:.*"
     },
     "Key": {
       "type": "string",
@@ -1525,7 +1525,7 @@
     "RoleArn": {
       "type": "string",
       "max": 512,
-      "pattern": "arn:aws:iam:.*:[0-9]+:.*"
+      "pattern": "arn:aws[a-z0-9-]*:iam:.*:[0-9]+:.*"
     },
     "S3ConnectorOperator": {
       "type": "string",

@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 
 from regen_partitions import resolve_botocore_data, strip_source
-from request_shapes import REPO_ROOT, build_constraints, load_model
+from request_shapes import REPO_ROOT, build_constraints, load_model, widen_partition_and_region
 
 SERVICES = {"fsx": "fsx/2018-03-01"}
 
@@ -24,7 +24,7 @@ def main() -> int:
     data, provenance = resolve_botocore_data(args.botocore_data)
     stale = 0
     for service, path in SERVICES.items():
-        model = load_model(data, Path(path))
+        model = widen_partition_and_region(load_model(data, Path(path)))
         operations = tuple(sorted(name for name, op in model["operations"].items() if "input" in op))
         doc = build_constraints(model, operations, provenance, "tools/aws/regen_fsx_shapes.py")
         fresh = json.dumps(doc, indent=2) + "\n"

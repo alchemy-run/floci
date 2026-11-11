@@ -122,6 +122,8 @@ EVERY_PARTITION = "arn:aws[a-z0-9-]*:"
 # has a further part and `eusc-de-east-1` a longer prefix.
 COMMERCIAL_REGION = "[a-z]{2}-[a-z]{1,16}-[0-9]+"
 EVERY_REGION = "[a-z]{2,4}(-[a-z]{1,16})+-[0-9]+"
+# Other spellings models use for the same two-part commercial region (HealthLake's Lambda ARN).
+COMMERCIAL_REGION_SPELLINGS = (COMMERCIAL_REGION, r"[a-z]{2}-[a-z]+-\d{1}")
 
 
 def widen_partition_and_region(model: dict) -> dict:
@@ -134,7 +136,10 @@ def widen_partition_and_region(model: dict) -> dict:
     for shape in model["shapes"].values():
         pattern = shape.get("pattern")
         if pattern:
-            shape["pattern"] = pattern.replace(COMMERCIAL, EVERY_PARTITION).replace(COMMERCIAL_REGION, EVERY_REGION)
+            pattern = pattern.replace(COMMERCIAL, EVERY_PARTITION)
+            for spelling in COMMERCIAL_REGION_SPELLINGS:
+                pattern = pattern.replace(spelling, EVERY_REGION)
+            shape["pattern"] = pattern
     return model
 
 

@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "ivs", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1568,6 +1568,19 @@ class PartitionCrossServiceSmokeIntegrationTest {
         String arn = signed(region, "ivs").contentType("application/json").body("{}").post("/CreatePlaybackRestrictionPolicy")
                 .then().statusCode(200).extract().path("playbackRestrictionPolicy.arn");
         PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "ivs").contentType("application/json").body("{\"arn\":\"" + arn + "\"}")
+                .post("/GetPlaybackRestrictionPolicy").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void ivsChatRoomArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "ivschat");
+        String arn = signed(region, "ivschat").contentType("application/json").body("{}").post("/CreateRoom")
+                .then().statusCode(200).extract().path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "ivschat").contentType("application/json").body("{\"identifier\":\"" + arn + "\"}")
+                .post("/GetRoom").then().statusCode(200);
     }
 
     @ParameterizedTest

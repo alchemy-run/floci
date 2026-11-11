@@ -1025,6 +1025,8 @@ floci:
       enabled: true
     ivs:
       enabled: true
+    ivschat:
+      enabled: true
     healthlake:
       enabled: true
     greengrassv2:

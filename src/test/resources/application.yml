@@ -518,6 +518,9 @@ floci:
       enabled: true
       mock: true
       transition-millis: 0
+    ivschat:
+      enabled: true
+      s3-flush-millis: 0
     healthlake:
       enabled: true
       mock: true

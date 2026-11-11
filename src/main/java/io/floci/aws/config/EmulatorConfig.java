@@ -889,6 +889,8 @@ public interface EmulatorConfig {
         HealthLakeServiceConfig healthlake();
 
         IvsServiceConfig ivs();
+
+        IvsChatServiceConfig ivschat();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -3002,6 +3004,23 @@ public interface EmulatorConfig {
          */
         @WithDefault("true")
         boolean existingCustomer();
+    }
+
+    interface IvsChatServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * How long a room's log records gather before they are written to an S3 destination as one
+         * object (IVS Chat delivers to S3 about every five minutes; CloudWatch Logs and Firehose get each
+         * record as it happens). Zero writes every record as its own object.
+         */
+        @WithDefault("10000")
+        long s3FlushMillis();
+
+        /** How long a chat token can be used to connect, from when it is created. */
+        @WithDefault("60")
+        int tokenMinutes();
     }
 
     interface IvsServiceConfig {

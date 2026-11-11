@@ -303,6 +303,7 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_forecast_shapes.py
 	$(PYTHON) tools/aws/regen_healthlake_shapes.py
 	$(PYTHON) tools/aws/regen_ivs_shapes.py
+	$(PYTHON) tools/aws/regen_ivschat_shapes.py
 	$(PYTHON) tools/aws/regen_fsx_shapes.py
 	$(PYTHON) tools/aws/regen_ds_shapes.py
 	$(PYTHON) tools/aws/regen_rest_json_bindings.py
@@ -492,6 +493,10 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_ivs_shapes.py --check || { \
 		echo "error: IVS request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_ivschat_shapes.py --check || { \
+		echo "error: IVS Chat request shapes are out of date; run 'make aws-data-sync'."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_fsx_shapes.py --check || { \

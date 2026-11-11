@@ -1175,6 +1175,30 @@
         "UpdatePlaybackRestrictionPolicy": {"method": "POST", "requestUri": "/_ivs/UpdatePlaybackRestrictionPolicy"}
       }
     },
+    "ivschat": {
+      "credentialScope": "ivschat",
+      "apiVersion": "2020-07-14",
+      "accessDeniedStatus": 403,
+      "operations": {
+        "CreateChatToken": {"method": "POST", "requestUri": "/_ivschat/CreateChatToken"},
+        "CreateLoggingConfiguration": {"method": "POST", "requestUri": "/_ivschat/CreateLoggingConfiguration"},
+        "CreateRoom": {"method": "POST", "requestUri": "/_ivschat/CreateRoom"},
+        "DeleteLoggingConfiguration": {"method": "POST", "requestUri": "/_ivschat/DeleteLoggingConfiguration"},
+        "DeleteMessage": {"method": "POST", "requestUri": "/_ivschat/DeleteMessage"},
+        "DeleteRoom": {"method": "POST", "requestUri": "/_ivschat/DeleteRoom"},
+        "DisconnectUser": {"method": "POST", "requestUri": "/_ivschat/DisconnectUser"},
+        "GetLoggingConfiguration": {"method": "POST", "requestUri": "/_ivschat/GetLoggingConfiguration"},
+        "GetRoom": {"method": "POST", "requestUri": "/_ivschat/GetRoom"},
+        "ListLoggingConfigurations": {"method": "POST", "requestUri": "/_ivschat/ListLoggingConfigurations"},
+        "ListRooms": {"method": "POST", "requestUri": "/_ivschat/ListRooms"},
+        "ListTagsForResource": {"method": "GET", "requestUri": "/_ivschat/tags/{resourceArn+}"},
+        "SendEvent": {"method": "POST", "requestUri": "/_ivschat/SendEvent"},
+        "TagResource": {"method": "POST", "requestUri": "/_ivschat/tags/{resourceArn+}"},
+        "UntagResource": {"method": "DELETE", "requestUri": "/_ivschat/tags/{resourceArn+}"},
+        "UpdateLoggingConfiguration": {"method": "POST", "requestUri": "/_ivschat/UpdateLoggingConfiguration"},
+        "UpdateRoom": {"method": "POST", "requestUri": "/_ivschat/UpdateRoom"}
+      }
+    },
     "lambda": {
       "credentialScope": "lambda",
       "apiVersion": "2015-03-31",
