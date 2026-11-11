@@ -272,7 +272,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "CreateAsset": {
@@ -376,7 +380,10 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "props.sparkEmrProperties.credentialsExpiration"
+    ]
    }
   },
   "CreateDataProduct": {
@@ -440,7 +447,12 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "lastRunAt",
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "CreateDesignation": {
@@ -456,7 +468,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "CreateDomain": {
@@ -508,7 +524,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "CreateEnvironmentAction": {
@@ -544,7 +564,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "CreateEnvironmentProfile": {
@@ -560,7 +584,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "CreateFormType": {
@@ -692,7 +720,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "CreateProjectMembership": {
@@ -728,7 +760,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "CreateRule": {
@@ -1002,7 +1038,12 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "lastRunAt",
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "DeleteDesignation": {
@@ -1547,7 +1588,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "GetAsset": {
@@ -1644,7 +1689,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "connectionCredentials.expiration",
+     "props.sparkEmrProperties.credentialsExpiration"
+    ]
    }
   },
   "GetDataExportConfiguration": {
@@ -1704,7 +1753,12 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "lastRunAt",
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "GetDataSourceRun": {
@@ -1724,7 +1778,13 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt",
+     "startedAt",
+     "stoppedAt"
+    ]
    }
   },
   "GetDesignation": {
@@ -1744,7 +1804,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "GetDomain": {
@@ -1800,7 +1864,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "GetEnvironmentAction": {
@@ -1844,7 +1912,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "GetEnvironmentBlueprintConfiguration": {
@@ -1864,7 +1936,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "GetEnvironmentCredentials": {
@@ -1884,7 +1960,10 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "expiration"
+    ]
    }
   },
   "GetEnvironmentProfile": {
@@ -1904,7 +1983,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "GetFormType": {
@@ -2228,7 +2311,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "GetProjectProfile": {
@@ -2248,7 +2335,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "GetRule": {
@@ -2597,7 +2688,10 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "items[].props.sparkEmrProperties.credentialsExpiration"
+    ]
    }
   },
   "ListDataProductRevisions": {
@@ -2659,7 +2753,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
    }
   },
   "ListDataSourceRuns": {
@@ -2692,7 +2790,13 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt",
+     "items[].startedAt",
+     "items[].stoppedAt"
+    ]
    }
   },
   "ListDataSources": {
@@ -2741,7 +2845,12 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "items[].lastRunAt",
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
    }
   },
   "ListDesignations": {
@@ -2766,7 +2875,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
    }
   },
   "ListDomainUnitsForParent": {
@@ -2907,7 +3020,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
    }
   },
   "ListEnvironmentBlueprints": {
@@ -2941,7 +3058,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
    }
   },
   "ListEnvironmentProfiles": {
@@ -2986,7 +3107,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
    }
   },
   "ListEnvironments": {
@@ -3043,7 +3168,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
    }
   },
   "ListJobRuns": {
@@ -3456,7 +3585,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastUpdatedAt"
+    ]
    }
   },
   "ListProjects": {
@@ -3497,7 +3630,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
    }
   },
   "ListRules": {
@@ -3899,7 +4036,10 @@
       "location": "body",
       "idempotencyToken": true
      }
-    }
+    },
+    "timestamps": [
+     "forms[].timestamp"
+    ]
    },
    "output": {
     "members": {}
@@ -3942,7 +4082,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "QueryGraph": {
@@ -4195,7 +4339,13 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt",
+     "startedAt",
+     "stoppedAt"
+    ]
    }
   },
   "StartMetadataGenerationRun": {
@@ -4292,7 +4442,10 @@
       "location": "body",
       "idempotencyToken": true
      }
-    }
+    },
+    "timestamps": [
+     "gitMetadata.committedAt"
+    ]
    },
    "output": {
     "members": {}
@@ -4376,7 +4529,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "UpdateAssetFilter": {
@@ -4420,7 +4577,10 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "props.sparkEmrProperties.credentialsExpiration"
+    ]
    }
   },
   "UpdateDataSource": {
@@ -4440,7 +4600,12 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "lastRunAt",
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "UpdateDesignation": {
@@ -4460,7 +4625,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "UpdateDomain": {
@@ -4521,7 +4690,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "UpdateEnvironmentAction": {
@@ -4565,7 +4738,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "UpdateEnvironmentProfile": {
@@ -4585,7 +4762,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
    }
   },
   "UpdateGlossary": {
@@ -4693,7 +4874,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "UpdateProjectProfile": {
@@ -4713,7 +4898,11 @@
     }
    },
    "output": {
-    "members": {}
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
    }
   },
   "UpdateRootDomainUnitOwner": {

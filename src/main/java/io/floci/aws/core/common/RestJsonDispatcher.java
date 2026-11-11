@@ -55,6 +55,7 @@ public final class RestJsonDispatcher {
     private record Route(String operation, JsonNode binding, Pattern pattern, Pattern lenient, List<String> labels,
                          List<String> queryLiterals, int[] ranks) {}
 
+    private static final Pattern PATH_TOKEN = Pattern.compile("\\[]|\\{}|[^.\\[{]+");
     private static final Pattern LABEL = Pattern.compile("\\{([^}+]+)(\\+?)}");
 
     private final ObjectMapper mapper;
@@ -275,7 +276,94 @@ public final class RestJsonDispatcher {
                 }
             }
         }
+        for (JsonNode path : route.binding().path("input").path("timestamps")) {
+            convert(input, tokens(path.asText()), 0, true);
+        }
         return input;
+    }
+
+    /**
+     * Converts the timestamps at a path: on input, text (ISO 8601, an HTTP date or epoch seconds) to epoch
+     * seconds, so handlers read every timestamp as a number; on output, epoch seconds to the ISO 8601 text the
+     * model formats them as. A path's tokens are member names, {@code []} for each list element and {@code {}} for
+     * each map value.
+     */
+    private void convert(JsonNode node, List<String> tokens, int index, boolean toSeconds) {
+        if (node == null || index >= tokens.size()) {
+            return;
+        }
+        String token = tokens.get(index);
+        boolean last = index == tokens.size() - 1;
+        if ("[]".equals(token) || "{}".equals(token)) {
+            if (node instanceof ArrayNode array) {
+                for (int position = 0; position < array.size(); position++) {
+                    if (last) {
+                        JsonNode converted = timestamp(array.get(position), toSeconds);
+                        if (converted != null) {
+                            array.set(position, converted);
+                        }
+                    } else {
+                        convert(array.get(position), tokens, index + 1, toSeconds);
+                    }
+                }
+            } else if (node instanceof ObjectNode object) {
+                List<String> names = new ArrayList<>();
+                object.fieldNames().forEachRemaining(names::add);
+                for (String name : names) {
+                    if (last) {
+                        JsonNode converted = timestamp(object.get(name), toSeconds);
+                        if (converted != null) {
+                            object.set(name, converted);
+                        }
+                    } else {
+                        convert(object.get(name), tokens, index + 1, toSeconds);
+                    }
+                }
+            }
+            return;
+        }
+        if (!(node instanceof ObjectNode object) || !object.has(token)) {
+            return;
+        }
+        if (last) {
+            JsonNode converted = timestamp(object.get(token), toSeconds);
+            if (converted != null) {
+                object.set(token, converted);
+            }
+            return;
+        }
+        convert(object.get(token), tokens, index + 1, toSeconds);
+    }
+
+    private static List<String> tokens(String path) {
+        List<String> tokens = new ArrayList<>();
+        Matcher matcher = PATH_TOKEN.matcher(path);
+        while (matcher.find()) {
+            tokens.add(matcher.group());
+        }
+        return tokens;
+    }
+
+    private JsonNode timestamp(JsonNode value, boolean toSeconds) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (toSeconds) {
+            if (!value.isTextual()) {
+                return null;
+            }
+            try {
+                return mapper.getNodeFactory().numberNode(epochSeconds(value.asText().strip()));
+            } catch (DateTimeParseException | NumberFormatException e) {
+                throw new AwsException("ValidationException", "The value '" + value.asText()
+                        + "' is not a valid timestamp.", 400);
+            }
+        }
+        if (!value.isNumber()) {
+            return null;
+        }
+        Instant instant = Instant.ofEpochMilli(Math.round(value.asDouble() * 1000));
+        return mapper.getNodeFactory().textNode(DateTimeFormatter.ISO_INSTANT.format(instant));
     }
 
     private void put(ObjectNode input, String name, JsonNode spec, String value) {
@@ -336,6 +424,11 @@ public final class RestJsonDispatcher {
             }
         }
         int status = binding == null ? 200 : binding.path("responseCode").asInt(200);
+        if (binding != null) {
+            for (JsonNode path : binding.path("output").path("timestamps")) {
+                convert(output, tokens(path.asText()), 0, false);
+            }
+        }
         Response.ResponseBuilder builder = null;
         Object entity = output;
         String contentType = MediaType.APPLICATION_JSON;

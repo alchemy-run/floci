@@ -27,6 +27,7 @@ OUTPUT = REPO_ROOT / "src/main/resources/aws/rest-json"
 # botocore model -> the vendored file's name.
 MODELS = {
     "datazone": "datazone",
+    "deadline": "deadline",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}
@@ -50,7 +51,37 @@ def member(model: dict, spec: dict) -> dict:
     return entry
 
 
-def bindings(model: dict, shape_name: str | None, payload_location: str) -> dict:
+def timestamps(model: dict, shape_name: str, iso_only: bool, path: str = "", stack: tuple = ()) -> list[str]:
+    """The paths of the timestamp members under a shape: `a.b`, `[]` for a list element, `{}` for a map value.
+
+    Input paths list every timestamp (the dispatcher reads each to epoch seconds); output paths only those the model
+    formats as ISO 8601 (the dispatcher writes those as text, the rest stay epoch seconds).
+    """
+    if shape_name in stack or len(stack) > 12:
+        return []
+    shape = model["shapes"][shape_name]
+    found: list[str] = []
+    if shape["type"] == "structure":
+        for name, spec in shape.get("members", {}).items():
+            if spec.get("location") and spec["location"] != "body":
+                continue
+            wire = spec.get("jsonName", name) if not spec.get("locationName") else spec["locationName"]
+            target = model["shapes"][spec["shape"]]
+            member_path = f"{path}.{name}" if path else name
+            if target["type"] == "timestamp":
+                fmt = spec.get("timestampFormat") or target.get("timestampFormat") or "unixTimestamp"
+                if not iso_only or fmt == "iso8601":
+                    found.append(member_path)
+            else:
+                found += timestamps(model, spec["shape"], iso_only, member_path, stack + (shape_name,))
+    elif shape["type"] == "list":
+        found += timestamps(model, shape["member"]["shape"], iso_only, path + "[]", stack + (shape_name,))
+    elif shape["type"] == "map":
+        found += timestamps(model, shape["value"]["shape"], iso_only, path + "{}", stack + (shape_name,))
+    return found
+
+
+def bindings(model: dict, shape_name: str | None, payload_location: str, iso_only: bool) -> dict:
     if not shape_name:
         return {"members": {}}
     shape = model["shapes"][shape_name]
@@ -67,7 +98,11 @@ def bindings(model: dict, shape_name: str | None, payload_location: str) -> dict
             # A structure body is read and written as it is; only the members bound elsewhere are vendored.
             continue
         members[name] = entry
-    return {"members": members}
+    result: dict = {"members": members}
+    found = timestamps(model, shape_name, iso_only)
+    if found:
+        result["timestamps"] = found
+    return result
 
 
 def build(name: str, model: dict, provenance: str) -> dict:
@@ -79,8 +114,8 @@ def build(name: str, model: dict, provenance: str) -> dict:
             "method": http["method"],
             "requestUri": http["requestUri"],
             "responseCode": http.get("responseCode", 200),
-            "input": bindings(model, op.get("input", {}).get("shape"), "payload"),
-            "output": bindings(model, op.get("output", {}).get("shape"), "payload"),
+            "input": bindings(model, op.get("input", {}).get("shape"), "payload", False),
+            "output": bindings(model, op.get("output", {}).get("shape"), "payload", True),
         }
     return {
         "_source": {"generator": "tools/aws/regen_rest_json_bindings.py", "botocore": provenance},

@@ -869,6 +869,7 @@ public interface EmulatorConfig {
         DataBrewServiceConfig databrew();
         DataExchangeServiceConfig dataexchange();
         DataZoneServiceConfig datazone();
+        DeadlineServiceConfig deadline();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2936,6 +2937,15 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long a domain, environment, data source or run stays in its transitional state before it settles. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface DeadlineServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a fleet, job update, license endpoint or statistics aggregation stays in progress. */
         @WithDefault("2000")
         long transitionMillis();
     }

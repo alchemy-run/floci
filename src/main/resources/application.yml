@@ -1015,6 +1015,8 @@ floci:
       enabled: true
     datazone:
       enabled: true
+    deadline:
+      enabled: true
     dax:
       enabled: true
     rekognition:

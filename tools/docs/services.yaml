@@ -239,6 +239,10 @@ services:
     doc: docs/services/datazone.md
     sources:
       - { path: services/datazone/DataZoneController.java, mode: switch }
+  - service: deadline
+    doc: docs/services/deadline.md
+    sources:
+      - { path: services/deadline/DeadlineController.java, mode: switch }
   - service: dax
     doc: docs/services/dax.md
     sources:

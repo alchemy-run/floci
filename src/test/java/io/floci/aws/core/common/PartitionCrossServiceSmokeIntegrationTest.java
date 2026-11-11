@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1392,6 +1392,21 @@ class PartitionCrossServiceSmokeIntegrationTest {
         cleanup.register(() -> signed(region, "datazone").delete("/v2/domains/" + id));
         String arn = signed(region, "datazone").get("/v2/domains/" + id).then().statusCode(200).extract()
                 .path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void deadlineFarmArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "deadline");
+        String id = signed(region, "deadline").contentType(JSON)
+                .body("{\"displayName\":\"" + unique("smoke", partitionCase) + "\",\"tags\":{\"smoke\":\"yes\"}}")
+                .post("/2023-10-12/farms").then().statusCode(200).extract().path("farmId");
+        cleanup.register(() -> signed(region, "deadline").delete("/2023-10-12/farms/" + id));
+        String arn = "arn:" + partitionCase.partition() + ":deadline:" + region + ":" + PartitionMatrix.ACCOUNT + ":farm/" + id;
+        String tag = signed(region, "deadline").get("/2023-10-12/tags/" + arn).then().statusCode(200).extract()
+                .path("tags.smoke");
+        assertEquals("yes", tag);
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 

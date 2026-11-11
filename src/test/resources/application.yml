@@ -502,6 +502,9 @@ floci:
     datazone:
       enabled: true
       transition-millis: 0
+    deadline:
+      enabled: true
+      transition-millis: 0
     dax:
       enabled: true
       transition-millis: 0

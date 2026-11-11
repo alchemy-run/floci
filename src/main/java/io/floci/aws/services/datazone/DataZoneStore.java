@@ -19,6 +19,7 @@ import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -186,7 +187,14 @@ public class DataZoneStore implements Resettable {
             }
         }
         String token = input.path("nextToken").asText(null);
-        PaginatedResult<ObjectNode> paged = Pagination.paginate(items, cursor, max, token, field,
+        // Pagination orders by cursor; a positional cursor keeps the order the list was built in.
+        Map<ObjectNode, Integer> positions = new IdentityHashMap<>();
+        for (int index = 0; index < items.size(); index++) {
+            positions.put(items.get(index), index);
+        }
+        Function<ObjectNode, String> positional = item -> String.format("%09d", positions.get(item)) + ":"
+                + cursor.apply(item);
+        PaginatedResult<ObjectNode> paged = Pagination.paginate(items, positional, max, token, field,
                 bad -> invalid("Invalid nextToken."));
         ObjectNode response = object();
         response.putArray(field).addAll(paged.items());

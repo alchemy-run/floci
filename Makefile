@@ -293,6 +293,7 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_databrew_shapes.py
 	$(PYTHON) tools/aws/regen_dataexchange_shapes.py
 	$(PYTHON) tools/aws/regen_datazone_shapes.py
+	$(PYTHON) tools/aws/regen_deadline_shapes.py
 	$(PYTHON) tools/aws/regen_rest_json_bindings.py
 	$(PYTHON) tools/aws/regen_dax_shapes.py
 	$(PYTHON) tools/aws/regen_rest_xml_shapes.py
@@ -440,6 +441,10 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_datazone_shapes.py --check || { \
 		echo "error: DataZone request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_deadline_shapes.py --check || { \
+		echo "error: Deadline Cloud request shapes are out of date; run 'make aws-data-sync'."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_rest_json_bindings.py --check || { \

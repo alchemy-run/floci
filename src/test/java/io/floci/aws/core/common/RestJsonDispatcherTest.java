@@ -92,6 +92,30 @@ class RestJsonDispatcherTest {
     }
 
     @Test
+    void timestampsAreReadAsSecondsAndWrittenAsTheModelFormatsThem() {
+        RestJsonDispatcher deadline = new RestJsonDispatcher(mapper, "deadline");
+        RestJsonDispatcher.Call budget = deadline.match("POST", "/2023-10-12/farms/farm-1/budgets", null, null,
+                ("{\"schedule\":{\"fixed\":{\"startTime\":\"2026-01-01T00:00:00Z\",\"endTime\":1767312000}}}")
+                        .getBytes(StandardCharsets.UTF_8)).orElseThrow();
+        assertEquals(1767225600.0, budget.input().path("schedule").path("fixed").path("startTime").asDouble());
+        assertEquals(1767312000, budget.input().path("schedule").path("fixed").path("endTime").asLong());
+
+        Response listed = deadline.dispatch("GET", "/2023-10-12/farms/farm-1/queues/queue-1/jobs", null, null, null,
+                (operation, input) -> {
+                    ObjectNode output = mapper.createObjectNode();
+                    output.putArray("jobs").addObject().put("jobId", "job-1").put("createdAt", 1767225600.5);
+                    return output;
+                });
+        ObjectNode body = (ObjectNode) listed.getEntity();
+        assertEquals("2026-01-01T00:00:00.500Z", body.path("jobs").get(0).path("createdAt").asText());
+
+        // DataZone's default (epoch seconds) timestamps stay numbers.
+        Response asset = dispatcher.dispatch("GET", "/v2/domains/dzd_1/assets/a1", null, null, null,
+                (operation, input) -> mapper.createObjectNode().put("createdAt", 1767225600.0));
+        assertTrue(((ObjectNode) asset.getEntity()).path("createdAt").isNumber());
+    }
+
+    @Test
     void anUnknownRouteIsRefused() {
         AwsException error = assertThrows(AwsException.class, () -> dispatcher.dispatch("GET", "/v2/nothing", null,
                 null, null, (operation, input) -> mapper.createObjectNode()));
