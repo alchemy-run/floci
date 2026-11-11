@@ -1011,6 +1011,8 @@ floci:
       enabled: true
     databrew:
       enabled: true
+    dataexchange:
+      enabled: true
     dax:
       enabled: true
     rekognition:

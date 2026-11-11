@@ -231,6 +231,10 @@ services:
     doc: docs/services/databrew.md
     sources:
       - { path: services/databrew/DataBrewController.java, mode: rest }
+  - service: dataexchange
+    doc: docs/services/dataexchange.md
+    sources:
+      - { path: services/dataexchange/DataExchangeController.java, mode: rest }
   - service: dax
     doc: docs/services/dax.md
     sources:

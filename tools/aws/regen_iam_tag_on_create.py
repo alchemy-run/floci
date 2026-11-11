@@ -95,7 +95,7 @@ OUTPUT = REPO_ROOT / "src/main/resources/aws/iam-tag-on-create.json"
 NAMESPACES = (
     "access-analyzer", "acm", "application-autoscaling", "athena", "autoscaling", "bcm-data-exports",
     "bcm-pricing-calculator", "budgets", "ce", "cloudformation", "cloudhsm", "cloudtrail", "cloudwatch",
-    "codedeploy", "codepipeline", "cognito-identity", "cognito-idp", "comprehend", "config", "cur", "databrew", "datasync", "dax",
+    "codedeploy", "codepipeline", "cognito-identity", "cognito-idp", "comprehend", "config", "cur", "databrew", "dataexchange", "datasync", "dax",
     "dms", "dsql", "dynamodb", "ec2", "ecr", "ecs", "eks", "elasticache", "elasticloadbalancing",
     "elasticmapreduce", "events", "firehose", "globalaccelerator", "glue", "iam", "kinesis", "kinesisanalytics",
     "kms", "lambda", "lightsail", "logs", "memorydb", "network-firewall", "organizations", "payment-cryptography",
@@ -159,6 +159,8 @@ NO_TAGS = "no member of the request carries tags"
 # Operations the reference lists with a tagging action whose request carries no tags this file reads.
 NOT_READ = {
     "cloudformation:ExecuteChangeSet": NO_TAGS,
+    "dataexchange:StartJob": "it tags the assets an import creates with the CreateJob request's AssetConfiguration, "
+                             "not with members of its own request",
     "dynamodb:UpdateTable": NO_TAGS,
     "ec2:RequestSpotFleet": "its tags are in spotFleetRequestConfig, deeper than the members this file reads",
     "ecr:BatchGetImage": NO_TAGS,

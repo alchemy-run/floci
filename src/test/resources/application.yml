@@ -496,6 +496,9 @@ floci:
       enabled: true
       run-startup-millis: 2000
       session-startup-millis: 0
+    dataexchange:
+      enabled: true
+      job-millis: 200
     dax:
       enabled: true
       transition-millis: 0

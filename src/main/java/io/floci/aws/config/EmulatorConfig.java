@@ -867,6 +867,7 @@ public interface EmulatorConfig {
         CodeConnectionsServiceConfig codeConnections();
         DaxServiceConfig dax();
         DataBrewServiceConfig databrew();
+        DataExchangeServiceConfig dataexchange();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2918,6 +2919,15 @@ public interface EmulatorConfig {
         /** How long a project session stays INITIALIZING before it is READY. */
         @WithDefault("2000")
         long sessionStartupMillis();
+    }
+
+    interface DataExchangeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a started job stays IN_PROGRESS before it completes. */
+        @WithDefault("1000")
+        long jobMillis();
     }
 
     interface DaxServiceConfig {
