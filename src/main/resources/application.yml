@@ -1027,6 +1027,8 @@ floci:
       enabled: true
     imagebuilder:
       enabled: true
+    internetmonitor:
+      enabled: true
     ivschat:
       enabled: true
     healthlake:

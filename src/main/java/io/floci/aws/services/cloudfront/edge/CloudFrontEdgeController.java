@@ -228,6 +228,7 @@ public class CloudFrontEdgeController {
         } catch (AwsException e) {
             return edgeError(404, "The distribution does not exist.");
         }
+        servingController.observeViewer(distribution);
 
         // Take the path off the raw request URI rather than the path param:
         // CloudFront hands the function the URI exactly as the viewer sent it,

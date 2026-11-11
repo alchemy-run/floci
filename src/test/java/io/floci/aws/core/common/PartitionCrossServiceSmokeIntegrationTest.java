@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1596,6 +1596,18 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
         signed(region, "imagebuilder").queryParam("componentBuildVersionArn", arn).get("/GetComponent")
                 .then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void internetMonitorMonitorArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "internetmonitor");
+        String name = "smoke-" + partitionCase.partition();
+        String arn = signed(region, "internetmonitor").contentType("application/json")
+                .body("{\"MonitorName\":\"" + name + "\",\"MaxCityNetworksToMonitor\":1}")
+                .post("/v20210603/Monitors").then().statusCode(200).extract().path("Arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "internetmonitor").get("/v20210603/Monitors/" + name).then().statusCode(200);
     }
 
     @ParameterizedTest

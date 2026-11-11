@@ -520,6 +520,8 @@ floci:
       transition-millis: 0
     imagebuilder:
       enabled: true
+    internetmonitor:
+      enabled: true
     ivschat:
       enabled: true
       s3-flush-millis: 0

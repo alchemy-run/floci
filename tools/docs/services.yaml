@@ -283,6 +283,10 @@ services:
     doc: docs/services/imagebuilder.md
     sources:
       - { path: services/imagebuilder/ImageBuilderController.java, mode: rest }
+  - service: internetmonitor
+    doc: docs/services/internetmonitor.md
+    sources:
+      - { path: services/internetmonitor/InternetMonitorController.java, mode: rest }
   - service: ivschat
     doc: docs/services/ivschat.md
     sources:

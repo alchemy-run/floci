@@ -1211,6 +1211,29 @@
         "UpdateLifecyclePolicy": {"method": "PUT", "requestUri": "/_imagebuilder/UpdateLifecyclePolicy"}
       }
     },
+    "internetmonitor": {
+      "credentialScope": "internetmonitor",
+      "apiVersion": "2021-06-03",
+      "accessDeniedStatus": 403,
+      "operations": {
+        "CreateMonitor": {"method": "POST", "requestUri": "/_internetmonitor/v20210603/Monitors"},
+        "DeleteMonitor": {"method": "DELETE", "requestUri": "/_internetmonitor/v20210603/Monitors/{MonitorName+}"},
+        "GetHealthEvent": {"method": "GET", "requestUri": "/_internetmonitor/v20210603/Monitors/{MonitorName+}/HealthEvents/{EventId+}"},
+        "GetInternetEvent": {"method": "GET", "requestUri": "/_internetmonitor/v20210603/InternetEvents/{EventId+}"},
+        "GetMonitor": {"method": "GET", "requestUri": "/_internetmonitor/v20210603/Monitors/{MonitorName+}"},
+        "GetQueryResults": {"method": "GET", "requestUri": "/_internetmonitor/v20210603/Monitors/{MonitorName+}/Queries/{QueryId+}/Results"},
+        "GetQueryStatus": {"method": "GET", "requestUri": "/_internetmonitor/v20210603/Monitors/{MonitorName+}/Queries/{QueryId+}/Status"},
+        "ListHealthEvents": {"method": "GET", "requestUri": "/_internetmonitor/v20210603/Monitors/{MonitorName+}/HealthEvents"},
+        "ListInternetEvents": {"method": "GET", "requestUri": "/_internetmonitor/v20210603/InternetEvents"},
+        "ListMonitors": {"method": "GET", "requestUri": "/_internetmonitor/v20210603/Monitors"},
+        "ListTagsForResource": {"method": "GET", "requestUri": "/_internetmonitor/tags/{ResourceArn+}"},
+        "StartQuery": {"method": "POST", "requestUri": "/_internetmonitor/v20210603/Monitors/{MonitorName+}/Queries"},
+        "StopQuery": {"method": "DELETE", "requestUri": "/_internetmonitor/v20210603/Monitors/{MonitorName+}/Queries/{QueryId+}"},
+        "TagResource": {"method": "POST", "requestUri": "/_internetmonitor/tags/{ResourceArn+}"},
+        "UntagResource": {"method": "DELETE", "requestUri": "/_internetmonitor/tags/{ResourceArn+}"},
+        "UpdateMonitor": {"method": "PATCH", "requestUri": "/_internetmonitor/v20210603/Monitors/{MonitorName+}"}
+      }
+    },
     "ivs": {
       "credentialScope": "ivs",
       "apiVersion": "2020-07-14",

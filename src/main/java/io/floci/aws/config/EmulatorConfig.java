@@ -893,6 +893,8 @@ public interface EmulatorConfig {
         IvsChatServiceConfig ivschat();
 
         ImageBuilderServiceConfig imagebuilder();
+
+        InternetMonitorServiceConfig internetmonitor();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -3022,6 +3024,65 @@ public interface EmulatorConfig {
         /** How often enabled lifecycle policies are evaluated; Image Builder evaluates them daily. */
         @WithDefault("3600")
         long lifecycleIntervalSeconds();
+    }
+
+    interface InternetMonitorServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * The length of a measurement window: Floci aggregates a monitor's traffic over each window, publishes its
+         * measurements and evaluates health events when it closes. Internet Monitor uses five minutes.
+         */
+        @WithDefault("300")
+        long measurementSeconds();
+
+        /** How long a created, updated, activated or deactivated monitor stays {@code PENDING}. */
+        @WithDefault("1000")
+        long pendingMillis();
+
+        /**
+         * The round-trip time above which a request counts against a city-network's performance score, standing in
+         * for the baseline Internet Monitor learns from each city-network's history.
+         */
+        @WithDefault("1000")
+        long performanceThresholdMillis();
+
+        /** The client location every viewer is reported in: Floci has no IP geolocation database. */
+        ClientLocationConfig clientLocation();
+
+        interface ClientLocationConfig {
+            @WithDefault("Local")
+            String city();
+
+            @WithDefault("Local")
+            String metro();
+
+            @WithDefault("Local")
+            String subdivision();
+
+            @WithDefault("LO")
+            String subdivisionCode();
+
+            @WithDefault("Local")
+            String country();
+
+            @WithDefault("ZZ")
+            String countryCode();
+
+            @WithDefault("0")
+            double latitude();
+
+            @WithDefault("0")
+            double longitude();
+
+            /** The viewers' network; 64512 is the first private-use ASN. */
+            @WithDefault("Floci local network")
+            String asName();
+
+            @WithDefault("64512")
+            long asNumber();
+        }
     }
 
     interface IvsChatServiceConfig {
