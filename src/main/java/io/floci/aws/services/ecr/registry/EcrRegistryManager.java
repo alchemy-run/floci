@@ -392,6 +392,8 @@ public class EcrRegistryManager {
         if (existing.isPresent()) {
             if (!hasLoopbackBinding(existing.get())) {
                 LOG.infov("Recreating ECR backing registry {0} with a loopback-only port binding", adoptedName);
+            } else if (!hasBlobCacheDisabled(existing.get())) {
+                LOG.infov("Recreating ECR backing registry {0} with its blob descriptor cache disabled", adoptedName);
             } else if (!onAnotherNetwork(existing.get())) {
                 this.activeContainerName = adoptedName;
                 adoptExisting(existing.get());
@@ -429,7 +431,8 @@ public class EcrRegistryManager {
         List<String> env = new ArrayList<>(List.of(
                 "REGISTRY_STORAGE_DELETE_ENABLED=true",
                 "REGISTRY_HTTP_ADDR=0.0.0.0:" + CONTAINER_INTERNAL_PORT,
-                "REGISTRY_HTTP_RELATIVEURLS=true"
+                "REGISTRY_HTTP_RELATIVEURLS=true",
+                "REGISTRY_STORAGE_CACHE_BLOBDESCRIPTOR=" + BLOB_CACHE_DISABLED
         ));
         ContainerBuilder.Builder specBuilder = containerBuilder.newContainer(config.services().ecr().registryImage())
                 .withName(name)
@@ -438,7 +441,8 @@ public class EcrRegistryManager {
                 .withDockerNetwork(resolveRegistryDockerNetwork())
                 .withLogRotation()
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(
-                        "ecr", null, regionResolver.getAccountId(), regionResolver.getDefaultRegion()));
+                        "ecr", null, regionResolver.getAccountId(), regionResolver.getDefaultRegion()))
+                .withLabel(BLOB_CACHE_LABEL, BLOB_CACHE_DISABLED);
         addPersistenceMounts(specBuilder, env);
         return specBuilder.build();
     }
