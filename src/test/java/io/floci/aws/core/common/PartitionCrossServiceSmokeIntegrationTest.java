@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1437,6 +1437,16 @@ class PartitionCrossServiceSmokeIntegrationTest {
         String missing = signed(region, "docdb-elastic").urlEncodingEnabled(false).get("/cluster/" + arn).then()
                 .statusCode(404).extract().path("resourceId");
         assertEquals(arn, missing);
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void ecrPublicRegistryArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "ecr-public");
+        String arn = signed(region, "ecr-public").header("X-Amz-Target", "SpencerFrontendService.DescribeRegistries")
+                .contentType(JSON_1_1).body("{}").post("/").then().statusCode(200).extract()
+                .path("registries[0].registryArn");
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 

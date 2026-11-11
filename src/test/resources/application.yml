@@ -508,6 +508,8 @@ floci:
     devopsguru:
       enabled: true
       transition-millis: 0
+    ecr-public:
+      enabled: true
     docdb-elastic:
       enabled: true
       transition-millis: 0

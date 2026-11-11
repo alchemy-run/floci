@@ -1,0 +1,464 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_ecrpublic_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "BatchCheckLayerAvailability": "BatchCheckLayerAvailabilityRequest",
+    "BatchDeleteImage": "BatchDeleteImageRequest",
+    "CompleteLayerUpload": "CompleteLayerUploadRequest",
+    "CreateRepository": "CreateRepositoryRequest",
+    "DeleteRepository": "DeleteRepositoryRequest",
+    "DeleteRepositoryPolicy": "DeleteRepositoryPolicyRequest",
+    "DescribeImageTags": "DescribeImageTagsRequest",
+    "DescribeImages": "DescribeImagesRequest",
+    "DescribeRegistries": "DescribeRegistriesRequest",
+    "DescribeRepositories": "DescribeRepositoriesRequest",
+    "GetAuthorizationToken": "GetAuthorizationTokenRequest",
+    "GetRegistryCatalogData": "GetRegistryCatalogDataRequest",
+    "GetRepositoryCatalogData": "GetRepositoryCatalogDataRequest",
+    "GetRepositoryPolicy": "GetRepositoryPolicyRequest",
+    "InitiateLayerUpload": "InitiateLayerUploadRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutImage": "PutImageRequest",
+    "PutRegistryCatalogData": "PutRegistryCatalogDataRequest",
+    "PutRepositoryCatalogData": "PutRepositoryCatalogDataRequest",
+    "SetRepositoryPolicy": "SetRepositoryPolicyRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UploadLayerPart": "UploadLayerPartRequest"
+  },
+  "shapes": {
+    "AboutText": {
+      "type": "string",
+      "max": 25600
+    },
+    "Architecture": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "ArchitectureList": {
+      "type": "list",
+      "max": 50,
+      "member": "Architecture"
+    },
+    "Arn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "BatchCheckLayerAvailabilityRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName",
+        "layerDigests"
+      ],
+      "members": {
+        "registryId": "RegistryIdOrAlias",
+        "repositoryName": "RepositoryName",
+        "layerDigests": "BatchedOperationLayerDigestList"
+      }
+    },
+    "BatchDeleteImageRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName",
+        "imageIds"
+      ],
+      "members": {
+        "registryId": "RegistryIdOrAlias",
+        "repositoryName": "RepositoryName",
+        "imageIds": "ImageIdentifierList"
+      }
+    },
+    "BatchedOperationLayerDigest": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "BatchedOperationLayerDigestList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "BatchedOperationLayerDigest"
+    },
+    "CompleteLayerUploadRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName",
+        "uploadId",
+        "layerDigests"
+      ],
+      "members": {
+        "registryId": "RegistryIdOrAlias",
+        "repositoryName": "RepositoryName",
+        "uploadId": "UploadId",
+        "layerDigests": "LayerDigestList"
+      }
+    },
+    "CreateRepositoryRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName"
+      ],
+      "members": {
+        "repositoryName": "RepositoryName",
+        "catalogData": "RepositoryCatalogDataInput",
+        "tags": "TagList"
+      }
+    },
+    "DeleteRepositoryPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName"
+      ],
+      "members": {
+        "registryId": "RegistryId",
+        "repositoryName": "RepositoryName"
+      }
+    },
+    "DeleteRepositoryRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName"
+      ],
+      "members": {
+        "registryId": "RegistryId",
+        "repositoryName": "RepositoryName",
+        "force": "ForceFlag"
+      }
+    },
+    "DescribeImageTagsRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName"
+      ],
+      "members": {
+        "registryId": "RegistryId",
+        "repositoryName": "RepositoryName",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "DescribeImagesRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName"
+      ],
+      "members": {
+        "registryId": "RegistryId",
+        "repositoryName": "RepositoryName",
+        "imageIds": "ImageIdentifierList",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "DescribeRegistriesRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "DescribeRepositoriesRequest": {
+      "type": "structure",
+      "members": {
+        "registryId": "RegistryId",
+        "repositoryNames": "RepositoryNameList",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ForceFlag": {
+      "type": "boolean"
+    },
+    "GetAuthorizationTokenRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetRegistryCatalogDataRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetRepositoryCatalogDataRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName"
+      ],
+      "members": {
+        "registryId": "RegistryId",
+        "repositoryName": "RepositoryName"
+      }
+    },
+    "GetRepositoryPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName"
+      ],
+      "members": {
+        "registryId": "RegistryId",
+        "repositoryName": "RepositoryName"
+      }
+    },
+    "ImageDigest": {
+      "type": "string"
+    },
+    "ImageIdentifier": {
+      "type": "structure",
+      "members": {
+        "imageDigest": "ImageDigest",
+        "imageTag": "ImageTag"
+      }
+    },
+    "ImageIdentifierList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "ImageIdentifier"
+    },
+    "ImageManifest": {
+      "type": "string",
+      "min": 1,
+      "max": 4194304
+    },
+    "ImageTag": {
+      "type": "string",
+      "min": 1,
+      "max": 300
+    },
+    "InitiateLayerUploadRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName"
+      ],
+      "members": {
+        "registryId": "RegistryIdOrAlias",
+        "repositoryName": "RepositoryName"
+      }
+    },
+    "LayerDigest": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9-_+.]+:[a-fA-F0-9]+"
+    },
+    "LayerDigestList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "LayerDigest"
+    },
+    "LayerPartBlob": {
+      "type": "blob",
+      "min": 0,
+      "max": 20971520
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "Arn"
+      }
+    },
+    "LogoImageBlob": {
+      "type": "blob",
+      "min": 0,
+      "max": 512000
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "MediaType": {
+      "type": "string"
+    },
+    "NextToken": {
+      "type": "string"
+    },
+    "OperatingSystem": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "OperatingSystemList": {
+      "type": "list",
+      "max": 50,
+      "member": "OperatingSystem"
+    },
+    "PartSize": {
+      "type": "long",
+      "min": 0
+    },
+    "PutImageRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName",
+        "imageManifest"
+      ],
+      "members": {
+        "registryId": "RegistryIdOrAlias",
+        "repositoryName": "RepositoryName",
+        "imageManifest": "ImageManifest",
+        "imageManifestMediaType": "MediaType",
+        "imageTag": "ImageTag",
+        "imageDigest": "ImageDigest"
+      }
+    },
+    "PutRegistryCatalogDataRequest": {
+      "type": "structure",
+      "members": {
+        "displayName": "RegistryDisplayName"
+      }
+    },
+    "PutRepositoryCatalogDataRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName",
+        "catalogData"
+      ],
+      "members": {
+        "registryId": "RegistryId",
+        "repositoryName": "RepositoryName",
+        "catalogData": "RepositoryCatalogDataInput"
+      }
+    },
+    "RegistryDisplayName": {
+      "type": "string",
+      "min": 0,
+      "max": 100
+    },
+    "RegistryId": {
+      "type": "string",
+      "pattern": "[0-9]{12}"
+    },
+    "RegistryIdOrAlias": {
+      "type": "string",
+      "min": 2,
+      "max": 50
+    },
+    "RepositoryCatalogDataInput": {
+      "type": "structure",
+      "members": {
+        "description": "RepositoryDescription",
+        "architectures": "ArchitectureList",
+        "operatingSystems": "OperatingSystemList",
+        "logoImageBlob": "LogoImageBlob",
+        "aboutText": "AboutText",
+        "usageText": "UsageText"
+      }
+    },
+    "RepositoryDescription": {
+      "type": "string",
+      "max": 1024
+    },
+    "RepositoryName": {
+      "type": "string",
+      "min": 2,
+      "max": 205,
+      "pattern": "(?:[a-z0-9]+(?:[._-][a-z0-9]+)*/)*[a-z0-9]+(?:[._-][a-z0-9]+)*"
+    },
+    "RepositoryNameList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "RepositoryName"
+    },
+    "RepositoryPolicyText": {
+      "type": "string",
+      "min": 0,
+      "max": 10240
+    },
+    "SetRepositoryPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName",
+        "policyText"
+      ],
+      "members": {
+        "registryId": "RegistryId",
+        "repositoryName": "RepositoryName",
+        "policyText": "RepositoryPolicyText",
+        "force": "ForceFlag"
+      }
+    },
+    "Tag": {
+      "type": "structure",
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UploadId": {
+      "type": "string",
+      "pattern": "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+    },
+    "UploadLayerPartRequest": {
+      "type": "structure",
+      "required": [
+        "repositoryName",
+        "uploadId",
+        "partFirstByte",
+        "partLastByte",
+        "layerPartBlob"
+      ],
+      "members": {
+        "registryId": "RegistryIdOrAlias",
+        "repositoryName": "RepositoryName",
+        "uploadId": "UploadId",
+        "partFirstByte": "PartSize",
+        "partLastByte": "PartSize",
+        "layerPartBlob": "LayerPartBlob"
+      }
+    },
+    "UsageText": {
+      "type": "string",
+      "max": 25600
+    }
+  }
+}

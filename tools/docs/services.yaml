@@ -255,6 +255,10 @@ services:
     doc: docs/services/ds.md
     sources:
       - { path: services/directoryservice/DirectoryJsonHandler.java, mode: switch }
+  - service: ecrpublic
+    doc: docs/services/ecrpublic.md
+    sources:
+      - { path: services/ecrpublic/EcrPublicJsonHandler.java, mode: switch }
   - service: dax
     doc: docs/services/dax.md
     sources:

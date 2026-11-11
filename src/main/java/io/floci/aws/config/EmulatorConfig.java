@@ -872,6 +872,7 @@ public interface EmulatorConfig {
         DeadlineServiceConfig deadline();
         DevOpsGuruServiceConfig devopsguru();
         DocDbElasticServiceConfig docdbElastic();
+        EcrPublicServiceConfig ecrPublic();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -2960,6 +2961,11 @@ public interface EmulatorConfig {
         /** How long a cost estimation stays ONGOING. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface EcrPublicServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface DocDbElasticServiceConfig {

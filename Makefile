@@ -296,6 +296,7 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_deadline_shapes.py
 	$(PYTHON) tools/aws/regen_devopsguru_shapes.py
 	$(PYTHON) tools/aws/regen_docdbelastic_shapes.py
+	$(PYTHON) tools/aws/regen_ecrpublic_shapes.py
 	$(PYTHON) tools/aws/regen_ds_shapes.py
 	$(PYTHON) tools/aws/regen_rest_json_bindings.py
 	$(PYTHON) tools/aws/regen_dax_shapes.py
@@ -456,6 +457,10 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_docdbelastic_shapes.py --check || { \
 		echo "error: DocumentDB elastic request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_ecrpublic_shapes.py --check || { \
+		echo "error: ECR Public request shapes are out of date; run 'make aws-data-sync'."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_ds_shapes.py --check || { \
