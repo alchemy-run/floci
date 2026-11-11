@@ -69,6 +69,7 @@ MODELS: dict[str, str] = {
     "imagebuilder": "imagebuilder",
     "internetmonitor": "internetmonitor",
     "iot-managed-integrations": "iotmanagedintegrations",
+    "iotsitewise": "iotsitewise",
     "dsql": "dsql",
     "eks": "eks",
     "es": "es",
@@ -112,7 +113,8 @@ INTERNAL_ROUTES: dict[str, tuple[str, bool]] = {
     "ivschat": ("/_ivschat", True),
     "imagebuilder": ("/_imagebuilder", True),
     "internetmonitor": ("/_internetmonitor", True),
-    "iot-managed-integrations": ("/_iotmanagedintegrations", True),
+    "iot-managed-integrations": ("/_iotmanagedintegrations", False),
+    "iotsitewise": ("/_iotsitewise", False),
 }
 
 

@@ -29,6 +29,7 @@ import io.floci.aws.services.grafana.GrafanaService;
 import io.floci.aws.services.iam.IamService;
 import io.floci.aws.services.imagebuilder.ImageBuilderService;
 import io.floci.aws.services.internetmonitor.InternetMonitorService;
+import io.floci.aws.services.iotsitewise.SiteWiseRuntime;
 import io.floci.aws.services.ivs.IvsRealtimeLive;
 import io.floci.aws.services.ivs.IvsService;
 import io.floci.aws.services.kinesisanalytics.container.FlinkContainerManager;
@@ -111,6 +112,7 @@ public class EmulatorLifecycle {
     private final IvsRealtimeLive ivsRealtimeLive;
     private final ImageBuilderService imageBuilderService;
     private final InternetMonitorService internetMonitorService;
+    private final SiteWiseRuntime siteWiseRuntime;
     private final ElbV2Service elbV2Service;
     private final EcsService ecsService;
     private final ElbClassicService elbClassicService;
@@ -161,6 +163,7 @@ public class EmulatorLifecycle {
                              IvsRealtimeLive ivsRealtimeLive,
                              ImageBuilderService imageBuilderService,
                              InternetMonitorService internetMonitorService,
+                             SiteWiseRuntime siteWiseRuntime,
                              ElbV2Service elbV2Service,
                              ElbClassicService elbClassicService,
                              EcsService ecsService,
@@ -208,6 +211,7 @@ public class EmulatorLifecycle {
         this.ivsRealtimeLive = ivsRealtimeLive;
         this.imageBuilderService = imageBuilderService;
         this.internetMonitorService = internetMonitorService;
+        this.siteWiseRuntime = siteWiseRuntime;
         this.elbV2Service = elbV2Service;
         this.elbClassicService = elbClassicService;
         this.ecsService = ecsService;
@@ -297,6 +301,9 @@ public class EmulatorLifecycle {
         }
         if (config.services().imagebuilder().enabled()) {
             imageBuilderService.restorePersistedRuntime();
+        }
+        if (config.services().iotsitewise().enabled()) {
+            siteWiseRuntime.restorePersistedRuntime();
         }
         if (config.services().internetmonitor().enabled()) {
             internetMonitorService.restorePersistedRuntime();

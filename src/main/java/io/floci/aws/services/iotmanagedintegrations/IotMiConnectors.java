@@ -7,6 +7,7 @@ import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.RequestScopes;
+import io.floci.aws.core.storage.AccountAwareStorageBackend;
 import io.floci.aws.services.lambda.LambdaService;
 import io.floci.aws.services.lambda.model.InvocationType;
 import io.floci.aws.services.lambda.model.InvokeResult;
@@ -362,7 +363,7 @@ public class IotMiConnectors {
      * with the connector, and returns where the end user goes next.
      */
     public String completeAuthorization(String state, String code, String error) {
-        for (var entry : store.everywhere(key -> key.contains("/" + ASSOCIATION + "/"))) {
+        for (AccountAwareStorageBackend.AccountEntry<ObjectNode> entry : store.everywhere(key -> key.contains("/" + ASSOCIATION + "/"))) {
             ObjectNode association = entry.value();
             if (!state.equals(meta(association).path("oauthState").asText())) {
                 continue;

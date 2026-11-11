@@ -80,7 +80,7 @@ SERVICE_SUFFIX = ".amazonaws.com"
 NAMESPACES = (
     "application-autoscaling", "athena", "autoscaling", "budgets", "cloudformation", "cloudtrail",
     "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito-identity", "cognito-idp",
-    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
+    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
     "events", "firehose", "glue", "iam", "kinesis", "kinesisanalytics", "lambda", "logs", "pipes",
     "rds", "redshift", "redshift-serverless", "rekognition", "resource-groups", "s3", "sagemaker", "scheduler",
     "secretsmanager", "servicecatalog", "ses", "sns", "ssm", "states", "swf", "textract",
@@ -279,6 +279,11 @@ NOT_READ = {
                                    "to three services without saying which goes where",
     "elasticmapreduce:UpdateStudio": NO_ROLE_MEMBER,
     "glue:GetJob": NO_ROLE_MEMBER,
+    "iotsitewise:CreateAssetModelCompositeModel": "the role is in the default value of an AWS/L4E_ANOMALY_PERMISSIONS "
+                                                  "attribute, a JSON document",
+    "iotsitewise:CreateGateway": NO_ROLE_MEMBER,
+    "iotsitewise:UpdateAssetModelCompositeModel": "the role is in the default value of an AWS/L4E_ANOMALY_PERMISSIONS "
+                                                  "attribute, a JSON document",
     "glue:GetJobs": NO_ROLE_MEMBER,
     "lambda:AddEventSource": "botocore's model has no such operation",
     "logs:CreateImportTask": "the reference passes the role to cloudtrail or logs and nothing says which",

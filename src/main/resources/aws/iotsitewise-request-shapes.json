@@ -1,0 +1,4249 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_iotsitewise_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateAssets": "AssociateAssetsRequest",
+    "AssociateTimeSeriesToAssetProperty": "AssociateTimeSeriesToAssetPropertyRequest",
+    "BatchAssociateDataSegmentsToDataset": "BatchAssociateDataSegmentsToDatasetRequest",
+    "BatchAssociateProjectAssets": "BatchAssociateProjectAssetsRequest",
+    "BatchDeleteDatasetDataSegments": "BatchDeleteDatasetDataSegmentsRequest",
+    "BatchDisassociateDataSegmentsFromDataset": "BatchDisassociateDataSegmentsFromDatasetRequest",
+    "BatchDisassociateProjectAssets": "BatchDisassociateProjectAssetsRequest",
+    "BatchGetAssetPropertyAggregates": "BatchGetAssetPropertyAggregatesRequest",
+    "BatchGetAssetPropertyValue": "BatchGetAssetPropertyValueRequest",
+    "BatchGetAssetPropertyValueHistory": "BatchGetAssetPropertyValueHistoryRequest",
+    "BatchPutAssetPropertyValue": "BatchPutAssetPropertyValueRequest",
+    "CancelEnrichmentJob": "CancelEnrichmentJobRequest",
+    "CancelPipelineExecution": "CancelPipelineExecutionRequest",
+    "CancelQuery": "CancelQueryRequest",
+    "CreateAccessPolicy": "CreateAccessPolicyRequest",
+    "CreateApplication": "CreateApplicationRequest",
+    "CreateAsset": "CreateAssetRequest",
+    "CreateAssetModel": "CreateAssetModelRequest",
+    "CreateAssetModelCompositeModel": "CreateAssetModelCompositeModelRequest",
+    "CreateBulkImportJob": "CreateBulkImportJobRequest",
+    "CreateComputationModel": "CreateComputationModelRequest",
+    "CreateDashboard": "CreateDashboardRequest",
+    "CreateDataset": "CreateDatasetRequest",
+    "CreateDatasetExportJob": "CreateDatasetExportJobRequest",
+    "CreateEnrichmentJob": "CreateEnrichmentJobRequest",
+    "CreateGateway": "CreateGatewayRequest",
+    "CreatePipeline": "CreatePipelineRequest",
+    "CreatePortal": "CreatePortalRequest",
+    "CreateProject": "CreateProjectRequest",
+    "CreateTask": "CreateTaskRequest",
+    "CreateWorkspace": "CreateWorkspaceRequest",
+    "DeleteAccessPolicy": "DeleteAccessPolicyRequest",
+    "DeleteApplication": "DeleteApplicationRequest",
+    "DeleteAsset": "DeleteAssetRequest",
+    "DeleteAssetModel": "DeleteAssetModelRequest",
+    "DeleteAssetModelCompositeModel": "DeleteAssetModelCompositeModelRequest",
+    "DeleteAssetModelInterfaceRelationship": "DeleteAssetModelInterfaceRelationshipRequest",
+    "DeleteComputationModel": "DeleteComputationModelRequest",
+    "DeleteDashboard": "DeleteDashboardRequest",
+    "DeleteDataset": "DeleteDatasetRequest",
+    "DeleteGateway": "DeleteGatewayRequest",
+    "DeletePipeline": "DeletePipelineRequest",
+    "DeletePortal": "DeletePortalRequest",
+    "DeleteProject": "DeleteProjectRequest",
+    "DeleteTask": "DeleteTaskRequest",
+    "DeleteTimeSeries": "DeleteTimeSeriesRequest",
+    "DeleteWorkspace": "DeleteWorkspaceRequest",
+    "DescribeAccessPolicy": "DescribeAccessPolicyRequest",
+    "DescribeAction": "DescribeActionRequest",
+    "DescribeApplication": "DescribeApplicationRequest",
+    "DescribeAsset": "DescribeAssetRequest",
+    "DescribeAssetCompositeModel": "DescribeAssetCompositeModelRequest",
+    "DescribeAssetModel": "DescribeAssetModelRequest",
+    "DescribeAssetModelCompositeModel": "DescribeAssetModelCompositeModelRequest",
+    "DescribeAssetModelInterfaceRelationship": "DescribeAssetModelInterfaceRelationshipRequest",
+    "DescribeAssetProperty": "DescribeAssetPropertyRequest",
+    "DescribeBulkImportJob": "DescribeBulkImportJobRequest",
+    "DescribeComputationModel": "DescribeComputationModelRequest",
+    "DescribeComputationModelExecutionSummary": "DescribeComputationModelExecutionSummaryRequest",
+    "DescribeDashboard": "DescribeDashboardRequest",
+    "DescribeDataset": "DescribeDatasetRequest",
+    "DescribeDatasetExportJob": "DescribeDatasetExportJobRequest",
+    "DescribeDefaultEncryptionConfiguration": "DescribeDefaultEncryptionConfigurationRequest",
+    "DescribeEnrichmentJob": "DescribeEnrichmentJobRequest",
+    "DescribeExecution": "DescribeExecutionRequest",
+    "DescribeGateway": "DescribeGatewayRequest",
+    "DescribeGatewayCapabilityConfiguration": "DescribeGatewayCapabilityConfigurationRequest",
+    "DescribeLoggingOptions": "DescribeLoggingOptionsRequest",
+    "DescribePipeline": "DescribePipelineRequest",
+    "DescribePipelineExecution": "DescribePipelineExecutionRequest",
+    "DescribePortal": "DescribePortalRequest",
+    "DescribeProject": "DescribeProjectRequest",
+    "DescribeQuery": "DescribeQueryRequest",
+    "DescribeSearch": "DescribeSearchRequest",
+    "DescribeStorageConfiguration": "DescribeStorageConfigurationRequest",
+    "DescribeTask": "DescribeTaskRequest",
+    "DescribeTimeSeries": "DescribeTimeSeriesRequest",
+    "DescribeWorkspace": "DescribeWorkspaceRequest",
+    "DisassociateAssets": "DisassociateAssetsRequest",
+    "DisassociateTimeSeriesFromAssetProperty": "DisassociateTimeSeriesFromAssetPropertyRequest",
+    "ExecuteAction": "ExecuteActionRequest",
+    "ExecuteQuery": "ExecuteQueryRequest",
+    "GetAssetPropertyAggregates": "GetAssetPropertyAggregatesRequest",
+    "GetAssetPropertyValue": "GetAssetPropertyValueRequest",
+    "GetAssetPropertyValueHistory": "GetAssetPropertyValueHistoryRequest",
+    "GetCaptureData": "GetCaptureDataRequest",
+    "GetInterpolatedAssetPropertyValues": "GetInterpolatedAssetPropertyValuesRequest",
+    "GetQueryResults": "GetQueryResultsRequest",
+    "GetSearchResults": "GetSearchResultsRequest",
+    "InvokeAssistant": "InvokeAssistantRequest",
+    "ListAccessPolicies": "ListAccessPoliciesRequest",
+    "ListActions": "ListActionsRequest",
+    "ListApplications": "ListApplicationsRequest",
+    "ListAssetModelCompositeModels": "ListAssetModelCompositeModelsRequest",
+    "ListAssetModelProperties": "ListAssetModelPropertiesRequest",
+    "ListAssetModels": "ListAssetModelsRequest",
+    "ListAssetProperties": "ListAssetPropertiesRequest",
+    "ListAssetRelationships": "ListAssetRelationshipsRequest",
+    "ListAssets": "ListAssetsRequest",
+    "ListAssociatedAssets": "ListAssociatedAssetsRequest",
+    "ListBulkImportJobs": "ListBulkImportJobsRequest",
+    "ListCompositionRelationships": "ListCompositionRelationshipsRequest",
+    "ListComputationModelDataBindingUsages": "ListComputationModelDataBindingUsagesRequest",
+    "ListComputationModelResolveToResources": "ListComputationModelResolveToResourcesRequest",
+    "ListComputationModels": "ListComputationModelsRequest",
+    "ListDashboards": "ListDashboardsRequest",
+    "ListDatasetDataSegmentRelationships": "ListDatasetDataSegmentRelationshipsRequest",
+    "ListDatasetDataSegments": "ListDatasetDataSegmentsRequest",
+    "ListDatasetExportJobs": "ListDatasetExportJobsRequest",
+    "ListDatasets": "ListDatasetsRequest",
+    "ListEnrichmentJobs": "ListEnrichmentJobsRequest",
+    "ListExecutions": "ListExecutionsRequest",
+    "ListGateways": "ListGatewaysRequest",
+    "ListInterfaceRelationships": "ListInterfaceRelationshipsRequest",
+    "ListPipelineExecutions": "ListPipelineExecutionsRequest",
+    "ListPipelines": "ListPipelinesRequest",
+    "ListPortals": "ListPortalsRequest",
+    "ListProjectAssets": "ListProjectAssetsRequest",
+    "ListProjects": "ListProjectsRequest",
+    "ListQueries": "ListQueriesRequest",
+    "ListSearches": "ListSearchesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTasks": "ListTasksRequest",
+    "ListTimeSeries": "ListTimeSeriesRequest",
+    "ListWorkspaces": "ListWorkspacesRequest",
+    "PutAssetModelInterfaceRelationship": "PutAssetModelInterfaceRelationshipRequest",
+    "PutDefaultEncryptionConfiguration": "PutDefaultEncryptionConfigurationRequest",
+    "PutLoggingOptions": "PutLoggingOptionsRequest",
+    "PutStorageConfiguration": "PutStorageConfigurationRequest",
+    "StartPipelineExecution": "StartPipelineExecutionRequest",
+    "StartQuery": "StartQueryRequest",
+    "StartSearch": "StartSearchRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateAccessPolicy": "UpdateAccessPolicyRequest",
+    "UpdateAsset": "UpdateAssetRequest",
+    "UpdateAssetModel": "UpdateAssetModelRequest",
+    "UpdateAssetModelCompositeModel": "UpdateAssetModelCompositeModelRequest",
+    "UpdateAssetProperty": "UpdateAssetPropertyRequest",
+    "UpdateComputationModel": "UpdateComputationModelRequest",
+    "UpdateDashboard": "UpdateDashboardRequest",
+    "UpdateDataset": "UpdateDatasetRequest",
+    "UpdateGateway": "UpdateGatewayRequest",
+    "UpdateGatewayCapabilityConfiguration": "UpdateGatewayCapabilityConfigurationRequest",
+    "UpdatePipeline": "UpdatePipelineRequest",
+    "UpdatePortal": "UpdatePortalRequest",
+    "UpdateProject": "UpdateProjectRequest",
+    "UpdateTask": "UpdateTaskRequest",
+    "UpdateWorkspace": "UpdateWorkspaceRequest"
+  },
+  "shapes": {
+    "ARN": {
+      "type": "string",
+      "min": 1,
+      "max": 1600,
+      "pattern": "^arn:aws(-cn|-us-gov)?:[a-zA-Z0-9-:\\/_\\.]+$"
+    },
+    "ActionPayload": {
+      "type": "structure",
+      "required": [
+        "stringValue"
+      ],
+      "members": {
+        "stringValue": "ActionPayloadString"
+      }
+    },
+    "ActionPayloadString": {
+      "type": "string",
+      "pattern": "[^\\u0000-\\u001F\\u007F]+"
+    },
+    "AdaptiveIngestion": {
+      "type": "boolean"
+    },
+    "AggregateType": {
+      "type": "string",
+      "enum": [
+        "AVERAGE",
+        "COUNT",
+        "MAXIMUM",
+        "MINIMUM",
+        "SUM",
+        "STANDARD_DEVIATION"
+      ]
+    },
+    "AggregateTypes": {
+      "type": "list",
+      "min": 1,
+      "member": "AggregateType"
+    },
+    "Alarms": {
+      "type": "structure",
+      "required": [
+        "alarmRoleArn"
+      ],
+      "members": {
+        "alarmRoleArn": "IamArn",
+        "notificationLambdaArn": "ARN"
+      }
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "Annotation": {
+      "type": "structure",
+      "members": {}
+    },
+    "ApplicationId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-z0-9-]{36}"
+    },
+    "ApplicationName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9](?:[A-Za-z0-9 ._()\\-]*[A-Za-z0-9._()\\-])?"
+    },
+    "AssetBindingValueFilter": {
+      "type": "structure",
+      "required": [
+        "assetId"
+      ],
+      "members": {
+        "assetId": "ID"
+      }
+    },
+    "AssetModelBindingValueFilter": {
+      "type": "structure",
+      "required": [
+        "assetModelId"
+      ],
+      "members": {
+        "assetModelId": "ID"
+      }
+    },
+    "AssetModelCompositeModel": {
+      "type": "structure",
+      "required": [
+        "name",
+        "type"
+      ],
+      "members": {
+        "name": "Name",
+        "description": "Description",
+        "type": "Name",
+        "properties": "AssetModelProperties",
+        "id": "CustomID",
+        "externalId": "ExternalId"
+      }
+    },
+    "AssetModelCompositeModelDefinition": {
+      "type": "structure",
+      "required": [
+        "name",
+        "type"
+      ],
+      "members": {
+        "id": "ID",
+        "externalId": "ExternalId",
+        "name": "Name",
+        "description": "Description",
+        "type": "Name",
+        "properties": "AssetModelPropertyDefinitions"
+      }
+    },
+    "AssetModelCompositeModelDefinitions": {
+      "type": "list",
+      "member": "AssetModelCompositeModelDefinition"
+    },
+    "AssetModelCompositeModels": {
+      "type": "list",
+      "member": "AssetModelCompositeModel"
+    },
+    "AssetModelHierarchies": {
+      "type": "list",
+      "member": "AssetModelHierarchy"
+    },
+    "AssetModelHierarchy": {
+      "type": "structure",
+      "required": [
+        "name",
+        "childAssetModelId"
+      ],
+      "members": {
+        "id": "CustomID",
+        "externalId": "ExternalId",
+        "name": "Name",
+        "childAssetModelId": "CustomID"
+      }
+    },
+    "AssetModelHierarchyDefinition": {
+      "type": "structure",
+      "required": [
+        "name",
+        "childAssetModelId"
+      ],
+      "members": {
+        "id": "ID",
+        "externalId": "ExternalId",
+        "name": "Name",
+        "childAssetModelId": "CustomID"
+      }
+    },
+    "AssetModelHierarchyDefinitions": {
+      "type": "list",
+      "member": "AssetModelHierarchyDefinition"
+    },
+    "AssetModelProperties": {
+      "type": "list",
+      "member": "AssetModelProperty"
+    },
+    "AssetModelProperty": {
+      "type": "structure",
+      "required": [
+        "name",
+        "dataType",
+        "type"
+      ],
+      "members": {
+        "id": "CustomID",
+        "externalId": "ExternalId",
+        "name": "Name",
+        "dataType": "PropertyDataType",
+        "dataTypeSpec": "Name",
+        "unit": "PropertyUnit",
+        "type": "PropertyType",
+        "path": "AssetModelPropertyPath"
+      }
+    },
+    "AssetModelPropertyBindingValue": {
+      "type": "structure",
+      "required": [
+        "assetModelId",
+        "propertyId"
+      ],
+      "members": {
+        "assetModelId": "ID",
+        "propertyId": "ID"
+      }
+    },
+    "AssetModelPropertyBindingValueFilter": {
+      "type": "structure",
+      "required": [
+        "assetModelId",
+        "propertyId"
+      ],
+      "members": {
+        "assetModelId": "ID",
+        "propertyId": "ID"
+      }
+    },
+    "AssetModelPropertyDefinition": {
+      "type": "structure",
+      "required": [
+        "name",
+        "dataType",
+        "type"
+      ],
+      "members": {
+        "id": "ID",
+        "externalId": "ExternalId",
+        "name": "Name",
+        "dataType": "PropertyDataType",
+        "dataTypeSpec": "Name",
+        "unit": "PropertyUnit",
+        "type": "PropertyType"
+      }
+    },
+    "AssetModelPropertyDefinitions": {
+      "type": "list",
+      "member": "AssetModelPropertyDefinition"
+    },
+    "AssetModelPropertyPath": {
+      "type": "list",
+      "member": "AssetModelPropertyPathSegment"
+    },
+    "AssetModelPropertyPathSegment": {
+      "type": "structure",
+      "members": {
+        "id": "ID",
+        "name": "Name"
+      }
+    },
+    "AssetModelType": {
+      "type": "string",
+      "enum": [
+        "ASSET_MODEL",
+        "COMPONENT_MODEL",
+        "INTERFACE"
+      ]
+    },
+    "AssetModelVersionFilter": {
+      "type": "string",
+      "pattern": "^(LATEST|ACTIVE)$"
+    },
+    "AssetModelVersionType": {
+      "type": "string",
+      "enum": [
+        "LATEST",
+        "ACTIVE"
+      ]
+    },
+    "AssetPropertyAlias": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "[^\\u0000-\\u001F\\u007F]+"
+    },
+    "AssetPropertyBindingValue": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "propertyId"
+      ],
+      "members": {
+        "assetId": "ID",
+        "propertyId": "ID"
+      }
+    },
+    "AssetPropertyBindingValueFilter": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "propertyId"
+      ],
+      "members": {
+        "assetId": "ID",
+        "propertyId": "ID"
+      }
+    },
+    "AssetPropertyValue": {
+      "type": "structure",
+      "required": [
+        "value",
+        "timestamp"
+      ],
+      "members": {
+        "value": "Variant",
+        "timestamp": "TimeInNanos",
+        "quality": "Quality"
+      }
+    },
+    "AssetPropertyValues": {
+      "type": "list",
+      "member": "AssetPropertyValue"
+    },
+    "AssociateAssetsRequest": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "hierarchyId",
+        "childAssetId"
+      ],
+      "members": {
+        "assetId": "CustomID",
+        "hierarchyId": "CustomID",
+        "childAssetId": "CustomID",
+        "clientToken": "ClientToken"
+      }
+    },
+    "AssociateDataSegmentEntries": {
+      "type": "list",
+      "member": "AssociateDataSegmentEntry"
+    },
+    "AssociateDataSegmentEntry": {
+      "type": "structure",
+      "required": [
+        "sourceDatasetId",
+        "timeSeriesId",
+        "startTimestamp",
+        "endTimestamp"
+      ],
+      "members": {
+        "sourceDatasetId": "ID",
+        "timeSeriesId": "TimeSeriesId",
+        "startTimestamp": "TimeInNanos",
+        "endTimestamp": "TimeInNanos"
+      }
+    },
+    "AssociateTimeSeriesToAssetPropertyRequest": {
+      "type": "structure",
+      "required": [
+        "alias",
+        "assetId",
+        "propertyId"
+      ],
+      "members": {
+        "alias": "PropertyAlias",
+        "assetId": "CustomID",
+        "propertyId": "CustomID",
+        "clientToken": "ClientToken"
+      }
+    },
+    "Attribute": {
+      "type": "structure",
+      "members": {
+        "defaultValue": "DefaultValue"
+      }
+    },
+    "AuthMode": {
+      "type": "string",
+      "enum": [
+        "IAM",
+        "SSO"
+      ]
+    },
+    "BatchAssociateDataSegmentsToDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "datasetId",
+        "workspaceName",
+        "associateDataSegmentEntries"
+      ],
+      "members": {
+        "datasetId": "ID",
+        "workspaceName": "WorkspaceName",
+        "associateDataSegmentEntries": "AssociateDataSegmentEntries",
+        "clientToken": "ClientToken"
+      }
+    },
+    "BatchAssociateProjectAssetsRequest": {
+      "type": "structure",
+      "required": [
+        "projectId",
+        "assetIds"
+      ],
+      "members": {
+        "projectId": "ID",
+        "assetIds": "IDs",
+        "clientToken": "ClientToken"
+      }
+    },
+    "BatchDeleteDatasetDataSegmentsRequest": {
+      "type": "structure",
+      "required": [
+        "datasetId",
+        "workspaceName",
+        "deleteDataSegmentEntries"
+      ],
+      "members": {
+        "datasetId": "ID",
+        "workspaceName": "WorkspaceName",
+        "deleteDataSegmentEntries": "DeleteDataSegmentEntries",
+        "clientToken": "ClientToken"
+      }
+    },
+    "BatchDisassociateDataSegmentsFromDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "datasetId",
+        "workspaceName",
+        "disassociateDataSegmentEntries"
+      ],
+      "members": {
+        "datasetId": "ID",
+        "workspaceName": "WorkspaceName",
+        "disassociateDataSegmentEntries": "DisassociateDataSegmentEntries",
+        "clientToken": "ClientToken"
+      }
+    },
+    "BatchDisassociateProjectAssetsRequest": {
+      "type": "structure",
+      "required": [
+        "projectId",
+        "assetIds"
+      ],
+      "members": {
+        "projectId": "ID",
+        "assetIds": "IDs",
+        "clientToken": "ClientToken"
+      }
+    },
+    "BatchGetAssetPropertyAggregatesEntries": {
+      "type": "list",
+      "member": "BatchGetAssetPropertyAggregatesEntry"
+    },
+    "BatchGetAssetPropertyAggregatesEntry": {
+      "type": "structure",
+      "required": [
+        "entryId",
+        "aggregateTypes",
+        "resolution",
+        "startDate",
+        "endDate"
+      ],
+      "members": {
+        "entryId": "EntryId",
+        "assetId": "ID",
+        "propertyId": "ID",
+        "propertyAlias": "AssetPropertyAlias",
+        "aggregateTypes": "AggregateTypes",
+        "resolution": "Resolution",
+        "startDate": "Timestamp",
+        "endDate": "Timestamp",
+        "qualities": "Qualities",
+        "timeOrdering": "TimeOrdering"
+      }
+    },
+    "BatchGetAssetPropertyAggregatesMaxResults": {
+      "type": "integer",
+      "min": 1
+    },
+    "BatchGetAssetPropertyAggregatesRequest": {
+      "type": "structure",
+      "required": [
+        "entries"
+      ],
+      "members": {
+        "entries": "BatchGetAssetPropertyAggregatesEntries",
+        "nextToken": "NextToken",
+        "maxResults": "BatchGetAssetPropertyAggregatesMaxResults"
+      }
+    },
+    "BatchGetAssetPropertyValueEntries": {
+      "type": "list",
+      "member": "BatchGetAssetPropertyValueEntry"
+    },
+    "BatchGetAssetPropertyValueEntry": {
+      "type": "structure",
+      "required": [
+        "entryId"
+      ],
+      "members": {
+        "entryId": "EntryId",
+        "assetId": "ID",
+        "propertyId": "ID",
+        "propertyAlias": "AssetPropertyAlias"
+      }
+    },
+    "BatchGetAssetPropertyValueHistoryEntries": {
+      "type": "list",
+      "member": "BatchGetAssetPropertyValueHistoryEntry"
+    },
+    "BatchGetAssetPropertyValueHistoryEntry": {
+      "type": "structure",
+      "required": [
+        "entryId"
+      ],
+      "members": {
+        "entryId": "EntryId",
+        "assetId": "ID",
+        "propertyId": "ID",
+        "propertyAlias": "AssetPropertyAlias",
+        "startDate": "Timestamp",
+        "endDate": "Timestamp",
+        "qualities": "Qualities",
+        "timeOrdering": "TimeOrdering"
+      }
+    },
+    "BatchGetAssetPropertyValueHistoryMaxResults": {
+      "type": "integer",
+      "min": 1
+    },
+    "BatchGetAssetPropertyValueHistoryRequest": {
+      "type": "structure",
+      "required": [
+        "entries"
+      ],
+      "members": {
+        "entries": "BatchGetAssetPropertyValueHistoryEntries",
+        "nextToken": "NextToken",
+        "maxResults": "BatchGetAssetPropertyValueHistoryMaxResults"
+      }
+    },
+    "BatchGetAssetPropertyValueRequest": {
+      "type": "structure",
+      "required": [
+        "entries"
+      ],
+      "members": {
+        "entries": "BatchGetAssetPropertyValueEntries",
+        "nextToken": "NextToken"
+      }
+    },
+    "BatchPutAssetPropertyValueRequest": {
+      "type": "structure",
+      "required": [
+        "entries"
+      ],
+      "members": {
+        "enablePartialEntryProcessing": "BooleanValue",
+        "entries": "PutAssetPropertyValueEntries"
+      }
+    },
+    "BindingValueList": {
+      "type": "list",
+      "member": "ComputationModelDataBindingValue"
+    },
+    "BooleanValue": {
+      "type": "boolean"
+    },
+    "Bucket": {
+      "type": "string",
+      "min": 3,
+      "max": 63
+    },
+    "BulkImportJobName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^[\\p{L}\\p{N}\\p{Zs}._:/-]+$"
+    },
+    "CancelEnrichmentJobRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "jobId"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "jobId": "ID"
+      }
+    },
+    "CancelPipelineExecutionRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "pipelineName",
+        "pipelineExecutionId"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "pipelineName": "ResourceName",
+        "pipelineExecutionId": "ID",
+        "reason": "CancelPipelineExecutionRequestReasonString"
+      }
+    },
+    "CancelPipelineExecutionRequestReasonString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "CancelQueryRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "queryId"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "queryId": "QueryId"
+      }
+    },
+    "CapabilityConfiguration": {
+      "type": "string",
+      "min": 1,
+      "max": 10000000
+    },
+    "CapabilityNamespace": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "^[a-zA-Z]+:[a-zA-Z]+:[0-9]+$"
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 36,
+      "max": 64,
+      "pattern": "\\S{36,64}"
+    },
+    "ColumnName": {
+      "type": "string",
+      "enum": [
+        "ALIAS",
+        "ASSET_ID",
+        "PROPERTY_ID",
+        "DATA_TYPE",
+        "TIMESTAMP_SECONDS",
+        "TIMESTAMP_NANO_OFFSET",
+        "QUALITY",
+        "VALUE"
+      ]
+    },
+    "ColumnNames": {
+      "type": "list",
+      "member": "ColumnName"
+    },
+    "CommandList": {
+      "type": "list",
+      "member": "String"
+    },
+    "ComputationModelAnomalyDetectionConfiguration": {
+      "type": "structure",
+      "required": [
+        "inputProperties",
+        "resultProperty"
+      ],
+      "members": {
+        "inputProperties": "InputProperties",
+        "resultProperty": "ResultProperty"
+      }
+    },
+    "ComputationModelConfiguration": {
+      "type": "structure",
+      "members": {
+        "anomalyDetection": "ComputationModelAnomalyDetectionConfiguration"
+      }
+    },
+    "ComputationModelDataBinding": {
+      "type": "map",
+      "key": "ComputationModelDataBindingVariable",
+      "value": "ComputationModelDataBindingValue"
+    },
+    "ComputationModelDataBindingValue": {
+      "type": "structure",
+      "members": {
+        "assetModelProperty": "AssetModelPropertyBindingValue",
+        "assetProperty": "AssetPropertyBindingValue",
+        "list": "BindingValueList"
+      }
+    },
+    "ComputationModelDataBindingVariable": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "ComputationModelType": {
+      "type": "string",
+      "enum": [
+        "ANOMALY_DETECTION"
+      ]
+    },
+    "ComputationModelVersionFilter": {
+      "type": "string",
+      "pattern": "^(LATEST|ACTIVE|[1-9]{1}\\d{0,9})$"
+    },
+    "ComputeLocation": {
+      "type": "string",
+      "enum": [
+        "EDGE",
+        "CLOUD"
+      ]
+    },
+    "ComputeNode": {
+      "type": "structure",
+      "required": [
+        "computeNodeName",
+        "taskName"
+      ],
+      "members": {
+        "computeNodeName": "ResourceName",
+        "taskName": "ResourceName",
+        "environmentVariables": "EnvironmentVariablesMap",
+        "dependsOn": "ComputeNodeNameList"
+      }
+    },
+    "ComputeNodeEnvironmentVariablesMap": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "ResourceName",
+      "value": "EnvironmentVariablesMap"
+    },
+    "ComputeNodeList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "ComputeNode"
+    },
+    "ComputeNodeMountsMap": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "ResourceName",
+      "value": "MountList"
+    },
+    "ComputeNodeNameList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "ResourceName"
+    },
+    "ContainerTaskConfiguration": {
+      "type": "structure",
+      "required": [
+        "ecrUri",
+        "taskExecutionRole",
+        "processingType",
+        "processingUnit"
+      ],
+      "members": {
+        "ecrUri": "EcrUri",
+        "taskExecutionRole": "IamRoleArn",
+        "processingType": "ProcessingType",
+        "processingUnit": "ProcessingUnit",
+        "ephemeralStorageConfiguration": "EphemeralStorageConfiguration",
+        "command": "CommandList",
+        "timeoutSeconds": "TimeoutSeconds",
+        "environmentVariables": "EnvironmentVariablesMap",
+        "mounts": "MountList"
+      }
+    },
+    "ConversationId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    },
+    "CoreDeviceOperatingSystem": {
+      "type": "string",
+      "enum": [
+        "LINUX_AARCH64",
+        "LINUX_AMD64",
+        "WINDOWS_AMD64"
+      ]
+    },
+    "CoreDeviceThingName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[a-zA-Z0-9:_-]+$"
+    },
+    "CreateAccessPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "accessPolicyIdentity",
+        "accessPolicyResource",
+        "accessPolicyPermission"
+      ],
+      "members": {
+        "accessPolicyIdentity": "Identity",
+        "accessPolicyResource": "Resource",
+        "accessPolicyPermission": "Permission",
+        "clientToken": "ClientToken",
+        "tags": "TagMap"
+      }
+    },
+    "CreateApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "idcInstanceArn",
+        "workspaceName",
+        "name"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "idcInstanceArn": "ARN",
+        "workspaceName": "WorkspaceName",
+        "name": "ApplicationName",
+        "description": "Description",
+        "tags": "TagMap"
+      }
+    },
+    "CreateAssetModelCompositeModelRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId",
+        "assetModelCompositeModelName",
+        "assetModelCompositeModelType"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "assetModelCompositeModelExternalId": "ExternalId",
+        "parentAssetModelCompositeModelId": "CustomID",
+        "assetModelCompositeModelId": "ID",
+        "assetModelCompositeModelDescription": "Description",
+        "assetModelCompositeModelName": "Name",
+        "assetModelCompositeModelType": "Name",
+        "clientToken": "ClientToken",
+        "composedAssetModelId": "CustomID",
+        "assetModelCompositeModelProperties": "AssetModelPropertyDefinitions",
+        "ifMatch": "ETag",
+        "ifNoneMatch": "SelectAll",
+        "matchForVersionType": "AssetModelVersionType"
+      }
+    },
+    "CreateAssetModelRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelName"
+      ],
+      "members": {
+        "assetModelName": "Name",
+        "assetModelType": "AssetModelType",
+        "assetModelId": "ID",
+        "assetModelExternalId": "ExternalId",
+        "assetModelDescription": "Description",
+        "assetModelProperties": "AssetModelPropertyDefinitions",
+        "assetModelHierarchies": "AssetModelHierarchyDefinitions",
+        "assetModelCompositeModels": "AssetModelCompositeModelDefinitions",
+        "clientToken": "ClientToken",
+        "tags": "TagMap"
+      }
+    },
+    "CreateAssetRequest": {
+      "type": "structure",
+      "required": [
+        "assetName",
+        "assetModelId"
+      ],
+      "members": {
+        "assetName": "Name",
+        "assetModelId": "CustomID",
+        "assetId": "ID",
+        "assetExternalId": "ExternalId",
+        "clientToken": "ClientToken",
+        "tags": "TagMap",
+        "assetDescription": "Description"
+      }
+    },
+    "CreateBulkImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobName",
+        "jobRoleArn",
+        "files",
+        "errorReportLocation"
+      ],
+      "members": {
+        "jobName": "BulkImportJobName",
+        "jobRoleArn": "ARN",
+        "files": "Files",
+        "errorReportLocation": "ErrorReportLocation",
+        "jobConfiguration": "JobConfiguration",
+        "adaptiveIngestion": "AdaptiveIngestion",
+        "deleteFilesAfterImport": "DeleteFilesAfterImport",
+        "datasetId": "ID",
+        "workspaceName": "WorkspaceName"
+      }
+    },
+    "CreateComputationModelRequest": {
+      "type": "structure",
+      "required": [
+        "computationModelName",
+        "computationModelConfiguration",
+        "computationModelDataBinding"
+      ],
+      "members": {
+        "computationModelName": "RestrictedName",
+        "computationModelDescription": "RestrictedDescription",
+        "computationModelConfiguration": "ComputationModelConfiguration",
+        "computationModelDataBinding": "ComputationModelDataBinding",
+        "clientToken": "ClientToken",
+        "tags": "TagMap"
+      }
+    },
+    "CreateDashboardRequest": {
+      "type": "structure",
+      "required": [
+        "projectId",
+        "dashboardName",
+        "dashboardDefinition"
+      ],
+      "members": {
+        "projectId": "ID",
+        "dashboardName": "Name",
+        "dashboardDescription": "Description",
+        "dashboardDefinition": "DashboardDefinition",
+        "clientToken": "ClientToken",
+        "tags": "TagMap"
+      }
+    },
+    "CreateDatasetExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "destinationS3Uri",
+        "input",
+        "errorReportLocation"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "clientToken": "ClientToken",
+        "destinationS3Uri": "S3Uri",
+        "input": "ProcessingInput",
+        "errorReportLocation": "ExportErrorReportLocation"
+      }
+    },
+    "CreateDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "datasetName",
+        "datasetSource"
+      ],
+      "members": {
+        "datasetId": "ID",
+        "datasetName": "RestrictedName",
+        "datasetDescription": "Description",
+        "datasetType": "DatasetTypeEnum",
+        "datasetConfig": "DatasetConfig",
+        "workspaceName": "WorkspaceName",
+        "metadata": "Metadata",
+        "datasetSource": "DatasetSource",
+        "clientToken": "ClientToken",
+        "tags": "TagMap"
+      }
+    },
+    "CreateEnrichmentJobRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "jobConfiguration"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "jobConfiguration": "EnrichmentJobConfiguration",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "gatewayName",
+        "gatewayPlatform"
+      ],
+      "members": {
+        "gatewayName": "GatewayName",
+        "gatewayPlatform": "GatewayPlatform",
+        "gatewayVersion": "GatewayVersion",
+        "tags": "TagMap"
+      }
+    },
+    "CreateMissingProperty": {
+      "type": "boolean"
+    },
+    "CreatePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "pipelineName",
+        "computations"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "pipelineName": "ResourceName",
+        "description": "Description",
+        "environmentVariables": "EnvironmentVariablesMap",
+        "computations": "ComputeNodeList",
+        "tags": "TagMap",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreatePortalRequest": {
+      "type": "structure",
+      "required": [
+        "portalName",
+        "portalContactEmail",
+        "roleArn"
+      ],
+      "members": {
+        "portalName": "Name",
+        "portalDescription": "Description",
+        "portalContactEmail": "Email",
+        "clientToken": "ClientToken",
+        "portalLogoImageFile": "ImageFile",
+        "roleArn": "IamArn",
+        "tags": "TagMap",
+        "portalAuthMode": "AuthMode",
+        "notificationSenderEmail": "Email",
+        "alarms": "Alarms",
+        "portalType": "PortalType",
+        "portalTypeConfiguration": "PortalTypeConfiguration"
+      }
+    },
+    "CreateProjectRequest": {
+      "type": "structure",
+      "required": [
+        "portalId",
+        "projectName"
+      ],
+      "members": {
+        "portalId": "ID",
+        "projectName": "Name",
+        "projectDescription": "Description",
+        "clientToken": "ClientToken",
+        "tags": "TagMap"
+      }
+    },
+    "CreateTaskRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "taskName",
+        "taskConfiguration"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "taskName": "ResourceName",
+        "description": "Description",
+        "taskConfiguration": "TaskConfiguration",
+        "tags": "TagMap",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateWorkspaceRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "encryptionConfiguration"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "workspaceDescription": "Description",
+        "encryptionConfiguration": "WorkspaceEncryptionConfiguration",
+        "tags": "TagMap",
+        "clientToken": "ClientToken"
+      }
+    },
+    "Csv": {
+      "type": "structure",
+      "required": [
+        "columnNames"
+      ],
+      "members": {
+        "columnNames": "ColumnNames"
+      }
+    },
+    "CustomID": {
+      "type": "string",
+      "min": 13,
+      "max": 139,
+      "pattern": "^(?!00000000-0000-0000-0000-000000000000)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$|^externalId:[a-zA-Z0-9_][a-zA-Z_\\-0-9.:]*[a-zA-Z0-9_]+"
+    },
+    "CustomerManagedS3Storage": {
+      "type": "structure",
+      "required": [
+        "s3ResourceArn",
+        "roleArn"
+      ],
+      "members": {
+        "s3ResourceArn": "ARN",
+        "roleArn": "ARN"
+      }
+    },
+    "DashboardDefinition": {
+      "type": "string",
+      "min": 0,
+      "max": 204800,
+      "pattern": ".+"
+    },
+    "DataBindingValueFilter": {
+      "type": "structure",
+      "members": {
+        "asset": "AssetBindingValueFilter",
+        "assetModel": "AssetModelBindingValueFilter",
+        "assetProperty": "AssetPropertyBindingValueFilter",
+        "assetModelProperty": "AssetModelPropertyBindingValueFilter"
+      }
+    },
+    "DataSetIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "DatasetId"
+    },
+    "DatasetConfig": {
+      "type": "structure",
+      "members": {
+        "session": "SessionConfig"
+      }
+    },
+    "DatasetExportJobFilter": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "SUBMITTED",
+        "RUNNING",
+        "COMPLETED",
+        "COMPLETED_WITH_ERRORS",
+        "FAILED"
+      ]
+    },
+    "DatasetExportJobId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    },
+    "DatasetId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "DatasetItem": {
+      "type": "structure",
+      "required": [
+        "datasetId"
+      ],
+      "members": {
+        "datasetId": "DatasetId",
+        "trimSettings": "TrimSettings",
+        "exportDataTypes": "ExportDataTypeList"
+      }
+    },
+    "DatasetSource": {
+      "type": "structure",
+      "required": [
+        "sourceType",
+        "sourceFormat"
+      ],
+      "members": {
+        "sourceType": "DatasetSourceType",
+        "sourceFormat": "DatasetSourceFormat",
+        "sourceDetail": "SourceDetail"
+      }
+    },
+    "DatasetSourceFormat": {
+      "type": "string",
+      "enum": [
+        "KNOWLEDGE_BASE",
+        "TIMESERIES"
+      ]
+    },
+    "DatasetSourceType": {
+      "type": "string",
+      "enum": [
+        "KENDRA",
+        "SITEWISE"
+      ]
+    },
+    "DatasetTypeEnum": {
+      "type": "string",
+      "enum": [
+        "SESSION",
+        "CURATED",
+        "EXTERNAL"
+      ]
+    },
+    "DefaultValue": {
+      "type": "string",
+      "pattern": "[^\\u0000-\\u001F\\u007F]+"
+    },
+    "DeleteAccessPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "accessPolicyId"
+      ],
+      "members": {
+        "accessPolicyId": "ID",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "id"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "id": "ApplicationId"
+      }
+    },
+    "DeleteAssetModelCompositeModelRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId",
+        "assetModelCompositeModelId"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "assetModelCompositeModelId": "CustomID",
+        "clientToken": "ClientToken",
+        "ifMatch": "ETag",
+        "ifNoneMatch": "SelectAll",
+        "matchForVersionType": "AssetModelVersionType"
+      }
+    },
+    "DeleteAssetModelInterfaceRelationshipRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId",
+        "interfaceAssetModelId"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "interfaceAssetModelId": "CustomID",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteAssetModelRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "clientToken": "ClientToken",
+        "ifMatch": "ETag",
+        "ifNoneMatch": "SelectAll",
+        "matchForVersionType": "AssetModelVersionType"
+      }
+    },
+    "DeleteAssetRequest": {
+      "type": "structure",
+      "required": [
+        "assetId"
+      ],
+      "members": {
+        "assetId": "CustomID",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteComputationModelRequest": {
+      "type": "structure",
+      "required": [
+        "computationModelId"
+      ],
+      "members": {
+        "computationModelId": "ID",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteDashboardRequest": {
+      "type": "structure",
+      "required": [
+        "dashboardId"
+      ],
+      "members": {
+        "dashboardId": "ID",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteDataSegmentEntries": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "DeleteDataSegmentEntry"
+    },
+    "DeleteDataSegmentEntry": {
+      "type": "structure",
+      "required": [
+        "timeSeriesId",
+        "startTimestamp",
+        "endTimestamp"
+      ],
+      "members": {
+        "timeSeriesId": "ID",
+        "startTimestamp": "TimeInNanos",
+        "endTimestamp": "TimeInNanos"
+      }
+    },
+    "DeleteDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "datasetId"
+      ],
+      "members": {
+        "datasetId": "ID",
+        "workspaceName": "WorkspaceName",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteFilesAfterImport": {
+      "type": "boolean"
+    },
+    "DeleteGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "gatewayId"
+      ],
+      "members": {
+        "gatewayId": "ID"
+      }
+    },
+    "DeletePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "pipelineName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "pipelineName": "ResourceName"
+      }
+    },
+    "DeletePortalRequest": {
+      "type": "structure",
+      "required": [
+        "portalId"
+      ],
+      "members": {
+        "portalId": "ID",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteProjectRequest": {
+      "type": "structure",
+      "required": [
+        "projectId"
+      ],
+      "members": {
+        "projectId": "ID",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteTaskRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "taskName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "taskName": "ResourceName"
+      }
+    },
+    "DeleteTimeSeriesRequest": {
+      "type": "structure",
+      "members": {
+        "alias": "PropertyAlias",
+        "assetId": "CustomID",
+        "propertyId": "CustomID",
+        "clientToken": "ClientToken",
+        "workspaceName": "WorkspaceName"
+      }
+    },
+    "DeleteWorkspaceRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DescribeAccessPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "accessPolicyId"
+      ],
+      "members": {
+        "accessPolicyId": "ID"
+      }
+    },
+    "DescribeActionRequest": {
+      "type": "structure",
+      "required": [
+        "actionId"
+      ],
+      "members": {
+        "actionId": "ID"
+      }
+    },
+    "DescribeApplicationRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "id"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "id": "ApplicationId"
+      }
+    },
+    "DescribeAssetCompositeModelRequest": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "assetCompositeModelId"
+      ],
+      "members": {
+        "assetId": "CustomID",
+        "assetCompositeModelId": "CustomID"
+      }
+    },
+    "DescribeAssetModelCompositeModelRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId",
+        "assetModelCompositeModelId"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "assetModelCompositeModelId": "CustomID",
+        "assetModelVersion": "AssetModelVersionFilter"
+      }
+    },
+    "DescribeAssetModelInterfaceRelationshipRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId",
+        "interfaceAssetModelId"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "interfaceAssetModelId": "CustomID"
+      }
+    },
+    "DescribeAssetModelRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "excludeProperties": "ExcludeProperties",
+        "assetModelVersion": "AssetModelVersionFilter"
+      }
+    },
+    "DescribeAssetPropertyRequest": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "propertyId"
+      ],
+      "members": {
+        "assetId": "CustomID",
+        "propertyId": "CustomID"
+      }
+    },
+    "DescribeAssetRequest": {
+      "type": "structure",
+      "required": [
+        "assetId"
+      ],
+      "members": {
+        "assetId": "CustomID",
+        "excludeProperties": "ExcludeProperties"
+      }
+    },
+    "DescribeBulkImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "ID",
+        "workspaceName": "WorkspaceName"
+      }
+    },
+    "DescribeComputationModelExecutionSummaryRequest": {
+      "type": "structure",
+      "required": [
+        "computationModelId"
+      ],
+      "members": {
+        "computationModelId": "ID",
+        "resolveToResourceType": "ResolveToResourceType",
+        "resolveToResourceId": "ID"
+      }
+    },
+    "DescribeComputationModelRequest": {
+      "type": "structure",
+      "required": [
+        "computationModelId"
+      ],
+      "members": {
+        "computationModelId": "ID",
+        "computationModelVersion": "ComputationModelVersionFilter"
+      }
+    },
+    "DescribeDashboardRequest": {
+      "type": "structure",
+      "required": [
+        "dashboardId"
+      ],
+      "members": {
+        "dashboardId": "ID"
+      }
+    },
+    "DescribeDatasetExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "jobId"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "jobId": "DatasetExportJobId"
+      }
+    },
+    "DescribeDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "datasetId"
+      ],
+      "members": {
+        "datasetId": "ID",
+        "workspaceName": "WorkspaceName",
+        "datasetVersion": "Version"
+      }
+    },
+    "DescribeDefaultEncryptionConfigurationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DescribeEnrichmentJobRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "jobId"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "jobId": "ID"
+      }
+    },
+    "DescribeExecutionRequest": {
+      "type": "structure",
+      "required": [
+        "executionId"
+      ],
+      "members": {
+        "executionId": "ID"
+      }
+    },
+    "DescribeGatewayCapabilityConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "gatewayId",
+        "capabilityNamespace"
+      ],
+      "members": {
+        "gatewayId": "ID",
+        "capabilityNamespace": "CapabilityNamespace"
+      }
+    },
+    "DescribeGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "gatewayId"
+      ],
+      "members": {
+        "gatewayId": "ID"
+      }
+    },
+    "DescribeLoggingOptionsRequest": {
+      "type": "structure",
+      "members": {
+        "workspaceName": "WorkspaceName"
+      }
+    },
+    "DescribePipelineExecutionRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "pipelineName",
+        "pipelineExecutionId"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "pipelineName": "ResourceName",
+        "pipelineExecutionId": "ID",
+        "nextToken": "PaginationToken",
+        "maxResults": "DescribePipelineExecutionRequestMaxResultsInteger"
+      }
+    },
+    "DescribePipelineExecutionRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 250
+    },
+    "DescribePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "pipelineName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "pipelineName": "ResourceName",
+        "pipelineVersion": "Version"
+      }
+    },
+    "DescribePortalRequest": {
+      "type": "structure",
+      "required": [
+        "portalId"
+      ],
+      "members": {
+        "portalId": "ID"
+      }
+    },
+    "DescribeProjectRequest": {
+      "type": "structure",
+      "required": [
+        "projectId"
+      ],
+      "members": {
+        "projectId": "ID"
+      }
+    },
+    "DescribeQueryRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "queryId"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "queryId": "QueryId"
+      }
+    },
+    "DescribeSearchRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "searchId"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "searchId": "SearchId"
+      }
+    },
+    "DescribeStorageConfigurationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DescribeTaskRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "taskName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "taskName": "ResourceName",
+        "taskVersion": "Version"
+      }
+    },
+    "DescribeTimeSeriesRequest": {
+      "type": "structure",
+      "members": {
+        "alias": "PropertyAlias",
+        "assetId": "CustomID",
+        "propertyId": "CustomID",
+        "workspaceName": "WorkspaceName"
+      }
+    },
+    "DescribeWorkspaceRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName"
+      }
+    },
+    "Description": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "[^\\u0000-\\u001F\\u007F]+"
+    },
+    "DisallowIngestNullNaN": {
+      "type": "boolean"
+    },
+    "DisassociateAssetsRequest": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "hierarchyId",
+        "childAssetId"
+      ],
+      "members": {
+        "assetId": "CustomID",
+        "hierarchyId": "CustomID",
+        "childAssetId": "CustomID",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DisassociateDataSegmentEntries": {
+      "type": "list",
+      "member": "DisassociateDataSegmentEntry"
+    },
+    "DisassociateDataSegmentEntry": {
+      "type": "structure",
+      "required": [
+        "sourceDatasetId",
+        "timeSeriesId",
+        "startTimestamp",
+        "endTimestamp"
+      ],
+      "members": {
+        "sourceDatasetId": "ID",
+        "timeSeriesId": "TimeSeriesId",
+        "startTimestamp": "TimeInNanos",
+        "endTimestamp": "TimeInNanos"
+      }
+    },
+    "DisassociateTimeSeriesFromAssetPropertyRequest": {
+      "type": "structure",
+      "required": [
+        "alias",
+        "assetId",
+        "propertyId"
+      ],
+      "members": {
+        "alias": "PropertyAlias",
+        "assetId": "CustomID",
+        "propertyId": "CustomID",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DisassociatedDataStorageState": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "ETag": {
+      "type": "string",
+      "pattern": "^[\\w-]{43}$"
+    },
+    "EcrUri": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "((\\d{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\.[a-z.]+)|public\\.ecr\\.aws/[a-z][a-z0-9]+([._-][a-z0-9]+)*)/[a-z0-9]+((\\.||__|_|-+)[a-z0-9]+)*(/[a-z0-9]+((\\.||__|_|-+)[a-z0-9]+)*)*(:[a-zA-Z0-9._-]+|@sha256:[a-f0-9]{64})?"
+    },
+    "Email": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^[a-zA-Z0-9_\\-\\.\\+]+@[a-zA-Z0-9_\\-\\.\\+]+\\.[a-zA-Z]{2,}$"
+    },
+    "EncryptionType": {
+      "type": "string",
+      "enum": [
+        "SITEWISE_DEFAULT_ENCRYPTION",
+        "KMS_BASED_ENCRYPTION"
+      ]
+    },
+    "EnrichmentJobConfiguration": {
+      "type": "structure",
+      "members": {
+        "eventDetection": "EventDetection"
+      }
+    },
+    "EnrichmentJobStatus": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "RUNNING",
+        "COMPLETED",
+        "FAILED",
+        "TIMED_OUT",
+        "CANCELLED"
+      ]
+    },
+    "EnrichmentTrimSettings": {
+      "type": "structure",
+      "required": [
+        "startTime",
+        "endTime"
+      ],
+      "members": {
+        "startTime": "TimeInNanos",
+        "endTime": "TimeInNanos"
+      }
+    },
+    "EntryId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[a-zA-Z0-9_-]+$"
+    },
+    "EnvironmentVariableName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "(?!(?i)AWS_)[a-zA-Z_][a-zA-Z0-9_]*"
+    },
+    "EnvironmentVariableValue": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "EnvironmentVariablesMap": {
+      "type": "map",
+      "min": 0,
+      "max": 20,
+      "key": "EnvironmentVariableName",
+      "value": "EnvironmentVariableValue"
+    },
+    "EphemeralStorageConfiguration": {
+      "type": "structure",
+      "required": [
+        "storageClass",
+        "storageSizeInGiB"
+      ],
+      "members": {
+        "storageClass": "StorageClass",
+        "storageSizeInGiB": "EphemeralStorageConfigurationStorageSizeInGiBInteger"
+      }
+    },
+    "EphemeralStorageConfigurationStorageSizeInGiBInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 16384
+    },
+    "ErrorReportLocation": {
+      "type": "structure",
+      "required": [
+        "bucket",
+        "prefix"
+      ],
+      "members": {
+        "bucket": "Bucket",
+        "prefix": "String"
+      }
+    },
+    "EventDetection": {
+      "type": "structure",
+      "required": [
+        "datasetId",
+        "trimSettings"
+      ],
+      "members": {
+        "datasetId": "ID",
+        "timeSeriesId": "TimeSeriesId",
+        "propertyAlias": "AssetPropertyAlias",
+        "trimSettings": "EnrichmentTrimSettings"
+      }
+    },
+    "ExcludeProperties": {
+      "type": "boolean"
+    },
+    "ExecuteActionRequest": {
+      "type": "structure",
+      "required": [
+        "targetResource",
+        "actionDefinitionId",
+        "actionPayload"
+      ],
+      "members": {
+        "targetResource": "TargetResource",
+        "actionDefinitionId": "ID",
+        "actionPayload": "ActionPayload",
+        "clientToken": "ClientToken",
+        "resolveTo": "ResolveTo"
+      }
+    },
+    "ExecuteQueryMaxResults": {
+      "type": "integer",
+      "min": 1
+    },
+    "ExecuteQueryNextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "ExecuteQueryRequest": {
+      "type": "structure",
+      "required": [
+        "queryStatement"
+      ],
+      "members": {
+        "queryStatement": "QueryStatement",
+        "nextToken": "ExecuteQueryNextToken",
+        "maxResults": "ExecuteQueryMaxResults",
+        "clientToken": "ClientToken"
+      }
+    },
+    "ExecutionEnvironmentVariables": {
+      "type": "structure",
+      "members": {
+        "global": "EnvironmentVariablesMap",
+        "computeNodes": "ComputeNodeEnvironmentVariablesMap"
+      }
+    },
+    "ExecutionPriority": {
+      "type": "integer",
+      "min": 0,
+      "max": 2
+    },
+    "ExportDataType": {
+      "type": "string",
+      "enum": [
+        "VIDEO",
+        "TELEMETRY",
+        "ANNOTATION"
+      ]
+    },
+    "ExportDataTypeList": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "ExportDataType"
+    },
+    "ExportErrorReportLocation": {
+      "type": "structure",
+      "required": [
+        "s3Uri"
+      ],
+      "members": {
+        "s3Uri": "S3Uri"
+      }
+    },
+    "Expression": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "ExpressionVariable": {
+      "type": "structure",
+      "required": [
+        "name",
+        "value"
+      ],
+      "members": {
+        "name": "VariableName",
+        "value": "VariableValue"
+      }
+    },
+    "ExpressionVariables": {
+      "type": "list",
+      "member": "ExpressionVariable"
+    },
+    "ExternalId": {
+      "type": "string",
+      "min": 2,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9_][a-zA-Z_\\-0-9.:]*[a-zA-Z0-9_]+"
+    },
+    "File": {
+      "type": "structure",
+      "required": [
+        "bucket",
+        "key"
+      ],
+      "members": {
+        "bucket": "Bucket",
+        "key": "String",
+        "versionId": "String",
+        "alias": "AssetPropertyAlias",
+        "startTime": "TimeInNanos",
+        "fileFormat": "FileFormat"
+      }
+    },
+    "FileFormat": {
+      "type": "structure",
+      "members": {
+        "csv": "Csv",
+        "parquet": "Parquet",
+        "mp4": "Mp4",
+        "annotation": "Annotation"
+      }
+    },
+    "Files": {
+      "type": "list",
+      "member": "File"
+    },
+    "FormatSettings": {
+      "type": "structure",
+      "members": {
+        "framesPerSecond": "PositiveInteger",
+        "widthInPixels": "PositiveInteger",
+        "heightInPixels": "PositiveInteger"
+      }
+    },
+    "ForwardingConfig": {
+      "type": "structure",
+      "required": [
+        "state"
+      ],
+      "members": {
+        "state": "ForwardingConfigState"
+      }
+    },
+    "ForwardingConfigState": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "GatewayName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[^\\u0000-\\u001F\\u007F]+"
+    },
+    "GatewayPlatform": {
+      "type": "structure",
+      "members": {
+        "greengrass": "Greengrass",
+        "greengrassV2": "GreengrassV2",
+        "siemensIE": "SiemensIE"
+      }
+    },
+    "GatewayVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^[0-9]+$"
+    },
+    "GetAssetPropertyAggregatesRequest": {
+      "type": "structure",
+      "required": [
+        "aggregateTypes",
+        "resolution",
+        "startDate",
+        "endDate"
+      ],
+      "members": {
+        "assetId": "ID",
+        "propertyId": "ID",
+        "propertyAlias": "AssetPropertyAlias",
+        "aggregateTypes": "AggregateTypes",
+        "resolution": "Resolution",
+        "qualities": "Qualities",
+        "startDate": "Timestamp",
+        "endDate": "Timestamp",
+        "timeOrdering": "TimeOrdering",
+        "nextToken": "NextToken",
+        "maxResults": "GetAssetPropertyValueAggregatesMaxResults"
+      }
+    },
+    "GetAssetPropertyValueAggregatesMaxResults": {
+      "type": "integer",
+      "min": 1
+    },
+    "GetAssetPropertyValueHistoryMaxResults": {
+      "type": "integer",
+      "min": 1
+    },
+    "GetAssetPropertyValueHistoryRequest": {
+      "type": "structure",
+      "members": {
+        "assetId": "ID",
+        "propertyId": "ID",
+        "propertyAlias": "AssetPropertyAlias",
+        "startDate": "Timestamp",
+        "endDate": "Timestamp",
+        "qualities": "Qualities",
+        "timeOrdering": "TimeOrdering",
+        "nextToken": "NextToken",
+        "maxResults": "GetAssetPropertyValueHistoryMaxResults"
+      }
+    },
+    "GetAssetPropertyValueRequest": {
+      "type": "structure",
+      "members": {
+        "assetId": "ID",
+        "propertyId": "ID",
+        "propertyAlias": "AssetPropertyAlias"
+      }
+    },
+    "GetCaptureDataNextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "GetCaptureDataRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "startTime",
+        "endTime"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "startTime": "TimeInNanos",
+        "endTime": "TimeInNanos",
+        "timeSeriesId": "TimeSeriesId",
+        "propertyAlias": "AssetPropertyAlias",
+        "formatSettings": "FormatSettings",
+        "nextToken": "GetCaptureDataNextToken"
+      }
+    },
+    "GetInterpolatedAssetPropertyValuesRequest": {
+      "type": "structure",
+      "required": [
+        "startTimeInSeconds",
+        "endTimeInSeconds",
+        "quality",
+        "intervalInSeconds",
+        "type"
+      ],
+      "members": {
+        "assetId": "ID",
+        "propertyId": "ID",
+        "propertyAlias": "AssetPropertyAlias",
+        "startTimeInSeconds": "TimeInSeconds",
+        "startTimeOffsetInNanos": "OffsetInNanos",
+        "endTimeInSeconds": "TimeInSeconds",
+        "endTimeOffsetInNanos": "OffsetInNanos",
+        "quality": "Quality",
+        "intervalInSeconds": "IntervalInSeconds",
+        "nextToken": "NextToken",
+        "maxResults": "MaxInterpolatedResults",
+        "type": "InterpolationType",
+        "intervalWindowInSeconds": "IntervalWindowInSeconds"
+      }
+    },
+    "GetQueryResultsRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "queryId"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "queryId": "QueryId",
+        "maxResults": "QueryMaxResults",
+        "nextToken": "QueryNextToken"
+      }
+    },
+    "GetSearchResultsRequest": {
+      "type": "structure",
+      "required": [
+        "searchId",
+        "workspaceName"
+      ],
+      "members": {
+        "searchId": "SearchId",
+        "workspaceName": "WorkspaceName",
+        "maxResults": "GetSearchResultsRequestMaxResultsInteger",
+        "nextToken": "NextToken"
+      }
+    },
+    "GetSearchResultsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 10000
+    },
+    "Greengrass": {
+      "type": "structure",
+      "required": [
+        "groupArn"
+      ],
+      "members": {
+        "groupArn": "ARN"
+      }
+    },
+    "GreengrassV2": {
+      "type": "structure",
+      "required": [
+        "coreDeviceThingName"
+      ],
+      "members": {
+        "coreDeviceThingName": "CoreDeviceThingName",
+        "coreDeviceOperatingSystem": "CoreDeviceOperatingSystem"
+      }
+    },
+    "GroupId": {
+      "type": "string",
+      "min": 2,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]*"
+    },
+    "GroupIdFilterList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "GroupId"
+    },
+    "GroupIdentity": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "IdentityId"
+      }
+    },
+    "IAMRoleIdentity": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "IamArn"
+      }
+    },
+    "IAMUserIdentity": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "IamArn"
+      }
+    },
+    "ID": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "^(?!00000000-0000-0000-0000-000000000000)[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+    },
+    "IDs": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "ID"
+    },
+    "IamArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1600,
+      "pattern": "^arn:aws(-cn|-us-gov)?:[a-zA-Z0-9-:\\/_\\.\\+=,@]+$"
+    },
+    "IamRoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:aws(-cn|-us-gov)?:iam::\\d{12}:role/[\\w+=,.@/-]+"
+    },
+    "Identity": {
+      "type": "structure",
+      "members": {
+        "user": "UserIdentity",
+        "group": "GroupIdentity",
+        "iamUser": "IAMUserIdentity",
+        "iamRole": "IAMRoleIdentity"
+      }
+    },
+    "IdentityId": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "\\S+"
+    },
+    "IdentityType": {
+      "type": "string",
+      "enum": [
+        "USER",
+        "GROUP",
+        "IAM"
+      ]
+    },
+    "Image": {
+      "type": "structure",
+      "members": {
+        "id": "ID",
+        "file": "ImageFile"
+      }
+    },
+    "ImageFile": {
+      "type": "structure",
+      "required": [
+        "data",
+        "type"
+      ],
+      "members": {
+        "data": "ImageFileData",
+        "type": "ImageFileType"
+      }
+    },
+    "ImageFileData": {
+      "type": "blob",
+      "min": 1,
+      "max": 1500000
+    },
+    "ImageFileType": {
+      "type": "string",
+      "enum": [
+        "PNG"
+      ]
+    },
+    "InputProperties": {
+      "type": "string",
+      "min": 4,
+      "max": 67,
+      "pattern": "^\\$\\{[a-z][a-z0-9_]*\\}"
+    },
+    "InterpolationType": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "Interval": {
+      "type": "string",
+      "min": 2,
+      "max": 23
+    },
+    "IntervalInSeconds": {
+      "type": "long",
+      "min": 1,
+      "max": 320000000
+    },
+    "IntervalWindowInSeconds": {
+      "type": "long",
+      "min": 1,
+      "max": 320000000
+    },
+    "InvokeAssistantRequest": {
+      "type": "structure",
+      "required": [
+        "message"
+      ],
+      "members": {
+        "conversationId": "ConversationId",
+        "message": "MessageInput",
+        "enableTrace": "PrimitiveBoolean"
+      }
+    },
+    "IotCoreThingName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[a-zA-Z0-9:_-]+$"
+    },
+    "JobConfiguration": {
+      "type": "structure",
+      "members": {
+        "fileFormat": "FileFormat"
+      }
+    },
+    "JobType": {
+      "type": "string",
+      "enum": [
+        "EVENT_DETECTION"
+      ]
+    },
+    "KendraSourceDetail": {
+      "type": "structure",
+      "required": [
+        "knowledgeBaseArn",
+        "roleArn"
+      ],
+      "members": {
+        "knowledgeBaseArn": "ARN",
+        "roleArn": "ARN"
+      }
+    },
+    "KmsKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "ListAccessPoliciesRequest": {
+      "type": "structure",
+      "members": {
+        "identityType": "IdentityType",
+        "identityId": "IdentityId",
+        "resourceType": "ResourceType",
+        "resourceId": "ID",
+        "iamArn": "IamArn",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListActionsRequest": {
+      "type": "structure",
+      "required": [
+        "targetResourceType",
+        "targetResourceId"
+      ],
+      "members": {
+        "targetResourceType": "TargetResourceType",
+        "targetResourceId": "ID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "resolveToResourceType": "ResolveToResourceType",
+        "resolveToResourceId": "ID"
+      }
+    },
+    "ListApplicationsRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListAssetModelCompositeModelsRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "assetModelVersion": "AssetModelVersionFilter"
+      }
+    },
+    "ListAssetModelPropertiesFilter": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "BASE"
+      ]
+    },
+    "ListAssetModelPropertiesRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "filter": "ListAssetModelPropertiesFilter",
+        "assetModelVersion": "AssetModelVersionFilter"
+      }
+    },
+    "ListAssetModelsRequest": {
+      "type": "structure",
+      "members": {
+        "assetModelTypes": "ListAssetModelsTypeFilter",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "assetModelVersion": "AssetModelVersionFilter"
+      }
+    },
+    "ListAssetModelsTypeFilter": {
+      "type": "list",
+      "member": "AssetModelType"
+    },
+    "ListAssetPropertiesFilter": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "BASE"
+      ]
+    },
+    "ListAssetPropertiesRequest": {
+      "type": "structure",
+      "required": [
+        "assetId"
+      ],
+      "members": {
+        "assetId": "CustomID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "filter": "ListAssetPropertiesFilter"
+      }
+    },
+    "ListAssetRelationshipsRequest": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "traversalType"
+      ],
+      "members": {
+        "assetId": "CustomID",
+        "traversalType": "TraversalType",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListAssetsFilter": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "TOP_LEVEL"
+      ]
+    },
+    "ListAssetsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "assetModelId": "CustomID",
+        "filter": "ListAssetsFilter"
+      }
+    },
+    "ListAssociatedAssetsRequest": {
+      "type": "structure",
+      "required": [
+        "assetId"
+      ],
+      "members": {
+        "assetId": "CustomID",
+        "hierarchyId": "CustomID",
+        "traversalDirection": "TraversalDirection",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListBulkImportJobsFilter": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "PENDING",
+        "RUNNING",
+        "CANCELLED",
+        "FAILED",
+        "COMPLETED_WITH_FAILURES",
+        "COMPLETED"
+      ]
+    },
+    "ListBulkImportJobsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "filter": "ListBulkImportJobsFilter",
+        "workspaceName": "WorkspaceName"
+      }
+    },
+    "ListCompositionRelationshipsRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId"
+      ],
+      "members": {
+        "assetModelId": "ID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListComputationModelDataBindingUsagesRequest": {
+      "type": "structure",
+      "required": [
+        "dataBindingValueFilter"
+      ],
+      "members": {
+        "dataBindingValueFilter": "DataBindingValueFilter",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListComputationModelResolveToResourcesRequest": {
+      "type": "structure",
+      "required": [
+        "computationModelId"
+      ],
+      "members": {
+        "computationModelId": "ID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListComputationModelsRequest": {
+      "type": "structure",
+      "members": {
+        "computationModelType": "ComputationModelType",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListDashboardsRequest": {
+      "type": "structure",
+      "required": [
+        "projectId"
+      ],
+      "members": {
+        "projectId": "ID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListDatasetDataSegmentRelationshipsRequest": {
+      "type": "structure",
+      "required": [
+        "datasetId",
+        "workspaceName"
+      ],
+      "members": {
+        "datasetId": "ID",
+        "workspaceName": "WorkspaceName",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListDatasetDataSegmentsRequest": {
+      "type": "structure",
+      "required": [
+        "datasetId",
+        "workspaceName"
+      ],
+      "members": {
+        "datasetId": "ID",
+        "workspaceName": "WorkspaceName",
+        "datasetVersion": "Version",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListDatasetExportJobsRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "filter": "DatasetExportJobFilter",
+        "maxResults": "ListExportJobsMaxResults",
+        "nextToken": "ListExportJobsNextToken"
+      }
+    },
+    "ListDatasetsRequest": {
+      "type": "structure",
+      "required": [
+        "sourceType"
+      ],
+      "members": {
+        "sourceType": "DatasetSourceType",
+        "workspaceName": "WorkspaceName",
+        "datasetType": "DatasetTypeEnum",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListEnrichmentJobsRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "datasetId": "ID",
+        "propertyAlias": "AssetPropertyAlias",
+        "timeSeriesId": "TimeSeriesId",
+        "status": "EnrichmentJobStatus",
+        "jobType": "JobType",
+        "startDate": "Timestamp",
+        "endDate": "Timestamp",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListExecutionsRequest": {
+      "type": "structure",
+      "required": [
+        "targetResourceType",
+        "targetResourceId"
+      ],
+      "members": {
+        "targetResourceType": "TargetResourceType",
+        "targetResourceId": "ID",
+        "resolveToResourceType": "ResolveToResourceType",
+        "resolveToResourceId": "ID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "actionType": "Name"
+      }
+    },
+    "ListExportJobsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 250
+    },
+    "ListExportJobsNextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "ListGatewaysRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListInterfaceRelationshipsRequest": {
+      "type": "structure",
+      "required": [
+        "interfaceAssetModelId"
+      ],
+      "members": {
+        "interfaceAssetModelId": "CustomID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListPipelineExecutionsRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "pipelineName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "pipelineName": "ResourceName",
+        "nextToken": "PaginationToken",
+        "maxResults": "ListPipelineExecutionsRequestMaxResultsInteger",
+        "state": "PipelineExecutionState",
+        "startTimeAfter": "Timestamp",
+        "startTimeBefore": "Timestamp",
+        "endTimeAfter": "Timestamp",
+        "endTimeBefore": "Timestamp"
+      }
+    },
+    "ListPipelineExecutionsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 250
+    },
+    "ListPipelinesRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "nextToken": "PaginationToken",
+        "maxResults": "ListPipelinesRequestMaxResultsInteger"
+      }
+    },
+    "ListPipelinesRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 250
+    },
+    "ListPortalsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListProjectAssetsRequest": {
+      "type": "structure",
+      "required": [
+        "projectId"
+      ],
+      "members": {
+        "projectId": "ID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListProjectsRequest": {
+      "type": "structure",
+      "required": [
+        "portalId"
+      ],
+      "members": {
+        "portalId": "ID",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListQueriesRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "filter": "QueryFilter",
+        "maxResults": "QueryMaxResults",
+        "nextToken": "QueryListNextToken"
+      }
+    },
+    "ListSearchesFilters": {
+      "type": "structure",
+      "members": {
+        "statusFilter": "SearchStatusFilterList",
+        "startedAfter": "Timestamp",
+        "startedBefore": "Timestamp",
+        "groupIdFilter": "GroupIdFilterList",
+        "searchTypeFilter": "SearchTypeFilterList"
+      }
+    },
+    "ListSearchesRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "maxResults": "ListSearchesRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "listSearchesFilters": "ListSearchesFilters"
+      }
+    },
+    "ListSearchesRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName"
+      }
+    },
+    "ListTasksRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "nextToken": "PaginationToken",
+        "maxResults": "ListTasksRequestMaxResultsInteger"
+      }
+    },
+    "ListTasksRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 250
+    },
+    "ListTimeSeriesRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "assetId": "CustomID",
+        "aliasPrefix": "PropertyAlias",
+        "timeSeriesType": "ListTimeSeriesType",
+        "workspaceName": "WorkspaceName"
+      }
+    },
+    "ListTimeSeriesType": {
+      "type": "string",
+      "enum": [
+        "ASSOCIATED",
+        "DISASSOCIATED"
+      ]
+    },
+    "ListWorkspacesRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "LoggingLevel": {
+      "type": "string",
+      "enum": [
+        "ERROR",
+        "INFO",
+        "OFF"
+      ]
+    },
+    "LoggingOptions": {
+      "type": "structure",
+      "required": [
+        "level"
+      ],
+      "members": {
+        "level": "LoggingLevel"
+      }
+    },
+    "Macro": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[^\\u0000-\\u001F\\u007F]+"
+    },
+    "MatchByPropertyName": {
+      "type": "boolean"
+    },
+    "MaxInterpolatedResults": {
+      "type": "integer",
+      "min": 1
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 250
+    },
+    "Measurement": {
+      "type": "structure",
+      "members": {
+        "processingConfig": "MeasurementProcessingConfig"
+      }
+    },
+    "MeasurementProcessingConfig": {
+      "type": "structure",
+      "required": [
+        "forwardingConfig"
+      ],
+      "members": {
+        "forwardingConfig": "ForwardingConfig"
+      }
+    },
+    "MessageInput": {
+      "type": "string",
+      "min": 1,
+      "max": 10000
+    },
+    "Metadata": {
+      "type": "map",
+      "key": "MetadataKey",
+      "value": "MetadataValue"
+    },
+    "MetadataKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "MetadataValue": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "Metric": {
+      "type": "structure",
+      "required": [
+        "window"
+      ],
+      "members": {
+        "expression": "Expression",
+        "variables": "ExpressionVariables",
+        "window": "MetricWindow",
+        "processingConfig": "MetricProcessingConfig"
+      }
+    },
+    "MetricProcessingConfig": {
+      "type": "structure",
+      "required": [
+        "computeLocation"
+      ],
+      "members": {
+        "computeLocation": "ComputeLocation"
+      }
+    },
+    "MetricWindow": {
+      "type": "structure",
+      "members": {
+        "tumbling": "TumblingWindow"
+      }
+    },
+    "Mount": {
+      "type": "structure",
+      "required": [
+        "name",
+        "relativePath",
+        "source",
+        "storageType"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "relativePath": "MountRelativePath",
+        "source": "MountSource",
+        "storageType": "MountStorageType"
+      }
+    },
+    "MountList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "Mount"
+    },
+    "MountOverrides": {
+      "type": "structure",
+      "required": [
+        "computeNodes"
+      ],
+      "members": {
+        "computeNodes": "ComputeNodeMountsMap"
+      }
+    },
+    "MountRelativePath": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "((?!.*(^|/)\\.\\.?(/|$))(?!.*//)[a-zA-Z0-9._-][a-zA-Z0-9._/-]*[a-zA-Z0-9._-]|[a-zA-Z0-9_-])"
+    },
+    "MountS3AccessPointArn": {
+      "type": "string",
+      "min": 4,
+      "max": 128,
+      "pattern": "arn:aws(-cn|-us-gov)?:s3:[a-z0-9-]*:\\d{12}:accesspoint[/:][a-zA-Z0-9._-]+"
+    },
+    "MountS3KeyPrefix": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "MountSource": {
+      "type": "structure",
+      "members": {
+        "s3AccessPoint": "S3AccessPointSource"
+      }
+    },
+    "MountStorageType": {
+      "type": "string",
+      "enum": [
+        "SHARED_STORAGE"
+      ]
+    },
+    "Mp4": {
+      "type": "structure",
+      "members": {}
+    },
+    "MultiLayerStorage": {
+      "type": "structure",
+      "required": [
+        "customerManagedS3Storage"
+      ],
+      "members": {
+        "customerManagedS3Storage": "CustomerManagedS3Storage"
+      }
+    },
+    "Name": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[^\\u0000-\\u001F\\u007F]+"
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096,
+      "pattern": "[A-Za-z0-9+/=]+"
+    },
+    "NumberOfDays": {
+      "type": "integer"
+    },
+    "Offset": {
+      "type": "string",
+      "min": 2,
+      "max": 25
+    },
+    "OffsetInNanos": {
+      "type": "integer",
+      "min": 0,
+      "max": 999999999
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "Parquet": {
+      "type": "structure",
+      "members": {}
+    },
+    "Permission": {
+      "type": "string",
+      "enum": [
+        "ADMINISTRATOR",
+        "VIEWER"
+      ]
+    },
+    "PipelineExecutionState": {
+      "type": "string",
+      "enum": [
+        "NOT_STARTED",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+        "CANCELLING",
+        "CANCELLED"
+      ]
+    },
+    "PortalResource": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "ID"
+      }
+    },
+    "PortalTools": {
+      "type": "list",
+      "member": "Name"
+    },
+    "PortalType": {
+      "type": "string",
+      "enum": [
+        "SITEWISE_PORTAL_V1",
+        "SITEWISE_PORTAL_V2"
+      ]
+    },
+    "PortalTypeConfiguration": {
+      "type": "map",
+      "key": "PortalTypeKey",
+      "value": "PortalTypeEntry"
+    },
+    "PortalTypeEntry": {
+      "type": "structure",
+      "members": {
+        "portalTools": "PortalTools"
+      }
+    },
+    "PortalTypeKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "PositiveInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "PrimitiveBoolean": {
+      "type": "boolean"
+    },
+    "ProcessingInput": {
+      "type": "structure",
+      "members": {
+        "timeseries": "TimeseriesList",
+        "dataset": "DatasetItem"
+      }
+    },
+    "ProcessingType": {
+      "type": "string",
+      "enum": [
+        "GENERIC_COMPUTE_PROCESSING",
+        "HARDWARE_ACCELERATED_PROCESSING"
+      ]
+    },
+    "ProcessingUnit": {
+      "type": "string",
+      "enum": [
+        "UNITS_2",
+        "UNITS_4",
+        "UNITS_8",
+        "UNITS_12",
+        "UNITS_16",
+        "UNITS_24",
+        "UNITS_32",
+        "UNITS_36",
+        "UNITS_48",
+        "UNITS_60",
+        "UNITS_64",
+        "UNITS_72",
+        "UNITS_84",
+        "UNITS_96"
+      ]
+    },
+    "ProjectResource": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "ID"
+      }
+    },
+    "PropertyAlias": {
+      "type": "string",
+      "min": 1,
+      "pattern": "[^\\u0000-\\u001F\\u007F]+"
+    },
+    "PropertyDataType": {
+      "type": "string",
+      "enum": [
+        "STRING",
+        "INTEGER",
+        "DOUBLE",
+        "BOOLEAN",
+        "STRUCT",
+        "VIDEO",
+        "ANNOTATION",
+        "JSON"
+      ]
+    },
+    "PropertyMapping": {
+      "type": "structure",
+      "required": [
+        "assetModelPropertyId",
+        "interfaceAssetModelPropertyId"
+      ],
+      "members": {
+        "assetModelPropertyId": "CustomID",
+        "interfaceAssetModelPropertyId": "CustomID"
+      }
+    },
+    "PropertyMappingConfiguration": {
+      "type": "structure",
+      "members": {
+        "matchByPropertyName": "MatchByPropertyName",
+        "createMissingProperty": "CreateMissingProperty",
+        "overrides": "PropertyMappings"
+      }
+    },
+    "PropertyMappings": {
+      "type": "list",
+      "member": "PropertyMapping"
+    },
+    "PropertyNotificationState": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "PropertyType": {
+      "type": "structure",
+      "members": {
+        "attribute": "Attribute",
+        "measurement": "Measurement",
+        "transform": "Transform",
+        "metric": "Metric"
+      }
+    },
+    "PropertyUnit": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[^\\u0000-\\u001F\\u007F]+"
+    },
+    "PropertyValueBooleanValue": {
+      "type": "boolean"
+    },
+    "PropertyValueDoubleValue": {
+      "type": "double"
+    },
+    "PropertyValueIntegerValue": {
+      "type": "integer"
+    },
+    "PropertyValueNullValue": {
+      "type": "structure",
+      "required": [
+        "valueType"
+      ],
+      "members": {
+        "valueType": "RawValueType"
+      }
+    },
+    "PropertyValueStringValue": {
+      "type": "string"
+    },
+    "PutAssetModelInterfaceRelationshipRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId",
+        "interfaceAssetModelId",
+        "propertyMappingConfiguration"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "interfaceAssetModelId": "CustomID",
+        "propertyMappingConfiguration": "PropertyMappingConfiguration",
+        "clientToken": "ClientToken"
+      }
+    },
+    "PutAssetPropertyValueEntries": {
+      "type": "list",
+      "member": "PutAssetPropertyValueEntry"
+    },
+    "PutAssetPropertyValueEntry": {
+      "type": "structure",
+      "required": [
+        "entryId",
+        "propertyValues"
+      ],
+      "members": {
+        "entryId": "EntryId",
+        "assetId": "ID",
+        "propertyId": "ID",
+        "propertyAlias": "AssetPropertyAlias",
+        "propertyValues": "AssetPropertyValues"
+      }
+    },
+    "PutDefaultEncryptionConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "encryptionType"
+      ],
+      "members": {
+        "encryptionType": "EncryptionType",
+        "kmsKeyId": "KmsKeyId"
+      }
+    },
+    "PutLoggingOptionsRequest": {
+      "type": "structure",
+      "required": [
+        "loggingOptions"
+      ],
+      "members": {
+        "loggingOptions": "LoggingOptions",
+        "workspaceName": "WorkspaceName"
+      }
+    },
+    "PutStorageConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "storageType"
+      ],
+      "members": {
+        "storageType": "StorageType",
+        "multiLayerStorage": "MultiLayerStorage",
+        "disassociatedDataStorage": "DisassociatedDataStorageState",
+        "retentionPeriod": "RetentionPeriod",
+        "warmTier": "WarmTierState",
+        "warmTierRetentionPeriod": "WarmTierRetentionPeriod",
+        "disallowIngestNullNaN": "DisallowIngestNullNaN"
+      }
+    },
+    "Qualities": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "Quality"
+    },
+    "Quality": {
+      "type": "string",
+      "enum": [
+        "GOOD",
+        "BAD",
+        "UNCERTAIN"
+      ]
+    },
+    "QueryFilter": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "QueryId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9-]+"
+    },
+    "QueryListNextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "QueryMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 10000
+    },
+    "QueryNextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "QueryStatement": {
+      "type": "string",
+      "min": 1,
+      "max": 10000,
+      "pattern": "^[\\s\\S]+$"
+    },
+    "QueryString": {
+      "type": "string",
+      "min": 1,
+      "max": 10240
+    },
+    "RawValueType": {
+      "type": "string",
+      "enum": [
+        "D",
+        "B",
+        "S",
+        "I",
+        "U"
+      ]
+    },
+    "Resolution": {
+      "type": "string",
+      "min": 2,
+      "max": 3,
+      "pattern": "1m|15m|1h|1d"
+    },
+    "ResolveTo": {
+      "type": "structure",
+      "required": [
+        "assetId"
+      ],
+      "members": {
+        "assetId": "ID"
+      }
+    },
+    "ResolveToResourceType": {
+      "type": "string",
+      "enum": [
+        "ASSET"
+      ]
+    },
+    "Resource": {
+      "type": "structure",
+      "members": {
+        "portal": "PortalResource",
+        "project": "ProjectResource"
+      }
+    },
+    "ResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "ResourceType": {
+      "type": "string",
+      "enum": [
+        "PORTAL",
+        "PROJECT"
+      ]
+    },
+    "RestrictedDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^[a-zA-Z0-9 _\\-#$*!@]+$"
+    },
+    "RestrictedName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^[a-zA-Z0-9 _\\-#$*!@.]+$"
+    },
+    "ResultProperty": {
+      "type": "string",
+      "min": 4,
+      "max": 67,
+      "pattern": "^\\$\\{[a-z][a-z0-9_]*\\}"
+    },
+    "RetentionPeriod": {
+      "type": "structure",
+      "members": {
+        "numberOfDays": "NumberOfDays",
+        "unlimited": "Unlimited"
+      }
+    },
+    "S3AccessPointSource": {
+      "type": "structure",
+      "required": [
+        "accessPointArn"
+      ],
+      "members": {
+        "accessPointArn": "MountS3AccessPointArn",
+        "prefix": "MountS3KeyPrefix"
+      }
+    },
+    "S3Uri": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "s3://[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]/.+"
+    },
+    "SearchFilters": {
+      "type": "structure",
+      "members": {
+        "timeSeriesIds": "TimeSeriesIdList",
+        "datasetIds": "DataSetIdList",
+        "timeIntervals": "TimeIntervalList"
+      }
+    },
+    "SearchId": {
+      "type": "string",
+      "min": 23,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9]+(-[a-zA-Z0-9]+)*"
+    },
+    "SearchQueryStatement": {
+      "type": "string",
+      "min": 1,
+      "max": 5000
+    },
+    "SearchStatus": {
+      "type": "string",
+      "enum": [
+        "QUEUED",
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED"
+      ]
+    },
+    "SearchStatusFilterList": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "SearchStatus"
+    },
+    "SearchType": {
+      "type": "string",
+      "enum": [
+        "DEEP",
+        "QUICK"
+      ]
+    },
+    "SearchTypeFilterList": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "SearchType"
+    },
+    "SelectAll": {
+      "type": "string",
+      "pattern": "\\*"
+    },
+    "SessionConfig": {
+      "type": "structure",
+      "required": [
+        "sessionStartTimestamp",
+        "sessionEndTimestamp"
+      ],
+      "members": {
+        "sessionStartTimestamp": "TimeInNanos",
+        "sessionEndTimestamp": "TimeInNanos"
+      }
+    },
+    "SiemensIE": {
+      "type": "structure",
+      "required": [
+        "iotCoreThingName"
+      ],
+      "members": {
+        "iotCoreThingName": "IotCoreThingName"
+      }
+    },
+    "SourceDetail": {
+      "type": "structure",
+      "members": {
+        "kendra": "KendraSourceDetail"
+      }
+    },
+    "StartPipelineExecutionRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "pipelineName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "pipelineName": "ResourceName",
+        "executionEnvironmentVariableOverrides": "ExecutionEnvironmentVariables",
+        "executionMountOverrides": "MountOverrides",
+        "executionPriority": "ExecutionPriority",
+        "clientToken": "ClientToken"
+      }
+    },
+    "StartQueryRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "queryStatement"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "workspaceName": "WorkspaceName",
+        "queryStatement": "QueryString"
+      }
+    },
+    "StartSearchRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "queryStatement"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "queryStatement": "SearchQueryStatement",
+        "clientToken": "ClientToken",
+        "searchType": "SearchType",
+        "searchFilters": "SearchFilters",
+        "groupId": "GroupId"
+      }
+    },
+    "StorageClass": {
+      "type": "string",
+      "enum": [
+        "STANDARD_1",
+        "STANDARD_2",
+        "THROUGHPUT_1",
+        "THROUGHPUT_2"
+      ]
+    },
+    "StorageType": {
+      "type": "string",
+      "enum": [
+        "SITEWISE_DEFAULT_STORAGE",
+        "MULTI_LAYER_STORAGE"
+      ]
+    },
+    "String": {
+      "type": "string"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 1,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TargetResource": {
+      "type": "structure",
+      "members": {
+        "assetId": "ID",
+        "computationModelId": "ID"
+      }
+    },
+    "TargetResourceType": {
+      "type": "string",
+      "enum": [
+        "ASSET",
+        "COMPUTATION_MODEL"
+      ]
+    },
+    "TaskConfiguration": {
+      "type": "structure",
+      "members": {
+        "containerTaskConfiguration": "ContainerTaskConfiguration"
+      }
+    },
+    "TimeInNanos": {
+      "type": "structure",
+      "required": [
+        "timeInSeconds"
+      ],
+      "members": {
+        "timeInSeconds": "TimeInSeconds",
+        "offsetInNanos": "OffsetInNanos"
+      }
+    },
+    "TimeInSeconds": {
+      "type": "long",
+      "min": 1,
+      "max": 9223372036854774
+    },
+    "TimeInterval": {
+      "type": "structure",
+      "required": [
+        "startTime",
+        "endTime"
+      ],
+      "members": {
+        "startTime": "TimeInNanos",
+        "endTime": "TimeInNanos"
+      }
+    },
+    "TimeIntervalList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "TimeInterval"
+    },
+    "TimeOrdering": {
+      "type": "string",
+      "enum": [
+        "ASCENDING",
+        "DESCENDING"
+      ]
+    },
+    "TimeSeriesId": {
+      "type": "string",
+      "min": 36,
+      "max": 73
+    },
+    "TimeSeriesIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "TimeSeriesId"
+    },
+    "TimeoutSeconds": {
+      "type": "long",
+      "min": 60,
+      "max": 86400
+    },
+    "TimeseriesItem": {
+      "type": "structure",
+      "members": {
+        "timeSeriesId": "TimeSeriesId",
+        "propertyAlias": "AssetPropertyAlias",
+        "trimSettings": "TrimSettings",
+        "formatSettings": "FormatSettings"
+      }
+    },
+    "TimeseriesList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "TimeseriesItem"
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "Transform": {
+      "type": "structure",
+      "required": [
+        "expression",
+        "variables"
+      ],
+      "members": {
+        "expression": "Expression",
+        "variables": "ExpressionVariables",
+        "processingConfig": "TransformProcessingConfig"
+      }
+    },
+    "TransformProcessingConfig": {
+      "type": "structure",
+      "required": [
+        "computeLocation"
+      ],
+      "members": {
+        "computeLocation": "ComputeLocation",
+        "forwardingConfig": "ForwardingConfig"
+      }
+    },
+    "TraversalDirection": {
+      "type": "string",
+      "enum": [
+        "PARENT",
+        "CHILD"
+      ]
+    },
+    "TraversalType": {
+      "type": "string",
+      "enum": [
+        "PATH_TO_ROOT"
+      ]
+    },
+    "TrimSettings": {
+      "type": "structure",
+      "required": [
+        "startTime",
+        "endTime"
+      ],
+      "members": {
+        "startTime": "TimeInNanos",
+        "endTime": "TimeInNanos"
+      }
+    },
+    "TumblingWindow": {
+      "type": "structure",
+      "required": [
+        "interval"
+      ],
+      "members": {
+        "interval": "Interval",
+        "offset": "Offset"
+      }
+    },
+    "Unlimited": {
+      "type": "boolean"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateAccessPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "accessPolicyId",
+        "accessPolicyIdentity",
+        "accessPolicyResource",
+        "accessPolicyPermission"
+      ],
+      "members": {
+        "accessPolicyId": "ID",
+        "accessPolicyIdentity": "Identity",
+        "accessPolicyResource": "Resource",
+        "accessPolicyPermission": "Permission",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateAssetModelCompositeModelRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId",
+        "assetModelCompositeModelId",
+        "assetModelCompositeModelName"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "assetModelCompositeModelId": "CustomID",
+        "assetModelCompositeModelExternalId": "ExternalId",
+        "assetModelCompositeModelDescription": "Description",
+        "assetModelCompositeModelName": "Name",
+        "clientToken": "ClientToken",
+        "assetModelCompositeModelProperties": "AssetModelProperties",
+        "ifMatch": "ETag",
+        "ifNoneMatch": "SelectAll",
+        "matchForVersionType": "AssetModelVersionType"
+      }
+    },
+    "UpdateAssetModelRequest": {
+      "type": "structure",
+      "required": [
+        "assetModelId",
+        "assetModelName"
+      ],
+      "members": {
+        "assetModelId": "CustomID",
+        "assetModelExternalId": "ExternalId",
+        "assetModelName": "Name",
+        "assetModelDescription": "Description",
+        "assetModelProperties": "AssetModelProperties",
+        "assetModelHierarchies": "AssetModelHierarchies",
+        "assetModelCompositeModels": "AssetModelCompositeModels",
+        "clientToken": "ClientToken",
+        "ifMatch": "ETag",
+        "ifNoneMatch": "SelectAll",
+        "matchForVersionType": "AssetModelVersionType"
+      }
+    },
+    "UpdateAssetPropertyRequest": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "propertyId"
+      ],
+      "members": {
+        "assetId": "CustomID",
+        "propertyId": "CustomID",
+        "propertyAlias": "PropertyAlias",
+        "propertyNotificationState": "PropertyNotificationState",
+        "clientToken": "ClientToken",
+        "propertyUnit": "PropertyUnit"
+      }
+    },
+    "UpdateAssetRequest": {
+      "type": "structure",
+      "required": [
+        "assetId",
+        "assetName"
+      ],
+      "members": {
+        "assetId": "CustomID",
+        "assetExternalId": "ExternalId",
+        "assetName": "Name",
+        "clientToken": "ClientToken",
+        "assetDescription": "Description"
+      }
+    },
+    "UpdateComputationModelRequest": {
+      "type": "structure",
+      "required": [
+        "computationModelId",
+        "computationModelName",
+        "computationModelConfiguration",
+        "computationModelDataBinding"
+      ],
+      "members": {
+        "computationModelId": "ID",
+        "computationModelName": "RestrictedName",
+        "computationModelDescription": "RestrictedDescription",
+        "computationModelConfiguration": "ComputationModelConfiguration",
+        "computationModelDataBinding": "ComputationModelDataBinding",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateDashboardRequest": {
+      "type": "structure",
+      "required": [
+        "dashboardId",
+        "dashboardName",
+        "dashboardDefinition"
+      ],
+      "members": {
+        "dashboardId": "ID",
+        "dashboardName": "Name",
+        "dashboardDescription": "Description",
+        "dashboardDefinition": "DashboardDefinition",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "datasetId",
+        "datasetName",
+        "datasetSource"
+      ],
+      "members": {
+        "datasetId": "ID",
+        "workspaceName": "WorkspaceName",
+        "datasetName": "RestrictedName",
+        "datasetDescription": "Description",
+        "datasetConfig": "DatasetConfig",
+        "metadata": "Metadata",
+        "datasetSource": "DatasetSource",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateGatewayCapabilityConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "gatewayId",
+        "capabilityNamespace",
+        "capabilityConfiguration"
+      ],
+      "members": {
+        "gatewayId": "ID",
+        "capabilityNamespace": "CapabilityNamespace",
+        "capabilityConfiguration": "CapabilityConfiguration"
+      }
+    },
+    "UpdateGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "gatewayId",
+        "gatewayName"
+      ],
+      "members": {
+        "gatewayId": "ID",
+        "gatewayName": "GatewayName"
+      }
+    },
+    "UpdatePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "pipelineName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "pipelineName": "ResourceName",
+        "description": "Description",
+        "environmentVariables": "EnvironmentVariablesMap",
+        "computations": "ComputeNodeList"
+      }
+    },
+    "UpdatePortalRequest": {
+      "type": "structure",
+      "required": [
+        "portalId",
+        "portalName",
+        "portalContactEmail",
+        "roleArn"
+      ],
+      "members": {
+        "portalId": "ID",
+        "portalName": "Name",
+        "portalDescription": "Description",
+        "portalContactEmail": "Email",
+        "portalLogoImage": "Image",
+        "roleArn": "IamArn",
+        "clientToken": "ClientToken",
+        "notificationSenderEmail": "Email",
+        "alarms": "Alarms",
+        "portalType": "PortalType",
+        "portalTypeConfiguration": "PortalTypeConfiguration"
+      }
+    },
+    "UpdateProjectRequest": {
+      "type": "structure",
+      "required": [
+        "projectId",
+        "projectName"
+      ],
+      "members": {
+        "projectId": "ID",
+        "projectName": "Name",
+        "projectDescription": "Description",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateTaskRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName",
+        "taskName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "taskName": "ResourceName",
+        "description": "Description",
+        "taskConfiguration": "TaskConfiguration"
+      }
+    },
+    "UpdateWorkspaceRequest": {
+      "type": "structure",
+      "required": [
+        "workspaceName"
+      ],
+      "members": {
+        "workspaceName": "WorkspaceName",
+        "workspaceDescription": "Description",
+        "encryptionConfiguration": "WorkspaceEncryptionConfiguration",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UserIdentity": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "IdentityId"
+      }
+    },
+    "VariableName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[a-z][a-z0-9_]*$"
+    },
+    "VariableValue": {
+      "type": "structure",
+      "members": {
+        "propertyId": "Macro",
+        "hierarchyId": "Macro",
+        "propertyPath": "AssetModelPropertyPath"
+      }
+    },
+    "Variant": {
+      "type": "structure",
+      "members": {
+        "stringValue": "PropertyValueStringValue",
+        "integerValue": "PropertyValueIntegerValue",
+        "doubleValue": "PropertyValueDoubleValue",
+        "booleanValue": "PropertyValueBooleanValue",
+        "nullValue": "PropertyValueNullValue"
+      }
+    },
+    "Version": {
+      "type": "string",
+      "min": 1,
+      "max": 10,
+      "pattern": "^(0|([1-9]{1}\\d*))$"
+    },
+    "WarmTierRetentionPeriod": {
+      "type": "structure",
+      "members": {
+        "numberOfDays": "NumberOfDays",
+        "unlimited": "Unlimited"
+      }
+    },
+    "WarmTierState": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "WorkspaceEncryptionConfiguration": {
+      "type": "structure",
+      "required": [
+        "encryptionType"
+      ],
+      "members": {
+        "encryptionType": "EncryptionType",
+        "kmsKeyId": "KmsKeyId"
+      }
+    },
+    "WorkspaceName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[a-zA-Z0-9_-]+$"
+    }
+  }
+}

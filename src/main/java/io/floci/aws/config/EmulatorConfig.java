@@ -899,6 +899,8 @@ public interface EmulatorConfig {
         IotFleetWiseServiceConfig iotfleetwise();
 
         IotMiServiceConfig iotmanagedintegrations();
+
+        IotSiteWiseServiceConfig iotsitewise();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -2544,6 +2546,10 @@ public interface EmulatorConfig {
 
         @WithDefault("floci/floci-duck:latest")
         String defaultImage();
+
+        /** How long a started floci-duck container has to answer its health check. */
+        @WithDefault("120")
+        int startupTimeoutSeconds();
     }
 
     interface GlueServiceConfig {
@@ -3028,6 +3034,51 @@ public interface EmulatorConfig {
         /** How often enabled lifecycle policies are evaluated; Image Builder evaluates them daily. */
         @WithDefault("3600")
         long lifecycleIntervalSeconds();
+    }
+
+    interface IotSiteWiseServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long asset models, assets and portals stay CREATING, UPDATING or DELETING. */
+        @WithDefault("1000")
+        long transitionMillis();
+
+        /** How often metric windows that have ended are computed. */
+        @WithDefault("1000")
+        long metricTickMillis();
+
+        /** How often data is replicated to the cold tier, in seconds; SiteWise replicates every six hours. */
+        @WithDefault("21600")
+        long coldTierExportSeconds();
+
+        /** Asset models in each account and Region. */
+        @WithDefault("1000")
+        int maxAssetModels();
+
+        /** Assets in each account and Region. */
+        @WithDefault("100000")
+        int maxAssets();
+
+        /** Properties of each asset model. */
+        @WithDefault("1000")
+        int maxPropertiesPerModel();
+
+        /** Bulk import jobs PENDING or RUNNING at once. */
+        @WithDefault("10")
+        int maxActiveBulkImportJobs();
+
+        /** The Bedrock model the SiteWise Assistant converses with. */
+        @WithDefault("anthropic.claude-3-5-sonnet-20240620-v1:0")
+        String assistantModelId();
+
+        /** The fewest samples of every input anomaly detection training needs. */
+        @WithDefault("10")
+        int minTrainingSamples();
+
+        /** Starts floci-duck, which runs ExecuteQuery, when SiteWise resources are first created. */
+        @WithDefault("true")
+        boolean prestartQueryEngine();
     }
 
     interface IotMiServiceConfig {

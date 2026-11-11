@@ -561,6 +561,7 @@ These services spawn Docker containers. They require access to the Docker socket
 | `FLOCI_SERVICES_ATHENA_MOCK` | `false` | When `true`, queries are accepted but not executed |
 | `FLOCI_SERVICES_ATHENA_DEFAULT_IMAGE` | `floci/floci-duck:latest` | Docker image for the DuckDB query engine |
 | `FLOCI_SERVICES_ATHENA_DUCK_URL` | _(none)_ | URL of an existing DuckDB service. When set, Floci skips managing the container |
+| `FLOCI_SERVICES_DUCK_STARTUP_TIMEOUT_SECONDS` | `120` | How long a started floci-duck container has to answer its health check |
 
 ---
 

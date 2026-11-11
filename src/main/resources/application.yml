@@ -722,6 +722,7 @@ floci:
     duck:
       # url: http://floci-duck:3000   # set to skip container management
       default-image: "floci/floci-duck:latest"
+      startup-timeout-seconds: 120
     glue:
       enabled: true
       job-run-duration-seconds: 0   # 0 = job runs succeed as soon as they start
@@ -1032,6 +1033,8 @@ floci:
     iotfleetwise:
       enabled: true
     iotmanagedintegrations:
+      enabled: true
+    iotsitewise:
       enabled: true
     ivschat:
       enabled: true

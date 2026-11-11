@@ -526,6 +526,11 @@ floci:
       enabled: true
     iotmanagedintegrations:
       enabled: true
+    iotsitewise:
+      enabled: true
+      transition-millis: 200
+      metric-tick-millis: 250
+      prestart-query-engine: false
     ivschat:
       enabled: true
       s3-flush-millis: 0
