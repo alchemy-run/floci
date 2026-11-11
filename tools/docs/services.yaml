@@ -296,6 +296,10 @@ services:
     sources:
       - { path: services/ivs/IvsController.java, mode: rest }
       - { path: services/ivs/IvsRealtimeController.java, mode: rest }
+  - service: iotmanagedintegrations
+    doc: docs/services/iotmanagedintegrations.md
+    sources:
+      - { path: services/iotmanagedintegrations/IotMiController.java, mode: rest }
   - service: iotfleetwise
     doc: docs/services/iotfleetwise.md
     sources:

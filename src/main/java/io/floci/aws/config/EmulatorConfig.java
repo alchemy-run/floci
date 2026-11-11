@@ -897,6 +897,8 @@ public interface EmulatorConfig {
         InternetMonitorServiceConfig internetmonitor();
 
         IotFleetWiseServiceConfig iotfleetwise();
+
+        IotMiServiceConfig iotmanagedintegrations();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -3026,6 +3028,27 @@ public interface EmulatorConfig {
         /** How often enabled lifecycle policies are evaluated; Image Builder evaluates them daily. */
         @WithDefault("3600")
         long lifecycleIntervalSeconds();
+    }
+
+    interface IotMiServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a deleted managed thing stays DELETE_IN_PROGRESS. */
+        @WithDefault("2000")
+        long deletionMillis();
+
+        /** How long a cloud discovery waits for the connector's DEVICE_DISCOVERY event before it TIMED_OUT. */
+        @WithDefault("300")
+        long discoveryTimeoutSeconds();
+
+        /** Managed things in each account and Region. */
+        @WithDefault("10000")
+        int maxManagedThings();
+
+        /** Credential lockers in each account and Region. */
+        @WithDefault("100")
+        int maxCredentialLockers();
     }
 
     interface IotFleetWiseServiceConfig {
