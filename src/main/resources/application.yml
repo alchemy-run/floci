@@ -1019,6 +1019,8 @@ floci:
       enabled: true
     devopsguru:
       enabled: true
+    fms:
+      enabled: true
     entityresolution:
       enabled: true
     emr-containers:

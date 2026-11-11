@@ -38,6 +38,7 @@ import io.floci.aws.services.ecs.EcsJsonHandler;
 import io.floci.aws.services.emr.EmrHandler;
 import io.floci.aws.services.eventbridge.EventBridgeHandler;
 import io.floci.aws.services.firehose.FirehoseJsonHandler;
+import io.floci.aws.services.fms.FmsJsonHandler;
 import io.floci.aws.services.globalaccelerator.GlobalAcceleratorJsonHandler;
 import io.floci.aws.services.glue.GlueJsonHandler;
 import io.floci.aws.services.identitystore.IdentityStoreJsonHandler;
@@ -136,6 +137,7 @@ public class AwsJson11Controller {
     private final DaxJsonHandler daxJsonHandler;
     private final DirectoryJsonHandler directoryJsonHandler;
     private final EcrPublicJsonHandler ecrPublicJsonHandler;
+    private final FmsJsonHandler fmsJsonHandler;
     private final CostExplorerJsonHandler costExplorerJsonHandler;
     private final CurJsonHandler curJsonHandler;
     private final BcmDataExportsJsonHandler bcmDataExportsJsonHandler;
@@ -200,6 +202,7 @@ public class AwsJson11Controller {
                                DaxJsonHandler daxJsonHandler,
                                DirectoryJsonHandler directoryJsonHandler,
                                EcrPublicJsonHandler ecrPublicJsonHandler,
+                               FmsJsonHandler fmsJsonHandler,
                                CostExplorerJsonHandler costExplorerJsonHandler,
                                CurJsonHandler curJsonHandler,
                                BcmDataExportsJsonHandler bcmDataExportsJsonHandler,
@@ -268,6 +271,7 @@ public class AwsJson11Controller {
         this.daxJsonHandler = daxJsonHandler;
         this.directoryJsonHandler = directoryJsonHandler;
         this.ecrPublicJsonHandler = ecrPublicJsonHandler;
+        this.fmsJsonHandler = fmsJsonHandler;
         this.costExplorerJsonHandler = costExplorerJsonHandler;
         this.curJsonHandler = curJsonHandler;
         this.bcmDataExportsJsonHandler = bcmDataExportsJsonHandler;
@@ -382,6 +386,7 @@ public class AwsJson11Controller {
                 case "dax" -> daxJsonHandler.handle(action, request, region);
                 case "ds" -> directoryJsonHandler.handle(action, request, region);
                 case "ecr-public" -> ecrPublicJsonHandler.handle(action, request, region);
+                case "fms" -> fmsJsonHandler.handle(action, request, region);
                 case "ce" -> costExplorerJsonHandler.handle(action, request, region);
                 case "cur" -> curJsonHandler.handle(action, request, region);
                 case "bcm-data-exports" -> bcmDataExportsJsonHandler.handle(action, request, region);

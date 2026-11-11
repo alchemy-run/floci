@@ -875,6 +875,7 @@ public interface EmulatorConfig {
         EcrPublicServiceConfig ecrPublic();
         EmrContainersServiceConfig emrContainers();
         EntityResolutionServiceConfig entityresolution();
+        FmsServiceConfig fms();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -2961,6 +2962,15 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long a cost estimation stays ONGOING. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface FmsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long an organization stays ONBOARDING after its default administrator is designated. */
         @WithDefault("2000")
         long transitionMillis();
     }

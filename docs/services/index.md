@@ -120,6 +120,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [ECR Public](ecrpublic.md) | `POST /` + `X-Amz-Target: SpencerFrontendService.*` (signed `ecr-public`); images stored in the ECR registry | JSON 1.1 | 23 |
 | [EMR on EKS](emrcontainers.md) | `/virtualclusters`, `/jobtemplates`, `/securityconfigurations`, `/tags` (signed `emr-containers`); Spark drivers in Docker in the `docker` runner mode | REST JSON | 25 |
 | [Entity Resolution](entityresolution.md) | `/schemas`, `/matchingworkflows`, `/idnamespaces`, `/idmappingworkflows`, `/policies`, `/tags` (signed `entityresolution`); jobs read Glue tables in S3 | REST JSON | 38 |
+| [Firewall Manager](fms.md) | `POST /` + `X-Amz-Target: AWSFMS_20180101.*` | JSON 1.1 | 42 |
 | [AWS Resource Groups](resource-groups.md) | `/groups`, `/get-group`, `/groups-list`, `/list-group-resources`, `/resources/*` and the other AWS routes | REST JSON | 23 |
 | [Resource Groups Tagging API](resource-groups-tagging.md) | `POST /` + `X-Amz-Target: ResourceGroupsTaggingAPI_20170126.*` | JSON 1.1 | 5 |
 | [Resource Explorer](resource-explorer.md) | `POST /{OperationName}`, rewritten to `/_re2/*` for the four paths S3 Vectors also claims | REST JSON | 32 |

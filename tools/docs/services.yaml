@@ -267,6 +267,10 @@ services:
     doc: docs/services/entityresolution.md
     sources:
       - { path: services/entityresolution/EntityResolutionController.java, mode: switch }
+  - service: fms
+    doc: docs/services/fms.md
+    sources:
+      - { path: services/fms/FmsJsonHandler.java, mode: switch }
   - service: dax
     doc: docs/services/dax.md
     sources:
