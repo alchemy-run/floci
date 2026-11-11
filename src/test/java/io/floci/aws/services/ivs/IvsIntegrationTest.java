@@ -89,6 +89,7 @@ class IvsIntegrationTest {
                 .body("channel.playbackUrl", containsString("/api/video/v1/us-east-1.000000000000.channel."))
                 .body("channel.srt.passphrase", matchesPattern("[A-Za-z0-9]{32}"))
                 .body("streamKey.value", startsWith("sk_us-east-1_"))
+                .body("channel.tags.team", equalTo("video")).body("streamKey.tags.size()", equalTo(0))
                 .extract().path("channel.arn");
         String streamKey = ivs("ListStreamKeys", "{\"channelArn\":\"" + created + "\"}").statusCode(200)
                 .body("streamKeys", hasSize(1)).extract().path("streamKeys[0].arn");

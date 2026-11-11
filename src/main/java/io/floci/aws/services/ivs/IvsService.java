@@ -151,7 +151,7 @@ public class IvsService {
                 .put("passphrase", IvsStore.id(32));
         channel.set("tags", store.tags(input.path("tags"), null));
         store.put(key(region, "channel", id), channel);
-        ObjectNode streamKey = newStreamKey(region, id, input.path("tags"));
+        ObjectNode streamKey = newStreamKey(region, id, null);
         ensureMedia();
         configurePath(streamKey, channel);
         ObjectNode response = store.mapper().createObjectNode();
