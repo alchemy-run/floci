@@ -881,6 +881,8 @@ public interface EmulatorConfig {
         FsxServiceConfig fsx();
 
         GlacierServiceConfig glacier();
+
+        GrafanaServiceConfig grafana();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -2994,6 +2996,44 @@ public interface EmulatorConfig {
          */
         @WithDefault("true")
         boolean existingCustomer();
+    }
+
+    interface GrafanaServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** When true, workspaces become ACTIVE without a backing Grafana container. */
+        @WithDefault("false")
+        boolean mock();
+
+        /** The repository of the Grafana images workspaces run, tagged with the release of their version. */
+        @WithDefault("grafana/grafana")
+        String imageRepository();
+
+        /** Lowest host port a workspace's Grafana (container port 3000) is published on. */
+        @WithDefault("13000")
+        int hostPortBase();
+
+        /** Highest host port a workspace's Grafana is published on. */
+        @WithDefault("13099")
+        int hostPortMax();
+
+        /** Seconds to wait for a started Grafana to answer its health check. */
+        @WithDefault("120")
+        int readinessTimeoutSeconds();
+
+        /** How long a workspace without a Grafana container takes to settle after a change. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /**
+         * The Grafana organization role anonymous visitors to a workspace endpoint get (Viewer, Editor or Admin).
+         * Unset, a workspace's Grafana takes only its credentials.
+         */
+        Optional<String> anonymousRole();
+
+        /** Docker network to attach Grafana containers to. Empty uses the default network. */
+        Optional<String> dockerNetwork();
     }
 
     interface GlacierServiceConfig {

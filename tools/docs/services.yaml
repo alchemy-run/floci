@@ -279,6 +279,10 @@ services:
     doc: docs/services/fsx.md
     sources:
       - { path: services/fsx/FsxJsonHandler.java, mode: switch }
+  - service: grafana
+    doc: docs/services/grafana.md
+    sources:
+      - { path: services/grafana/GrafanaController.java, mode: rest }
   - service: glacier
     doc: docs/services/glacier.md
     sources:

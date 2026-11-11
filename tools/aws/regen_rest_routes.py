@@ -61,6 +61,7 @@ MODELS: dict[str, str] = {
     "emr-containers": "emr-containers",
     "entityresolution": "entityresolution",
     "glacier": "glacier",
+    "grafana": "grafana",
     "dsql": "dsql",
     "eks": "eks",
     "es": "es",
@@ -96,6 +97,7 @@ INTERNAL_ROUTES: dict[str, tuple[str, bool]] = {
     "emr-containers": ("/_emrcontainers", False),
     "entityresolution": ("/_entityresolution", False),
     "glacier": ("/_glacier", False),
+    "grafana": ("/_grafana", False),
 }
 
 

@@ -1023,6 +1023,8 @@ floci:
       enabled: true
     forecast:
       enabled: true
+    grafana:
+      enabled: true
     glacier:
       enabled: true
     fms:

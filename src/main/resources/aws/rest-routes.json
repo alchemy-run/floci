@@ -1059,6 +1059,38 @@
         "UploadMultipartPart": {"method": "PUT", "requestUri": "/_glacier/{accountId}/vaults/{vaultName}/multipart-uploads/{uploadId}"}
       }
     },
+    "grafana": {
+      "credentialScope": "grafana",
+      "apiVersion": "2020-08-18",
+      "accessDeniedStatus": 403,
+      "operations": {
+        "AssociateLicense": {"method": "POST", "requestUri": "/_grafana/workspaces/{workspaceId}/licenses/{licenseType}"},
+        "CreateWorkspace": {"method": "POST", "requestUri": "/_grafana/workspaces"},
+        "CreateWorkspaceApiKey": {"method": "POST", "requestUri": "/_grafana/workspaces/{workspaceId}/apikeys"},
+        "CreateWorkspaceServiceAccount": {"method": "POST", "requestUri": "/_grafana/workspaces/{workspaceId}/serviceaccounts"},
+        "CreateWorkspaceServiceAccountToken": {"method": "POST", "requestUri": "/_grafana/workspaces/{workspaceId}/serviceaccounts/{serviceAccountId}/tokens"},
+        "DeleteWorkspace": {"method": "DELETE", "requestUri": "/_grafana/workspaces/{workspaceId}"},
+        "DeleteWorkspaceApiKey": {"method": "DELETE", "requestUri": "/_grafana/workspaces/{workspaceId}/apikeys/{keyName}"},
+        "DeleteWorkspaceServiceAccount": {"method": "DELETE", "requestUri": "/_grafana/workspaces/{workspaceId}/serviceaccounts/{serviceAccountId}"},
+        "DeleteWorkspaceServiceAccountToken": {"method": "DELETE", "requestUri": "/_grafana/workspaces/{workspaceId}/serviceaccounts/{serviceAccountId}/tokens/{tokenId}"},
+        "DescribeWorkspace": {"method": "GET", "requestUri": "/_grafana/workspaces/{workspaceId}"},
+        "DescribeWorkspaceAuthentication": {"method": "GET", "requestUri": "/_grafana/workspaces/{workspaceId}/authentication"},
+        "DescribeWorkspaceConfiguration": {"method": "GET", "requestUri": "/_grafana/workspaces/{workspaceId}/configuration"},
+        "DisassociateLicense": {"method": "DELETE", "requestUri": "/_grafana/workspaces/{workspaceId}/licenses/{licenseType}"},
+        "ListPermissions": {"method": "GET", "requestUri": "/_grafana/workspaces/{workspaceId}/permissions"},
+        "ListTagsForResource": {"method": "GET", "requestUri": "/_grafana/tags/{resourceArn}"},
+        "ListVersions": {"method": "GET", "requestUri": "/_grafana/versions"},
+        "ListWorkspaceServiceAccountTokens": {"method": "GET", "requestUri": "/_grafana/workspaces/{workspaceId}/serviceaccounts/{serviceAccountId}/tokens"},
+        "ListWorkspaceServiceAccounts": {"method": "GET", "requestUri": "/_grafana/workspaces/{workspaceId}/serviceaccounts"},
+        "ListWorkspaces": {"method": "GET", "requestUri": "/_grafana/workspaces"},
+        "TagResource": {"method": "POST", "requestUri": "/_grafana/tags/{resourceArn}"},
+        "UntagResource": {"method": "DELETE", "requestUri": "/_grafana/tags/{resourceArn}"},
+        "UpdatePermissions": {"method": "PATCH", "requestUri": "/_grafana/workspaces/{workspaceId}/permissions"},
+        "UpdateWorkspace": {"method": "PUT", "requestUri": "/_grafana/workspaces/{workspaceId}"},
+        "UpdateWorkspaceAuthentication": {"method": "POST", "requestUri": "/_grafana/workspaces/{workspaceId}/authentication"},
+        "UpdateWorkspaceConfiguration": {"method": "PUT", "requestUri": "/_grafana/workspaces/{workspaceId}/configuration"}
+      }
+    },
     "lambda": {
       "credentialScope": "lambda",
       "apiVersion": "2015-03-31",

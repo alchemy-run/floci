@@ -25,6 +25,7 @@ import io.floci.aws.services.elasticache.proxy.ElastiCacheProxyManager;
 import io.floci.aws.services.elb.ElbClassicService;
 import io.floci.aws.services.elbv2.ElbV2Service;
 import io.floci.aws.services.floci.ui.FlociUiManager;
+import io.floci.aws.services.grafana.GrafanaService;
 import io.floci.aws.services.iam.IamService;
 import io.floci.aws.services.kinesisanalytics.container.FlinkContainerManager;
 import io.floci.aws.services.lambda.DynamoDbStreamsEventSourcePoller;
@@ -101,6 +102,7 @@ public class EmulatorLifecycle {
     private final FlinkContainerManager flinkContainerManager;
     private final RdsService rdsService;
     private final TimestreamInfluxDbService timestreamInfluxDbService;
+    private final GrafanaService grafanaService;
     private final ElbV2Service elbV2Service;
     private final EcsService ecsService;
     private final ElbClassicService elbClassicService;
@@ -146,6 +148,7 @@ public class EmulatorLifecycle {
                              FlinkContainerManager flinkContainerManager,
                              RdsService rdsService,
                              TimestreamInfluxDbService timestreamInfluxDbService,
+                             GrafanaService grafanaService,
                              ElbV2Service elbV2Service,
                              ElbClassicService elbClassicService,
                              EcsService ecsService,
@@ -188,6 +191,7 @@ public class EmulatorLifecycle {
         this.flinkContainerManager = flinkContainerManager;
         this.rdsService = rdsService;
         this.timestreamInfluxDbService = timestreamInfluxDbService;
+        this.grafanaService = grafanaService;
         this.elbV2Service = elbV2Service;
         this.elbClassicService = elbClassicService;
         this.ecsService = ecsService;
@@ -267,6 +271,9 @@ public class EmulatorLifecycle {
         rdsService.restorePersistedRuntime();
         if (config.services().timestreamInfluxdb().enabled()) {
             timestreamInfluxDbService.restorePersistedRuntime();
+        }
+        if (config.services().grafana().enabled()) {
+            grafanaService.restorePersistedRuntime();
         }
         if (config.services().elasticache().enabled()) {
             elastiCacheService.restorePersistedRuntime().exceptionally(ex -> {
