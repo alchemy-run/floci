@@ -57,6 +57,7 @@ MODELS: dict[str, str] = {
     "datazone": "datazone",
     "deadline": "deadline",
     "devops-guru": "devops-guru",
+    "docdb-elastic": "docdb-elastic",
     "dsql": "dsql",
     "eks": "eks",
     "es": "es",
@@ -88,6 +89,7 @@ INTERNAL_ROUTES: dict[str, tuple[str, bool]] = {
     "datazone": ("/_datazone", False),
     "deadline": ("/_deadline", False),
     "devops-guru": ("/_devopsguru", False),
+    "docdb-elastic": ("/_docdbelastic", False),
 }
 
 

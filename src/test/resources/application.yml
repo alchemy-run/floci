@@ -508,6 +508,9 @@ floci:
     devopsguru:
       enabled: true
       transition-millis: 0
+    docdb-elastic:
+      enabled: true
+      transition-millis: 0
     ds:
       enabled: true
       transition-millis: 0

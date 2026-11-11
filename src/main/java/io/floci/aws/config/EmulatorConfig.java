@@ -871,6 +871,7 @@ public interface EmulatorConfig {
         DataZoneServiceConfig datazone();
         DeadlineServiceConfig deadline();
         DevOpsGuruServiceConfig devopsguru();
+        DocDbElasticServiceConfig docdbElastic();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -2957,6 +2958,15 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long a cost estimation stays ONGOING. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface DocDbElasticServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a cluster or snapshot stays creating, updating, stopping, starting or deleting. */
         @WithDefault("2000")
         long transitionMillis();
     }

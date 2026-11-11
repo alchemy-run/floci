@@ -1,0 +1,343 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_docdbelastic_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "ApplyPendingMaintenanceAction": "ApplyPendingMaintenanceActionInput",
+    "CopyClusterSnapshot": "CopyClusterSnapshotInput",
+    "CreateCluster": "CreateClusterInput",
+    "CreateClusterSnapshot": "CreateClusterSnapshotInput",
+    "DeleteCluster": "DeleteClusterInput",
+    "DeleteClusterSnapshot": "DeleteClusterSnapshotInput",
+    "GetCluster": "GetClusterInput",
+    "GetClusterSnapshot": "GetClusterSnapshotInput",
+    "GetPendingMaintenanceAction": "GetPendingMaintenanceActionInput",
+    "ListClusterSnapshots": "ListClusterSnapshotsInput",
+    "ListClusters": "ListClustersInput",
+    "ListPendingMaintenanceActions": "ListPendingMaintenanceActionsInput",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "RestoreClusterFromSnapshot": "RestoreClusterFromSnapshotInput",
+    "StartCluster": "StartClusterInput",
+    "StopCluster": "StopClusterInput",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateCluster": "UpdateClusterInput"
+  },
+  "shapes": {
+    "ApplyPendingMaintenanceActionInput": {
+      "type": "structure",
+      "required": [
+        "applyAction",
+        "optInType",
+        "resourceArn"
+      ],
+      "members": {
+        "applyAction": "InputString",
+        "applyOn": "InputString",
+        "optInType": "OptInType",
+        "resourceArn": "InputString"
+      }
+    },
+    "Arn": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "Auth": {
+      "type": "string",
+      "enum": [
+        "PLAIN_TEXT",
+        "SECRET_ARN"
+      ]
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CopyClusterSnapshotInput": {
+      "type": "structure",
+      "required": [
+        "snapshotArn",
+        "targetSnapshotName"
+      ],
+      "members": {
+        "copyTags": "Boolean",
+        "kmsKeyId": "String",
+        "snapshotArn": "String",
+        "tags": "TagMap",
+        "targetSnapshotName": "CopyClusterSnapshotInputTargetSnapshotNameString"
+      }
+    },
+    "CopyClusterSnapshotInputTargetSnapshotNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 63
+    },
+    "CreateClusterInput": {
+      "type": "structure",
+      "required": [
+        "adminUserName",
+        "adminUserPassword",
+        "authType",
+        "clusterName",
+        "shardCapacity",
+        "shardCount"
+      ],
+      "members": {
+        "adminUserName": "String",
+        "adminUserPassword": "Password",
+        "authType": "Auth",
+        "backupRetentionPeriod": "Integer",
+        "clientToken": "String",
+        "clusterName": "String",
+        "kmsKeyId": "String",
+        "preferredBackupWindow": "String",
+        "preferredMaintenanceWindow": "String",
+        "shardCapacity": "Integer",
+        "shardCount": "Integer",
+        "shardInstanceCount": "Integer",
+        "subnetIds": "StringList",
+        "tags": "TagMap",
+        "vpcSecurityGroupIds": "StringList"
+      }
+    },
+    "CreateClusterSnapshotInput": {
+      "type": "structure",
+      "required": [
+        "clusterArn",
+        "snapshotName"
+      ],
+      "members": {
+        "clusterArn": "String",
+        "snapshotName": "CreateClusterSnapshotInputSnapshotNameString",
+        "tags": "TagMap"
+      }
+    },
+    "CreateClusterSnapshotInputSnapshotNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 63
+    },
+    "DeleteClusterInput": {
+      "type": "structure",
+      "required": [
+        "clusterArn"
+      ],
+      "members": {
+        "clusterArn": "String"
+      }
+    },
+    "DeleteClusterSnapshotInput": {
+      "type": "structure",
+      "required": [
+        "snapshotArn"
+      ],
+      "members": {
+        "snapshotArn": "String"
+      }
+    },
+    "GetClusterInput": {
+      "type": "structure",
+      "required": [
+        "clusterArn"
+      ],
+      "members": {
+        "clusterArn": "String"
+      }
+    },
+    "GetClusterSnapshotInput": {
+      "type": "structure",
+      "required": [
+        "snapshotArn"
+      ],
+      "members": {
+        "snapshotArn": "String"
+      }
+    },
+    "GetPendingMaintenanceActionInput": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "InputString"
+      }
+    },
+    "InputString": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "ListClusterSnapshotsInput": {
+      "type": "structure",
+      "members": {
+        "clusterArn": "String",
+        "maxResults": "ListClusterSnapshotsInputMaxResultsInteger",
+        "nextToken": "PaginationToken",
+        "snapshotType": "String"
+      }
+    },
+    "ListClusterSnapshotsInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 20,
+      "max": 100
+    },
+    "ListClustersInput": {
+      "type": "structure",
+      "members": {
+        "maxResults": "ListClustersInputMaxResultsInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListClustersInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListPendingMaintenanceActionsInput": {
+      "type": "structure",
+      "members": {
+        "maxResults": "ListPendingMaintenanceActionsInputMaxResultsInteger",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListPendingMaintenanceActionsInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "Arn"
+      }
+    },
+    "OptInType": {
+      "type": "string",
+      "enum": [
+        "IMMEDIATE",
+        "NEXT_MAINTENANCE",
+        "APPLY_ON",
+        "UNDO_OPT_IN"
+      ]
+    },
+    "PaginationToken": {
+      "type": "string"
+    },
+    "Password": {
+      "type": "string"
+    },
+    "RestoreClusterFromSnapshotInput": {
+      "type": "structure",
+      "required": [
+        "clusterName",
+        "snapshotArn"
+      ],
+      "members": {
+        "clusterName": "String",
+        "kmsKeyId": "String",
+        "shardCapacity": "Integer",
+        "shardInstanceCount": "Integer",
+        "snapshotArn": "String",
+        "subnetIds": "StringList",
+        "tags": "TagMap",
+        "vpcSecurityGroupIds": "StringList"
+      }
+    },
+    "StartClusterInput": {
+      "type": "structure",
+      "required": [
+        "clusterArn"
+      ],
+      "members": {
+        "clusterArn": "String"
+      }
+    },
+    "StopClusterInput": {
+      "type": "structure",
+      "required": [
+        "clusterArn"
+      ],
+      "members": {
+        "clusterArn": "String"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringList": {
+      "type": "list",
+      "member": "String"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^(?!aws:)[a-zA-Z+-=._:/]+$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateClusterInput": {
+      "type": "structure",
+      "required": [
+        "clusterArn"
+      ],
+      "members": {
+        "adminUserPassword": "Password",
+        "authType": "Auth",
+        "backupRetentionPeriod": "Integer",
+        "clientToken": "String",
+        "clusterArn": "String",
+        "preferredBackupWindow": "String",
+        "preferredMaintenanceWindow": "String",
+        "shardCapacity": "Integer",
+        "shardCount": "Integer",
+        "shardInstanceCount": "Integer",
+        "subnetIds": "StringList",
+        "vpcSecurityGroupIds": "StringList"
+      }
+    }
+  }
+}

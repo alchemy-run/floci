@@ -1019,6 +1019,8 @@ floci:
       enabled: true
     devopsguru:
       enabled: true
+    docdb-elastic:
+      enabled: true
     ds:
       enabled: true
     dax:

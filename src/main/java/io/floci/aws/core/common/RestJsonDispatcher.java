@@ -52,8 +52,8 @@ public final class RestJsonDispatcher {
     /** A matched request: the operation and its assembled input. */
     public record Call(String operation, ObjectNode input) {}
 
-    private record Route(String operation, JsonNode binding, Pattern pattern, Pattern lenient, List<String> labels,
-                         List<String> queryLiterals, int[] ranks) {}
+    private record Route(String operation, JsonNode binding, Pattern pattern, Pattern lenient, Pattern spanning,
+                         List<String> labels, List<String> queryLiterals, int[] ranks) {}
 
     private static final Pattern PATH_TOKEN = Pattern.compile("\\[]|\\{}|[^.\\[{]+");
     private static final Pattern LABEL = Pattern.compile("\\{([^}+]+)(\\+?)}");
@@ -114,13 +114,16 @@ public final class RestJsonDispatcher {
             ranks[index - 1] = !hasLabel ? 3 : greedy ? 0 : wholeLabel ? 1 : 2;
         }
         regex.append("/?$");
-        // Some clients leave a '/' in a final label unencoded (an ARN such as domain/dzd_1): a second pass
-        // lets the last label span segments.
+        // Some clients leave a '/' in a final label unencoded (an ARN such as domain/dzd_1), and the server
+        // decodes an encoded one: a second pass lets the last label span segments, and a third any label (an ARN
+        // in /cluster/{clusterArn}/start).
         String strict = regex.toString();
         int last = strict.lastIndexOf("([^/]+)");
         Pattern lenient = last >= 0 && strict.endsWith("([^/]+)/?$")
                 ? Pattern.compile(strict.substring(0, last) + "(.+?)/?$") : null;
-        return new Route(operation, binding, Pattern.compile(strict), lenient, labels, queryLiterals, ranks);
+        Pattern spanning = strict.contains("([^/]+)") ? Pattern.compile(strict.replace("([^/]+)", "(.+?)")) : null;
+        return new Route(operation, binding, Pattern.compile(strict), lenient, spanning, labels, queryLiterals,
+                ranks);
     }
 
     private static void quote(StringBuilder regex, String literal) {
@@ -141,9 +144,9 @@ public final class RestJsonDispatcher {
     /** The operation and input a request is, or empty when no route matches it. */
     public Optional<Call> match(String method, String rawPath, MultivaluedMap<String, String> query,
                                           HttpHeaders headers, byte[] body) {
-        for (boolean lenient : new boolean[] {false, true}) {
+        for (int pass = 0; pass < 3; pass++) {
             for (Route route : routes) {
-                Pattern pattern = lenient ? route.lenient() : route.pattern();
+                Pattern pattern = pass == 0 ? route.pattern() : pass == 1 ? route.lenient() : route.spanning();
                 if (pattern == null || !route.binding().path("method").asText().equalsIgnoreCase(method)) {
                     continue;
                 }

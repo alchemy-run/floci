@@ -760,6 +760,32 @@
         "UpdateServiceIntegration": {"method": "PUT", "requestUri": "/_devopsguru/service-integrations"}
       }
     },
+    "docdb-elastic": {
+      "credentialScope": "docdb-elastic",
+      "apiVersion": "2022-11-28",
+      "accessDeniedStatus": 403,
+      "operations": {
+        "ApplyPendingMaintenanceAction": {"method": "POST", "requestUri": "/_docdbelastic/pending-action"},
+        "CopyClusterSnapshot": {"method": "POST", "requestUri": "/_docdbelastic/cluster-snapshot/{snapshotArn}/copy"},
+        "CreateCluster": {"method": "POST", "requestUri": "/_docdbelastic/cluster"},
+        "CreateClusterSnapshot": {"method": "POST", "requestUri": "/_docdbelastic/cluster-snapshot"},
+        "DeleteCluster": {"method": "DELETE", "requestUri": "/_docdbelastic/cluster/{clusterArn}"},
+        "DeleteClusterSnapshot": {"method": "DELETE", "requestUri": "/_docdbelastic/cluster-snapshot/{snapshotArn}"},
+        "GetCluster": {"method": "GET", "requestUri": "/_docdbelastic/cluster/{clusterArn}"},
+        "GetClusterSnapshot": {"method": "GET", "requestUri": "/_docdbelastic/cluster-snapshot/{snapshotArn}"},
+        "GetPendingMaintenanceAction": {"method": "GET", "requestUri": "/_docdbelastic/pending-action/{resourceArn}"},
+        "ListClusterSnapshots": {"method": "GET", "requestUri": "/_docdbelastic/cluster-snapshots"},
+        "ListClusters": {"method": "GET", "requestUri": "/_docdbelastic/clusters"},
+        "ListPendingMaintenanceActions": {"method": "GET", "requestUri": "/_docdbelastic/pending-actions"},
+        "ListTagsForResource": {"method": "GET", "requestUri": "/_docdbelastic/tags/{resourceArn}"},
+        "RestoreClusterFromSnapshot": {"method": "POST", "requestUri": "/_docdbelastic/cluster-snapshot/{snapshotArn}/restore"},
+        "StartCluster": {"method": "POST", "requestUri": "/_docdbelastic/cluster/{clusterArn}/start"},
+        "StopCluster": {"method": "POST", "requestUri": "/_docdbelastic/cluster/{clusterArn}/stop"},
+        "TagResource": {"method": "POST", "requestUri": "/_docdbelastic/tags/{resourceArn}"},
+        "UntagResource": {"method": "DELETE", "requestUri": "/_docdbelastic/tags/{resourceArn}"},
+        "UpdateCluster": {"method": "PUT", "requestUri": "/_docdbelastic/cluster/{clusterArn}"}
+      }
+    },
     "dsql": {
       "credentialScope": "dsql",
       "apiVersion": "2018-05-10",

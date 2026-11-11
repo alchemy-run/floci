@@ -62,6 +62,18 @@ class RestJsonDispatcherTest {
     }
 
     @Test
+    void aLabelBeforeALiteralMaySpanADecodedSlash() {
+        RestJsonDispatcher elastic = new RestJsonDispatcher(mapper, "docdbelastic");
+        String arn = "arn:aws:docdb-elastic:us-east-1:000000000000:cluster/00000000-0000-0000-0000-000000000000";
+        RestJsonDispatcher.Call start = elastic.match("POST", "/cluster/" + arn + "/start", null, null, null)
+                .orElseThrow();
+        assertEquals("StartCluster", start.operation());
+        assertEquals(arn, start.input().get("clusterArn").asText());
+        assertEquals("GetCluster", elastic.match("GET", "/cluster/" + arn, null, null, null).orElseThrow()
+                .operation());
+    }
+
+    @Test
     void idempotencyTokensAreFilledAndBlobPayloadsEncoded() {
         RestJsonDispatcher.Call asset = match("POST", "/v2/domains/dzd_1/assets", null, "{\"name\":\"a\"}");
         assertTrue(asset.input().hasNonNull("clientToken"));

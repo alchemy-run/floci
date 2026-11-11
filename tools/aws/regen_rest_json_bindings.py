@@ -29,6 +29,7 @@ MODELS = {
     "datazone": "datazone",
     "deadline": "deadline",
     "devops-guru": "devopsguru",
+    "docdb-elastic": "docdbelastic",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

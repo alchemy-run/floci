@@ -247,6 +247,10 @@ services:
     doc: docs/services/devopsguru.md
     sources:
       - { path: services/devopsguru/DevOpsGuruController.java, mode: switch }
+  - service: docdbelastic
+    doc: docs/services/docdbelastic.md
+    sources:
+      - { path: services/docdbelastic/DocDbElasticController.java, mode: switch }
   - service: ds
     doc: docs/services/ds.md
     sources:
