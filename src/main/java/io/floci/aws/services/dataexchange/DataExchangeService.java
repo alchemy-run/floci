@@ -770,14 +770,16 @@ public class DataExchangeService implements Resettable {
     // ---------------------------------------------------------------- tags
 
     public synchronized ObjectNode listTags(String resourceArn) {
+        // The tagging operations name the member "tags" on the wire, unlike every other operation's "Tags".
         ObjectNode response = mapper.createObjectNode();
-        response.set("Tags", locate(resourceArn).resource().path("Tags").deepCopy());
+        response.set("tags", locate(resourceArn).resource().path("Tags").deepCopy());
         return response;
     }
 
     public synchronized void tagResource(String resourceArn, JsonNode request) {
         Located located = locate(resourceArn);
-        ((ObjectNode) located.resource().get("Tags")).setAll(tags(request.path("Tags")));
+        JsonNode input = request.has("tags") ? request.path("tags") : request.path("Tags");
+        ((ObjectNode) located.resource().get("Tags")).setAll(tags(input));
         located.save().run();
     }
 

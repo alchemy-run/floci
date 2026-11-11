@@ -147,11 +147,11 @@ class DataExchangeIntegrationTest {
 
         String arn = dx(PROVIDER).get("/v1/data-sets/" + dataSetId).then().extract().path("Arn");
         String encoded = URLEncoder.encode(arn, StandardCharsets.UTF_8);
-        dx(PROVIDER).urlEncodingEnabled(false).body("{\"Tags\":{\"env\":\"test\"}}").post("/tags/" + encoded).then()
+        dx(PROVIDER).urlEncodingEnabled(false).body("{\"tags\":{\"env\":\"test\"}}").post("/tags/" + encoded).then()
                 .statusCode(204);
         dx(PROVIDER).urlEncodingEnabled(false).delete("/tags/" + encoded + "?tagKeys=team").then().statusCode(204);
         dx(PROVIDER).urlEncodingEnabled(false).get("/tags/" + encoded).then().statusCode(200)
-                .body("Tags.env", equalTo("test")).body("Tags.team", equalTo(null));
+                .body("tags.env", equalTo("test")).body("tags.team", equalTo(null));
 
         dx(PROVIDER).delete("/v1/data-sets/" + dataSetId).then().statusCode(204);
         dx(PROVIDER).get("/v1/data-sets/" + dataSetId).then().statusCode(404)
