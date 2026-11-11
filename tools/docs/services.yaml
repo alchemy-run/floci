@@ -279,6 +279,13 @@ services:
     doc: docs/services/fsx.md
     sources:
       - { path: services/fsx/FsxJsonHandler.java, mode: switch }
+  - service: glacier
+    doc: docs/services/glacier.md
+    sources:
+      - { path: services/glacier/GlacierController.java, mode: rest }
+      - { path: services/glacier/GlacierController.java, mode: switch }
+    exclude_actions:
+      - VaultTags
   - service: dax
     doc: docs/services/dax.md
     sources:

@@ -879,6 +879,8 @@ public interface EmulatorConfig {
 
         ForecastServiceConfig forecast();
         FsxServiceConfig fsx();
+
+        GlacierServiceConfig glacier();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -2989,6 +2991,26 @@ public interface EmulatorConfig {
         /**
          * Whether the account is an existing Amazon Forecast customer. Forecast is closed to new customers; with
          * false, every create is refused as AWS refuses a new customer.
+         */
+        @WithDefault("true")
+        boolean existingCustomer();
+    }
+
+    interface GlacierServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a job takes to finish, whatever its tier. */
+        @WithDefault("2000")
+        long jobMillis();
+
+        /** How long after a vault's archives last change its inventory is taken. */
+        @WithDefault("0")
+        long inventoryMillis();
+
+        /**
+         * Whether the account is an existing Amazon Glacier customer. The vault API is closed to new accounts;
+         * with false, every call is refused as AWS refuses a new account.
          */
         @WithDefault("true")
         boolean existingCustomer();

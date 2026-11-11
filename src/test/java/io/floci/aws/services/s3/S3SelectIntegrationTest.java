@@ -156,6 +156,15 @@ class S3SelectIntegrationTest {
     }
 
     @Test
+    void select_projectionNamesTheTableAlias() {
+        String bucket = "select-bucket-alias";
+        createBucketAndPut(bucket, "data.csv", "name,age,city\nAlice,30,New York\nBob,25,London");
+        select(bucket, "data.csv", "SELECT s.name FROM S3Object s WHERE s.city = 'London'", CSV_USE, CSV_OUT)
+                .body(containsString("Bob"))
+                .body(not(containsString("Alice")));
+    }
+
+    @Test
     void select_withLimit() {
         String bucket = "select-bucket-limit";
         createBucketAndPut(bucket, "data.csv", "name,age\nAlice,30\nBob,25\nCharlie,35");

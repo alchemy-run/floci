@@ -60,6 +60,7 @@ MODELS: dict[str, str] = {
     "docdb-elastic": "docdb-elastic",
     "emr-containers": "emr-containers",
     "entityresolution": "entityresolution",
+    "glacier": "glacier",
     "dsql": "dsql",
     "eks": "eks",
     "es": "es",
@@ -94,6 +95,7 @@ INTERNAL_ROUTES: dict[str, tuple[str, bool]] = {
     "docdb-elastic": ("/_docdbelastic", False),
     "emr-containers": ("/_emrcontainers", False),
     "entityresolution": ("/_entityresolution", False),
+    "glacier": ("/_glacier", False),
 }
 
 

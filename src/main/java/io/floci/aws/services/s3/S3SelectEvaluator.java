@@ -290,8 +290,13 @@ class S3SelectEvaluator {
                 throw unsupportedWhereExpression(processed);
             }
         }
+        // A column may name the table's alias as WHERE does: SELECT s.name FROM S3Object s.
+        String aliasPrefix = alias == null ? null : alias.toLowerCase(Locale.ROOT) + ".";
         String[] columns = "*".equals(projection) ? null
-                : Arrays.stream(projection.split(",")).map(String::trim).toArray(String[]::new);
+                : Arrays.stream(projection.split(",")).map(String::trim)
+                .map(column -> aliasPrefix != null && column.toLowerCase(Locale.ROOT).startsWith(aliasPrefix)
+                        ? column.substring(aliasPrefix.length()) : column)
+                .toArray(String[]::new);
         return new Query(columns, where, limitStr != null ? Integer.parseInt(limitStr) : null);
     }
 
