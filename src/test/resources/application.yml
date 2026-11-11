@@ -508,6 +508,9 @@ floci:
     devopsguru:
       enabled: true
       transition-millis: 0
+    fsx:
+      enabled: true
+      transition-millis: 0
     fms:
       enabled: true
       transition-millis: 0

@@ -271,6 +271,10 @@ services:
     doc: docs/services/fms.md
     sources:
       - { path: services/fms/FmsJsonHandler.java, mode: switch }
+  - service: fsx
+    doc: docs/services/fsx.md
+    sources:
+      - { path: services/fsx/FsxJsonHandler.java, mode: switch }
   - service: dax
     doc: docs/services/dax.md
     sources:

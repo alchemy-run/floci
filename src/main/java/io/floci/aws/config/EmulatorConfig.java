@@ -876,6 +876,7 @@ public interface EmulatorConfig {
         EmrContainersServiceConfig emrContainers();
         EntityResolutionServiceConfig entityresolution();
         FmsServiceConfig fms();
+        FsxServiceConfig fsx();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -2962,6 +2963,15 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long a cost estimation stays ONGOING. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface FsxServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
     }

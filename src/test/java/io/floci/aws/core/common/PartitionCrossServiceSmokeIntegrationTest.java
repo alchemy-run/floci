@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "fsx", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1493,6 +1493,16 @@ class PartitionCrossServiceSmokeIntegrationTest {
         String type = signed(region, "fms").header("X-Amz-Target", "AWSFMS_20180101.GetAdminAccount")
                 .contentType(JSON_1_1).body("{}").post("/").then().statusCode(400).extract().path("__type");
         assertTrue(type.contains("ResourceNotFoundException"), type);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void fsxMissingFileSystem(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "fsx");
+        String type = signed(region, "fsx").header("X-Amz-Target", "AWSSimbaAPIService_v20180301.DescribeFileSystems")
+                .contentType(JSON_1_1).body("{\"FileSystemIds\":[\"fs-00000000000000000\"]}").post("/").then()
+                .statusCode(400).extract().path("__type");
+        assertTrue(type.contains("FileSystemNotFound"), type);
     }
 
     @ParameterizedTest
