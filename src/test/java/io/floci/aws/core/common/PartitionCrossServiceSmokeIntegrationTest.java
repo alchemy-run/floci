@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1425,6 +1425,16 @@ class PartitionCrossServiceSmokeIntegrationTest {
                 .put("/channels").then().statusCode(200).extract().path("Id");
         cleanup.register(() -> signed(region, "devops-guru").delete("/channels/" + id));
         PartitionMatrix.assertArnIn(partitionCase, topic);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void directoryServiceAccessUrl(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "ds");
+        String limit = signed(region, "ds").header("X-Amz-Target", "DirectoryService_20150416.GetDirectoryLimits")
+                .contentType(JSON_1_1).body("{}").post("/").then().statusCode(200).extract()
+                .path("DirectoryLimits.CloudOnlyMicrosoftADLimit").toString();
+        assertEquals("20", limit);
     }
 
     @ParameterizedTest

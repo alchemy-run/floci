@@ -508,6 +508,9 @@ floci:
     devopsguru:
       enabled: true
       transition-millis: 0
+    ds:
+      enabled: true
+      transition-millis: 0
     dax:
       enabled: true
       transition-millis: 0

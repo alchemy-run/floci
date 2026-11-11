@@ -871,6 +871,7 @@ public interface EmulatorConfig {
         DataZoneServiceConfig datazone();
         DeadlineServiceConfig deadline();
         DevOpsGuruServiceConfig devopsguru();
+        DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2958,6 +2959,19 @@ public interface EmulatorConfig {
         /** How long a cost estimation stays ONGOING. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface DirectoryServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a directory, trust, snapshot or update stays in its transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** Whether accounts may still create Simple AD directories; AWS closed it to new customers. */
+        @WithDefault("false")
+        boolean simpleAdOpen();
     }
 
     interface DaxServiceConfig {

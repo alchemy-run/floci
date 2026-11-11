@@ -30,6 +30,7 @@ import io.floci.aws.services.configservice.ConfigServiceJsonHandler;
 import io.floci.aws.services.cur.CurJsonHandler;
 import io.floci.aws.services.datasync.DataSyncJsonHandler;
 import io.floci.aws.services.dax.DaxJsonHandler;
+import io.floci.aws.services.directoryservice.DirectoryJsonHandler;
 import io.floci.aws.services.dms.DmsJsonHandler;
 import io.floci.aws.services.ecr.EcrJsonHandler;
 import io.floci.aws.services.ecs.EcsJsonHandler;
@@ -132,6 +133,7 @@ public class AwsJson11Controller {
     private final TranslateJsonHandler translateJsonHandler;
     private final BdaRuntimeJsonHandler bdaRuntimeJsonHandler;
     private final DaxJsonHandler daxJsonHandler;
+    private final DirectoryJsonHandler directoryJsonHandler;
     private final CostExplorerJsonHandler costExplorerJsonHandler;
     private final CurJsonHandler curJsonHandler;
     private final BcmDataExportsJsonHandler bcmDataExportsJsonHandler;
@@ -194,6 +196,7 @@ public class AwsJson11Controller {
                                TranslateJsonHandler translateJsonHandler,
                                BdaRuntimeJsonHandler bdaRuntimeJsonHandler,
                                DaxJsonHandler daxJsonHandler,
+                               DirectoryJsonHandler directoryJsonHandler,
                                CostExplorerJsonHandler costExplorerJsonHandler,
                                CurJsonHandler curJsonHandler,
                                BcmDataExportsJsonHandler bcmDataExportsJsonHandler,
@@ -260,6 +263,7 @@ public class AwsJson11Controller {
         this.translateJsonHandler = translateJsonHandler;
         this.bdaRuntimeJsonHandler = bdaRuntimeJsonHandler;
         this.daxJsonHandler = daxJsonHandler;
+        this.directoryJsonHandler = directoryJsonHandler;
         this.costExplorerJsonHandler = costExplorerJsonHandler;
         this.curJsonHandler = curJsonHandler;
         this.bcmDataExportsJsonHandler = bcmDataExportsJsonHandler;
@@ -372,6 +376,7 @@ public class AwsJson11Controller {
                 case "translate" -> translateJsonHandler.handle(action, request, region);
                 case "bedrock-data-automation-runtime" -> bdaRuntimeJsonHandler.handle(action, request, region);
                 case "dax" -> daxJsonHandler.handle(action, request, region);
+                case "ds" -> directoryJsonHandler.handle(action, request, region);
                 case "ce" -> costExplorerJsonHandler.handle(action, request, region);
                 case "cur" -> curJsonHandler.handle(action, request, region);
                 case "bcm-data-exports" -> bcmDataExportsJsonHandler.handle(action, request, region);

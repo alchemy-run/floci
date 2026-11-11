@@ -247,6 +247,10 @@ services:
     doc: docs/services/devopsguru.md
     sources:
       - { path: services/devopsguru/DevOpsGuruController.java, mode: switch }
+  - service: ds
+    doc: docs/services/ds.md
+    sources:
+      - { path: services/directoryservice/DirectoryJsonHandler.java, mode: switch }
   - service: dax
     doc: docs/services/dax.md
     sources:
