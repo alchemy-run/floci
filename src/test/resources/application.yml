@@ -514,6 +514,10 @@ floci:
     forecast:
       enabled: true
       transition-millis: 0
+    healthlake:
+      enabled: true
+      mock: true
+      transition-millis: 0
     greengrassv2:
       enabled: true
       transition-millis: 0

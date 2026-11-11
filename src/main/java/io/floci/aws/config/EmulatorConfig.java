@@ -885,6 +885,8 @@ public interface EmulatorConfig {
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
+
+        HealthLakeServiceConfig healthlake();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -2998,6 +3000,38 @@ public interface EmulatorConfig {
          */
         @WithDefault("true")
         boolean existingCustomer();
+    }
+
+    interface HealthLakeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** When true, data stores keep their resources in floci, without a backing FHIR server container. */
+        @WithDefault("false")
+        boolean mock();
+
+        /** The HAPI FHIR R4 image a data store's FHIR server runs. */
+        @WithDefault("hapiproject/hapi:v8.12.0-2")
+        String image();
+
+        /** Lowest host port a data store's FHIR server (container port 8080) is published on. */
+        @WithDefault("13100")
+        int hostPortBase();
+
+        /** Highest host port a data store's FHIR server is published on. */
+        @WithDefault("13199")
+        int hostPortMax();
+
+        /** Seconds to wait for a started FHIR server to serve its capability statement. */
+        @WithDefault("180")
+        int readinessTimeoutSeconds();
+
+        /** How long a job, or a data store without a FHIR server, takes to move on from its first status. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** Docker network to attach FHIR server containers to. Empty uses the default network. */
+        Optional<String> dockerNetwork();
     }
 
     interface GreengrassV2ServiceConfig {

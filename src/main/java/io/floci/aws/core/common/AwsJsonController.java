@@ -15,6 +15,7 @@ import io.floci.aws.services.dynamodb.DynamoDbJsonHandler;
 import io.floci.aws.services.dynamodb.DynamoDbRequestShapes;
 import io.floci.aws.services.dynamodb.DynamoDbResponses;
 import io.floci.aws.services.dynamodb.DynamoDbStreamsJsonHandler;
+import io.floci.aws.services.healthlake.HealthLakeJsonHandler;
 import io.floci.aws.services.marketplace.MarketplaceJsonHandler;
 import io.floci.aws.services.networkfirewall.NetworkFirewallJsonHandler;
 import io.floci.aws.services.paymentcryptography.PaymentCryptographyJsonHandler;
@@ -75,6 +76,7 @@ public class AwsJsonController {
     private final VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler;
     private final BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler;
     private final TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler;
+    private final HealthLakeJsonHandler healthLakeJsonHandler;
     @Inject
     TimestreamJsonHandler timestreamJsonHandler;
 
@@ -96,7 +98,8 @@ public class AwsJsonController {
                              MarketplaceJsonHandler marketplaceJsonHandler,
                              VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler,
                              BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler,
-                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler) {
+                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler,
+                             HealthLakeJsonHandler healthLakeJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -118,6 +121,7 @@ public class AwsJsonController {
         this.verifiedPermissionsJsonHandler = verifiedPermissionsJsonHandler;
         this.bcmPricingCalculatorJsonHandler = bcmPricingCalculatorJsonHandler;
         this.timestreamInfluxDbJsonHandler = timestreamInfluxDbJsonHandler;
+        this.healthLakeJsonHandler = healthLakeJsonHandler;
     }
 
     /**
@@ -217,6 +221,7 @@ public class AwsJsonController {
                 case "verifiedpermissions" -> verifiedPermissionsJsonHandler.handle(action, request, region);
                 case "bcm-pricing-calculator" -> bcmPricingCalculatorJsonHandler.handle(action, request, region);
                 case "timestream-influxdb" -> timestreamInfluxDbJsonHandler.handle(action, request, region);
+                case "healthlake" -> healthLakeJsonHandler.handle(action, request, region);
                 case "timestream" -> timestreamJsonHandler.handle(action, request, region);
                 default -> null;
             };

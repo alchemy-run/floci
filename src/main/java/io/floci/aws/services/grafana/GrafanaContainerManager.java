@@ -2,6 +2,7 @@ package io.floci.aws.services.grafana;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.github.dockerjava.api.command.InspectContainerResponse;
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.ContainerTeardown;
 import io.floci.aws.core.common.docker.ContainerBuilder;
@@ -139,6 +140,7 @@ public class GrafanaContainerManager implements ContainerTeardown {
         int timeoutSeconds = config.services().grafana().readinessTimeoutSeconds();
         long deadline = System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(timeoutSeconds);
         while (System.currentTimeMillis() < deadline) {
+            exitedEarly(endpoint.containerId());
             try {
                 HttpResponse<String> health = http.send(HttpRequest.newBuilder(URI.create(endpoint.url()
                         + "/api/health")).timeout(Duration.ofSeconds(2)).GET().build(),
@@ -161,6 +163,22 @@ public class GrafanaContainerManager implements ContainerTeardown {
         }
         throw new IllegalStateException("Grafana at " + endpoint.url() + " did not become healthy within "
                 + timeoutSeconds + "s");
+    }
+
+    /** Fails when the container has stopped: it will never answer, and its exit code says why. */
+    private void exitedEarly(String containerId) {
+        try {
+            InspectContainerResponse.ContainerState state = lifecycleManager.getDockerClient().inspectContainerCmd(containerId).exec().getState();
+            if (state != null && Boolean.FALSE.equals(state.getRunning())) {
+                throw new IllegalStateException("The Grafana container exited with code " + state.getExitCodeLong()
+                        + " before it was ready.");
+            }
+        } catch (RuntimeException e) {
+            if (e instanceof IllegalStateException) {
+                throw e;
+            }
+            LOG.debugv("Could not inspect the Grafana container: {0}", e.getMessage());
+        }
     }
 
     public void stop(String workspaceId, String containerId) {
@@ -200,6 +218,8 @@ public class GrafanaContainerManager implements ContainerTeardown {
         if (ContainerStorageHelper.isNamedVolumeMode(config)) {
             ContainerStorageHelper.applyStorage(builder, lifecycleManager, config, SERVICE, null, workspaceId,
                     DATA_PATH);
+            // The image runs as a non-root user, which a volume Docker makes for root cannot be written by.
+            builder.withUser("0");
             return;
         }
         Path base = ContainerStorageHelper.hostResourcePath(config, SERVICE, workspaceId);
