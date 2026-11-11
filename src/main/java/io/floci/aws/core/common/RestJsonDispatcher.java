@@ -115,15 +115,31 @@ public final class RestJsonDispatcher {
         }
         regex.append("/?$");
         // Some clients leave a '/' in a final label unencoded (an ARN such as domain/dzd_1), and the server
-        // decodes an encoded one: a second pass lets the last label span segments, and a third any label (an ARN
-        // in /cluster/{clusterArn}/start).
+        // decodes an encoded one: a second pass lets the last label span segments, and a third the labels before a
+        // literal or another label (an ARN in /cluster/{clusterArn}/start or /policies/{arn}/{statementId}).
         String strict = regex.toString();
         int last = strict.lastIndexOf("([^/]+)");
         Pattern lenient = last >= 0 && strict.endsWith("([^/]+)/?$")
                 ? Pattern.compile(strict.substring(0, last) + "(.+?)/?$") : null;
-        Pattern spanning = strict.contains("([^/]+)") ? Pattern.compile(strict.replace("([^/]+)", "(.+?)")) : null;
+        Pattern spanning = strict.contains("([^/]+)") ? Pattern.compile(spanning(strict)) : null;
         return new Route(operation, binding, Pattern.compile(strict), lenient, spanning, labels, queryLiterals,
                 ranks);
+    }
+
+    /**
+     * The pattern whose labels span segments: each label but the last takes as much as it can, so an ARN before a
+     * literal or another label keeps its slashes, and a last label that follows another label stays one segment.
+     */
+    private static String spanning(String strict) {
+        int labels = strict.split("\\(\\[\\^/]\\+\\)", -1).length - 1;
+        StringBuilder regex = new StringBuilder();
+        int from = 0;
+        for (int index = 0; index < labels; index++) {
+            int at = strict.indexOf("([^/]+)", from);
+            regex.append(strict, from, at).append(labels == 1 || index < labels - 1 ? "(.+)" : "([^/]+)");
+            from = at + "([^/]+)".length();
+        }
+        return regex.append(strict.substring(from)).toString();
     }
 
     private static void quote(StringBuilder regex, String literal) {
@@ -151,7 +167,8 @@ public final class RestJsonDispatcher {
                     continue;
                 }
                 Matcher matcher = pattern.matcher(rawPath);
-                if (!matcher.matches() || !queryMatches(route.queryLiterals(), query)) {
+                if (!matcher.matches() || !queryMatches(route.queryLiterals(), query)
+                        || (pass == 1 && earlierLabelIsArn(matcher))) {
                     continue;
                 }
                 ObjectNode input = input(route, matcher, query, headers, body);
@@ -168,6 +185,21 @@ public final class RestJsonDispatcher {
                 "UnknownOperationException", "No operation matches " + method + " " + rawPath + ".", 404));
         ObjectNode output = handler.handle(call.operation(), call.input());
         return response(call.operation(), output == null ? mapper.createObjectNode() : output);
+    }
+
+    /**
+     * Whether a label before the last holds an ARN: then the slash the last label would span belongs to the ARN
+     * ({@code /policies/{arn}/{statementId}}), which the spanning pass reads.
+     */
+    private static boolean earlierLabelIsArn(Matcher matcher) {
+        for (int group = 1; group < matcher.groupCount(); group++) {
+            String value = matcher.group(group);
+            if (value != null && AwsArnUtils.looksLikeArn(URLDecoder.decode(value.replace("+", "%2B"),
+                    StandardCharsets.UTF_8))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static boolean queryMatches(List<String> literals, MultivaluedMap<String, String> query) {

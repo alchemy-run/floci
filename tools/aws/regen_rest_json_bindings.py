@@ -31,6 +31,7 @@ MODELS = {
     "devops-guru": "devopsguru",
     "docdb-elastic": "docdbelastic",
     "emr-containers": "emrcontainers",
+    "entityresolution": "entityresolution",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1470,6 +1470,19 @@ class PartitionCrossServiceSmokeIntegrationTest {
                 .post("/jobtemplates").then().statusCode(200).extract().path("arn");
         String id = arn.substring(arn.lastIndexOf('/') + 1);
         cleanup.register(() -> signed(region, "emr-containers").delete("/jobtemplates/" + id));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void entityResolutionSchemaMappingArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "entityresolution");
+        String name = unique("smoke-er", partitionCase);
+        String arn = signed(region, "entityresolution").contentType(JSON).body("{\"schemaName\":\"" + name
+                        + "\",\"mappedInputFields\":[{\"fieldName\":\"id\",\"type\":\"UNIQUE_ID\"},"
+                        + "{\"fieldName\":\"email\",\"type\":\"EMAIL_ADDRESS\",\"matchKey\":\"email\"}]}")
+                .post("/schemas").then().statusCode(200).extract().path("schemaArn");
+        cleanup.register(() -> signed(region, "entityresolution").delete("/schemas/" + name));
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 

@@ -71,6 +71,13 @@ class RestJsonDispatcherTest {
         assertEquals(arn, start.input().get("clusterArn").asText());
         assertEquals("GetCluster", elastic.match("GET", "/cluster/" + arn, null, null, null).orElseThrow()
                 .operation());
+        RestJsonDispatcher resolution = new RestJsonDispatcher(mapper, "entityresolution");
+        String workflow = "arn:aws:entityresolution:us-east-1:000000000000:matchingworkflow/dedupe";
+        RestJsonDispatcher.Call statement = resolution.match("POST", "/policies/" + workflow + "/share", null, null,
+                "{}".getBytes(StandardCharsets.UTF_8)).orElseThrow();
+        assertEquals("AddPolicyStatement", statement.operation());
+        assertEquals(workflow, statement.input().get("arn").asText());
+        assertEquals("share", statement.input().get("statementId").asText());
     }
 
     @Test

@@ -263,6 +263,10 @@ services:
     doc: docs/services/emrcontainers.md
     sources:
       - { path: services/emrcontainers/EmrContainersController.java, mode: switch }
+  - service: entityresolution
+    doc: docs/services/entityresolution.md
+    sources:
+      - { path: services/entityresolution/EntityResolutionController.java, mode: switch }
   - service: dax
     doc: docs/services/dax.md
     sources:

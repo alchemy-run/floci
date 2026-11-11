@@ -1,0 +1,679 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "entityresolution",
+ "apiVersion": "2018-05-10",
+ "operations": {
+  "AddPolicyStatement": {
+   "method": "POST",
+   "requestUri": "/policies/{arn}/{statementId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     },
+     "statementId": {
+      "location": "uri",
+      "name": "statementId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchDeleteUniqueId": {
+   "method": "DELETE",
+   "requestUri": "/matchingworkflows/{workflowName}/uniqueids",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     },
+     "inputSource": {
+      "location": "header",
+      "name": "inputSource"
+     },
+     "uniqueIds": {
+      "location": "header",
+      "name": "uniqueIds",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateIdMappingWorkflow": {
+   "method": "POST",
+   "requestUri": "/idmappingworkflows",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateIdNamespace": {
+   "method": "POST",
+   "requestUri": "/idnamespaces",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateMatchingWorkflow": {
+   "method": "POST",
+   "requestUri": "/matchingworkflows",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateSchemaMapping": {
+   "method": "POST",
+   "requestUri": "/schemas",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteIdMappingWorkflow": {
+   "method": "DELETE",
+   "requestUri": "/idmappingworkflows/{workflowName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteIdNamespace": {
+   "method": "DELETE",
+   "requestUri": "/idnamespaces/{idNamespaceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "idNamespaceName": {
+      "location": "uri",
+      "name": "idNamespaceName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteMatchingWorkflow": {
+   "method": "DELETE",
+   "requestUri": "/matchingworkflows/{workflowName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeletePolicyStatement": {
+   "method": "DELETE",
+   "requestUri": "/policies/{arn}/{statementId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     },
+     "statementId": {
+      "location": "uri",
+      "name": "statementId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSchemaMapping": {
+   "method": "DELETE",
+   "requestUri": "/schemas/{schemaName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "schemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GenerateMatchId": {
+   "method": "POST",
+   "requestUri": "/matchingworkflows/{workflowName}/generateMatches",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetIdMappingJob": {
+   "method": "GET",
+   "requestUri": "/idmappingworkflows/{workflowName}/jobs/{jobId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetIdMappingWorkflow": {
+   "method": "GET",
+   "requestUri": "/idmappingworkflows/{workflowName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetIdNamespace": {
+   "method": "GET",
+   "requestUri": "/idnamespaces/{idNamespaceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "idNamespaceName": {
+      "location": "uri",
+      "name": "idNamespaceName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetMatchId": {
+   "method": "POST",
+   "requestUri": "/matchingworkflows/{workflowName}/matches",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetMatchingJob": {
+   "method": "GET",
+   "requestUri": "/matchingworkflows/{workflowName}/jobs/{jobId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     },
+     "jobId": {
+      "location": "uri",
+      "name": "jobId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetMatchingWorkflow": {
+   "method": "GET",
+   "requestUri": "/matchingworkflows/{workflowName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetPolicy": {
+   "method": "GET",
+   "requestUri": "/policies/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetProviderService": {
+   "method": "GET",
+   "requestUri": "/providerservices/{providerName}/{providerServiceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "providerName": {
+      "location": "uri",
+      "name": "providerName"
+     },
+     "providerServiceName": {
+      "location": "uri",
+      "name": "providerServiceName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetSchemaMapping": {
+   "method": "GET",
+   "requestUri": "/schemas/{schemaName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "schemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListIdMappingJobs": {
+   "method": "GET",
+   "requestUri": "/idmappingworkflows/{workflowName}/jobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListIdMappingWorkflows": {
+   "method": "GET",
+   "requestUri": "/idmappingworkflows",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListIdNamespaces": {
+   "method": "GET",
+   "requestUri": "/idnamespaces",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListMatchingJobs": {
+   "method": "GET",
+   "requestUri": "/matchingworkflows/{workflowName}/jobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListMatchingWorkflows": {
+   "method": "GET",
+   "requestUri": "/matchingworkflows",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListProviderServices": {
+   "method": "GET",
+   "requestUri": "/providerservices",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "providerName": {
+      "location": "querystring",
+      "name": "providerName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListSchemaMappings": {
+   "method": "GET",
+   "requestUri": "/schemas",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutPolicy": {
+   "method": "PUT",
+   "requestUri": "/policies/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartIdMappingJob": {
+   "method": "POST",
+   "requestUri": "/idmappingworkflows/{workflowName}/jobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartMatchingJob": {
+   "method": "POST",
+   "requestUri": "/matchingworkflows/{workflowName}/jobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateIdMappingWorkflow": {
+   "method": "PUT",
+   "requestUri": "/idmappingworkflows/{workflowName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateIdNamespace": {
+   "method": "PUT",
+   "requestUri": "/idnamespaces/{idNamespaceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "idNamespaceName": {
+      "location": "uri",
+      "name": "idNamespaceName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateMatchingWorkflow": {
+   "method": "PUT",
+   "requestUri": "/matchingworkflows/{workflowName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "workflowName": {
+      "location": "uri",
+      "name": "workflowName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateSchemaMapping": {
+   "method": "PUT",
+   "requestUri": "/schemas/{schemaName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "schemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

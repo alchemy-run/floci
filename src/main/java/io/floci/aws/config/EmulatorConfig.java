@@ -874,6 +874,7 @@ public interface EmulatorConfig {
         DocDbElasticServiceConfig docdbElastic();
         EcrPublicServiceConfig ecrPublic();
         EmrContainersServiceConfig emrContainers();
+        EntityResolutionServiceConfig entityresolution();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -2960,6 +2961,15 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long a cost estimation stays ONGOING. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface EntityResolutionServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a matching or ID mapping job stays QUEUED, and then RUNNING. */
         @WithDefault("2000")
         long transitionMillis();
     }
