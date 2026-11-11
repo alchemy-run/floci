@@ -522,6 +522,8 @@ floci:
       enabled: true
     internetmonitor:
       enabled: true
+    iotfleetwise:
+      enabled: true
     ivschat:
       enabled: true
       s3-flush-millis: 0

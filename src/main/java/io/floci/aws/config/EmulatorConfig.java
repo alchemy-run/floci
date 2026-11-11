@@ -895,6 +895,8 @@ public interface EmulatorConfig {
         ImageBuilderServiceConfig imagebuilder();
 
         InternetMonitorServiceConfig internetmonitor();
+
+        IotFleetWiseServiceConfig iotfleetwise();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -3024,6 +3026,42 @@ public interface EmulatorConfig {
         /** How often enabled lifecycle policies are evaluated; Image Builder evaluates them daily. */
         @WithDefault("3600")
         long lifecycleIntervalSeconds();
+    }
+
+    interface IotFleetWiseServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * Whether the account is an existing IoT FleetWise customer. AWS closed the service to new customers, so
+         * when false every operation is refused with AccessDeniedException as on a new account.
+         */
+        @WithDefault("true")
+        boolean existingCustomer();
+
+        /** How long a created campaign stays CREATING before it waits for approval. */
+        @WithDefault("1000")
+        long campaignCreationMillis();
+
+        /** How long a campaign's processed data is gathered before it is written to S3; IoT FleetWise uses ~10 minutes. */
+        @WithDefault("600")
+        long s3FlushSeconds();
+
+        /** Campaigns in each account and Region. */
+        @WithDefault("20")
+        int maxCampaigns();
+
+        /** Vehicle models in each account and Region. */
+        @WithDefault("150")
+        int maxModelManifests();
+
+        /** Decoder manifests for each vehicle model. */
+        @WithDefault("100")
+        int maxDecoderManifestsPerModel();
+
+        /** Vehicles in each fleet. */
+        @WithDefault("2000")
+        int maxVehiclesPerFleet();
     }
 
     interface InternetMonitorServiceConfig {

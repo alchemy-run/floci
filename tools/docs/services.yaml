@@ -296,6 +296,10 @@ services:
     sources:
       - { path: services/ivs/IvsController.java, mode: rest }
       - { path: services/ivs/IvsRealtimeController.java, mode: rest }
+  - service: iotfleetwise
+    doc: docs/services/iotfleetwise.md
+    sources:
+      - { path: services/iotfleetwise/IotFleetWiseJsonHandler.java, mode: switch }
   - service: healthlake
     doc: docs/services/healthlake.md
     sources:

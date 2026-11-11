@@ -1029,6 +1029,8 @@ floci:
       enabled: true
     internetmonitor:
       enabled: true
+    iotfleetwise:
+      enabled: true
     ivschat:
       enabled: true
     healthlake:
