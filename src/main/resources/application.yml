@@ -1017,6 +1017,8 @@ floci:
       enabled: true
     deadline:
       enabled: true
+    devopsguru:
+      enabled: true
     dax:
       enabled: true
     rekognition:

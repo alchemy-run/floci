@@ -1,0 +1,1000 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_devopsguru_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AddNotificationChannel": "AddNotificationChannelRequest",
+    "DeleteInsight": "DeleteInsightRequest",
+    "DescribeAccountHealth": "DescribeAccountHealthRequest",
+    "DescribeAccountOverview": "DescribeAccountOverviewRequest",
+    "DescribeAnomaly": "DescribeAnomalyRequest",
+    "DescribeEventSourcesConfig": "DescribeEventSourcesConfigRequest",
+    "DescribeFeedback": "DescribeFeedbackRequest",
+    "DescribeInsight": "DescribeInsightRequest",
+    "DescribeOrganizationHealth": "DescribeOrganizationHealthRequest",
+    "DescribeOrganizationOverview": "DescribeOrganizationOverviewRequest",
+    "DescribeOrganizationResourceCollectionHealth": "DescribeOrganizationResourceCollectionHealthRequest",
+    "DescribeResourceCollectionHealth": "DescribeResourceCollectionHealthRequest",
+    "DescribeServiceIntegration": "DescribeServiceIntegrationRequest",
+    "GetCostEstimation": "GetCostEstimationRequest",
+    "GetResourceCollection": "GetResourceCollectionRequest",
+    "ListAnomaliesForInsight": "ListAnomaliesForInsightRequest",
+    "ListAnomalousLogGroups": "ListAnomalousLogGroupsRequest",
+    "ListEvents": "ListEventsRequest",
+    "ListInsights": "ListInsightsRequest",
+    "ListMonitoredResources": "ListMonitoredResourcesRequest",
+    "ListNotificationChannels": "ListNotificationChannelsRequest",
+    "ListOrganizationInsights": "ListOrganizationInsightsRequest",
+    "ListRecommendations": "ListRecommendationsRequest",
+    "PutFeedback": "PutFeedbackRequest",
+    "RemoveNotificationChannel": "RemoveNotificationChannelRequest",
+    "SearchInsights": "SearchInsightsRequest",
+    "SearchOrganizationInsights": "SearchOrganizationInsightsRequest",
+    "StartCostEstimation": "StartCostEstimationRequest",
+    "UpdateEventSourcesConfig": "UpdateEventSourcesConfigRequest",
+    "UpdateResourceCollection": "UpdateResourceCollectionRequest",
+    "UpdateServiceIntegration": "UpdateServiceIntegrationRequest"
+  },
+  "shapes": {
+    "AccountIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "AwsAccountId"
+    },
+    "AddNotificationChannelRequest": {
+      "type": "structure",
+      "required": [
+        "Config"
+      ],
+      "members": {
+        "Config": "NotificationChannelConfig"
+      }
+    },
+    "AmazonCodeGuruProfilerIntegration": {
+      "type": "structure",
+      "members": {
+        "Status": "EventSourceOptInStatus"
+      }
+    },
+    "AnomalyId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[\\w~.-]*$"
+    },
+    "AppBoundaryKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "AwsAccountId": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "^\\d{12}$"
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[a-zA-Z0-9]+[a-zA-Z0-9-]*$"
+    },
+    "CloudFormationCollection": {
+      "type": "structure",
+      "members": {
+        "StackNames": "StackNames"
+      }
+    },
+    "CloudFormationCostEstimationResourceCollectionFilter": {
+      "type": "structure",
+      "members": {
+        "StackNames": "CostEstimationStackNames"
+      }
+    },
+    "CostEstimationResourceCollectionFilter": {
+      "type": "structure",
+      "members": {
+        "CloudFormation": "CloudFormationCostEstimationResourceCollectionFilter",
+        "Tags": "TagCostEstimationResourceCollectionFilters"
+      }
+    },
+    "CostEstimationStackNames": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "StackName"
+    },
+    "CostEstimationTagValues": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "TagValue"
+    },
+    "DeleteInsightRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "InsightId"
+      }
+    },
+    "DescribeAccountHealthRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DescribeAccountOverviewRequest": {
+      "type": "structure",
+      "required": [
+        "FromTime"
+      ],
+      "members": {
+        "FromTime": "Timestamp",
+        "ToTime": "Timestamp"
+      }
+    },
+    "DescribeAnomalyRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "AnomalyId",
+        "AccountId": "AwsAccountId"
+      }
+    },
+    "DescribeEventSourcesConfigRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DescribeFeedbackRequest": {
+      "type": "structure",
+      "members": {
+        "InsightId": "InsightId"
+      }
+    },
+    "DescribeInsightRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "InsightId",
+        "AccountId": "AwsAccountId"
+      }
+    },
+    "DescribeOrganizationHealthRequest": {
+      "type": "structure",
+      "members": {
+        "AccountIds": "AccountIdList",
+        "OrganizationalUnitIds": "OrganizationalUnitIdList"
+      }
+    },
+    "DescribeOrganizationOverviewRequest": {
+      "type": "structure",
+      "required": [
+        "FromTime"
+      ],
+      "members": {
+        "FromTime": "Timestamp",
+        "ToTime": "Timestamp",
+        "AccountIds": "AccountIdList",
+        "OrganizationalUnitIds": "OrganizationalUnitIdList"
+      }
+    },
+    "DescribeOrganizationResourceCollectionHealthRequest": {
+      "type": "structure",
+      "required": [
+        "OrganizationResourceCollectionType"
+      ],
+      "members": {
+        "OrganizationResourceCollectionType": "OrganizationResourceCollectionType",
+        "AccountIds": "AccountIdList",
+        "OrganizationalUnitIds": "OrganizationalUnitIdList",
+        "NextToken": "UuidNextToken",
+        "MaxResults": "OrganizationResourceCollectionMaxResults"
+      }
+    },
+    "DescribeResourceCollectionHealthRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceCollectionType"
+      ],
+      "members": {
+        "ResourceCollectionType": "ResourceCollectionType",
+        "NextToken": "UuidNextToken"
+      }
+    },
+    "DescribeServiceIntegrationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "EndTimeRange": {
+      "type": "structure",
+      "members": {
+        "FromTime": "Timestamp",
+        "ToTime": "Timestamp"
+      }
+    },
+    "EventClass": {
+      "type": "string",
+      "enum": [
+        "INFRASTRUCTURE",
+        "DEPLOYMENT",
+        "SECURITY_CHANGE",
+        "CONFIG_CHANGE",
+        "SCHEMA_CHANGE"
+      ]
+    },
+    "EventDataSource": {
+      "type": "string",
+      "enum": [
+        "AWS_CLOUD_TRAIL",
+        "AWS_CODE_DEPLOY"
+      ]
+    },
+    "EventSource": {
+      "type": "string",
+      "min": 10,
+      "max": 50,
+      "pattern": "^[a-z]+[a-z0-9]*\\.amazonaws\\.com|aws\\.events$"
+    },
+    "EventSourceOptInStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "EventSourcesConfig": {
+      "type": "structure",
+      "members": {
+        "AmazonCodeGuruProfiler": "AmazonCodeGuruProfilerIntegration"
+      }
+    },
+    "EventTimeRange": {
+      "type": "structure",
+      "required": [
+        "FromTime",
+        "ToTime"
+      ],
+      "members": {
+        "FromTime": "Timestamp",
+        "ToTime": "Timestamp"
+      }
+    },
+    "GetCostEstimationRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "UuidNextToken"
+      }
+    },
+    "GetResourceCollectionRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceCollectionType"
+      ],
+      "members": {
+        "ResourceCollectionType": "ResourceCollectionType",
+        "NextToken": "UuidNextToken"
+      }
+    },
+    "InsightFeedback": {
+      "type": "structure",
+      "members": {
+        "Id": "InsightId",
+        "Feedback": "InsightFeedbackOption"
+      }
+    },
+    "InsightFeedbackOption": {
+      "type": "string",
+      "enum": [
+        "VALID_COLLECTION",
+        "RECOMMENDATION_USEFUL",
+        "ALERT_TOO_SENSITIVE",
+        "DATA_NOISY_ANOMALY",
+        "DATA_INCORRECT"
+      ]
+    },
+    "InsightId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[\\w-]*$"
+    },
+    "InsightSeverities": {
+      "type": "list",
+      "min": 0,
+      "max": 3,
+      "member": "InsightSeverity"
+    },
+    "InsightSeverity": {
+      "type": "string",
+      "enum": [
+        "LOW",
+        "MEDIUM",
+        "HIGH"
+      ]
+    },
+    "InsightStatus": {
+      "type": "string",
+      "enum": [
+        "ONGOING",
+        "CLOSED"
+      ]
+    },
+    "InsightStatuses": {
+      "type": "list",
+      "min": 0,
+      "max": 2,
+      "member": "InsightStatus"
+    },
+    "InsightType": {
+      "type": "string",
+      "enum": [
+        "REACTIVE",
+        "PROACTIVE"
+      ]
+    },
+    "KMSKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^.*$"
+    },
+    "KMSServerSideEncryptionIntegrationConfig": {
+      "type": "structure",
+      "members": {
+        "KMSKeyId": "KMSKeyId",
+        "OptInStatus": "OptInStatus",
+        "Type": "ServerSideEncryptionType"
+      }
+    },
+    "ListAnomaliesForInsightFilters": {
+      "type": "structure",
+      "members": {
+        "ServiceCollection": "ServiceCollection"
+      }
+    },
+    "ListAnomaliesForInsightMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 500
+    },
+    "ListAnomaliesForInsightRequest": {
+      "type": "structure",
+      "required": [
+        "InsightId"
+      ],
+      "members": {
+        "InsightId": "InsightId",
+        "StartTimeRange": "StartTimeRange",
+        "MaxResults": "ListAnomaliesForInsightMaxResults",
+        "NextToken": "UuidNextToken",
+        "AccountId": "AwsAccountId",
+        "Filters": "ListAnomaliesForInsightFilters"
+      }
+    },
+    "ListAnomalousLogGroupsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 200
+    },
+    "ListAnomalousLogGroupsRequest": {
+      "type": "structure",
+      "required": [
+        "InsightId"
+      ],
+      "members": {
+        "InsightId": "InsightId",
+        "MaxResults": "ListAnomalousLogGroupsMaxResults",
+        "NextToken": "UuidNextToken"
+      }
+    },
+    "ListEventsFilters": {
+      "type": "structure",
+      "members": {
+        "InsightId": "InsightId",
+        "EventTimeRange": "EventTimeRange",
+        "EventClass": "EventClass",
+        "EventSource": "EventSource",
+        "DataSource": "EventDataSource",
+        "ResourceCollection": "ResourceCollection"
+      }
+    },
+    "ListEventsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 200
+    },
+    "ListEventsRequest": {
+      "type": "structure",
+      "required": [
+        "Filters"
+      ],
+      "members": {
+        "Filters": "ListEventsFilters",
+        "MaxResults": "ListEventsMaxResults",
+        "NextToken": "UuidNextToken",
+        "AccountId": "AwsAccountId"
+      }
+    },
+    "ListInsightsAccountIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "AwsAccountId"
+    },
+    "ListInsightsAnyStatusFilter": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "StartTimeRange"
+      ],
+      "members": {
+        "Type": "InsightType",
+        "StartTimeRange": "StartTimeRange"
+      }
+    },
+    "ListInsightsClosedStatusFilter": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "EndTimeRange"
+      ],
+      "members": {
+        "Type": "InsightType",
+        "EndTimeRange": "EndTimeRange"
+      }
+    },
+    "ListInsightsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListInsightsOngoingStatusFilter": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "Type": "InsightType"
+      }
+    },
+    "ListInsightsOrganizationalUnitIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "OrganizationalUnitId"
+    },
+    "ListInsightsRequest": {
+      "type": "structure",
+      "required": [
+        "StatusFilter"
+      ],
+      "members": {
+        "StatusFilter": "ListInsightsStatusFilter",
+        "MaxResults": "ListInsightsMaxResults",
+        "NextToken": "UuidNextToken"
+      }
+    },
+    "ListInsightsStatusFilter": {
+      "type": "structure",
+      "members": {
+        "Ongoing": "ListInsightsOngoingStatusFilter",
+        "Closed": "ListInsightsClosedStatusFilter",
+        "Any": "ListInsightsAnyStatusFilter"
+      }
+    },
+    "ListMonitoredResourcesFilters": {
+      "type": "structure",
+      "required": [
+        "ResourcePermission",
+        "ResourceTypeFilters"
+      ],
+      "members": {
+        "ResourcePermission": "ResourcePermission",
+        "ResourceTypeFilters": "ResourceTypeFilters"
+      }
+    },
+    "ListMonitoredResourcesMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "ListMonitoredResourcesRequest": {
+      "type": "structure",
+      "members": {
+        "Filters": "ListMonitoredResourcesFilters",
+        "MaxResults": "ListMonitoredResourcesMaxResults",
+        "NextToken": "UuidNextToken"
+      }
+    },
+    "ListNotificationChannelsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "UuidNextToken"
+      }
+    },
+    "ListOrganizationInsightsRequest": {
+      "type": "structure",
+      "required": [
+        "StatusFilter"
+      ],
+      "members": {
+        "StatusFilter": "ListInsightsStatusFilter",
+        "MaxResults": "ListInsightsMaxResults",
+        "AccountIds": "ListInsightsAccountIdList",
+        "OrganizationalUnitIds": "ListInsightsOrganizationalUnitIdList",
+        "NextToken": "UuidNextToken"
+      }
+    },
+    "ListRecommendationsRequest": {
+      "type": "structure",
+      "required": [
+        "InsightId"
+      ],
+      "members": {
+        "InsightId": "InsightId",
+        "NextToken": "UuidNextToken",
+        "Locale": "Locale",
+        "AccountId": "AwsAccountId"
+      }
+    },
+    "Locale": {
+      "type": "string",
+      "enum": [
+        "DE_DE",
+        "EN_US",
+        "EN_GB",
+        "ES_ES",
+        "FR_FR",
+        "IT_IT",
+        "JA_JP",
+        "KO_KR",
+        "PT_BR",
+        "ZH_CN",
+        "ZH_TW"
+      ]
+    },
+    "LogsAnomalyDetectionIntegrationConfig": {
+      "type": "structure",
+      "members": {
+        "OptInStatus": "OptInStatus"
+      }
+    },
+    "NotificationChannelConfig": {
+      "type": "structure",
+      "required": [
+        "Sns"
+      ],
+      "members": {
+        "Sns": "SnsChannelConfig",
+        "Filters": "NotificationFilterConfig"
+      }
+    },
+    "NotificationChannelId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+    },
+    "NotificationFilterConfig": {
+      "type": "structure",
+      "members": {
+        "Severities": "InsightSeverities",
+        "MessageTypes": "NotificationMessageTypes"
+      }
+    },
+    "NotificationMessageType": {
+      "type": "string",
+      "enum": [
+        "NEW_INSIGHT",
+        "CLOSED_INSIGHT",
+        "NEW_ASSOCIATION",
+        "SEVERITY_UPGRADED",
+        "NEW_RECOMMENDATION"
+      ]
+    },
+    "NotificationMessageTypes": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "NotificationMessageType"
+    },
+    "OpsCenterIntegrationConfig": {
+      "type": "structure",
+      "members": {
+        "OptInStatus": "OptInStatus"
+      }
+    },
+    "OptInStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "OrganizationResourceCollectionMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 500
+    },
+    "OrganizationResourceCollectionType": {
+      "type": "string",
+      "enum": [
+        "AWS_CLOUD_FORMATION",
+        "AWS_SERVICE",
+        "AWS_ACCOUNT",
+        "AWS_TAGS"
+      ]
+    },
+    "OrganizationalUnitId": {
+      "type": "string",
+      "max": 68,
+      "pattern": "^ou-[0-9a-z]{4,32}-[a-z0-9]{8,32}$"
+    },
+    "OrganizationalUnitIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "OrganizationalUnitId"
+    },
+    "PutFeedbackRequest": {
+      "type": "structure",
+      "members": {
+        "InsightFeedback": "InsightFeedback"
+      }
+    },
+    "RemoveNotificationChannelRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "NotificationChannelId"
+      }
+    },
+    "ResourceCollection": {
+      "type": "structure",
+      "members": {
+        "CloudFormation": "CloudFormationCollection",
+        "Tags": "TagCollections"
+      }
+    },
+    "ResourceCollectionType": {
+      "type": "string",
+      "enum": [
+        "AWS_CLOUD_FORMATION",
+        "AWS_SERVICE",
+        "AWS_TAGS"
+      ]
+    },
+    "ResourcePermission": {
+      "type": "string",
+      "enum": [
+        "FULL_PERMISSION",
+        "MISSING_PERMISSION"
+      ]
+    },
+    "ResourceTypeFilter": {
+      "type": "string",
+      "enum": [
+        "LOG_GROUPS",
+        "CLOUDFRONT_DISTRIBUTION",
+        "DYNAMODB_TABLE",
+        "EC2_NAT_GATEWAY",
+        "ECS_CLUSTER",
+        "ECS_SERVICE",
+        "EKS_CLUSTER",
+        "ELASTIC_BEANSTALK_ENVIRONMENT",
+        "ELASTIC_LOAD_BALANCER_LOAD_BALANCER",
+        "ELASTIC_LOAD_BALANCING_V2_LOAD_BALANCER",
+        "ELASTIC_LOAD_BALANCING_V2_TARGET_GROUP",
+        "ELASTICACHE_CACHE_CLUSTER",
+        "ELASTICSEARCH_DOMAIN",
+        "KINESIS_STREAM",
+        "LAMBDA_FUNCTION",
+        "OPEN_SEARCH_SERVICE_DOMAIN",
+        "RDS_DB_INSTANCE",
+        "RDS_DB_CLUSTER",
+        "REDSHIFT_CLUSTER",
+        "ROUTE53_HOSTED_ZONE",
+        "ROUTE53_HEALTH_CHECK",
+        "S3_BUCKET",
+        "SAGEMAKER_ENDPOINT",
+        "SNS_TOPIC",
+        "SQS_QUEUE",
+        "STEP_FUNCTIONS_ACTIVITY",
+        "STEP_FUNCTIONS_STATE_MACHINE"
+      ]
+    },
+    "ResourceTypeFilters": {
+      "type": "list",
+      "member": "ResourceTypeFilter"
+    },
+    "SearchInsightsAccountIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "AwsAccountId"
+    },
+    "SearchInsightsFilters": {
+      "type": "structure",
+      "members": {
+        "Severities": "InsightSeverities",
+        "Statuses": "InsightStatuses",
+        "ResourceCollection": "ResourceCollection",
+        "ServiceCollection": "ServiceCollection"
+      }
+    },
+    "SearchInsightsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "SearchInsightsRequest": {
+      "type": "structure",
+      "required": [
+        "StartTimeRange",
+        "Type"
+      ],
+      "members": {
+        "StartTimeRange": "StartTimeRange",
+        "Filters": "SearchInsightsFilters",
+        "MaxResults": "SearchInsightsMaxResults",
+        "NextToken": "UuidNextToken",
+        "Type": "InsightType"
+      }
+    },
+    "SearchOrganizationInsightsFilters": {
+      "type": "structure",
+      "members": {
+        "Severities": "InsightSeverities",
+        "Statuses": "InsightStatuses",
+        "ResourceCollection": "ResourceCollection",
+        "ServiceCollection": "ServiceCollection"
+      }
+    },
+    "SearchOrganizationInsightsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "SearchOrganizationInsightsRequest": {
+      "type": "structure",
+      "required": [
+        "AccountIds",
+        "StartTimeRange",
+        "Type"
+      ],
+      "members": {
+        "AccountIds": "SearchInsightsAccountIdList",
+        "StartTimeRange": "StartTimeRange",
+        "Filters": "SearchOrganizationInsightsFilters",
+        "MaxResults": "SearchOrganizationInsightsMaxResults",
+        "NextToken": "UuidNextToken",
+        "Type": "InsightType"
+      }
+    },
+    "ServerSideEncryptionType": {
+      "type": "string",
+      "enum": [
+        "CUSTOMER_MANAGED_KEY",
+        "AWS_OWNED_KMS_KEY"
+      ]
+    },
+    "ServiceCollection": {
+      "type": "structure",
+      "members": {
+        "ServiceNames": "ServiceNames"
+      }
+    },
+    "ServiceName": {
+      "type": "string",
+      "enum": [
+        "API_GATEWAY",
+        "APPLICATION_ELB",
+        "AUTO_SCALING_GROUP",
+        "CLOUD_FRONT",
+        "DYNAMO_DB",
+        "EC2",
+        "ECS",
+        "EKS",
+        "ELASTIC_BEANSTALK",
+        "ELASTI_CACHE",
+        "ELB",
+        "ES",
+        "KINESIS",
+        "LAMBDA",
+        "NAT_GATEWAY",
+        "NETWORK_ELB",
+        "RDS",
+        "REDSHIFT",
+        "ROUTE_53",
+        "S3",
+        "SAGE_MAKER",
+        "SNS",
+        "SQS",
+        "STEP_FUNCTIONS",
+        "SWF"
+      ]
+    },
+    "ServiceNames": {
+      "type": "list",
+      "member": "ServiceName"
+    },
+    "SnsChannelConfig": {
+      "type": "structure",
+      "members": {
+        "TopicArn": "TopicArn"
+      }
+    },
+    "StackName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[a-zA-Z*]+[a-zA-Z0-9-]*$"
+    },
+    "StackNames": {
+      "type": "list",
+      "member": "StackName"
+    },
+    "StartCostEstimationRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceCollection"
+      ],
+      "members": {
+        "ResourceCollection": "CostEstimationResourceCollectionFilter",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "StartTimeRange": {
+      "type": "structure",
+      "members": {
+        "FromTime": "Timestamp",
+        "ToTime": "Timestamp"
+      }
+    },
+    "TagCollection": {
+      "type": "structure",
+      "required": [
+        "AppBoundaryKey",
+        "TagValues"
+      ],
+      "members": {
+        "AppBoundaryKey": "AppBoundaryKey",
+        "TagValues": "TagValues"
+      }
+    },
+    "TagCollections": {
+      "type": "list",
+      "member": "TagCollection"
+    },
+    "TagCostEstimationResourceCollectionFilter": {
+      "type": "structure",
+      "required": [
+        "AppBoundaryKey",
+        "TagValues"
+      ],
+      "members": {
+        "AppBoundaryKey": "AppBoundaryKey",
+        "TagValues": "CostEstimationTagValues"
+      }
+    },
+    "TagCostEstimationResourceCollectionFilters": {
+      "type": "list",
+      "member": "TagCostEstimationResourceCollectionFilter"
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*|\\*)$"
+    },
+    "TagValues": {
+      "type": "list",
+      "member": "TagValue"
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "TopicArn": {
+      "type": "string",
+      "min": 36,
+      "max": 1024,
+      "pattern": "^arn:aws[a-z0-9-]*:sns:[a-z0-9-]+:\\d{12}:[^:]+$"
+    },
+    "UpdateCloudFormationCollectionFilter": {
+      "type": "structure",
+      "members": {
+        "StackNames": "UpdateStackNames"
+      }
+    },
+    "UpdateEventSourcesConfigRequest": {
+      "type": "structure",
+      "members": {
+        "EventSources": "EventSourcesConfig"
+      }
+    },
+    "UpdateResourceCollectionAction": {
+      "type": "string",
+      "enum": [
+        "ADD",
+        "REMOVE"
+      ]
+    },
+    "UpdateResourceCollectionFilter": {
+      "type": "structure",
+      "members": {
+        "CloudFormation": "UpdateCloudFormationCollectionFilter",
+        "Tags": "UpdateTagCollectionFilters"
+      }
+    },
+    "UpdateResourceCollectionRequest": {
+      "type": "structure",
+      "required": [
+        "Action",
+        "ResourceCollection"
+      ],
+      "members": {
+        "Action": "UpdateResourceCollectionAction",
+        "ResourceCollection": "UpdateResourceCollectionFilter"
+      }
+    },
+    "UpdateServiceIntegrationConfig": {
+      "type": "structure",
+      "members": {
+        "OpsCenter": "OpsCenterIntegrationConfig",
+        "LogsAnomalyDetection": "LogsAnomalyDetectionIntegrationConfig",
+        "KMSServerSideEncryption": "KMSServerSideEncryptionIntegrationConfig"
+      }
+    },
+    "UpdateServiceIntegrationRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceIntegration"
+      ],
+      "members": {
+        "ServiceIntegration": "UpdateServiceIntegrationConfig"
+      }
+    },
+    "UpdateStackNames": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "StackName"
+    },
+    "UpdateTagCollectionFilter": {
+      "type": "structure",
+      "required": [
+        "AppBoundaryKey",
+        "TagValues"
+      ],
+      "members": {
+        "AppBoundaryKey": "AppBoundaryKey",
+        "TagValues": "UpdateTagValues"
+      }
+    },
+    "UpdateTagCollectionFilters": {
+      "type": "list",
+      "member": "UpdateTagCollectionFilter"
+    },
+    "UpdateTagValues": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "TagValue"
+    },
+    "UuidNextToken": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+    }
+  }
+}

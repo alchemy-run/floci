@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1408,6 +1408,23 @@ class PartitionCrossServiceSmokeIntegrationTest {
                 .path("tags.smoke");
         assertEquals("yes", tag);
         PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void devOpsGuruChannelTopic(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "devops-guru");
+        String topic = signed(region, "sns").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateTopic").formParam("Name", unique("smoke-guru", partitionCase))
+                .post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateTopicResponse.CreateTopicResult.TopicArn");
+        cleanup.register(() -> signed(region, "sns").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteTopic").formParam("TopicArn", topic).post("/"));
+        String id = signed(region, "devops-guru").contentType(JSON)
+                .body("{\"Config\":{\"Sns\":{\"TopicArn\":\"" + topic + "\"}}}")
+                .put("/channels").then().statusCode(200).extract().path("Id");
+        cleanup.register(() -> signed(region, "devops-guru").delete("/channels/" + id));
+        PartitionMatrix.assertArnIn(partitionCase, topic);
     }
 
     @ParameterizedTest

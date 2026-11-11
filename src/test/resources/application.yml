@@ -505,6 +505,9 @@ floci:
     deadline:
       enabled: true
       transition-millis: 0
+    devopsguru:
+      enabled: true
+      transition-millis: 0
     dax:
       enabled: true
       transition-millis: 0

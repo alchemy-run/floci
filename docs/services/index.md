@@ -101,6 +101,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Data Exchange](dataexchange.md) | `/v1/data-sets`, `/v1/jobs`, `/v1/data-grants`, `/v1/event-actions` (signed `dataexchange`) | REST JSON | 37 |
 | [DataZone](datazone.md) | `/v2/domains`, `/tags/{resourceArn}` (signed `datazone`) | REST JSON | 195 |
 | [Deadline Cloud](deadline.md) | `/2023-10-12/farms`, `/2023-10-12/monitors`, `/2023-10-12/license-endpoints` (signed `deadline`) | REST JSON | 127 |
+| [DevOps Guru](devopsguru.md) | `/insights`, `/channels`, `/resource-collections`, `/accounts/health` (signed `devops-guru`) | REST JSON | 31 |
 | [DAX](dax.md) | `POST /` + `X-Amz-Target: AmazonDAXV3.*` | JSON 1.1 | 21 |
 | [CodeConnections](codeconnections.md) | `POST /` + `X-Amz-Target: CodeConnections_20231201.*`, or RPC v2 CBOR | JSON 1.0 + CBOR | 27 |
 | [Chatbot](chatbot.md) | `POST /<operation-path>` (signed `chatbot`) | REST JSON | 34 |

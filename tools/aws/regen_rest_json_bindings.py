@@ -28,6 +28,7 @@ OUTPUT = REPO_ROOT / "src/main/resources/aws/rest-json"
 MODELS = {
     "datazone": "datazone",
     "deadline": "deadline",
+    "devops-guru": "devopsguru",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

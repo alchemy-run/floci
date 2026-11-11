@@ -870,6 +870,7 @@ public interface EmulatorConfig {
         DataExchangeServiceConfig dataexchange();
         DataZoneServiceConfig datazone();
         DeadlineServiceConfig deadline();
+        DevOpsGuruServiceConfig devopsguru();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2946,6 +2947,15 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long a fleet, job update, license endpoint or statistics aggregation stays in progress. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface DevOpsGuruServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a cost estimation stays ONGOING. */
         @WithDefault("2000")
         long transitionMillis();
     }

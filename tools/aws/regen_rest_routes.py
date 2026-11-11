@@ -56,6 +56,7 @@ MODELS: dict[str, str] = {
     "dataexchange": "dataexchange",
     "datazone": "datazone",
     "deadline": "deadline",
+    "devops-guru": "devops-guru",
     "dsql": "dsql",
     "eks": "eks",
     "es": "es",
@@ -86,6 +87,7 @@ INTERNAL_ROUTES: dict[str, tuple[str, bool]] = {
     "dataexchange": ("/_dataexchange", False),
     "datazone": ("/_datazone", False),
     "deadline": ("/_deadline", False),
+    "devops-guru": ("/_devopsguru", False),
 }
 
 

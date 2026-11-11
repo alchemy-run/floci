@@ -243,6 +243,10 @@ services:
     doc: docs/services/deadline.md
     sources:
       - { path: services/deadline/DeadlineController.java, mode: switch }
+  - service: devopsguru
+    doc: docs/services/devopsguru.md
+    sources:
+      - { path: services/devopsguru/DevOpsGuruController.java, mode: switch }
   - service: dax
     doc: docs/services/dax.md
     sources:
