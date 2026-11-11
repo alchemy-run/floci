@@ -159,7 +159,7 @@ OUTPUT = REPO_ROOT / "src/main/resources/aws/iam-request-resources.json"
 # are the ones its handlers mint.
 NAMESPACES = ("access-analyzer", "acm", "application-autoscaling", "athena", "bcm-data-exports",
               "bcm-pricing-calculator", "budgets", "ce", "cloudtrail", "codebuild", "codepipeline", "cognito-identity",
-              "cognito-idp", "cur", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "dax", "ecr", "elasticloadbalancing", "elasticmapreduce", "es", "events",
+              "cognito-idp", "cur", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "dax", "ecr", "elasticloadbalancing", "elasticmapreduce", "es", "events",
               "firehose", "globalaccelerator", "kinesisanalytics", "payment-cryptography", "quicksight", "redshift",
               "redshift-data", "rekognition", "servicediscovery", "servicequotas", "sso", "states", "textract",
               "timestream-influxdb", "translate")
@@ -167,6 +167,9 @@ NAMESPACES = ("access-analyzer", "acm", "application-autoscaling", "athena", "bc
 # SDK clients the reference lists for a namespace's operations whose requests Floci does not serve, and why: their
 # members are not read.
 CLIENTS_NOT_READ: dict[str, str] = {
+    "greengrass": "IoT Greengrass v1, groups and definitions under /greengrass/groups and /greengrass/definition, "
+                  "which Floci does not serve (it serves v2, greengrassv2); its operations share v2's names, "
+                  "TagResource among them, and name their resources by other members",
     "kinesisanalytics": "Kinesis Data Analytics v1, SQL applications on the KinesisAnalytics_20150814 target, which "
                         "Floci does not serve (it serves v2, kinesisanalyticsv2); its operations share v2's names and "
                         "name their resources by other members",

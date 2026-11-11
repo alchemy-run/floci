@@ -124,6 +124,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Forecast](forecast.md) | `POST /` + `X-Amz-Target: AmazonForecast.*`, `AmazonForecastRuntime.*` | JSON 1.1 | 65 |
 | [Glacier](glacier.md) | `/<account>/vaults/*`, `/<account>/policies/*`, `/<account>/provisioned-capacity` | REST JSON | 33 |
 | [Managed Grafana](grafana.md) | `/workspaces/*`, `/tags/*`, `/versions` | REST JSON | 25 |
+| [IoT Greengrass V2](greengrassv2.md) | `/greengrass/v2/*`, `/greengrass/things/*`, `/greengrass/servicerole`, `/tags/*` | REST JSON | 29 |
 | [FSx](fsx.md) | `POST /` + `X-Amz-Target: AWSSimbaAPIService_v20180301.*` | JSON 1.1 | 48 |
 | [FinSpace](finspace.md) (end of support) | requests signed `finspace-api` | REST JSON | 0 |
 | [AWS Resource Groups](resource-groups.md) | `/groups`, `/get-group`, `/groups-list`, `/list-group-resources`, `/resources/*` and the other AWS routes | REST JSON | 23 |

@@ -62,6 +62,7 @@ MODELS: dict[str, str] = {
     "entityresolution": "entityresolution",
     "glacier": "glacier",
     "grafana": "grafana",
+    "greengrassv2": "greengrass",
     "dsql": "dsql",
     "eks": "eks",
     "es": "es",
@@ -98,6 +99,7 @@ INTERNAL_ROUTES: dict[str, tuple[str, bool]] = {
     "entityresolution": ("/_entityresolution", False),
     "glacier": ("/_glacier", False),
     "grafana": ("/_grafana", False),
+    "greengrassv2": ("/_greengrass", False),
 }
 
 

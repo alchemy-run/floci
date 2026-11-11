@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1535,6 +1535,20 @@ class PartitionCrossServiceSmokeIntegrationTest {
         String type = signed(region, "grafana").get("/workspaces/g-0000000000").then().statusCode(404).extract()
                 .header("x-amzn-ErrorType");
         assertTrue(type.contains("ResourceNotFoundException"), type);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void greengrassComponentArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "greengrass");
+        String recipe = Base64.getEncoder().encodeToString(("{\"RecipeFormatVersion\":\"2020-01-25\","
+                + "\"ComponentName\":\"com.example.Partition\",\"ComponentVersion\":\"1.0.0\"}")
+                .getBytes(StandardCharsets.UTF_8));
+        String arn = signed(region, "greengrass").contentType("application/json").body("{\"inlineRecipe\":\""
+                + recipe + "\"}").post("/greengrass/v2/createComponentVersion").then().statusCode(201).extract()
+                .path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "greengrass").delete("/greengrass/v2/components/" + arn).then().statusCode(204);
     }
 
     @ParameterizedTest

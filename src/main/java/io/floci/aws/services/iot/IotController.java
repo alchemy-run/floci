@@ -674,6 +674,36 @@ public class IotController {
         }
     }
 
+    @PUT
+    @Path("/jobs/{jobId}/cancel")
+    public Response cancelJob(@Context HttpHeaders headers,
+                              @PathParam("jobId") String jobId,
+                              @QueryParam("force") Boolean force,
+                              String body) {
+        try {
+            JsonNode request = objectMapper.readTree(body == null || body.isBlank() ? "{}" : body);
+            IotJob job = iotService.cancelJob(jobId, request.path("reasonCode").asText(null),
+                    request.path("comment").asText(null), Boolean.TRUE.equals(force),
+                    regionResolver.resolveRegion(headers));
+            ObjectNode response = objectMapper.createObjectNode();
+            response.put("jobArn", job.getJobArn());
+            response.put("jobId", job.getJobId());
+            response.put("description", job.getDescription());
+            return Response.ok(response).build();
+        } catch (JsonProcessingException e) {
+            throw new AwsException("InvalidRequestException", e.getMessage(), 400);
+        }
+    }
+
+    @DELETE
+    @Path("/jobs/{jobId}")
+    public Response deleteJob(@Context HttpHeaders headers,
+                              @PathParam("jobId") String jobId,
+                              @QueryParam("force") Boolean force) {
+        iotService.deleteJob(jobId, Boolean.TRUE.equals(force), regionResolver.resolveRegion(headers));
+        return Response.ok().build();
+    }
+
     @GET
     @Path("/jobs/{jobId}")
     public Response describeJob(@Context HttpHeaders headers,

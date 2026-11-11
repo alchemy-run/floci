@@ -514,6 +514,9 @@ floci:
     forecast:
       enabled: true
       transition-millis: 0
+    greengrassv2:
+      enabled: true
+      transition-millis: 0
     grafana:
       enabled: true
       mock: true

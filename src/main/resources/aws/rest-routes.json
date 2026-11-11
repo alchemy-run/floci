@@ -1091,6 +1091,42 @@
         "UpdateWorkspaceConfiguration": {"method": "PUT", "requestUri": "/_grafana/workspaces/{workspaceId}/configuration"}
       }
     },
+    "greengrassv2": {
+      "credentialScope": "greengrass",
+      "apiVersion": "2020-11-30",
+      "accessDeniedStatus": 403,
+      "operations": {
+        "AssociateServiceRoleToAccount": {"method": "PUT", "requestUri": "/_greengrass/greengrass/servicerole"},
+        "BatchAssociateClientDeviceWithCoreDevice": {"method": "POST", "requestUri": "/_greengrass/greengrass/v2/coreDevices/{coreDeviceThingName}/associateClientDevices"},
+        "BatchDisassociateClientDeviceFromCoreDevice": {"method": "POST", "requestUri": "/_greengrass/greengrass/v2/coreDevices/{coreDeviceThingName}/disassociateClientDevices"},
+        "CancelDeployment": {"method": "POST", "requestUri": "/_greengrass/greengrass/v2/deployments/{deploymentId}/cancel"},
+        "CreateComponentVersion": {"method": "POST", "requestUri": "/_greengrass/greengrass/v2/createComponentVersion"},
+        "CreateDeployment": {"method": "POST", "requestUri": "/_greengrass/greengrass/v2/deployments"},
+        "DeleteComponent": {"method": "DELETE", "requestUri": "/_greengrass/greengrass/v2/components/{arn}"},
+        "DeleteCoreDevice": {"method": "DELETE", "requestUri": "/_greengrass/greengrass/v2/coreDevices/{coreDeviceThingName}"},
+        "DeleteDeployment": {"method": "DELETE", "requestUri": "/_greengrass/greengrass/v2/deployments/{deploymentId}"},
+        "DescribeComponent": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/components/{arn}/metadata"},
+        "DisassociateServiceRoleFromAccount": {"method": "DELETE", "requestUri": "/_greengrass/greengrass/servicerole"},
+        "GetComponent": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/components/{arn}"},
+        "GetComponentVersionArtifact": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/components/{arn}/artifacts/{artifactName+}"},
+        "GetConnectivityInfo": {"method": "GET", "requestUri": "/_greengrass/greengrass/things/{thingName}/connectivityInfo"},
+        "GetCoreDevice": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/coreDevices/{coreDeviceThingName}"},
+        "GetDeployment": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/deployments/{deploymentId}"},
+        "GetServiceRoleForAccount": {"method": "GET", "requestUri": "/_greengrass/greengrass/servicerole"},
+        "ListClientDevicesAssociatedWithCoreDevice": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/coreDevices/{coreDeviceThingName}/associatedClientDevices"},
+        "ListComponentVersions": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/components/{arn}/versions"},
+        "ListComponents": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/components"},
+        "ListCoreDevices": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/coreDevices"},
+        "ListDeployments": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/deployments"},
+        "ListEffectiveDeployments": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/coreDevices/{coreDeviceThingName}/effectiveDeployments"},
+        "ListInstalledComponents": {"method": "GET", "requestUri": "/_greengrass/greengrass/v2/coreDevices/{coreDeviceThingName}/installedComponents"},
+        "ListTagsForResource": {"method": "GET", "requestUri": "/_greengrass/tags/{resourceArn}"},
+        "ResolveComponentCandidates": {"method": "POST", "requestUri": "/_greengrass/greengrass/v2/resolveComponentCandidates"},
+        "TagResource": {"method": "POST", "requestUri": "/_greengrass/tags/{resourceArn}"},
+        "UntagResource": {"method": "DELETE", "requestUri": "/_greengrass/tags/{resourceArn}"},
+        "UpdateConnectivityInfo": {"method": "PUT", "requestUri": "/_greengrass/greengrass/things/{thingName}/connectivityInfo"}
+      }
+    },
     "lambda": {
       "credentialScope": "lambda",
       "apiVersion": "2015-03-31",

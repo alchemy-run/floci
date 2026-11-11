@@ -279,6 +279,10 @@ services:
     doc: docs/services/fsx.md
     sources:
       - { path: services/fsx/FsxJsonHandler.java, mode: switch }
+  - service: greengrassv2
+    doc: docs/services/greengrassv2.md
+    sources:
+      - { path: services/greengrassv2/GreengrassV2Controller.java, mode: rest }
   - service: grafana
     doc: docs/services/grafana.md
     sources:

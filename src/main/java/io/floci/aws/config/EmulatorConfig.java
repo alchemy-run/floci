@@ -883,6 +883,8 @@ public interface EmulatorConfig {
         GlacierServiceConfig glacier();
 
         GrafanaServiceConfig grafana();
+
+        GreengrassV2ServiceConfig greengrassv2();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -2996,6 +2998,15 @@ public interface EmulatorConfig {
          */
         @WithDefault("true")
         boolean existingCustomer();
+    }
+
+    interface GreengrassV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a new component version stays REQUESTED before it settles. */
+        @WithDefault("2000")
+        long transitionMillis();
     }
 
     interface GrafanaServiceConfig {
