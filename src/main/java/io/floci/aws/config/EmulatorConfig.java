@@ -946,6 +946,8 @@ public interface EmulatorConfig {
 
         ShieldServiceConfig shield();
 
+        SignerServiceConfig signer();
+
         SsmIncidentsServiceConfig ssmIncidents();
 
         SsmContactsServiceConfig ssmContacts();
@@ -3116,6 +3118,11 @@ public interface EmulatorConfig {
         /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface SignerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface ShieldServiceConfig {

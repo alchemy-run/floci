@@ -58,6 +58,7 @@ MODELS = {
     "ssm-incidents": "ssmincidents",
     "schemas": "schemas",
     "securitylake": "securitylake",
+    "signer": "signer",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

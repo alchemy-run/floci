@@ -126,6 +126,7 @@ import io.floci.aws.services.ses.SesSuppressionController;
 import io.floci.aws.services.ses.SesTagController;
 import io.floci.aws.services.ses.SesTemplateController;
 import io.floci.aws.services.ses.SesTenantController;
+import io.floci.aws.services.signer.SignerController;
 import io.floci.aws.services.signin.SigninController;
 import io.floci.aws.services.ssmincidents.SsmIncidentsController;
 import io.floci.aws.services.ssooidc.SsoOidcController;
@@ -510,6 +511,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("OpenSearchServerless."), Set.of("aoss"), Set.of(), Set.of()),
+                descriptor("signer", "signer", config.services().signer().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("signer"), Set.of(), Set.of(SignerController.class)),
                 descriptor("shield", "shield", config.services().shield().enabled(),
                         true, null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

@@ -1060,6 +1060,8 @@ floci:
       enabled: true
     repostspace:
       enabled: true
+    signer:
+      enabled: true
     shield:
       enabled: true
     securitylake:

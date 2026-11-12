@@ -61,7 +61,7 @@ class CloudFormationLambdaCodeSigningIntegrationTest {
             .body("CodeSigningConfig.Description", equalTo("signed"))
             .body("CodeSigningConfig.AllowedPublishers.SigningProfileVersionArns",
                     contains(profileArn + "/" + version))
-            .body("CodeSigningConfig.CodeSigningPolicies.UntrustedArtifactOnDeployment", equalTo("Enforce"));
+            .body("CodeSigningConfig.CodeSigningPolicies.UntrustedArtifactOnDeployment", equalTo("Warn"));
         assertCodeSigningConfig(function, cscArn);
 
         for (String rejected : List.of(MISSING_CSC_ARN, cscArn.replace(":000000000000:", ":111111111111:"))) {
@@ -106,7 +106,7 @@ class CloudFormationLambdaCodeSigningIntegrationTest {
                         "AllowedPublishers": {
                           "SigningProfileVersionArns": [{"Fn::GetAtt": ["Profile", "ProfileVersionArn"]}]
                         },
-                        "CodeSigningPolicies": {"UntrustedArtifactOnDeployment": "Enforce"}
+                        "CodeSigningPolicies": {"UntrustedArtifactOnDeployment": "Warn"}
                       }
                     },
                     "Fn": {
