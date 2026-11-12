@@ -150,6 +150,8 @@ For services extended by this fork, follow the service-page link for the combine
 | [OpenSearch Serverless](opensearchserverless.md) | `POST /` + `X-Amz-Target: OpenSearchServerless.*` (signed `aoss`); collections run on OpenSearch | JSON 1.0 | 54 |
 | [Personalize](personalize.md) | `POST /` + `X-Amz-Target: AmazonPersonalize.*`, plus the runtime and events REST APIs (signed `personalize`); trains real models | JSON 1.1 + REST JSON | 79 |
 | [SMS and Voice v2](pinpointsmsvoicev2.md) | `POST /` + `X-Amz-Target: PinpointSMSVoiceV2.*` (signed `sms-voice`); events to SNS, Logs and Firehose, inbound keywords | JSON 1.0 | 110 |
+| [Q Business](qbusiness.md) | `/applications/...` (signed `qbusiness`); indexes documents, answers chat with citations | REST JSON | 83 |
+| [Q Apps](qapps.md) | `/apps.*`, `/runtime.*`, `/catalog.*` (signed `qapps`); apps of cards computed on a Q Business instance | REST JSON | 35 |
 | [HealthOmics](omics.md) | `/referencestore`, `/sequencestore`, `/workflow`, `/run`, ... (signed `omics`); runs on Cromwell, Nextflow and cwltool | REST JSON | 107 |
 | [CloudWatch Observability Admin](observabilityadmin.md) | `POST /<Operation>` (signed `observabilityadmin`); telemetry rules configure resources, pipelines run processors | REST JSON | 45 |
 | [OpenSearch Ingestion](osis.md) | `/2022-01-01/osis/*` (signed `osis`); pipelines run on Data Prepper, ingest on per-pipeline hosts | REST JSON | 22 |

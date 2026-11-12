@@ -926,6 +926,10 @@ public interface EmulatorConfig {
 
         PinpointSmsVoiceV2ServiceConfig pinpointSmsVoiceV2();
 
+        QBusinessServiceConfig qbusiness();
+
+        QAppsServiceConfig qapps();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3057,6 +3061,32 @@ public interface EmulatorConfig {
         /** How long event rules, hubs and configurations stay in a transitional state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface QBusinessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long applications, indices, data sources and documents take to become ready, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long presigned document, upload and export links last, in seconds. */
+        @WithDefault("300")
+        long presignedUrlSeconds();
+
+        /** The Bedrock model creator mode, extended knowledge and generated answers use. */
+        @WithDefault("amazon.nova-lite-v1:0")
+        String model();
+
+        /** Whether retrieval answers are written by {@link #model()}; otherwise they're the sentences that answer. */
+        @WithDefault("false")
+        boolean generateAnswers();
+    }
+
+    interface QAppsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface PinpointSmsVoiceV2ServiceConfig {

@@ -1,0 +1,691 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "qapps",
+ "apiVersion": "2023-11-27",
+ "operations": {
+  "AssociateLibraryItemReview": {
+   "method": "POST",
+   "requestUri": "/catalog.associateItemRating",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AssociateQAppWithUser": {
+   "method": "POST",
+   "requestUri": "/apps.install",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchCreateCategory": {
+   "method": "POST",
+   "requestUri": "/catalog.createCategories",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchDeleteCategory": {
+   "method": "POST",
+   "requestUri": "/catalog.deleteCategories",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchUpdateCategory": {
+   "method": "POST",
+   "requestUri": "/catalog.updateCategories",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateLibraryItem": {
+   "method": "POST",
+   "requestUri": "/catalog.createItem",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "CreatePresignedUrl": {
+   "method": "POST",
+   "requestUri": "/apps.createPresignedUrl",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "presignedUrlExpiration"
+    ]
+   }
+  },
+  "CreateQApp": {
+   "method": "POST",
+   "requestUri": "/apps.create",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    },
+    "timestamps": [
+     "appDefinition.cards[].qQuery.attributeFilter.equalsTo.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.containsAll.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.containsAny.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.greaterThan.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.greaterThanOrEquals.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.lessThan.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.lessThanOrEquals.value.dateValue"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "DeleteLibraryItem": {
+   "method": "POST",
+   "requestUri": "/catalog.deleteItem",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteQApp": {
+   "method": "POST",
+   "requestUri": "/apps.delete",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeQAppPermissions": {
+   "method": "GET",
+   "requestUri": "/apps.describeQAppPermissions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     },
+     "appId": {
+      "location": "querystring",
+      "name": "appId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateLibraryItemReview": {
+   "method": "POST",
+   "requestUri": "/catalog.disassociateItemRating",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateQAppFromUser": {
+   "method": "POST",
+   "requestUri": "/apps.uninstall",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ExportQAppSessionData": {
+   "method": "POST",
+   "requestUri": "/runtime.exportQAppSessionData",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "expiresAt"
+    ]
+   }
+  },
+  "GetLibraryItem": {
+   "method": "GET",
+   "requestUri": "/catalog.getItem",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     },
+     "libraryItemId": {
+      "location": "querystring",
+      "name": "libraryItemId"
+     },
+     "appId": {
+      "location": "querystring",
+      "name": "appId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetQApp": {
+   "method": "GET",
+   "requestUri": "/apps.get",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     },
+     "appId": {
+      "location": "querystring",
+      "name": "appId"
+     },
+     "appVersion": {
+      "location": "querystring",
+      "name": "appVersion",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetQAppSession": {
+   "method": "GET",
+   "requestUri": "/runtime.getQAppSession",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     },
+     "sessionId": {
+      "location": "querystring",
+      "name": "sessionId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "cardStatus{}.submissions[].timestamp"
+    ]
+   }
+  },
+  "GetQAppSessionMetadata": {
+   "method": "GET",
+   "requestUri": "/runtime.getQAppSessionMetadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     },
+     "sessionId": {
+      "location": "querystring",
+      "name": "sessionId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ImportDocument": {
+   "method": "POST",
+   "requestUri": "/apps.importDocument",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListCategories": {
+   "method": "GET",
+   "requestUri": "/catalog.listCategories",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListLibraryItems": {
+   "method": "GET",
+   "requestUri": "/catalog.list",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     },
+     "limit": {
+      "location": "querystring",
+      "name": "limit",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "categoryId": {
+      "location": "querystring",
+      "name": "categoryId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "libraryItems[].createdAt",
+     "libraryItems[].updatedAt"
+    ]
+   }
+  },
+  "ListQAppSessionData": {
+   "method": "GET",
+   "requestUri": "/runtime.listQAppSessionData",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     },
+     "sessionId": {
+      "location": "querystring",
+      "name": "sessionId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "sessionData[].timestamp"
+    ]
+   }
+  },
+  "ListQApps": {
+   "method": "GET",
+   "requestUri": "/apps.list",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     },
+     "limit": {
+      "location": "querystring",
+      "name": "limit",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "apps[].createdAt"
+    ]
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceARN}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceARN": {
+      "location": "uri",
+      "name": "resourceARN"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PredictQApp": {
+   "method": "POST",
+   "requestUri": "/apps.predictQApp",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartQAppSession": {
+   "method": "POST",
+   "requestUri": "/runtime.startQAppSession",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StopQAppSession": {
+   "method": "POST",
+   "requestUri": "/runtime.deleteMiniAppRun",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceARN}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceARN": {
+      "location": "uri",
+      "name": "resourceARN"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceARN}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceARN": {
+      "location": "uri",
+      "name": "resourceARN"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateLibraryItem": {
+   "method": "POST",
+   "requestUri": "/catalog.updateItem",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "UpdateLibraryItemMetadata": {
+   "method": "POST",
+   "requestUri": "/catalog.updateItemMetadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateQApp": {
+   "method": "POST",
+   "requestUri": "/apps.update",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    },
+    "timestamps": [
+     "appDefinition.cards[].qQuery.attributeFilter.equalsTo.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.containsAll.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.containsAny.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.greaterThan.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.greaterThanOrEquals.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.lessThan.value.dateValue",
+     "appDefinition.cards[].qQuery.attributeFilter.lessThanOrEquals.value.dateValue"
+    ]
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "UpdateQAppPermissions": {
+   "method": "POST",
+   "requestUri": "/apps.updateQAppPermissions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateQAppSession": {
+   "method": "POST",
+   "requestUri": "/runtime.updateQAppSession",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateQAppSessionMetadata": {
+   "method": "POST",
+   "requestUri": "/runtime.updateQAppSessionMetadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "instanceId": {
+      "location": "header",
+      "name": "instance-id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

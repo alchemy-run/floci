@@ -1,0 +1,1990 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "qbusiness",
+ "apiVersion": "2023-11-27",
+ "operations": {
+  "AssociatePermission": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchDeleteDocument": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/documents/delete",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchPutDocument": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/documents",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     }
+    },
+    "timestamps": [
+     "documents[].attributes[].value.dateValue",
+     "documents[].documentEnrichmentConfiguration.inlineConfigurations[].condition.value.dateValue",
+     "documents[].documentEnrichmentConfiguration.inlineConfigurations[].target.value.dateValue",
+     "documents[].documentEnrichmentConfiguration.preExtractionHookConfiguration.invocationCondition.value.dateValue",
+     "documents[].documentEnrichmentConfiguration.postExtractionHookConfiguration.invocationCondition.value.dateValue"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CancelSubscription": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/subscriptions/{subscriptionId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "subscriptionId": {
+      "location": "uri",
+      "name": "subscriptionId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "Chat": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/conversations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "userId": {
+      "location": "querystring",
+      "name": "userId"
+     },
+     "userGroups": {
+      "location": "querystring",
+      "name": "userGroups",
+      "type": "list"
+     },
+     "conversationId": {
+      "location": "querystring",
+      "name": "conversationId"
+     },
+     "parentMessageId": {
+      "location": "querystring",
+      "name": "parentMessageId"
+     },
+     "clientToken": {
+      "location": "querystring",
+      "name": "clientToken",
+      "idempotencyToken": true
+     },
+     "inputStream": {
+      "location": "payload",
+      "type": "structure"
+     }
+    },
+    "timestamps": [
+     "inputStream.configurationEvent.attributeFilter.equalsTo.value.dateValue",
+     "inputStream.configurationEvent.attributeFilter.containsAll.value.dateValue",
+     "inputStream.configurationEvent.attributeFilter.containsAny.value.dateValue",
+     "inputStream.configurationEvent.attributeFilter.greaterThan.value.dateValue",
+     "inputStream.configurationEvent.attributeFilter.greaterThanOrEquals.value.dateValue",
+     "inputStream.configurationEvent.attributeFilter.lessThan.value.dateValue",
+     "inputStream.configurationEvent.attributeFilter.lessThanOrEquals.value.dateValue"
+    ]
+   },
+   "output": {
+    "members": {
+     "outputStream": {
+      "location": "payload",
+      "type": "structure"
+     }
+    }
+   }
+  },
+  "ChatSync": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/conversations?sync",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "userId": {
+      "location": "querystring",
+      "name": "userId"
+     },
+     "userGroups": {
+      "location": "querystring",
+      "name": "userGroups",
+      "type": "list"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "attributeFilter.equalsTo.value.dateValue",
+     "attributeFilter.containsAll.value.dateValue",
+     "attributeFilter.containsAny.value.dateValue",
+     "attributeFilter.greaterThan.value.dateValue",
+     "attributeFilter.greaterThanOrEquals.value.dateValue",
+     "attributeFilter.lessThan.value.dateValue",
+     "attributeFilter.lessThanOrEquals.value.dateValue"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CheckDocumentAccess": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/index/{indexId}/users/{userId}/documents/{documentId}/check-document-access",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "userId": {
+      "location": "uri",
+      "name": "userId"
+     },
+     "documentId": {
+      "location": "uri",
+      "name": "documentId"
+     },
+     "dataSourceId": {
+      "location": "querystring",
+      "name": "dataSourceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateAnonymousWebExperienceUrl": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/experiences/{webExperienceId}/anonymous-url",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "webExperienceId": {
+      "location": "uri",
+      "name": "webExperienceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateApplication": {
+   "method": "POST",
+   "requestUri": "/applications",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateChatResponseConfiguration": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/chatresponseconfigurations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateDataAccessor": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/dataaccessors",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.equalsTo.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.containsAll.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.containsAny.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.greaterThan.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.greaterThanOrEquals.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.lessThan.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.lessThanOrEquals.value.dateValue"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateDataSource": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/datasources",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "documentEnrichmentConfiguration.inlineConfigurations[].condition.value.dateValue",
+     "documentEnrichmentConfiguration.inlineConfigurations[].target.value.dateValue",
+     "documentEnrichmentConfiguration.preExtractionHookConfiguration.invocationCondition.value.dateValue",
+     "documentEnrichmentConfiguration.postExtractionHookConfiguration.invocationCondition.value.dateValue"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateIndex": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/indices",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreatePlugin": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/plugins",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateRetriever": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/retrievers",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateSubscription": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/subscriptions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateUser": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/users",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateWebExperience": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/experiences",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteApplication": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteAttachment": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/conversations/{conversationId}/attachments/{attachmentId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "conversationId": {
+      "location": "uri",
+      "name": "conversationId"
+     },
+     "attachmentId": {
+      "location": "uri",
+      "name": "attachmentId"
+     },
+     "userId": {
+      "location": "querystring",
+      "name": "userId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteChatControlsConfiguration": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/chatcontrols",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteChatResponseConfiguration": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/chatresponseconfigurations/{chatResponseConfigurationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "chatResponseConfigurationId": {
+      "location": "uri",
+      "name": "chatResponseConfigurationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteConversation": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/conversations/{conversationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "conversationId": {
+      "location": "uri",
+      "name": "conversationId"
+     },
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "userId": {
+      "location": "querystring",
+      "name": "userId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDataAccessor": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/dataaccessors/{dataAccessorId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "dataAccessorId": {
+      "location": "uri",
+      "name": "dataAccessorId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDataSource": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/datasources/{dataSourceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "dataSourceId": {
+      "location": "uri",
+      "name": "dataSourceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteGroup": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/groups/{groupName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "groupName": {
+      "location": "uri",
+      "name": "groupName"
+     },
+     "dataSourceId": {
+      "location": "querystring",
+      "name": "dataSourceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteIndex": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeletePlugin": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/plugins/{pluginId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "pluginId": {
+      "location": "uri",
+      "name": "pluginId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteRetriever": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/retrievers/{retrieverId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "retrieverId": {
+      "location": "uri",
+      "name": "retrieverId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteUser": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/users/{userId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "userId": {
+      "location": "uri",
+      "name": "userId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteWebExperience": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/experiences/{webExperienceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "webExperienceId": {
+      "location": "uri",
+      "name": "webExperienceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociatePermission": {
+   "method": "DELETE",
+   "requestUri": "/applications/{applicationId}/policy/{statementId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "statementId": {
+      "location": "uri",
+      "name": "statementId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetApplication": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetChatControlsConfiguration": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/chatcontrols",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetChatResponseConfiguration": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/chatresponseconfigurations/{chatResponseConfigurationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "chatResponseConfigurationId": {
+      "location": "uri",
+      "name": "chatResponseConfigurationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDataAccessor": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/dataaccessors/{dataAccessorId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "dataAccessorId": {
+      "location": "uri",
+      "name": "dataAccessorId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDataSource": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/datasources/{dataSourceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "dataSourceId": {
+      "location": "uri",
+      "name": "dataSourceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDocumentContent": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/index/{indexId}/documents/{documentId}/content",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "dataSourceId": {
+      "location": "querystring",
+      "name": "dataSourceId"
+     },
+     "documentId": {
+      "location": "uri",
+      "name": "documentId"
+     },
+     "outputFormat": {
+      "location": "querystring",
+      "name": "outputFormat"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetGroup": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/groups/{groupName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "groupName": {
+      "location": "uri",
+      "name": "groupName"
+     },
+     "dataSourceId": {
+      "location": "querystring",
+      "name": "dataSourceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetIndex": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetMedia": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/conversations/{conversationId}/messages/{messageId}/media/{mediaId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "conversationId": {
+      "location": "uri",
+      "name": "conversationId"
+     },
+     "messageId": {
+      "location": "uri",
+      "name": "messageId"
+     },
+     "mediaId": {
+      "location": "uri",
+      "name": "mediaId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetPlugin": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/plugins/{pluginId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "pluginId": {
+      "location": "uri",
+      "name": "pluginId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetPolicy": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetRetriever": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/retrievers/{retrieverId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "retrieverId": {
+      "location": "uri",
+      "name": "retrieverId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetUser": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/users/{userId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "userId": {
+      "location": "uri",
+      "name": "userId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetWebExperience": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/experiences/{webExperienceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "webExperienceId": {
+      "location": "uri",
+      "name": "webExperienceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListApplications": {
+   "method": "GET",
+   "requestUri": "/applications",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListAttachments": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/attachments",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "conversationId": {
+      "location": "querystring",
+      "name": "conversationId"
+     },
+     "userId": {
+      "location": "querystring",
+      "name": "userId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListChatResponseConfigurations": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/chatresponseconfigurations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListConversations": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/conversations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "userId": {
+      "location": "querystring",
+      "name": "userId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListDataAccessors": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/dataaccessors",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListDataSourceSyncJobs": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/datasources/{dataSourceId}/syncjobs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "dataSourceId": {
+      "location": "uri",
+      "name": "dataSourceId"
+     },
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "startTime": {
+      "location": "querystring",
+      "name": "startTime",
+      "type": "timestamp"
+     },
+     "endTime": {
+      "location": "querystring",
+      "name": "endTime",
+      "type": "timestamp"
+     },
+     "statusFilter": {
+      "location": "querystring",
+      "name": "syncStatus"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListDataSources": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/datasources",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListDocuments": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/index/{indexId}/documents",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "dataSourceIds": {
+      "location": "querystring",
+      "name": "dataSourceIds",
+      "type": "list"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListGroups": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/groups",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "updatedEarlierThan": {
+      "location": "querystring",
+      "name": "updatedEarlierThan",
+      "type": "timestamp"
+     },
+     "dataSourceId": {
+      "location": "querystring",
+      "name": "dataSourceId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListIndices": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/indices",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListMessages": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/conversations/{conversationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "conversationId": {
+      "location": "uri",
+      "name": "conversationId"
+     },
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "userId": {
+      "location": "querystring",
+      "name": "userId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListPluginActions": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/plugins/{pluginId}/actions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "pluginId": {
+      "location": "uri",
+      "name": "pluginId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListPluginTypeActions": {
+   "method": "GET",
+   "requestUri": "/pluginTypes/{pluginType}/actions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "pluginType": {
+      "location": "uri",
+      "name": "pluginType"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListPluginTypeMetadata": {
+   "method": "GET",
+   "requestUri": "/pluginTypeMetadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListPlugins": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/plugins",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListRetrievers": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/retrievers",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListSubscriptions": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/subscriptions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/v1/tags/{resourceARN}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceARN": {
+      "location": "uri",
+      "name": "resourceARN"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListWebExperiences": {
+   "method": "GET",
+   "requestUri": "/applications/{applicationId}/experiences",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutFeedback": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/conversations/{conversationId}/messages/{messageId}/feedback",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "userId": {
+      "location": "querystring",
+      "name": "userId"
+     },
+     "conversationId": {
+      "location": "uri",
+      "name": "conversationId"
+     },
+     "messageId": {
+      "location": "uri",
+      "name": "messageId"
+     }
+    },
+    "timestamps": [
+     "messageCopiedAt",
+     "messageUsefulness.submittedAt"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutGroup": {
+   "method": "PUT",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/groups",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SearchRelevantContent": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/relevant-content",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     }
+    },
+    "timestamps": [
+     "attributeFilter.equalsTo.value.dateValue",
+     "attributeFilter.containsAll.value.dateValue",
+     "attributeFilter.containsAny.value.dateValue",
+     "attributeFilter.greaterThan.value.dateValue",
+     "attributeFilter.greaterThanOrEquals.value.dateValue",
+     "attributeFilter.lessThan.value.dateValue",
+     "attributeFilter.lessThanOrEquals.value.dateValue"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartDataSourceSyncJob": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/datasources/{dataSourceId}/startsync",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "dataSourceId": {
+      "location": "uri",
+      "name": "dataSourceId"
+     },
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StopDataSourceSyncJob": {
+   "method": "POST",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/datasources/{dataSourceId}/stopsync",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "dataSourceId": {
+      "location": "uri",
+      "name": "dataSourceId"
+     },
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/v1/tags/{resourceARN}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceARN": {
+      "location": "uri",
+      "name": "resourceARN"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/v1/tags/{resourceARN}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceARN": {
+      "location": "uri",
+      "name": "resourceARN"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateApplication": {
+   "method": "PUT",
+   "requestUri": "/applications/{applicationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateChatControlsConfiguration": {
+   "method": "PATCH",
+   "requestUri": "/applications/{applicationId}/chatcontrols",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateChatResponseConfiguration": {
+   "method": "PUT",
+   "requestUri": "/applications/{applicationId}/chatresponseconfigurations/{chatResponseConfigurationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "chatResponseConfigurationId": {
+      "location": "uri",
+      "name": "chatResponseConfigurationId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateDataAccessor": {
+   "method": "PUT",
+   "requestUri": "/applications/{applicationId}/dataaccessors/{dataAccessorId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "dataAccessorId": {
+      "location": "uri",
+      "name": "dataAccessorId"
+     }
+    },
+    "timestamps": [
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.equalsTo.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.containsAll.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.containsAny.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.greaterThan.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.greaterThanOrEquals.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.lessThan.value.dateValue",
+     "actionConfigurations[].filterConfiguration.documentAttributeFilter.lessThanOrEquals.value.dateValue"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateDataSource": {
+   "method": "PUT",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}/datasources/{dataSourceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     },
+     "dataSourceId": {
+      "location": "uri",
+      "name": "dataSourceId"
+     }
+    },
+    "timestamps": [
+     "documentEnrichmentConfiguration.inlineConfigurations[].condition.value.dateValue",
+     "documentEnrichmentConfiguration.inlineConfigurations[].target.value.dateValue",
+     "documentEnrichmentConfiguration.preExtractionHookConfiguration.invocationCondition.value.dateValue",
+     "documentEnrichmentConfiguration.postExtractionHookConfiguration.invocationCondition.value.dateValue"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateIndex": {
+   "method": "PUT",
+   "requestUri": "/applications/{applicationId}/indices/{indexId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "indexId": {
+      "location": "uri",
+      "name": "indexId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdatePlugin": {
+   "method": "PUT",
+   "requestUri": "/applications/{applicationId}/plugins/{pluginId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "pluginId": {
+      "location": "uri",
+      "name": "pluginId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateRetriever": {
+   "method": "PUT",
+   "requestUri": "/applications/{applicationId}/retrievers/{retrieverId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "retrieverId": {
+      "location": "uri",
+      "name": "retrieverId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateSubscription": {
+   "method": "PUT",
+   "requestUri": "/applications/{applicationId}/subscriptions/{subscriptionId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "subscriptionId": {
+      "location": "uri",
+      "name": "subscriptionId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateUser": {
+   "method": "PUT",
+   "requestUri": "/applications/{applicationId}/users/{userId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "userId": {
+      "location": "uri",
+      "name": "userId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateWebExperience": {
+   "method": "PUT",
+   "requestUri": "/applications/{applicationId}/experiences/{webExperienceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "applicationId": {
+      "location": "uri",
+      "name": "applicationId"
+     },
+     "webExperienceId": {
+      "location": "uri",
+      "name": "webExperienceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

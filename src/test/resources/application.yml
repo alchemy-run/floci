@@ -566,6 +566,11 @@ floci:
       enabled: true
       transition-millis: 200
       engine: none
+    qbusiness:
+      enabled: true
+      transition-millis: 200
+    qapps:
+      enabled: true
     pinpoint-sms-voice-v2:
       enabled: true
       transition-millis: 200

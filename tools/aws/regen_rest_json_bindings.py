@@ -48,6 +48,8 @@ MODELS = {
     "omics": "omics",
     "personalize-runtime": "personalizeruntime",
     "personalize-events": "personalizeevents",
+    "qbusiness": "qbusiness",
+    "qapps": "qapps",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

@@ -1,0 +1,1019 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_qbusiness_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateLibraryItemReview": "AssociateLibraryItemReviewInput",
+    "AssociateQAppWithUser": "AssociateQAppWithUserInput",
+    "BatchCreateCategory": "BatchCreateCategoryInput",
+    "BatchDeleteCategory": "BatchDeleteCategoryInput",
+    "BatchUpdateCategory": "BatchUpdateCategoryInput",
+    "CreateLibraryItem": "CreateLibraryItemInput",
+    "CreatePresignedUrl": "CreatePresignedUrlInput",
+    "CreateQApp": "CreateQAppInput",
+    "DeleteLibraryItem": "DeleteLibraryItemInput",
+    "DeleteQApp": "DeleteQAppInput",
+    "DescribeQAppPermissions": "DescribeQAppPermissionsInput",
+    "DisassociateLibraryItemReview": "DisassociateLibraryItemReviewInput",
+    "DisassociateQAppFromUser": "DisassociateQAppFromUserInput",
+    "ExportQAppSessionData": "ExportQAppSessionDataInput",
+    "GetLibraryItem": "GetLibraryItemInput",
+    "GetQApp": "GetQAppInput",
+    "GetQAppSession": "GetQAppSessionInput",
+    "GetQAppSessionMetadata": "GetQAppSessionMetadataInput",
+    "ImportDocument": "ImportDocumentInput",
+    "ListCategories": "ListCategoriesInput",
+    "ListLibraryItems": "ListLibraryItemsInput",
+    "ListQAppSessionData": "ListQAppSessionDataInput",
+    "ListQApps": "ListQAppsInput",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PredictQApp": "PredictQAppInput",
+    "StartQAppSession": "StartQAppSessionInput",
+    "StopQAppSession": "StopQAppSessionInput",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateLibraryItem": "UpdateLibraryItemInput",
+    "UpdateLibraryItemMetadata": "UpdateLibraryItemMetadataInput",
+    "UpdateQApp": "UpdateQAppInput",
+    "UpdateQAppPermissions": "UpdateQAppPermissionsInput",
+    "UpdateQAppSession": "UpdateQAppSessionInput",
+    "UpdateQAppSessionMetadata": "UpdateQAppSessionMetadataInput"
+  },
+  "shapes": {
+    "ActionIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "AppDefinitionInput": {
+      "type": "structure",
+      "required": [
+        "cards"
+      ],
+      "members": {
+        "cards": "CardList",
+        "initialPrompt": "InitialPrompt"
+      }
+    },
+    "AppVersion": {
+      "type": "integer",
+      "min": 0,
+      "max": 2147483647
+    },
+    "AssociateLibraryItemReviewInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "libraryItemId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "libraryItemId": "UUID"
+      }
+    },
+    "AssociateQAppWithUserInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "appId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "appId": "UUID"
+      }
+    },
+    "AttributeFilter": {
+      "type": "structure",
+      "members": {
+        "andAllFilters": "AttributeFilters",
+        "orAllFilters": "AttributeFilters",
+        "notFilter": "AttributeFilter",
+        "equalsTo": "DocumentAttribute",
+        "containsAll": "DocumentAttribute",
+        "containsAny": "DocumentAttribute",
+        "greaterThan": "DocumentAttribute",
+        "greaterThanOrEquals": "DocumentAttribute",
+        "lessThan": "DocumentAttribute",
+        "lessThanOrEquals": "DocumentAttribute"
+      }
+    },
+    "AttributeFilters": {
+      "type": "list",
+      "member": "AttributeFilter"
+    },
+    "BatchCreateCategoryInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "categories"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "categories": "BatchCreateCategoryInputCategoryList"
+      }
+    },
+    "BatchCreateCategoryInputCategory": {
+      "type": "structure",
+      "required": [
+        "title"
+      ],
+      "members": {
+        "id": "UUID",
+        "title": "BatchCreateCategoryInputCategoryTitleString",
+        "color": "BatchCreateCategoryInputCategoryColorString"
+      }
+    },
+    "BatchCreateCategoryInputCategoryColorString": {
+      "type": "string",
+      "min": 4,
+      "max": 7,
+      "pattern": "#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})"
+    },
+    "BatchCreateCategoryInputCategoryList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "BatchCreateCategoryInputCategory"
+    },
+    "BatchCreateCategoryInputCategoryTitleString": {
+      "type": "string",
+      "min": 1,
+      "max": 30,
+      "pattern": "[a-zA-Z0-9_]+( [a-zA-Z0-9_]+)*"
+    },
+    "BatchDeleteCategoryInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "categories"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "categories": "DeleteCategoryInputList"
+      }
+    },
+    "BatchUpdateCategoryInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "categories"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "categories": "CategoryListInput"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CardInput": {
+      "type": "structure",
+      "members": {
+        "textInput": "TextInputCardInput",
+        "qQuery": "QQueryCardInput",
+        "qPlugin": "QPluginCardInput",
+        "fileUpload": "FileUploadCardInput",
+        "formInput": "FormInputCardInput"
+      }
+    },
+    "CardList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "CardInput"
+    },
+    "CardOutputSource": {
+      "type": "string",
+      "enum": [
+        "approved-sources",
+        "llm"
+      ]
+    },
+    "CardType": {
+      "type": "string",
+      "enum": [
+        "text-input",
+        "q-query",
+        "file-upload",
+        "q-plugin",
+        "form-input"
+      ]
+    },
+    "CardValue": {
+      "type": "structure",
+      "required": [
+        "cardId",
+        "value"
+      ],
+      "members": {
+        "cardId": "UUID",
+        "value": "CardValueValueString",
+        "submissionMutation": "SubmissionMutation"
+      }
+    },
+    "CardValueList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "CardValue"
+    },
+    "CardValueValueString": {
+      "type": "string",
+      "min": 0,
+      "max": 40000
+    },
+    "CategoryIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 3,
+      "member": "UUID"
+    },
+    "CategoryInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "title"
+      ],
+      "members": {
+        "id": "UUID",
+        "title": "CategoryInputTitleString",
+        "color": "CategoryInputColorString"
+      }
+    },
+    "CategoryInputColorString": {
+      "type": "string",
+      "min": 4,
+      "max": 7,
+      "pattern": "#([A-Fa-f0-9]{3}|[A-Fa-f0-9]{6})"
+    },
+    "CategoryInputTitleString": {
+      "type": "string",
+      "min": 1,
+      "max": 30,
+      "pattern": "[a-zA-Z0-9_]+( [a-zA-Z0-9_]+)*"
+    },
+    "CategoryListInput": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "CategoryInput"
+    },
+    "ConversationMessage": {
+      "type": "structure",
+      "required": [
+        "body",
+        "type"
+      ],
+      "members": {
+        "body": "ConversationMessageBodyString",
+        "type": "Sender"
+      }
+    },
+    "ConversationMessageBodyString": {
+      "type": "string",
+      "min": 0,
+      "max": 7000
+    },
+    "CreateLibraryItemInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "appId",
+        "appVersion",
+        "categories"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "appId": "UUID",
+        "appVersion": "AppVersion",
+        "categories": "CategoryIdList"
+      }
+    },
+    "CreatePresignedUrlInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "cardId",
+        "appId",
+        "fileContentsSha256",
+        "fileName",
+        "scope"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "cardId": "UUID",
+        "appId": "UUID",
+        "fileContentsSha256": "CreatePresignedUrlInputFileContentsSha256String",
+        "fileName": "Filename",
+        "scope": "DocumentScope",
+        "sessionId": "UUID"
+      }
+    },
+    "CreatePresignedUrlInputFileContentsSha256String": {
+      "type": "string",
+      "pattern": "[A-Za-z0-9+/]{43}=$|^[A-Za-z0-9+/]{42}==$|^[A-Za-z0-9+/]{44}"
+    },
+    "CreateQAppInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "title",
+        "appDefinition"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "title": "Title",
+        "description": "Description",
+        "appDefinition": "AppDefinitionInput",
+        "tags": "TagMap"
+      }
+    },
+    "Default": {
+      "type": "string",
+      "min": 0,
+      "max": 500
+    },
+    "DeleteCategoryInputList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "UUID"
+    },
+    "DeleteLibraryItemInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "libraryItemId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "libraryItemId": "UUID"
+      }
+    },
+    "DeleteQAppInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "appId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "appId": "UUID"
+      }
+    },
+    "DescribeQAppPermissionsInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "appId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "appId": "UUID"
+      }
+    },
+    "Description": {
+      "type": "string",
+      "min": 0,
+      "max": 500
+    },
+    "DisassociateLibraryItemReviewInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "libraryItemId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "libraryItemId": "UUID"
+      }
+    },
+    "DisassociateQAppFromUserInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "appId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "appId": "UUID"
+      }
+    },
+    "DocumentAttribute": {
+      "type": "structure",
+      "required": [
+        "name",
+        "value"
+      ],
+      "members": {
+        "name": "DocumentAttributeKey",
+        "value": "DocumentAttributeValue"
+      }
+    },
+    "DocumentAttributeKey": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[a-zA-Z0-9_][a-zA-Z0-9_-]*"
+    },
+    "DocumentAttributeStringListValue": {
+      "type": "list",
+      "member": "PlatoString"
+    },
+    "DocumentAttributeValue": {
+      "type": "structure",
+      "members": {
+        "stringValue": "DocumentAttributeValueStringValueString",
+        "stringListValue": "DocumentAttributeStringListValue",
+        "longValue": "Long",
+        "dateValue": "Timestamp"
+      }
+    },
+    "DocumentAttributeValueStringValueString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "DocumentScope": {
+      "type": "string",
+      "enum": [
+        "APPLICATION",
+        "SESSION"
+      ]
+    },
+    "ExportQAppSessionDataInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "sessionId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "sessionId": "UUID"
+      }
+    },
+    "FileUploadCardInput": {
+      "type": "structure",
+      "required": [
+        "title",
+        "id",
+        "type"
+      ],
+      "members": {
+        "title": "Title",
+        "id": "UUID",
+        "type": "CardType",
+        "filename": "Filename",
+        "fileId": "UUID",
+        "allowOverride": "Boolean"
+      }
+    },
+    "Filename": {
+      "type": "string",
+      "min": 0,
+      "max": 100
+    },
+    "FormInputCardInput": {
+      "type": "structure",
+      "required": [
+        "title",
+        "id",
+        "type",
+        "metadata"
+      ],
+      "members": {
+        "title": "Title",
+        "id": "UUID",
+        "type": "CardType",
+        "metadata": "FormInputCardMetadata",
+        "computeMode": "InputCardComputeMode"
+      }
+    },
+    "FormInputCardMetadata": {
+      "type": "structure",
+      "required": [
+        "schema"
+      ],
+      "members": {
+        "schema": "FormInputCardMetadataSchema"
+      }
+    },
+    "FormInputCardMetadataSchema": {
+      "type": "document"
+    },
+    "GetLibraryItemInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "libraryItemId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "libraryItemId": "UUID",
+        "appId": "UUID"
+      }
+    },
+    "GetQAppInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "appId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "appId": "UUID",
+        "appVersion": "AppVersion"
+      }
+    },
+    "GetQAppSessionInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "sessionId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "sessionId": "UUID"
+      }
+    },
+    "GetQAppSessionMetadataInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "sessionId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "sessionId": "UUID"
+      }
+    },
+    "ImportDocumentInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "cardId",
+        "appId",
+        "fileContentsBase64",
+        "fileName",
+        "scope"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "cardId": "UUID",
+        "appId": "UUID",
+        "fileContentsBase64": "String",
+        "fileName": "Filename",
+        "scope": "DocumentScope",
+        "sessionId": "UUID"
+      }
+    },
+    "InitialPrompt": {
+      "type": "string",
+      "min": 0,
+      "max": 10000
+    },
+    "InputCardComputeMode": {
+      "type": "string",
+      "enum": [
+        "append",
+        "replace"
+      ]
+    },
+    "InstanceId": {
+      "type": "string"
+    },
+    "LibraryItemStatus": {
+      "type": "string",
+      "enum": [
+        "PUBLISHED",
+        "DISABLED"
+      ]
+    },
+    "ListCategoriesInput": {
+      "type": "structure",
+      "required": [
+        "instanceId"
+      ],
+      "members": {
+        "instanceId": "InstanceId"
+      }
+    },
+    "ListLibraryItemsInput": {
+      "type": "structure",
+      "required": [
+        "instanceId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "limit": "PageLimit",
+        "nextToken": "PaginationToken",
+        "categoryId": "UUID"
+      }
+    },
+    "ListQAppSessionDataInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "sessionId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "sessionId": "UUID"
+      }
+    },
+    "ListQAppsInput": {
+      "type": "structure",
+      "required": [
+        "instanceId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "limit": "PageLimit",
+        "nextToken": "PaginationToken"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN"
+      ],
+      "members": {
+        "resourceARN": "AmazonResourceName"
+      }
+    },
+    "Long": {
+      "type": "long"
+    },
+    "PageLimit": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 0,
+      "max": 300
+    },
+    "PermissionInput": {
+      "type": "structure",
+      "required": [
+        "action",
+        "principal"
+      ],
+      "members": {
+        "action": "PermissionInputActionEnum",
+        "principal": "PermissionInputPrincipalString"
+      }
+    },
+    "PermissionInputActionEnum": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "enum": [
+        "read",
+        "write"
+      ]
+    },
+    "PermissionInputPrincipalString": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "Placeholder": {
+      "type": "string",
+      "min": 0,
+      "max": 500
+    },
+    "PlatoString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "PluginId": {
+      "type": "string",
+      "min": 36,
+      "max": 36
+    },
+    "PredictQAppInput": {
+      "type": "structure",
+      "required": [
+        "instanceId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "options": "PredictQAppInputOptions"
+      }
+    },
+    "PredictQAppInputOptions": {
+      "type": "structure",
+      "members": {
+        "conversation": "PredictQAppInputOptionsConversationList",
+        "problemStatement": "PredictQAppInputOptionsProblemStatementString"
+      }
+    },
+    "PredictQAppInputOptionsConversationList": {
+      "type": "list",
+      "min": 1,
+      "max": 25,
+      "member": "ConversationMessage"
+    },
+    "PredictQAppInputOptionsProblemStatementString": {
+      "type": "string",
+      "min": 0,
+      "max": 10000
+    },
+    "Prompt": {
+      "type": "string",
+      "min": 0,
+      "max": 50000
+    },
+    "QPluginCardInput": {
+      "type": "structure",
+      "required": [
+        "title",
+        "id",
+        "type",
+        "prompt",
+        "pluginId"
+      ],
+      "members": {
+        "title": "Title",
+        "id": "UUID",
+        "type": "CardType",
+        "prompt": "Prompt",
+        "pluginId": "PluginId",
+        "actionIdentifier": "ActionIdentifier"
+      }
+    },
+    "QQueryCardInput": {
+      "type": "structure",
+      "required": [
+        "title",
+        "id",
+        "type",
+        "prompt"
+      ],
+      "members": {
+        "title": "Title",
+        "id": "UUID",
+        "type": "CardType",
+        "prompt": "Prompt",
+        "outputSource": "CardOutputSource",
+        "attributeFilter": "AttributeFilter"
+      }
+    },
+    "Sender": {
+      "type": "string",
+      "enum": [
+        "USER",
+        "SYSTEM"
+      ]
+    },
+    "SessionName": {
+      "type": "string",
+      "min": 0,
+      "max": 100
+    },
+    "SessionSharingAcceptResponses": {
+      "type": "boolean"
+    },
+    "SessionSharingConfiguration": {
+      "type": "structure",
+      "required": [
+        "enabled"
+      ],
+      "members": {
+        "enabled": "SessionSharingEnabled",
+        "acceptResponses": "SessionSharingAcceptResponses",
+        "revealCards": "SessionSharingRevealCards"
+      }
+    },
+    "SessionSharingEnabled": {
+      "type": "boolean"
+    },
+    "SessionSharingRevealCards": {
+      "type": "boolean"
+    },
+    "StartQAppSessionInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "appId",
+        "appVersion"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "appId": "UUID",
+        "appVersion": "AppVersion",
+        "initialValues": "CardValueList",
+        "sessionId": "String",
+        "tags": "TagMap"
+      }
+    },
+    "StopQAppSessionInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "sessionId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "sessionId": "UUID"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "SubmissionMutation": {
+      "type": "structure",
+      "required": [
+        "submissionId",
+        "mutationType"
+      ],
+      "members": {
+        "submissionId": "UUID",
+        "mutationType": "SubmissionMutationKind"
+      }
+    },
+    "SubmissionMutationKind": {
+      "type": "string",
+      "enum": [
+        "edit",
+        "delete",
+        "add"
+      ]
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tags"
+      ],
+      "members": {
+        "resourceARN": "AmazonResourceName",
+        "tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "Tags": {
+      "type": "map",
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TextInputCardInput": {
+      "type": "structure",
+      "required": [
+        "title",
+        "id",
+        "type"
+      ],
+      "members": {
+        "title": "Title",
+        "id": "UUID",
+        "type": "CardType",
+        "placeholder": "Placeholder",
+        "defaultValue": "Default"
+      }
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "Title": {
+      "type": "string",
+      "min": 0,
+      "max": 100,
+      "pattern": "[^{}\\\\\"<>]+"
+    },
+    "UUID": {
+      "type": "string",
+      "pattern": "[\\da-f]{8}-[\\da-f]{4}-[45][\\da-f]{3}-[89ABab][\\da-f]{3}-[\\da-f]{12}"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceARN",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceARN": "AmazonResourceName",
+        "tagKeys": "TagKeys"
+      }
+    },
+    "UpdateLibraryItemInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "libraryItemId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "libraryItemId": "UUID",
+        "status": "LibraryItemStatus",
+        "categories": "CategoryIdList"
+      }
+    },
+    "UpdateLibraryItemMetadataInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "libraryItemId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "libraryItemId": "UUID",
+        "isVerified": "Boolean"
+      }
+    },
+    "UpdateQAppInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "appId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "appId": "UUID",
+        "title": "Title",
+        "description": "Description",
+        "appDefinition": "AppDefinitionInput"
+      }
+    },
+    "UpdateQAppPermissionsInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "appId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "appId": "UUID",
+        "grantPermissions": "UpdateQAppPermissionsInputGrantPermissionsList",
+        "revokePermissions": "UpdateQAppPermissionsInputRevokePermissionsList"
+      }
+    },
+    "UpdateQAppPermissionsInputGrantPermissionsList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "PermissionInput"
+    },
+    "UpdateQAppPermissionsInputRevokePermissionsList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "PermissionInput"
+    },
+    "UpdateQAppSessionInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "sessionId"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "sessionId": "UUID",
+        "values": "CardValueList"
+      }
+    },
+    "UpdateQAppSessionMetadataInput": {
+      "type": "structure",
+      "required": [
+        "instanceId",
+        "sessionId",
+        "sharingConfiguration"
+      ],
+      "members": {
+        "instanceId": "InstanceId",
+        "sessionId": "UUID",
+        "sessionName": "SessionName",
+        "sharingConfiguration": "SessionSharingConfiguration"
+      }
+    }
+  }
+}

@@ -291,6 +291,14 @@ services:
     doc: docs/services/opensearchserverless.md
     sources:
       - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: qbusiness
+    doc: docs/services/qbusiness.md
+    sources:
+      - { path: services/qbusiness/QBusinessController.java, mode: switch }
+  - service: qapps
+    doc: docs/services/qapps.md
+    sources:
+      - { path: services/qbusiness/QAppsService.java, mode: switch }
   - service: sms-voice
     doc: docs/services/pinpointsmsvoicev2.md
     sources:
