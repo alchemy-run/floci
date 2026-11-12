@@ -149,7 +149,9 @@ public class SecurityLakeService implements Resettable {
                 "TagResource", "UntagResource", "ListTagsForResource").contains(operation)) {
             return;
         }
-        if (lakes.get(region).isEmpty()) {
+        // Only an account that never had a data lake here is turned away; once offboarded, what it asks for
+        // is simply not found.
+        if (lakes.get(region).isEmpty() && settings.get("onboarded/" + region).isEmpty()) {
             throw new AwsException("UnauthorizedException", "Security Lake isn't enabled for this account in "
                     + region + ". Create a data lake first.", 401);
         }
@@ -212,6 +214,7 @@ public class SecurityLakeService implements Resettable {
             meta.put("ready", now() + step()).put("bucket", bucket).put("metastoreRole", metastoreRole);
             meta.set("tags", tagMap(in.path("tags")));
             lakes.put(lakeRegion, lake);
+            settings.put("onboarded/" + lakeRegion, mapper.createObjectNode().put("since", now()));
             out.add(view(lake));
         }
         return wrap("dataLakes", out);

@@ -152,6 +152,6 @@ class SecurityLakeIntegrationTest {
         lake().body("{\"regions\":[\"us-east-1\"]}").post("/v1/datalake/delete").then().statusCode(200);
         lake().get("/v1/datalakes").then().body("dataLakes", hasSize(0));
         given().header("Authorization", auth("s3")).head("/" + bucket).then().statusCode(200);
-        lake().get("/v1/subscribers").then().statusCode(401);
+        lake().get("/v1/subscribers/" + subscriber).then().statusCode(404);
     }
 }
