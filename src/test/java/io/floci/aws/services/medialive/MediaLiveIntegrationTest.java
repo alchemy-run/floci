@@ -24,7 +24,7 @@ import static org.hamcrest.Matchers.startsWith;
  * deleted; multiplexes and programs; reservations; workflow monitor templates and signal maps; MediaLive Anywhere.
  */
 @QuarkusTest
-class MediaLiveIntegrationTest {
+public class MediaLiveIntegrationTest {
 
     static final String ENCODER = "{\"audioDescriptions\":[{\"audioSelectorName\":\"default\",\"name\":\"audio1\","
             + "\"codecSettings\":{\"aacSettings\":{\"bitrate\":96000,\"sampleRate\":48000}}}],\"videoDescriptions\":"
@@ -40,7 +40,7 @@ class MediaLiveIntegrationTest {
         RestAssuredJsonUtils.configureAwsContentTypes();
     }
 
-    static RequestSpecification ml() {
+    public static RequestSpecification ml() {
         return given().header("Authorization",
                         "AWS4-HMAC-SHA256 Credential=000000000000/20260101/us-east-1/medialive/aws4_request")
                 .contentType("application/json");
@@ -50,11 +50,11 @@ class MediaLiveIntegrationTest {
         return ml().get("/prod/channels/" + id).then().log().ifValidationFails();
     }
 
-    static void awaitState(String id, String state) {
+    public static void awaitState(String id, String state) {
         await().atMost(Duration.ofSeconds(10)).until(() -> state.equals(channel(id).extract().path("state")));
     }
 
-    static String pullInput(String name, String url) {
+    public static String pullInput(String name, String url) {
         return ml().body("{\"name\":\"" + name + "\",\"type\":\"MP4_FILE\",\"sources\":[{\"url\":\"" + url + "\"}]}")
                 .post("/prod/inputs").then().statusCode(201).body("input.inputClass", equalTo("SINGLE_PIPELINE"))
                 .extract().path("input.id");

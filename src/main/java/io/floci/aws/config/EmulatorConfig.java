@@ -902,6 +902,8 @@ public interface EmulatorConfig {
 
         MediaLiveServiceConfig mediaLive();
 
+        MediaPackageV2ServiceConfig mediaPackageV2();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3024,6 +3026,22 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface MediaPackageV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a harvest job waits after its window ends before it runs. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long ingested content is kept at least, beyond any origin endpoint's startover window. */
+        @WithDefault("120")
+        int minimumRetentionSeconds();
+
+        @WithDefault("3")
+        int maxChannelGroups();
     }
 
     interface MediaLiveServiceConfig {

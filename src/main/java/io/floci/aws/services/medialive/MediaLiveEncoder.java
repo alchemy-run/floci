@@ -11,9 +11,9 @@ import io.floci.aws.core.common.ContainerTeardown;
 import io.floci.aws.core.common.RequestScopes;
 import io.floci.aws.core.common.docker.ContainerBuilder;
 import io.floci.aws.core.common.docker.ContainerLifecycleManager;
-import io.floci.aws.core.common.docker.LaunchedContainerAwsEnv;
 import io.floci.aws.core.common.docker.ContainerSpec;
 import io.floci.aws.core.common.docker.ContainerStorageHelper;
+import io.floci.aws.core.common.docker.LaunchedContainerAwsEnv;
 import io.floci.aws.services.s3.S3Service;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -26,6 +26,7 @@ import org.jboss.logging.Logger;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Base64;
@@ -38,6 +39,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Runs a running channel's encoder: one ffmpeg container per channel, in the media image Kinesis Video Streams
@@ -57,6 +60,9 @@ public class MediaLiveEncoder implements ContainerTeardown {
     private static final Logger LOG = Logger.getLogger(MediaLiveEncoder.class);
     private static final int RTMP_PORT = 1935;
     private static final int UDP_PORT = 5000;
+    /** A MediaPackage v2 ingest or egress host, which its path-style URL reaches without a Host header. */
+    private static final Pattern MEDIAPACKAGE_HOST = Pattern.compile(
+            "(?i)([a-z0-9-]+)\\.(ingest|egress)\\.mediapackagev2\\.([a-z0-9-]+)\\..*");
 
     private final ContainerBuilder containers;
     private final ContainerLifecycleManager lifecycle;
@@ -207,6 +213,43 @@ public class MediaLiveEncoder implements ContainerTeardown {
         return awsEnv.flociEndpoint().replaceAll("/+$", "");
     }
 
+    /**
+     * A URL as the encoder's container reaches it, and the Host header to send with it: a Floci-hosted URL (a
+     * {@code *.localhost.floci.io} or localhost host, such as a MediaPackage ingest endpoint) goes to Floci's
+     * container-reachable endpoint with its own host in the header, which Floci routes by; any other URL is as is.
+     */
+    String[] reachable(String url) {
+        URI parsed;
+        try {
+            parsed = URI.create(url);
+        } catch (IllegalArgumentException e) {
+            return new String[] {url, null};
+        }
+        String host = parsed.getHost();
+        String scheme = parsed.getScheme();
+        if (host == null || scheme == null || !scheme.toLowerCase(Locale.ROOT).startsWith("http")
+                || !(host.equalsIgnoreCase("localhost") || host.toLowerCase(Locale.ROOT).endsWith(
+                ".localhost.floci.io") || host.equalsIgnoreCase("localhost.floci.io") || "127.0.0.1".equals(host))) {
+            return new String[] {url, null};
+        }
+        String original = host + (parsed.getPort() < 0 ? "" : ":" + parsed.getPort());
+        String path = parsed.getRawPath() + (parsed.getRawQuery() == null ? "" : "?" + parsed.getRawQuery());
+        Matcher packaging = MEDIAPACKAGE_HOST.matcher(host);
+        if (packaging.matches()) {
+            return new String[] {flociUrl() + "/_floci/mediapackagev2/" + packaging.group(2).toLowerCase(Locale.ROOT)
+                    + "/" + packaging.group(3) + "/" + packaging.group(1) + path, null};
+        }
+        return new String[] {flociUrl() + path, original};
+    }
+
+    /**
+     * Custom headers that set the Host: ffmpeg keeps its own Host header unless a custom one follows a line break,
+     * so another header goes first.
+     */
+    private static String hostHeader(String host) {
+        return "X-Floci-Route: medialive\r\nHost: " + host + "\r\n";
+    }
+
     private static String quote(String value) {
         return "'" + value.replace("'", "'\\''") + "'";
     }
@@ -244,7 +287,11 @@ public class MediaLiveEncoder implements ContainerTeardown {
                 if (file) {
                     args.append(" -re");
                 }
-                args.append(" -i ").append(quote(url));
+                String[] reachable = reachable(url);
+                if (reachable[1] != null) {
+                    args.append(" -headers ").append(quote(hostHeader(reachable[1])));
+                }
+                args.append(" -i ").append(quote(reachable[0]));
             }
             case "RTMP_PUSH" -> {
                 rtmpPort = input.path("Destinations").path(0).path("Port").asInt();
@@ -304,6 +351,8 @@ public class MediaLiveEncoder implements ContainerTeardown {
                         break;
                     }
                     boolean s3 = url.startsWith("s3://") || url.startsWith("s3ssl://");
+                    String[] reachable = s3 ? new String[] {url, null} : reachable(url);
+                    url = reachable[0];
                     String location = s3 ? url.substring(url.indexOf("://") + 3) : url;
                     String base = location.substring(location.lastIndexOf('/') + 1);
                     String folder = location.substring(0, location.lastIndexOf('/') + 1);
@@ -312,7 +361,8 @@ public class MediaLiveEncoder implements ContainerTeardown {
                         mkdirs.append(' ').append(dir);
                         uploads.add(new String[] {"g" + groupIndex, folder});
                     }
-                    String method = s3 ? "" : " -method PUT";
+                    String method = s3 ? "" : " -method PUT" + (reachable[1] == null ? "" : " -headers "
+                            + quote(hostHeader(reachable[1])));
                     if ("HlsGroupSettings".equals(kind)) {
                         StringBuilder maps = new StringBuilder();
                         StringBuilder streamMap = new StringBuilder();

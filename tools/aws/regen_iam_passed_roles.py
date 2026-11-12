@@ -80,7 +80,7 @@ SERVICE_SUFFIX = ".amazonaws.com"
 NAMESPACES = (
     "application-autoscaling", "athena", "autoscaling", "budgets", "cloudformation", "cloudtrail",
     "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito-identity", "cognito-idp",
-    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "medialive", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
+    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
     "events", "firehose", "glue", "iam", "kinesis", "kinesisanalytics", "lambda", "logs", "pipes",
     "rds", "redshift", "redshift-serverless", "rekognition", "resource-groups", "s3", "sagemaker", "scheduler",
     "secretsmanager", "servicecatalog", "ses", "sns", "ssm", "states", "swf", "textract",
