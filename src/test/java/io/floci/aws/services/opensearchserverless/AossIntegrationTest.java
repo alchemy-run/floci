@@ -81,6 +81,10 @@ class AossIntegrationTest {
                 + "\"ResourceType\":\"index\",\"Resource\":[\"index/x/*\"],\"Permission\":[\"aoss:CreateCollectionItems\""
                 + "]}],\"Principal\":[\"arn:aws:iam::000000000000:root\"]}]") + "}").post("/").then().statusCode(400)
                 .body("message", containsString("doesn't apply"));
+        aoss("CreateSecurityPolicy", "{\"type\":\"network\",\"name\":\"dash-net\",\"policy\":" + json("[{\"Rules\":[{"
+                + "\"ResourceType\":\"dashboard\",\"Resource\":[\"collection/logs\"]}],\"AllowFromPublic\":true}]") + "}")
+                .post("/").then().statusCode(200);
+        aoss("DeleteSecurityPolicy", "{\"type\":\"network\",\"name\":\"dash-net\"}").post("/").then().statusCode(200);
         String version = aoss("CreateSecurityPolicy", "{\"type\":\"network\",\"name\":\"policy-net\",\"description\":"
                 + "\"v1\",\"policy\":" + network("logs*") + "}").post("/").then().statusCode(200)
                 .body("securityPolicyDetail.policy[0].AllowFromPublic", equalTo(true)).extract()

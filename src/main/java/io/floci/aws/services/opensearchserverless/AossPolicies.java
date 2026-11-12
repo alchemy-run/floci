@@ -68,10 +68,12 @@ final class AossPolicies {
             if (!resources.isArray() || resources.isEmpty()) {
                 throw AossStore.validation("Each " + kind + " policy rule needs a Resource list.");
             }
+            // A dashboard rule names the collections whose dashboards it covers.
+            String prefix = "dashboard".equals(type) ? "collection/" : type + "/";
             for (JsonNode resource : resources) {
-                if (!resource.asText().startsWith(type + "/")) {
-                    throw AossStore.validation("The resource " + resource.asText() + " must start with " + type
-                            + "/.");
+                if (!resource.asText().startsWith(prefix)) {
+                    throw AossStore.validation("The resource " + resource.asText() + " must start with " + prefix
+                            + ".");
                 }
             }
         }
