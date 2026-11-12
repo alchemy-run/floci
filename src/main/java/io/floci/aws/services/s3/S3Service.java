@@ -7210,6 +7210,8 @@ public class S3Service implements Resettable, ResourceProvider {
                 entry.put("Source", "aws.s3");
                 entry.put("DetailType", detailType);
                 entry.put("Detail", buildS3EventBridgeDetail(bucketName, key, eventName, obj, region));
+                entry.put("Resources", objectMapper.createArrayNode().add(
+                        S3PublicAccessEvaluator.bucketArn(bucketPartition(bucketName), bucketName)));
                 eventBridgeService.putEvents(List.of(entry), region);
                 LOG.debugv("Fired S3 event {0} to EventBridge default bus", eventName);
             } catch (Exception e) {

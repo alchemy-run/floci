@@ -41,6 +41,8 @@ MODELS = {
     "mediatailor": "mediatailor",
     "medical-imaging": "medicalimaging",
     "neptune-graph": "neptunegraph",
+    "notifications": "notifications",
+    "notificationscontacts": "notificationscontacts",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

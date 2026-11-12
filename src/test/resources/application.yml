@@ -553,6 +553,11 @@ floci:
     airflow-serverless:
       enabled: true
       transition-millis: 200
+    notifications:
+      enabled: true
+      transition-millis: 200
+    notifications-contacts:
+      enabled: true
     neptune-graph:
       enabled: true
       transition-millis: 200

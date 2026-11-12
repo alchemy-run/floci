@@ -1,0 +1,704 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_notifications_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateChannel": "AssociateChannelRequest",
+    "AssociateManagedNotificationAccountContact": "AssociateManagedNotificationAccountContactRequest",
+    "AssociateManagedNotificationAdditionalChannel": "AssociateManagedNotificationAdditionalChannelRequest",
+    "AssociateOrganizationalUnit": "AssociateOrganizationalUnitRequest",
+    "CreateEventRule": "CreateEventRuleRequest",
+    "CreateNotificationConfiguration": "CreateNotificationConfigurationRequest",
+    "DeleteEventRule": "DeleteEventRuleRequest",
+    "DeleteNotificationConfiguration": "DeleteNotificationConfigurationRequest",
+    "DeregisterNotificationHub": "DeregisterNotificationHubRequest",
+    "DisableNotificationsAccessForOrganization": "DisableNotificationsAccessForOrganizationRequest",
+    "DisassociateChannel": "DisassociateChannelRequest",
+    "DisassociateManagedNotificationAccountContact": "DisassociateManagedNotificationAccountContactRequest",
+    "DisassociateManagedNotificationAdditionalChannel": "DisassociateManagedNotificationAdditionalChannelRequest",
+    "DisassociateOrganizationalUnit": "DisassociateOrganizationalUnitRequest",
+    "EnableNotificationsAccessForOrganization": "EnableNotificationsAccessForOrganizationRequest",
+    "GetEventRule": "GetEventRuleRequest",
+    "GetManagedNotificationChildEvent": "GetManagedNotificationChildEventRequest",
+    "GetManagedNotificationConfiguration": "GetManagedNotificationConfigurationRequest",
+    "GetManagedNotificationEvent": "GetManagedNotificationEventRequest",
+    "GetNotificationConfiguration": "GetNotificationConfigurationRequest",
+    "GetNotificationEvent": "GetNotificationEventRequest",
+    "GetNotificationsAccessForOrganization": "GetNotificationsAccessForOrganizationRequest",
+    "ListChannels": "ListChannelsRequest",
+    "ListEventRules": "ListEventRulesRequest",
+    "ListManagedNotificationChannelAssociations": "ListManagedNotificationChannelAssociationsRequest",
+    "ListManagedNotificationChildEvents": "ListManagedNotificationChildEventsRequest",
+    "ListManagedNotificationConfigurations": "ListManagedNotificationConfigurationsRequest",
+    "ListManagedNotificationEvents": "ListManagedNotificationEventsRequest",
+    "ListMemberAccounts": "ListMemberAccountsRequest",
+    "ListNotificationConfigurations": "ListNotificationConfigurationsRequest",
+    "ListNotificationEvents": "ListNotificationEventsRequest",
+    "ListNotificationHubs": "ListNotificationHubsRequest",
+    "ListOrganizationalUnits": "ListOrganizationalUnitsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "RegisterNotificationHub": "RegisterNotificationHubRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateEventRule": "UpdateEventRuleRequest",
+    "UpdateManagedNotificationChannelAssociation": "UpdateManagedNotificationChannelAssociationRequest",
+    "UpdateNotificationConfiguration": "UpdateNotificationConfigurationRequest"
+  },
+  "shapes": {
+    "AccountContactType": {
+      "type": "string",
+      "enum": [
+        "ACCOUNT_PRIMARY",
+        "ACCOUNT_ALTERNATE_BILLING",
+        "ACCOUNT_ALTERNATE_OPERATIONS",
+        "ACCOUNT_ALTERNATE_SECURITY"
+      ]
+    },
+    "AccountId": {
+      "type": "string",
+      "pattern": "\\d{12}"
+    },
+    "AggregationDuration": {
+      "type": "string",
+      "enum": [
+        "LONG",
+        "SHORT",
+        "NONE"
+      ]
+    },
+    "AssociateChannelRequest": {
+      "type": "structure",
+      "required": [
+        "arn",
+        "notificationConfigurationArn"
+      ],
+      "members": {
+        "arn": "ChannelArn",
+        "notificationConfigurationArn": "NotificationConfigurationArn"
+      }
+    },
+    "AssociateManagedNotificationAccountContactRequest": {
+      "type": "structure",
+      "required": [
+        "contactIdentifier",
+        "managedNotificationConfigurationArn"
+      ],
+      "members": {
+        "contactIdentifier": "AccountContactType",
+        "managedNotificationConfigurationArn": "ManagedNotificationConfigurationOsArn",
+        "isSensitiveEventsSubscribed": "Boolean"
+      }
+    },
+    "AssociateManagedNotificationAdditionalChannelRequest": {
+      "type": "structure",
+      "required": [
+        "channelArn",
+        "managedNotificationConfigurationArn"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "managedNotificationConfigurationArn": "ManagedNotificationConfigurationOsArn",
+        "isSensitiveEventsSubscribed": "Boolean"
+      }
+    },
+    "AssociateOrganizationalUnitRequest": {
+      "type": "structure",
+      "required": [
+        "organizationalUnitId",
+        "notificationConfigurationArn"
+      ],
+      "members": {
+        "organizationalUnitId": "OrganizationalUnitId",
+        "notificationConfigurationArn": "NotificationConfigurationArn"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "ChannelArn": {
+      "type": "string",
+      "pattern": "arn:[a-z-]{3,10}:(chatbot|consoleapp|notifications-contacts):[a-zA-Z0-9-]*:[0-9]{12}:[a-zA-Z0-9-_.@]+/[a-zA-Z0-9/_.@:-]+"
+    },
+    "ChannelIdentifier": {
+      "type": "string",
+      "pattern": "(ACCOUNT_PRIMARY|ACCOUNT_ALTERNATE_BILLING|ACCOUNT_ALTERNATE_OPERATIONS|ACCOUNT_ALTERNATE_SECURITY|arn:[a-z-]{3,10}:(chatbot|consoleapp|notifications-contacts):[a-zA-Z0-9-]*:[0-9]{12}:[a-zA-Z0-9-_.@]+/[a-zA-Z0-9/_.@:-]+)"
+    },
+    "CreateEventRuleRequest": {
+      "type": "structure",
+      "required": [
+        "notificationConfigurationArn",
+        "source",
+        "eventType",
+        "regions"
+      ],
+      "members": {
+        "notificationConfigurationArn": "NotificationConfigurationArn",
+        "source": "Source",
+        "eventType": "EventType",
+        "eventPattern": "EventRuleEventPattern",
+        "regions": "Regions"
+      }
+    },
+    "CreateNotificationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "description"
+      ],
+      "members": {
+        "name": "NotificationConfigurationName",
+        "description": "NotificationConfigurationDescription",
+        "aggregationDuration": "AggregationDuration",
+        "tags": "TagMap"
+      }
+    },
+    "DeleteEventRuleRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "EventRuleArn"
+      }
+    },
+    "DeleteNotificationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "NotificationConfigurationArn"
+      }
+    },
+    "DeregisterNotificationHubRequest": {
+      "type": "structure",
+      "required": [
+        "notificationHubRegion"
+      ],
+      "members": {
+        "notificationHubRegion": "Region"
+      }
+    },
+    "DisableNotificationsAccessForOrganizationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DisassociateChannelRequest": {
+      "type": "structure",
+      "required": [
+        "arn",
+        "notificationConfigurationArn"
+      ],
+      "members": {
+        "arn": "ChannelArn",
+        "notificationConfigurationArn": "NotificationConfigurationArn"
+      }
+    },
+    "DisassociateManagedNotificationAccountContactRequest": {
+      "type": "structure",
+      "required": [
+        "contactIdentifier",
+        "managedNotificationConfigurationArn"
+      ],
+      "members": {
+        "contactIdentifier": "AccountContactType",
+        "managedNotificationConfigurationArn": "ManagedNotificationConfigurationOsArn"
+      }
+    },
+    "DisassociateManagedNotificationAdditionalChannelRequest": {
+      "type": "structure",
+      "required": [
+        "channelArn",
+        "managedNotificationConfigurationArn"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "managedNotificationConfigurationArn": "ManagedNotificationConfigurationOsArn"
+      }
+    },
+    "DisassociateOrganizationalUnitRequest": {
+      "type": "structure",
+      "required": [
+        "organizationalUnitId",
+        "notificationConfigurationArn"
+      ],
+      "members": {
+        "organizationalUnitId": "OrganizationalUnitId",
+        "notificationConfigurationArn": "NotificationConfigurationArn"
+      }
+    },
+    "EnableNotificationsAccessForOrganizationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "EventRuleArn": {
+      "type": "string",
+      "pattern": "arn:[a-z-]{3,10}:notifications::[0-9]{12}:configuration/[a-z0-9]{27}/rule/[a-z0-9]{27}"
+    },
+    "EventRuleEventPattern": {
+      "type": "string",
+      "min": 0,
+      "max": 4096
+    },
+    "EventType": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "([a-zA-Z0-9 \\-\\(\\)])+"
+    },
+    "GetEventRuleRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "EventRuleArn"
+      }
+    },
+    "GetManagedNotificationChildEventRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "ManagedNotificationChildEventArn",
+        "locale": "LocaleCode"
+      }
+    },
+    "GetManagedNotificationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "ManagedNotificationConfigurationOsArn"
+      }
+    },
+    "GetManagedNotificationEventRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "ManagedNotificationEventArn",
+        "locale": "LocaleCode"
+      }
+    },
+    "GetNotificationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "NotificationConfigurationArn"
+      }
+    },
+    "GetNotificationEventRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "NotificationEventArn",
+        "locale": "LocaleCode"
+      }
+    },
+    "GetNotificationsAccessForOrganizationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "ListChannelsRequest": {
+      "type": "structure",
+      "required": [
+        "notificationConfigurationArn"
+      ],
+      "members": {
+        "notificationConfigurationArn": "NotificationConfigurationArn",
+        "maxResults": "ListChannelsRequestMaxResultsInteger",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListChannelsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListEventRulesRequest": {
+      "type": "structure",
+      "required": [
+        "notificationConfigurationArn"
+      ],
+      "members": {
+        "notificationConfigurationArn": "NotificationConfigurationArn",
+        "maxResults": "ListEventRulesRequestMaxResultsInteger",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListEventRulesRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "ListManagedNotificationChannelAssociationsRequest": {
+      "type": "structure",
+      "required": [
+        "managedNotificationConfigurationArn"
+      ],
+      "members": {
+        "managedNotificationConfigurationArn": "ManagedNotificationConfigurationOsArn",
+        "maxResults": "ListManagedNotificationChannelAssociationsRequestMaxResultsInteger",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListManagedNotificationChannelAssociationsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListManagedNotificationChildEventsRequest": {
+      "type": "structure",
+      "required": [
+        "aggregateManagedNotificationEventArn"
+      ],
+      "members": {
+        "aggregateManagedNotificationEventArn": "ManagedNotificationEventArn",
+        "startTime": "SyntheticTimestamp_date_time",
+        "endTime": "SyntheticTimestamp_date_time",
+        "locale": "LocaleCode",
+        "maxResults": "ListManagedNotificationChildEventsRequestMaxResultsInteger",
+        "relatedAccount": "AccountId",
+        "organizationalUnitId": "OrganizationalUnitId",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListManagedNotificationChildEventsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListManagedNotificationConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "channelIdentifier": "ChannelIdentifier",
+        "maxResults": "ListManagedNotificationConfigurationsRequestMaxResultsInteger",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListManagedNotificationConfigurationsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListManagedNotificationEventsRequest": {
+      "type": "structure",
+      "members": {
+        "startTime": "SyntheticTimestamp_date_time",
+        "endTime": "SyntheticTimestamp_date_time",
+        "locale": "LocaleCode",
+        "source": "Source",
+        "maxResults": "ListManagedNotificationEventsRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "organizationalUnitId": "OrganizationalUnitId",
+        "relatedAccount": "AccountId",
+        "includeSensitiveEvents": "Boolean"
+      }
+    },
+    "ListManagedNotificationEventsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListMemberAccountsRequest": {
+      "type": "structure",
+      "required": [
+        "notificationConfigurationArn"
+      ],
+      "members": {
+        "notificationConfigurationArn": "NotificationConfigurationArn",
+        "maxResults": "ListMemberAccountsRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "memberAccount": "AccountId",
+        "status": "MemberAccountNotificationConfigurationStatus",
+        "organizationalUnitId": "OrganizationalUnitId"
+      }
+    },
+    "ListMemberAccountsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListNotificationConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "eventRuleSource": "Source",
+        "channelArn": "ChannelArn",
+        "status": "NotificationConfigurationStatus",
+        "subtype": "NotificationConfigurationSubtype",
+        "maxResults": "ListNotificationConfigurationsRequestMaxResultsInteger",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListNotificationConfigurationsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListNotificationEventsRequest": {
+      "type": "structure",
+      "members": {
+        "startTime": "SyntheticTimestamp_date_time",
+        "endTime": "SyntheticTimestamp_date_time",
+        "locale": "LocaleCode",
+        "source": "Source",
+        "includeChildEvents": "Boolean",
+        "aggregateNotificationEventArn": "NotificationEventArn",
+        "maxResults": "ListNotificationEventsRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "organizationalUnitId": "OrganizationalUnitId"
+      }
+    },
+    "ListNotificationEventsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListNotificationHubsRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "ListNotificationHubsRequestMaxResultsInteger",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListNotificationHubsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 3,
+      "max": 3
+    },
+    "ListOrganizationalUnitsRequest": {
+      "type": "structure",
+      "required": [
+        "notificationConfigurationArn"
+      ],
+      "members": {
+        "notificationConfigurationArn": "NotificationConfigurationArn",
+        "maxResults": "ListOrganizationalUnitsRequestMaxResultsInteger",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListOrganizationalUnitsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "NotificationConfigurationArn"
+      }
+    },
+    "LocaleCode": {
+      "type": "string",
+      "enum": [
+        "de_DE",
+        "en_CA",
+        "en_US",
+        "en_UK",
+        "es_ES",
+        "fr_CA",
+        "fr_FR",
+        "id_ID",
+        "it_IT",
+        "ja_JP",
+        "ko_KR",
+        "pt_BR",
+        "tr_TR",
+        "zh_CN",
+        "zh_TW"
+      ]
+    },
+    "ManagedNotificationChannelIdentifier": {
+      "type": "string",
+      "pattern": "(ACCOUNT_PRIMARY|ACCOUNT_ALTERNATE_BILLING|ACCOUNT_ALTERNATE_OPERATIONS|ACCOUNT_ALTERNATE_SECURITY|arn:[a-z-]{3,10}:(chatbot|consoleapp|notifications-contacts):[a-zA-Z0-9-]*:[0-9]{12}:[a-zA-Z0-9-_.@]+/[a-zA-Z0-9/_.@:-]+)"
+    },
+    "ManagedNotificationChildEventArn": {
+      "type": "string",
+      "pattern": "arn:[a-z-]{3,10}:notifications::[0-9]{12}:managed-notification-configuration/category/[a-zA-Z0-9\\-]{3,64}/sub-category/[a-zA-Z0-9\\-]{3,64}/event/[a-z0-9]{27}/child-event/[a-z0-9]{27}"
+    },
+    "ManagedNotificationConfigurationOsArn": {
+      "type": "string",
+      "pattern": "arn:[a-z-]{3,10}:notifications::[0-9]{12}:managed-notification-configuration/category/[a-zA-Z0-9\\-]{3,64}/sub-category/[a-zA-Z0-9\\-]{3,64}"
+    },
+    "ManagedNotificationEventArn": {
+      "type": "string",
+      "pattern": "arn:[a-z-]{3,10}:notifications::[0-9]{12}:managed-notification-configuration/category/[a-zA-Z0-9\\-]{3,64}/sub-category/[a-zA-Z0-9\\-]{3,64}/event/[a-z0-9]{27}"
+    },
+    "MemberAccountNotificationConfigurationStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "PENDING",
+        "INACTIVE",
+        "CREATING",
+        "DELETING"
+      ]
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096,
+      "pattern": "[\\w+-/=]+"
+    },
+    "NotificationConfigurationArn": {
+      "type": "string",
+      "pattern": "arn:[a-z-]{3,10}:notifications::[0-9]{12}:configuration/[a-z0-9]{27}"
+    },
+    "NotificationConfigurationDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[^\\u0001-\\u001F\\u007F-\\u009F]*"
+    },
+    "NotificationConfigurationName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9_\\-]+"
+    },
+    "NotificationConfigurationStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "PARTIALLY_ACTIVE",
+        "INACTIVE",
+        "DELETING"
+      ]
+    },
+    "NotificationConfigurationSubtype": {
+      "type": "string",
+      "enum": [
+        "ACCOUNT",
+        "ADMIN_MANAGED"
+      ]
+    },
+    "NotificationEventArn": {
+      "type": "string",
+      "pattern": "arn:[a-z-]{3,10}:notifications:[-.a-z0-9]{1,63}:[0-9]{12}:configuration/[a-z0-9]{27}/event/[a-z0-9]{27}"
+    },
+    "OrganizationalUnitId": {
+      "type": "string",
+      "pattern": "(Root|r-[0-9a-z]{4,32}|ou-[0-9a-z]{4,32}-[a-z0-9]{8,32})"
+    },
+    "Region": {
+      "type": "string",
+      "min": 2,
+      "max": 25,
+      "pattern": "([a-z]{1,4})-([a-z]{1,15}-)+([0-9])"
+    },
+    "Regions": {
+      "type": "list",
+      "min": 1,
+      "member": "Region"
+    },
+    "RegisterNotificationHubRequest": {
+      "type": "structure",
+      "required": [
+        "notificationHubRegion"
+      ],
+      "members": {
+        "notificationHubRegion": "Region"
+      }
+    },
+    "Source": {
+      "type": "string",
+      "min": 1,
+      "max": 36,
+      "pattern": "aws.([a-z0-9\\-])+"
+    },
+    "SyntheticTimestamp_date_time": {
+      "type": "timestamp"
+    },
+    "TagKey": {
+      "type": "string",
+      "pattern": "(?!aws:).{1,128}"
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 0,
+      "max": 200,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "arn",
+        "tags"
+      ],
+      "members": {
+        "arn": "NotificationConfigurationArn",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "arn",
+        "tagKeys"
+      ],
+      "members": {
+        "arn": "NotificationConfigurationArn",
+        "tagKeys": "TagKeys"
+      }
+    },
+    "UpdateEventRuleRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "EventRuleArn",
+        "eventPattern": "EventRuleEventPattern",
+        "regions": "Regions"
+      }
+    },
+    "UpdateManagedNotificationChannelAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "managedNotificationConfigurationArn",
+        "channelIdentifier"
+      ],
+      "members": {
+        "managedNotificationConfigurationArn": "ManagedNotificationConfigurationOsArn",
+        "channelIdentifier": "ManagedNotificationChannelIdentifier",
+        "isSensitiveEventsSubscribed": "Boolean"
+      }
+    },
+    "UpdateNotificationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "NotificationConfigurationArn",
+        "name": "NotificationConfigurationName",
+        "description": "NotificationConfigurationDescription",
+        "aggregationDuration": "AggregationDuration"
+      }
+    }
+  }
+}

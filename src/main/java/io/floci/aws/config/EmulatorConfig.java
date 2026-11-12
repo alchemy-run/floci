@@ -910,6 +910,10 @@ public interface EmulatorConfig {
 
         NeptuneGraphServiceConfig neptuneGraph();
 
+        NotificationsServiceConfig notifications();
+
+        NotificationsContactsServiceConfig notificationsContacts();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3032,6 +3036,24 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface NotificationsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long event rules, hubs and configurations stay in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface NotificationsContactsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long an activation code is valid. */
+        @WithDefault("1800")
+        int activationCodeSeconds();
     }
 
     interface NeptuneGraphServiceConfig {

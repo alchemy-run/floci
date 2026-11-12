@@ -279,6 +279,14 @@ services:
     doc: docs/services/airflowserverless.md
     sources:
       - { path: services/airflowserverless/AirflowServerlessJsonHandler.java, mode: switch }
+  - service: notifications
+    doc: docs/services/notifications.md
+    sources:
+      - { path: services/notifications/NotificationsController.java, mode: switch }
+  - service: notifications-contacts
+    doc: docs/services/notificationscontacts.md
+    sources:
+      - { path: services/notificationscontacts/NotificationsContactsController.java, mode: switch }
   - service: neptune-graph
     doc: docs/services/neptunegraph.md
     sources:

@@ -324,6 +324,8 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_mediatailor_shapes.py
 	$(PYTHON) tools/aws/regen_medicalimaging_shapes.py
 	$(PYTHON) tools/aws/regen_neptunegraph_shapes.py
+	$(PYTHON) tools/aws/regen_notifications_shapes.py
+	$(PYTHON) tools/aws/regen_notificationscontacts_shapes.py
 	$(PYTHON) tools/aws/regen_fsx_shapes.py
 	$(PYTHON) tools/aws/regen_ds_shapes.py
 	$(PYTHON) tools/aws/regen_rest_json_bindings.py
@@ -593,6 +595,14 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_neptunegraph_shapes.py --check || { \
 		echo "error: Neptune Analytics request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_notifications_shapes.py --check || { \
+		echo "error: User Notifications request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_notificationscontacts_shapes.py --check || { \
+		echo "error: User Notifications Contacts request shapes are out of date; run 'make aws-data-sync'."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_iotsitewise_shapes.py --check || { \

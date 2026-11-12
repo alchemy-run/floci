@@ -1050,6 +1050,10 @@ floci:
       enabled: true
     airflow-serverless:
       enabled: true
+    notifications:
+      enabled: true
+    notifications-contacts:
+      enabled: true
     neptune-graph:
       enabled: true
     medical-imaging:
