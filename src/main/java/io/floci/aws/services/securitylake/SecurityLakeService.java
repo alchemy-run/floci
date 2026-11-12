@@ -422,7 +422,7 @@ public class SecurityLakeService implements Resettable {
                 // Kept from an earlier source with this name.
             }
         });
-        String providerRole = "AmazonSecurityLake-Provider-" + name + "-" + region;
+        String providerRole = roleName("AmazonSecurityLake-Provider-" + name + "-" + region);
         IamRole role = createAssumableRole(providerRole, identity, "Lets the custom source " + name
                 + " write to Security Lake.", List.of("s3:PutObject", "s3:PutObjectAcl"),
                 AwsArnUtils.Arn.global(partition, "s3", "", bucket + "/" + prefix + "*").toString());
@@ -833,6 +833,15 @@ public class SecurityLakeService implements Resettable {
                 .set("Action", mapper.valueToTree(actions));
         iam.get().putRolePolicy(name, "SecurityLakeAccess", policy.toString());
         return role;
+    }
+
+    /** An IAM role name, at most 64 characters: a longer one is cut and given a hash of the whole for uniqueness. */
+    private static String roleName(String wanted) {
+        if (wanted.length() <= 64) {
+            return wanted;
+        }
+        String hash = String.format("%08x", wanted.hashCode());
+        return wanted.substring(0, 55) + "-" + hash;
     }
 
     private void deleteRole(String name) {

@@ -88,17 +88,17 @@ class SecurityLakeIntegrationTest {
                 + "\"amazon_security_lake_table_us_east_1_route53_2_0\"}").post("/").then().statusCode(200)
                 .body("Table.StorageDescriptor.Location", containsString("/aws/ROUTE53/2.0/"));
         String crawlerRole = role("SecurityLakeCrawler", "glue.amazonaws.com");
-        String providerRole = lake().body("{\"sourceName\":\"app-audit\",\"eventClasses\":[\"FILE_ACTIVITY\"],"
+        String providerRole = lake().body("{\"sourceName\":\"application-audit-trail-events\",\"eventClasses\":[\"FILE_ACTIVITY\"],"
                 + "\"configuration\":{\"crawlerConfiguration\":{\"roleArn\":\"" + crawlerRole + "\"},"
                 + "\"providerIdentity\":{\"principal\":\"000000000000\",\"externalId\":\"app\"}}}")
                 .post("/v1/datalake/logsources/custom").then().statusCode(200)
-                .body("source.provider.location", containsString("/ext/app-audit/1.0/"))
+                .body("source.provider.location", containsString("/ext/application-audit-trail-events/1.0/"))
                 .body("source.attributes.crawlerArn", containsString(":crawler/")).extract()
                 .path("source.provider.roleArn");
-        glue("GetCrawler", "{\"Name\":\"SecurityLake-app-audit-us-east-1\"}").post("/").then().statusCode(200);
+        glue("GetCrawler", "{\"Name\":\"SecurityLake-application-audit-trail-events-us-east-1\"}").post("/").then().statusCode(200);
         lake().body("{}").post("/v1/datalake/logsources/list").then()
                 .body("sources[0].sources.awsLogSource.sourceName", hasItem("ROUTE53"))
-                .body("sources[0].sources.customLogSource.sourceName", hasItem("app-audit"));
+                .body("sources[0].sources.customLogSource.sourceName", hasItem("application-audit-trail-events"));
 
         // A subscriber reads through a role its identity assumes; its queue hears of new objects.
         lake().body("{\"subscriberName\":\"siem\",\"subscriberIdentity\":{\"principal\":\"111122223333\","
@@ -141,7 +141,7 @@ class SecurityLakeIntegrationTest {
         lake().body("{}").post("/v1/datalake/exceptions").then().body("exceptions", hasSize(1))
                 .body("exceptions[0].exception", containsString(providerName));
         lake().body("{}").post("/v1/datalake/sources").then()
-                .body("dataLakeSources.find { it.sourceName == 'app-audit' }.sourceStatuses[0].status",
+                .body("dataLakeSources.find { it.sourceName == 'application-audit-trail-events' }.sourceStatuses[0].status",
                         equalTo("MISCONFIGURED"));
 
         // Offboarding: subscribers first; the bucket stays.
