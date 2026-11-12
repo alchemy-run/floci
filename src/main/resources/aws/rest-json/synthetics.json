@@ -1,0 +1,346 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "synthetics",
+ "apiVersion": "2017-10-11",
+ "operations": {
+  "AssociateResource": {
+   "method": "PATCH",
+   "requestUri": "/group/{groupIdentifier}/associate",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "GroupIdentifier": {
+      "location": "uri",
+      "name": "groupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateCanary": {
+   "method": "POST",
+   "requestUri": "/canary",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateGroup": {
+   "method": "POST",
+   "requestUri": "/group",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteCanary": {
+   "method": "DELETE",
+   "requestUri": "/canary/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     },
+     "DeleteLambda": {
+      "location": "querystring",
+      "name": "deleteLambda",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteGroup": {
+   "method": "DELETE",
+   "requestUri": "/group/{groupIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "GroupIdentifier": {
+      "location": "uri",
+      "name": "groupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeCanaries": {
+   "method": "POST",
+   "requestUri": "/canaries",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeCanariesLastRun": {
+   "method": "POST",
+   "requestUri": "/canaries/last-run",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeRuntimeVersions": {
+   "method": "POST",
+   "requestUri": "/runtime-versions",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateResource": {
+   "method": "PATCH",
+   "requestUri": "/group/{groupIdentifier}/disassociate",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "GroupIdentifier": {
+      "location": "uri",
+      "name": "groupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetCanary": {
+   "method": "GET",
+   "requestUri": "/canary/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     },
+     "DryRunId": {
+      "location": "querystring",
+      "name": "dryRunId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetCanaryRuns": {
+   "method": "POST",
+   "requestUri": "/canary/{name}/runs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetGroup": {
+   "method": "GET",
+   "requestUri": "/group/{groupIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "GroupIdentifier": {
+      "location": "uri",
+      "name": "groupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListAssociatedGroups": {
+   "method": "POST",
+   "requestUri": "/resource/{resourceArn}/groups",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListGroupResources": {
+   "method": "POST",
+   "requestUri": "/group/{groupIdentifier}/resources",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "GroupIdentifier": {
+      "location": "uri",
+      "name": "groupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListGroups": {
+   "method": "POST",
+   "requestUri": "/groups",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartCanary": {
+   "method": "POST",
+   "requestUri": "/canary/{name}/start",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartCanaryDryRun": {
+   "method": "POST",
+   "requestUri": "/canary/{name}/dry-run/start",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StopCanary": {
+   "method": "POST",
+   "requestUri": "/canary/{name}/stop",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "TagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateCanary": {
+   "method": "PATCH",
+   "requestUri": "/canary/{name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "name"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

@@ -1062,6 +1062,8 @@ floci:
       enabled: true
     socialmessaging:
       enabled: true
+    synthetics:
+      enabled: true
     sdb:
       enabled: true
     signer:

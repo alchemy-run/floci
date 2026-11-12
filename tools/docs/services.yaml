@@ -295,6 +295,10 @@ services:
     doc: docs/services/socialmessaging.md
     sources:
       - { path: services/socialmessaging/SocialMessagingService.java, mode: switch }
+  - service: synthetics
+    doc: docs/services/synthetics.md
+    sources:
+      - { path: services/synthetics/SyntheticsService.java, mode: switch }
   - service: sdb
     doc: docs/services/sdb.md
     sources:

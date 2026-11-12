@@ -574,6 +574,9 @@ floci:
     socialmessaging:
       enabled: true
       review-millis: 200
+    synthetics:
+      enabled: true
+      transition-millis: 100
     sdb:
       enabled: true
     signer:

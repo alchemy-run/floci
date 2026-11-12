@@ -952,6 +952,8 @@ public interface EmulatorConfig {
 
         SocialMessagingServiceConfig socialmessaging();
 
+        SyntheticsServiceConfig synthetics();
+
         SsmIncidentsServiceConfig ssmIncidents();
 
         SsmContactsServiceConfig ssmContacts();
@@ -3121,6 +3123,15 @@ public interface EmulatorConfig {
 
         /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
         @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface SyntheticsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a canary's asynchronous state changes (create, update, start, stop, delete) take, in ms. */
+        @WithDefault("1000")
         long transitionMillis();
     }
 
