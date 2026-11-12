@@ -279,6 +279,10 @@ services:
     doc: docs/services/airflowserverless.md
     sources:
       - { path: services/airflowserverless/AirflowServerlessJsonHandler.java, mode: switch }
+  - service: mediaconnect
+    doc: docs/services/mediaconnect.md
+    sources:
+      - { path: services/mediaconnect/MediaConnectController.java, mode: switch }
   - service: mailmanager
     doc: docs/services/mailmanager.md
     sources:

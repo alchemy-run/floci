@@ -95,7 +95,7 @@ OUTPUT = REPO_ROOT / "src/main/resources/aws/iam-tag-on-create.json"
 NAMESPACES = (
     "access-analyzer", "acm", "application-autoscaling", "athena", "autoscaling", "bcm-data-exports",
     "bcm-pricing-calculator", "budgets", "ce", "cloudformation", "cloudhsm", "cloudtrail", "cloudwatch",
-    "codedeploy", "codepipeline", "cognito-identity", "cognito-idp", "comprehend", "config", "cur", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "ivs", "ivschat", "dax",
+    "codedeploy", "codepipeline", "cognito-identity", "cognito-idp", "comprehend", "config", "cur", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "ivs", "ivschat", "dax",
     "dms", "dsql", "dynamodb", "ec2", "ecr", "ecs", "eks", "elasticache", "elasticloadbalancing",
     "elasticmapreduce", "events", "firehose", "globalaccelerator", "glue", "iam", "kinesis", "kinesisanalytics",
     "kms", "lambda", "lightsail", "logs", "memorydb", "network-firewall", "organizations", "payment-cryptography",
@@ -173,6 +173,21 @@ NOT_READ = {
     "fsx:DeleteVolume": "its tags are the FinalBackupTags of the per-type configuration, deeper than the members "
                         "this file reads",
     "iam:AcquireRole": NO_TAGS,
+    "mediaconnect:AddFlowMediaStreams": "its tags are per media stream in mediaStreams[].mediaStreamTags, deeper "
+                                        "than the members this file reads",
+    "mediaconnect:AddFlowOutputs": "its tags are per output in outputs[].outputTags, deeper than the members this "
+                                   "file reads",
+    "mediaconnect:AddFlowSources": "its tags are per source in sources[].sourceTags, deeper than the members this "
+                                   "file reads",
+    "mediaconnect:AddFlowVpcInterfaces": "its tags are per VPC interface in vpcInterfaces[].vpcInterfaceTags, "
+                                         "deeper than the members this file reads",
+    "mediaconnect:GrantFlowEntitlements": "its tags are per entitlement in entitlements[].entitlementTags, deeper "
+                                          "than the members this file reads",
+    "mediaconnect:RegisterDestinationEndpoint": "endpoint registration is newer than botocore's MediaConnect "
+                                                "model, which has no operation of this name, and Floci does not "
+                                                "serve it",
+    "mediaconnect:RegisterSourceEndpoint": "endpoint registration is newer than botocore's MediaConnect model, "
+                                           "which has no operation of this name, and Floci does not serve it",
     "ivs:CreateFailoverSlateConfiguration": "failover slates are newer than botocore's IVS model, which has no "
                                             "operation of this name to read, and Floci does not serve them",
     "rds:CreateDBCapacityReservation": NO_TAGS,

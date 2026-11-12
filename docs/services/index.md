@@ -139,6 +139,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [License Manager](licensemanager.md) | `POST /` + `X-Amz-Target: AWSLicenseManager.*`; license configurations with usage and hard limits, seller licenses, grants, tokens and checkouts | JSON 1.1 | 62 |
 | [MWAA Serverless](airflowserverless.md) | `POST /` + `X-Amz-Target: AmazonMWAAServerless.*` (signed `airflow-serverless`); workflow runs execute in Apache Airflow | JSON 1.0 | 15 |
 | [SES Mail Manager](mailmanager.md) | `POST /` + `X-Amz-Target: MailManagerSvc.*` (signed `ses`); ingress points receive mail over SMTP | JSON 1.0 / CBOR | 60 |
+| [MediaConnect](mediaconnect.md) | `/v1/flows`, `/v1/bridges`, `/v1/gateways`, `/v1/routerInput`, `/v1/offerings` (signed `mediaconnect`); active flows relay UDP | REST JSON | 82 |
 | [IVS](ivs.md) | `POST /<Operation>`, `/tags/*` signed for `ivs` (with Real-Time) | REST JSON | 78 |
 | [IVS Chat](ivschat.md) | `POST /<Operation>`, `/tags/*` signed for `ivschat` | REST JSON | 17 |
 | [FSx](fsx.md) | `POST /` + `X-Amz-Target: AWSSimbaAPIService_v20180301.*` | JSON 1.1 | 48 |

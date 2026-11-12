@@ -159,7 +159,7 @@ OUTPUT = REPO_ROOT / "src/main/resources/aws/iam-request-resources.json"
 # are the ones its handlers mint.
 NAMESPACES = ("access-analyzer", "acm", "application-autoscaling", "athena", "bcm-data-exports",
               "bcm-pricing-calculator", "budgets", "ce", "cloudtrail", "codebuild", "codepipeline", "cognito-identity",
-              "cognito-idp", "cur", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "ivs", "ivschat", "dax", "ecr", "elasticloadbalancing", "elasticmapreduce", "es", "events",
+              "cognito-idp", "cur", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "ivs", "ivschat", "dax", "ecr", "elasticloadbalancing", "elasticmapreduce", "es", "events",
               "firehose", "globalaccelerator", "kinesisanalytics", "payment-cryptography", "quicksight", "redshift",
               "redshift-data", "rekognition", "servicediscovery", "servicequotas", "sso", "states", "textract",
               "timestream-influxdb", "translate")

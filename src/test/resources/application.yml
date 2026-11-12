@@ -553,6 +553,9 @@ floci:
     airflow-serverless:
       enabled: true
       transition-millis: 200
+    media-connect:
+      enabled: true
+      transition-millis: 200
     mail-manager:
       enabled: true
       transition-millis: 200

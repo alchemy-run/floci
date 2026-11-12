@@ -896,6 +896,8 @@ public interface EmulatorConfig {
 
         MailManagerServiceConfig mailManager();
 
+        MediaConnectServiceConfig mediaConnect();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3018,6 +3020,37 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface MediaConnectServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a flow, bridge, gateway or router resource takes to start, stop, change or delete. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The address sources' IngestIp gives: where to send a flow's content. */
+        @WithDefault("127.0.0.1")
+        String ingestIp();
+
+        /** The address flows' EgressIp and listener outputs' ListenerAddress give. */
+        @WithDefault("127.0.0.1")
+        String egressIp();
+
+        /** The address active flows' and router inputs' UDP listeners bind to. */
+        @WithDefault("0.0.0.0")
+        String bindHost();
+
+        /** The first UDP port a source takes when its own IngestPort is in use. */
+        @WithDefault("20000")
+        int udpPortStart();
+
+        @WithDefault("100")
+        int udpPortCount();
+
+        @WithDefault("20")
+        int maxFlows();
     }
 
     interface MailManagerServiceConfig {
