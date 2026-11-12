@@ -291,6 +291,10 @@ services:
     doc: docs/services/opensearchserverless.md
     sources:
       - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: rbin
+    doc: docs/services/rbin.md
+    sources:
+      - { path: services/rbin/RbinService.java, mode: switch }
   - service: qbusiness
     doc: docs/services/qbusiness.md
     sources:

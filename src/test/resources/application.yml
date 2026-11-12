@@ -566,6 +566,9 @@ floci:
       enabled: true
       transition-millis: 200
       engine: none
+    rbin:
+      enabled: true
+      transition-millis: 200
     qbusiness:
       enabled: true
       transition-millis: 200

@@ -90,6 +90,7 @@ import io.floci.aws.services.qbusiness.QBusinessController;
 import io.floci.aws.services.quicksight.QuickSightController;
 import io.floci.aws.services.quicksight.QuickSightEmbedController;
 import io.floci.aws.services.ram.RamController;
+import io.floci.aws.services.rbin.RbinController;
 import io.floci.aws.services.rdsdata.RdsDataController;
 import io.floci.aws.services.resourceexplorer2.ResourceExplorer2Controller;
 import io.floci.aws.services.resourcegroups.ResourceGroupsController;
@@ -502,6 +503,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("OpenSearchServerless."), Set.of("aoss"), Set.of(), Set.of()),
+                descriptor("rbin", "rbin", config.services().rbin().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("rbin"), Set.of(), Set.of(RbinController.class)),
                 descriptor("qbusiness", "qbusiness", config.services().qbusiness().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

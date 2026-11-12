@@ -50,6 +50,7 @@ MODELS = {
     "personalize-events": "personalizeevents",
     "qbusiness": "qbusiness",
     "qapps": "qapps",
+    "rbin": "rbin",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

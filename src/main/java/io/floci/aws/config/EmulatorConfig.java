@@ -930,6 +930,8 @@ public interface EmulatorConfig {
 
         QAppsServiceConfig qapps();
 
+        RbinServiceConfig rbin();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3082,6 +3084,15 @@ public interface EmulatorConfig {
         /** Whether retrieval answers are written by {@link #model()}; otherwise they're the sentences that answer. */
         @WithDefault("false")
         boolean generateAnswers();
+    }
+
+    interface RbinServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a new or changed retention rule stays pending, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
     }
 
     interface QAppsServiceConfig {

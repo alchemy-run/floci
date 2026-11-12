@@ -365,6 +365,18 @@ public class Ec2QueryHandler {
                 case "DetachVolume" -> handleDetachVolume(params, region);
                 case "GetPasswordData" -> handleGetPasswordData(params, region);
                 case "DeleteSnapshot" -> handleDeleteSnapshot(params, region);
+                case "ListSnapshotsInRecycleBin" -> handleListRecycled(params, region, "EBS_SNAPSHOT");
+                case "ListImagesInRecycleBin" -> handleListRecycled(params, region, "EC2_IMAGE");
+                case "ListVolumesInRecycleBin" -> handleListRecycled(params, region, "EBS_VOLUME");
+                case "RestoreSnapshotFromRecycleBin" -> handleRestoreSnapshotFromRecycleBin(params, region);
+                case "RestoreImageFromRecycleBin" -> {
+                    service.restoreImageFromRecycleBin(region, p(params, "ImageId"));
+                    yield booleanResponse("RestoreImageFromRecycleBin");
+                }
+                case "RestoreVolumeFromRecycleBin" -> {
+                    service.restoreVolumeFromRecycleBin(region, p(params, "VolumeId"));
+                    yield booleanResponse("RestoreVolumeFromRecycleBin");
+                }
                 case "CreateSnapshot" -> handleCreateSnapshot(params, region);
                 // Spot Instances
                 case "RequestSpotInstances" -> handleRequestSpotInstances(params, region);
@@ -7654,6 +7666,89 @@ public class Ec2QueryHandler {
                 .elem("requestId", UUID.randomUUID().toString())
                 .raw(snapshotXml(snapshot))
                 .end("CreateSnapshotResponse");
+        return xmlResponse(xml.build());
+    }
+
+    private static String p(MultivaluedMap<String, String> params, String name) {
+        String value = params.getFirst(name);
+        if (value == null || value.isBlank()) {
+            throw new AwsException("MissingParameter", "The request must contain the parameter " + name, 400);
+        }
+        return value;
+    }
+
+    /** ListSnapshotsInRecycleBin, ListImagesInRecycleBin and ListVolumesInRecycleBin. */
+    private Response handleListRecycled(MultivaluedMap<String, String> p, String region, String type) {
+        String kind = switch (type) {
+            case "EBS_SNAPSHOT" -> "Snapshot";
+            case "EC2_IMAGE" -> "Image";
+            default -> "Volume";
+        };
+        String action = "List" + kind + "sInRecycleBin";
+        List<RecycledResource> records = service.listRecycled(region, type, getList(p, kind + "Id"));
+        int max = p.getFirst("MaxResults") == null ? 1000 : Integer.parseInt(p.getFirst("MaxResults"));
+        int start = p.getFirst("NextToken") == null || p.getFirst("NextToken").isBlank() ? 0
+                : Integer.parseInt(p.getFirst("NextToken"));
+        int end = Math.min(records.size(), start + max);
+        XmlBuilder xml = new XmlBuilder()
+                .start(action + "Response", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .start(kind.toLowerCase(Locale.ROOT) + "Set");
+        for (RecycledResource record : records.subList(start, end)) {
+            xml.start("item").elem(kind.toLowerCase(Locale.ROOT) + "Id", record.getResourceId());
+            switch (type) {
+                case "EBS_SNAPSHOT" -> {
+                    Snapshot snapshot = record.getSnapshot();
+                    if (snapshot.getDescription() != null) {
+                        xml.elem("description", snapshot.getDescription());
+                    }
+                    if (snapshot.getVolumeId() != null) {
+                        xml.elem("volumeId", snapshot.getVolumeId());
+                    }
+                }
+                case "EBS_VOLUME" -> {
+                    Volume volume = record.getVolume();
+                    xml.elem("volumeType", volume.getVolumeType()).elem("state", "available")
+                            .elem("size", String.valueOf(volume.getSize()))
+                            .elem("iops", String.valueOf(volume.getIops()))
+                            .elem("availabilityZone", volume.getAvailabilityZone());
+                    if (volume.getThroughput() != null) {
+                        xml.elem("throughput", String.valueOf(volume.getThroughput()));
+                    }
+                    if (volume.getSnapshotId() != null) {
+                        xml.elem("snapshotId", volume.getSnapshotId());
+                    }
+                    if (volume.getCreateTime() != null) {
+                        xml.elem("createTime", ISO_FMT.format(volume.getCreateTime()));
+                    }
+                }
+                default -> service.describeImagesForRecycleBin(region, record.getResourceId()).ifPresent(image -> {
+                    if (image.getName() != null) {
+                        xml.elem("name", image.getName());
+                    }
+                    if (image.getDescription() != null) {
+                        xml.elem("description", image.getDescription());
+                    }
+                });
+            }
+            xml.elem("recycleBinEnterTime", ISO_FMT.format(record.getEnterTime()))
+                    .elem("recycleBinExitTime", ISO_FMT.format(record.getExitTime())).end("item");
+        }
+        xml.end(kind.toLowerCase(Locale.ROOT) + "Set");
+        if (end < records.size()) {
+            xml.elem("nextToken", String.valueOf(end));
+        }
+        xml.end(action + "Response");
+        return xmlResponse(xml.build());
+    }
+
+    private Response handleRestoreSnapshotFromRecycleBin(MultivaluedMap<String, String> p, String region) {
+        Snapshot snapshot = service.restoreSnapshotFromRecycleBin(region, p(p, "SnapshotId"));
+        XmlBuilder xml = new XmlBuilder()
+                .start("RestoreSnapshotFromRecycleBinResponse", AwsNamespaces.EC2)
+                .elem("requestId", UUID.randomUUID().toString())
+                .raw(snapshotXml(snapshot))
+                .end("RestoreSnapshotFromRecycleBinResponse");
         return xmlResponse(xml.build());
     }
 

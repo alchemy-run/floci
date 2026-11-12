@@ -1258,10 +1258,16 @@ A route table's `CreateRoute` with a `NetworkInterfaceId` target is accepted but
 |--------|-------------|
 | CreateVolume | Creates an EBS volume record. `KmsKeyId` (alias name, key id, or ARN) is resolved to the CMK ARN via KMS and returned on describe. |
 | DescribeVolumes | Lists or returns stored EBS volume records. |
-| DeleteVolume | Deletes an EBS volume record. |
+| DeleteVolume | Deletes an EBS volume record, or moves it to the Recycle Bin when a retention rule covers it. |
 | ModifyVolume | Updates size, type, IOPS, or throughput on a volume. |
 | CreateSnapshot | Creates a completed snapshot of a volume. |
-| DeleteSnapshot | Deletes a snapshot. |
+| DeleteSnapshot | Deletes a snapshot, or moves it to the Recycle Bin when a [retention rule](rbin.md) covers it. |
+| ListSnapshotsInRecycleBin | Lists snapshots in the Recycle Bin with when they entered and leave. |
+| RestoreSnapshotFromRecycleBin | Restores a snapshot from the Recycle Bin, with its tags. |
+| ListVolumesInRecycleBin | Lists volumes in the Recycle Bin. |
+| RestoreVolumeFromRecycleBin | Restores a volume, with its data and tags, from the Recycle Bin. |
+| ListImagesInRecycleBin | Lists AMIs in the Recycle Bin. |
+| RestoreImageFromRecycleBin | Restores a deregistered AMI from the Recycle Bin. |
 | ModifyVolume | Modifies size, type, IOPS, throughput, or multi-attach settings of an EBS volume record. |
 | DescribeVolumesModifications | Reports the current modification state for EBS volumes, filterable by volume ID and state. |
 | AttachVolume | Attaches a volume to an instance at the requested device; returns the attachment in `attaching` state. |

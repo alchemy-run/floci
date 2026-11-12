@@ -67,6 +67,7 @@ import io.floci.aws.services.ec2.model.Placement;
 import io.floci.aws.services.ec2.model.PrefixList;
 import io.floci.aws.services.ec2.model.PrefixListEntry;
 import io.floci.aws.services.ec2.model.PrefixListId;
+import io.floci.aws.services.ec2.model.RecycledResource;
 import io.floci.aws.services.ec2.model.ReferencedSecurityGroup;
 import io.floci.aws.services.ec2.model.Reservation;
 import io.floci.aws.services.ec2.model.Route;
@@ -151,6 +152,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
@@ -304,6 +306,8 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     private final StorageBackend<String, VolumeModification> volumeModifications;
     private final StorageBackend<String, Image> registeredImages;
     private final StorageBackend<String, Snapshot> snapshots;
+    private StorageBackend<String, RecycledResource> recycled;
+    private jakarta.enterprise.inject.Instance<Ec2RecycleBin> recycleBins;
     private final StorageBackend<String, LaunchTemplate> launchTemplates;
     private final StorageBackend<String, VpcEndpoint> vpcEndpoints;
     private final StorageBackend<String, NatGateway> natGateways;
@@ -550,9 +554,13 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                       jakarta.enterprise.inject.Instance<Ec2InstanceLaunchListener> instanceLaunchListenersInstance,
                       Ec2EbsEncryptionService ebsEncryptionService,
                       jakarta.enterprise.inject.Instance<VpcDependencyProvider> vpcDependencyProviders,
-                      jakarta.enterprise.inject.Instance<ResourceGroupsService> resourceGroupsServices) {
+                      jakarta.enterprise.inject.Instance<ResourceGroupsService> resourceGroupsServices,
+                      jakarta.enterprise.inject.Instance<Ec2RecycleBin> recycleBins) {
         this(config, containerManager, portForwardManager, amiImageResolver, imageCatalog,
                 instanceTypeCatalog, storageFactory, requestContextInstance, iamService, volumeBlockDeviceManager);
+        this.recycleBins = recycleBins;
+        this.recycled = storageFactory.create("ec2", "ec2-recycle-bin.json",
+                new TypeReference<Map<String, RecycledResource>>() {});
         this.vpcNetworkManager = vpcNetworkManager;
         this.clusterNodeInstanceProviders = clusterNodeInstanceProviders;
         this.routeTableListenersInstance = routeTableListenersInstance;
@@ -9407,8 +9415,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 throw new AwsException("InvalidAMIID.Unavailable",
                         "The image id '[" + imageId + "]' has been deregistered and is no longer available", 400);
             }
+            boolean recycledImage = recycle(region, RECYCLE_IMAGE, imageId, image.getTags(), record -> record.setImage(null));
             image.setState(DEREGISTERED_STATE);
-            reclaimCapturedImage(image, null);
+            if (!recycledImage) {
+                reclaimCapturedImage(image, null);
+            }
             registeredImages.put(key(region, imageId), image);
             return deleteAssociatedSnapshots ? deleteSnapshotsOf(region, image) : List.of();
         }
@@ -14903,7 +14914,8 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 throw new AwsException("VolumeInUse",
                         "Volume " + volumeId + " is currently attached to an instance", 400);
             }
-            if (volumeBlockDeviceManager != null && volumeBlockDeviceManager.isAvailable()) {
+            boolean kept = recycle(region, RECYCLE_VOLUME, volumeId, volume.getTags(), record -> record.setVolume(volume));
+            if (!kept && volumeBlockDeviceManager != null && volumeBlockDeviceManager.isAvailable()) {
                 if (!volumeBlockDeviceManager.deleteVolume(volumeId)) {
                     throw new AwsException("InternalError",
                             "Failed to delete backing storage for volume " + volumeId, 500);
@@ -16539,12 +16551,140 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     public void deleteSnapshot(String region, String snapshotId) {
-        if (snapshots.get(key(region, snapshotId)).isEmpty()) {
-            throw new AwsException("InvalidSnapshot.NotFound",
-                    "The snapshot '" + snapshotId + "' does not exist.", 400);
-        }
+        Snapshot snapshot = snapshots.get(key(region, snapshotId)).orElseThrow(() -> new AwsException(
+                "InvalidSnapshot.NotFound", "The snapshot '" + snapshotId + "' does not exist.", 400));
+        recycle(region, RECYCLE_SNAPSHOT, snapshotId, snapshot.getTags(), record -> record.setSnapshot(snapshot));
         snapshots.delete(key(region, snapshotId));
         tags.delete(snapshotId);
+        removeTags(region, snapshotId);
+    }
+
+    // ─── Recycle Bin ──────────────────────────────────────────────────────────
+
+    static final String RECYCLE_SNAPSHOT = "EBS_SNAPSHOT";
+    static final String RECYCLE_IMAGE = "EC2_IMAGE";
+    static final String RECYCLE_VOLUME = "EBS_VOLUME";
+
+    /** A resource's tags: those its record carries and those CreateTags keeps for it. */
+    private List<Tag> allTags(String region, String resourceId, List<Tag> own) {
+        Map<String, Tag> merged = new LinkedHashMap<>();
+        if (own != null) {
+            own.forEach(tag -> merged.put(tag.getKey(), tag));
+        }
+        resourceTags(region, resourceId).forEach(tag -> merged.put(tag.getKey(), tag));
+        return new ArrayList<>(merged.values());
+    }
+
+    private Optional<Duration> retentionFor(String region, String type, List<Tag> resourceTags) {
+        if (recycled == null || recycleBins == null || recycleBins.isUnsatisfied()) {
+            return Optional.empty();
+        }
+        return recycleBins.get().retention(region, type, resourceTags);
+    }
+
+    /** Keeps a deleted resource in the Recycle Bin when a retention rule covers it; returns whether one did. */
+    private boolean recycle(String region, String type, String resourceId, List<Tag> own,
+                            Consumer<RecycledResource> fill) {
+        List<Tag> resourceTags = allTags(region, resourceId, own);
+        Optional<Duration> retention = retentionFor(region, type, resourceTags);
+        if (retention.isEmpty()) {
+            return false;
+        }
+        RecycledResource record = new RecycledResource();
+        record.setResourceType(type);
+        record.setResourceId(resourceId);
+        record.setTags(resourceTags);
+        Instant now = Instant.now();
+        record.setEnterTime(now);
+        record.setExitTime(now.plus(retention.get()));
+        fill.accept(record);
+        recycled.put(key(region, type + "/" + resourceId), record);
+        return true;
+    }
+
+    /** The resources of a type in the Recycle Bin, dropping those whose retention has run out. */
+    public List<RecycledResource> listRecycled(String region, String type, List<String> ids) {
+        if (recycled == null) {
+            return List.of();
+        }
+        String prefix = key(region, type + "/");
+        List<RecycledResource> found = new ArrayList<>();
+        for (RecycledResource record : recycled.scan(k -> k.startsWith(prefix))) {
+            if (record.getExitTime() != null && record.getExitTime().isBefore(Instant.now())) {
+                purge(region, record);
+                continue;
+            }
+            if (ids == null || ids.isEmpty() || ids.contains(record.getResourceId())) {
+                found.add(record);
+            }
+        }
+        found.sort(Comparator.comparing(RecycledResource::getEnterTime));
+        return found;
+    }
+
+    private void purge(String region, RecycledResource record) {
+        recycled.delete(key(region, record.getResourceType() + "/" + record.getResourceId()));
+        if (RECYCLE_VOLUME.equals(record.getResourceType()) && volumeBlockDeviceManager != null
+                && volumeBlockDeviceManager.isAvailable()) {
+            volumeBlockDeviceManager.deleteVolume(record.getResourceId());
+        }
+        if (RECYCLE_IMAGE.equals(record.getResourceType())) {
+            synchronized (imageRegistryLock) {
+                registeredImages.get(key(region, record.getResourceId())).ifPresent(image -> {
+                    if (DEREGISTERED_STATE.equals(image.getState())) {
+                        reclaimCapturedImage(image, null);
+                        registeredImages.put(key(region, image.getImageId()), image);
+                    }
+                });
+            }
+        }
+    }
+
+    private RecycledResource takeRecycled(String region, String type, String resourceId, String notFoundCode,
+                                          String label) {
+        List<RecycledResource> found = listRecycled(region, type, List.of(resourceId));
+        if (found.isEmpty()) {
+            throw new AwsException(notFoundCode, "The " + label + " '" + resourceId
+                    + "' is not in the Recycle Bin.", 400);
+        }
+        RecycledResource record = found.get(0);
+        recycled.delete(key(region, type + "/" + resourceId));
+        if (!record.getTags().isEmpty()) {
+            putTags(region, resourceId, record.getTags());
+        }
+        return record;
+    }
+
+    /** The AMI record a recycled image keeps, for its name and description. */
+    public Optional<Image> describeImagesForRecycleBin(String region, String imageId) {
+        return registeredImages.get(key(region, imageId));
+    }
+
+    public Snapshot restoreSnapshotFromRecycleBin(String region, String snapshotId) {
+        RecycledResource record = takeRecycled(region, RECYCLE_SNAPSHOT, snapshotId, "InvalidSnapshot.NotFound",
+                "snapshot");
+        Snapshot snapshot = record.getSnapshot();
+        snapshot.setTags(new ArrayList<>(record.getTags()));
+        snapshots.put(key(region, snapshotId), snapshot);
+        return snapshot;
+    }
+
+    public void restoreImageFromRecycleBin(String region, String imageId) {
+        RecycledResource record = takeRecycled(region, RECYCLE_IMAGE, imageId, "InvalidAMIID.NotFound", "image");
+        synchronized (imageRegistryLock) {
+            Image image = registeredImages.get(key(region, imageId)).orElseThrow(() -> new AwsException(
+                    "InvalidAMIID.NotFound", "The image id '[" + imageId + "]' does not exist", 400));
+            image.setState("available");
+            registeredImages.put(key(region, imageId), image);
+        }
+    }
+
+    public void restoreVolumeFromRecycleBin(String region, String volumeId) {
+        RecycledResource record = takeRecycled(region, RECYCLE_VOLUME, volumeId, "InvalidVolume.NotFound",
+                "volume");
+        Volume volume = record.getVolume();
+        volume.setState("available");
+        volumes.put(key(region, volumeId), volume);
     }
 
     public void modifyNetworkInterfaceAttribute(String region, String networkInterfaceId, String description,

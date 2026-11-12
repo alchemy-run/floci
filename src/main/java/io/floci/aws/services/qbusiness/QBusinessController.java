@@ -42,7 +42,7 @@ public class QBusinessController {
 
     private static final Pattern CHAT = Pattern.compile("/applications/([^/]+)/conversations");
 
-    static RequestConstraintCheck shapes(String resource, String label) {
+    public static RequestConstraintCheck shapes(String resource, String label) {
         return RequestConstraintCheck.load(resource, label, new RequestConstraintCheck.Messages() {
             @Override
             public AwsException type(String path, String type) {
