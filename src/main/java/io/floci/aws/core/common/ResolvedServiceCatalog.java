@@ -155,7 +155,10 @@ public class ResolvedServiceCatalog {
                     "monitoring", "cloudwatch",
                     "awsssoportal", "sso",
                     "eventsv2", "events",
-                    "payment-cryptography-data", "payment-cryptography");
+                    "payment-cryptography-data", "payment-cryptography",
+                    // Mail Manager signs for ses and its actions are ses:; its descriptor leaves the ses
+                    // scope to SES so requests route by target prefix.
+                    "mailmanager", "ses");
 
     private final ServiceCatalog catalog;
 
@@ -483,6 +486,10 @@ public class ResolvedServiceCatalog {
                         true, null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AmazonMWAAServerless."), Set.of("airflow-serverless"), Set.of(), Set.of()),
+                descriptor("mailmanager", "mailmanager", config.services().mailManager().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON, ServiceProtocol.CBOR),
+                        Set.of("MailManagerSvc."), Set.of(), Set.of("MailManagerSvc"), Set.of()),
                 descriptor("license-manager", "license-manager", config.services().licenseManager().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

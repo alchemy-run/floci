@@ -19,6 +19,7 @@ import io.floci.aws.services.dynamodb.DynamoDbStreamsJsonHandler;
 import io.floci.aws.services.healthlake.HealthLakeJsonHandler;
 import io.floci.aws.services.iotfleetwise.IotFleetWiseJsonHandler;
 import io.floci.aws.services.keyspaces.KeyspacesJsonHandler;
+import io.floci.aws.services.mailmanager.MailManagerJsonHandler;
 import io.floci.aws.services.marketplace.MarketplaceJsonHandler;
 import io.floci.aws.services.networkfirewall.NetworkFirewallJsonHandler;
 import io.floci.aws.services.paymentcryptography.PaymentCryptographyJsonHandler;
@@ -85,6 +86,8 @@ public class AwsJsonController {
     private final IotFleetWiseJsonHandler iotFleetWiseJsonHandler;
     @Inject
     TimestreamJsonHandler timestreamJsonHandler;
+    @Inject
+    MailManagerJsonHandler mailManagerJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -239,6 +242,7 @@ public class AwsJsonController {
                 case "healthlake" -> healthLakeJsonHandler.handle(action, request, region);
                 case "iotfleetwise" -> iotFleetWiseJsonHandler.handle(action, request, region);
                 case "timestream" -> timestreamJsonHandler.handle(action, request, region);
+                case "mailmanager" -> mailManagerJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.1 target

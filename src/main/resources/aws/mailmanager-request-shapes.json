@@ -1,0 +1,2127 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_mailmanager_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateAddonInstance": "CreateAddonInstanceRequest",
+    "CreateAddonSubscription": "CreateAddonSubscriptionRequest",
+    "CreateAddressList": "CreateAddressListRequest",
+    "CreateAddressListImportJob": "CreateAddressListImportJobRequest",
+    "CreateArchive": "CreateArchiveRequest",
+    "CreateIngressPoint": "CreateIngressPointRequest",
+    "CreateRelay": "CreateRelayRequest",
+    "CreateRuleSet": "CreateRuleSetRequest",
+    "CreateTrafficPolicy": "CreateTrafficPolicyRequest",
+    "DeleteAddonInstance": "DeleteAddonInstanceRequest",
+    "DeleteAddonSubscription": "DeleteAddonSubscriptionRequest",
+    "DeleteAddressList": "DeleteAddressListRequest",
+    "DeleteArchive": "DeleteArchiveRequest",
+    "DeleteIngressPoint": "DeleteIngressPointRequest",
+    "DeleteRelay": "DeleteRelayRequest",
+    "DeleteRuleSet": "DeleteRuleSetRequest",
+    "DeleteTrafficPolicy": "DeleteTrafficPolicyRequest",
+    "DeregisterMemberFromAddressList": "DeregisterMemberFromAddressListRequest",
+    "GetAddonInstance": "GetAddonInstanceRequest",
+    "GetAddonSubscription": "GetAddonSubscriptionRequest",
+    "GetAddressList": "GetAddressListRequest",
+    "GetAddressListImportJob": "GetAddressListImportJobRequest",
+    "GetArchive": "GetArchiveRequest",
+    "GetArchiveExport": "GetArchiveExportRequest",
+    "GetArchiveMessage": "GetArchiveMessageRequest",
+    "GetArchiveMessageContent": "GetArchiveMessageContentRequest",
+    "GetArchiveSearch": "GetArchiveSearchRequest",
+    "GetArchiveSearchResults": "GetArchiveSearchResultsRequest",
+    "GetIngressPoint": "GetIngressPointRequest",
+    "GetMemberOfAddressList": "GetMemberOfAddressListRequest",
+    "GetRelay": "GetRelayRequest",
+    "GetRuleSet": "GetRuleSetRequest",
+    "GetTrafficPolicy": "GetTrafficPolicyRequest",
+    "ListAddonInstances": "ListAddonInstancesRequest",
+    "ListAddonSubscriptions": "ListAddonSubscriptionsRequest",
+    "ListAddressListImportJobs": "ListAddressListImportJobsRequest",
+    "ListAddressLists": "ListAddressListsRequest",
+    "ListArchiveExports": "ListArchiveExportsRequest",
+    "ListArchiveSearches": "ListArchiveSearchesRequest",
+    "ListArchives": "ListArchivesRequest",
+    "ListIngressPoints": "ListIngressPointsRequest",
+    "ListMembersOfAddressList": "ListMembersOfAddressListRequest",
+    "ListRelays": "ListRelaysRequest",
+    "ListRuleSets": "ListRuleSetsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTrafficPolicies": "ListTrafficPoliciesRequest",
+    "RegisterMemberToAddressList": "RegisterMemberToAddressListRequest",
+    "StartAddressListImportJob": "StartAddressListImportJobRequest",
+    "StartArchiveExport": "StartArchiveExportRequest",
+    "StartArchiveSearch": "StartArchiveSearchRequest",
+    "StopAddressListImportJob": "StopAddressListImportJobRequest",
+    "StopArchiveExport": "StopArchiveExportRequest",
+    "StopArchiveSearch": "StopArchiveSearchRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateArchive": "UpdateArchiveRequest",
+    "UpdateIngressPoint": "UpdateIngressPointRequest",
+    "UpdateRelay": "UpdateRelayRequest",
+    "UpdateRuleSet": "UpdateRuleSetRequest",
+    "UpdateTrafficPolicy": "UpdateTrafficPolicyRequest"
+  },
+  "shapes": {
+    "AcceptAction": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "DENY"
+      ]
+    },
+    "ActionFailurePolicy": {
+      "type": "string",
+      "enum": [
+        "CONTINUE",
+        "DROP"
+      ]
+    },
+    "AddHeaderAction": {
+      "type": "structure",
+      "required": [
+        "HeaderName",
+        "HeaderValue"
+      ],
+      "members": {
+        "HeaderName": "HeaderName",
+        "HeaderValue": "HeaderValue"
+      }
+    },
+    "AddonInstanceId": {
+      "type": "string",
+      "min": 4,
+      "max": 67,
+      "pattern": "ai-[a-zA-Z0-9]{1,64}"
+    },
+    "AddonName": {
+      "type": "string"
+    },
+    "AddonSubscriptionId": {
+      "type": "string",
+      "min": 4,
+      "max": 67,
+      "pattern": "as-[a-zA-Z0-9]{1,64}"
+    },
+    "Address": {
+      "type": "string",
+      "min": 3,
+      "max": 320
+    },
+    "AddressFilter": {
+      "type": "structure",
+      "members": {
+        "AddressPrefix": "AddressPrefix"
+      }
+    },
+    "AddressListArn": {
+      "type": "string"
+    },
+    "AddressListId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9-]+"
+    },
+    "AddressListName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "AddressPageSize": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "AddressPrefix": {
+      "type": "string",
+      "min": 1,
+      "max": 320
+    },
+    "Analysis": {
+      "type": "structure",
+      "required": [
+        "Analyzer",
+        "ResultField"
+      ],
+      "members": {
+        "Analyzer": "AnalyzerArn",
+        "ResultField": "ResultField"
+      }
+    },
+    "AnalyzerArn": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9:_/+=,@.#-]+"
+    },
+    "ArchiveAction": {
+      "type": "structure",
+      "required": [
+        "TargetArchive"
+      ],
+      "members": {
+        "ActionFailurePolicy": "ActionFailurePolicy",
+        "TargetArchive": "NameOrArn"
+      }
+    },
+    "ArchiveBooleanEmailAttribute": {
+      "type": "string",
+      "enum": [
+        "HAS_ATTACHMENTS"
+      ]
+    },
+    "ArchiveBooleanExpression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator"
+      ],
+      "members": {
+        "Evaluate": "ArchiveBooleanToEvaluate",
+        "Operator": "ArchiveBooleanOperator"
+      }
+    },
+    "ArchiveBooleanOperator": {
+      "type": "string",
+      "enum": [
+        "IS_TRUE",
+        "IS_FALSE"
+      ]
+    },
+    "ArchiveBooleanToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Attribute": "ArchiveBooleanEmailAttribute"
+      }
+    },
+    "ArchiveFilterCondition": {
+      "type": "structure",
+      "members": {
+        "StringExpression": "ArchiveStringExpression",
+        "BooleanExpression": "ArchiveBooleanExpression"
+      }
+    },
+    "ArchiveFilterConditions": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "ArchiveFilterCondition"
+    },
+    "ArchiveFilters": {
+      "type": "structure",
+      "members": {
+        "Include": "ArchiveFilterConditions",
+        "Unless": "ArchiveFilterConditions"
+      }
+    },
+    "ArchiveId": {
+      "type": "string",
+      "min": 3,
+      "max": 66,
+      "pattern": "a-[\\w]{1,64}"
+    },
+    "ArchiveIdString": {
+      "type": "string",
+      "min": 1,
+      "max": 66
+    },
+    "ArchiveNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*[a-zA-Z0-9]"
+    },
+    "ArchiveRetention": {
+      "type": "structure",
+      "members": {
+        "RetentionPeriod": "RetentionPeriod"
+      }
+    },
+    "ArchiveStringEmailAttribute": {
+      "type": "string",
+      "enum": [
+        "TO",
+        "FROM",
+        "CC",
+        "SUBJECT",
+        "ENVELOPE_TO",
+        "ENVELOPE_FROM"
+      ]
+    },
+    "ArchiveStringExpression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator",
+        "Values"
+      ],
+      "members": {
+        "Evaluate": "ArchiveStringToEvaluate",
+        "Operator": "ArchiveStringOperator",
+        "Values": "StringValueList"
+      }
+    },
+    "ArchiveStringOperator": {
+      "type": "string",
+      "enum": [
+        "CONTAINS"
+      ]
+    },
+    "ArchiveStringToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Attribute": "ArchiveStringEmailAttribute"
+      }
+    },
+    "ArchivedMessageId": {
+      "type": "string"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BounceAction": {
+      "type": "structure",
+      "required": [
+        "RoleArn",
+        "Sender",
+        "StatusCode",
+        "SmtpReplyCode",
+        "DiagnosticMessage"
+      ],
+      "members": {
+        "ActionFailurePolicy": "ActionFailurePolicy",
+        "RoleArn": "IamRoleArn",
+        "Sender": "EmailAddress",
+        "StatusCode": "StatusCode",
+        "SmtpReplyCode": "SmtpReplyCode",
+        "DiagnosticMessage": "DiagnosticMessage",
+        "Message": "BounceMessage"
+      }
+    },
+    "BounceMessage": {
+      "type": "string",
+      "min": 1,
+      "max": 500,
+      "pattern": "[\\r\\n\\x20-\\x7e]+"
+    },
+    "CAContent": {
+      "type": "string",
+      "min": 1,
+      "max": 500000,
+      "pattern": "[\\P{C}\\s]*"
+    },
+    "CreateAddonInstanceRequest": {
+      "type": "structure",
+      "required": [
+        "AddonSubscriptionId"
+      ],
+      "members": {
+        "ClientToken": "IdempotencyToken",
+        "AddonSubscriptionId": "AddonSubscriptionId",
+        "Tags": "TagList"
+      }
+    },
+    "CreateAddonSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "AddonName"
+      ],
+      "members": {
+        "ClientToken": "IdempotencyToken",
+        "AddonName": "AddonName",
+        "Tags": "TagList"
+      }
+    },
+    "CreateAddressListImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "AddressListId",
+        "Name",
+        "ImportDataFormat"
+      ],
+      "members": {
+        "ClientToken": "IdempotencyToken",
+        "AddressListId": "AddressListId",
+        "Name": "JobName",
+        "ImportDataFormat": "ImportDataFormat"
+      }
+    },
+    "CreateAddressListRequest": {
+      "type": "structure",
+      "required": [
+        "AddressListName"
+      ],
+      "members": {
+        "ClientToken": "IdempotencyToken",
+        "AddressListName": "AddressListName",
+        "Tags": "TagList"
+      }
+    },
+    "CreateArchiveRequest": {
+      "type": "structure",
+      "required": [
+        "ArchiveName"
+      ],
+      "members": {
+        "ClientToken": "IdempotencyToken",
+        "ArchiveName": "ArchiveNameString",
+        "Retention": "ArchiveRetention",
+        "KmsKeyArn": "KmsKeyArn",
+        "Tags": "TagList"
+      }
+    },
+    "CreateIngressPointRequest": {
+      "type": "structure",
+      "required": [
+        "IngressPointName",
+        "Type",
+        "RuleSetId",
+        "TrafficPolicyId"
+      ],
+      "members": {
+        "ClientToken": "IdempotencyToken",
+        "IngressPointName": "IngressPointName",
+        "Type": "IngressPointType",
+        "RuleSetId": "RuleSetId",
+        "TrafficPolicyId": "TrafficPolicyId",
+        "IngressPointConfiguration": "IngressPointConfiguration",
+        "NetworkConfiguration": "NetworkConfiguration",
+        "TlsPolicy": "TlsPolicy",
+        "Tags": "TagList"
+      }
+    },
+    "CreateRelayRequest": {
+      "type": "structure",
+      "required": [
+        "RelayName",
+        "ServerName",
+        "ServerPort",
+        "Authentication"
+      ],
+      "members": {
+        "ClientToken": "IdempotencyToken",
+        "RelayName": "RelayName",
+        "ServerName": "RelayServerName",
+        "ServerPort": "RelayServerPort",
+        "Authentication": "RelayAuthentication",
+        "Tags": "TagList"
+      }
+    },
+    "CreateRuleSetRequest": {
+      "type": "structure",
+      "required": [
+        "RuleSetName",
+        "Rules"
+      ],
+      "members": {
+        "ClientToken": "IdempotencyToken",
+        "RuleSetName": "RuleSetName",
+        "Rules": "Rules",
+        "Tags": "TagList"
+      }
+    },
+    "CreateTrafficPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "TrafficPolicyName",
+        "PolicyStatements",
+        "DefaultAction"
+      ],
+      "members": {
+        "ClientToken": "IdempotencyToken",
+        "TrafficPolicyName": "TrafficPolicyName",
+        "PolicyStatements": "PolicyStatementList",
+        "DefaultAction": "AcceptAction",
+        "MaxMessageSizeBytes": "MaxMessageSizeBytes",
+        "Tags": "TagList"
+      }
+    },
+    "CrlContent": {
+      "type": "string",
+      "min": 1,
+      "max": 500000,
+      "pattern": "[\\P{C}\\s]*"
+    },
+    "DeleteAddonInstanceRequest": {
+      "type": "structure",
+      "required": [
+        "AddonInstanceId"
+      ],
+      "members": {
+        "AddonInstanceId": "AddonInstanceId"
+      }
+    },
+    "DeleteAddonSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "AddonSubscriptionId"
+      ],
+      "members": {
+        "AddonSubscriptionId": "AddonSubscriptionId"
+      }
+    },
+    "DeleteAddressListRequest": {
+      "type": "structure",
+      "required": [
+        "AddressListId"
+      ],
+      "members": {
+        "AddressListId": "AddressListId"
+      }
+    },
+    "DeleteArchiveRequest": {
+      "type": "structure",
+      "required": [
+        "ArchiveId"
+      ],
+      "members": {
+        "ArchiveId": "ArchiveIdString"
+      }
+    },
+    "DeleteIngressPointRequest": {
+      "type": "structure",
+      "required": [
+        "IngressPointId"
+      ],
+      "members": {
+        "IngressPointId": "IngressPointId"
+      }
+    },
+    "DeleteRelayRequest": {
+      "type": "structure",
+      "required": [
+        "RelayId"
+      ],
+      "members": {
+        "RelayId": "RelayId"
+      }
+    },
+    "DeleteRuleSetRequest": {
+      "type": "structure",
+      "required": [
+        "RuleSetId"
+      ],
+      "members": {
+        "RuleSetId": "RuleSetId"
+      }
+    },
+    "DeleteTrafficPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "TrafficPolicyId"
+      ],
+      "members": {
+        "TrafficPolicyId": "TrafficPolicyId"
+      }
+    },
+    "DeliverToMailboxAction": {
+      "type": "structure",
+      "required": [
+        "MailboxArn",
+        "RoleArn"
+      ],
+      "members": {
+        "ActionFailurePolicy": "ActionFailurePolicy",
+        "MailboxArn": "NameOrArn",
+        "RoleArn": "IamRoleArn"
+      }
+    },
+    "DeliverToQBusinessAction": {
+      "type": "structure",
+      "required": [
+        "ApplicationId",
+        "IndexId",
+        "RoleArn"
+      ],
+      "members": {
+        "ActionFailurePolicy": "ActionFailurePolicy",
+        "ApplicationId": "QBusinessApplicationId",
+        "IndexId": "QBusinessIndexId",
+        "RoleArn": "IamRoleArn"
+      }
+    },
+    "DeregisterMemberFromAddressListRequest": {
+      "type": "structure",
+      "required": [
+        "AddressListId",
+        "Address"
+      ],
+      "members": {
+        "AddressListId": "AddressListId",
+        "Address": "Address"
+      }
+    },
+    "DiagnosticMessage": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\x20-\\x7e]+"
+    },
+    "Double": {
+      "type": "double"
+    },
+    "DropAction": {
+      "type": "structure",
+      "members": {}
+    },
+    "EmailAddress": {
+      "type": "string",
+      "min": 0,
+      "max": 254,
+      "pattern": "[a-zA-Z0-9._+-]+@[a-zA-Z0-9.-]+"
+    },
+    "ExportDestinationConfiguration": {
+      "type": "structure",
+      "members": {
+        "S3": "S3ExportDestinationConfiguration"
+      }
+    },
+    "ExportId": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "ExportMaxResults": {
+      "type": "integer"
+    },
+    "GetAddonInstanceRequest": {
+      "type": "structure",
+      "required": [
+        "AddonInstanceId"
+      ],
+      "members": {
+        "AddonInstanceId": "AddonInstanceId"
+      }
+    },
+    "GetAddonSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "AddonSubscriptionId"
+      ],
+      "members": {
+        "AddonSubscriptionId": "AddonSubscriptionId"
+      }
+    },
+    "GetAddressListImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "JobId"
+      ],
+      "members": {
+        "JobId": "JobId"
+      }
+    },
+    "GetAddressListRequest": {
+      "type": "structure",
+      "required": [
+        "AddressListId"
+      ],
+      "members": {
+        "AddressListId": "AddressListId"
+      }
+    },
+    "GetArchiveExportRequest": {
+      "type": "structure",
+      "required": [
+        "ExportId"
+      ],
+      "members": {
+        "ExportId": "ExportId"
+      }
+    },
+    "GetArchiveMessageContentRequest": {
+      "type": "structure",
+      "required": [
+        "ArchivedMessageId"
+      ],
+      "members": {
+        "ArchivedMessageId": "ArchivedMessageId"
+      }
+    },
+    "GetArchiveMessageRequest": {
+      "type": "structure",
+      "required": [
+        "ArchivedMessageId"
+      ],
+      "members": {
+        "ArchivedMessageId": "ArchivedMessageId"
+      }
+    },
+    "GetArchiveRequest": {
+      "type": "structure",
+      "required": [
+        "ArchiveId"
+      ],
+      "members": {
+        "ArchiveId": "ArchiveIdString"
+      }
+    },
+    "GetArchiveSearchRequest": {
+      "type": "structure",
+      "required": [
+        "SearchId"
+      ],
+      "members": {
+        "SearchId": "SearchId"
+      }
+    },
+    "GetArchiveSearchResultsRequest": {
+      "type": "structure",
+      "required": [
+        "SearchId"
+      ],
+      "members": {
+        "SearchId": "SearchId"
+      }
+    },
+    "GetIngressPointRequest": {
+      "type": "structure",
+      "required": [
+        "IngressPointId"
+      ],
+      "members": {
+        "IngressPointId": "IngressPointId",
+        "IncludeTrustStoreContents": "TrustStoreResponseOption"
+      }
+    },
+    "GetMemberOfAddressListRequest": {
+      "type": "structure",
+      "required": [
+        "AddressListId",
+        "Address"
+      ],
+      "members": {
+        "AddressListId": "AddressListId",
+        "Address": "Address"
+      }
+    },
+    "GetRelayRequest": {
+      "type": "structure",
+      "required": [
+        "RelayId"
+      ],
+      "members": {
+        "RelayId": "RelayId"
+      }
+    },
+    "GetRuleSetRequest": {
+      "type": "structure",
+      "required": [
+        "RuleSetId"
+      ],
+      "members": {
+        "RuleSetId": "RuleSetId"
+      }
+    },
+    "GetTrafficPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "TrafficPolicyId"
+      ],
+      "members": {
+        "TrafficPolicyId": "TrafficPolicyId"
+      }
+    },
+    "HeaderName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[xX]\\-[a-zA-Z0-9\\-]+"
+    },
+    "HeaderValue": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "IamRoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "[a-zA-Z0-9:_/+=,@.#-]+"
+    },
+    "IdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "[a-zA-Z0-9:_/+=,@.#-]+"
+    },
+    "IdempotencyToken": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "ImportDataFormat": {
+      "type": "structure",
+      "required": [
+        "ImportDataType"
+      ],
+      "members": {
+        "ImportDataType": "ImportDataType"
+      }
+    },
+    "ImportDataType": {
+      "type": "string",
+      "enum": [
+        "CSV",
+        "JSON"
+      ]
+    },
+    "IngressAddressListArnList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "AddressListArn"
+    },
+    "IngressAddressListEmailAttribute": {
+      "type": "string",
+      "enum": [
+        "RECIPIENT"
+      ]
+    },
+    "IngressAnalysis": {
+      "type": "structure",
+      "required": [
+        "Analyzer",
+        "ResultField"
+      ],
+      "members": {
+        "Analyzer": "AnalyzerArn",
+        "ResultField": "ResultField"
+      }
+    },
+    "IngressBooleanExpression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator"
+      ],
+      "members": {
+        "Evaluate": "IngressBooleanToEvaluate",
+        "Operator": "IngressBooleanOperator"
+      }
+    },
+    "IngressBooleanOperator": {
+      "type": "string",
+      "enum": [
+        "IS_TRUE",
+        "IS_FALSE"
+      ]
+    },
+    "IngressBooleanToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Analysis": "IngressAnalysis",
+        "IsInAddressList": "IngressIsInAddressList"
+      }
+    },
+    "IngressIpOperator": {
+      "type": "string",
+      "enum": [
+        "CIDR_MATCHES",
+        "NOT_CIDR_MATCHES"
+      ]
+    },
+    "IngressIpToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Attribute": "IngressIpv4Attribute"
+      }
+    },
+    "IngressIpv4Attribute": {
+      "type": "string",
+      "enum": [
+        "SENDER_IP"
+      ]
+    },
+    "IngressIpv4Expression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator",
+        "Values"
+      ],
+      "members": {
+        "Evaluate": "IngressIpToEvaluate",
+        "Operator": "IngressIpOperator",
+        "Values": "Ipv4Cidrs"
+      }
+    },
+    "IngressIpv6Attribute": {
+      "type": "string",
+      "enum": [
+        "SENDER_IPV6"
+      ]
+    },
+    "IngressIpv6Expression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator",
+        "Values"
+      ],
+      "members": {
+        "Evaluate": "IngressIpv6ToEvaluate",
+        "Operator": "IngressIpOperator",
+        "Values": "Ipv6Cidrs"
+      }
+    },
+    "IngressIpv6ToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Attribute": "IngressIpv6Attribute"
+      }
+    },
+    "IngressIsInAddressList": {
+      "type": "structure",
+      "required": [
+        "Attribute",
+        "AddressLists"
+      ],
+      "members": {
+        "Attribute": "IngressAddressListEmailAttribute",
+        "AddressLists": "IngressAddressListArnList"
+      }
+    },
+    "IngressPointConfiguration": {
+      "type": "structure",
+      "members": {
+        "SmtpPassword": "SmtpPassword",
+        "SecretArn": "SecretArn",
+        "TlsAuthConfiguration": "TlsAuthConfiguration"
+      }
+    },
+    "IngressPointId": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "IngressPointName": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "[A-Za-z0-9_\\-]+"
+    },
+    "IngressPointStatusToUpdate": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "CLOSED"
+      ]
+    },
+    "IngressPointType": {
+      "type": "string",
+      "enum": [
+        "OPEN",
+        "AUTH",
+        "MTLS"
+      ]
+    },
+    "IngressStringEmailAttribute": {
+      "type": "string",
+      "enum": [
+        "RECIPIENT"
+      ]
+    },
+    "IngressStringExpression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator",
+        "Values"
+      ],
+      "members": {
+        "Evaluate": "IngressStringToEvaluate",
+        "Operator": "IngressStringOperator",
+        "Values": "StringList"
+      }
+    },
+    "IngressStringOperator": {
+      "type": "string",
+      "enum": [
+        "EQUALS",
+        "NOT_EQUALS",
+        "STARTS_WITH",
+        "ENDS_WITH",
+        "CONTAINS"
+      ]
+    },
+    "IngressStringToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Attribute": "IngressStringEmailAttribute",
+        "Analysis": "IngressAnalysis"
+      }
+    },
+    "IngressTlsAttribute": {
+      "type": "string",
+      "enum": [
+        "TLS_PROTOCOL"
+      ]
+    },
+    "IngressTlsProtocolAttribute": {
+      "type": "string",
+      "enum": [
+        "TLS1_2",
+        "TLS1_3"
+      ]
+    },
+    "IngressTlsProtocolExpression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator",
+        "Value"
+      ],
+      "members": {
+        "Evaluate": "IngressTlsProtocolToEvaluate",
+        "Operator": "IngressTlsProtocolOperator",
+        "Value": "IngressTlsProtocolAttribute"
+      }
+    },
+    "IngressTlsProtocolOperator": {
+      "type": "string",
+      "enum": [
+        "MINIMUM_TLS_VERSION",
+        "IS"
+      ]
+    },
+    "IngressTlsProtocolToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Attribute": "IngressTlsAttribute"
+      }
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "InvokeLambdaAction": {
+      "type": "structure",
+      "required": [
+        "FunctionArn",
+        "InvocationType",
+        "RoleArn"
+      ],
+      "members": {
+        "ActionFailurePolicy": "ActionFailurePolicy",
+        "FunctionArn": "LambdaFunctionArn",
+        "InvocationType": "LambdaInvocationType",
+        "RoleArn": "IamRoleArn",
+        "RetryTimeMinutes": "LambdaRetryTimeMinutes"
+      }
+    },
+    "IpType": {
+      "type": "string",
+      "enum": [
+        "IPV4",
+        "DUAL_STACK"
+      ]
+    },
+    "Ipv4Cidr": {
+      "type": "string",
+      "pattern": "((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/([0-9]|[12][0-9]|3[0-2])"
+    },
+    "Ipv4Cidrs": {
+      "type": "list",
+      "member": "Ipv4Cidr"
+    },
+    "Ipv6Cidr": {
+      "type": "string",
+      "min": 0,
+      "max": 49,
+      "pattern": "(([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,7}:|([0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}|([0-9a-fA-F]{1,4}:){1,5}(:[0-9a-fA-F]{1,4}){1,2}|([0-9a-fA-F]{1,4}:){1,4}(:[0-9a-fA-F]{1,4}){1,3}|([0-9a-fA-F]{1,4}:){1,3}(:[0-9a-fA-F]{1,4}){1,4}|([0-9a-fA-F]{1,4}:){1,2}(:[0-9a-fA-F]{1,4}){1,5}|[0-9a-fA-F]{1,4}:((:[0-9a-fA-F]{1,4}){1,6})|:((:[0-9a-fA-F]{1,4}){1,7}|:))\\/(12[0-8]|1[0-1][0-9]|[1-9][0-9]|[0-9])"
+    },
+    "Ipv6Cidrs": {
+      "type": "list",
+      "member": "Ipv6Cidr"
+    },
+    "JobId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9-]+"
+    },
+    "JobName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "pattern": "arn:aws(|-cn|-us-gov|-eusc):kms:[a-z0-9-]{1,20}:[0-9]{12}:(key|alias)/.+"
+    },
+    "KmsKeyId": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "[a-zA-Z0-9-:/]+"
+    },
+    "LambdaFunctionArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "[a-zA-Z0-9:_/+=,@.#-]+"
+    },
+    "LambdaInvocationType": {
+      "type": "string",
+      "enum": [
+        "EVENT",
+        "REQUEST_RESPONSE"
+      ]
+    },
+    "LambdaRetryTimeMinutes": {
+      "type": "integer",
+      "min": 0,
+      "max": 2160
+    },
+    "ListAddonInstancesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "PageSize": "PageSize"
+      }
+    },
+    "ListAddonSubscriptionsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "PageSize": "PageSize"
+      }
+    },
+    "ListAddressListImportJobsRequest": {
+      "type": "structure",
+      "required": [
+        "AddressListId"
+      ],
+      "members": {
+        "AddressListId": "AddressListId",
+        "NextToken": "PaginationToken",
+        "PageSize": "PageSize"
+      }
+    },
+    "ListAddressListsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "PageSize": "PageSize"
+      }
+    },
+    "ListArchiveExportsRequest": {
+      "type": "structure",
+      "required": [
+        "ArchiveId"
+      ],
+      "members": {
+        "ArchiveId": "ArchiveId",
+        "NextToken": "PaginationToken",
+        "PageSize": "PageSize"
+      }
+    },
+    "ListArchiveSearchesRequest": {
+      "type": "structure",
+      "required": [
+        "ArchiveId"
+      ],
+      "members": {
+        "ArchiveId": "ArchiveId",
+        "NextToken": "PaginationToken",
+        "PageSize": "PageSize"
+      }
+    },
+    "ListArchivesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "PageSize": "PageSize"
+      }
+    },
+    "ListIngressPointsRequest": {
+      "type": "structure",
+      "members": {
+        "PageSize": "PageSize",
+        "NextToken": "PaginationToken"
+      }
+    },
+    "ListMembersOfAddressListRequest": {
+      "type": "structure",
+      "required": [
+        "AddressListId"
+      ],
+      "members": {
+        "AddressListId": "AddressListId",
+        "Filter": "AddressFilter",
+        "NextToken": "PaginationToken",
+        "PageSize": "AddressPageSize"
+      }
+    },
+    "ListRelaysRequest": {
+      "type": "structure",
+      "members": {
+        "PageSize": "Integer",
+        "NextToken": "PaginationToken"
+      }
+    },
+    "ListRuleSetsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "PageSize": "PageSize"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "TaggableResourceArn"
+      }
+    },
+    "ListTrafficPoliciesRequest": {
+      "type": "structure",
+      "members": {
+        "PageSize": "PageSize",
+        "NextToken": "PaginationToken"
+      }
+    },
+    "MailFrom": {
+      "type": "string",
+      "enum": [
+        "REPLACE",
+        "PRESERVE"
+      ]
+    },
+    "MaxMessageSizeBytes": {
+      "type": "integer",
+      "min": 1
+    },
+    "MimeHeaderAttribute": {
+      "type": "string",
+      "pattern": "X-[a-zA-Z0-9-]{1,256}"
+    },
+    "NameOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "[a-zA-Z0-9:_/+=,@.#-]+"
+    },
+    "NetworkConfiguration": {
+      "type": "structure",
+      "members": {
+        "PublicNetworkConfiguration": "PublicNetworkConfiguration",
+        "PrivateNetworkConfiguration": "PrivateNetworkConfiguration"
+      }
+    },
+    "NoAuthentication": {
+      "type": "structure",
+      "members": {}
+    },
+    "PageSize": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "PolicyCondition": {
+      "type": "structure",
+      "members": {
+        "StringExpression": "IngressStringExpression",
+        "IpExpression": "IngressIpv4Expression",
+        "Ipv6Expression": "IngressIpv6Expression",
+        "TlsExpression": "IngressTlsProtocolExpression",
+        "BooleanExpression": "IngressBooleanExpression"
+      }
+    },
+    "PolicyConditions": {
+      "type": "list",
+      "min": 1,
+      "member": "PolicyCondition"
+    },
+    "PolicyStatement": {
+      "type": "structure",
+      "required": [
+        "Conditions",
+        "Action"
+      ],
+      "members": {
+        "Conditions": "PolicyConditions",
+        "Action": "AcceptAction"
+      }
+    },
+    "PolicyStatementList": {
+      "type": "list",
+      "member": "PolicyStatement"
+    },
+    "PrivateNetworkConfiguration": {
+      "type": "structure",
+      "required": [
+        "VpcEndpointId"
+      ],
+      "members": {
+        "VpcEndpointId": "VpcEndpointId"
+      }
+    },
+    "PublicNetworkConfiguration": {
+      "type": "structure",
+      "required": [
+        "IpType"
+      ],
+      "members": {
+        "IpType": "IpType"
+      }
+    },
+    "QBusinessApplicationId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-z0-9-]+"
+    },
+    "QBusinessIndexId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-z0-9-]+"
+    },
+    "Recipients": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "EmailAddress"
+    },
+    "RegisterMemberToAddressListRequest": {
+      "type": "structure",
+      "required": [
+        "AddressListId",
+        "Address"
+      ],
+      "members": {
+        "AddressListId": "AddressListId",
+        "Address": "Address"
+      }
+    },
+    "RelayAction": {
+      "type": "structure",
+      "required": [
+        "Relay"
+      ],
+      "members": {
+        "ActionFailurePolicy": "ActionFailurePolicy",
+        "Relay": "IdOrArn",
+        "MailFrom": "MailFrom"
+      }
+    },
+    "RelayAuthentication": {
+      "type": "structure",
+      "members": {
+        "SecretArn": "SecretArn",
+        "NoAuthentication": "NoAuthentication"
+      }
+    },
+    "RelayId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9-]+"
+    },
+    "RelayName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9-_]+"
+    },
+    "RelayServerName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9-\\.]+"
+    },
+    "RelayServerPort": {
+      "type": "integer",
+      "min": 1,
+      "max": 65535
+    },
+    "ReplaceRecipientAction": {
+      "type": "structure",
+      "members": {
+        "ReplaceWith": "Recipients"
+      }
+    },
+    "ResultField": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "(addon\\.)?[\\sa-zA-Z0-9_]+"
+    },
+    "RetentionPeriod": {
+      "type": "string",
+      "enum": [
+        "THREE_MONTHS",
+        "SIX_MONTHS",
+        "NINE_MONTHS",
+        "ONE_YEAR",
+        "EIGHTEEN_MONTHS",
+        "TWO_YEARS",
+        "THIRTY_MONTHS",
+        "THREE_YEARS",
+        "FOUR_YEARS",
+        "FIVE_YEARS",
+        "SIX_YEARS",
+        "SEVEN_YEARS",
+        "EIGHT_YEARS",
+        "NINE_YEARS",
+        "TEN_YEARS",
+        "PERMANENT"
+      ]
+    },
+    "Rule": {
+      "type": "structure",
+      "required": [
+        "Actions"
+      ],
+      "members": {
+        "Name": "RuleName",
+        "Conditions": "RuleConditions",
+        "Unless": "RuleConditions",
+        "Actions": "RuleActions"
+      }
+    },
+    "RuleAction": {
+      "type": "structure",
+      "members": {
+        "Drop": "DropAction",
+        "Relay": "RelayAction",
+        "Archive": "ArchiveAction",
+        "WriteToS3": "S3Action",
+        "Send": "SendAction",
+        "AddHeader": "AddHeaderAction",
+        "ReplaceRecipient": "ReplaceRecipientAction",
+        "DeliverToMailbox": "DeliverToMailboxAction",
+        "DeliverToQBusiness": "DeliverToQBusinessAction",
+        "PublishToSns": "SnsAction",
+        "Bounce": "BounceAction",
+        "InvokeLambda": "InvokeLambdaAction"
+      }
+    },
+    "RuleActions": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "RuleAction"
+    },
+    "RuleAddressListArnList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "AddressListArn"
+    },
+    "RuleAddressListEmailAttribute": {
+      "type": "string",
+      "enum": [
+        "RECIPIENT",
+        "MAIL_FROM",
+        "SENDER",
+        "FROM",
+        "TO",
+        "CC"
+      ]
+    },
+    "RuleBooleanEmailAttribute": {
+      "type": "string",
+      "enum": [
+        "READ_RECEIPT_REQUESTED",
+        "TLS",
+        "TLS_WRAPPED"
+      ]
+    },
+    "RuleBooleanExpression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator"
+      ],
+      "members": {
+        "Evaluate": "RuleBooleanToEvaluate",
+        "Operator": "RuleBooleanOperator"
+      }
+    },
+    "RuleBooleanOperator": {
+      "type": "string",
+      "enum": [
+        "IS_TRUE",
+        "IS_FALSE"
+      ]
+    },
+    "RuleBooleanToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Attribute": "RuleBooleanEmailAttribute",
+        "Analysis": "Analysis",
+        "IsInAddressList": "RuleIsInAddressList"
+      }
+    },
+    "RuleClientCertificateAttribute": {
+      "type": "string",
+      "enum": [
+        "CN",
+        "SAN_RFC822_NAME",
+        "SAN_DNS_NAME",
+        "SAN_DIRECTORY_NAME",
+        "SAN_UNIFORM_RESOURCE_IDENTIFIER",
+        "SAN_IP_ADDRESS",
+        "SAN_REGISTERED_ID",
+        "SERIAL_NUMBER"
+      ]
+    },
+    "RuleCondition": {
+      "type": "structure",
+      "members": {
+        "BooleanExpression": "RuleBooleanExpression",
+        "StringExpression": "RuleStringExpression",
+        "NumberExpression": "RuleNumberExpression",
+        "IpExpression": "RuleIpExpression",
+        "VerdictExpression": "RuleVerdictExpression",
+        "DmarcExpression": "RuleDmarcExpression"
+      }
+    },
+    "RuleConditions": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "RuleCondition"
+    },
+    "RuleDmarcExpression": {
+      "type": "structure",
+      "required": [
+        "Operator",
+        "Values"
+      ],
+      "members": {
+        "Operator": "RuleDmarcOperator",
+        "Values": "RuleDmarcValueList"
+      }
+    },
+    "RuleDmarcOperator": {
+      "type": "string",
+      "enum": [
+        "EQUALS",
+        "NOT_EQUALS"
+      ]
+    },
+    "RuleDmarcPolicy": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "QUARANTINE",
+        "REJECT"
+      ]
+    },
+    "RuleDmarcValueList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "RuleDmarcPolicy"
+    },
+    "RuleIpEmailAttribute": {
+      "type": "string",
+      "enum": [
+        "SOURCE_IP"
+      ]
+    },
+    "RuleIpExpression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator",
+        "Values"
+      ],
+      "members": {
+        "Evaluate": "RuleIpToEvaluate",
+        "Operator": "RuleIpOperator",
+        "Values": "RuleIpValueList"
+      }
+    },
+    "RuleIpOperator": {
+      "type": "string",
+      "enum": [
+        "CIDR_MATCHES",
+        "NOT_CIDR_MATCHES"
+      ]
+    },
+    "RuleIpStringValue": {
+      "type": "string",
+      "min": 1,
+      "max": 43,
+      "pattern": "(([0-9]|.|:|/)*)"
+    },
+    "RuleIpToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Attribute": "RuleIpEmailAttribute"
+      }
+    },
+    "RuleIpValueList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "RuleIpStringValue"
+    },
+    "RuleIsInAddressList": {
+      "type": "structure",
+      "required": [
+        "Attribute",
+        "AddressLists"
+      ],
+      "members": {
+        "Attribute": "RuleAddressListEmailAttribute",
+        "AddressLists": "RuleAddressListArnList"
+      }
+    },
+    "RuleName": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "RuleNumberEmailAttribute": {
+      "type": "string",
+      "enum": [
+        "MESSAGE_SIZE"
+      ]
+    },
+    "RuleNumberExpression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator",
+        "Value"
+      ],
+      "members": {
+        "Evaluate": "RuleNumberToEvaluate",
+        "Operator": "RuleNumberOperator",
+        "Value": "Double"
+      }
+    },
+    "RuleNumberOperator": {
+      "type": "string",
+      "enum": [
+        "EQUALS",
+        "NOT_EQUALS",
+        "LESS_THAN",
+        "GREATER_THAN",
+        "LESS_THAN_OR_EQUAL",
+        "GREATER_THAN_OR_EQUAL"
+      ]
+    },
+    "RuleNumberToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Attribute": "RuleNumberEmailAttribute"
+      }
+    },
+    "RuleSetId": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "RuleSetName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "RuleStringEmailAttribute": {
+      "type": "string",
+      "enum": [
+        "MAIL_FROM",
+        "HELO",
+        "RECIPIENT",
+        "SENDER",
+        "FROM",
+        "SUBJECT",
+        "TO",
+        "CC"
+      ]
+    },
+    "RuleStringExpression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator",
+        "Values"
+      ],
+      "members": {
+        "Evaluate": "RuleStringToEvaluate",
+        "Operator": "RuleStringOperator",
+        "Values": "RuleStringList"
+      }
+    },
+    "RuleStringList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "RuleStringValue"
+    },
+    "RuleStringOperator": {
+      "type": "string",
+      "enum": [
+        "EQUALS",
+        "NOT_EQUALS",
+        "STARTS_WITH",
+        "ENDS_WITH",
+        "CONTAINS"
+      ]
+    },
+    "RuleStringToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Attribute": "RuleStringEmailAttribute",
+        "MimeHeaderAttribute": "MimeHeaderAttribute",
+        "Analysis": "Analysis",
+        "ClientCertificateAttribute": "RuleClientCertificateAttribute"
+      }
+    },
+    "RuleStringValue": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "RuleVerdict": {
+      "type": "string",
+      "enum": [
+        "PASS",
+        "FAIL",
+        "GRAY",
+        "PROCESSING_FAILED"
+      ]
+    },
+    "RuleVerdictAttribute": {
+      "type": "string",
+      "enum": [
+        "SPF",
+        "DKIM"
+      ]
+    },
+    "RuleVerdictExpression": {
+      "type": "structure",
+      "required": [
+        "Evaluate",
+        "Operator",
+        "Values"
+      ],
+      "members": {
+        "Evaluate": "RuleVerdictToEvaluate",
+        "Operator": "RuleVerdictOperator",
+        "Values": "RuleVerdictValueList"
+      }
+    },
+    "RuleVerdictOperator": {
+      "type": "string",
+      "enum": [
+        "EQUALS",
+        "NOT_EQUALS"
+      ]
+    },
+    "RuleVerdictToEvaluate": {
+      "type": "structure",
+      "members": {
+        "Attribute": "RuleVerdictAttribute",
+        "Analysis": "Analysis"
+      }
+    },
+    "RuleVerdictValueList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "RuleVerdict"
+    },
+    "Rules": {
+      "type": "list",
+      "min": 0,
+      "max": 40,
+      "member": "Rule"
+    },
+    "S3Action": {
+      "type": "structure",
+      "required": [
+        "RoleArn",
+        "S3Bucket"
+      ],
+      "members": {
+        "ActionFailurePolicy": "ActionFailurePolicy",
+        "RoleArn": "IamRoleArn",
+        "S3Bucket": "S3Bucket",
+        "S3Prefix": "S3Prefix",
+        "S3SseKmsKeyId": "KmsKeyId"
+      }
+    },
+    "S3Bucket": {
+      "type": "string",
+      "min": 1,
+      "max": 62,
+      "pattern": "[a-zA-Z0-9.-]+"
+    },
+    "S3ExportDestinationConfiguration": {
+      "type": "structure",
+      "members": {
+        "S3Location": "S3Location"
+      }
+    },
+    "S3Location": {
+      "type": "string",
+      "pattern": "s3://[a-zA-Z0-9.-]{3,63}(/[a-zA-Z0-9!_.*'()/-]*)*"
+    },
+    "S3Prefix": {
+      "type": "string",
+      "min": 1,
+      "max": 62,
+      "pattern": "[a-zA-Z0-9!_.*'()/-]+"
+    },
+    "SearchId": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "SearchMaxResults": {
+      "type": "integer",
+      "min": 0,
+      "max": 1000
+    },
+    "SecretArn": {
+      "type": "string",
+      "pattern": "arn:(aws|aws-cn|aws-us-gov|aws-eusc):secretsmanager:[a-z0-9-]+:\\d{12}:secret:[a-zA-Z0-9/_+=,.@-]+"
+    },
+    "SendAction": {
+      "type": "structure",
+      "required": [
+        "RoleArn"
+      ],
+      "members": {
+        "ActionFailurePolicy": "ActionFailurePolicy",
+        "RoleArn": "IamRoleArn"
+      }
+    },
+    "SmtpPassword": {
+      "type": "string",
+      "min": 8,
+      "max": 64,
+      "pattern": "[A-Za-z0-9!@#$%^&*()_+\\-=\\[\\]{}|.,?]+"
+    },
+    "SmtpReplyCode": {
+      "type": "string",
+      "min": 3,
+      "max": 3,
+      "pattern": "[45][0-9][0-9]"
+    },
+    "SnsAction": {
+      "type": "structure",
+      "required": [
+        "TopicArn",
+        "RoleArn"
+      ],
+      "members": {
+        "ActionFailurePolicy": "ActionFailurePolicy",
+        "TopicArn": "SnsTopicArn",
+        "RoleArn": "IamRoleArn",
+        "Encoding": "SnsNotificationEncoding",
+        "PayloadType": "SnsNotificationPayloadType"
+      }
+    },
+    "SnsNotificationEncoding": {
+      "type": "string",
+      "enum": [
+        "UTF-8",
+        "BASE64"
+      ]
+    },
+    "SnsNotificationPayloadType": {
+      "type": "string",
+      "enum": [
+        "HEADERS",
+        "CONTENT"
+      ]
+    },
+    "SnsTopicArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:(aws|aws-cn|aws-us-gov|aws-eusc):sns:[a-z0-9-]+:\\d{12}:[\\w\\-]{1,256}"
+    },
+    "StartAddressListImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "JobId"
+      ],
+      "members": {
+        "JobId": "JobId"
+      }
+    },
+    "StartArchiveExportRequest": {
+      "type": "structure",
+      "required": [
+        "ArchiveId",
+        "FromTimestamp",
+        "ToTimestamp",
+        "ExportDestinationConfiguration"
+      ],
+      "members": {
+        "ArchiveId": "ArchiveId",
+        "Filters": "ArchiveFilters",
+        "FromTimestamp": "Timestamp",
+        "ToTimestamp": "Timestamp",
+        "MaxResults": "ExportMaxResults",
+        "ExportDestinationConfiguration": "ExportDestinationConfiguration",
+        "IncludeMetadata": "Boolean"
+      }
+    },
+    "StartArchiveSearchRequest": {
+      "type": "structure",
+      "required": [
+        "ArchiveId",
+        "FromTimestamp",
+        "ToTimestamp",
+        "MaxResults"
+      ],
+      "members": {
+        "ArchiveId": "ArchiveId",
+        "Filters": "ArchiveFilters",
+        "FromTimestamp": "Timestamp",
+        "ToTimestamp": "Timestamp",
+        "MaxResults": "SearchMaxResults"
+      }
+    },
+    "StatusCode": {
+      "type": "string",
+      "min": 5,
+      "max": 9,
+      "pattern": "[45]\\.[0-9]{1,3}\\.[0-9]{1,3}"
+    },
+    "StopAddressListImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "JobId"
+      ],
+      "members": {
+        "JobId": "JobId"
+      }
+    },
+    "StopArchiveExportRequest": {
+      "type": "structure",
+      "required": [
+        "ExportId"
+      ],
+      "members": {
+        "ExportId": "ExportId"
+      }
+    },
+    "StopArchiveSearchRequest": {
+      "type": "structure",
+      "required": [
+        "SearchId"
+      ],
+      "members": {
+        "SearchId": "SearchId"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringList": {
+      "type": "list",
+      "member": "String"
+    },
+    "StringValue": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "StringValueList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "StringValue"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9/_\\+=\\.:@\\-]+"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "TaggableResourceArn",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9/_\\+=\\.:@\\-]*"
+    },
+    "TaggableResourceArn": {
+      "type": "string",
+      "min": 20,
+      "max": 1011,
+      "pattern": "arn:aws(|-cn|-us-gov|-eusc):ses:[a-z0-9-]{1,20}:[0-9]{12}:(mailmanager-|addon-).+"
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "TlsAuthConfiguration": {
+      "type": "structure",
+      "members": {
+        "TrustStore": "TrustStore"
+      }
+    },
+    "TlsPolicy": {
+      "type": "string",
+      "enum": [
+        "REQUIRED",
+        "OPTIONAL",
+        "FIPS"
+      ]
+    },
+    "TrafficPolicyId": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "TrafficPolicyName": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "[A-Za-z0-9_\\-]+"
+    },
+    "TrustStore": {
+      "type": "structure",
+      "required": [
+        "CAContent"
+      ],
+      "members": {
+        "CAContent": "CAContent",
+        "CrlContent": "CrlContent",
+        "KmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "TrustStoreResponseOption": {
+      "type": "string",
+      "enum": [
+        "EXCLUDE",
+        "INCLUDE"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "TaggableResourceArn",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateArchiveRequest": {
+      "type": "structure",
+      "required": [
+        "ArchiveId"
+      ],
+      "members": {
+        "ArchiveId": "ArchiveIdString",
+        "ArchiveName": "ArchiveNameString",
+        "Retention": "ArchiveRetention"
+      }
+    },
+    "UpdateIngressPointRequest": {
+      "type": "structure",
+      "required": [
+        "IngressPointId"
+      ],
+      "members": {
+        "IngressPointId": "IngressPointId",
+        "IngressPointName": "IngressPointName",
+        "StatusToUpdate": "IngressPointStatusToUpdate",
+        "RuleSetId": "RuleSetId",
+        "TrafficPolicyId": "TrafficPolicyId",
+        "IngressPointConfiguration": "IngressPointConfiguration",
+        "TlsPolicy": "TlsPolicy"
+      }
+    },
+    "UpdateRelayRequest": {
+      "type": "structure",
+      "required": [
+        "RelayId"
+      ],
+      "members": {
+        "RelayId": "RelayId",
+        "RelayName": "RelayName",
+        "ServerName": "RelayServerName",
+        "ServerPort": "RelayServerPort",
+        "Authentication": "RelayAuthentication"
+      }
+    },
+    "UpdateRuleSetRequest": {
+      "type": "structure",
+      "required": [
+        "RuleSetId"
+      ],
+      "members": {
+        "RuleSetId": "RuleSetId",
+        "RuleSetName": "RuleSetName",
+        "Rules": "Rules"
+      }
+    },
+    "UpdateTrafficPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "TrafficPolicyId"
+      ],
+      "members": {
+        "TrafficPolicyId": "TrafficPolicyId",
+        "TrafficPolicyName": "TrafficPolicyName",
+        "PolicyStatements": "PolicyStatementList",
+        "DefaultAction": "AcceptAction",
+        "MaxMessageSizeBytes": "MaxMessageSizeBytes"
+      }
+    },
+    "VpcEndpointId": {
+      "type": "string",
+      "pattern": "vpce-[a-zA-Z0-9]{17}"
+    }
+  }
+}

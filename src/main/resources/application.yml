@@ -1050,6 +1050,8 @@ floci:
       enabled: true
     airflow-serverless:
       enabled: true
+    mail-manager:
+      enabled: true
     license-manager:
       enabled: true
     lexv2:

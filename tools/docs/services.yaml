@@ -279,6 +279,10 @@ services:
     doc: docs/services/airflowserverless.md
     sources:
       - { path: services/airflowserverless/AirflowServerlessJsonHandler.java, mode: switch }
+  - service: mailmanager
+    doc: docs/services/mailmanager.md
+    sources:
+      - { path: services/mailmanager/MailManagerJsonHandler.java, mode: switch }
   - service: licensemanager
     doc: docs/services/licensemanager.md
     sources:

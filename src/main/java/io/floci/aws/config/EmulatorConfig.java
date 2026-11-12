@@ -894,6 +894,8 @@ public interface EmulatorConfig {
 
         AirflowServerlessServiceConfig airflowServerless();
 
+        MailManagerServiceConfig mailManager();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3016,6 +3018,34 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface MailManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long an ingress point stays PROVISIONING, or an import job, search or export runs. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The host name ingress points' ARecord gives for SMTP clients. */
+        @WithDefault("localhost.floci.io")
+        String smtpHostname();
+
+        /** The address ingress points' SMTP listeners bind to. */
+        @WithDefault("0.0.0.0")
+        String smtpBindHost();
+
+        /** The first port an ingress point's SMTP listener takes. */
+        @WithDefault("2525")
+        int smtpPortStart();
+
+        /** How many ports, from {@link #smtpPortStart()}, ingress points' SMTP listeners may take. */
+        @WithDefault("50")
+        int smtpPortCount();
+
+        @WithDefault("100000")
+        int maxAddressListMembers();
     }
 
     interface AirflowServerlessServiceConfig {
