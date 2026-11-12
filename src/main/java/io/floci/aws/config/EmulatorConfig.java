@@ -904,6 +904,8 @@ public interface EmulatorConfig {
 
         MediaPackageV2ServiceConfig mediaPackageV2();
 
+        MediaTailorServiceConfig mediaTailor();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3026,6 +3028,23 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface MediaTailorServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a request to an origin, ad decision server or beacon may take. */
+        @WithDefault("10000")
+        long requestTimeoutMillis();
+
+        /** How long a manifest request waits for its ads to be transcoded before it plays without them. */
+        @WithDefault("30000")
+        long transcodeWaitMillis();
+
+        /** How long a session lasts after its last request. */
+        @WithDefault("600")
+        int sessionIdleSeconds();
     }
 
     interface MediaPackageV2ServiceConfig {

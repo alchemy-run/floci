@@ -553,6 +553,8 @@ floci:
     airflow-serverless:
       enabled: true
       transition-millis: 200
+    media-tailor:
+      enabled: true
     media-package-v2:
       enabled: true
       transition-millis: 200

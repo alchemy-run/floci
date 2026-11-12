@@ -143,6 +143,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [MediaConvert](mediaconvert.md) | `/2017-08-29/jobs`, `/2017-08-29/queues`, `/2017-08-29/presets`, `/2017-08-29/jobTemplates` (signed `mediaconvert`); jobs transcode with ffmpeg | REST JSON | 34 |
 | [MediaLive](medialive.md) | `/prod/channels`, `/prod/inputs`, `/prod/multiplexes`, `/prod/signal-maps` (signed `medialive`); running channels encode with ffmpeg | REST JSON | 123 |
 | [MediaPackage v2](mediapackagev2.md) | `/channelGroup` (signed `mediapackagev2`); ingest and egress on per-group hosts; CMAF remuxed with ffmpeg | REST JSON | 30 |
+| [MediaTailor](mediatailor.md) | `/playbackConfiguration`, `/channel`, `/sourceLocation` (signed `mediatailor`); ads stitched into HLS, running channels | REST JSON | 48 |
 | [IVS](ivs.md) | `POST /<Operation>`, `/tags/*` signed for `ivs` (with Real-Time) | REST JSON | 78 |
 | [IVS Chat](ivschat.md) | `POST /<Operation>`, `/tags/*` signed for `ivschat` | REST JSON | 17 |
 | [FSx](fsx.md) | `POST /` + `X-Amz-Target: AWSSimbaAPIService_v20180301.*` | JSON 1.1 | 48 |

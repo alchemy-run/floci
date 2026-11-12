@@ -38,6 +38,7 @@ MODELS = {
     "mediaconvert": "mediaconvert",
     "medialive": "medialive",
     "mediapackagev2": "mediapackagev2",
+    "mediatailor": "mediatailor",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}
