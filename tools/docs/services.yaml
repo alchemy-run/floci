@@ -279,6 +279,10 @@ services:
     doc: docs/services/airflowserverless.md
     sources:
       - { path: services/airflowserverless/AirflowServerlessJsonHandler.java, mode: switch }
+  - service: medialive
+    doc: docs/services/medialive.md
+    sources:
+      - { path: services/medialive/MediaLiveController.java, mode: switch }
   - service: mediaconvert
     doc: docs/services/mediaconvert.md
     sources:

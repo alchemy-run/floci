@@ -1,0 +1,7420 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_medialive_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AcceptInputDeviceTransfer": "AcceptInputDeviceTransferRequest",
+    "BatchDelete": "BatchDeleteRequest",
+    "BatchStart": "BatchStartRequest",
+    "BatchStop": "BatchStopRequest",
+    "BatchUpdateSchedule": "BatchUpdateScheduleRequest",
+    "CancelInputDeviceTransfer": "CancelInputDeviceTransferRequest",
+    "ClaimDevice": "ClaimDeviceRequest",
+    "CreateChannel": "CreateChannelRequest",
+    "CreateChannelPlacementGroup": "CreateChannelPlacementGroupRequest",
+    "CreateCloudWatchAlarmTemplate": "CreateCloudWatchAlarmTemplateRequest",
+    "CreateCloudWatchAlarmTemplateGroup": "CreateCloudWatchAlarmTemplateGroupRequest",
+    "CreateCluster": "CreateClusterRequest",
+    "CreateEventBridgeRuleTemplate": "CreateEventBridgeRuleTemplateRequest",
+    "CreateEventBridgeRuleTemplateGroup": "CreateEventBridgeRuleTemplateGroupRequest",
+    "CreateInput": "CreateInputRequest",
+    "CreateInputSecurityGroup": "CreateInputSecurityGroupRequest",
+    "CreateMultiplex": "CreateMultiplexRequest",
+    "CreateMultiplexProgram": "CreateMultiplexProgramRequest",
+    "CreateNetwork": "CreateNetworkRequest",
+    "CreateNode": "CreateNodeRequest",
+    "CreateNodeRegistrationScript": "CreateNodeRegistrationScriptRequest",
+    "CreatePartnerInput": "CreatePartnerInputRequest",
+    "CreateSdiSource": "CreateSdiSourceRequest",
+    "CreateSignalMap": "CreateSignalMapRequest",
+    "CreateTags": "CreateTagsRequest",
+    "DeleteChannel": "DeleteChannelRequest",
+    "DeleteChannelPlacementGroup": "DeleteChannelPlacementGroupRequest",
+    "DeleteCloudWatchAlarmTemplate": "DeleteCloudWatchAlarmTemplateRequest",
+    "DeleteCloudWatchAlarmTemplateGroup": "DeleteCloudWatchAlarmTemplateGroupRequest",
+    "DeleteCluster": "DeleteClusterRequest",
+    "DeleteEventBridgeRuleTemplate": "DeleteEventBridgeRuleTemplateRequest",
+    "DeleteEventBridgeRuleTemplateGroup": "DeleteEventBridgeRuleTemplateGroupRequest",
+    "DeleteInput": "DeleteInputRequest",
+    "DeleteInputSecurityGroup": "DeleteInputSecurityGroupRequest",
+    "DeleteMultiplex": "DeleteMultiplexRequest",
+    "DeleteMultiplexProgram": "DeleteMultiplexProgramRequest",
+    "DeleteNetwork": "DeleteNetworkRequest",
+    "DeleteNode": "DeleteNodeRequest",
+    "DeleteReservation": "DeleteReservationRequest",
+    "DeleteSchedule": "DeleteScheduleRequest",
+    "DeleteSdiSource": "DeleteSdiSourceRequest",
+    "DeleteSignalMap": "DeleteSignalMapRequest",
+    "DeleteTags": "DeleteTagsRequest",
+    "DescribeAccountConfiguration": "DescribeAccountConfigurationRequest",
+    "DescribeChannel": "DescribeChannelRequest",
+    "DescribeChannelPlacementGroup": "DescribeChannelPlacementGroupRequest",
+    "DescribeCluster": "DescribeClusterRequest",
+    "DescribeInput": "DescribeInputRequest",
+    "DescribeInputDevice": "DescribeInputDeviceRequest",
+    "DescribeInputDeviceThumbnail": "DescribeInputDeviceThumbnailRequest",
+    "DescribeInputSecurityGroup": "DescribeInputSecurityGroupRequest",
+    "DescribeMultiplex": "DescribeMultiplexRequest",
+    "DescribeMultiplexProgram": "DescribeMultiplexProgramRequest",
+    "DescribeNetwork": "DescribeNetworkRequest",
+    "DescribeNode": "DescribeNodeRequest",
+    "DescribeOffering": "DescribeOfferingRequest",
+    "DescribeReservation": "DescribeReservationRequest",
+    "DescribeSchedule": "DescribeScheduleRequest",
+    "DescribeSdiSource": "DescribeSdiSourceRequest",
+    "DescribeThumbnails": "DescribeThumbnailsRequest",
+    "GetCloudWatchAlarmTemplate": "GetCloudWatchAlarmTemplateRequest",
+    "GetCloudWatchAlarmTemplateGroup": "GetCloudWatchAlarmTemplateGroupRequest",
+    "GetEventBridgeRuleTemplate": "GetEventBridgeRuleTemplateRequest",
+    "GetEventBridgeRuleTemplateGroup": "GetEventBridgeRuleTemplateGroupRequest",
+    "GetSignalMap": "GetSignalMapRequest",
+    "ListAlerts": "ListAlertsRequest",
+    "ListChannelPlacementGroups": "ListChannelPlacementGroupsRequest",
+    "ListChannels": "ListChannelsRequest",
+    "ListCloudWatchAlarmTemplateGroups": "ListCloudWatchAlarmTemplateGroupsRequest",
+    "ListCloudWatchAlarmTemplates": "ListCloudWatchAlarmTemplatesRequest",
+    "ListClusterAlerts": "ListClusterAlertsRequest",
+    "ListClusters": "ListClustersRequest",
+    "ListEventBridgeRuleTemplateGroups": "ListEventBridgeRuleTemplateGroupsRequest",
+    "ListEventBridgeRuleTemplates": "ListEventBridgeRuleTemplatesRequest",
+    "ListInputDeviceTransfers": "ListInputDeviceTransfersRequest",
+    "ListInputDevices": "ListInputDevicesRequest",
+    "ListInputSecurityGroups": "ListInputSecurityGroupsRequest",
+    "ListInputs": "ListInputsRequest",
+    "ListMultiplexAlerts": "ListMultiplexAlertsRequest",
+    "ListMultiplexPrograms": "ListMultiplexProgramsRequest",
+    "ListMultiplexes": "ListMultiplexesRequest",
+    "ListNetworks": "ListNetworksRequest",
+    "ListNodes": "ListNodesRequest",
+    "ListOfferings": "ListOfferingsRequest",
+    "ListReservations": "ListReservationsRequest",
+    "ListSdiSources": "ListSdiSourcesRequest",
+    "ListSignalMaps": "ListSignalMapsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListVersions": "ListVersionsRequest",
+    "PurchaseOffering": "PurchaseOfferingRequest",
+    "RebootInputDevice": "RebootInputDeviceRequest",
+    "RejectInputDeviceTransfer": "RejectInputDeviceTransferRequest",
+    "RestartChannelPipelines": "RestartChannelPipelinesRequest",
+    "StartChannel": "StartChannelRequest",
+    "StartDeleteMonitorDeployment": "StartDeleteMonitorDeploymentRequest",
+    "StartInputDevice": "StartInputDeviceRequest",
+    "StartInputDeviceMaintenanceWindow": "StartInputDeviceMaintenanceWindowRequest",
+    "StartMonitorDeployment": "StartMonitorDeploymentRequest",
+    "StartMultiplex": "StartMultiplexRequest",
+    "StartUpdateSignalMap": "StartUpdateSignalMapRequest",
+    "StopChannel": "StopChannelRequest",
+    "StopInputDevice": "StopInputDeviceRequest",
+    "StopMultiplex": "StopMultiplexRequest",
+    "TransferInputDevice": "TransferInputDeviceRequest",
+    "UpdateAccountConfiguration": "UpdateAccountConfigurationRequest",
+    "UpdateChannel": "UpdateChannelRequest",
+    "UpdateChannelClass": "UpdateChannelClassRequest",
+    "UpdateChannelPlacementGroup": "UpdateChannelPlacementGroupRequest",
+    "UpdateCloudWatchAlarmTemplate": "UpdateCloudWatchAlarmTemplateRequest",
+    "UpdateCloudWatchAlarmTemplateGroup": "UpdateCloudWatchAlarmTemplateGroupRequest",
+    "UpdateCluster": "UpdateClusterRequest",
+    "UpdateEventBridgeRuleTemplate": "UpdateEventBridgeRuleTemplateRequest",
+    "UpdateEventBridgeRuleTemplateGroup": "UpdateEventBridgeRuleTemplateGroupRequest",
+    "UpdateInput": "UpdateInputRequest",
+    "UpdateInputDevice": "UpdateInputDeviceRequest",
+    "UpdateInputSecurityGroup": "UpdateInputSecurityGroupRequest",
+    "UpdateMultiplex": "UpdateMultiplexRequest",
+    "UpdateMultiplexProgram": "UpdateMultiplexProgramRequest",
+    "UpdateNetwork": "UpdateNetworkRequest",
+    "UpdateNode": "UpdateNodeRequest",
+    "UpdateNodeState": "UpdateNodeStateRequest",
+    "UpdateReservation": "UpdateReservationRequest",
+    "UpdateSdiSource": "UpdateSdiSourceRequest"
+  },
+  "shapes": {
+    "AacCodingMode": {
+      "type": "string",
+      "enum": [
+        "AD_RECEIVER_MIX",
+        "CODING_MODE_1_0",
+        "CODING_MODE_1_1",
+        "CODING_MODE_2_0",
+        "CODING_MODE_5_1"
+      ]
+    },
+    "AacInputType": {
+      "type": "string",
+      "enum": [
+        "BROADCASTER_MIXED_AD",
+        "NORMAL"
+      ]
+    },
+    "AacProfile": {
+      "type": "string",
+      "enum": [
+        "HEV1",
+        "HEV2",
+        "LC"
+      ]
+    },
+    "AacRateControlMode": {
+      "type": "string",
+      "enum": [
+        "CBR",
+        "VBR"
+      ]
+    },
+    "AacRawFormat": {
+      "type": "string",
+      "enum": [
+        "LATM_LOAS",
+        "NONE"
+      ]
+    },
+    "AacSettings": {
+      "type": "structure",
+      "members": {
+        "Bitrate": "__double",
+        "CodingMode": "AacCodingMode",
+        "InputType": "AacInputType",
+        "Profile": "AacProfile",
+        "RateControlMode": "AacRateControlMode",
+        "RawFormat": "AacRawFormat",
+        "SampleRate": "__double",
+        "Spec": "AacSpec",
+        "VbrQuality": "AacVbrQuality"
+      }
+    },
+    "AacSpec": {
+      "type": "string",
+      "enum": [
+        "MPEG2",
+        "MPEG4"
+      ]
+    },
+    "AacVbrQuality": {
+      "type": "string",
+      "enum": [
+        "HIGH",
+        "LOW",
+        "MEDIUM_HIGH",
+        "MEDIUM_LOW"
+      ]
+    },
+    "AbWatermarkerIdLength": {
+      "type": "string",
+      "enum": [
+        "ID_2048",
+        "ID_512"
+      ]
+    },
+    "AbWatermarkingCustomProfile": {
+      "type": "structure",
+      "required": [
+        "SceneCut",
+        "EmbeddingFrequency",
+        "TargetPsnr"
+      ],
+      "members": {
+        "EmbeddingFrequency": "__doubleMin250Max5000",
+        "SceneCut": "__doubleMinNegative1Max5",
+        "TargetPsnr": "__doubleMin32Max46"
+      }
+    },
+    "AbWatermarkingProfile": {
+      "type": "string",
+      "enum": [
+        "CAMCORDING",
+        "CUSTOM",
+        "DEFAULT",
+        "HQ",
+        "MEZZANINE",
+        "ROBUST"
+      ]
+    },
+    "Ac3AttenuationControl": {
+      "type": "string",
+      "enum": [
+        "ATTENUATE_3_DB",
+        "NONE"
+      ]
+    },
+    "Ac3BitstreamMode": {
+      "type": "string",
+      "enum": [
+        "COMMENTARY",
+        "COMPLETE_MAIN",
+        "DIALOGUE",
+        "EMERGENCY",
+        "HEARING_IMPAIRED",
+        "MUSIC_AND_EFFECTS",
+        "VISUALLY_IMPAIRED",
+        "VOICE_OVER"
+      ]
+    },
+    "Ac3CodingMode": {
+      "type": "string",
+      "enum": [
+        "CODING_MODE_1_0",
+        "CODING_MODE_1_1",
+        "CODING_MODE_2_0",
+        "CODING_MODE_3_2_LFE"
+      ]
+    },
+    "Ac3DrcProfile": {
+      "type": "string",
+      "enum": [
+        "FILM_STANDARD",
+        "NONE"
+      ]
+    },
+    "Ac3LfeFilter": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "Ac3MetadataControl": {
+      "type": "string",
+      "enum": [
+        "FOLLOW_INPUT",
+        "USE_CONFIGURED"
+      ]
+    },
+    "Ac3Settings": {
+      "type": "structure",
+      "members": {
+        "Bitrate": "__double",
+        "BitstreamMode": "Ac3BitstreamMode",
+        "CodingMode": "Ac3CodingMode",
+        "Dialnorm": "__integerMin1Max31",
+        "DrcProfile": "Ac3DrcProfile",
+        "LfeFilter": "Ac3LfeFilter",
+        "MetadataControl": "Ac3MetadataControl",
+        "AttenuationControl": "Ac3AttenuationControl"
+      }
+    },
+    "AcceptHeader": {
+      "type": "string",
+      "enum": [
+        "image/jpeg"
+      ]
+    },
+    "AcceptInputDeviceTransferRequest": {
+      "type": "structure",
+      "required": [
+        "InputDeviceId"
+      ],
+      "members": {
+        "InputDeviceId": "__string"
+      }
+    },
+    "AccessibilityType": {
+      "type": "string",
+      "enum": [
+        "DOES_NOT_IMPLEMENT_ACCESSIBILITY_FEATURES",
+        "IMPLEMENTS_ACCESSIBILITY_FEATURES"
+      ]
+    },
+    "AccountConfiguration": {
+      "type": "structure",
+      "members": {
+        "KmsKeyId": "__string"
+      }
+    },
+    "AdditionalDestinations": {
+      "type": "structure",
+      "required": [
+        "Destination"
+      ],
+      "members": {
+        "Destination": "OutputLocationRef"
+      }
+    },
+    "AfdSignaling": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "FIXED",
+        "NONE"
+      ]
+    },
+    "Algorithm": {
+      "type": "string",
+      "enum": [
+        "AES128",
+        "AES192",
+        "AES256"
+      ]
+    },
+    "AncillarySourceSettings": {
+      "type": "structure",
+      "members": {
+        "SourceAncillaryChannelNumber": "__integerMin1Max4"
+      }
+    },
+    "AnywhereSettings": {
+      "type": "structure",
+      "members": {
+        "ChannelPlacementGroupId": "__string",
+        "ClusterId": "__string"
+      }
+    },
+    "ArchiveCdnSettings": {
+      "type": "structure",
+      "members": {
+        "ArchiveS3Settings": "ArchiveS3Settings"
+      }
+    },
+    "ArchiveContainerSettings": {
+      "type": "structure",
+      "members": {
+        "M2tsSettings": "M2tsSettings",
+        "RawSettings": "RawSettings"
+      }
+    },
+    "ArchiveGroupSettings": {
+      "type": "structure",
+      "required": [
+        "Destination"
+      ],
+      "members": {
+        "ArchiveCdnSettings": "ArchiveCdnSettings",
+        "Destination": "OutputLocationRef",
+        "RolloverInterval": "__integerMin1"
+      }
+    },
+    "ArchiveOutputSettings": {
+      "type": "structure",
+      "required": [
+        "ContainerSettings"
+      ],
+      "members": {
+        "ContainerSettings": "ArchiveContainerSettings",
+        "Extension": "__string",
+        "NameModifier": "__string"
+      }
+    },
+    "ArchiveS3Settings": {
+      "type": "structure",
+      "members": {
+        "CannedAcl": "S3CannedAcl"
+      }
+    },
+    "AribDestinationSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "AribSourceSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "AudioChannelMapping": {
+      "type": "structure",
+      "required": [
+        "OutputChannel",
+        "InputChannelLevels"
+      ],
+      "members": {
+        "InputChannelLevels": "__listOfInputChannelLevel",
+        "OutputChannel": "__integerMin0Max7"
+      }
+    },
+    "AudioCodecSettings": {
+      "type": "structure",
+      "members": {
+        "AacSettings": "AacSettings",
+        "Ac3Settings": "Ac3Settings",
+        "Eac3AtmosSettings": "Eac3AtmosSettings",
+        "Eac3Settings": "Eac3Settings",
+        "Mp2Settings": "Mp2Settings",
+        "PassThroughSettings": "PassThroughSettings",
+        "WavSettings": "WavSettings"
+      }
+    },
+    "AudioDescription": {
+      "type": "structure",
+      "required": [
+        "AudioSelectorName",
+        "Name"
+      ],
+      "members": {
+        "AudioNormalizationSettings": "AudioNormalizationSettings",
+        "AudioSelectorName": "__string",
+        "AudioType": "AudioType",
+        "AudioTypeControl": "AudioDescriptionAudioTypeControl",
+        "AudioWatermarkingSettings": "AudioWatermarkSettings",
+        "CodecSettings": "AudioCodecSettings",
+        "LanguageCode": "__stringMin1Max35",
+        "LanguageCodeControl": "AudioDescriptionLanguageCodeControl",
+        "Name": "__stringMax255",
+        "RemixSettings": "RemixSettings",
+        "StreamName": "__string",
+        "AudioDashRoles": "__listOfDashRoleAudio",
+        "DvbDashAccessibility": "DvbDashAccessibility"
+      }
+    },
+    "AudioDescriptionAudioTypeControl": {
+      "type": "string",
+      "enum": [
+        "FOLLOW_INPUT",
+        "USE_CONFIGURED"
+      ]
+    },
+    "AudioDescriptionLanguageCodeControl": {
+      "type": "string",
+      "enum": [
+        "FOLLOW_INPUT",
+        "USE_CONFIGURED"
+      ]
+    },
+    "AudioDolbyEDecode": {
+      "type": "structure",
+      "required": [
+        "ProgramSelection"
+      ],
+      "members": {
+        "ProgramSelection": "DolbyEProgramSelection"
+      }
+    },
+    "AudioFeedInput": {
+      "type": "structure",
+      "members": {
+        "AudioSelectorName": "__string",
+        "FeedInput": "__string"
+      }
+    },
+    "AudioHlsRenditionSelection": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "GroupId"
+      ],
+      "members": {
+        "GroupId": "__stringMin1",
+        "Name": "__stringMin1"
+      }
+    },
+    "AudioLanguageSelection": {
+      "type": "structure",
+      "required": [
+        "LanguageCode"
+      ],
+      "members": {
+        "LanguageCode": "__string",
+        "LanguageSelectionPolicy": "AudioLanguageSelectionPolicy"
+      }
+    },
+    "AudioLanguageSelectionPolicy": {
+      "type": "string",
+      "enum": [
+        "LOOSE",
+        "STRICT"
+      ]
+    },
+    "AudioNormalizationAlgorithm": {
+      "type": "string",
+      "enum": [
+        "ITU_1770_1",
+        "ITU_1770_2",
+        "ITU_1770_3",
+        "ITU_1770_4"
+      ]
+    },
+    "AudioNormalizationAlgorithmControl": {
+      "type": "string",
+      "enum": [
+        "CORRECT_AUDIO"
+      ]
+    },
+    "AudioNormalizationPeakCalculation": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "TRUE_PEAK"
+      ]
+    },
+    "AudioNormalizationSettings": {
+      "type": "structure",
+      "members": {
+        "Algorithm": "AudioNormalizationAlgorithm",
+        "AlgorithmControl": "AudioNormalizationAlgorithmControl",
+        "TargetLkfs": "__doubleMinNegative59Max0",
+        "PeakCalculation": "AudioNormalizationPeakCalculation",
+        "PeakLimiterThreshold": "__doubleMinNegative8Max0"
+      }
+    },
+    "AudioOnlyHlsSegmentType": {
+      "type": "string",
+      "enum": [
+        "AAC",
+        "FMP4"
+      ]
+    },
+    "AudioOnlyHlsSettings": {
+      "type": "structure",
+      "members": {
+        "AudioGroupId": "__string",
+        "AudioOnlyImage": "InputLocation",
+        "AudioTrackType": "AudioOnlyHlsTrackType",
+        "SegmentType": "AudioOnlyHlsSegmentType"
+      }
+    },
+    "AudioOnlyHlsTrackType": {
+      "type": "string",
+      "enum": [
+        "ALTERNATE_AUDIO_AUTO_SELECT",
+        "ALTERNATE_AUDIO_AUTO_SELECT_DEFAULT",
+        "ALTERNATE_AUDIO_NOT_AUTO_SELECT",
+        "AUDIO_ONLY_VARIANT_STREAM"
+      ]
+    },
+    "AudioPid": {
+      "type": "structure",
+      "required": [
+        "Pid"
+      ],
+      "members": {
+        "DolbyEDecode": "AudioDolbyEDecode",
+        "Pid": "__integerMin0Max8191",
+        "PremixSettings": "AudioPreMixerSettings"
+      }
+    },
+    "AudioPidSelection": {
+      "type": "structure",
+      "required": [
+        "Pid"
+      ],
+      "members": {
+        "Pid": "__integerMin0Max8191",
+        "Pids": "__listOfAudioPid"
+      }
+    },
+    "AudioPreMixerSettings": {
+      "type": "structure",
+      "members": {
+        "AudioNormalizationSettings": "AudioNormalizationSettings",
+        "Channels": "__integerMin1Max16",
+        "GainDb": "__doubleMinNegative60Max60",
+        "RemixSettings": "RemixSettings"
+      }
+    },
+    "AudioSelector": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "__stringMin1",
+        "SelectorSettings": "AudioSelectorSettings"
+      }
+    },
+    "AudioSelectorSettings": {
+      "type": "structure",
+      "members": {
+        "AudioHlsRenditionSelection": "AudioHlsRenditionSelection",
+        "AudioLanguageSelection": "AudioLanguageSelection",
+        "AudioPidSelection": "AudioPidSelection",
+        "AudioTrackSelection": "AudioTrackSelection"
+      }
+    },
+    "AudioSilenceFailoverSettings": {
+      "type": "structure",
+      "required": [
+        "AudioSelectorName"
+      ],
+      "members": {
+        "AudioSelectorName": "__string",
+        "AudioSilenceThresholdMsec": "__integerMin1000"
+      }
+    },
+    "AudioTrack": {
+      "type": "structure",
+      "required": [
+        "Track"
+      ],
+      "members": {
+        "Track": "__integerMin1",
+        "PremixSettings": "AudioPreMixerSettings"
+      }
+    },
+    "AudioTrackSelection": {
+      "type": "structure",
+      "required": [
+        "Tracks"
+      ],
+      "members": {
+        "Tracks": "__listOfAudioTrack",
+        "DolbyEDecode": "AudioDolbyEDecode"
+      }
+    },
+    "AudioType": {
+      "type": "string",
+      "enum": [
+        "CLEAN_EFFECTS",
+        "HEARING_IMPAIRED",
+        "UNDEFINED",
+        "VISUAL_IMPAIRED_COMMENTARY"
+      ]
+    },
+    "AudioWatermarkSettings": {
+      "type": "structure",
+      "members": {
+        "NielsenWatermarksSettings": "NielsenWatermarksSettings"
+      }
+    },
+    "AuthenticationScheme": {
+      "type": "string",
+      "enum": [
+        "AKAMAI",
+        "COMMON"
+      ]
+    },
+    "AutomaticInputFailoverSettings": {
+      "type": "structure",
+      "required": [
+        "SecondaryInputId"
+      ],
+      "members": {
+        "ErrorClearTimeMsec": "__integerMin1",
+        "FailoverConditions": "__listOfFailoverCondition",
+        "InputPreference": "InputPreference",
+        "SecondaryInputId": "__string"
+      }
+    },
+    "Av1BitDepth": {
+      "type": "string",
+      "enum": [
+        "DEPTH_10",
+        "DEPTH_8"
+      ]
+    },
+    "Av1ColorSpaceSettings": {
+      "type": "structure",
+      "members": {
+        "ColorSpacePassthroughSettings": "ColorSpacePassthroughSettings",
+        "Hdr10Settings": "Hdr10Settings",
+        "Rec601Settings": "Rec601Settings",
+        "Rec709Settings": "Rec709Settings",
+        "Hlg2020Settings": "Hlg2020Settings"
+      }
+    },
+    "Av1GopSizeUnits": {
+      "type": "string",
+      "enum": [
+        "FRAMES",
+        "SECONDS"
+      ]
+    },
+    "Av1Level": {
+      "type": "string",
+      "enum": [
+        "AV1_LEVEL_2",
+        "AV1_LEVEL_2_1",
+        "AV1_LEVEL_3",
+        "AV1_LEVEL_3_1",
+        "AV1_LEVEL_4",
+        "AV1_LEVEL_4_1",
+        "AV1_LEVEL_5",
+        "AV1_LEVEL_5_1",
+        "AV1_LEVEL_5_2",
+        "AV1_LEVEL_5_3",
+        "AV1_LEVEL_6",
+        "AV1_LEVEL_6_1",
+        "AV1_LEVEL_6_2",
+        "AV1_LEVEL_6_3",
+        "AV1_LEVEL_AUTO"
+      ]
+    },
+    "Av1LookAheadRateControl": {
+      "type": "string",
+      "enum": [
+        "HIGH",
+        "LOW",
+        "MEDIUM"
+      ]
+    },
+    "Av1RateControlMode": {
+      "type": "string",
+      "enum": [
+        "CBR",
+        "QVBR"
+      ]
+    },
+    "Av1SceneChangeDetect": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "Av1Settings": {
+      "type": "structure",
+      "required": [
+        "FramerateNumerator",
+        "FramerateDenominator"
+      ],
+      "members": {
+        "AfdSignaling": "AfdSignaling",
+        "BufSize": "__integerMin50000Max24000000",
+        "ColorSpaceSettings": "Av1ColorSpaceSettings",
+        "FixedAfd": "FixedAfd",
+        "FramerateDenominator": "__integerMin1Max3003",
+        "FramerateNumerator": "__integerMin1",
+        "GopSize": "__doubleMin0",
+        "GopSizeUnits": "Av1GopSizeUnits",
+        "Level": "Av1Level",
+        "LookAheadRateControl": "Av1LookAheadRateControl",
+        "MaxBitrate": "__integerMin50000Max12000000",
+        "MinIInterval": "__integerMin0Max30",
+        "ParDenominator": "__integerMin1",
+        "ParNumerator": "__integerMin1",
+        "QvbrQualityLevel": "__integerMin1Max10",
+        "SceneChangeDetect": "Av1SceneChangeDetect",
+        "TimecodeBurninSettings": "TimecodeBurninSettings",
+        "Bitrate": "__integerMin50000Max12000000",
+        "RateControlMode": "Av1RateControlMode",
+        "MinBitrate": "__integerMin0Max8000000",
+        "SpatialAq": "Av1SpatialAq",
+        "TemporalAq": "Av1TemporalAq",
+        "TimecodeInsertion": "Av1TimecodeInsertionBehavior",
+        "BitDepth": "Av1BitDepth"
+      }
+    },
+    "Av1SpatialAq": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "Av1TemporalAq": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "Av1TimecodeInsertionBehavior": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "METADATA_OBU"
+      ]
+    },
+    "AvailBlanking": {
+      "type": "structure",
+      "members": {
+        "AvailBlankingImage": "InputLocation",
+        "State": "AvailBlankingState"
+      }
+    },
+    "AvailBlankingState": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "AvailConfiguration": {
+      "type": "structure",
+      "members": {
+        "AvailSettings": "AvailSettings",
+        "Scte35SegmentationScope": "Scte35SegmentationScope"
+      }
+    },
+    "AvailSettings": {
+      "type": "structure",
+      "members": {
+        "Esam": "Esam",
+        "Scte35SpliceInsert": "Scte35SpliceInsert",
+        "Scte35TimeSignalApos": "Scte35TimeSignalApos"
+      }
+    },
+    "BandwidthReductionFilterSettings": {
+      "type": "structure",
+      "members": {
+        "PostFilterSharpening": "BandwidthReductionPostFilterSharpening",
+        "Strength": "BandwidthReductionFilterStrength"
+      }
+    },
+    "BandwidthReductionFilterStrength": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "STRENGTH_1",
+        "STRENGTH_2",
+        "STRENGTH_3",
+        "STRENGTH_4"
+      ]
+    },
+    "BandwidthReductionPostFilterSharpening": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "SHARPENING_1",
+        "SHARPENING_2",
+        "SHARPENING_3"
+      ]
+    },
+    "BatchDeleteRequest": {
+      "type": "structure",
+      "members": {
+        "ChannelIds": "__listOf__string",
+        "InputIds": "__listOf__string",
+        "InputSecurityGroupIds": "__listOf__string",
+        "MultiplexIds": "__listOf__string"
+      }
+    },
+    "BatchScheduleActionCreateRequest": {
+      "type": "structure",
+      "required": [
+        "ScheduleActions"
+      ],
+      "members": {
+        "ScheduleActions": "__listOfScheduleAction"
+      }
+    },
+    "BatchScheduleActionDeleteRequest": {
+      "type": "structure",
+      "required": [
+        "ActionNames"
+      ],
+      "members": {
+        "ActionNames": "__listOf__string"
+      }
+    },
+    "BatchStartRequest": {
+      "type": "structure",
+      "members": {
+        "ChannelIds": "__listOf__string",
+        "MultiplexIds": "__listOf__string"
+      }
+    },
+    "BatchStopRequest": {
+      "type": "structure",
+      "members": {
+        "ChannelIds": "__listOf__string",
+        "MultiplexIds": "__listOf__string"
+      }
+    },
+    "BatchUpdateScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId"
+      ],
+      "members": {
+        "ChannelId": "__string",
+        "Creates": "BatchScheduleActionCreateRequest",
+        "Deletes": "BatchScheduleActionDeleteRequest"
+      }
+    },
+    "BlackoutSlate": {
+      "type": "structure",
+      "members": {
+        "BlackoutSlateImage": "InputLocation",
+        "NetworkEndBlackout": "BlackoutSlateNetworkEndBlackout",
+        "NetworkEndBlackoutImage": "InputLocation",
+        "NetworkId": "__stringMin34Max34",
+        "State": "BlackoutSlateState"
+      }
+    },
+    "BlackoutSlateNetworkEndBlackout": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "BlackoutSlateState": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "BurnInAlignment": {
+      "type": "string",
+      "enum": [
+        "CENTERED",
+        "LEFT",
+        "SMART"
+      ]
+    },
+    "BurnInBackgroundColor": {
+      "type": "string",
+      "enum": [
+        "BLACK",
+        "NONE",
+        "WHITE"
+      ]
+    },
+    "BurnInDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "Alignment": "BurnInAlignment",
+        "BackgroundColor": "BurnInBackgroundColor",
+        "BackgroundOpacity": "__integerMin0Max255",
+        "Font": "InputLocation",
+        "FontColor": "BurnInFontColor",
+        "FontOpacity": "__integerMin0Max255",
+        "FontResolution": "__integerMin96Max600",
+        "FontSize": "__string",
+        "OutlineColor": "BurnInOutlineColor",
+        "OutlineSize": "__integerMin0Max10",
+        "ShadowColor": "BurnInShadowColor",
+        "ShadowOpacity": "__integerMin0Max255",
+        "ShadowXOffset": "__integer",
+        "ShadowYOffset": "__integer",
+        "TeletextGridControl": "BurnInTeletextGridControl",
+        "XPosition": "__integerMin0",
+        "YPosition": "__integerMin0",
+        "SubtitleRows": "BurnInDestinationSubtitleRows"
+      }
+    },
+    "BurnInDestinationSubtitleRows": {
+      "type": "string",
+      "enum": [
+        "ROWS_16",
+        "ROWS_20",
+        "ROWS_24"
+      ]
+    },
+    "BurnInFontColor": {
+      "type": "string",
+      "enum": [
+        "BLACK",
+        "BLUE",
+        "GREEN",
+        "RED",
+        "WHITE",
+        "YELLOW"
+      ]
+    },
+    "BurnInOutlineColor": {
+      "type": "string",
+      "enum": [
+        "BLACK",
+        "BLUE",
+        "GREEN",
+        "RED",
+        "WHITE",
+        "YELLOW"
+      ]
+    },
+    "BurnInShadowColor": {
+      "type": "string",
+      "enum": [
+        "BLACK",
+        "NONE",
+        "WHITE"
+      ]
+    },
+    "BurnInTeletextGridControl": {
+      "type": "string",
+      "enum": [
+        "FIXED",
+        "SCALED"
+      ]
+    },
+    "CancelInputDeviceTransferRequest": {
+      "type": "structure",
+      "required": [
+        "InputDeviceId"
+      ],
+      "members": {
+        "InputDeviceId": "__string"
+      }
+    },
+    "CaptionDescription": {
+      "type": "structure",
+      "required": [
+        "CaptionSelectorName",
+        "Name"
+      ],
+      "members": {
+        "Accessibility": "AccessibilityType",
+        "CaptionSelectorName": "__string",
+        "DestinationSettings": "CaptionDestinationSettings",
+        "LanguageCode": "__string",
+        "LanguageDescription": "__string",
+        "Name": "__string",
+        "CaptionDashRoles": "__listOfDashRoleCaption",
+        "DvbDashAccessibility": "DvbDashAccessibility"
+      }
+    },
+    "CaptionDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "AribDestinationSettings": "AribDestinationSettings",
+        "BurnInDestinationSettings": "BurnInDestinationSettings",
+        "DvbSubDestinationSettings": "DvbSubDestinationSettings",
+        "EbuTtDDestinationSettings": "EbuTtDDestinationSettings",
+        "EmbeddedDestinationSettings": "EmbeddedDestinationSettings",
+        "EmbeddedPlusScte20DestinationSettings": "EmbeddedPlusScte20DestinationSettings",
+        "RtmpCaptionInfoDestinationSettings": "RtmpCaptionInfoDestinationSettings",
+        "Scte20PlusEmbeddedDestinationSettings": "Scte20PlusEmbeddedDestinationSettings",
+        "Scte27DestinationSettings": "Scte27DestinationSettings",
+        "SmpteTtDestinationSettings": "SmpteTtDestinationSettings",
+        "TeletextDestinationSettings": "TeletextDestinationSettings",
+        "TtmlDestinationSettings": "TtmlDestinationSettings",
+        "WebvttDestinationSettings": "WebvttDestinationSettings"
+      }
+    },
+    "CaptionLanguageMapping": {
+      "type": "structure",
+      "required": [
+        "LanguageCode",
+        "LanguageDescription",
+        "CaptionChannel"
+      ],
+      "members": {
+        "CaptionChannel": "__integerMin1Max4",
+        "LanguageCode": "__stringMin3Max3",
+        "LanguageDescription": "__stringMin1"
+      }
+    },
+    "CaptionRectangle": {
+      "type": "structure",
+      "required": [
+        "TopOffset",
+        "Height",
+        "Width",
+        "LeftOffset"
+      ],
+      "members": {
+        "Height": "__doubleMin0Max100",
+        "LeftOffset": "__doubleMin0Max100",
+        "TopOffset": "__doubleMin0Max100",
+        "Width": "__doubleMin0Max100"
+      }
+    },
+    "CaptionSelector": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "LanguageCode": "__string",
+        "Name": "__stringMin1",
+        "SelectorSettings": "CaptionSelectorSettings"
+      }
+    },
+    "CaptionSelectorSettings": {
+      "type": "structure",
+      "members": {
+        "AncillarySourceSettings": "AncillarySourceSettings",
+        "AribSourceSettings": "AribSourceSettings",
+        "DvbSubSourceSettings": "DvbSubSourceSettings",
+        "EmbeddedSourceSettings": "EmbeddedSourceSettings",
+        "Scte20SourceSettings": "Scte20SourceSettings",
+        "Scte27SourceSettings": "Scte27SourceSettings",
+        "TeletextSourceSettings": "TeletextSourceSettings",
+        "SmartSubtitleSourceSettings": "SmartSubtitleSourceSettings"
+      }
+    },
+    "CaptionSynchronizationMode": {
+      "type": "string",
+      "enum": [
+        "NO_VIDEO_DELAY",
+        "VIDEO_ALIGNED_CAPTIONS"
+      ]
+    },
+    "CdiInputResolution": {
+      "type": "string",
+      "enum": [
+        "SD",
+        "HD",
+        "FHD",
+        "UHD"
+      ]
+    },
+    "CdiInputSpecification": {
+      "type": "structure",
+      "members": {
+        "Resolution": "CdiInputResolution"
+      }
+    },
+    "ChannelClass": {
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "SINGLE_PIPELINE"
+      ]
+    },
+    "ChannelEngineVersionRequest": {
+      "type": "structure",
+      "members": {
+        "Version": "__string"
+      }
+    },
+    "ChannelPipelineIdToRestart": {
+      "type": "string",
+      "enum": [
+        "PIPELINE_0",
+        "PIPELINE_1"
+      ]
+    },
+    "ClaimDeviceRequest": {
+      "type": "structure",
+      "members": {
+        "Id": "__string"
+      }
+    },
+    "CloudWatchAlarmTemplateComparisonOperator": {
+      "type": "string",
+      "enum": [
+        "GreaterThanOrEqualToThreshold",
+        "GreaterThanThreshold",
+        "LessThanThreshold",
+        "LessThanOrEqualToThreshold"
+      ]
+    },
+    "CloudWatchAlarmTemplateStatistic": {
+      "type": "string",
+      "enum": [
+        "SampleCount",
+        "Average",
+        "Sum",
+        "Minimum",
+        "Maximum"
+      ]
+    },
+    "CloudWatchAlarmTemplateTargetResourceType": {
+      "type": "string",
+      "enum": [
+        "CLOUDFRONT_DISTRIBUTION",
+        "MEDIALIVE_MULTIPLEX",
+        "MEDIALIVE_CHANNEL",
+        "MEDIALIVE_INPUT_DEVICE",
+        "MEDIAPACKAGE_CHANNEL",
+        "MEDIAPACKAGE_ORIGIN_ENDPOINT",
+        "MEDIACONNECT_FLOW",
+        "S3_BUCKET",
+        "MEDIATAILOR_PLAYBACK_CONFIGURATION",
+        "ELEMENTAL_INFERENCE_FEED"
+      ]
+    },
+    "CloudWatchAlarmTemplateTreatMissingData": {
+      "type": "string",
+      "enum": [
+        "notBreaching",
+        "breaching",
+        "ignore",
+        "missing"
+      ]
+    },
+    "ClusterNetworkSettingsCreateRequest": {
+      "type": "structure",
+      "members": {
+        "DefaultRoute": "__string",
+        "InterfaceMappings": "__listOfInterfaceMappingCreateRequest"
+      }
+    },
+    "ClusterNetworkSettingsUpdateRequest": {
+      "type": "structure",
+      "members": {
+        "DefaultRoute": "__string",
+        "InterfaceMappings": "__listOfInterfaceMappingUpdateRequest"
+      }
+    },
+    "ClusterType": {
+      "type": "string",
+      "enum": [
+        "ON_PREMISES"
+      ]
+    },
+    "CmafId3Behavior": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "CmafIngestAbWatermarkerIrdetoSettings": {
+      "type": "structure",
+      "required": [
+        "AlternateDestination",
+        "OperatorId",
+        "Profile"
+      ],
+      "members": {
+        "AdditionalDestinationsAlternateDestinations": "__listOfOutputLocationRef",
+        "AlternateDestination": "OutputLocationRef",
+        "CustomProfile": "AbWatermarkingCustomProfile",
+        "License": "__string",
+        "OperatorId": "__integerMin1Max511",
+        "PolyPeriod": "__integerMin1Max1000",
+        "Profile": "AbWatermarkingProfile",
+        "WatermarkIdLength": "AbWatermarkerIdLength"
+      }
+    },
+    "CmafIngestCaptionLanguageMapping": {
+      "type": "structure",
+      "required": [
+        "LanguageCode",
+        "CaptionChannel"
+      ],
+      "members": {
+        "CaptionChannel": "__integerMin1Max4",
+        "LanguageCode": "__stringMin3Max3"
+      }
+    },
+    "CmafIngestGroupSettings": {
+      "type": "structure",
+      "required": [
+        "Destination"
+      ],
+      "members": {
+        "Destination": "OutputLocationRef",
+        "NielsenId3Behavior": "CmafNielsenId3Behavior",
+        "Scte35Type": "Scte35Type",
+        "SegmentLength": "__integerMin1",
+        "SegmentLengthUnits": "CmafIngestSegmentLengthUnits",
+        "SendDelayMs": "__integerMin0Max2000",
+        "KlvBehavior": "CmafKLVBehavior",
+        "KlvNameModifier": "__stringMax100",
+        "NielsenId3NameModifier": "__stringMax100",
+        "Scte35NameModifier": "__stringMax100",
+        "Id3Behavior": "CmafId3Behavior",
+        "Id3NameModifier": "__stringMax100",
+        "CaptionLanguageMappings": "__listOfCmafIngestCaptionLanguageMapping",
+        "TimedMetadataId3Frame": "CmafTimedMetadataId3Frame",
+        "TimedMetadataId3Period": "__integerMin0Max10000",
+        "TimedMetadataPassthrough": "CmafTimedMetadataPassthrough",
+        "AdditionalDestinations": "__listOfAdditionalDestinations",
+        "WatermarkingSettings": "CmafIngestWatermarkingSettings"
+      }
+    },
+    "CmafIngestOutputSettings": {
+      "type": "structure",
+      "members": {
+        "NameModifier": "__string"
+      }
+    },
+    "CmafIngestSegmentLengthUnits": {
+      "type": "string",
+      "enum": [
+        "MILLISECONDS",
+        "SECONDS"
+      ]
+    },
+    "CmafIngestWatermarkingSettings": {
+      "type": "structure",
+      "members": {
+        "CmafIngestAbWatermarkerIrdetoSettings": "CmafIngestAbWatermarkerIrdetoSettings"
+      }
+    },
+    "CmafKLVBehavior": {
+      "type": "string",
+      "enum": [
+        "NO_PASSTHROUGH",
+        "PASSTHROUGH"
+      ]
+    },
+    "CmafNielsenId3Behavior": {
+      "type": "string",
+      "enum": [
+        "NO_PASSTHROUGH",
+        "PASSTHROUGH"
+      ]
+    },
+    "CmafTimedMetadataId3Frame": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PRIV",
+        "TDRL"
+      ]
+    },
+    "CmafTimedMetadataPassthrough": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "ColorCorrection": {
+      "type": "structure",
+      "required": [
+        "OutputColorSpace",
+        "InputColorSpace",
+        "Uri"
+      ],
+      "members": {
+        "InputColorSpace": "ColorSpace",
+        "OutputColorSpace": "ColorSpace",
+        "Uri": "__string"
+      }
+    },
+    "ColorCorrectionSettings": {
+      "type": "structure",
+      "required": [
+        "GlobalColorCorrections"
+      ],
+      "members": {
+        "GlobalColorCorrections": "__listOfColorCorrection"
+      }
+    },
+    "ColorSpace": {
+      "type": "string",
+      "enum": [
+        "HDR10",
+        "HLG_2020",
+        "REC_601",
+        "REC_709"
+      ]
+    },
+    "ColorSpacePassthroughSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "ConnectionMode": {
+      "type": "string",
+      "enum": [
+        "CALLER",
+        "LISTENER"
+      ]
+    },
+    "CreateChannelPlacementGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string",
+        "Name": "__string",
+        "Nodes": "__listOf__string",
+        "RequestId": "__string",
+        "Tags": "Tags"
+      }
+    },
+    "CreateChannelRequest": {
+      "type": "structure",
+      "members": {
+        "CdiInputSpecification": "CdiInputSpecification",
+        "ChannelClass": "ChannelClass",
+        "Destinations": "__listOfOutputDestination",
+        "EncoderSettings": "EncoderSettings",
+        "InputAttachments": "__listOfInputAttachment",
+        "InputSpecification": "InputSpecification",
+        "LogLevel": "LogLevel",
+        "Maintenance": "MaintenanceCreateSettings",
+        "Name": "__string",
+        "RequestId": "__string",
+        "Reserved": "__string",
+        "RoleArn": "__string",
+        "Tags": "Tags",
+        "Vpc": "VpcOutputSettings",
+        "AnywhereSettings": "AnywhereSettings",
+        "ChannelEngineVersion": "ChannelEngineVersionRequest",
+        "DryRun": "__boolean",
+        "LinkedChannelSettings": "LinkedChannelSettings",
+        "ChannelSecurityGroups": "__listOf__string",
+        "InferenceSettings": "InferenceSettings"
+      }
+    },
+    "CreateCloudWatchAlarmTemplateGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Description": "__stringMin0Max1024",
+        "Name": "__stringMin1Max255PatternS",
+        "Tags": "TagMap",
+        "RequestId": "__stringMin1Max256PatternS"
+      }
+    },
+    "CreateCloudWatchAlarmTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "TargetResourceType",
+        "MetricName",
+        "TreatMissingData",
+        "ComparisonOperator",
+        "Statistic",
+        "Period",
+        "EvaluationPeriods",
+        "Threshold",
+        "Name",
+        "GroupIdentifier"
+      ],
+      "members": {
+        "ComparisonOperator": "CloudWatchAlarmTemplateComparisonOperator",
+        "DatapointsToAlarm": "__integerMin1",
+        "Description": "__stringMin0Max1024",
+        "EvaluationPeriods": "__integerMin1",
+        "GroupIdentifier": "__stringPatternS",
+        "MetricName": "__stringMax64",
+        "Name": "__stringMin1Max255PatternS",
+        "Period": "__integerMin10Max86400",
+        "Statistic": "CloudWatchAlarmTemplateStatistic",
+        "Tags": "TagMap",
+        "TargetResourceType": "CloudWatchAlarmTemplateTargetResourceType",
+        "Threshold": "__double",
+        "TreatMissingData": "CloudWatchAlarmTemplateTreatMissingData",
+        "RequestId": "__stringMin1Max256PatternS"
+      }
+    },
+    "CreateClusterRequest": {
+      "type": "structure",
+      "members": {
+        "ClusterType": "ClusterType",
+        "InstanceRoleArn": "__string",
+        "Name": "__string",
+        "NetworkSettings": "ClusterNetworkSettingsCreateRequest",
+        "RequestId": "__string",
+        "Tags": "Tags"
+      }
+    },
+    "CreateEventBridgeRuleTemplateGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Description": "__stringMin0Max1024",
+        "Name": "__stringMin1Max255PatternS",
+        "Tags": "TagMap",
+        "RequestId": "__stringMin1Max256PatternS"
+      }
+    },
+    "CreateEventBridgeRuleTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "EventType",
+        "Name",
+        "GroupIdentifier"
+      ],
+      "members": {
+        "Description": "__stringMin0Max1024",
+        "EventTargets": "__listOfEventBridgeRuleTemplateTarget",
+        "EventType": "EventBridgeRuleTemplateEventType",
+        "GroupIdentifier": "__stringPatternS",
+        "Name": "__stringMin1Max255PatternS",
+        "Tags": "TagMap",
+        "RequestId": "__stringMin1Max256PatternS"
+      }
+    },
+    "CreateInputRequest": {
+      "type": "structure",
+      "members": {
+        "Destinations": "__listOfInputDestinationRequest",
+        "InputDevices": "__listOfInputDeviceSettings",
+        "InputSecurityGroups": "__listOf__string",
+        "MediaConnectFlows": "__listOfMediaConnectFlowRequest",
+        "Name": "__string",
+        "RequestId": "__string",
+        "RoleArn": "__string",
+        "Sources": "__listOfInputSourceRequest",
+        "Tags": "Tags",
+        "Type": "InputType",
+        "Vpc": "InputVpcRequest",
+        "SrtSettings": "SrtSettingsRequest",
+        "InputNetworkLocation": "InputNetworkLocation",
+        "MulticastSettings": "MulticastSettingsCreateRequest",
+        "Smpte2110ReceiverGroupSettings": "Smpte2110ReceiverGroupSettings",
+        "SdiSources": "InputSdiSources",
+        "RouterSettings": "RouterSettings"
+      }
+    },
+    "CreateInputSecurityGroupRequest": {
+      "type": "structure",
+      "members": {
+        "Tags": "Tags",
+        "WhitelistRules": "__listOfInputWhitelistRuleCidr"
+      }
+    },
+    "CreateMultiplexProgramRequest": {
+      "type": "structure",
+      "required": [
+        "MultiplexId",
+        "RequestId",
+        "MultiplexProgramSettings",
+        "ProgramName"
+      ],
+      "members": {
+        "MultiplexId": "__string",
+        "MultiplexProgramSettings": "MultiplexProgramSettings",
+        "ProgramName": "__string",
+        "RequestId": "__string"
+      }
+    },
+    "CreateMultiplexRequest": {
+      "type": "structure",
+      "required": [
+        "RequestId",
+        "MultiplexSettings",
+        "AvailabilityZones",
+        "Name"
+      ],
+      "members": {
+        "AvailabilityZones": "__listOf__string",
+        "MultiplexSettings": "MultiplexSettings",
+        "Name": "__string",
+        "RequestId": "__string",
+        "Tags": "Tags"
+      }
+    },
+    "CreateNetworkRequest": {
+      "type": "structure",
+      "members": {
+        "IpPools": "__listOfIpPoolCreateRequest",
+        "Name": "__string",
+        "RequestId": "__string",
+        "Routes": "__listOfRouteCreateRequest",
+        "Tags": "Tags"
+      }
+    },
+    "CreateNodeRegistrationScriptRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string",
+        "Id": "__string",
+        "Name": "__string",
+        "NodeInterfaceMappings": "__listOfNodeInterfaceMapping",
+        "RequestId": "__string",
+        "Role": "NodeRole"
+      }
+    },
+    "CreateNodeRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string",
+        "Name": "__string",
+        "NodeInterfaceMappings": "__listOfNodeInterfaceMappingCreateRequest",
+        "RequestId": "__string",
+        "Role": "NodeRole",
+        "Tags": "Tags"
+      }
+    },
+    "CreatePartnerInputRequest": {
+      "type": "structure",
+      "required": [
+        "InputId"
+      ],
+      "members": {
+        "InputId": "__string",
+        "RequestId": "__string",
+        "Tags": "Tags"
+      }
+    },
+    "CreateSdiSourceRequest": {
+      "type": "structure",
+      "members": {
+        "Mode": "SdiSourceMode",
+        "Name": "__string",
+        "RequestId": "__string",
+        "Tags": "Tags",
+        "Type": "SdiSourceType"
+      }
+    },
+    "CreateSignalMapRequest": {
+      "type": "structure",
+      "required": [
+        "DiscoveryEntryPointArn",
+        "Name"
+      ],
+      "members": {
+        "CloudWatchAlarmTemplateGroupIdentifiers": "__listOf__stringPatternS",
+        "Description": "__stringMin0Max1024",
+        "DiscoveryEntryPointArn": "__stringMin1Max2048",
+        "EventBridgeRuleTemplateGroupIdentifiers": "__listOf__stringPatternS",
+        "Name": "__stringMin1Max255PatternS",
+        "Tags": "TagMap",
+        "RequestId": "__stringMin1Max256PatternS"
+      }
+    },
+    "CreateTagsRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "__string",
+        "Tags": "Tags"
+      }
+    },
+    "DashRoleAudio": {
+      "type": "string",
+      "enum": [
+        "ALTERNATE",
+        "COMMENTARY",
+        "DESCRIPTION",
+        "DUB",
+        "EMERGENCY",
+        "ENHANCED-AUDIO-INTELLIGIBILITY",
+        "KARAOKE",
+        "MAIN",
+        "SUPPLEMENTARY"
+      ]
+    },
+    "DashRoleCaption": {
+      "type": "string",
+      "enum": [
+        "ALTERNATE",
+        "CAPTION",
+        "COMMENTARY",
+        "DESCRIPTION",
+        "DUB",
+        "EASYREADER",
+        "EMERGENCY",
+        "FORCED-SUBTITLE",
+        "KARAOKE",
+        "MAIN",
+        "METADATA",
+        "SUBTITLE",
+        "SUPPLEMENTARY"
+      ]
+    },
+    "DeleteChannelPlacementGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId",
+        "ChannelPlacementGroupId"
+      ],
+      "members": {
+        "ChannelPlacementGroupId": "__string",
+        "ClusterId": "__string"
+      }
+    },
+    "DeleteChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId"
+      ],
+      "members": {
+        "ChannelId": "__string"
+      }
+    },
+    "DeleteCloudWatchAlarmTemplateGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "__string"
+      }
+    },
+    "DeleteCloudWatchAlarmTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "__string"
+      }
+    },
+    "DeleteClusterRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string"
+      }
+    },
+    "DeleteEventBridgeRuleTemplateGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "__string"
+      }
+    },
+    "DeleteEventBridgeRuleTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "__string"
+      }
+    },
+    "DeleteInputRequest": {
+      "type": "structure",
+      "required": [
+        "InputId"
+      ],
+      "members": {
+        "InputId": "__string"
+      }
+    },
+    "DeleteInputSecurityGroupRequest": {
+      "type": "structure",
+      "required": [
+        "InputSecurityGroupId"
+      ],
+      "members": {
+        "InputSecurityGroupId": "__string"
+      }
+    },
+    "DeleteMultiplexProgramRequest": {
+      "type": "structure",
+      "required": [
+        "MultiplexId",
+        "ProgramName"
+      ],
+      "members": {
+        "MultiplexId": "__string",
+        "ProgramName": "__string"
+      }
+    },
+    "DeleteMultiplexRequest": {
+      "type": "structure",
+      "required": [
+        "MultiplexId"
+      ],
+      "members": {
+        "MultiplexId": "__string"
+      }
+    },
+    "DeleteNetworkRequest": {
+      "type": "structure",
+      "required": [
+        "NetworkId"
+      ],
+      "members": {
+        "NetworkId": "__string"
+      }
+    },
+    "DeleteNodeRequest": {
+      "type": "structure",
+      "required": [
+        "NodeId",
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string",
+        "NodeId": "__string"
+      }
+    },
+    "DeleteReservationRequest": {
+      "type": "structure",
+      "required": [
+        "ReservationId"
+      ],
+      "members": {
+        "ReservationId": "__string"
+      }
+    },
+    "DeleteScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId"
+      ],
+      "members": {
+        "ChannelId": "__string"
+      }
+    },
+    "DeleteSdiSourceRequest": {
+      "type": "structure",
+      "required": [
+        "SdiSourceId"
+      ],
+      "members": {
+        "SdiSourceId": "__string"
+      }
+    },
+    "DeleteSignalMapRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "__string"
+      }
+    },
+    "DeleteTagsRequest": {
+      "type": "structure",
+      "required": [
+        "TagKeys",
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "__string",
+        "TagKeys": "__listOf__string"
+      }
+    },
+    "DescribeAccountConfigurationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DescribeChannelPlacementGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId",
+        "ChannelPlacementGroupId"
+      ],
+      "members": {
+        "ChannelPlacementGroupId": "__string",
+        "ClusterId": "__string"
+      }
+    },
+    "DescribeChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId"
+      ],
+      "members": {
+        "ChannelId": "__string"
+      }
+    },
+    "DescribeClusterRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string"
+      }
+    },
+    "DescribeInputDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "InputDeviceId"
+      ],
+      "members": {
+        "InputDeviceId": "__string"
+      }
+    },
+    "DescribeInputDeviceThumbnailRequest": {
+      "type": "structure",
+      "required": [
+        "InputDeviceId",
+        "Accept"
+      ],
+      "members": {
+        "InputDeviceId": "__string",
+        "Accept": "AcceptHeader"
+      }
+    },
+    "DescribeInputRequest": {
+      "type": "structure",
+      "required": [
+        "InputId"
+      ],
+      "members": {
+        "InputId": "__string"
+      }
+    },
+    "DescribeInputSecurityGroupRequest": {
+      "type": "structure",
+      "required": [
+        "InputSecurityGroupId"
+      ],
+      "members": {
+        "InputSecurityGroupId": "__string"
+      }
+    },
+    "DescribeMultiplexProgramRequest": {
+      "type": "structure",
+      "required": [
+        "MultiplexId",
+        "ProgramName"
+      ],
+      "members": {
+        "MultiplexId": "__string",
+        "ProgramName": "__string"
+      }
+    },
+    "DescribeMultiplexRequest": {
+      "type": "structure",
+      "required": [
+        "MultiplexId"
+      ],
+      "members": {
+        "MultiplexId": "__string"
+      }
+    },
+    "DescribeNetworkRequest": {
+      "type": "structure",
+      "required": [
+        "NetworkId"
+      ],
+      "members": {
+        "NetworkId": "__string"
+      }
+    },
+    "DescribeNodeRequest": {
+      "type": "structure",
+      "required": [
+        "NodeId",
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string",
+        "NodeId": "__string"
+      }
+    },
+    "DescribeOfferingRequest": {
+      "type": "structure",
+      "required": [
+        "OfferingId"
+      ],
+      "members": {
+        "OfferingId": "__string"
+      }
+    },
+    "DescribeReservationRequest": {
+      "type": "structure",
+      "required": [
+        "ReservationId"
+      ],
+      "members": {
+        "ReservationId": "__string"
+      }
+    },
+    "DescribeScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId"
+      ],
+      "members": {
+        "ChannelId": "__string",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "DescribeSdiSourceRequest": {
+      "type": "structure",
+      "required": [
+        "SdiSourceId"
+      ],
+      "members": {
+        "SdiSourceId": "__string"
+      }
+    },
+    "DescribeThumbnailsRequest": {
+      "type": "structure",
+      "required": [
+        "ThumbnailType",
+        "PipelineId",
+        "ChannelId"
+      ],
+      "members": {
+        "ChannelId": "__string",
+        "PipelineId": "__string",
+        "ThumbnailType": "__string"
+      }
+    },
+    "DisabledLockingSettings": {
+      "type": "structure",
+      "members": {
+        "CustomEpoch": "__string"
+      }
+    },
+    "DolbyEProgramSelection": {
+      "type": "string",
+      "enum": [
+        "ALL_CHANNELS",
+        "PROGRAM_1",
+        "PROGRAM_2",
+        "PROGRAM_3",
+        "PROGRAM_4",
+        "PROGRAM_5",
+        "PROGRAM_6",
+        "PROGRAM_7",
+        "PROGRAM_8"
+      ]
+    },
+    "DolbyVision81Settings": {
+      "type": "structure",
+      "members": {}
+    },
+    "DvbDashAccessibility": {
+      "type": "string",
+      "enum": [
+        "DVBDASH_1_VISUALLY_IMPAIRED",
+        "DVBDASH_2_HARD_OF_HEARING",
+        "DVBDASH_3_SUPPLEMENTAL_COMMENTARY",
+        "DVBDASH_4_DIRECTORS_COMMENTARY",
+        "DVBDASH_5_EDUCATIONAL_NOTES",
+        "DVBDASH_6_MAIN_PROGRAM",
+        "DVBDASH_7_CLEAN_FEED"
+      ]
+    },
+    "DvbNitSettings": {
+      "type": "structure",
+      "required": [
+        "NetworkName",
+        "NetworkId"
+      ],
+      "members": {
+        "NetworkId": "__integerMin0Max65536",
+        "NetworkName": "__stringMin1Max256",
+        "RepInterval": "__integerMin25Max10000"
+      }
+    },
+    "DvbSdtOutputSdt": {
+      "type": "string",
+      "enum": [
+        "SDT_FOLLOW",
+        "SDT_FOLLOW_IF_PRESENT",
+        "SDT_MANUAL",
+        "SDT_NONE"
+      ]
+    },
+    "DvbSdtSettings": {
+      "type": "structure",
+      "members": {
+        "OutputSdt": "DvbSdtOutputSdt",
+        "RepInterval": "__integerMin25Max2000",
+        "ServiceName": "__stringMin1Max256",
+        "ServiceProviderName": "__stringMin1Max256"
+      }
+    },
+    "DvbSubDestinationAlignment": {
+      "type": "string",
+      "enum": [
+        "CENTERED",
+        "LEFT",
+        "SMART"
+      ]
+    },
+    "DvbSubDestinationBackgroundColor": {
+      "type": "string",
+      "enum": [
+        "BLACK",
+        "NONE",
+        "WHITE"
+      ]
+    },
+    "DvbSubDestinationFontColor": {
+      "type": "string",
+      "enum": [
+        "BLACK",
+        "BLUE",
+        "GREEN",
+        "RED",
+        "WHITE",
+        "YELLOW"
+      ]
+    },
+    "DvbSubDestinationOutlineColor": {
+      "type": "string",
+      "enum": [
+        "BLACK",
+        "BLUE",
+        "GREEN",
+        "RED",
+        "WHITE",
+        "YELLOW"
+      ]
+    },
+    "DvbSubDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "Alignment": "DvbSubDestinationAlignment",
+        "BackgroundColor": "DvbSubDestinationBackgroundColor",
+        "BackgroundOpacity": "__integerMin0Max255",
+        "Font": "InputLocation",
+        "FontColor": "DvbSubDestinationFontColor",
+        "FontOpacity": "__integerMin0Max255",
+        "FontResolution": "__integerMin96Max600",
+        "FontSize": "__string",
+        "OutlineColor": "DvbSubDestinationOutlineColor",
+        "OutlineSize": "__integerMin0Max10",
+        "ShadowColor": "DvbSubDestinationShadowColor",
+        "ShadowOpacity": "__integerMin0Max255",
+        "ShadowXOffset": "__integer",
+        "ShadowYOffset": "__integer",
+        "TeletextGridControl": "DvbSubDestinationTeletextGridControl",
+        "XPosition": "__integerMin0",
+        "YPosition": "__integerMin0",
+        "SubtitleRows": "DvbSubDestinationSubtitleRows"
+      }
+    },
+    "DvbSubDestinationShadowColor": {
+      "type": "string",
+      "enum": [
+        "BLACK",
+        "NONE",
+        "WHITE"
+      ]
+    },
+    "DvbSubDestinationSubtitleRows": {
+      "type": "string",
+      "enum": [
+        "ROWS_16",
+        "ROWS_20",
+        "ROWS_24"
+      ]
+    },
+    "DvbSubDestinationTeletextGridControl": {
+      "type": "string",
+      "enum": [
+        "FIXED",
+        "SCALED"
+      ]
+    },
+    "DvbSubOcrLanguage": {
+      "type": "string",
+      "enum": [
+        "DEU",
+        "ENG",
+        "FRA",
+        "NLD",
+        "POR",
+        "SPA"
+      ]
+    },
+    "DvbSubSourceSettings": {
+      "type": "structure",
+      "members": {
+        "OcrLanguage": "DvbSubOcrLanguage",
+        "Pid": "__integerMin1"
+      }
+    },
+    "DvbTdtSettings": {
+      "type": "structure",
+      "members": {
+        "RepInterval": "__integerMin1000Max30000"
+      }
+    },
+    "Eac3AtmosCodingMode": {
+      "type": "string",
+      "enum": [
+        "CODING_MODE_5_1_4",
+        "CODING_MODE_7_1_4",
+        "CODING_MODE_9_1_6"
+      ]
+    },
+    "Eac3AtmosDrcLine": {
+      "type": "string",
+      "enum": [
+        "FILM_LIGHT",
+        "FILM_STANDARD",
+        "MUSIC_LIGHT",
+        "MUSIC_STANDARD",
+        "NONE",
+        "SPEECH"
+      ]
+    },
+    "Eac3AtmosDrcRf": {
+      "type": "string",
+      "enum": [
+        "FILM_LIGHT",
+        "FILM_STANDARD",
+        "MUSIC_LIGHT",
+        "MUSIC_STANDARD",
+        "NONE",
+        "SPEECH"
+      ]
+    },
+    "Eac3AtmosSettings": {
+      "type": "structure",
+      "members": {
+        "Bitrate": "__double",
+        "CodingMode": "Eac3AtmosCodingMode",
+        "Dialnorm": "__integerMin1Max31",
+        "DrcLine": "Eac3AtmosDrcLine",
+        "DrcRf": "Eac3AtmosDrcRf",
+        "HeightTrim": "__double",
+        "SurroundTrim": "__double"
+      }
+    },
+    "Eac3AttenuationControl": {
+      "type": "string",
+      "enum": [
+        "ATTENUATE_3_DB",
+        "NONE"
+      ]
+    },
+    "Eac3BitstreamMode": {
+      "type": "string",
+      "enum": [
+        "COMMENTARY",
+        "COMPLETE_MAIN",
+        "EMERGENCY",
+        "HEARING_IMPAIRED",
+        "VISUALLY_IMPAIRED"
+      ]
+    },
+    "Eac3CodingMode": {
+      "type": "string",
+      "enum": [
+        "CODING_MODE_1_0",
+        "CODING_MODE_2_0",
+        "CODING_MODE_3_2"
+      ]
+    },
+    "Eac3DcFilter": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "Eac3DrcLine": {
+      "type": "string",
+      "enum": [
+        "FILM_LIGHT",
+        "FILM_STANDARD",
+        "MUSIC_LIGHT",
+        "MUSIC_STANDARD",
+        "NONE",
+        "SPEECH"
+      ]
+    },
+    "Eac3DrcRf": {
+      "type": "string",
+      "enum": [
+        "FILM_LIGHT",
+        "FILM_STANDARD",
+        "MUSIC_LIGHT",
+        "MUSIC_STANDARD",
+        "NONE",
+        "SPEECH"
+      ]
+    },
+    "Eac3LfeControl": {
+      "type": "string",
+      "enum": [
+        "LFE",
+        "NO_LFE"
+      ]
+    },
+    "Eac3LfeFilter": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "Eac3MetadataControl": {
+      "type": "string",
+      "enum": [
+        "FOLLOW_INPUT",
+        "USE_CONFIGURED"
+      ]
+    },
+    "Eac3PassthroughControl": {
+      "type": "string",
+      "enum": [
+        "NO_PASSTHROUGH",
+        "WHEN_POSSIBLE"
+      ]
+    },
+    "Eac3PhaseControl": {
+      "type": "string",
+      "enum": [
+        "NO_SHIFT",
+        "SHIFT_90_DEGREES"
+      ]
+    },
+    "Eac3Settings": {
+      "type": "structure",
+      "members": {
+        "AttenuationControl": "Eac3AttenuationControl",
+        "Bitrate": "__double",
+        "BitstreamMode": "Eac3BitstreamMode",
+        "CodingMode": "Eac3CodingMode",
+        "DcFilter": "Eac3DcFilter",
+        "Dialnorm": "__integerMin1Max31",
+        "DrcLine": "Eac3DrcLine",
+        "DrcRf": "Eac3DrcRf",
+        "LfeControl": "Eac3LfeControl",
+        "LfeFilter": "Eac3LfeFilter",
+        "LoRoCenterMixLevel": "__double",
+        "LoRoSurroundMixLevel": "__double",
+        "LtRtCenterMixLevel": "__double",
+        "LtRtSurroundMixLevel": "__double",
+        "MetadataControl": "Eac3MetadataControl",
+        "PassthroughControl": "Eac3PassthroughControl",
+        "PhaseControl": "Eac3PhaseControl",
+        "StereoDownmix": "Eac3StereoDownmix",
+        "SurroundExMode": "Eac3SurroundExMode",
+        "SurroundMode": "Eac3SurroundMode"
+      }
+    },
+    "Eac3StereoDownmix": {
+      "type": "string",
+      "enum": [
+        "DPL2",
+        "LO_RO",
+        "LT_RT",
+        "NOT_INDICATED"
+      ]
+    },
+    "Eac3SurroundExMode": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED",
+        "NOT_INDICATED"
+      ]
+    },
+    "Eac3SurroundMode": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED",
+        "NOT_INDICATED"
+      ]
+    },
+    "EbuTtDDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "CopyrightHolder": "__stringMax1000",
+        "FillLineGap": "EbuTtDFillLineGapControl",
+        "FontFamily": "__string",
+        "StyleControl": "EbuTtDDestinationStyleControl",
+        "DefaultFontSize": "__integerMin1Max800",
+        "DefaultLineHeight": "__integerMin80Max800"
+      }
+    },
+    "EbuTtDDestinationStyleControl": {
+      "type": "string",
+      "enum": [
+        "EXCLUDE",
+        "INCLUDE"
+      ]
+    },
+    "EbuTtDFillLineGapControl": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "EmbeddedCaptionPositionSettings": {
+      "type": "structure",
+      "members": {
+        "YPositionLine": "__integerMin1Max15"
+      }
+    },
+    "EmbeddedConvert608To708": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "UPCONVERT"
+      ]
+    },
+    "EmbeddedDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "Position": "EmbeddedCaptionPositionSettings",
+        "StyleControl": "EmbeddedDestinationStyleControl"
+      }
+    },
+    "EmbeddedDestinationStyleControl": {
+      "type": "string",
+      "enum": [
+        "MANUAL",
+        "PASSTHROUGH"
+      ]
+    },
+    "EmbeddedPlusScte20DestinationSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "EmbeddedScte20Detection": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "OFF"
+      ]
+    },
+    "EmbeddedSourceSettings": {
+      "type": "structure",
+      "members": {
+        "Convert608To708": "EmbeddedConvert608To708",
+        "Scte20Detection": "EmbeddedScte20Detection",
+        "Source608ChannelNumber": "__integerMin1Max4",
+        "Source608TrackNumber": "__integerMin1Max5"
+      }
+    },
+    "EncoderSettings": {
+      "type": "structure",
+      "required": [
+        "VideoDescriptions",
+        "AudioDescriptions",
+        "OutputGroups",
+        "TimecodeConfig"
+      ],
+      "members": {
+        "AudioDescriptions": "__listOfAudioDescription",
+        "AvailBlanking": "AvailBlanking",
+        "AvailConfiguration": "AvailConfiguration",
+        "BlackoutSlate": "BlackoutSlate",
+        "CaptionDescriptions": "__listOfCaptionDescription",
+        "FeatureActivations": "FeatureActivations",
+        "GlobalConfiguration": "GlobalConfiguration",
+        "MotionGraphicsConfiguration": "MotionGraphicsConfiguration",
+        "NielsenConfiguration": "NielsenConfiguration",
+        "OutputGroups": "__listOfOutputGroup",
+        "TimecodeConfig": "TimecodeConfig",
+        "VideoDescriptions": "__listOfVideoDescription",
+        "ThumbnailConfiguration": "ThumbnailConfiguration",
+        "ColorCorrectionSettings": "ColorCorrectionSettings"
+      }
+    },
+    "EnrichmentMethod": {
+      "type": "string",
+      "enum": [
+        "SCTE35_ELEMENTAL_INFERENCE_QUERY_PARAMS"
+      ]
+    },
+    "EpochLockingSettings": {
+      "type": "structure",
+      "members": {
+        "CustomEpoch": "__string",
+        "JamSyncTime": "__string"
+      }
+    },
+    "Esam": {
+      "type": "structure",
+      "required": [
+        "AcquisitionPointId",
+        "PoisEndpoint"
+      ],
+      "members": {
+        "AcquisitionPointId": "__stringMax256",
+        "AdAvailOffset": "__integerMinNegative1000Max1000",
+        "PasswordParam": "__string",
+        "PoisEndpoint": "__stringMax2048",
+        "Username": "__string",
+        "ZoneIdentity": "__stringMax256"
+      }
+    },
+    "EventBridgeRuleTemplateEventType": {
+      "type": "string",
+      "enum": [
+        "MEDIALIVE_MULTIPLEX_ALERT",
+        "MEDIALIVE_MULTIPLEX_STATE_CHANGE",
+        "MEDIALIVE_CHANNEL_ALERT",
+        "MEDIALIVE_CHANNEL_INPUT_CHANGE",
+        "MEDIALIVE_CHANNEL_STATE_CHANGE",
+        "MEDIAPACKAGE_INPUT_NOTIFICATION",
+        "MEDIAPACKAGE_KEY_PROVIDER_NOTIFICATION",
+        "MEDIAPACKAGE_HARVEST_JOB_NOTIFICATION",
+        "SIGNAL_MAP_ACTIVE_ALARM",
+        "MEDIACONNECT_ALERT",
+        "MEDIACONNECT_SOURCE_HEALTH",
+        "MEDIACONNECT_OUTPUT_HEALTH",
+        "MEDIACONNECT_FLOW_STATUS_CHANGE"
+      ]
+    },
+    "EventBridgeRuleTemplateTarget": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "__stringMin1Max2048PatternArn"
+      }
+    },
+    "FailoverCondition": {
+      "type": "structure",
+      "members": {
+        "FailoverConditionSettings": "FailoverConditionSettings"
+      }
+    },
+    "FailoverConditionSettings": {
+      "type": "structure",
+      "members": {
+        "AudioSilenceSettings": "AudioSilenceFailoverSettings",
+        "InputLossSettings": "InputLossFailoverSettings",
+        "VideoBlackSettings": "VideoBlackFailoverSettings"
+      }
+    },
+    "FeatureActivations": {
+      "type": "structure",
+      "members": {
+        "InputPrepareScheduleActions": "FeatureActivationsInputPrepareScheduleActions",
+        "OutputStaticImageOverlayScheduleActions": "FeatureActivationsOutputStaticImageOverlayScheduleActions"
+      }
+    },
+    "FeatureActivationsInputPrepareScheduleActions": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "FeatureActivationsOutputStaticImageOverlayScheduleActions": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "FecOutputIncludeFec": {
+      "type": "string",
+      "enum": [
+        "COLUMN",
+        "COLUMN_AND_ROW"
+      ]
+    },
+    "FecOutputSettings": {
+      "type": "structure",
+      "members": {
+        "ColumnDepth": "__integerMin4Max20",
+        "IncludeFec": "FecOutputIncludeFec",
+        "RowLength": "__integerMin1Max20"
+      }
+    },
+    "FixedAfd": {
+      "type": "string",
+      "enum": [
+        "AFD_0000",
+        "AFD_0010",
+        "AFD_0011",
+        "AFD_0100",
+        "AFD_1000",
+        "AFD_1001",
+        "AFD_1010",
+        "AFD_1011",
+        "AFD_1101",
+        "AFD_1110",
+        "AFD_1111"
+      ]
+    },
+    "FixedModeScheduleActionStartSettings": {
+      "type": "structure",
+      "required": [
+        "Time"
+      ],
+      "members": {
+        "Time": "__string"
+      }
+    },
+    "Fmp4HlsSettings": {
+      "type": "structure",
+      "members": {
+        "AudioRenditionSets": "__string",
+        "NielsenId3Behavior": "Fmp4NielsenId3Behavior",
+        "TimedMetadataBehavior": "Fmp4TimedMetadataBehavior"
+      }
+    },
+    "Fmp4NielsenId3Behavior": {
+      "type": "string",
+      "enum": [
+        "NO_PASSTHROUGH",
+        "PASSTHROUGH"
+      ]
+    },
+    "Fmp4TimedMetadataBehavior": {
+      "type": "string",
+      "enum": [
+        "NO_PASSTHROUGH",
+        "PASSTHROUGH"
+      ]
+    },
+    "FollowModeScheduleActionStartSettings": {
+      "type": "structure",
+      "required": [
+        "ReferenceActionName",
+        "FollowPoint"
+      ],
+      "members": {
+        "FollowPoint": "FollowPoint",
+        "ReferenceActionName": "__string"
+      }
+    },
+    "FollowPoint": {
+      "type": "string",
+      "enum": [
+        "END",
+        "START"
+      ]
+    },
+    "FollowerChannelSettings": {
+      "type": "structure",
+      "members": {
+        "LinkedChannelType": "LinkedChannelType",
+        "PrimaryChannelArn": "__string"
+      }
+    },
+    "FrameCaptureCdnSettings": {
+      "type": "structure",
+      "members": {
+        "FrameCaptureS3Settings": "FrameCaptureS3Settings"
+      }
+    },
+    "FrameCaptureGroupSettings": {
+      "type": "structure",
+      "required": [
+        "Destination"
+      ],
+      "members": {
+        "Destination": "OutputLocationRef",
+        "FrameCaptureCdnSettings": "FrameCaptureCdnSettings"
+      }
+    },
+    "FrameCaptureHlsSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "FrameCaptureIntervalUnit": {
+      "type": "string",
+      "enum": [
+        "MILLISECONDS",
+        "SECONDS"
+      ]
+    },
+    "FrameCaptureOutputSettings": {
+      "type": "structure",
+      "members": {
+        "NameModifier": "__string"
+      }
+    },
+    "FrameCaptureS3Settings": {
+      "type": "structure",
+      "members": {
+        "CannedAcl": "S3CannedAcl"
+      }
+    },
+    "FrameCaptureSettings": {
+      "type": "structure",
+      "members": {
+        "CaptureInterval": "__integerMin1Max3600000",
+        "CaptureIntervalUnits": "FrameCaptureIntervalUnit",
+        "TimecodeBurninSettings": "TimecodeBurninSettings"
+      }
+    },
+    "GetCloudWatchAlarmTemplateGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "__string"
+      }
+    },
+    "GetCloudWatchAlarmTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "__string"
+      }
+    },
+    "GetEventBridgeRuleTemplateGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "__string"
+      }
+    },
+    "GetEventBridgeRuleTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "__string"
+      }
+    },
+    "GetSignalMapRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "__string"
+      }
+    },
+    "GlobalConfiguration": {
+      "type": "structure",
+      "members": {
+        "InitialAudioGain": "__integerMinNegative60Max60",
+        "InputEndAction": "GlobalConfigurationInputEndAction",
+        "InputLossBehavior": "InputLossBehavior",
+        "OutputLockingMode": "GlobalConfigurationOutputLockingMode",
+        "OutputTimingSource": "GlobalConfigurationOutputTimingSource",
+        "SupportLowFramerateInputs": "GlobalConfigurationLowFramerateInputs",
+        "OutputLockingSettings": "OutputLockingSettings"
+      }
+    },
+    "GlobalConfigurationInputEndAction": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "SWITCH_AND_LOOP_INPUTS"
+      ]
+    },
+    "GlobalConfigurationLowFramerateInputs": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "GlobalConfigurationOutputLockingMode": {
+      "type": "string",
+      "enum": [
+        "EPOCH_LOCKING",
+        "PIPELINE_LOCKING",
+        "DISABLED"
+      ]
+    },
+    "GlobalConfigurationOutputTimingSource": {
+      "type": "string",
+      "enum": [
+        "INPUT_CLOCK",
+        "SYSTEM_CLOCK"
+      ]
+    },
+    "H264AdaptiveQuantization": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "HIGH",
+        "HIGHER",
+        "LOW",
+        "MAX",
+        "MEDIUM",
+        "OFF"
+      ]
+    },
+    "H264ColorMetadata": {
+      "type": "string",
+      "enum": [
+        "IGNORE",
+        "INSERT"
+      ]
+    },
+    "H264ColorSpaceSettings": {
+      "type": "structure",
+      "members": {
+        "ColorSpacePassthroughSettings": "ColorSpacePassthroughSettings",
+        "Rec601Settings": "Rec601Settings",
+        "Rec709Settings": "Rec709Settings"
+      }
+    },
+    "H264EntropyEncoding": {
+      "type": "string",
+      "enum": [
+        "CABAC",
+        "CAVLC"
+      ]
+    },
+    "H264FilterSettings": {
+      "type": "structure",
+      "members": {
+        "TemporalFilterSettings": "TemporalFilterSettings",
+        "BandwidthReductionFilterSettings": "BandwidthReductionFilterSettings"
+      }
+    },
+    "H264FlickerAq": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H264ForceFieldPictures": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H264FramerateControl": {
+      "type": "string",
+      "enum": [
+        "INITIALIZE_FROM_SOURCE",
+        "SPECIFIED"
+      ]
+    },
+    "H264GopBReference": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H264GopSizeUnits": {
+      "type": "string",
+      "enum": [
+        "FRAMES",
+        "SECONDS"
+      ]
+    },
+    "H264Level": {
+      "type": "string",
+      "enum": [
+        "H264_LEVEL_1",
+        "H264_LEVEL_1_1",
+        "H264_LEVEL_1_2",
+        "H264_LEVEL_1_3",
+        "H264_LEVEL_2",
+        "H264_LEVEL_2_1",
+        "H264_LEVEL_2_2",
+        "H264_LEVEL_3",
+        "H264_LEVEL_3_1",
+        "H264_LEVEL_3_2",
+        "H264_LEVEL_4",
+        "H264_LEVEL_4_1",
+        "H264_LEVEL_4_2",
+        "H264_LEVEL_5",
+        "H264_LEVEL_5_1",
+        "H264_LEVEL_5_2",
+        "H264_LEVEL_AUTO"
+      ]
+    },
+    "H264LookAheadRateControl": {
+      "type": "string",
+      "enum": [
+        "HIGH",
+        "LOW",
+        "MEDIUM"
+      ]
+    },
+    "H264ParControl": {
+      "type": "string",
+      "enum": [
+        "INITIALIZE_FROM_SOURCE",
+        "SPECIFIED"
+      ]
+    },
+    "H264Profile": {
+      "type": "string",
+      "enum": [
+        "BASELINE",
+        "HIGH",
+        "HIGH_10BIT",
+        "HIGH_422",
+        "HIGH_422_10BIT",
+        "MAIN"
+      ]
+    },
+    "H264QualityLevel": {
+      "type": "string",
+      "enum": [
+        "ENHANCED_QUALITY",
+        "STANDARD_QUALITY"
+      ]
+    },
+    "H264RateControlMode": {
+      "type": "string",
+      "enum": [
+        "CBR",
+        "MULTIPLEX",
+        "QVBR",
+        "VBR"
+      ]
+    },
+    "H264ScanType": {
+      "type": "string",
+      "enum": [
+        "INTERLACED",
+        "PROGRESSIVE"
+      ]
+    },
+    "H264SceneChangeDetect": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H264Settings": {
+      "type": "structure",
+      "members": {
+        "AdaptiveQuantization": "H264AdaptiveQuantization",
+        "AfdSignaling": "AfdSignaling",
+        "Bitrate": "__integerMin1000",
+        "BufFillPct": "__integerMin0Max100",
+        "BufSize": "__integerMin0",
+        "ColorMetadata": "H264ColorMetadata",
+        "ColorSpaceSettings": "H264ColorSpaceSettings",
+        "EntropyEncoding": "H264EntropyEncoding",
+        "FilterSettings": "H264FilterSettings",
+        "FixedAfd": "FixedAfd",
+        "FlickerAq": "H264FlickerAq",
+        "ForceFieldPictures": "H264ForceFieldPictures",
+        "FramerateControl": "H264FramerateControl",
+        "FramerateDenominator": "__integerMin1",
+        "FramerateNumerator": "__integerMin1",
+        "GopBReference": "H264GopBReference",
+        "GopClosedCadence": "__integerMin0",
+        "GopNumBFrames": "__integerMin0Max7",
+        "GopSize": "__double",
+        "GopSizeUnits": "H264GopSizeUnits",
+        "Level": "H264Level",
+        "LookAheadRateControl": "H264LookAheadRateControl",
+        "MaxBitrate": "__integerMin1000",
+        "MinIInterval": "__integerMin0Max30",
+        "NumRefFrames": "__integerMin1Max6",
+        "ParControl": "H264ParControl",
+        "ParDenominator": "__integerMin1",
+        "ParNumerator": "__integerMin1",
+        "Profile": "H264Profile",
+        "QualityLevel": "H264QualityLevel",
+        "QvbrQualityLevel": "__integerMin1Max10",
+        "RateControlMode": "H264RateControlMode",
+        "ScanType": "H264ScanType",
+        "SceneChangeDetect": "H264SceneChangeDetect",
+        "Slices": "__integerMin1Max32",
+        "Softness": "__integerMin0Max128",
+        "SpatialAq": "H264SpatialAq",
+        "SubgopLength": "H264SubGopLength",
+        "Syntax": "H264Syntax",
+        "TemporalAq": "H264TemporalAq",
+        "TimecodeInsertion": "H264TimecodeInsertionBehavior",
+        "TimecodeBurninSettings": "TimecodeBurninSettings",
+        "MinQp": "__integerMin1Max51",
+        "MinBitrate": "__integerMin0"
+      }
+    },
+    "H264SpatialAq": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H264SubGopLength": {
+      "type": "string",
+      "enum": [
+        "DYNAMIC",
+        "FIXED"
+      ]
+    },
+    "H264Syntax": {
+      "type": "string",
+      "enum": [
+        "DEFAULT",
+        "RP2027"
+      ]
+    },
+    "H264TemporalAq": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H264TimecodeInsertionBehavior": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "PIC_TIMING_SEI"
+      ]
+    },
+    "H265AdaptiveQuantization": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "HIGH",
+        "HIGHER",
+        "LOW",
+        "MAX",
+        "MEDIUM",
+        "OFF"
+      ]
+    },
+    "H265AlternativeTransferFunction": {
+      "type": "string",
+      "enum": [
+        "INSERT",
+        "OMIT"
+      ]
+    },
+    "H265ColorMetadata": {
+      "type": "string",
+      "enum": [
+        "IGNORE",
+        "INSERT"
+      ]
+    },
+    "H265ColorSpaceSettings": {
+      "type": "structure",
+      "members": {
+        "ColorSpacePassthroughSettings": "ColorSpacePassthroughSettings",
+        "DolbyVision81Settings": "DolbyVision81Settings",
+        "Hdr10Settings": "Hdr10Settings",
+        "Rec601Settings": "Rec601Settings",
+        "Rec709Settings": "Rec709Settings",
+        "Hlg2020Settings": "Hlg2020Settings"
+      }
+    },
+    "H265Deblocking": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H265FilterSettings": {
+      "type": "structure",
+      "members": {
+        "TemporalFilterSettings": "TemporalFilterSettings",
+        "BandwidthReductionFilterSettings": "BandwidthReductionFilterSettings"
+      }
+    },
+    "H265FlickerAq": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H265GopBReference": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H265GopSizeUnits": {
+      "type": "string",
+      "enum": [
+        "FRAMES",
+        "SECONDS"
+      ]
+    },
+    "H265Level": {
+      "type": "string",
+      "enum": [
+        "H265_LEVEL_1",
+        "H265_LEVEL_2",
+        "H265_LEVEL_2_1",
+        "H265_LEVEL_3",
+        "H265_LEVEL_3_1",
+        "H265_LEVEL_4",
+        "H265_LEVEL_4_1",
+        "H265_LEVEL_5",
+        "H265_LEVEL_5_1",
+        "H265_LEVEL_5_2",
+        "H265_LEVEL_6",
+        "H265_LEVEL_6_1",
+        "H265_LEVEL_6_2",
+        "H265_LEVEL_AUTO"
+      ]
+    },
+    "H265LookAheadRateControl": {
+      "type": "string",
+      "enum": [
+        "HIGH",
+        "LOW",
+        "MEDIUM"
+      ]
+    },
+    "H265MvOverPictureBoundaries": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H265MvTemporalPredictor": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H265Profile": {
+      "type": "string",
+      "enum": [
+        "MAIN",
+        "MAIN_10BIT"
+      ]
+    },
+    "H265RateControlMode": {
+      "type": "string",
+      "enum": [
+        "CBR",
+        "MULTIPLEX",
+        "QVBR"
+      ]
+    },
+    "H265ScanType": {
+      "type": "string",
+      "enum": [
+        "INTERLACED",
+        "PROGRESSIVE"
+      ]
+    },
+    "H265SceneChangeDetect": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "H265Settings": {
+      "type": "structure",
+      "required": [
+        "FramerateNumerator",
+        "FramerateDenominator"
+      ],
+      "members": {
+        "AdaptiveQuantization": "H265AdaptiveQuantization",
+        "AfdSignaling": "AfdSignaling",
+        "AlternativeTransferFunction": "H265AlternativeTransferFunction",
+        "Bitrate": "__integerMin100000Max40000000",
+        "BufSize": "__integerMin100000Max80000000",
+        "ColorMetadata": "H265ColorMetadata",
+        "ColorSpaceSettings": "H265ColorSpaceSettings",
+        "FilterSettings": "H265FilterSettings",
+        "FixedAfd": "FixedAfd",
+        "FlickerAq": "H265FlickerAq",
+        "FramerateDenominator": "__integerMin1Max3003",
+        "FramerateNumerator": "__integerMin1",
+        "GopClosedCadence": "__integerMin0",
+        "GopSize": "__double",
+        "GopSizeUnits": "H265GopSizeUnits",
+        "Level": "H265Level",
+        "LookAheadRateControl": "H265LookAheadRateControl",
+        "MaxBitrate": "__integerMin100000Max40000000",
+        "MinIInterval": "__integerMin0Max30",
+        "ParDenominator": "__integerMin1",
+        "ParNumerator": "__integerMin1",
+        "Profile": "H265Profile",
+        "QvbrQualityLevel": "__integerMin1Max10",
+        "RateControlMode": "H265RateControlMode",
+        "ScanType": "H265ScanType",
+        "SceneChangeDetect": "H265SceneChangeDetect",
+        "Slices": "__integerMin1Max16",
+        "Tier": "H265Tier",
+        "TimecodeInsertion": "H265TimecodeInsertionBehavior",
+        "TimecodeBurninSettings": "TimecodeBurninSettings",
+        "MvOverPictureBoundaries": "H265MvOverPictureBoundaries",
+        "MvTemporalPredictor": "H265MvTemporalPredictor",
+        "TileHeight": "__integerMin64Max2160",
+        "TilePadding": "H265TilePadding",
+        "TileWidth": "__integerMin256Max3840",
+        "TreeblockSize": "H265TreeblockSize",
+        "MinQp": "__integerMin1Max51",
+        "Deblocking": "H265Deblocking",
+        "GopBReference": "H265GopBReference",
+        "GopNumBFrames": "__integerMin0Max3",
+        "MinBitrate": "__integerMin0Max40000000",
+        "SubgopLength": "H265SubGopLength"
+      }
+    },
+    "H265SubGopLength": {
+      "type": "string",
+      "enum": [
+        "DYNAMIC",
+        "FIXED"
+      ]
+    },
+    "H265Tier": {
+      "type": "string",
+      "enum": [
+        "HIGH",
+        "MAIN"
+      ]
+    },
+    "H265TilePadding": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PADDED"
+      ]
+    },
+    "H265TimecodeInsertionBehavior": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "PIC_TIMING_SEI"
+      ]
+    },
+    "H265TreeblockSize": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "TREE_SIZE_32X32"
+      ]
+    },
+    "Hdr10Settings": {
+      "type": "structure",
+      "members": {
+        "MaxCll": "__integerMin0Max32768",
+        "MaxFall": "__integerMin0Max32768"
+      }
+    },
+    "Hlg2020Settings": {
+      "type": "structure",
+      "members": {}
+    },
+    "HlsAdMarkers": {
+      "type": "string",
+      "enum": [
+        "ADOBE",
+        "ELEMENTAL",
+        "ELEMENTAL_SCTE35"
+      ]
+    },
+    "HlsAkamaiHttpTransferMode": {
+      "type": "string",
+      "enum": [
+        "CHUNKED",
+        "NON_CHUNKED"
+      ]
+    },
+    "HlsAkamaiSettings": {
+      "type": "structure",
+      "members": {
+        "ConnectionRetryInterval": "__integerMin0",
+        "FilecacheDuration": "__integerMin0Max600",
+        "HttpTransferMode": "HlsAkamaiHttpTransferMode",
+        "NumRetries": "__integerMin0",
+        "RestartDelay": "__integerMin0Max15",
+        "Salt": "__string",
+        "Token": "__string"
+      }
+    },
+    "HlsAutoSelect": {
+      "type": "string",
+      "enum": [
+        "NO",
+        "OMIT",
+        "YES"
+      ]
+    },
+    "HlsBasicPutSettings": {
+      "type": "structure",
+      "members": {
+        "ConnectionRetryInterval": "__integerMin0",
+        "FilecacheDuration": "__integerMin0Max600",
+        "NumRetries": "__integerMin0",
+        "RestartDelay": "__integerMin0Max15"
+      }
+    },
+    "HlsCaptionLanguageSetting": {
+      "type": "string",
+      "enum": [
+        "INSERT",
+        "NONE",
+        "OMIT"
+      ]
+    },
+    "HlsCdnSettings": {
+      "type": "structure",
+      "members": {
+        "HlsAkamaiSettings": "HlsAkamaiSettings",
+        "HlsBasicPutSettings": "HlsBasicPutSettings",
+        "HlsMediaStoreSettings": "HlsMediaStoreSettings",
+        "HlsS3Settings": "HlsS3Settings",
+        "HlsWebdavSettings": "HlsWebdavSettings"
+      }
+    },
+    "HlsClientCache": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "HlsCodecSpecification": {
+      "type": "string",
+      "enum": [
+        "RFC_4281",
+        "RFC_6381"
+      ]
+    },
+    "HlsDefault": {
+      "type": "string",
+      "enum": [
+        "NO",
+        "OMIT",
+        "YES"
+      ]
+    },
+    "HlsDirectoryStructure": {
+      "type": "string",
+      "enum": [
+        "SINGLE_DIRECTORY",
+        "SUBDIRECTORY_PER_STREAM"
+      ]
+    },
+    "HlsDiscontinuityTags": {
+      "type": "string",
+      "enum": [
+        "INSERT",
+        "NEVER_INSERT"
+      ]
+    },
+    "HlsEncryptionType": {
+      "type": "string",
+      "enum": [
+        "AES128",
+        "SAMPLE_AES"
+      ]
+    },
+    "HlsGroupSettings": {
+      "type": "structure",
+      "required": [
+        "Destination"
+      ],
+      "members": {
+        "AdMarkers": "__listOfHlsAdMarkers",
+        "BaseUrlContent": "__string",
+        "BaseUrlContent1": "__string",
+        "BaseUrlManifest": "__string",
+        "BaseUrlManifest1": "__string",
+        "CaptionLanguageMappings": "__listOfCaptionLanguageMapping",
+        "CaptionLanguageSetting": "HlsCaptionLanguageSetting",
+        "ClientCache": "HlsClientCache",
+        "CodecSpecification": "HlsCodecSpecification",
+        "ConstantIv": "__stringMin32Max32",
+        "Destination": "OutputLocationRef",
+        "DirectoryStructure": "HlsDirectoryStructure",
+        "DiscontinuityTags": "HlsDiscontinuityTags",
+        "EncryptionType": "HlsEncryptionType",
+        "HlsCdnSettings": "HlsCdnSettings",
+        "HlsId3SegmentTagging": "HlsId3SegmentTaggingState",
+        "IFrameOnlyPlaylists": "IFrameOnlyPlaylistType",
+        "IncompleteSegmentBehavior": "HlsIncompleteSegmentBehavior",
+        "IndexNSegments": "__integerMin3",
+        "InputLossAction": "InputLossActionForHlsOut",
+        "IvInManifest": "HlsIvInManifest",
+        "IvSource": "HlsIvSource",
+        "KeepSegments": "__integerMin1",
+        "KeyFormat": "__string",
+        "KeyFormatVersions": "__string",
+        "KeyProviderSettings": "KeyProviderSettings",
+        "ManifestCompression": "HlsManifestCompression",
+        "ManifestDurationFormat": "HlsManifestDurationFormat",
+        "MinSegmentLength": "__integerMin0",
+        "Mode": "HlsMode",
+        "OutputSelection": "HlsOutputSelection",
+        "ProgramDateTime": "HlsProgramDateTime",
+        "ProgramDateTimeClock": "HlsProgramDateTimeClock",
+        "ProgramDateTimePeriod": "__integerMin0Max3600",
+        "RedundantManifest": "HlsRedundantManifest",
+        "SegmentLength": "__integerMin1",
+        "SegmentationMode": "HlsSegmentationMode",
+        "SegmentsPerSubdirectory": "__integerMin1",
+        "StreamInfResolution": "HlsStreamInfResolution",
+        "TimedMetadataId3Frame": "HlsTimedMetadataId3Frame",
+        "TimedMetadataId3Period": "__integerMin0",
+        "TimestampDeltaMilliseconds": "__integerMin0",
+        "TsFileMode": "HlsTsFileMode"
+      }
+    },
+    "HlsH265PackagingType": {
+      "type": "string",
+      "enum": [
+        "HEV1",
+        "HVC1"
+      ]
+    },
+    "HlsId3SegmentTaggingScheduleActionSettings": {
+      "type": "structure",
+      "members": {
+        "Tag": "__string",
+        "Id3": "__string"
+      }
+    },
+    "HlsId3SegmentTaggingState": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "HlsIncompleteSegmentBehavior": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "SUPPRESS"
+      ]
+    },
+    "HlsInputSettings": {
+      "type": "structure",
+      "members": {
+        "Bandwidth": "__integerMin0",
+        "BufferSegments": "__integerMin0",
+        "Retries": "__integerMin0",
+        "RetryInterval": "__integerMin0",
+        "Scte35Source": "HlsScte35SourceType"
+      }
+    },
+    "HlsIvInManifest": {
+      "type": "string",
+      "enum": [
+        "EXCLUDE",
+        "INCLUDE"
+      ]
+    },
+    "HlsIvSource": {
+      "type": "string",
+      "enum": [
+        "EXPLICIT",
+        "FOLLOWS_SEGMENT_NUMBER"
+      ]
+    },
+    "HlsManifestCompression": {
+      "type": "string",
+      "enum": [
+        "GZIP",
+        "NONE"
+      ]
+    },
+    "HlsManifestDurationFormat": {
+      "type": "string",
+      "enum": [
+        "FLOATING_POINT",
+        "INTEGER"
+      ]
+    },
+    "HlsMediaStoreSettings": {
+      "type": "structure",
+      "members": {
+        "ConnectionRetryInterval": "__integerMin0",
+        "FilecacheDuration": "__integerMin0Max600",
+        "MediaStoreStorageClass": "HlsMediaStoreStorageClass",
+        "NumRetries": "__integerMin0",
+        "RestartDelay": "__integerMin0Max15"
+      }
+    },
+    "HlsMediaStoreStorageClass": {
+      "type": "string",
+      "enum": [
+        "TEMPORAL"
+      ]
+    },
+    "HlsMode": {
+      "type": "string",
+      "enum": [
+        "LIVE",
+        "VOD"
+      ]
+    },
+    "HlsOutputSelection": {
+      "type": "string",
+      "enum": [
+        "MANIFESTS_AND_SEGMENTS",
+        "SEGMENTS_ONLY",
+        "VARIANT_MANIFESTS_AND_SEGMENTS"
+      ]
+    },
+    "HlsOutputSettings": {
+      "type": "structure",
+      "required": [
+        "HlsSettings"
+      ],
+      "members": {
+        "H265PackagingType": "HlsH265PackagingType",
+        "HlsSettings": "HlsSettings",
+        "NameModifier": "__stringMin1",
+        "SegmentModifier": "__string"
+      }
+    },
+    "HlsProgramDateTime": {
+      "type": "string",
+      "enum": [
+        "EXCLUDE",
+        "INCLUDE"
+      ]
+    },
+    "HlsProgramDateTimeClock": {
+      "type": "string",
+      "enum": [
+        "INITIALIZE_FROM_OUTPUT_TIMECODE",
+        "SYSTEM_CLOCK"
+      ]
+    },
+    "HlsRedundantManifest": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "HlsS3Settings": {
+      "type": "structure",
+      "members": {
+        "CannedAcl": "S3CannedAcl"
+      }
+    },
+    "HlsScte35SourceType": {
+      "type": "string",
+      "enum": [
+        "MANIFEST",
+        "SEGMENTS"
+      ]
+    },
+    "HlsSegmentationMode": {
+      "type": "string",
+      "enum": [
+        "USE_INPUT_SEGMENTATION",
+        "USE_SEGMENT_DURATION"
+      ]
+    },
+    "HlsSettings": {
+      "type": "structure",
+      "members": {
+        "AudioOnlyHlsSettings": "AudioOnlyHlsSettings",
+        "Fmp4HlsSettings": "Fmp4HlsSettings",
+        "FrameCaptureHlsSettings": "FrameCaptureHlsSettings",
+        "StandardHlsSettings": "StandardHlsSettings"
+      }
+    },
+    "HlsStreamInfResolution": {
+      "type": "string",
+      "enum": [
+        "EXCLUDE",
+        "INCLUDE"
+      ]
+    },
+    "HlsTimedMetadataId3Frame": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PRIV",
+        "TDRL"
+      ]
+    },
+    "HlsTimedMetadataScheduleActionSettings": {
+      "type": "structure",
+      "required": [
+        "Id3"
+      ],
+      "members": {
+        "Id3": "__string"
+      }
+    },
+    "HlsTsFileMode": {
+      "type": "string",
+      "enum": [
+        "SEGMENTED_FILES",
+        "SINGLE_FILE"
+      ]
+    },
+    "HlsWebdavHttpTransferMode": {
+      "type": "string",
+      "enum": [
+        "CHUNKED",
+        "NON_CHUNKED"
+      ]
+    },
+    "HlsWebdavSettings": {
+      "type": "structure",
+      "members": {
+        "ConnectionRetryInterval": "__integerMin0",
+        "FilecacheDuration": "__integerMin0Max600",
+        "HttpTransferMode": "HlsWebdavHttpTransferMode",
+        "NumRetries": "__integerMin0",
+        "RestartDelay": "__integerMin0Max15"
+      }
+    },
+    "HtmlMotionGraphicsSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "IFrameOnlyPlaylistType": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "STANDARD"
+      ]
+    },
+    "Id3SegmentTaggingScheduleActionSettings": {
+      "type": "structure",
+      "members": {
+        "Id3": "__string",
+        "Tag": "__string"
+      }
+    },
+    "ImmediateModeScheduleActionStartSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "IncludeFillerNalUnits": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "DROP",
+        "INCLUDE"
+      ]
+    },
+    "InferenceSettings": {
+      "type": "structure",
+      "members": {
+        "FeedArn": "__string",
+        "AudioFeedInputs": "__listOfAudioFeedInput",
+        "EnrichmentMethods": "__listOfEnrichmentMethod"
+      }
+    },
+    "InputAttachment": {
+      "type": "structure",
+      "members": {
+        "AutomaticInputFailoverSettings": "AutomaticInputFailoverSettings",
+        "InputAttachmentName": "__string",
+        "InputId": "__string",
+        "InputSettings": "InputSettings",
+        "LogicalInterfaceNames": "__listOf__string"
+      }
+    },
+    "InputChannelLevel": {
+      "type": "structure",
+      "required": [
+        "InputChannel",
+        "Gain"
+      ],
+      "members": {
+        "Gain": "__integerMinNegative60Max6",
+        "InputChannel": "__integerMin0Max15"
+      }
+    },
+    "InputClippingSettings": {
+      "type": "structure",
+      "required": [
+        "InputTimecodeSource"
+      ],
+      "members": {
+        "InputTimecodeSource": "InputTimecodeSource",
+        "StartTimecode": "StartTimecode",
+        "StopTimecode": "StopTimecode"
+      }
+    },
+    "InputCodec": {
+      "type": "string",
+      "enum": [
+        "MPEG2",
+        "AVC",
+        "HEVC"
+      ]
+    },
+    "InputDeblockFilter": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "InputDenoiseFilter": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "InputDestinationRequest": {
+      "type": "structure",
+      "members": {
+        "StreamName": "__string",
+        "Network": "__string",
+        "NetworkRoutes": "__listOfInputRequestDestinationRoute",
+        "StaticIpAddress": "__string"
+      }
+    },
+    "InputDeviceCodec": {
+      "type": "string",
+      "enum": [
+        "HEVC",
+        "AVC"
+      ]
+    },
+    "InputDeviceConfigurableAudioChannelPairConfig": {
+      "type": "structure",
+      "members": {
+        "Id": "__integer",
+        "Profile": "InputDeviceConfigurableAudioChannelPairProfile"
+      }
+    },
+    "InputDeviceConfigurableAudioChannelPairProfile": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "VBR-AAC_HHE-16000",
+        "VBR-AAC_HE-64000",
+        "VBR-AAC_LC-128000",
+        "CBR-AAC_HQ-192000",
+        "CBR-AAC_HQ-256000",
+        "CBR-AAC_HQ-384000",
+        "CBR-AAC_HQ-512000"
+      ]
+    },
+    "InputDeviceConfigurableSettings": {
+      "type": "structure",
+      "members": {
+        "ConfiguredInput": "InputDeviceConfiguredInput",
+        "MaxBitrate": "__integer",
+        "LatencyMs": "__integer",
+        "Codec": "InputDeviceCodec",
+        "MediaconnectSettings": "InputDeviceMediaConnectConfigurableSettings",
+        "AudioChannelPairs": "__listOfInputDeviceConfigurableAudioChannelPairConfig",
+        "InputResolution": "__string"
+      }
+    },
+    "InputDeviceConfiguredInput": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "HDMI",
+        "SDI"
+      ]
+    },
+    "InputDeviceMediaConnectConfigurableSettings": {
+      "type": "structure",
+      "members": {
+        "FlowArn": "__string",
+        "RoleArn": "__string",
+        "SecretArn": "__string",
+        "SourceName": "__string"
+      }
+    },
+    "InputDeviceRequest": {
+      "type": "structure",
+      "members": {
+        "Id": "__string"
+      }
+    },
+    "InputDeviceSettings": {
+      "type": "structure",
+      "members": {
+        "Id": "__string"
+      }
+    },
+    "InputFilter": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "DISABLED",
+        "FORCED"
+      ]
+    },
+    "InputLocation": {
+      "type": "structure",
+      "required": [
+        "Uri"
+      ],
+      "members": {
+        "PasswordParam": "__string",
+        "Uri": "__stringMax2048",
+        "Username": "__string"
+      }
+    },
+    "InputLossActionForHlsOut": {
+      "type": "string",
+      "enum": [
+        "EMIT_OUTPUT",
+        "PAUSE_OUTPUT"
+      ]
+    },
+    "InputLossActionForMsSmoothOut": {
+      "type": "string",
+      "enum": [
+        "EMIT_OUTPUT",
+        "PAUSE_OUTPUT"
+      ]
+    },
+    "InputLossActionForRtmpOut": {
+      "type": "string",
+      "enum": [
+        "EMIT_OUTPUT",
+        "PAUSE_OUTPUT"
+      ]
+    },
+    "InputLossActionForUdpOut": {
+      "type": "string",
+      "enum": [
+        "DROP_PROGRAM",
+        "DROP_TS",
+        "EMIT_PROGRAM"
+      ]
+    },
+    "InputLossBehavior": {
+      "type": "structure",
+      "members": {
+        "BlackFrameMsec": "__integerMin0Max1000000",
+        "InputLossImageColor": "__stringMin6Max6",
+        "InputLossImageSlate": "InputLocation",
+        "InputLossImageType": "InputLossImageType",
+        "RepeatFrameMsec": "__integerMin0Max1000000"
+      }
+    },
+    "InputLossFailoverSettings": {
+      "type": "structure",
+      "members": {
+        "InputLossThresholdMsec": "__integerMin100"
+      }
+    },
+    "InputLossImageType": {
+      "type": "string",
+      "enum": [
+        "COLOR",
+        "SLATE"
+      ]
+    },
+    "InputMaximumBitrate": {
+      "type": "string",
+      "enum": [
+        "MAX_10_MBPS",
+        "MAX_20_MBPS",
+        "MAX_50_MBPS"
+      ]
+    },
+    "InputNetworkLocation": {
+      "type": "string",
+      "enum": [
+        "AWS",
+        "ON_PREMISES"
+      ]
+    },
+    "InputPreference": {
+      "type": "string",
+      "enum": [
+        "EQUAL_INPUT_PREFERENCE",
+        "PRIMARY_INPUT_PREFERRED"
+      ]
+    },
+    "InputPrepareScheduleActionSettings": {
+      "type": "structure",
+      "members": {
+        "InputAttachmentNameReference": "__string",
+        "InputClippingSettings": "InputClippingSettings",
+        "UrlPath": "__listOf__string"
+      }
+    },
+    "InputRequestDestinationRoute": {
+      "type": "structure",
+      "members": {
+        "Cidr": "__string",
+        "Gateway": "__string"
+      }
+    },
+    "InputResolution": {
+      "type": "string",
+      "enum": [
+        "SD",
+        "HD",
+        "UHD"
+      ]
+    },
+    "InputSdiSources": {
+      "type": "list",
+      "member": "__string"
+    },
+    "InputSdpLocation": {
+      "type": "structure",
+      "members": {
+        "MediaIndex": "__integer",
+        "SdpUrl": "__string"
+      }
+    },
+    "InputSettings": {
+      "type": "structure",
+      "members": {
+        "AudioSelectors": "__listOfAudioSelector",
+        "CaptionSelectors": "__listOfCaptionSelector",
+        "DeblockFilter": "InputDeblockFilter",
+        "DenoiseFilter": "InputDenoiseFilter",
+        "FilterStrength": "__integerMin1Max5",
+        "InputFilter": "InputFilter",
+        "NetworkInputSettings": "NetworkInputSettings",
+        "Scte35Pid": "__integerMin32Max8191",
+        "Smpte2038DataPreference": "Smpte2038DataPreference",
+        "SourceEndBehavior": "InputSourceEndBehavior",
+        "VideoSelector": "VideoSelector"
+      }
+    },
+    "InputSourceEndBehavior": {
+      "type": "string",
+      "enum": [
+        "CONTINUE",
+        "LOOP"
+      ]
+    },
+    "InputSourceRequest": {
+      "type": "structure",
+      "members": {
+        "PasswordParam": "__string",
+        "Url": "__string",
+        "Username": "__string"
+      }
+    },
+    "InputSpecification": {
+      "type": "structure",
+      "members": {
+        "Codec": "InputCodec",
+        "MaximumBitrate": "InputMaximumBitrate",
+        "Resolution": "InputResolution"
+      }
+    },
+    "InputSwitchScheduleActionSettings": {
+      "type": "structure",
+      "required": [
+        "InputAttachmentNameReference"
+      ],
+      "members": {
+        "InputAttachmentNameReference": "__string",
+        "InputClippingSettings": "InputClippingSettings",
+        "UrlPath": "__listOf__string"
+      }
+    },
+    "InputTimecodeSource": {
+      "type": "string",
+      "enum": [
+        "ZEROBASED",
+        "EMBEDDED"
+      ]
+    },
+    "InputType": {
+      "type": "string",
+      "enum": [
+        "UDP_PUSH",
+        "RTP_PUSH",
+        "RTMP_PUSH",
+        "RTMP_PULL",
+        "URL_PULL",
+        "MP4_FILE",
+        "MEDIACONNECT",
+        "INPUT_DEVICE",
+        "AWS_CDI",
+        "TS_FILE",
+        "SRT_CALLER",
+        "MULTICAST",
+        "SMPTE_2110_RECEIVER_GROUP",
+        "SDI",
+        "MEDIACONNECT_ROUTER",
+        "SRT_LISTENER"
+      ]
+    },
+    "InputVpcRequest": {
+      "type": "structure",
+      "required": [
+        "SubnetIds"
+      ],
+      "members": {
+        "SecurityGroupIds": "__listOf__string",
+        "SubnetIds": "__listOf__string"
+      }
+    },
+    "InputWhitelistRuleCidr": {
+      "type": "structure",
+      "members": {
+        "Cidr": "__string"
+      }
+    },
+    "InterfaceMappingCreateRequest": {
+      "type": "structure",
+      "members": {
+        "LogicalInterfaceName": "__string",
+        "NetworkId": "__string"
+      }
+    },
+    "InterfaceMappingUpdateRequest": {
+      "type": "structure",
+      "members": {
+        "LogicalInterfaceName": "__string",
+        "NetworkId": "__string"
+      }
+    },
+    "IpPoolCreateRequest": {
+      "type": "structure",
+      "members": {
+        "Cidr": "__string"
+      }
+    },
+    "IpPoolUpdateRequest": {
+      "type": "structure",
+      "members": {
+        "Cidr": "__string"
+      }
+    },
+    "KeyProviderSettings": {
+      "type": "structure",
+      "members": {
+        "StaticKeySettings": "StaticKeySettings"
+      }
+    },
+    "LastFrameClippingBehavior": {
+      "type": "string",
+      "enum": [
+        "EXCLUDE_LAST_FRAME",
+        "INCLUDE_LAST_FRAME"
+      ]
+    },
+    "LinkedChannelSettings": {
+      "type": "structure",
+      "members": {
+        "FollowerChannelSettings": "FollowerChannelSettings",
+        "PrimaryChannelSettings": "PrimaryChannelSettings"
+      }
+    },
+    "LinkedChannelType": {
+      "type": "string",
+      "enum": [
+        "FOLLOWING_CHANNEL",
+        "PRIMARY_CHANNEL"
+      ]
+    },
+    "ListAlertsRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId"
+      ],
+      "members": {
+        "ChannelId": "__string",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "StateFilter": "__string"
+      }
+    },
+    "ListChannelPlacementGroupsRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListChannelsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListCloudWatchAlarmTemplateGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "Scope": "__string",
+        "SignalMapIdentifier": "__string"
+      }
+    },
+    "ListCloudWatchAlarmTemplatesRequest": {
+      "type": "structure",
+      "members": {
+        "GroupIdentifier": "__string",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "Scope": "__string",
+        "SignalMapIdentifier": "__string"
+      }
+    },
+    "ListClusterAlertsRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "StateFilter": "__string"
+      }
+    },
+    "ListClustersRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListEventBridgeRuleTemplateGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "SignalMapIdentifier": "__string"
+      }
+    },
+    "ListEventBridgeRuleTemplatesRequest": {
+      "type": "structure",
+      "members": {
+        "GroupIdentifier": "__string",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "SignalMapIdentifier": "__string"
+      }
+    },
+    "ListInputDeviceTransfersRequest": {
+      "type": "structure",
+      "required": [
+        "TransferType"
+      ],
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "TransferType": "__string"
+      }
+    },
+    "ListInputDevicesRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListInputSecurityGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListInputsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListMultiplexAlertsRequest": {
+      "type": "structure",
+      "required": [
+        "MultiplexId"
+      ],
+      "members": {
+        "MaxResults": "MaxResults",
+        "MultiplexId": "__string",
+        "NextToken": "__string",
+        "StateFilter": "__string"
+      }
+    },
+    "ListMultiplexProgramsRequest": {
+      "type": "structure",
+      "required": [
+        "MultiplexId"
+      ],
+      "members": {
+        "MaxResults": "MaxResults",
+        "MultiplexId": "__string",
+        "NextToken": "__string"
+      }
+    },
+    "ListMultiplexesRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListNetworksRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListNodesRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListOfferingsRequest": {
+      "type": "structure",
+      "members": {
+        "ChannelClass": "__string",
+        "ChannelConfiguration": "__string",
+        "Codec": "__string",
+        "Duration": "__string",
+        "MaxResults": "MaxResults",
+        "MaximumBitrate": "__string",
+        "MaximumFramerate": "__string",
+        "NextToken": "__string",
+        "Resolution": "__string",
+        "ResourceType": "__string",
+        "SpecialFeature": "__string",
+        "VideoQuality": "__string"
+      }
+    },
+    "ListReservationsRequest": {
+      "type": "structure",
+      "members": {
+        "ChannelClass": "__string",
+        "Codec": "__string",
+        "MaxResults": "MaxResults",
+        "MaximumBitrate": "__string",
+        "MaximumFramerate": "__string",
+        "NextToken": "__string",
+        "Resolution": "__string",
+        "ResourceType": "__string",
+        "SpecialFeature": "__string",
+        "VideoQuality": "__string"
+      }
+    },
+    "ListSdiSourcesRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListSignalMapsRequest": {
+      "type": "structure",
+      "members": {
+        "CloudWatchAlarmTemplateGroupIdentifier": "__string",
+        "EventBridgeRuleTemplateGroupIdentifier": "__string",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "__string"
+      }
+    },
+    "ListVersionsRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "LogLevel": {
+      "type": "string",
+      "enum": [
+        "ERROR",
+        "WARNING",
+        "INFO",
+        "DEBUG",
+        "DISABLED"
+      ]
+    },
+    "M2tsAbsentInputAudioBehavior": {
+      "type": "string",
+      "enum": [
+        "DROP",
+        "ENCODE_SILENCE"
+      ]
+    },
+    "M2tsArib": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "M2tsAribCaptionsPidControl": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "USE_CONFIGURED"
+      ]
+    },
+    "M2tsAudioBufferModel": {
+      "type": "string",
+      "enum": [
+        "ATSC",
+        "DVB"
+      ]
+    },
+    "M2tsAudioInterval": {
+      "type": "string",
+      "enum": [
+        "VIDEO_AND_FIXED_INTERVALS",
+        "VIDEO_INTERVAL"
+      ]
+    },
+    "M2tsAudioStreamType": {
+      "type": "string",
+      "enum": [
+        "ATSC",
+        "DVB"
+      ]
+    },
+    "M2tsBufferModel": {
+      "type": "string",
+      "enum": [
+        "MULTIPLEX",
+        "NONE"
+      ]
+    },
+    "M2tsCcDescriptor": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "M2tsEbifControl": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PASSTHROUGH"
+      ]
+    },
+    "M2tsEbpPlacement": {
+      "type": "string",
+      "enum": [
+        "VIDEO_AND_AUDIO_PIDS",
+        "VIDEO_PID"
+      ]
+    },
+    "M2tsEsRateInPes": {
+      "type": "string",
+      "enum": [
+        "EXCLUDE",
+        "INCLUDE"
+      ]
+    },
+    "M2tsKlv": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PASSTHROUGH"
+      ]
+    },
+    "M2tsNielsenId3Behavior": {
+      "type": "string",
+      "enum": [
+        "NO_PASSTHROUGH",
+        "PASSTHROUGH"
+      ]
+    },
+    "M2tsPcrControl": {
+      "type": "string",
+      "enum": [
+        "CONFIGURED_PCR_PERIOD",
+        "PCR_EVERY_PES_PACKET"
+      ]
+    },
+    "M2tsRateMode": {
+      "type": "string",
+      "enum": [
+        "CBR",
+        "VBR"
+      ]
+    },
+    "M2tsScte35Control": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PASSTHROUGH",
+        "SCTE_35_WITHOUT_IDR"
+      ]
+    },
+    "M2tsSegmentationMarkers": {
+      "type": "string",
+      "enum": [
+        "EBP",
+        "EBP_LEGACY",
+        "NONE",
+        "PSI_SEGSTART",
+        "RAI_ADAPT",
+        "RAI_SEGSTART"
+      ]
+    },
+    "M2tsSegmentationStyle": {
+      "type": "string",
+      "enum": [
+        "MAINTAIN_CADENCE",
+        "RESET_CADENCE"
+      ]
+    },
+    "M2tsSettings": {
+      "type": "structure",
+      "members": {
+        "AbsentInputAudioBehavior": "M2tsAbsentInputAudioBehavior",
+        "Arib": "M2tsArib",
+        "AribCaptionsPid": "__string",
+        "AribCaptionsPidControl": "M2tsAribCaptionsPidControl",
+        "AudioBufferModel": "M2tsAudioBufferModel",
+        "AudioFramesPerPes": "__integerMin0",
+        "AudioPids": "__string",
+        "AudioStreamType": "M2tsAudioStreamType",
+        "Bitrate": "__integerMin0",
+        "BufferModel": "M2tsBufferModel",
+        "CcDescriptor": "M2tsCcDescriptor",
+        "DvbNitSettings": "DvbNitSettings",
+        "DvbSdtSettings": "DvbSdtSettings",
+        "DvbSubPids": "__string",
+        "DvbTdtSettings": "DvbTdtSettings",
+        "DvbTeletextPid": "__string",
+        "Ebif": "M2tsEbifControl",
+        "EbpAudioInterval": "M2tsAudioInterval",
+        "EbpLookaheadMs": "__integerMin0Max10000",
+        "EbpPlacement": "M2tsEbpPlacement",
+        "EcmPid": "__string",
+        "EsRateInPes": "M2tsEsRateInPes",
+        "EtvPlatformPid": "__string",
+        "EtvSignalPid": "__string",
+        "FragmentTime": "__doubleMin0",
+        "Klv": "M2tsKlv",
+        "KlvDataPids": "__string",
+        "NielsenId3Behavior": "M2tsNielsenId3Behavior",
+        "NullPacketBitrate": "__doubleMin0",
+        "PatInterval": "__integerMin0Max1000",
+        "PcrControl": "M2tsPcrControl",
+        "PcrPeriod": "__integerMin0Max500",
+        "PcrPid": "__string",
+        "PmtInterval": "__integerMin0Max1000",
+        "PmtPid": "__string",
+        "ProgramNum": "__integerMin0Max65535",
+        "RateMode": "M2tsRateMode",
+        "Scte27Pids": "__string",
+        "Scte35Control": "M2tsScte35Control",
+        "Scte35Pid": "__string",
+        "SegmentationMarkers": "M2tsSegmentationMarkers",
+        "SegmentationStyle": "M2tsSegmentationStyle",
+        "SegmentationTime": "__doubleMin1",
+        "TimedMetadataBehavior": "M2tsTimedMetadataBehavior",
+        "TimedMetadataPid": "__string",
+        "TransportStreamId": "__integerMin0Max65535",
+        "VideoPid": "__string",
+        "Scte35PrerollPullupMilliseconds": "__doubleMin0Max5000"
+      }
+    },
+    "M2tsTimedMetadataBehavior": {
+      "type": "string",
+      "enum": [
+        "NO_PASSTHROUGH",
+        "PASSTHROUGH"
+      ]
+    },
+    "M3u8KlvBehavior": {
+      "type": "string",
+      "enum": [
+        "NO_PASSTHROUGH",
+        "PASSTHROUGH"
+      ]
+    },
+    "M3u8NielsenId3Behavior": {
+      "type": "string",
+      "enum": [
+        "NO_PASSTHROUGH",
+        "PASSTHROUGH"
+      ]
+    },
+    "M3u8PcrControl": {
+      "type": "string",
+      "enum": [
+        "CONFIGURED_PCR_PERIOD",
+        "PCR_EVERY_PES_PACKET"
+      ]
+    },
+    "M3u8Scte35Behavior": {
+      "type": "string",
+      "enum": [
+        "NO_PASSTHROUGH",
+        "PASSTHROUGH"
+      ]
+    },
+    "M3u8Settings": {
+      "type": "structure",
+      "members": {
+        "AudioFramesPerPes": "__integerMin0",
+        "AudioPids": "__string",
+        "EcmPid": "__string",
+        "NielsenId3Behavior": "M3u8NielsenId3Behavior",
+        "PatInterval": "__integerMin0Max1000",
+        "PcrControl": "M3u8PcrControl",
+        "PcrPeriod": "__integerMin0Max500",
+        "PcrPid": "__string",
+        "PmtInterval": "__integerMin0Max1000",
+        "PmtPid": "__string",
+        "ProgramNum": "__integerMin0Max65535",
+        "Scte35Behavior": "M3u8Scte35Behavior",
+        "Scte35Pid": "__string",
+        "TimedMetadataBehavior": "M3u8TimedMetadataBehavior",
+        "TimedMetadataPid": "__string",
+        "TransportStreamId": "__integerMin0Max65535",
+        "VideoPid": "__string",
+        "KlvBehavior": "M3u8KlvBehavior",
+        "KlvDataPids": "__string"
+      }
+    },
+    "M3u8TimedMetadataBehavior": {
+      "type": "string",
+      "enum": [
+        "NO_PASSTHROUGH",
+        "PASSTHROUGH"
+      ]
+    },
+    "MaintenanceCreateSettings": {
+      "type": "structure",
+      "members": {
+        "MaintenanceDay": "MaintenanceDay",
+        "MaintenanceStartTime": "__stringPattern010920300"
+      }
+    },
+    "MaintenanceDay": {
+      "type": "string",
+      "enum": [
+        "MONDAY",
+        "TUESDAY",
+        "WEDNESDAY",
+        "THURSDAY",
+        "FRIDAY",
+        "SATURDAY",
+        "SUNDAY"
+      ]
+    },
+    "MaintenanceUpdateSettings": {
+      "type": "structure",
+      "members": {
+        "MaintenanceDay": "MaintenanceDay",
+        "MaintenanceScheduledDate": "__string",
+        "MaintenanceStartTime": "__stringPattern010920300"
+      }
+    },
+    "MaxResults": {
+      "type": "integer"
+    },
+    "MediaConnectFlowRequest": {
+      "type": "structure",
+      "members": {
+        "FlowArn": "__string"
+      }
+    },
+    "MediaConnectRouterContainerSettings": {
+      "type": "structure",
+      "members": {
+        "M2tsSettings": "M2tsSettings"
+      }
+    },
+    "MediaConnectRouterGroupSettings": {
+      "type": "structure",
+      "members": {
+        "AvailabilityZones": "__listOf__string"
+      }
+    },
+    "MediaConnectRouterOutputConnectionMap": {
+      "type": "structure",
+      "members": {
+        "Pipeline0": "__string",
+        "Pipeline1": "__string"
+      }
+    },
+    "MediaConnectRouterOutputDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "EncryptionType": "MediaConnectRouterOutputEncryptionType",
+        "SecretArn": "__string"
+      }
+    },
+    "MediaConnectRouterOutputEncryptionType": {
+      "type": "string",
+      "enum": [
+        "AUTOMATIC",
+        "SECRETS_MANAGER"
+      ]
+    },
+    "MediaConnectRouterOutputSettings": {
+      "type": "structure",
+      "required": [
+        "Destination",
+        "ContainerSettings"
+      ],
+      "members": {
+        "ConnectedRouterInputs": "MediaConnectRouterOutputConnectionMap",
+        "ContainerSettings": "MediaConnectRouterContainerSettings",
+        "Destination": "OutputLocationRef"
+      }
+    },
+    "MediaPackageAdditionalDestinations": {
+      "type": "structure",
+      "required": [
+        "Destination"
+      ],
+      "members": {
+        "Destination": "OutputLocationRef"
+      }
+    },
+    "MediaPackageGroupSettings": {
+      "type": "structure",
+      "required": [
+        "Destination"
+      ],
+      "members": {
+        "Destination": "OutputLocationRef",
+        "MediapackageV2GroupSettings": "MediaPackageV2GroupSettings"
+      }
+    },
+    "MediaPackageOutputDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "ChannelId": "__stringMin1",
+        "ChannelGroup": "__stringMin1",
+        "ChannelName": "__stringMin1",
+        "ChannelEndpointId": "__stringMin1",
+        "MediaPackageRegionName": "__stringMin1"
+      }
+    },
+    "MediaPackageOutputSettings": {
+      "type": "structure",
+      "members": {
+        "MediaPackageV2DestinationSettings": "MediaPackageV2DestinationSettings"
+      }
+    },
+    "MediaPackageV2AbWatermarkerIrdetoSettings": {
+      "type": "structure",
+      "required": [
+        "AlternateDestination",
+        "OperatorId",
+        "Profile"
+      ],
+      "members": {
+        "AdditionalDestinationsAlternateDestinations": "__listOfOutputLocationRef",
+        "AlternateDestination": "OutputLocationRef",
+        "CustomProfile": "AbWatermarkingCustomProfile",
+        "License": "__string",
+        "OperatorId": "__integerMin1Max511",
+        "PolyPeriod": "__integerMin1Max1000",
+        "Profile": "AbWatermarkingProfile",
+        "WatermarkIdLength": "AbWatermarkerIdLength"
+      }
+    },
+    "MediaPackageV2DestinationSettings": {
+      "type": "structure",
+      "members": {
+        "AudioGroupId": "__string",
+        "AudioRenditionSets": "__string",
+        "HlsAutoSelect": "HlsAutoSelect",
+        "HlsDefault": "HlsDefault",
+        "OutputUsage": "__listOfOutputUsage"
+      }
+    },
+    "MediaPackageV2GroupSettings": {
+      "type": "structure",
+      "members": {
+        "CaptionLanguageMappings": "__listOfCaptionLanguageMapping",
+        "Id3Behavior": "CmafId3Behavior",
+        "KlvBehavior": "CmafKLVBehavior",
+        "NielsenId3Behavior": "CmafNielsenId3Behavior",
+        "Scte35Type": "Scte35Type",
+        "SegmentLength": "__integerMin1",
+        "SegmentLengthUnits": "CmafIngestSegmentLengthUnits",
+        "TimedMetadataId3Frame": "CmafTimedMetadataId3Frame",
+        "TimedMetadataId3Period": "__integerMin0Max10000",
+        "TimedMetadataPassthrough": "CmafTimedMetadataPassthrough",
+        "AdditionalDestinations": "__listOfMediaPackageAdditionalDestinations",
+        "WatermarkingSettings": "MediaPackageV2WatermarkingSettings"
+      }
+    },
+    "MediaPackageV2WatermarkingSettings": {
+      "type": "structure",
+      "members": {
+        "MediaPackageV2AbWatermarkerIrdetoSettings": "MediaPackageV2AbWatermarkerIrdetoSettings"
+      }
+    },
+    "MotionGraphicsActivateScheduleActionSettings": {
+      "type": "structure",
+      "members": {
+        "Duration": "__longMin0Max86400000",
+        "PasswordParam": "__string",
+        "Url": "__string",
+        "Username": "__string"
+      }
+    },
+    "MotionGraphicsConfiguration": {
+      "type": "structure",
+      "required": [
+        "MotionGraphicsSettings"
+      ],
+      "members": {
+        "MotionGraphicsInsertion": "MotionGraphicsInsertion",
+        "MotionGraphicsSettings": "MotionGraphicsSettings"
+      }
+    },
+    "MotionGraphicsDeactivateScheduleActionSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "MotionGraphicsInsertion": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "MotionGraphicsSettings": {
+      "type": "structure",
+      "members": {
+        "HtmlMotionGraphicsSettings": "HtmlMotionGraphicsSettings"
+      }
+    },
+    "Mp2CodingMode": {
+      "type": "string",
+      "enum": [
+        "CODING_MODE_1_0",
+        "CODING_MODE_2_0"
+      ]
+    },
+    "Mp2Settings": {
+      "type": "structure",
+      "members": {
+        "Bitrate": "__double",
+        "CodingMode": "Mp2CodingMode",
+        "SampleRate": "__double"
+      }
+    },
+    "Mpeg2AdaptiveQuantization": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "HIGH",
+        "LOW",
+        "MEDIUM",
+        "OFF"
+      ]
+    },
+    "Mpeg2ColorMetadata": {
+      "type": "string",
+      "enum": [
+        "IGNORE",
+        "INSERT"
+      ]
+    },
+    "Mpeg2ColorSpace": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "PASSTHROUGH"
+      ]
+    },
+    "Mpeg2DisplayRatio": {
+      "type": "string",
+      "enum": [
+        "DISPLAYRATIO16X9",
+        "DISPLAYRATIO4X3"
+      ]
+    },
+    "Mpeg2FilterSettings": {
+      "type": "structure",
+      "members": {
+        "TemporalFilterSettings": "TemporalFilterSettings"
+      }
+    },
+    "Mpeg2GopSizeUnits": {
+      "type": "string",
+      "enum": [
+        "FRAMES",
+        "SECONDS"
+      ]
+    },
+    "Mpeg2ScanType": {
+      "type": "string",
+      "enum": [
+        "INTERLACED",
+        "PROGRESSIVE"
+      ]
+    },
+    "Mpeg2Settings": {
+      "type": "structure",
+      "required": [
+        "FramerateNumerator",
+        "FramerateDenominator"
+      ],
+      "members": {
+        "AdaptiveQuantization": "Mpeg2AdaptiveQuantization",
+        "AfdSignaling": "AfdSignaling",
+        "ColorMetadata": "Mpeg2ColorMetadata",
+        "ColorSpace": "Mpeg2ColorSpace",
+        "DisplayAspectRatio": "Mpeg2DisplayRatio",
+        "FilterSettings": "Mpeg2FilterSettings",
+        "FixedAfd": "FixedAfd",
+        "FramerateDenominator": "__integerMin1",
+        "FramerateNumerator": "__integerMin1",
+        "GopClosedCadence": "__integerMin0",
+        "GopNumBFrames": "__integerMin0Max7",
+        "GopSize": "__double",
+        "GopSizeUnits": "Mpeg2GopSizeUnits",
+        "ScanType": "Mpeg2ScanType",
+        "SubgopLength": "Mpeg2SubGopLength",
+        "TimecodeInsertion": "Mpeg2TimecodeInsertionBehavior",
+        "TimecodeBurninSettings": "TimecodeBurninSettings"
+      }
+    },
+    "Mpeg2SubGopLength": {
+      "type": "string",
+      "enum": [
+        "DYNAMIC",
+        "FIXED"
+      ]
+    },
+    "Mpeg2TimecodeInsertionBehavior": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "GOP_TIMECODE"
+      ]
+    },
+    "MsSmoothGroupSettings": {
+      "type": "structure",
+      "required": [
+        "Destination"
+      ],
+      "members": {
+        "AcquisitionPointId": "__string",
+        "AudioOnlyTimecodeControl": "SmoothGroupAudioOnlyTimecodeControl",
+        "CertificateMode": "SmoothGroupCertificateMode",
+        "ConnectionRetryInterval": "__integerMin0",
+        "Destination": "OutputLocationRef",
+        "EventId": "__string",
+        "EventIdMode": "SmoothGroupEventIdMode",
+        "EventStopBehavior": "SmoothGroupEventStopBehavior",
+        "FilecacheDuration": "__integerMin0",
+        "FragmentLength": "__integerMin1",
+        "InputLossAction": "InputLossActionForMsSmoothOut",
+        "NumRetries": "__integerMin0",
+        "RestartDelay": "__integerMin0",
+        "SegmentationMode": "SmoothGroupSegmentationMode",
+        "SendDelayMs": "__integerMin0Max10000",
+        "SparseTrackType": "SmoothGroupSparseTrackType",
+        "StreamManifestBehavior": "SmoothGroupStreamManifestBehavior",
+        "TimestampOffset": "__string",
+        "TimestampOffsetMode": "SmoothGroupTimestampOffsetMode"
+      }
+    },
+    "MsSmoothH265PackagingType": {
+      "type": "string",
+      "enum": [
+        "HEV1",
+        "HVC1"
+      ]
+    },
+    "MsSmoothOutputSettings": {
+      "type": "structure",
+      "members": {
+        "H265PackagingType": "MsSmoothH265PackagingType",
+        "NameModifier": "__string"
+      }
+    },
+    "MulticastInputSettings": {
+      "type": "structure",
+      "members": {
+        "SourceIpAddress": "__string"
+      }
+    },
+    "MulticastSettingsCreateRequest": {
+      "type": "structure",
+      "members": {
+        "Sources": "__listOfMulticastSourceCreateRequest"
+      }
+    },
+    "MulticastSettingsUpdateRequest": {
+      "type": "structure",
+      "members": {
+        "Sources": "__listOfMulticastSourceUpdateRequest"
+      }
+    },
+    "MulticastSourceCreateRequest": {
+      "type": "structure",
+      "required": [
+        "Url"
+      ],
+      "members": {
+        "SourceIp": "__string",
+        "Url": "__string"
+      }
+    },
+    "MulticastSourceUpdateRequest": {
+      "type": "structure",
+      "required": [
+        "Url"
+      ],
+      "members": {
+        "SourceIp": "__string",
+        "Url": "__string"
+      }
+    },
+    "MultiplexContainerSettings": {
+      "type": "structure",
+      "members": {
+        "MultiplexM2tsSettings": "MultiplexM2tsSettings"
+      }
+    },
+    "MultiplexGroupSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "MultiplexM2tsSettings": {
+      "type": "structure",
+      "members": {
+        "AbsentInputAudioBehavior": "M2tsAbsentInputAudioBehavior",
+        "Arib": "M2tsArib",
+        "AudioBufferModel": "M2tsAudioBufferModel",
+        "AudioFramesPerPes": "__integerMin0",
+        "AudioStreamType": "M2tsAudioStreamType",
+        "CcDescriptor": "M2tsCcDescriptor",
+        "Ebif": "M2tsEbifControl",
+        "EsRateInPes": "M2tsEsRateInPes",
+        "Klv": "M2tsKlv",
+        "NielsenId3Behavior": "M2tsNielsenId3Behavior",
+        "PcrControl": "M2tsPcrControl",
+        "PcrPeriod": "__integerMin0Max500",
+        "Scte35Control": "M2tsScte35Control",
+        "Scte35PrerollPullupMilliseconds": "__doubleMin0Max5000"
+      }
+    },
+    "MultiplexOutputSettings": {
+      "type": "structure",
+      "required": [
+        "Destination"
+      ],
+      "members": {
+        "Destination": "OutputLocationRef",
+        "ContainerSettings": "MultiplexContainerSettings"
+      }
+    },
+    "MultiplexPacketIdentifiersMapping": {
+      "type": "map",
+      "key": "__string",
+      "value": "MultiplexProgramPacketIdentifiersMap"
+    },
+    "MultiplexProgramChannelDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "MultiplexId": "__stringMin1",
+        "ProgramName": "__stringMin1"
+      }
+    },
+    "MultiplexProgramPacketIdentifiersMap": {
+      "type": "structure",
+      "members": {
+        "AudioPids": "__listOf__integer",
+        "DvbSubPids": "__listOf__integer",
+        "DvbTeletextPid": "__integer",
+        "EtvPlatformPid": "__integer",
+        "EtvSignalPid": "__integer",
+        "KlvDataPids": "__listOf__integer",
+        "PcrPid": "__integer",
+        "PmtPid": "__integer",
+        "PrivateMetadataPid": "__integer",
+        "Scte27Pids": "__listOf__integer",
+        "Scte35Pid": "__integer",
+        "TimedMetadataPid": "__integer",
+        "VideoPid": "__integer",
+        "AribCaptionsPid": "__integer",
+        "DvbTeletextPids": "__listOf__integer",
+        "EcmPid": "__integer",
+        "Smpte2038Pid": "__integer"
+      }
+    },
+    "MultiplexProgramServiceDescriptor": {
+      "type": "structure",
+      "required": [
+        "ProviderName",
+        "ServiceName"
+      ],
+      "members": {
+        "ProviderName": "__stringMax256",
+        "ServiceName": "__stringMax256"
+      }
+    },
+    "MultiplexProgramSettings": {
+      "type": "structure",
+      "required": [
+        "ProgramNumber"
+      ],
+      "members": {
+        "PreferredChannelPipeline": "PreferredChannelPipeline",
+        "ProgramNumber": "__integerMin0Max65535",
+        "ServiceDescriptor": "MultiplexProgramServiceDescriptor",
+        "VideoSettings": "MultiplexVideoSettings"
+      }
+    },
+    "MultiplexSettings": {
+      "type": "structure",
+      "required": [
+        "TransportStreamBitrate",
+        "TransportStreamId"
+      ],
+      "members": {
+        "MaximumVideoBufferDelayMilliseconds": "__integerMin800Max3000",
+        "TransportStreamBitrate": "__integerMin1000000Max100000000",
+        "TransportStreamId": "__integerMin0Max65535",
+        "TransportStreamReservedBitrate": "__integerMin0Max100000000"
+      }
+    },
+    "MultiplexStatmuxVideoSettings": {
+      "type": "structure",
+      "members": {
+        "MaximumBitrate": "__integerMin100000Max100000000",
+        "MinimumBitrate": "__integerMin100000Max100000000",
+        "Priority": "__integerMinNegative5Max5"
+      }
+    },
+    "MultiplexVideoSettings": {
+      "type": "structure",
+      "members": {
+        "ConstantBitrate": "__integerMin100000Max100000000",
+        "StatmuxSettings": "MultiplexStatmuxVideoSettings"
+      }
+    },
+    "NetworkInputServerValidation": {
+      "type": "string",
+      "enum": [
+        "CHECK_CRYPTOGRAPHY_AND_VALIDATE_NAME",
+        "CHECK_CRYPTOGRAPHY_ONLY"
+      ]
+    },
+    "NetworkInputSettings": {
+      "type": "structure",
+      "members": {
+        "HlsInputSettings": "HlsInputSettings",
+        "ServerValidation": "NetworkInputServerValidation",
+        "MulticastInputSettings": "MulticastInputSettings"
+      }
+    },
+    "NetworkInterfaceMode": {
+      "type": "string",
+      "enum": [
+        "NAT",
+        "BRIDGE"
+      ]
+    },
+    "NielsenCBET": {
+      "type": "structure",
+      "required": [
+        "CbetCheckDigitString",
+        "CbetStepaside",
+        "Csid"
+      ],
+      "members": {
+        "CbetCheckDigitString": "__stringMin2Max2",
+        "CbetStepaside": "NielsenWatermarksCbetStepaside",
+        "Csid": "__stringMin1Max7"
+      }
+    },
+    "NielsenConfiguration": {
+      "type": "structure",
+      "members": {
+        "DistributorId": "__string",
+        "NielsenPcmToId3Tagging": "NielsenPcmToId3TaggingState"
+      }
+    },
+    "NielsenNaesIiNw": {
+      "type": "structure",
+      "required": [
+        "CheckDigitString",
+        "Sid"
+      ],
+      "members": {
+        "CheckDigitString": "__stringMin2Max2",
+        "Sid": "__doubleMin1Max65535",
+        "Timezone": "NielsenWatermarkTimezones"
+      }
+    },
+    "NielsenNwOnly": {
+      "type": "structure",
+      "required": [
+        "CheckDigitString",
+        "Sid"
+      ],
+      "members": {
+        "CheckDigitString": "__stringMin2Max2",
+        "Sid": "__doubleMin1Max65535",
+        "Timezone": "NielsenWatermarkTimezones"
+      }
+    },
+    "NielsenPcmToId3TaggingState": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "NielsenWatermarkTimezones": {
+      "type": "string",
+      "enum": [
+        "AMERICA_PUERTO_RICO",
+        "US_ALASKA",
+        "US_ARIZONA",
+        "US_CENTRAL",
+        "US_EASTERN",
+        "US_HAWAII",
+        "US_MOUNTAIN",
+        "US_PACIFIC",
+        "US_SAMOA",
+        "UTC"
+      ]
+    },
+    "NielsenWatermarksCbetStepaside": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "NielsenWatermarksDistributionTypes": {
+      "type": "string",
+      "enum": [
+        "FINAL_DISTRIBUTOR",
+        "PROGRAM_CONTENT"
+      ]
+    },
+    "NielsenWatermarksSettings": {
+      "type": "structure",
+      "members": {
+        "NielsenCbetSettings": "NielsenCBET",
+        "NielsenDistributionType": "NielsenWatermarksDistributionTypes",
+        "NielsenNaesIiNwSettings": "NielsenNaesIiNw",
+        "NielsenNwOnlySettings": "NielsenNwOnly"
+      }
+    },
+    "NodeInterfaceMapping": {
+      "type": "structure",
+      "members": {
+        "LogicalInterfaceName": "__string",
+        "NetworkInterfaceMode": "NetworkInterfaceMode",
+        "PhysicalInterfaceName": "__string",
+        "PhysicalInterfaceIpAddresses": "__listOf__string"
+      }
+    },
+    "NodeInterfaceMappingCreateRequest": {
+      "type": "structure",
+      "members": {
+        "LogicalInterfaceName": "__string",
+        "NetworkInterfaceMode": "NetworkInterfaceMode",
+        "PhysicalInterfaceName": "__string"
+      }
+    },
+    "NodeRole": {
+      "type": "string",
+      "enum": [
+        "BACKUP",
+        "ACTIVE"
+      ]
+    },
+    "Output": {
+      "type": "structure",
+      "required": [
+        "OutputSettings"
+      ],
+      "members": {
+        "AudioDescriptionNames": "__listOf__string",
+        "CaptionDescriptionNames": "__listOf__string",
+        "OutputName": "__stringMin1Max255",
+        "OutputSettings": "OutputSettings",
+        "VideoDescriptionName": "__string"
+      }
+    },
+    "OutputDestination": {
+      "type": "structure",
+      "members": {
+        "Id": "__string",
+        "MediaPackageSettings": "__listOfMediaPackageOutputDestinationSettings",
+        "MultiplexSettings": "MultiplexProgramChannelDestinationSettings",
+        "Settings": "__listOfOutputDestinationSettings",
+        "SrtSettings": "__listOfSrtOutputDestinationSettings",
+        "LogicalInterfaceNames": "__listOf__string",
+        "MediaConnectRouterSettings": "__listOfMediaConnectRouterOutputDestinationSettings"
+      }
+    },
+    "OutputDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "PasswordParam": "__string",
+        "StreamName": "__string",
+        "Url": "__string",
+        "Username": "__string",
+        "VirtualSourceAddress": "__string"
+      }
+    },
+    "OutputGroup": {
+      "type": "structure",
+      "required": [
+        "Outputs",
+        "OutputGroupSettings"
+      ],
+      "members": {
+        "Name": "__stringMax32",
+        "OutputGroupSettings": "OutputGroupSettings",
+        "Outputs": "__listOfOutput"
+      }
+    },
+    "OutputGroupSettings": {
+      "type": "structure",
+      "members": {
+        "ArchiveGroupSettings": "ArchiveGroupSettings",
+        "FrameCaptureGroupSettings": "FrameCaptureGroupSettings",
+        "HlsGroupSettings": "HlsGroupSettings",
+        "MediaPackageGroupSettings": "MediaPackageGroupSettings",
+        "MsSmoothGroupSettings": "MsSmoothGroupSettings",
+        "MultiplexGroupSettings": "MultiplexGroupSettings",
+        "RtmpGroupSettings": "RtmpGroupSettings",
+        "UdpGroupSettings": "UdpGroupSettings",
+        "CmafIngestGroupSettings": "CmafIngestGroupSettings",
+        "SrtGroupSettings": "SrtGroupSettings",
+        "MediaConnectRouterGroupSettings": "MediaConnectRouterGroupSettings"
+      }
+    },
+    "OutputLocationRef": {
+      "type": "structure",
+      "members": {
+        "DestinationRefId": "__string"
+      }
+    },
+    "OutputLockingSettings": {
+      "type": "structure",
+      "members": {
+        "EpochLockingSettings": "EpochLockingSettings",
+        "PipelineLockingSettings": "PipelineLockingSettings",
+        "DisabledLockingSettings": "DisabledLockingSettings"
+      }
+    },
+    "OutputSettings": {
+      "type": "structure",
+      "members": {
+        "ArchiveOutputSettings": "ArchiveOutputSettings",
+        "FrameCaptureOutputSettings": "FrameCaptureOutputSettings",
+        "HlsOutputSettings": "HlsOutputSettings",
+        "MediaPackageOutputSettings": "MediaPackageOutputSettings",
+        "MsSmoothOutputSettings": "MsSmoothOutputSettings",
+        "MultiplexOutputSettings": "MultiplexOutputSettings",
+        "RtmpOutputSettings": "RtmpOutputSettings",
+        "UdpOutputSettings": "UdpOutputSettings",
+        "CmafIngestOutputSettings": "CmafIngestOutputSettings",
+        "SrtOutputSettings": "SrtOutputSettings",
+        "MediaConnectRouterOutputSettings": "MediaConnectRouterOutputSettings"
+      }
+    },
+    "OutputUsage": {
+      "type": "string",
+      "enum": [
+        "MULTIVIEW_EQUAL_SIZE_VIEW",
+        "MULTIVIEW_PRIMARY_VIEW",
+        "MULTIVIEW_SECONDARY_VIEW"
+      ]
+    },
+    "PassThroughSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "PauseStateScheduleActionSettings": {
+      "type": "structure",
+      "members": {
+        "Pipelines": "__listOfPipelinePauseStateSettings"
+      }
+    },
+    "PipelineId": {
+      "type": "string",
+      "enum": [
+        "PIPELINE_0",
+        "PIPELINE_1"
+      ]
+    },
+    "PipelineLockingMethod": {
+      "type": "string",
+      "enum": [
+        "SOURCE_TIMECODE",
+        "VIDEO_ALIGNMENT"
+      ]
+    },
+    "PipelineLockingSettings": {
+      "type": "structure",
+      "members": {
+        "PipelineLockingMethod": "PipelineLockingMethod",
+        "CustomEpoch": "__string"
+      }
+    },
+    "PipelinePauseStateSettings": {
+      "type": "structure",
+      "required": [
+        "PipelineId"
+      ],
+      "members": {
+        "PipelineId": "PipelineId"
+      }
+    },
+    "PreferredChannelPipeline": {
+      "type": "string",
+      "enum": [
+        "CURRENTLY_ACTIVE",
+        "PIPELINE_0",
+        "PIPELINE_1"
+      ]
+    },
+    "PrimaryChannelSettings": {
+      "type": "structure",
+      "members": {
+        "LinkedChannelType": "LinkedChannelType"
+      }
+    },
+    "PurchaseOfferingRequest": {
+      "type": "structure",
+      "required": [
+        "OfferingId",
+        "Count"
+      ],
+      "members": {
+        "Count": "__integerMin1",
+        "Name": "__string",
+        "OfferingId": "__string",
+        "RenewalSettings": "RenewalSettings",
+        "RequestId": "__string",
+        "Start": "__string",
+        "Tags": "Tags"
+      }
+    },
+    "RawSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "RebootInputDeviceForce": {
+      "type": "string",
+      "enum": [
+        "NO",
+        "YES"
+      ]
+    },
+    "RebootInputDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "InputDeviceId"
+      ],
+      "members": {
+        "Force": "RebootInputDeviceForce",
+        "InputDeviceId": "__string"
+      }
+    },
+    "Rec601Settings": {
+      "type": "structure",
+      "members": {}
+    },
+    "Rec709Settings": {
+      "type": "structure",
+      "members": {}
+    },
+    "RejectInputDeviceTransferRequest": {
+      "type": "structure",
+      "required": [
+        "InputDeviceId"
+      ],
+      "members": {
+        "InputDeviceId": "__string"
+      }
+    },
+    "RemixSettings": {
+      "type": "structure",
+      "required": [
+        "ChannelMappings"
+      ],
+      "members": {
+        "ChannelMappings": "__listOfAudioChannelMapping",
+        "ChannelsIn": "__integerMin1Max16",
+        "ChannelsOut": "__integerMin1Max8"
+      }
+    },
+    "RenewalSettings": {
+      "type": "structure",
+      "members": {
+        "AutomaticRenewal": "ReservationAutomaticRenewal",
+        "RenewalCount": "__integerMin1"
+      }
+    },
+    "ReservationAutomaticRenewal": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "ENABLED",
+        "UNAVAILABLE"
+      ]
+    },
+    "RestartChannelPipelinesRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId"
+      ],
+      "members": {
+        "ChannelId": "__string",
+        "PipelineIds": "__listOfChannelPipelineIdToRestart"
+      }
+    },
+    "RouteCreateRequest": {
+      "type": "structure",
+      "members": {
+        "Cidr": "__string",
+        "Gateway": "__string"
+      }
+    },
+    "RouteUpdateRequest": {
+      "type": "structure",
+      "members": {
+        "Cidr": "__string",
+        "Gateway": "__string"
+      }
+    },
+    "RouterDestinationSettings": {
+      "type": "structure",
+      "required": [
+        "AvailabilityZoneName"
+      ],
+      "members": {
+        "AvailabilityZoneName": "__string"
+      }
+    },
+    "RouterEncryptionType": {
+      "type": "string",
+      "enum": [
+        "AUTOMATIC",
+        "SECRETS_MANAGER"
+      ]
+    },
+    "RouterSettings": {
+      "type": "structure",
+      "members": {
+        "Destinations": "__listOfRouterDestinationSettings",
+        "EncryptionType": "RouterEncryptionType",
+        "SecretArn": "__string"
+      }
+    },
+    "RtmpAdMarkers": {
+      "type": "string",
+      "enum": [
+        "ON_CUE_POINT_SCTE35"
+      ]
+    },
+    "RtmpCacheFullBehavior": {
+      "type": "string",
+      "enum": [
+        "DISCONNECT_IMMEDIATELY",
+        "WAIT_FOR_SERVER"
+      ]
+    },
+    "RtmpCaptionData": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "FIELD1_608",
+        "FIELD1_AND_FIELD2_608"
+      ]
+    },
+    "RtmpCaptionInfoDestinationSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "RtmpGroupSettings": {
+      "type": "structure",
+      "members": {
+        "AdMarkers": "__listOfRtmpAdMarkers",
+        "AuthenticationScheme": "AuthenticationScheme",
+        "CacheFullBehavior": "RtmpCacheFullBehavior",
+        "CacheLength": "__integerMin30",
+        "CaptionData": "RtmpCaptionData",
+        "InputLossAction": "InputLossActionForRtmpOut",
+        "RestartDelay": "__integerMin0",
+        "IncludeFillerNalUnits": "IncludeFillerNalUnits"
+      }
+    },
+    "RtmpOutputCertificateMode": {
+      "type": "string",
+      "enum": [
+        "SELF_SIGNED",
+        "VERIFY_AUTHENTICITY"
+      ]
+    },
+    "RtmpOutputSettings": {
+      "type": "structure",
+      "required": [
+        "Destination"
+      ],
+      "members": {
+        "CertificateMode": "RtmpOutputCertificateMode",
+        "ConnectionRetryInterval": "__integerMin1",
+        "Destination": "OutputLocationRef",
+        "NumRetries": "__integerMin0"
+      }
+    },
+    "S3CannedAcl": {
+      "type": "string",
+      "enum": [
+        "AUTHENTICATED_READ",
+        "BUCKET_OWNER_FULL_CONTROL",
+        "BUCKET_OWNER_READ",
+        "PUBLIC_READ"
+      ]
+    },
+    "ScheduleAction": {
+      "type": "structure",
+      "required": [
+        "ActionName",
+        "ScheduleActionStartSettings",
+        "ScheduleActionSettings"
+      ],
+      "members": {
+        "ActionName": "__string",
+        "ScheduleActionSettings": "ScheduleActionSettings",
+        "ScheduleActionStartSettings": "ScheduleActionStartSettings"
+      }
+    },
+    "ScheduleActionSettings": {
+      "type": "structure",
+      "members": {
+        "HlsId3SegmentTaggingSettings": "HlsId3SegmentTaggingScheduleActionSettings",
+        "HlsTimedMetadataSettings": "HlsTimedMetadataScheduleActionSettings",
+        "InputPrepareSettings": "InputPrepareScheduleActionSettings",
+        "InputSwitchSettings": "InputSwitchScheduleActionSettings",
+        "MotionGraphicsImageActivateSettings": "MotionGraphicsActivateScheduleActionSettings",
+        "MotionGraphicsImageDeactivateSettings": "MotionGraphicsDeactivateScheduleActionSettings",
+        "PauseStateSettings": "PauseStateScheduleActionSettings",
+        "Scte35InputSettings": "Scte35InputScheduleActionSettings",
+        "Scte35ReturnToNetworkSettings": "Scte35ReturnToNetworkScheduleActionSettings",
+        "Scte35SpliceInsertSettings": "Scte35SpliceInsertScheduleActionSettings",
+        "Scte35TimeSignalSettings": "Scte35TimeSignalScheduleActionSettings",
+        "StaticImageActivateSettings": "StaticImageActivateScheduleActionSettings",
+        "StaticImageDeactivateSettings": "StaticImageDeactivateScheduleActionSettings",
+        "StaticImageOutputActivateSettings": "StaticImageOutputActivateScheduleActionSettings",
+        "StaticImageOutputDeactivateSettings": "StaticImageOutputDeactivateScheduleActionSettings",
+        "Id3SegmentTaggingSettings": "Id3SegmentTaggingScheduleActionSettings",
+        "TimedMetadataSettings": "TimedMetadataScheduleActionSettings"
+      }
+    },
+    "ScheduleActionStartSettings": {
+      "type": "structure",
+      "members": {
+        "FixedModeScheduleActionStartSettings": "FixedModeScheduleActionStartSettings",
+        "FollowModeScheduleActionStartSettings": "FollowModeScheduleActionStartSettings",
+        "ImmediateModeScheduleActionStartSettings": "ImmediateModeScheduleActionStartSettings"
+      }
+    },
+    "Scte20Convert608To708": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "UPCONVERT"
+      ]
+    },
+    "Scte20PlusEmbeddedDestinationSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "Scte20SourceSettings": {
+      "type": "structure",
+      "members": {
+        "Convert608To708": "Scte20Convert608To708",
+        "Source608ChannelNumber": "__integerMin1Max4"
+      }
+    },
+    "Scte27DestinationSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "Scte27OcrLanguage": {
+      "type": "string",
+      "enum": [
+        "DEU",
+        "ENG",
+        "FRA",
+        "NLD",
+        "POR",
+        "SPA"
+      ]
+    },
+    "Scte27SourceSettings": {
+      "type": "structure",
+      "members": {
+        "OcrLanguage": "Scte27OcrLanguage",
+        "Pid": "__integerMin1"
+      }
+    },
+    "Scte35AposNoRegionalBlackoutBehavior": {
+      "type": "string",
+      "enum": [
+        "FOLLOW",
+        "IGNORE"
+      ]
+    },
+    "Scte35AposWebDeliveryAllowedBehavior": {
+      "type": "string",
+      "enum": [
+        "FOLLOW",
+        "IGNORE"
+      ]
+    },
+    "Scte35ArchiveAllowedFlag": {
+      "type": "string",
+      "enum": [
+        "ARCHIVE_NOT_ALLOWED",
+        "ARCHIVE_ALLOWED"
+      ]
+    },
+    "Scte35DeliveryRestrictions": {
+      "type": "structure",
+      "required": [
+        "DeviceRestrictions",
+        "ArchiveAllowedFlag",
+        "WebDeliveryAllowedFlag",
+        "NoRegionalBlackoutFlag"
+      ],
+      "members": {
+        "ArchiveAllowedFlag": "Scte35ArchiveAllowedFlag",
+        "DeviceRestrictions": "Scte35DeviceRestrictions",
+        "NoRegionalBlackoutFlag": "Scte35NoRegionalBlackoutFlag",
+        "WebDeliveryAllowedFlag": "Scte35WebDeliveryAllowedFlag"
+      }
+    },
+    "Scte35Descriptor": {
+      "type": "structure",
+      "required": [
+        "Scte35DescriptorSettings"
+      ],
+      "members": {
+        "Scte35DescriptorSettings": "Scte35DescriptorSettings"
+      }
+    },
+    "Scte35DescriptorSettings": {
+      "type": "structure",
+      "required": [
+        "SegmentationDescriptorScte35DescriptorSettings"
+      ],
+      "members": {
+        "SegmentationDescriptorScte35DescriptorSettings": "Scte35SegmentationDescriptor"
+      }
+    },
+    "Scte35DeviceRestrictions": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "RESTRICT_GROUP0",
+        "RESTRICT_GROUP1",
+        "RESTRICT_GROUP2"
+      ]
+    },
+    "Scte35InputMode": {
+      "type": "string",
+      "enum": [
+        "FIXED",
+        "FOLLOW_ACTIVE"
+      ]
+    },
+    "Scte35InputScheduleActionSettings": {
+      "type": "structure",
+      "required": [
+        "Mode"
+      ],
+      "members": {
+        "InputAttachmentNameReference": "__string",
+        "Mode": "Scte35InputMode"
+      }
+    },
+    "Scte35NoRegionalBlackoutFlag": {
+      "type": "string",
+      "enum": [
+        "REGIONAL_BLACKOUT",
+        "NO_REGIONAL_BLACKOUT"
+      ]
+    },
+    "Scte35ReturnToNetworkScheduleActionSettings": {
+      "type": "structure",
+      "required": [
+        "SpliceEventId"
+      ],
+      "members": {
+        "SpliceEventId": "__longMin0Max4294967295"
+      }
+    },
+    "Scte35SegmentationCancelIndicator": {
+      "type": "string",
+      "enum": [
+        "SEGMENTATION_EVENT_NOT_CANCELED",
+        "SEGMENTATION_EVENT_CANCELED"
+      ]
+    },
+    "Scte35SegmentationDescriptor": {
+      "type": "structure",
+      "required": [
+        "SegmentationEventId",
+        "SegmentationCancelIndicator"
+      ],
+      "members": {
+        "DeliveryRestrictions": "Scte35DeliveryRestrictions",
+        "SegmentNum": "__integerMin0Max255",
+        "SegmentationCancelIndicator": "Scte35SegmentationCancelIndicator",
+        "SegmentationDuration": "__longMin0Max1099511627775",
+        "SegmentationEventId": "__longMin0Max4294967295",
+        "SegmentationTypeId": "__integerMin0Max255",
+        "SegmentationUpid": "__string",
+        "SegmentationUpidType": "__integerMin0Max255",
+        "SegmentsExpected": "__integerMin0Max255",
+        "SubSegmentNum": "__integerMin0Max255",
+        "SubSegmentsExpected": "__integerMin0Max255"
+      }
+    },
+    "Scte35SegmentationScope": {
+      "type": "string",
+      "enum": [
+        "ALL_OUTPUT_GROUPS",
+        "SCTE35_ENABLED_OUTPUT_GROUPS"
+      ]
+    },
+    "Scte35SpliceInsert": {
+      "type": "structure",
+      "members": {
+        "AdAvailOffset": "__integerMinNegative1000Max1000",
+        "NoRegionalBlackoutFlag": "Scte35SpliceInsertNoRegionalBlackoutBehavior",
+        "WebDeliveryAllowedFlag": "Scte35SpliceInsertWebDeliveryAllowedBehavior"
+      }
+    },
+    "Scte35SpliceInsertNoRegionalBlackoutBehavior": {
+      "type": "string",
+      "enum": [
+        "FOLLOW",
+        "IGNORE"
+      ]
+    },
+    "Scte35SpliceInsertScheduleActionSettings": {
+      "type": "structure",
+      "required": [
+        "SpliceEventId"
+      ],
+      "members": {
+        "Duration": "__longMin0Max8589934591",
+        "SpliceEventId": "__longMin0Max4294967295"
+      }
+    },
+    "Scte35SpliceInsertWebDeliveryAllowedBehavior": {
+      "type": "string",
+      "enum": [
+        "FOLLOW",
+        "IGNORE"
+      ]
+    },
+    "Scte35TimeSignalApos": {
+      "type": "structure",
+      "members": {
+        "AdAvailOffset": "__integerMinNegative1000Max1000",
+        "NoRegionalBlackoutFlag": "Scte35AposNoRegionalBlackoutBehavior",
+        "WebDeliveryAllowedFlag": "Scte35AposWebDeliveryAllowedBehavior"
+      }
+    },
+    "Scte35TimeSignalScheduleActionSettings": {
+      "type": "structure",
+      "required": [
+        "Scte35Descriptors"
+      ],
+      "members": {
+        "Scte35Descriptors": "__listOfScte35Descriptor"
+      }
+    },
+    "Scte35Type": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "SCTE_35_WITHOUT_SEGMENTATION",
+        "SCTE_35_WITHOUT_IDR"
+      ]
+    },
+    "Scte35WebDeliveryAllowedFlag": {
+      "type": "string",
+      "enum": [
+        "WEB_DELIVERY_NOT_ALLOWED",
+        "WEB_DELIVERY_ALLOWED"
+      ]
+    },
+    "SdiSourceMappingUpdateRequest": {
+      "type": "structure",
+      "members": {
+        "CardNumber": "__integer",
+        "ChannelNumber": "__integer",
+        "SdiSource": "__string"
+      }
+    },
+    "SdiSourceMappingsUpdateRequest": {
+      "type": "list",
+      "member": "SdiSourceMappingUpdateRequest"
+    },
+    "SdiSourceMode": {
+      "type": "string",
+      "enum": [
+        "QUADRANT",
+        "INTERLEAVE"
+      ]
+    },
+    "SdiSourceType": {
+      "type": "string",
+      "enum": [
+        "SINGLE",
+        "QUAD"
+      ]
+    },
+    "SmartSubtitleSourceSettings": {
+      "type": "structure",
+      "members": {
+        "CaptionSynchronizationMode": "CaptionSynchronizationMode",
+        "InferenceFeedOutput": "__string"
+      }
+    },
+    "SmoothGroupAudioOnlyTimecodeControl": {
+      "type": "string",
+      "enum": [
+        "PASSTHROUGH",
+        "USE_CONFIGURED_CLOCK"
+      ]
+    },
+    "SmoothGroupCertificateMode": {
+      "type": "string",
+      "enum": [
+        "SELF_SIGNED",
+        "VERIFY_AUTHENTICITY"
+      ]
+    },
+    "SmoothGroupEventIdMode": {
+      "type": "string",
+      "enum": [
+        "NO_EVENT_ID",
+        "USE_CONFIGURED",
+        "USE_TIMESTAMP"
+      ]
+    },
+    "SmoothGroupEventStopBehavior": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "SEND_EOS"
+      ]
+    },
+    "SmoothGroupSegmentationMode": {
+      "type": "string",
+      "enum": [
+        "USE_INPUT_SEGMENTATION",
+        "USE_SEGMENT_DURATION"
+      ]
+    },
+    "SmoothGroupSparseTrackType": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "SCTE_35",
+        "SCTE_35_WITHOUT_SEGMENTATION"
+      ]
+    },
+    "SmoothGroupStreamManifestBehavior": {
+      "type": "string",
+      "enum": [
+        "DO_NOT_SEND",
+        "SEND"
+      ]
+    },
+    "SmoothGroupTimestampOffsetMode": {
+      "type": "string",
+      "enum": [
+        "USE_CONFIGURED_OFFSET",
+        "USE_EVENT_START_DATE"
+      ]
+    },
+    "Smpte2038DataPreference": {
+      "type": "string",
+      "enum": [
+        "IGNORE",
+        "PREFER"
+      ]
+    },
+    "Smpte2110ReceiverGroup": {
+      "type": "structure",
+      "members": {
+        "SdpSettings": "Smpte2110ReceiverGroupSdpSettings"
+      }
+    },
+    "Smpte2110ReceiverGroupSdpSettings": {
+      "type": "structure",
+      "members": {
+        "AncillarySdps": "__listOfInputSdpLocation",
+        "AudioSdps": "__listOfInputSdpLocation",
+        "VideoSdp": "InputSdpLocation"
+      }
+    },
+    "Smpte2110ReceiverGroupSettings": {
+      "type": "structure",
+      "members": {
+        "Smpte2110ReceiverGroups": "__listOfSmpte2110ReceiverGroup"
+      }
+    },
+    "SmpteTtDestinationSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "SpecialRouterSettings": {
+      "type": "structure",
+      "members": {
+        "RouterArn": "__string"
+      }
+    },
+    "SrtCallerDecryptionRequest": {
+      "type": "structure",
+      "members": {
+        "Algorithm": "Algorithm",
+        "PassphraseSecretArn": "__string"
+      }
+    },
+    "SrtCallerSourceRequest": {
+      "type": "structure",
+      "members": {
+        "Decryption": "SrtCallerDecryptionRequest",
+        "MinimumLatency": "__integer",
+        "SrtListenerAddress": "__string",
+        "SrtListenerPort": "__string",
+        "StreamId": "__string"
+      }
+    },
+    "SrtEncryptionType": {
+      "type": "string",
+      "enum": [
+        "AES128",
+        "AES192",
+        "AES256"
+      ]
+    },
+    "SrtGroupSettings": {
+      "type": "structure",
+      "members": {
+        "InputLossAction": "InputLossActionForUdpOut"
+      }
+    },
+    "SrtListenerDecryptionRequest": {
+      "type": "structure",
+      "required": [
+        "PassphraseSecretArn",
+        "Algorithm"
+      ],
+      "members": {
+        "Algorithm": "Algorithm",
+        "PassphraseSecretArn": "__string"
+      }
+    },
+    "SrtListenerSettingsRequest": {
+      "type": "structure",
+      "required": [
+        "MinimumLatency",
+        "Decryption"
+      ],
+      "members": {
+        "Decryption": "SrtListenerDecryptionRequest",
+        "MinimumLatency": "__integer",
+        "StreamId": "__string"
+      }
+    },
+    "SrtOutputDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "EncryptionPassphraseSecretArn": "__string",
+        "StreamId": "__string",
+        "Url": "__string",
+        "ConnectionMode": "ConnectionMode",
+        "ListenerPort": "__integerMin1Max65535"
+      }
+    },
+    "SrtOutputSettings": {
+      "type": "structure",
+      "required": [
+        "Destination",
+        "ContainerSettings"
+      ],
+      "members": {
+        "BufferMsec": "__integerMin0Max10000",
+        "ContainerSettings": "UdpContainerSettings",
+        "Destination": "OutputLocationRef",
+        "EncryptionType": "SrtEncryptionType",
+        "Latency": "__integerMin40Max16000"
+      }
+    },
+    "SrtSettingsRequest": {
+      "type": "structure",
+      "members": {
+        "SrtCallerSources": "__listOfSrtCallerSourceRequest",
+        "SrtListenerSettings": "SrtListenerSettingsRequest"
+      }
+    },
+    "StandardHlsSettings": {
+      "type": "structure",
+      "required": [
+        "M3u8Settings"
+      ],
+      "members": {
+        "AudioRenditionSets": "__string",
+        "M3u8Settings": "M3u8Settings"
+      }
+    },
+    "StartChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId"
+      ],
+      "members": {
+        "ChannelId": "__string"
+      }
+    },
+    "StartDeleteMonitorDeploymentRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "__string"
+      }
+    },
+    "StartInputDeviceMaintenanceWindowRequest": {
+      "type": "structure",
+      "required": [
+        "InputDeviceId"
+      ],
+      "members": {
+        "InputDeviceId": "__string"
+      }
+    },
+    "StartInputDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "InputDeviceId"
+      ],
+      "members": {
+        "InputDeviceId": "__string"
+      }
+    },
+    "StartMonitorDeploymentRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "DryRun": "__boolean",
+        "Identifier": "__string"
+      }
+    },
+    "StartMultiplexRequest": {
+      "type": "structure",
+      "required": [
+        "MultiplexId"
+      ],
+      "members": {
+        "MultiplexId": "__string"
+      }
+    },
+    "StartTimecode": {
+      "type": "structure",
+      "members": {
+        "Timecode": "__string"
+      }
+    },
+    "StartUpdateSignalMapRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "CloudWatchAlarmTemplateGroupIdentifiers": "__listOf__stringPatternS",
+        "Description": "__stringMin0Max1024",
+        "DiscoveryEntryPointArn": "__stringMin1Max2048",
+        "EventBridgeRuleTemplateGroupIdentifiers": "__listOf__stringPatternS",
+        "ForceRediscovery": "__boolean",
+        "Identifier": "__string",
+        "Name": "__stringMin1Max255PatternS"
+      }
+    },
+    "StaticImageActivateScheduleActionSettings": {
+      "type": "structure",
+      "required": [
+        "Image"
+      ],
+      "members": {
+        "Duration": "__integerMin0",
+        "FadeIn": "__integerMin0",
+        "FadeOut": "__integerMin0",
+        "Height": "__integerMin1",
+        "Image": "InputLocation",
+        "ImageX": "__integerMin0",
+        "ImageY": "__integerMin0",
+        "Layer": "__integerMin0Max7",
+        "Opacity": "__integerMin0Max100",
+        "Width": "__integerMin1"
+      }
+    },
+    "StaticImageDeactivateScheduleActionSettings": {
+      "type": "structure",
+      "members": {
+        "FadeOut": "__integerMin0",
+        "Layer": "__integerMin0Max7"
+      }
+    },
+    "StaticImageOutputActivateScheduleActionSettings": {
+      "type": "structure",
+      "required": [
+        "OutputNames",
+        "Image"
+      ],
+      "members": {
+        "Duration": "__integerMin0",
+        "FadeIn": "__integerMin0",
+        "FadeOut": "__integerMin0",
+        "Height": "__integerMin1",
+        "Image": "InputLocation",
+        "ImageX": "__integerMin0",
+        "ImageY": "__integerMin0",
+        "Layer": "__integerMin0Max7",
+        "Opacity": "__integerMin0Max100",
+        "OutputNames": "__listOf__string",
+        "Width": "__integerMin1"
+      }
+    },
+    "StaticImageOutputDeactivateScheduleActionSettings": {
+      "type": "structure",
+      "required": [
+        "OutputNames"
+      ],
+      "members": {
+        "FadeOut": "__integerMin0",
+        "Layer": "__integerMin0Max7",
+        "OutputNames": "__listOf__string"
+      }
+    },
+    "StaticKeySettings": {
+      "type": "structure",
+      "required": [
+        "StaticKeyValue"
+      ],
+      "members": {
+        "KeyProviderServer": "InputLocation",
+        "StaticKeyValue": "__stringMin32Max32"
+      }
+    },
+    "StopChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId"
+      ],
+      "members": {
+        "ChannelId": "__string"
+      }
+    },
+    "StopInputDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "InputDeviceId"
+      ],
+      "members": {
+        "InputDeviceId": "__string"
+      }
+    },
+    "StopMultiplexRequest": {
+      "type": "structure",
+      "required": [
+        "MultiplexId"
+      ],
+      "members": {
+        "MultiplexId": "__string"
+      }
+    },
+    "StopTimecode": {
+      "type": "structure",
+      "members": {
+        "LastFrameClippingBehavior": "LastFrameClippingBehavior",
+        "Timecode": "__string"
+      }
+    },
+    "TagMap": {
+      "type": "map",
+      "key": "__string",
+      "value": "__string"
+    },
+    "Tags": {
+      "type": "map",
+      "key": "__string",
+      "value": "__string"
+    },
+    "TeletextDestinationSettings": {
+      "type": "structure",
+      "members": {}
+    },
+    "TeletextSourceSettings": {
+      "type": "structure",
+      "members": {
+        "OutputRectangle": "CaptionRectangle",
+        "PageNumber": "__string"
+      }
+    },
+    "TemporalFilterPostFilterSharpening": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "DISABLED",
+        "ENABLED"
+      ]
+    },
+    "TemporalFilterSettings": {
+      "type": "structure",
+      "members": {
+        "PostFilterSharpening": "TemporalFilterPostFilterSharpening",
+        "Strength": "TemporalFilterStrength"
+      }
+    },
+    "TemporalFilterStrength": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "STRENGTH_1",
+        "STRENGTH_2",
+        "STRENGTH_3",
+        "STRENGTH_4",
+        "STRENGTH_5",
+        "STRENGTH_6",
+        "STRENGTH_7",
+        "STRENGTH_8",
+        "STRENGTH_9",
+        "STRENGTH_10",
+        "STRENGTH_11",
+        "STRENGTH_12",
+        "STRENGTH_13",
+        "STRENGTH_14",
+        "STRENGTH_15",
+        "STRENGTH_16"
+      ]
+    },
+    "TextCaptionPositionSettings": {
+      "type": "structure",
+      "members": {
+        "YPositionPercentage": "__integerMin0Max100"
+      }
+    },
+    "ThumbnailConfiguration": {
+      "type": "structure",
+      "required": [
+        "State"
+      ],
+      "members": {
+        "State": "ThumbnailState"
+      }
+    },
+    "ThumbnailState": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "DISABLED"
+      ]
+    },
+    "TimecodeBurninFontSize": {
+      "type": "string",
+      "enum": [
+        "EXTRA_SMALL_10",
+        "LARGE_48",
+        "MEDIUM_32",
+        "SMALL_16"
+      ]
+    },
+    "TimecodeBurninPosition": {
+      "type": "string",
+      "enum": [
+        "BOTTOM_CENTER",
+        "BOTTOM_LEFT",
+        "BOTTOM_RIGHT",
+        "MIDDLE_CENTER",
+        "MIDDLE_LEFT",
+        "MIDDLE_RIGHT",
+        "TOP_CENTER",
+        "TOP_LEFT",
+        "TOP_RIGHT"
+      ]
+    },
+    "TimecodeBurninSettings": {
+      "type": "structure",
+      "required": [
+        "Position",
+        "FontSize"
+      ],
+      "members": {
+        "FontSize": "TimecodeBurninFontSize",
+        "Position": "TimecodeBurninPosition",
+        "Prefix": "__stringMax255"
+      }
+    },
+    "TimecodeConfig": {
+      "type": "structure",
+      "required": [
+        "Source"
+      ],
+      "members": {
+        "Source": "TimecodeConfigSource",
+        "SyncThreshold": "__integerMin1Max1000000"
+      }
+    },
+    "TimecodeConfigSource": {
+      "type": "string",
+      "enum": [
+        "EMBEDDED",
+        "SYSTEMCLOCK",
+        "ZEROBASED"
+      ]
+    },
+    "TimedMetadataScheduleActionSettings": {
+      "type": "structure",
+      "required": [
+        "Id3"
+      ],
+      "members": {
+        "Id3": "__string"
+      }
+    },
+    "TransferInputDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "InputDeviceId"
+      ],
+      "members": {
+        "InputDeviceId": "__string",
+        "TargetCustomerId": "__string",
+        "TargetRegion": "__string",
+        "TransferMessage": "__string"
+      }
+    },
+    "TtmlDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "StyleControl": "TtmlDestinationStyleControl",
+        "Position": "TextCaptionPositionSettings"
+      }
+    },
+    "TtmlDestinationStyleControl": {
+      "type": "string",
+      "enum": [
+        "PASSTHROUGH",
+        "USE_CONFIGURED",
+        "MANUAL"
+      ]
+    },
+    "UdpContainerSettings": {
+      "type": "structure",
+      "members": {
+        "M2tsSettings": "M2tsSettings"
+      }
+    },
+    "UdpGroupSettings": {
+      "type": "structure",
+      "members": {
+        "InputLossAction": "InputLossActionForUdpOut",
+        "TimedMetadataId3Frame": "UdpTimedMetadataId3Frame",
+        "TimedMetadataId3Period": "__integerMin0"
+      }
+    },
+    "UdpOutputSettings": {
+      "type": "structure",
+      "required": [
+        "Destination",
+        "ContainerSettings"
+      ],
+      "members": {
+        "BufferMsec": "__integerMin0Max10000",
+        "ContainerSettings": "UdpContainerSettings",
+        "Destination": "OutputLocationRef",
+        "FecOutputSettings": "FecOutputSettings"
+      }
+    },
+    "UdpTimedMetadataId3Frame": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PRIV",
+        "TDRL"
+      ]
+    },
+    "UpdateAccountConfigurationRequest": {
+      "type": "structure",
+      "members": {
+        "AccountConfiguration": "AccountConfiguration"
+      }
+    },
+    "UpdateChannelClassRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId",
+        "ChannelClass"
+      ],
+      "members": {
+        "ChannelClass": "ChannelClass",
+        "ChannelId": "__string",
+        "Destinations": "__listOfOutputDestination"
+      }
+    },
+    "UpdateChannelPlacementGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId",
+        "ChannelPlacementGroupId"
+      ],
+      "members": {
+        "ChannelPlacementGroupId": "__string",
+        "ClusterId": "__string",
+        "Name": "__string",
+        "Nodes": "__listOf__string"
+      }
+    },
+    "UpdateChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelId"
+      ],
+      "members": {
+        "CdiInputSpecification": "CdiInputSpecification",
+        "ChannelId": "__string",
+        "Destinations": "__listOfOutputDestination",
+        "EncoderSettings": "EncoderSettings",
+        "InputAttachments": "__listOfInputAttachment",
+        "InputSpecification": "InputSpecification",
+        "LogLevel": "LogLevel",
+        "Maintenance": "MaintenanceUpdateSettings",
+        "Name": "__string",
+        "RoleArn": "__string",
+        "ChannelEngineVersion": "ChannelEngineVersionRequest",
+        "DryRun": "__boolean",
+        "AnywhereSettings": "AnywhereSettings",
+        "LinkedChannelSettings": "LinkedChannelSettings",
+        "ChannelSecurityGroups": "__listOf__string",
+        "InferenceSettings": "InferenceSettings",
+        "SpecialRouterSettings": "SpecialRouterSettings"
+      }
+    },
+    "UpdateCloudWatchAlarmTemplateGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Description": "__stringMin0Max1024",
+        "Identifier": "__string"
+      }
+    },
+    "UpdateCloudWatchAlarmTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "ComparisonOperator": "CloudWatchAlarmTemplateComparisonOperator",
+        "DatapointsToAlarm": "__integerMin1",
+        "Description": "__stringMin0Max1024",
+        "EvaluationPeriods": "__integerMin1",
+        "GroupIdentifier": "__stringPatternS",
+        "Identifier": "__string",
+        "MetricName": "__stringMax64",
+        "Name": "__stringMin1Max255PatternS",
+        "Period": "__integerMin10Max86400",
+        "Statistic": "CloudWatchAlarmTemplateStatistic",
+        "TargetResourceType": "CloudWatchAlarmTemplateTargetResourceType",
+        "Threshold": "__double",
+        "TreatMissingData": "CloudWatchAlarmTemplateTreatMissingData"
+      }
+    },
+    "UpdateClusterRequest": {
+      "type": "structure",
+      "required": [
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string",
+        "Name": "__string",
+        "NetworkSettings": "ClusterNetworkSettingsUpdateRequest"
+      }
+    },
+    "UpdateEventBridgeRuleTemplateGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Description": "__stringMin0Max1024",
+        "Identifier": "__string"
+      }
+    },
+    "UpdateEventBridgeRuleTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Description": "__stringMin0Max1024",
+        "EventTargets": "__listOfEventBridgeRuleTemplateTarget",
+        "EventType": "EventBridgeRuleTemplateEventType",
+        "GroupIdentifier": "__stringPatternS",
+        "Identifier": "__string",
+        "Name": "__stringMin1Max255PatternS"
+      }
+    },
+    "UpdateInputDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "InputDeviceId"
+      ],
+      "members": {
+        "HdDeviceSettings": "InputDeviceConfigurableSettings",
+        "InputDeviceId": "__string",
+        "Name": "__string",
+        "UhdDeviceSettings": "InputDeviceConfigurableSettings",
+        "AvailabilityZone": "__string"
+      }
+    },
+    "UpdateInputRequest": {
+      "type": "structure",
+      "required": [
+        "InputId"
+      ],
+      "members": {
+        "Destinations": "__listOfInputDestinationRequest",
+        "InputDevices": "__listOfInputDeviceRequest",
+        "InputId": "__string",
+        "InputSecurityGroups": "__listOf__string",
+        "MediaConnectFlows": "__listOfMediaConnectFlowRequest",
+        "Name": "__string",
+        "RoleArn": "__string",
+        "Sources": "__listOfInputSourceRequest",
+        "SrtSettings": "SrtSettingsRequest",
+        "MulticastSettings": "MulticastSettingsUpdateRequest",
+        "Smpte2110ReceiverGroupSettings": "Smpte2110ReceiverGroupSettings",
+        "SdiSources": "InputSdiSources",
+        "SpecialRouterSettings": "SpecialRouterSettings"
+      }
+    },
+    "UpdateInputSecurityGroupRequest": {
+      "type": "structure",
+      "required": [
+        "InputSecurityGroupId"
+      ],
+      "members": {
+        "InputSecurityGroupId": "__string",
+        "Tags": "Tags",
+        "WhitelistRules": "__listOfInputWhitelistRuleCidr"
+      }
+    },
+    "UpdateMultiplexProgramRequest": {
+      "type": "structure",
+      "required": [
+        "MultiplexId",
+        "ProgramName"
+      ],
+      "members": {
+        "MultiplexId": "__string",
+        "MultiplexProgramSettings": "MultiplexProgramSettings",
+        "ProgramName": "__string"
+      }
+    },
+    "UpdateMultiplexRequest": {
+      "type": "structure",
+      "required": [
+        "MultiplexId"
+      ],
+      "members": {
+        "MultiplexId": "__string",
+        "MultiplexSettings": "MultiplexSettings",
+        "Name": "__string",
+        "PacketIdentifiersMapping": "MultiplexPacketIdentifiersMapping"
+      }
+    },
+    "UpdateNetworkRequest": {
+      "type": "structure",
+      "required": [
+        "NetworkId"
+      ],
+      "members": {
+        "IpPools": "__listOfIpPoolUpdateRequest",
+        "Name": "__string",
+        "NetworkId": "__string",
+        "Routes": "__listOfRouteUpdateRequest"
+      }
+    },
+    "UpdateNodeRequest": {
+      "type": "structure",
+      "required": [
+        "NodeId",
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string",
+        "Name": "__string",
+        "NodeId": "__string",
+        "Role": "NodeRole",
+        "SdiSourceMappings": "SdiSourceMappingsUpdateRequest"
+      }
+    },
+    "UpdateNodeState": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "DRAINING"
+      ]
+    },
+    "UpdateNodeStateRequest": {
+      "type": "structure",
+      "required": [
+        "NodeId",
+        "ClusterId"
+      ],
+      "members": {
+        "ClusterId": "__string",
+        "NodeId": "__string",
+        "State": "UpdateNodeState"
+      }
+    },
+    "UpdateReservationRequest": {
+      "type": "structure",
+      "required": [
+        "ReservationId"
+      ],
+      "members": {
+        "Name": "__string",
+        "RenewalSettings": "RenewalSettings",
+        "ReservationId": "__string"
+      }
+    },
+    "UpdateSdiSourceRequest": {
+      "type": "structure",
+      "required": [
+        "SdiSourceId"
+      ],
+      "members": {
+        "Mode": "SdiSourceMode",
+        "Name": "__string",
+        "SdiSourceId": "__string",
+        "Type": "SdiSourceType"
+      }
+    },
+    "VideoBlackFailoverSettings": {
+      "type": "structure",
+      "members": {
+        "BlackDetectThreshold": "__doubleMin0Max1",
+        "VideoBlackThresholdMsec": "__integerMin1000"
+      }
+    },
+    "VideoCodecSettings": {
+      "type": "structure",
+      "members": {
+        "FrameCaptureSettings": "FrameCaptureSettings",
+        "H264Settings": "H264Settings",
+        "H265Settings": "H265Settings",
+        "Mpeg2Settings": "Mpeg2Settings",
+        "Av1Settings": "Av1Settings"
+      }
+    },
+    "VideoDescription": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "CodecSettings": "VideoCodecSettings",
+        "Height": "__integer",
+        "Name": "__string",
+        "RespondToAfd": "VideoDescriptionRespondToAfd",
+        "ScalingBehavior": "VideoDescriptionScalingBehavior",
+        "Sharpness": "__integerMin0Max100",
+        "Width": "__integer",
+        "CropRectangle": "VideoPositionRectangle",
+        "OutputPositionRectangle": "VideoPositionRectangle",
+        "Border": "__integerMin0Max100"
+      }
+    },
+    "VideoDescriptionRespondToAfd": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PASSTHROUGH",
+        "RESPOND"
+      ]
+    },
+    "VideoDescriptionScalingBehavior": {
+      "type": "string",
+      "enum": [
+        "DEFAULT",
+        "STRETCH_TO_OUTPUT",
+        "SMART_CROP"
+      ]
+    },
+    "VideoPositionRectangle": {
+      "type": "structure",
+      "required": [
+        "X",
+        "Y",
+        "Height",
+        "Width"
+      ],
+      "members": {
+        "Height": "__integerMin2Max8192",
+        "Width": "__integerMin2Max8192",
+        "X": "__integerMin0Max8190",
+        "Y": "__integerMin0Max8190"
+      }
+    },
+    "VideoSelector": {
+      "type": "structure",
+      "members": {
+        "ColorSpace": "VideoSelectorColorSpace",
+        "ColorSpaceSettings": "VideoSelectorColorSpaceSettings",
+        "ColorSpaceUsage": "VideoSelectorColorSpaceUsage",
+        "SelectorSettings": "VideoSelectorSettings"
+      }
+    },
+    "VideoSelectorColorSpace": {
+      "type": "string",
+      "enum": [
+        "FOLLOW",
+        "HDR10",
+        "HLG_2020",
+        "REC_601",
+        "REC_709"
+      ]
+    },
+    "VideoSelectorColorSpaceSettings": {
+      "type": "structure",
+      "members": {
+        "Hdr10Settings": "Hdr10Settings"
+      }
+    },
+    "VideoSelectorColorSpaceUsage": {
+      "type": "string",
+      "enum": [
+        "FALLBACK",
+        "FORCE"
+      ]
+    },
+    "VideoSelectorPid": {
+      "type": "structure",
+      "members": {
+        "Pid": "__integerMin0Max8191"
+      }
+    },
+    "VideoSelectorProgramId": {
+      "type": "structure",
+      "members": {
+        "ProgramId": "__integerMin0Max65536"
+      }
+    },
+    "VideoSelectorSettings": {
+      "type": "structure",
+      "members": {
+        "VideoSelectorPid": "VideoSelectorPid",
+        "VideoSelectorProgramId": "VideoSelectorProgramId"
+      }
+    },
+    "VpcOutputSettings": {
+      "type": "structure",
+      "required": [
+        "SubnetIds"
+      ],
+      "members": {
+        "PublicAddressAllocationIds": "__listOf__string",
+        "SecurityGroupIds": "__listOf__string",
+        "SubnetIds": "__listOf__string"
+      }
+    },
+    "WavCodingMode": {
+      "type": "string",
+      "enum": [
+        "CODING_MODE_1_0",
+        "CODING_MODE_2_0",
+        "CODING_MODE_4_0",
+        "CODING_MODE_8_0"
+      ]
+    },
+    "WavSettings": {
+      "type": "structure",
+      "members": {
+        "BitDepth": "__double",
+        "CodingMode": "WavCodingMode",
+        "SampleRate": "__double"
+      }
+    },
+    "WebvttDestinationSettings": {
+      "type": "structure",
+      "members": {
+        "StyleControl": "WebvttDestinationStyleControl",
+        "Position": "TextCaptionPositionSettings"
+      }
+    },
+    "WebvttDestinationStyleControl": {
+      "type": "string",
+      "enum": [
+        "NO_STYLE_DATA",
+        "PASSTHROUGH",
+        "MANUAL"
+      ]
+    },
+    "__boolean": {
+      "type": "boolean"
+    },
+    "__double": {
+      "type": "double"
+    },
+    "__doubleMin0": {
+      "type": "double"
+    },
+    "__doubleMin0Max1": {
+      "type": "double"
+    },
+    "__doubleMin0Max100": {
+      "type": "double"
+    },
+    "__doubleMin0Max5000": {
+      "type": "double"
+    },
+    "__doubleMin1": {
+      "type": "double"
+    },
+    "__doubleMin1Max65535": {
+      "type": "double"
+    },
+    "__doubleMin250Max5000": {
+      "type": "double"
+    },
+    "__doubleMin32Max46": {
+      "type": "double"
+    },
+    "__doubleMinNegative1Max5": {
+      "type": "double"
+    },
+    "__doubleMinNegative59Max0": {
+      "type": "double"
+    },
+    "__doubleMinNegative60Max60": {
+      "type": "double"
+    },
+    "__doubleMinNegative8Max0": {
+      "type": "double"
+    },
+    "__integer": {
+      "type": "integer"
+    },
+    "__integerMin0": {
+      "type": "integer"
+    },
+    "__integerMin0Max10": {
+      "type": "integer"
+    },
+    "__integerMin0Max100": {
+      "type": "integer"
+    },
+    "__integerMin0Max1000": {
+      "type": "integer"
+    },
+    "__integerMin0Max10000": {
+      "type": "integer"
+    },
+    "__integerMin0Max1000000": {
+      "type": "integer"
+    },
+    "__integerMin0Max100000000": {
+      "type": "integer"
+    },
+    "__integerMin0Max128": {
+      "type": "integer"
+    },
+    "__integerMin0Max15": {
+      "type": "integer"
+    },
+    "__integerMin0Max2000": {
+      "type": "integer"
+    },
+    "__integerMin0Max255": {
+      "type": "integer"
+    },
+    "__integerMin0Max3": {
+      "type": "integer"
+    },
+    "__integerMin0Max30": {
+      "type": "integer"
+    },
+    "__integerMin0Max32768": {
+      "type": "integer"
+    },
+    "__integerMin0Max3600": {
+      "type": "integer"
+    },
+    "__integerMin0Max40000000": {
+      "type": "integer"
+    },
+    "__integerMin0Max500": {
+      "type": "integer"
+    },
+    "__integerMin0Max600": {
+      "type": "integer"
+    },
+    "__integerMin0Max65535": {
+      "type": "integer"
+    },
+    "__integerMin0Max65536": {
+      "type": "integer"
+    },
+    "__integerMin0Max7": {
+      "type": "integer"
+    },
+    "__integerMin0Max8000000": {
+      "type": "integer"
+    },
+    "__integerMin0Max8190": {
+      "type": "integer"
+    },
+    "__integerMin0Max8191": {
+      "type": "integer"
+    },
+    "__integerMin1": {
+      "type": "integer"
+    },
+    "__integerMin100": {
+      "type": "integer"
+    },
+    "__integerMin1000": {
+      "type": "integer"
+    },
+    "__integerMin1000000Max100000000": {
+      "type": "integer"
+    },
+    "__integerMin100000Max100000000": {
+      "type": "integer"
+    },
+    "__integerMin100000Max40000000": {
+      "type": "integer"
+    },
+    "__integerMin100000Max80000000": {
+      "type": "integer"
+    },
+    "__integerMin1000Max30000": {
+      "type": "integer"
+    },
+    "__integerMin10Max86400": {
+      "type": "integer"
+    },
+    "__integerMin1Max10": {
+      "type": "integer"
+    },
+    "__integerMin1Max1000": {
+      "type": "integer"
+    },
+    "__integerMin1Max1000000": {
+      "type": "integer"
+    },
+    "__integerMin1Max15": {
+      "type": "integer"
+    },
+    "__integerMin1Max16": {
+      "type": "integer"
+    },
+    "__integerMin1Max20": {
+      "type": "integer"
+    },
+    "__integerMin1Max3003": {
+      "type": "integer"
+    },
+    "__integerMin1Max31": {
+      "type": "integer"
+    },
+    "__integerMin1Max32": {
+      "type": "integer"
+    },
+    "__integerMin1Max3600000": {
+      "type": "integer"
+    },
+    "__integerMin1Max4": {
+      "type": "integer"
+    },
+    "__integerMin1Max5": {
+      "type": "integer"
+    },
+    "__integerMin1Max51": {
+      "type": "integer"
+    },
+    "__integerMin1Max511": {
+      "type": "integer"
+    },
+    "__integerMin1Max6": {
+      "type": "integer"
+    },
+    "__integerMin1Max65535": {
+      "type": "integer"
+    },
+    "__integerMin1Max8": {
+      "type": "integer"
+    },
+    "__integerMin1Max800": {
+      "type": "integer"
+    },
+    "__integerMin256Max3840": {
+      "type": "integer"
+    },
+    "__integerMin25Max10000": {
+      "type": "integer"
+    },
+    "__integerMin25Max2000": {
+      "type": "integer"
+    },
+    "__integerMin2Max8192": {
+      "type": "integer"
+    },
+    "__integerMin3": {
+      "type": "integer"
+    },
+    "__integerMin30": {
+      "type": "integer"
+    },
+    "__integerMin32Max8191": {
+      "type": "integer"
+    },
+    "__integerMin40Max16000": {
+      "type": "integer"
+    },
+    "__integerMin4Max20": {
+      "type": "integer"
+    },
+    "__integerMin50000Max12000000": {
+      "type": "integer"
+    },
+    "__integerMin50000Max24000000": {
+      "type": "integer"
+    },
+    "__integerMin64Max2160": {
+      "type": "integer"
+    },
+    "__integerMin800Max3000": {
+      "type": "integer"
+    },
+    "__integerMin80Max800": {
+      "type": "integer"
+    },
+    "__integerMin96Max600": {
+      "type": "integer"
+    },
+    "__integerMinNegative1000Max1000": {
+      "type": "integer"
+    },
+    "__integerMinNegative5Max5": {
+      "type": "integer"
+    },
+    "__integerMinNegative60Max6": {
+      "type": "integer"
+    },
+    "__integerMinNegative60Max60": {
+      "type": "integer"
+    },
+    "__listOfAdditionalDestinations": {
+      "type": "list",
+      "member": "AdditionalDestinations"
+    },
+    "__listOfAudioChannelMapping": {
+      "type": "list",
+      "member": "AudioChannelMapping"
+    },
+    "__listOfAudioDescription": {
+      "type": "list",
+      "member": "AudioDescription"
+    },
+    "__listOfAudioFeedInput": {
+      "type": "list",
+      "member": "AudioFeedInput"
+    },
+    "__listOfAudioPid": {
+      "type": "list",
+      "member": "AudioPid"
+    },
+    "__listOfAudioSelector": {
+      "type": "list",
+      "member": "AudioSelector"
+    },
+    "__listOfAudioTrack": {
+      "type": "list",
+      "member": "AudioTrack"
+    },
+    "__listOfCaptionDescription": {
+      "type": "list",
+      "member": "CaptionDescription"
+    },
+    "__listOfCaptionLanguageMapping": {
+      "type": "list",
+      "member": "CaptionLanguageMapping"
+    },
+    "__listOfCaptionSelector": {
+      "type": "list",
+      "member": "CaptionSelector"
+    },
+    "__listOfChannelPipelineIdToRestart": {
+      "type": "list",
+      "member": "ChannelPipelineIdToRestart"
+    },
+    "__listOfCmafIngestCaptionLanguageMapping": {
+      "type": "list",
+      "member": "CmafIngestCaptionLanguageMapping"
+    },
+    "__listOfColorCorrection": {
+      "type": "list",
+      "member": "ColorCorrection"
+    },
+    "__listOfDashRoleAudio": {
+      "type": "list",
+      "member": "DashRoleAudio"
+    },
+    "__listOfDashRoleCaption": {
+      "type": "list",
+      "member": "DashRoleCaption"
+    },
+    "__listOfEnrichmentMethod": {
+      "type": "list",
+      "member": "EnrichmentMethod"
+    },
+    "__listOfEventBridgeRuleTemplateTarget": {
+      "type": "list",
+      "member": "EventBridgeRuleTemplateTarget"
+    },
+    "__listOfFailoverCondition": {
+      "type": "list",
+      "member": "FailoverCondition"
+    },
+    "__listOfHlsAdMarkers": {
+      "type": "list",
+      "member": "HlsAdMarkers"
+    },
+    "__listOfInputAttachment": {
+      "type": "list",
+      "member": "InputAttachment"
+    },
+    "__listOfInputChannelLevel": {
+      "type": "list",
+      "member": "InputChannelLevel"
+    },
+    "__listOfInputDestinationRequest": {
+      "type": "list",
+      "member": "InputDestinationRequest"
+    },
+    "__listOfInputDeviceConfigurableAudioChannelPairConfig": {
+      "type": "list",
+      "member": "InputDeviceConfigurableAudioChannelPairConfig"
+    },
+    "__listOfInputDeviceRequest": {
+      "type": "list",
+      "member": "InputDeviceRequest"
+    },
+    "__listOfInputDeviceSettings": {
+      "type": "list",
+      "member": "InputDeviceSettings"
+    },
+    "__listOfInputRequestDestinationRoute": {
+      "type": "list",
+      "member": "InputRequestDestinationRoute"
+    },
+    "__listOfInputSdpLocation": {
+      "type": "list",
+      "member": "InputSdpLocation"
+    },
+    "__listOfInputSourceRequest": {
+      "type": "list",
+      "member": "InputSourceRequest"
+    },
+    "__listOfInputWhitelistRuleCidr": {
+      "type": "list",
+      "member": "InputWhitelistRuleCidr"
+    },
+    "__listOfInterfaceMappingCreateRequest": {
+      "type": "list",
+      "member": "InterfaceMappingCreateRequest"
+    },
+    "__listOfInterfaceMappingUpdateRequest": {
+      "type": "list",
+      "member": "InterfaceMappingUpdateRequest"
+    },
+    "__listOfIpPoolCreateRequest": {
+      "type": "list",
+      "member": "IpPoolCreateRequest"
+    },
+    "__listOfIpPoolUpdateRequest": {
+      "type": "list",
+      "member": "IpPoolUpdateRequest"
+    },
+    "__listOfMediaConnectFlowRequest": {
+      "type": "list",
+      "member": "MediaConnectFlowRequest"
+    },
+    "__listOfMediaConnectRouterOutputDestinationSettings": {
+      "type": "list",
+      "member": "MediaConnectRouterOutputDestinationSettings"
+    },
+    "__listOfMediaPackageAdditionalDestinations": {
+      "type": "list",
+      "member": "MediaPackageAdditionalDestinations"
+    },
+    "__listOfMediaPackageOutputDestinationSettings": {
+      "type": "list",
+      "member": "MediaPackageOutputDestinationSettings"
+    },
+    "__listOfMulticastSourceCreateRequest": {
+      "type": "list",
+      "member": "MulticastSourceCreateRequest"
+    },
+    "__listOfMulticastSourceUpdateRequest": {
+      "type": "list",
+      "member": "MulticastSourceUpdateRequest"
+    },
+    "__listOfNodeInterfaceMapping": {
+      "type": "list",
+      "member": "NodeInterfaceMapping"
+    },
+    "__listOfNodeInterfaceMappingCreateRequest": {
+      "type": "list",
+      "member": "NodeInterfaceMappingCreateRequest"
+    },
+    "__listOfOutput": {
+      "type": "list",
+      "member": "Output"
+    },
+    "__listOfOutputDestination": {
+      "type": "list",
+      "member": "OutputDestination"
+    },
+    "__listOfOutputDestinationSettings": {
+      "type": "list",
+      "member": "OutputDestinationSettings"
+    },
+    "__listOfOutputGroup": {
+      "type": "list",
+      "member": "OutputGroup"
+    },
+    "__listOfOutputLocationRef": {
+      "type": "list",
+      "member": "OutputLocationRef"
+    },
+    "__listOfOutputUsage": {
+      "type": "list",
+      "member": "OutputUsage"
+    },
+    "__listOfPipelinePauseStateSettings": {
+      "type": "list",
+      "member": "PipelinePauseStateSettings"
+    },
+    "__listOfRouteCreateRequest": {
+      "type": "list",
+      "member": "RouteCreateRequest"
+    },
+    "__listOfRouteUpdateRequest": {
+      "type": "list",
+      "member": "RouteUpdateRequest"
+    },
+    "__listOfRouterDestinationSettings": {
+      "type": "list",
+      "member": "RouterDestinationSettings"
+    },
+    "__listOfRtmpAdMarkers": {
+      "type": "list",
+      "member": "RtmpAdMarkers"
+    },
+    "__listOfScheduleAction": {
+      "type": "list",
+      "member": "ScheduleAction"
+    },
+    "__listOfScte35Descriptor": {
+      "type": "list",
+      "member": "Scte35Descriptor"
+    },
+    "__listOfSmpte2110ReceiverGroup": {
+      "type": "list",
+      "member": "Smpte2110ReceiverGroup"
+    },
+    "__listOfSrtCallerSourceRequest": {
+      "type": "list",
+      "member": "SrtCallerSourceRequest"
+    },
+    "__listOfSrtOutputDestinationSettings": {
+      "type": "list",
+      "member": "SrtOutputDestinationSettings"
+    },
+    "__listOfVideoDescription": {
+      "type": "list",
+      "member": "VideoDescription"
+    },
+    "__listOf__integer": {
+      "type": "list",
+      "member": "__integer"
+    },
+    "__listOf__string": {
+      "type": "list",
+      "member": "__string"
+    },
+    "__listOf__stringPatternS": {
+      "type": "list",
+      "member": "__stringPatternS"
+    },
+    "__longMin0Max1099511627775": {
+      "type": "long"
+    },
+    "__longMin0Max4294967295": {
+      "type": "long"
+    },
+    "__longMin0Max8589934591": {
+      "type": "long"
+    },
+    "__longMin0Max86400000": {
+      "type": "long"
+    },
+    "__string": {
+      "type": "string"
+    },
+    "__stringMax100": {
+      "type": "string"
+    },
+    "__stringMax1000": {
+      "type": "string"
+    },
+    "__stringMax2048": {
+      "type": "string"
+    },
+    "__stringMax255": {
+      "type": "string"
+    },
+    "__stringMax256": {
+      "type": "string"
+    },
+    "__stringMax32": {
+      "type": "string"
+    },
+    "__stringMax64": {
+      "type": "string"
+    },
+    "__stringMin0Max1024": {
+      "type": "string"
+    },
+    "__stringMin1": {
+      "type": "string"
+    },
+    "__stringMin1Max2048": {
+      "type": "string"
+    },
+    "__stringMin1Max2048PatternArn": {
+      "type": "string"
+    },
+    "__stringMin1Max255": {
+      "type": "string"
+    },
+    "__stringMin1Max255PatternS": {
+      "type": "string"
+    },
+    "__stringMin1Max256": {
+      "type": "string"
+    },
+    "__stringMin1Max256PatternS": {
+      "type": "string"
+    },
+    "__stringMin1Max35": {
+      "type": "string"
+    },
+    "__stringMin1Max7": {
+      "type": "string"
+    },
+    "__stringMin2Max2": {
+      "type": "string"
+    },
+    "__stringMin32Max32": {
+      "type": "string"
+    },
+    "__stringMin34Max34": {
+      "type": "string"
+    },
+    "__stringMin3Max3": {
+      "type": "string"
+    },
+    "__stringMin6Max6": {
+      "type": "string"
+    },
+    "__stringPattern010920300": {
+      "type": "string"
+    },
+    "__stringPatternS": {
+      "type": "string"
+    }
+  }
+}

@@ -36,6 +36,7 @@ MODELS = {
     "entityresolution": "entityresolution",
     "mediaconnect": "mediaconnect",
     "mediaconvert": "mediaconvert",
+    "medialive": "medialive",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

@@ -900,6 +900,8 @@ public interface EmulatorConfig {
 
         MediaConvertServiceConfig mediaConvert();
 
+        MediaLiveServiceConfig mediaLive();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3022,6 +3024,33 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface MediaLiveServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a channel, multiplex or other MediaLive resource takes to change state. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The address push inputs' destinations give. */
+        @WithDefault("127.0.0.1")
+        String ingestIp();
+
+        /** The address channels' egress endpoints give. */
+        @WithDefault("127.0.0.1")
+        String egressIp();
+
+        /** The first host port push inputs take: a running channel's encoder publishes it. */
+        @WithDefault("21000")
+        int ingestPortStart();
+
+        @WithDefault("100")
+        int ingestPortCount();
+
+        /** The Docker network channels' encoders join; the services' network when unset. */
+        Optional<String> dockerNetwork();
     }
 
     interface MediaConvertServiceConfig {
