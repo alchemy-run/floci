@@ -39,7 +39,8 @@ import java.util.regex.Pattern;
  * binds to the URI, the query string, headers or a payload read from there and typed as the model types them, and an
  * absent idempotency token filled in. A handler returns the output object; members the model binds to headers or the
  * status code leave the body for there, a payload member becomes the body, and the response takes the operation's
- * modelled status code.
+ * modelled status code. A model whose body members go by other names on the wire ({@code flowArn} for
+ * {@code FlowArn}) carries its shapes: handlers read and write member names, and the body is renamed each way.
  */
 public final class RestJsonDispatcher {
 
@@ -60,6 +61,7 @@ public final class RestJsonDispatcher {
 
     private final ObjectMapper mapper;
     private final List<Route> routes = new ArrayList<>();
+    private final JsonNode shapes;
 
     public RestJsonDispatcher(ObjectMapper mapper, String service) {
         this.mapper = mapper;
@@ -73,6 +75,7 @@ public final class RestJsonDispatcher {
         } catch (IOException e) {
             throw new UncheckedIOException("Failed to read " + resource, e);
         }
+        shapes = model.path("shapes");
         model.path("operations").properties().forEach(entry -> routes.add(route(entry.getKey(), entry.getValue())));
         routes.sort(Comparator.comparing((Route route) -> route.ranks(), RestJsonDispatcher::compareRanks)
                 .thenComparing(route -> -route.queryLiterals().size()));
@@ -232,14 +235,15 @@ public final class RestJsonDispatcher {
                 JsonNode spec = members.get(payloadMember);
                 String type = spec.path("type").asText("string");
                 if ("structure".equals(type)) {
-                    input.set(payloadMember, parse(body));
+                    input.set(payloadMember, renamed(parse(body), spec.path("shape").asText(null), true));
                 } else if ("blob".equals(type)) {
                     input.put(payloadMember, Base64.getEncoder().encodeToString(body));
                 } else {
                     input.put(payloadMember, new String(body, StandardCharsets.UTF_8));
                 }
             } else {
-                JsonNode parsed = parse(body);
+                JsonNode parsed = renamed(parse(body), route.binding().path("input").path("shape").asText(null),
+                        true);
                 if (parsed instanceof ObjectNode object) {
                     input.setAll(object);
                 }
@@ -443,6 +447,52 @@ public final class RestJsonDispatcher {
         };
     }
 
+    /**
+     * A body with its members renamed by the model's shapes: wire names to member names on input, member names to
+     * wire names on output. Map keys are data and keep their names; a model without shapes renames nothing.
+     */
+    private JsonNode renamed(JsonNode node, String shapeName, boolean fromWire) {
+        if (node == null || shapeName == null || shapes.isMissingNode()) {
+            return node;
+        }
+        JsonNode shape = shapes.path(shapeName);
+        if (shape.has("list") && node instanceof ArrayNode array) {
+            ArrayNode copy = mapper.createArrayNode();
+            array.forEach(item -> copy.add(renamed(item, shape.get("list").asText(), fromWire)));
+            return copy;
+        }
+        if (shape.has("map") && node instanceof ObjectNode map) {
+            ObjectNode copy = mapper.createObjectNode();
+            map.properties().forEach(entry -> copy.set(entry.getKey(), renamed(entry.getValue(),
+                    shape.get("map").asText(), fromWire)));
+            return copy;
+        }
+        if (!shape.has("members") || !(node instanceof ObjectNode object)) {
+            return node;
+        }
+        ObjectNode copy = mapper.createObjectNode();
+        for (Map.Entry<String, JsonNode> field : object.properties()) {
+            String key = field.getKey();
+            String member = key;
+            JsonNode spec = null;
+            for (Map.Entry<String, JsonNode> candidate : shape.get("members").properties()) {
+                String wire = candidate.getValue().path("name").asText(candidate.getKey());
+                if (fromWire ? wire.equals(key) : candidate.getKey().equals(key)) {
+                    member = candidate.getKey();
+                    spec = candidate.getValue();
+                    break;
+                }
+            }
+            if (spec == null) {
+                copy.set(key, field.getValue());
+                continue;
+            }
+            String name = fromWire ? member : spec.path("name").asText(member);
+            copy.set(name, renamed(field.getValue(), spec.path("shape").asText(null), fromWire));
+        }
+        return copy;
+    }
+
     private JsonNode parse(byte[] body) {
         try {
             return mapper.readTree(body);
@@ -497,7 +547,7 @@ public final class RestJsonDispatcher {
                             entity = value.isTextual() ? Base64.getDecoder().decode(value.asText()) : new byte[0];
                             contentType = MediaType.APPLICATION_OCTET_STREAM;
                         } else if ("structure".equals(type)) {
-                            entity = value;
+                            entity = renamed(value, spec.path("shape").asText(null), false);
                         } else {
                             entity = value.asText();
                             contentType = MediaType.TEXT_PLAIN;
@@ -507,6 +557,9 @@ public final class RestJsonDispatcher {
                     default -> {
                     }
                 }
+            }
+            if (entity == output) {
+                entity = renamed(output, binding.path("output").path("shape").asText(null), false);
             }
             builder = Response.status(status);
             for (String[] header : headers) {

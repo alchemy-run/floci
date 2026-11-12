@@ -4,7 +4,9 @@
 For each operation this records what a REST JSON request and response carry where: its method, request URI and
 response code, each input member bound to the URI, the query string, a header or a header prefix, or the body
 (only a payload member, or an idempotency token, is recorded: the rest of a structure body is read as it is), and
-each output member bound to a header, a header prefix, the status code or a payload. Members carry their type when the binding needs it to read a string (`integer`, `long`, `boolean`,
+each output member bound to a header, a header prefix, the status code or a payload. A model whose body members go
+by other names on the wire (`flowArn` for `FlowArn`) also records its shapes, each structure's members with their
+wire names, so the dispatcher hands handlers member names and answers with wire names. Members carry their type when the binding needs it to read a string (`integer`, `long`, `boolean`,
 `double`, `float`, `timestamp`, `list`, `blob`, `structure`). botocore's models are Apache-2.0
 (https://github.com/boto/botocore), read at their latest API version as `regen_query_services.py` reads them.
 
@@ -32,6 +34,7 @@ MODELS = {
     "docdb-elastic": "docdbelastic",
     "emr-containers": "emrcontainers",
     "entityresolution": "entityresolution",
+    "mediaconnect": "mediaconnect",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}
@@ -109,7 +112,47 @@ def bindings(model: dict, shape_name: str | None, payload_location: str, iso_onl
     return result
 
 
+def wire_name(spec: dict, name: str) -> str:
+    return spec.get("locationName") or spec.get("jsonName") or name
+
+
+def renames_members(model: dict) -> bool:
+    """Whether any body member of a structure goes by another name on the wire."""
+    for shape in model["shapes"].values():
+        if shape["type"] != "structure":
+            continue
+        for name, spec in shape.get("members", {}).items():
+            if spec.get("location") in (None, "body") and wire_name(spec, name) != name:
+                return True
+    return False
+
+
+def wire_shapes(model: dict) -> dict:
+    """Each aggregate shape: a structure's body members with their wire names and shapes, a list's or map's element."""
+    aggregates = {}
+    for shape_name in sorted(model["shapes"]):
+        shape = model["shapes"][shape_name]
+        if shape["type"] == "structure":
+            members = {}
+            for name, spec in shape.get("members", {}).items():
+                if spec.get("location") not in (None, "body"):
+                    continue
+                entry = {}
+                if wire_name(spec, name) != name:
+                    entry["name"] = wire_name(spec, name)
+                if model["shapes"][spec["shape"]]["type"] in ("structure", "list", "map"):
+                    entry["shape"] = spec["shape"]
+                members[name] = entry
+            aggregates[shape_name] = {"members": members}
+        elif shape["type"] == "list":
+            aggregates[shape_name] = {"list": shape["member"]["shape"]}
+        elif shape["type"] == "map":
+            aggregates[shape_name] = {"map": shape["value"]["shape"]}
+    return aggregates
+
+
 def build(name: str, model: dict, provenance: str) -> dict:
+    renamed = renames_members(model)
     operations = {}
     for operation in sorted(model["operations"]):
         op = model["operations"][operation]
@@ -121,12 +164,23 @@ def build(name: str, model: dict, provenance: str) -> dict:
             "input": bindings(model, op.get("input", {}).get("shape"), "payload", False),
             "output": bindings(model, op.get("output", {}).get("shape"), "payload", True),
         }
-    return {
+        if renamed:
+            for side in ("input", "output"):
+                if op.get(side, {}).get("shape"):
+                    operations[operation][side]["shape"] = op[side]["shape"]
+                    members = model["shapes"][op[side]["shape"]].get("members", {})
+                    for member_name, entry in operations[operation][side]["members"].items():
+                        if entry["location"] == "payload" and entry.get("type") == "structure":
+                            entry["shape"] = members[member_name]["shape"]
+    built = {
         "_source": {"generator": "tools/aws/regen_rest_json_bindings.py", "botocore": provenance},
         "service": name,
         "apiVersion": model["metadata"]["apiVersion"],
         "operations": operations,
     }
+    if renamed:
+        built["shapes"] = wire_shapes(model)
+    return built
 
 
 def main() -> int:
