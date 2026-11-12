@@ -18,11 +18,13 @@ import org.junit.jupiter.params.provider.MethodSource;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Set;
 
 import static io.restassured.RestAssured.given;
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -42,7 +44,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "notifications", "notificationscontacts", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "notifications", "notificationscontacts", "osis", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1552,6 +1554,22 @@ class PartitionCrossServiceSmokeIntegrationTest {
                 .post("/2022-09-19/emailcontacts").then().statusCode(201).extract().path("arn");
         cleanup.register(() -> signed(region, "notifications-contacts").delete("/emailcontacts/" + arn));
         PartitionMatrix.assertGlobalArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void osisPipelineArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "osis");
+        String config = "version: \\\"2\\\"\\nlogs:\\n  source:\\n    http:\\n      path: /logs\\n  sink:\\n"
+                + "    - opensearch:\\n        hosts: [\\\"https://localhost:9200\\\"]\\n";
+        String arn = signed(region, "osis").contentType("application/json")
+                .body("{\"PipelineName\":\"partition\",\"MinUnits\":1,\"MaxUnits\":1,"
+                        + "\"PipelineConfigurationBody\":\"" + config + "\"}")
+                .post("/2022-01-01/osis/createPipeline").then().statusCode(200).extract().path("Pipeline.PipelineArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        await().atMost(Duration.ofSeconds(30)).until(() -> "ACTIVE".equals(signed(region, "osis")
+                .get("/2022-01-01/osis/getPipeline/partition").then().extract().path("Pipeline.Status")));
+        signed(region, "osis").delete("/2022-01-01/osis/deletePipeline/partition").then().statusCode(200);
     }
 
     @ParameterizedTest

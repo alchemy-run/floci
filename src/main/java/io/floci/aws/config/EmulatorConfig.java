@@ -914,6 +914,8 @@ public interface EmulatorConfig {
 
         NotificationsContactsServiceConfig notificationsContacts();
 
+        OsisServiceConfig osis();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3043,6 +3045,31 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long event rules, hubs and configurations stay in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface OsisServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** What runs pipelines: {@code data-prepper}, or {@code none} to keep only their metadata. */
+        @WithDefault("data-prepper")
+        String engine();
+
+        /** The Data Prepper image pipelines run on. */
+        @WithDefault("opensearchproject/data-prepper:2.12.2")
+        String image();
+
+        /** How long a pipeline's Data Prepper may take to start. */
+        @WithDefault("300")
+        int readySeconds();
+
+        /** The Java heap each pipeline's Data Prepper runs with, in MiB. */
+        @WithDefault("512")
+        int heapMb();
+
+        /** How long pipeline endpoints, stops and deletions stay in a transitional state. */
         @WithDefault("2000")
         long transitionMillis();
     }

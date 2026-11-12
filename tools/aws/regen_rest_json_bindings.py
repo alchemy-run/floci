@@ -43,6 +43,7 @@ MODELS = {
     "neptune-graph": "neptunegraph",
     "notifications": "notifications",
     "notificationscontacts": "notificationscontacts",
+    "osis": "osis",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

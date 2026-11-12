@@ -562,6 +562,10 @@ floci:
       enabled: true
       transition-millis: 200
       query-engine: none
+    osis:
+      enabled: true
+      transition-millis: 200
+      engine: none
     medical-imaging:
       enabled: true
       transition-millis: 200

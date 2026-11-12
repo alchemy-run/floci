@@ -1054,6 +1054,8 @@ floci:
       enabled: true
     notifications-contacts:
       enabled: true
+    osis:
+      enabled: true
     neptune-graph:
       enabled: true
     medical-imaging:
