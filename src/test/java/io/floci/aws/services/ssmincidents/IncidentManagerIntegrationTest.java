@@ -147,6 +147,10 @@ class IncidentManagerIntegrationTest {
                 .body("RotationShifts.Type", equalTo(List.of("REGULAR", "OVERRIDDEN", "REGULAR")))
                 .body("RotationShifts[1].ShiftDetails.OverriddenContactIds", equalTo(List.of(person)));
         contacts("DeleteContact", "{\"ContactId\":\"" + bo + "\"}").post("/").then().statusCode(400);
+        contacts("TagResource", "{\"ResourceARN\":\"" + rotation + "\",\"Tags\":[{\"Key\":\"alchemy::id\","
+                + "\"Value\":\"Primary\"}]}").post("/").then().statusCode(200);
+        contacts("ListTagsForResource", "{\"ResourceARN\":\"" + rotation + "\"}").post("/").then()
+                .body("Tags.Key", equalTo(List.of("alchemy::id")));
 
         // An escalation plan engages Ana first, as an essential contact.
         String escalation = contacts("CreateContact", "{\"Alias\":\"sre\",\"Type\":\"ESCALATION\",\"Plan\":"

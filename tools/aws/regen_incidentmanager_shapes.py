@@ -27,6 +27,10 @@ def main() -> int:
         model = widen_partition_and_region(load_model(data, Path(path)))
         operations = tuple(sorted(name for name, op in model["operations"].items() if "input" in op))
         doc = build_constraints(model, operations, provenance, "tools/aws/regen_incidentmanager_shapes.py")
+        if service == "ssmcontacts":
+            # The model's TagKey pattern leaves out ':', but SSM Contacts accepts keys such as
+            # "alchemy::id" (live-tested), so the pattern isn't enforced and isn't checked here.
+            doc["shapes"]["TagKey"].pop("pattern", None)
         fresh = json.dumps(doc, indent=2) + "\n"
         target = output(service)
         if args.check:
