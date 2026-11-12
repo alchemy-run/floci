@@ -882,6 +882,8 @@ public interface EmulatorConfig {
 
         GlacierServiceConfig glacier();
 
+        KendraServiceConfig kendra();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3004,6 +3006,30 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface KendraServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long an index, data source, FAQ or other Kendra resource takes to finish creating, updating or deleting. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long a put document is PROCESSING before it is INDEXED and searchable. */
+        @WithDefault("1000")
+        long documentProcessingMillis();
+
+        /** How often scheduled data source syncs are checked. */
+        @WithDefault("30")
+        long syncSweepIntervalSeconds();
+
+        /**
+         * Whether the account is an existing Amazon Kendra customer. Kendra is closed to new customers; with false,
+         * CreateIndex is refused as AWS refuses a new customer.
+         */
+        @WithDefault("true")
+        boolean existingCustomer();
     }
 
     interface ForecastServiceConfig {

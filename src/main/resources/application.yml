@@ -1048,6 +1048,8 @@ floci:
       enabled: true
     glacier:
       enabled: true
+    kendra:
+      enabled: true
     fms:
       enabled: true
     entityresolution:

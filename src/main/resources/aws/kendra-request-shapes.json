@@ -1,0 +1,3565 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_kendra_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateEntitiesToExperience": "AssociateEntitiesToExperienceRequest",
+    "AssociatePersonasToEntities": "AssociatePersonasToEntitiesRequest",
+    "BatchDeleteDocument": "BatchDeleteDocumentRequest",
+    "BatchDeleteFeaturedResultsSet": "BatchDeleteFeaturedResultsSetRequest",
+    "BatchGetDocumentStatus": "BatchGetDocumentStatusRequest",
+    "BatchPutDocument": "BatchPutDocumentRequest",
+    "ClearQuerySuggestions": "ClearQuerySuggestionsRequest",
+    "CreateAccessControlConfiguration": "CreateAccessControlConfigurationRequest",
+    "CreateDataSource": "CreateDataSourceRequest",
+    "CreateExperience": "CreateExperienceRequest",
+    "CreateFaq": "CreateFaqRequest",
+    "CreateFeaturedResultsSet": "CreateFeaturedResultsSetRequest",
+    "CreateIndex": "CreateIndexRequest",
+    "CreateQuerySuggestionsBlockList": "CreateQuerySuggestionsBlockListRequest",
+    "CreateThesaurus": "CreateThesaurusRequest",
+    "DeleteAccessControlConfiguration": "DeleteAccessControlConfigurationRequest",
+    "DeleteDataSource": "DeleteDataSourceRequest",
+    "DeleteExperience": "DeleteExperienceRequest",
+    "DeleteFaq": "DeleteFaqRequest",
+    "DeleteIndex": "DeleteIndexRequest",
+    "DeletePrincipalMapping": "DeletePrincipalMappingRequest",
+    "DeleteQuerySuggestionsBlockList": "DeleteQuerySuggestionsBlockListRequest",
+    "DeleteThesaurus": "DeleteThesaurusRequest",
+    "DescribeAccessControlConfiguration": "DescribeAccessControlConfigurationRequest",
+    "DescribeDataSource": "DescribeDataSourceRequest",
+    "DescribeExperience": "DescribeExperienceRequest",
+    "DescribeFaq": "DescribeFaqRequest",
+    "DescribeFeaturedResultsSet": "DescribeFeaturedResultsSetRequest",
+    "DescribeIndex": "DescribeIndexRequest",
+    "DescribePrincipalMapping": "DescribePrincipalMappingRequest",
+    "DescribeQuerySuggestionsBlockList": "DescribeQuerySuggestionsBlockListRequest",
+    "DescribeQuerySuggestionsConfig": "DescribeQuerySuggestionsConfigRequest",
+    "DescribeThesaurus": "DescribeThesaurusRequest",
+    "DisassociateEntitiesFromExperience": "DisassociateEntitiesFromExperienceRequest",
+    "DisassociatePersonasFromEntities": "DisassociatePersonasFromEntitiesRequest",
+    "GetQuerySuggestions": "GetQuerySuggestionsRequest",
+    "GetSnapshots": "GetSnapshotsRequest",
+    "ListAccessControlConfigurations": "ListAccessControlConfigurationsRequest",
+    "ListDataSourceSyncJobs": "ListDataSourceSyncJobsRequest",
+    "ListDataSources": "ListDataSourcesRequest",
+    "ListEntityPersonas": "ListEntityPersonasRequest",
+    "ListExperienceEntities": "ListExperienceEntitiesRequest",
+    "ListExperiences": "ListExperiencesRequest",
+    "ListFaqs": "ListFaqsRequest",
+    "ListFeaturedResultsSets": "ListFeaturedResultsSetsRequest",
+    "ListGroupsOlderThanOrderingId": "ListGroupsOlderThanOrderingIdRequest",
+    "ListIndices": "ListIndicesRequest",
+    "ListQuerySuggestionsBlockLists": "ListQuerySuggestionsBlockListsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListThesauri": "ListThesauriRequest",
+    "PutPrincipalMapping": "PutPrincipalMappingRequest",
+    "Query": "QueryRequest",
+    "Retrieve": "RetrieveRequest",
+    "StartDataSourceSyncJob": "StartDataSourceSyncJobRequest",
+    "StopDataSourceSyncJob": "StopDataSourceSyncJobRequest",
+    "SubmitFeedback": "SubmitFeedbackRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateAccessControlConfiguration": "UpdateAccessControlConfigurationRequest",
+    "UpdateDataSource": "UpdateDataSourceRequest",
+    "UpdateExperience": "UpdateExperienceRequest",
+    "UpdateFeaturedResultsSet": "UpdateFeaturedResultsSetRequest",
+    "UpdateIndex": "UpdateIndexRequest",
+    "UpdateQuerySuggestionsBlockList": "UpdateQuerySuggestionsBlockListRequest",
+    "UpdateQuerySuggestionsConfig": "UpdateQuerySuggestionsConfigRequest",
+    "UpdateThesaurus": "UpdateThesaurusRequest"
+  },
+  "shapes": {
+    "AccessControlConfigurationId": {
+      "type": "string",
+      "min": 1,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9-]+"
+    },
+    "AccessControlConfigurationName": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[\\S\\s]*"
+    },
+    "AccessControlListConfiguration": {
+      "type": "structure",
+      "members": {
+        "KeyPath": "S3ObjectKey"
+      }
+    },
+    "AclConfiguration": {
+      "type": "structure",
+      "required": [
+        "AllowedGroupsColumnName"
+      ],
+      "members": {
+        "AllowedGroupsColumnName": "ColumnName"
+      }
+    },
+    "AlfrescoConfiguration": {
+      "type": "structure",
+      "required": [
+        "SiteUrl",
+        "SiteId",
+        "SecretArn",
+        "SslCertificateS3Path"
+      ],
+      "members": {
+        "SiteUrl": "SiteUrl",
+        "SiteId": "SiteId",
+        "SecretArn": "SecretArn",
+        "SslCertificateS3Path": "S3Path",
+        "CrawlSystemFolders": "Boolean",
+        "CrawlComments": "Boolean",
+        "EntityFilter": "EntityFilter",
+        "DocumentLibraryFieldMappings": "DataSourceToIndexFieldMappingList",
+        "BlogFieldMappings": "DataSourceToIndexFieldMappingList",
+        "WikiFieldMappings": "DataSourceToIndexFieldMappingList",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "VpcConfiguration": "DataSourceVpcConfiguration"
+      }
+    },
+    "AlfrescoEntity": {
+      "type": "string",
+      "enum": [
+        "wiki",
+        "blog",
+        "documentLibrary"
+      ]
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "AssociateEntitiesToExperienceRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId",
+        "EntityList"
+      ],
+      "members": {
+        "Id": "ExperienceId",
+        "IndexId": "IndexId",
+        "EntityList": "AssociateEntityList"
+      }
+    },
+    "AssociateEntityList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "EntityConfiguration"
+    },
+    "AssociatePersonasToEntitiesRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId",
+        "Personas"
+      ],
+      "members": {
+        "Id": "ExperienceId",
+        "IndexId": "IndexId",
+        "Personas": "EntityPersonaConfigurationList"
+      }
+    },
+    "AttributeFilter": {
+      "type": "structure",
+      "members": {
+        "AndAllFilters": "AttributeFilterList",
+        "OrAllFilters": "AttributeFilterList",
+        "NotFilter": "AttributeFilter",
+        "EqualsTo": "DocumentAttribute",
+        "ContainsAll": "DocumentAttribute",
+        "ContainsAny": "DocumentAttribute",
+        "GreaterThan": "DocumentAttribute",
+        "GreaterThanOrEquals": "DocumentAttribute",
+        "LessThan": "DocumentAttribute",
+        "LessThanOrEquals": "DocumentAttribute"
+      }
+    },
+    "AttributeFilterList": {
+      "type": "list",
+      "member": "AttributeFilter"
+    },
+    "AttributeSuggestionsGetConfig": {
+      "type": "structure",
+      "members": {
+        "SuggestionAttributes": "DocumentAttributeKeyList",
+        "AdditionalResponseAttributes": "DocumentAttributeKeyList",
+        "AttributeFilter": "AttributeFilter",
+        "UserContext": "UserContext"
+      }
+    },
+    "AttributeSuggestionsMode": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "INACTIVE"
+      ]
+    },
+    "AttributeSuggestionsUpdateConfig": {
+      "type": "structure",
+      "members": {
+        "SuggestableConfigList": "SuggestableConfigList",
+        "AttributeSuggestionsMode": "AttributeSuggestionsMode"
+      }
+    },
+    "AuthenticationConfiguration": {
+      "type": "structure",
+      "members": {
+        "BasicAuthentication": "BasicAuthenticationConfigurationList"
+      }
+    },
+    "BasicAuthenticationConfiguration": {
+      "type": "structure",
+      "required": [
+        "Host",
+        "Port",
+        "Credentials"
+      ],
+      "members": {
+        "Host": "Host",
+        "Port": "Port",
+        "Credentials": "SecretArn"
+      }
+    },
+    "BasicAuthenticationConfigurationList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "BasicAuthenticationConfiguration"
+    },
+    "BatchDeleteDocumentRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "DocumentIdList"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "DocumentIdList": "DocumentIdList",
+        "DataSourceSyncJobMetricTarget": "DataSourceSyncJobMetricTarget"
+      }
+    },
+    "BatchDeleteFeaturedResultsSetRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "FeaturedResultsSetIds"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "FeaturedResultsSetIds": "FeaturedResultsSetIdList"
+      }
+    },
+    "BatchGetDocumentStatusRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "DocumentInfoList"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "DocumentInfoList": "DocumentInfoList"
+      }
+    },
+    "BatchPutDocumentRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Documents"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "RoleArn": "RoleArn",
+        "Documents": "DocumentList",
+        "CustomDocumentEnrichmentConfiguration": "CustomDocumentEnrichmentConfiguration"
+      }
+    },
+    "Blob": {
+      "type": "blob"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BoxConfiguration": {
+      "type": "structure",
+      "required": [
+        "EnterpriseId",
+        "SecretArn"
+      ],
+      "members": {
+        "EnterpriseId": "EnterpriseId",
+        "SecretArn": "SecretArn",
+        "UseChangeLog": "Boolean",
+        "CrawlComments": "Boolean",
+        "CrawlTasks": "Boolean",
+        "CrawlWebLinks": "Boolean",
+        "FileFieldMappings": "DataSourceToIndexFieldMappingList",
+        "TaskFieldMappings": "DataSourceToIndexFieldMappingList",
+        "CommentFieldMappings": "DataSourceToIndexFieldMappingList",
+        "WebLinkFieldMappings": "DataSourceToIndexFieldMappingList",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "VpcConfiguration": "DataSourceVpcConfiguration"
+      }
+    },
+    "CapacityUnitsConfiguration": {
+      "type": "structure",
+      "required": [
+        "StorageCapacityUnits",
+        "QueryCapacityUnits"
+      ],
+      "members": {
+        "StorageCapacityUnits": "StorageCapacityUnit",
+        "QueryCapacityUnits": "QueryCapacityUnit"
+      }
+    },
+    "ChangeDetectingColumns": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "ColumnName"
+    },
+    "ClaimRegex": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^\\P{C}*$"
+    },
+    "ClearQuerySuggestionsRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId"
+      ],
+      "members": {
+        "IndexId": "IndexId"
+      }
+    },
+    "ClickFeedback": {
+      "type": "structure",
+      "required": [
+        "ResultId",
+        "ClickTime"
+      ],
+      "members": {
+        "ResultId": "ResultId",
+        "ClickTime": "Timestamp"
+      }
+    },
+    "ClickFeedbackList": {
+      "type": "list",
+      "member": "ClickFeedback"
+    },
+    "ClientTokenName": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "CollapseConfiguration": {
+      "type": "structure",
+      "required": [
+        "DocumentAttributeKey"
+      ],
+      "members": {
+        "DocumentAttributeKey": "DocumentAttributeKey",
+        "SortingConfigurations": "SortingConfigurationList",
+        "MissingAttributeKeyStrategy": "MissingAttributeKeyStrategy",
+        "Expand": "Boolean",
+        "ExpandConfiguration": "ExpandConfiguration"
+      }
+    },
+    "ColumnConfiguration": {
+      "type": "structure",
+      "required": [
+        "DocumentIdColumnName",
+        "DocumentDataColumnName",
+        "ChangeDetectingColumns"
+      ],
+      "members": {
+        "DocumentIdColumnName": "ColumnName",
+        "DocumentDataColumnName": "ColumnName",
+        "DocumentTitleColumnName": "ColumnName",
+        "FieldMappings": "DataSourceToIndexFieldMappingList",
+        "ChangeDetectingColumns": "ChangeDetectingColumns"
+      }
+    },
+    "ColumnName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"
+    },
+    "ConditionOperator": {
+      "type": "string",
+      "enum": [
+        "GreaterThan",
+        "GreaterThanOrEquals",
+        "LessThan",
+        "LessThanOrEquals",
+        "Equals",
+        "NotEquals",
+        "Contains",
+        "NotContains",
+        "Exists",
+        "NotExists",
+        "BeginsWith"
+      ]
+    },
+    "ConfluenceAttachmentConfiguration": {
+      "type": "structure",
+      "members": {
+        "CrawlAttachments": "Boolean",
+        "AttachmentFieldMappings": "ConfluenceAttachmentFieldMappingsList"
+      }
+    },
+    "ConfluenceAttachmentFieldMappingsList": {
+      "type": "list",
+      "min": 1,
+      "max": 11,
+      "member": "ConfluenceAttachmentToIndexFieldMapping"
+    },
+    "ConfluenceAttachmentFieldName": {
+      "type": "string",
+      "enum": [
+        "AUTHOR",
+        "CONTENT_TYPE",
+        "CREATED_DATE",
+        "DISPLAY_URL",
+        "FILE_SIZE",
+        "ITEM_TYPE",
+        "PARENT_ID",
+        "SPACE_KEY",
+        "SPACE_NAME",
+        "URL",
+        "VERSION"
+      ]
+    },
+    "ConfluenceAttachmentToIndexFieldMapping": {
+      "type": "structure",
+      "members": {
+        "DataSourceFieldName": "ConfluenceAttachmentFieldName",
+        "DateFieldFormat": "DataSourceDateFieldFormat",
+        "IndexFieldName": "IndexFieldName"
+      }
+    },
+    "ConfluenceAuthenticationType": {
+      "type": "string",
+      "enum": [
+        "HTTP_BASIC",
+        "PAT"
+      ]
+    },
+    "ConfluenceBlogConfiguration": {
+      "type": "structure",
+      "members": {
+        "BlogFieldMappings": "ConfluenceBlogFieldMappingsList"
+      }
+    },
+    "ConfluenceBlogFieldMappingsList": {
+      "type": "list",
+      "min": 1,
+      "max": 9,
+      "member": "ConfluenceBlogToIndexFieldMapping"
+    },
+    "ConfluenceBlogFieldName": {
+      "type": "string",
+      "enum": [
+        "AUTHOR",
+        "DISPLAY_URL",
+        "ITEM_TYPE",
+        "LABELS",
+        "PUBLISH_DATE",
+        "SPACE_KEY",
+        "SPACE_NAME",
+        "URL",
+        "VERSION"
+      ]
+    },
+    "ConfluenceBlogToIndexFieldMapping": {
+      "type": "structure",
+      "members": {
+        "DataSourceFieldName": "ConfluenceBlogFieldName",
+        "DateFieldFormat": "DataSourceDateFieldFormat",
+        "IndexFieldName": "IndexFieldName"
+      }
+    },
+    "ConfluenceConfiguration": {
+      "type": "structure",
+      "required": [
+        "ServerUrl",
+        "SecretArn",
+        "Version"
+      ],
+      "members": {
+        "ServerUrl": "Url",
+        "SecretArn": "SecretArn",
+        "Version": "ConfluenceVersion",
+        "SpaceConfiguration": "ConfluenceSpaceConfiguration",
+        "PageConfiguration": "ConfluencePageConfiguration",
+        "BlogConfiguration": "ConfluenceBlogConfiguration",
+        "AttachmentConfiguration": "ConfluenceAttachmentConfiguration",
+        "VpcConfiguration": "DataSourceVpcConfiguration",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ProxyConfiguration": "ProxyConfiguration",
+        "AuthenticationType": "ConfluenceAuthenticationType"
+      }
+    },
+    "ConfluencePageConfiguration": {
+      "type": "structure",
+      "members": {
+        "PageFieldMappings": "ConfluencePageFieldMappingsList"
+      }
+    },
+    "ConfluencePageFieldMappingsList": {
+      "type": "list",
+      "min": 1,
+      "max": 12,
+      "member": "ConfluencePageToIndexFieldMapping"
+    },
+    "ConfluencePageFieldName": {
+      "type": "string",
+      "enum": [
+        "AUTHOR",
+        "CONTENT_STATUS",
+        "CREATED_DATE",
+        "DISPLAY_URL",
+        "ITEM_TYPE",
+        "LABELS",
+        "MODIFIED_DATE",
+        "PARENT_ID",
+        "SPACE_KEY",
+        "SPACE_NAME",
+        "URL",
+        "VERSION"
+      ]
+    },
+    "ConfluencePageToIndexFieldMapping": {
+      "type": "structure",
+      "members": {
+        "DataSourceFieldName": "ConfluencePageFieldName",
+        "DateFieldFormat": "DataSourceDateFieldFormat",
+        "IndexFieldName": "IndexFieldName"
+      }
+    },
+    "ConfluenceSpaceConfiguration": {
+      "type": "structure",
+      "members": {
+        "CrawlPersonalSpaces": "Boolean",
+        "CrawlArchivedSpaces": "Boolean",
+        "IncludeSpaces": "ConfluenceSpaceList",
+        "ExcludeSpaces": "ConfluenceSpaceList",
+        "SpaceFieldMappings": "ConfluenceSpaceFieldMappingsList"
+      }
+    },
+    "ConfluenceSpaceFieldMappingsList": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "ConfluenceSpaceToIndexFieldMapping"
+    },
+    "ConfluenceSpaceFieldName": {
+      "type": "string",
+      "enum": [
+        "DISPLAY_URL",
+        "ITEM_TYPE",
+        "SPACE_KEY",
+        "URL"
+      ]
+    },
+    "ConfluenceSpaceIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^\\P{C}*$"
+    },
+    "ConfluenceSpaceList": {
+      "type": "list",
+      "min": 1,
+      "member": "ConfluenceSpaceIdentifier"
+    },
+    "ConfluenceSpaceToIndexFieldMapping": {
+      "type": "structure",
+      "members": {
+        "DataSourceFieldName": "ConfluenceSpaceFieldName",
+        "DateFieldFormat": "DataSourceDateFieldFormat",
+        "IndexFieldName": "IndexFieldName"
+      }
+    },
+    "ConfluenceVersion": {
+      "type": "string",
+      "enum": [
+        "CLOUD",
+        "SERVER"
+      ]
+    },
+    "ConnectionConfiguration": {
+      "type": "structure",
+      "required": [
+        "DatabaseHost",
+        "DatabasePort",
+        "DatabaseName",
+        "TableName",
+        "SecretArn"
+      ],
+      "members": {
+        "DatabaseHost": "DatabaseHost",
+        "DatabasePort": "DatabasePort",
+        "DatabaseName": "DatabaseName",
+        "TableName": "TableName",
+        "SecretArn": "SecretArn"
+      }
+    },
+    "ContentSourceConfiguration": {
+      "type": "structure",
+      "members": {
+        "DataSourceIds": "DataSourceIdList",
+        "FaqIds": "FaqIdsList",
+        "DirectPutContent": "Boolean"
+      }
+    },
+    "ContentType": {
+      "type": "string",
+      "enum": [
+        "PDF",
+        "HTML",
+        "MS_WORD",
+        "PLAIN_TEXT",
+        "PPT",
+        "RTF",
+        "XML",
+        "XSLT",
+        "MS_EXCEL",
+        "CSV",
+        "JSON",
+        "MD"
+      ]
+    },
+    "CrawlDepth": {
+      "type": "integer",
+      "min": 0,
+      "max": 10
+    },
+    "CreateAccessControlConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Name"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Name": "AccessControlConfigurationName",
+        "Description": "Description",
+        "AccessControlList": "PrincipalList",
+        "HierarchicalAccessControlList": "HierarchicalPrincipalList",
+        "ClientToken": "ClientTokenName"
+      }
+    },
+    "CreateDataSourceRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "IndexId",
+        "Type"
+      ],
+      "members": {
+        "Name": "DataSourceName",
+        "IndexId": "IndexId",
+        "Type": "DataSourceType",
+        "Configuration": "DataSourceConfiguration",
+        "VpcConfiguration": "DataSourceVpcConfiguration",
+        "Description": "Description",
+        "Schedule": "ScanSchedule",
+        "RoleArn": "RoleArn",
+        "Tags": "TagList",
+        "ClientToken": "ClientTokenName",
+        "LanguageCode": "LanguageCode",
+        "CustomDocumentEnrichmentConfiguration": "CustomDocumentEnrichmentConfiguration"
+      }
+    },
+    "CreateExperienceRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "IndexId"
+      ],
+      "members": {
+        "Name": "ExperienceName",
+        "IndexId": "IndexId",
+        "RoleArn": "RoleArn",
+        "Configuration": "ExperienceConfiguration",
+        "Description": "Description",
+        "ClientToken": "ClientTokenName"
+      }
+    },
+    "CreateFaqRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Name",
+        "S3Path",
+        "RoleArn"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Name": "FaqName",
+        "Description": "Description",
+        "S3Path": "S3Path",
+        "RoleArn": "RoleArn",
+        "Tags": "TagList",
+        "FileFormat": "FaqFileFormat",
+        "ClientToken": "ClientTokenName",
+        "LanguageCode": "LanguageCode"
+      }
+    },
+    "CreateFeaturedResultsSetRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "FeaturedResultsSetName"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "FeaturedResultsSetName": "FeaturedResultsSetName",
+        "Description": "FeaturedResultsSetDescription",
+        "ClientToken": "ClientTokenName",
+        "Status": "FeaturedResultsSetStatus",
+        "QueryTexts": "QueryTextList",
+        "FeaturedDocuments": "FeaturedDocumentList",
+        "Tags": "TagList"
+      }
+    },
+    "CreateIndexRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "RoleArn"
+      ],
+      "members": {
+        "Name": "IndexName",
+        "Edition": "IndexEdition",
+        "RoleArn": "RoleArn",
+        "ServerSideEncryptionConfiguration": "ServerSideEncryptionConfiguration",
+        "Description": "Description",
+        "ClientToken": "ClientTokenName",
+        "Tags": "TagList",
+        "UserTokenConfigurations": "UserTokenConfigurationList",
+        "UserContextPolicy": "UserContextPolicy",
+        "UserGroupResolutionConfiguration": "UserGroupResolutionConfiguration"
+      }
+    },
+    "CreateQuerySuggestionsBlockListRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Name",
+        "SourceS3Path",
+        "RoleArn"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Name": "QuerySuggestionsBlockListName",
+        "Description": "Description",
+        "SourceS3Path": "S3Path",
+        "ClientToken": "ClientTokenName",
+        "RoleArn": "RoleArn",
+        "Tags": "TagList"
+      }
+    },
+    "CreateThesaurusRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Name",
+        "RoleArn",
+        "SourceS3Path"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Name": "ThesaurusName",
+        "Description": "Description",
+        "RoleArn": "RoleArn",
+        "Tags": "TagList",
+        "SourceS3Path": "S3Path",
+        "ClientToken": "ClientTokenName"
+      }
+    },
+    "CustomDocumentEnrichmentConfiguration": {
+      "type": "structure",
+      "members": {
+        "InlineConfigurations": "InlineCustomDocumentEnrichmentConfigurationList",
+        "PreExtractionHookConfiguration": "HookConfiguration",
+        "PostExtractionHookConfiguration": "HookConfiguration",
+        "RoleArn": "RoleArn"
+      }
+    },
+    "DataSourceConfiguration": {
+      "type": "structure",
+      "members": {
+        "S3Configuration": "S3DataSourceConfiguration",
+        "SharePointConfiguration": "SharePointConfiguration",
+        "DatabaseConfiguration": "DatabaseConfiguration",
+        "SalesforceConfiguration": "SalesforceConfiguration",
+        "OneDriveConfiguration": "OneDriveConfiguration",
+        "ServiceNowConfiguration": "ServiceNowConfiguration",
+        "ConfluenceConfiguration": "ConfluenceConfiguration",
+        "GoogleDriveConfiguration": "GoogleDriveConfiguration",
+        "WebCrawlerConfiguration": "WebCrawlerConfiguration",
+        "WorkDocsConfiguration": "WorkDocsConfiguration",
+        "FsxConfiguration": "FsxConfiguration",
+        "SlackConfiguration": "SlackConfiguration",
+        "BoxConfiguration": "BoxConfiguration",
+        "QuipConfiguration": "QuipConfiguration",
+        "JiraConfiguration": "JiraConfiguration",
+        "GitHubConfiguration": "GitHubConfiguration",
+        "AlfrescoConfiguration": "AlfrescoConfiguration",
+        "TemplateConfiguration": "TemplateConfiguration"
+      }
+    },
+    "DataSourceDateFieldFormat": {
+      "type": "string",
+      "min": 4,
+      "max": 40,
+      "pattern": "^(?!\\s).*(?<!\\s)$"
+    },
+    "DataSourceFieldName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_.]*$"
+    },
+    "DataSourceGroup": {
+      "type": "structure",
+      "required": [
+        "GroupId",
+        "DataSourceId"
+      ],
+      "members": {
+        "GroupId": "PrincipalName",
+        "DataSourceId": "DataSourceId"
+      }
+    },
+    "DataSourceGroups": {
+      "type": "list",
+      "min": 1,
+      "max": 2048,
+      "member": "DataSourceGroup"
+    },
+    "DataSourceId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "DataSourceIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "DataSourceId"
+    },
+    "DataSourceInclusionsExclusionsStrings": {
+      "type": "list",
+      "min": 0,
+      "max": 250,
+      "member": "DataSourceInclusionsExclusionsStringsMember"
+    },
+    "DataSourceInclusionsExclusionsStringsMember": {
+      "type": "string",
+      "min": 1,
+      "max": 300
+    },
+    "DataSourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "DataSourceSyncJobId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "DataSourceSyncJobMetricTarget": {
+      "type": "structure",
+      "required": [
+        "DataSourceId"
+      ],
+      "members": {
+        "DataSourceId": "DataSourceId",
+        "DataSourceSyncJobId": "DataSourceSyncJobId"
+      }
+    },
+    "DataSourceSyncJobStatus": {
+      "type": "string",
+      "enum": [
+        "FAILED",
+        "SUCCEEDED",
+        "SYNCING",
+        "INCOMPLETE",
+        "STOPPING",
+        "ABORTED",
+        "SYNCING_INDEXING"
+      ]
+    },
+    "DataSourceToIndexFieldMapping": {
+      "type": "structure",
+      "required": [
+        "DataSourceFieldName",
+        "IndexFieldName"
+      ],
+      "members": {
+        "DataSourceFieldName": "DataSourceFieldName",
+        "DateFieldFormat": "DataSourceDateFieldFormat",
+        "IndexFieldName": "IndexFieldName"
+      }
+    },
+    "DataSourceToIndexFieldMappingList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "DataSourceToIndexFieldMapping"
+    },
+    "DataSourceType": {
+      "type": "string",
+      "enum": [
+        "S3",
+        "SHAREPOINT",
+        "DATABASE",
+        "SALESFORCE",
+        "ONEDRIVE",
+        "SERVICENOW",
+        "CUSTOM",
+        "CONFLUENCE",
+        "GOOGLEDRIVE",
+        "WEBCRAWLER",
+        "WORKDOCS",
+        "FSX",
+        "SLACK",
+        "BOX",
+        "QUIP",
+        "JIRA",
+        "GITHUB",
+        "ALFRESCO",
+        "TEMPLATE"
+      ]
+    },
+    "DataSourceVpcConfiguration": {
+      "type": "structure",
+      "required": [
+        "SubnetIds",
+        "SecurityGroupIds"
+      ],
+      "members": {
+        "SubnetIds": "SubnetIdList",
+        "SecurityGroupIds": "SecurityGroupIdList"
+      }
+    },
+    "DatabaseConfiguration": {
+      "type": "structure",
+      "required": [
+        "DatabaseEngineType",
+        "ConnectionConfiguration",
+        "ColumnConfiguration"
+      ],
+      "members": {
+        "DatabaseEngineType": "DatabaseEngineType",
+        "ConnectionConfiguration": "ConnectionConfiguration",
+        "VpcConfiguration": "DataSourceVpcConfiguration",
+        "ColumnConfiguration": "ColumnConfiguration",
+        "AclConfiguration": "AclConfiguration",
+        "SqlConfiguration": "SqlConfiguration"
+      }
+    },
+    "DatabaseEngineType": {
+      "type": "string",
+      "enum": [
+        "RDS_AURORA_MYSQL",
+        "RDS_AURORA_POSTGRESQL",
+        "RDS_MYSQL",
+        "RDS_POSTGRESQL"
+      ]
+    },
+    "DatabaseHost": {
+      "type": "string",
+      "min": 1,
+      "max": 253
+    },
+    "DatabaseName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"
+    },
+    "DatabasePort": {
+      "type": "integer",
+      "min": 1,
+      "max": 65535
+    },
+    "DeleteAccessControlConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Id"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Id": "AccessControlConfigurationId"
+      }
+    },
+    "DeleteDataSourceRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "DataSourceId",
+        "IndexId": "IndexId"
+      }
+    },
+    "DeleteExperienceRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "ExperienceId",
+        "IndexId": "IndexId"
+      }
+    },
+    "DeleteFaqRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "FaqId",
+        "IndexId": "IndexId"
+      }
+    },
+    "DeleteIndexRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "IndexId"
+      }
+    },
+    "DeletePrincipalMappingRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "GroupId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "DataSourceId": "DataSourceId",
+        "GroupId": "GroupId",
+        "OrderingId": "PrincipalOrderingId"
+      }
+    },
+    "DeleteQuerySuggestionsBlockListRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Id"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Id": "QuerySuggestionsBlockListId"
+      }
+    },
+    "DeleteThesaurusRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "ThesaurusId",
+        "IndexId": "IndexId"
+      }
+    },
+    "DescribeAccessControlConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Id"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Id": "AccessControlConfigurationId"
+      }
+    },
+    "DescribeDataSourceRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "DataSourceId",
+        "IndexId": "IndexId"
+      }
+    },
+    "DescribeExperienceRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "ExperienceId",
+        "IndexId": "IndexId"
+      }
+    },
+    "DescribeFaqRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "FaqId",
+        "IndexId": "IndexId"
+      }
+    },
+    "DescribeFeaturedResultsSetRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "FeaturedResultsSetId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "FeaturedResultsSetId": "FeaturedResultsSetId"
+      }
+    },
+    "DescribeIndexRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "IndexId"
+      }
+    },
+    "DescribePrincipalMappingRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "GroupId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "DataSourceId": "DataSourceId",
+        "GroupId": "GroupId"
+      }
+    },
+    "DescribeQuerySuggestionsBlockListRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Id"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Id": "QuerySuggestionsBlockListId"
+      }
+    },
+    "DescribeQuerySuggestionsConfigRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId"
+      ],
+      "members": {
+        "IndexId": "IndexId"
+      }
+    },
+    "DescribeThesaurusRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "ThesaurusId",
+        "IndexId": "IndexId"
+      }
+    },
+    "Description": {
+      "type": "string",
+      "min": 0,
+      "max": 1000,
+      "pattern": "^\\P{C}*$"
+    },
+    "DisassociateEntitiesFromExperienceRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId",
+        "EntityList"
+      ],
+      "members": {
+        "Id": "ExperienceId",
+        "IndexId": "IndexId",
+        "EntityList": "DisassociateEntityList"
+      }
+    },
+    "DisassociateEntityList": {
+      "type": "list",
+      "min": 1,
+      "max": 40,
+      "member": "EntityConfiguration"
+    },
+    "DisassociatePersonasFromEntitiesRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId",
+        "EntityIds"
+      ],
+      "members": {
+        "Id": "ExperienceId",
+        "IndexId": "IndexId",
+        "EntityIds": "EntityIdsList"
+      }
+    },
+    "Document": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "DocumentId",
+        "Title": "Title",
+        "Blob": "Blob",
+        "S3Path": "S3Path",
+        "Attributes": "DocumentAttributeList",
+        "AccessControlList": "PrincipalList",
+        "HierarchicalAccessControlList": "HierarchicalPrincipalList",
+        "ContentType": "ContentType",
+        "AccessControlConfigurationId": "AccessControlConfigurationId"
+      }
+    },
+    "DocumentAttribute": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "DocumentAttributeKey",
+        "Value": "DocumentAttributeValue"
+      }
+    },
+    "DocumentAttributeCondition": {
+      "type": "structure",
+      "required": [
+        "ConditionDocumentAttributeKey",
+        "Operator"
+      ],
+      "members": {
+        "ConditionDocumentAttributeKey": "DocumentAttributeKey",
+        "Operator": "ConditionOperator",
+        "ConditionOnValue": "DocumentAttributeValue"
+      }
+    },
+    "DocumentAttributeKey": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[a-zA-Z0-9_][a-zA-Z0-9_-]*"
+    },
+    "DocumentAttributeKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "DocumentAttributeKey"
+    },
+    "DocumentAttributeList": {
+      "type": "list",
+      "member": "DocumentAttribute"
+    },
+    "DocumentAttributeStringListValue": {
+      "type": "list",
+      "member": "String"
+    },
+    "DocumentAttributeStringValue": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "DocumentAttributeTarget": {
+      "type": "structure",
+      "members": {
+        "TargetDocumentAttributeKey": "DocumentAttributeKey",
+        "TargetDocumentAttributeValueDeletion": "Boolean",
+        "TargetDocumentAttributeValue": "DocumentAttributeValue"
+      }
+    },
+    "DocumentAttributeValue": {
+      "type": "structure",
+      "members": {
+        "StringValue": "DocumentAttributeStringValue",
+        "StringListValue": "DocumentAttributeStringListValue",
+        "LongValue": "Long",
+        "DateValue": "Timestamp"
+      }
+    },
+    "DocumentAttributeValueType": {
+      "type": "string",
+      "enum": [
+        "STRING_VALUE",
+        "STRING_LIST_VALUE",
+        "LONG_VALUE",
+        "DATE_VALUE"
+      ]
+    },
+    "DocumentId": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "DocumentIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "DocumentId"
+    },
+    "DocumentInfo": {
+      "type": "structure",
+      "required": [
+        "DocumentId"
+      ],
+      "members": {
+        "DocumentId": "DocumentId",
+        "Attributes": "DocumentAttributeList"
+      }
+    },
+    "DocumentInfoList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "DocumentInfo"
+    },
+    "DocumentList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "Document"
+    },
+    "DocumentMetadataBoolean": {
+      "type": "boolean"
+    },
+    "DocumentMetadataConfiguration": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Type"
+      ],
+      "members": {
+        "Name": "DocumentMetadataConfigurationName",
+        "Type": "DocumentAttributeValueType",
+        "Relevance": "Relevance",
+        "Search": "Search"
+      }
+    },
+    "DocumentMetadataConfigurationList": {
+      "type": "list",
+      "min": 0,
+      "max": 500,
+      "member": "DocumentMetadataConfiguration"
+    },
+    "DocumentMetadataConfigurationName": {
+      "type": "string",
+      "min": 1,
+      "max": 30
+    },
+    "DocumentRelevanceConfiguration": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Relevance"
+      ],
+      "members": {
+        "Name": "DocumentMetadataConfigurationName",
+        "Relevance": "Relevance"
+      }
+    },
+    "DocumentRelevanceOverrideConfigurationList": {
+      "type": "list",
+      "min": 0,
+      "max": 500,
+      "member": "DocumentRelevanceConfiguration"
+    },
+    "DocumentsMetadataConfiguration": {
+      "type": "structure",
+      "members": {
+        "S3Prefix": "S3ObjectKey"
+      }
+    },
+    "Domain": {
+      "type": "string",
+      "min": 1,
+      "max": 63,
+      "pattern": "^(?!-)[A-Za-z0-9-].*(?<!-)$"
+    },
+    "Duration": {
+      "type": "string",
+      "min": 1,
+      "max": 10,
+      "pattern": "[0-9]+[s]"
+    },
+    "EnterpriseId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[A-Z0-9]*$"
+    },
+    "EntityConfiguration": {
+      "type": "structure",
+      "required": [
+        "EntityId",
+        "EntityType"
+      ],
+      "members": {
+        "EntityId": "EntityId",
+        "EntityType": "EntityType"
+      }
+    },
+    "EntityFilter": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "AlfrescoEntity"
+    },
+    "EntityId": {
+      "type": "string",
+      "min": 1,
+      "max": 47,
+      "pattern": "^([0-9a-f]{10}-|)[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}$"
+    },
+    "EntityIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 25,
+      "member": "EntityId"
+    },
+    "EntityPersonaConfiguration": {
+      "type": "structure",
+      "required": [
+        "EntityId",
+        "Persona"
+      ],
+      "members": {
+        "EntityId": "EntityId",
+        "Persona": "Persona"
+      }
+    },
+    "EntityPersonaConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "max": 25,
+      "member": "EntityPersonaConfiguration"
+    },
+    "EntityType": {
+      "type": "string",
+      "enum": [
+        "USER",
+        "GROUP"
+      ]
+    },
+    "ExcludeMimeTypesList": {
+      "type": "list",
+      "min": 0,
+      "max": 30,
+      "member": "MimeType"
+    },
+    "ExcludeSharedDrivesList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "SharedDriveId"
+    },
+    "ExcludeUserAccountsList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "UserAccount"
+    },
+    "ExpandConfiguration": {
+      "type": "structure",
+      "members": {
+        "MaxResultItemsToExpand": "Integer",
+        "MaxExpandedResultsPerItem": "Integer"
+      }
+    },
+    "ExperienceConfiguration": {
+      "type": "structure",
+      "members": {
+        "ContentSourceConfiguration": "ContentSourceConfiguration",
+        "UserIdentityConfiguration": "UserIdentityConfiguration"
+      }
+    },
+    "ExperienceId": {
+      "type": "string",
+      "min": 1,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "ExperienceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "Facet": {
+      "type": "structure",
+      "members": {
+        "DocumentAttributeKey": "DocumentAttributeKey",
+        "Facets": "FacetList",
+        "MaxResults": "TopDocumentAttributeValueCountPairsSize"
+      }
+    },
+    "FacetList": {
+      "type": "list",
+      "member": "Facet"
+    },
+    "FaqFileFormat": {
+      "type": "string",
+      "enum": [
+        "CSV",
+        "CSV_WITH_HEADER",
+        "JSON"
+      ]
+    },
+    "FaqId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "FaqIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "FaqId"
+    },
+    "FaqName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "FeaturedDocument": {
+      "type": "structure",
+      "members": {
+        "Id": "DocumentId"
+      }
+    },
+    "FeaturedDocumentList": {
+      "type": "list",
+      "member": "FeaturedDocument"
+    },
+    "FeaturedResultsSetDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 1000,
+      "pattern": "^\\P{C}*$"
+    },
+    "FeaturedResultsSetId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "^[a-zA-Z-0-9]*"
+    },
+    "FeaturedResultsSetIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "FeaturedResultsSetId"
+    },
+    "FeaturedResultsSetName": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "[a-zA-Z0-9][ a-zA-Z0-9_-]*"
+    },
+    "FeaturedResultsSetStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "INACTIVE"
+      ]
+    },
+    "FileSystemId": {
+      "type": "string",
+      "min": 11,
+      "max": 21,
+      "pattern": "^(fs-[0-9a-f]{8,})$"
+    },
+    "FolderId": {
+      "type": "string",
+      "min": 1,
+      "max": 500
+    },
+    "FolderIdList": {
+      "type": "list",
+      "member": "FolderId"
+    },
+    "FsxConfiguration": {
+      "type": "structure",
+      "required": [
+        "FileSystemId",
+        "FileSystemType",
+        "VpcConfiguration"
+      ],
+      "members": {
+        "FileSystemId": "FileSystemId",
+        "FileSystemType": "FsxFileSystemType",
+        "VpcConfiguration": "DataSourceVpcConfiguration",
+        "SecretArn": "SecretArn",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "FieldMappings": "DataSourceToIndexFieldMappingList"
+      }
+    },
+    "FsxFileSystemType": {
+      "type": "string",
+      "enum": [
+        "WINDOWS"
+      ]
+    },
+    "GetQuerySuggestionsRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "QueryText"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "QueryText": "SuggestionQueryText",
+        "MaxSuggestionsCount": "Integer",
+        "SuggestionTypes": "SuggestionTypes",
+        "AttributeSuggestionsConfig": "AttributeSuggestionsGetConfig"
+      }
+    },
+    "GetSnapshotsRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Interval",
+        "MetricType"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Interval": "Interval",
+        "MetricType": "MetricType",
+        "NextToken": "NextToken",
+        "MaxResults": "Integer"
+      }
+    },
+    "GitHubConfiguration": {
+      "type": "structure",
+      "required": [
+        "SecretArn"
+      ],
+      "members": {
+        "SaaSConfiguration": "SaaSConfiguration",
+        "OnPremiseConfiguration": "OnPremiseConfiguration",
+        "Type": "Type",
+        "SecretArn": "SecretArn",
+        "UseChangeLog": "Boolean",
+        "GitHubDocumentCrawlProperties": "GitHubDocumentCrawlProperties",
+        "RepositoryFilter": "RepositoryNames",
+        "InclusionFolderNamePatterns": "StringList",
+        "InclusionFileTypePatterns": "StringList",
+        "InclusionFileNamePatterns": "StringList",
+        "ExclusionFolderNamePatterns": "StringList",
+        "ExclusionFileTypePatterns": "StringList",
+        "ExclusionFileNamePatterns": "StringList",
+        "VpcConfiguration": "DataSourceVpcConfiguration",
+        "GitHubRepositoryConfigurationFieldMappings": "DataSourceToIndexFieldMappingList",
+        "GitHubCommitConfigurationFieldMappings": "DataSourceToIndexFieldMappingList",
+        "GitHubIssueDocumentConfigurationFieldMappings": "DataSourceToIndexFieldMappingList",
+        "GitHubIssueCommentConfigurationFieldMappings": "DataSourceToIndexFieldMappingList",
+        "GitHubIssueAttachmentConfigurationFieldMappings": "DataSourceToIndexFieldMappingList",
+        "GitHubPullRequestCommentConfigurationFieldMappings": "DataSourceToIndexFieldMappingList",
+        "GitHubPullRequestDocumentConfigurationFieldMappings": "DataSourceToIndexFieldMappingList",
+        "GitHubPullRequestDocumentAttachmentConfigurationFieldMappings": "DataSourceToIndexFieldMappingList"
+      }
+    },
+    "GitHubDocumentCrawlProperties": {
+      "type": "structure",
+      "members": {
+        "CrawlRepositoryDocuments": "Boolean",
+        "CrawlIssue": "Boolean",
+        "CrawlIssueComment": "Boolean",
+        "CrawlIssueCommentAttachment": "Boolean",
+        "CrawlPullRequest": "Boolean",
+        "CrawlPullRequestComment": "Boolean",
+        "CrawlPullRequestCommentAttachment": "Boolean"
+      }
+    },
+    "GoogleDriveConfiguration": {
+      "type": "structure",
+      "required": [
+        "SecretArn"
+      ],
+      "members": {
+        "SecretArn": "SecretArn",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "FieldMappings": "DataSourceToIndexFieldMappingList",
+        "ExcludeMimeTypes": "ExcludeMimeTypesList",
+        "ExcludeUserAccounts": "ExcludeUserAccountsList",
+        "ExcludeSharedDrives": "ExcludeSharedDrivesList"
+      }
+    },
+    "GroupAttributeField": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^\\P{C}*$"
+    },
+    "GroupId": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^\\P{C}*$"
+    },
+    "GroupMembers": {
+      "type": "structure",
+      "members": {
+        "MemberGroups": "MemberGroups",
+        "MemberUsers": "MemberUsers",
+        "S3PathforGroupMembers": "S3Path"
+      }
+    },
+    "Groups": {
+      "type": "list",
+      "min": 1,
+      "max": 2048,
+      "member": "PrincipalName"
+    },
+    "HierarchicalPrincipal": {
+      "type": "structure",
+      "required": [
+        "PrincipalList"
+      ],
+      "members": {
+        "PrincipalList": "PrincipalList"
+      }
+    },
+    "HierarchicalPrincipalList": {
+      "type": "list",
+      "min": 1,
+      "max": 30,
+      "member": "HierarchicalPrincipal"
+    },
+    "HookConfiguration": {
+      "type": "structure",
+      "required": [
+        "LambdaArn",
+        "S3Bucket"
+      ],
+      "members": {
+        "InvocationCondition": "DocumentAttributeCondition",
+        "LambdaArn": "LambdaArn",
+        "S3Bucket": "S3BucketName"
+      }
+    },
+    "Host": {
+      "type": "string",
+      "min": 1,
+      "max": 253,
+      "pattern": "([^\\s]*)"
+    },
+    "IdentityAttributeName": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "Importance": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "IndexEdition": {
+      "type": "string",
+      "enum": [
+        "DEVELOPER_EDITION",
+        "ENTERPRISE_EDITION",
+        "GEN_AI_ENTERPRISE_EDITION"
+      ]
+    },
+    "IndexFieldName": {
+      "type": "string",
+      "min": 1,
+      "max": 30,
+      "pattern": "^\\P{C}*$"
+    },
+    "IndexId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]*"
+    },
+    "IndexName": {
+      "type": "string",
+      "min": 1,
+      "max": 1000,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "InlineCustomDocumentEnrichmentConfiguration": {
+      "type": "structure",
+      "members": {
+        "Condition": "DocumentAttributeCondition",
+        "Target": "DocumentAttributeTarget",
+        "DocumentContentDeletion": "Boolean"
+      }
+    },
+    "InlineCustomDocumentEnrichmentConfigurationList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "InlineCustomDocumentEnrichmentConfiguration"
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "Interval": {
+      "type": "string",
+      "enum": [
+        "THIS_MONTH",
+        "THIS_WEEK",
+        "ONE_WEEK_AGO",
+        "TWO_WEEKS_AGO",
+        "ONE_MONTH_AGO",
+        "TWO_MONTHS_AGO"
+      ]
+    },
+    "IssueSubEntity": {
+      "type": "string",
+      "enum": [
+        "COMMENTS",
+        "ATTACHMENTS",
+        "WORKLOGS"
+      ]
+    },
+    "IssueSubEntityFilter": {
+      "type": "list",
+      "min": 0,
+      "max": 3,
+      "member": "IssueSubEntity"
+    },
+    "IssueType": {
+      "type": "list",
+      "member": "String"
+    },
+    "Issuer": {
+      "type": "string",
+      "min": 1,
+      "max": 65,
+      "pattern": "^\\P{C}*$"
+    },
+    "JiraAccountUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^https:\\/\\/[a-zA-Z0-9_\\-\\.]+(\\.atlassian\\.net\\/)$"
+    },
+    "JiraConfiguration": {
+      "type": "structure",
+      "required": [
+        "JiraAccountUrl",
+        "SecretArn"
+      ],
+      "members": {
+        "JiraAccountUrl": "JiraAccountUrl",
+        "SecretArn": "SecretArn",
+        "UseChangeLog": "Boolean",
+        "Project": "Project",
+        "IssueType": "IssueType",
+        "Status": "JiraStatus",
+        "IssueSubEntityFilter": "IssueSubEntityFilter",
+        "AttachmentFieldMappings": "DataSourceToIndexFieldMappingList",
+        "CommentFieldMappings": "DataSourceToIndexFieldMappingList",
+        "IssueFieldMappings": "DataSourceToIndexFieldMappingList",
+        "ProjectFieldMappings": "DataSourceToIndexFieldMappingList",
+        "WorkLogFieldMappings": "DataSourceToIndexFieldMappingList",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "VpcConfiguration": "DataSourceVpcConfiguration"
+      }
+    },
+    "JiraStatus": {
+      "type": "list",
+      "member": "String"
+    },
+    "JsonTokenTypeConfiguration": {
+      "type": "structure",
+      "required": [
+        "UserNameAttributeField",
+        "GroupAttributeField"
+      ],
+      "members": {
+        "UserNameAttributeField": "String",
+        "GroupAttributeField": "String"
+      }
+    },
+    "JwtTokenTypeConfiguration": {
+      "type": "structure",
+      "required": [
+        "KeyLocation"
+      ],
+      "members": {
+        "KeyLocation": "KeyLocation",
+        "URL": "Url",
+        "SecretManagerArn": "RoleArn",
+        "UserNameAttributeField": "UserNameAttributeField",
+        "GroupAttributeField": "GroupAttributeField",
+        "Issuer": "Issuer",
+        "ClaimRegex": "ClaimRegex"
+      }
+    },
+    "KeyLocation": {
+      "type": "string",
+      "enum": [
+        "URL",
+        "SECRET_MANAGER"
+      ]
+    },
+    "KmsKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "LambdaArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "/arn:aws[a-zA-Z-]*:lambda:[a-z]+-[a-z]+-[0-9]:[0-9]{12}:function:[a-zA-Z0-9-_]+(\\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})?(:[a-zA-Z0-9-_]+)?/"
+    },
+    "LanguageCode": {
+      "type": "string",
+      "min": 2,
+      "max": 10,
+      "pattern": "[a-zA-Z-]*"
+    },
+    "ListAccessControlConfigurationsRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "NextToken": "String",
+        "MaxResults": "MaxResultsIntegerForListAccessControlConfigurationsRequest"
+      }
+    },
+    "ListDataSourceSyncJobsRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "DataSourceId",
+        "IndexId": "IndexId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsIntegerForListDataSourceSyncJobsRequest",
+        "StartTimeFilter": "TimeRange",
+        "StatusFilter": "DataSourceSyncJobStatus"
+      }
+    },
+    "ListDataSourcesRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsIntegerForListDataSourcesRequest"
+      }
+    },
+    "ListEntityPersonasRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "ExperienceId",
+        "IndexId": "IndexId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsIntegerForListEntityPersonasRequest"
+      }
+    },
+    "ListExperienceEntitiesRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "ExperienceId",
+        "IndexId": "IndexId",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListExperiencesRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsIntegerForListExperiencesRequest"
+      }
+    },
+    "ListFaqsRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsIntegerForListFaqsRequest"
+      }
+    },
+    "ListFeaturedResultsSetsRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsIntegerForListFeaturedResultsSetsRequest"
+      }
+    },
+    "ListGroupsOlderThanOrderingIdRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "OrderingId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "DataSourceId": "DataSourceId",
+        "OrderingId": "PrincipalOrderingId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsIntegerForListPrincipalsRequest"
+      }
+    },
+    "ListIndicesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsIntegerForListIndicesRequest"
+      }
+    },
+    "ListQuerySuggestionsBlockListsRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsIntegerForListQuerySuggestionsBlockLists"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName"
+      }
+    },
+    "ListThesauriRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResultsIntegerForListThesauriRequest"
+      }
+    },
+    "Long": {
+      "type": "long"
+    },
+    "LookBackPeriod": {
+      "type": "integer",
+      "min": 0,
+      "max": 168
+    },
+    "MaxContentSizePerPageInMegaBytes": {
+      "type": "float",
+      "min": 1e-06,
+      "max": 50
+    },
+    "MaxLinksPerPage": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "MaxResultsIntegerForListAccessControlConfigurationsRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListDataSourceSyncJobsRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "MaxResultsIntegerForListDataSourcesRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListEntityPersonasRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListExperiencesRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListFaqsRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListFeaturedResultsSetsRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListIndicesRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListPrincipalsRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "MaxResultsIntegerForListQuerySuggestionsBlockLists": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxResultsIntegerForListThesauriRequest": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxUrlsPerMinuteCrawlRate": {
+      "type": "integer",
+      "min": 1,
+      "max": 300
+    },
+    "MemberGroup": {
+      "type": "structure",
+      "required": [
+        "GroupId"
+      ],
+      "members": {
+        "GroupId": "GroupId",
+        "DataSourceId": "DataSourceId"
+      }
+    },
+    "MemberGroups": {
+      "type": "list",
+      "min": 1,
+      "max": 1000,
+      "member": "MemberGroup"
+    },
+    "MemberUser": {
+      "type": "structure",
+      "required": [
+        "UserId"
+      ],
+      "members": {
+        "UserId": "UserId"
+      }
+    },
+    "MemberUsers": {
+      "type": "list",
+      "min": 1,
+      "max": 1000,
+      "member": "MemberUser"
+    },
+    "MetricType": {
+      "type": "string",
+      "enum": [
+        "QUERIES_BY_COUNT",
+        "QUERIES_BY_ZERO_CLICK_RATE",
+        "QUERIES_BY_ZERO_RESULT_RATE",
+        "DOCS_BY_CLICK_COUNT",
+        "AGG_QUERY_DOC_METRICS",
+        "TREND_QUERY_DOC_METRICS"
+      ]
+    },
+    "MimeType": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^\\P{C}*$"
+    },
+    "MinimumNumberOfQueryingUsers": {
+      "type": "integer",
+      "min": 1,
+      "max": 10000
+    },
+    "MinimumQueryCount": {
+      "type": "integer",
+      "min": 1,
+      "max": 10000
+    },
+    "MissingAttributeKeyStrategy": {
+      "type": "string",
+      "enum": [
+        "IGNORE",
+        "COLLAPSE",
+        "EXPAND"
+      ]
+    },
+    "Mode": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "LEARN_ONLY"
+      ]
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 800
+    },
+    "ObjectBoolean": {
+      "type": "boolean"
+    },
+    "OnPremiseConfiguration": {
+      "type": "structure",
+      "required": [
+        "HostUrl",
+        "OrganizationName",
+        "SslCertificateS3Path"
+      ],
+      "members": {
+        "HostUrl": "Url",
+        "OrganizationName": "OrganizationName",
+        "SslCertificateS3Path": "S3Path"
+      }
+    },
+    "OneDriveConfiguration": {
+      "type": "structure",
+      "required": [
+        "TenantDomain",
+        "SecretArn",
+        "OneDriveUsers"
+      ],
+      "members": {
+        "TenantDomain": "TenantDomain",
+        "SecretArn": "SecretArn",
+        "OneDriveUsers": "OneDriveUsers",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "FieldMappings": "DataSourceToIndexFieldMappingList",
+        "DisableLocalGroups": "Boolean"
+      }
+    },
+    "OneDriveUser": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^(?!\\s).+@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,5})$"
+    },
+    "OneDriveUserList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "OneDriveUser"
+    },
+    "OneDriveUsers": {
+      "type": "structure",
+      "members": {
+        "OneDriveUserList": "OneDriveUserList",
+        "OneDriveUserS3Path": "S3Path"
+      }
+    },
+    "Order": {
+      "type": "string",
+      "enum": [
+        "ASCENDING",
+        "DESCENDING"
+      ]
+    },
+    "OrganizationId": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "d-[0-9a-fA-F]{10}"
+    },
+    "OrganizationName": {
+      "type": "string",
+      "min": 1,
+      "max": 60,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "Persona": {
+      "type": "string",
+      "enum": [
+        "OWNER",
+        "VIEWER"
+      ]
+    },
+    "Port": {
+      "type": "integer",
+      "min": 1,
+      "max": 65535
+    },
+    "Principal": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Type",
+        "Access"
+      ],
+      "members": {
+        "Name": "PrincipalName",
+        "Type": "PrincipalType",
+        "Access": "ReadAccessType",
+        "DataSourceId": "DataSourceId"
+      }
+    },
+    "PrincipalList": {
+      "type": "list",
+      "member": "Principal"
+    },
+    "PrincipalName": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "^\\P{C}*$"
+    },
+    "PrincipalOrderingId": {
+      "type": "long",
+      "min": 0,
+      "max": 32535158400000
+    },
+    "PrincipalType": {
+      "type": "string",
+      "enum": [
+        "USER",
+        "GROUP"
+      ]
+    },
+    "PrivateChannelFilter": {
+      "type": "list",
+      "member": "String"
+    },
+    "Project": {
+      "type": "list",
+      "member": "String"
+    },
+    "ProxyConfiguration": {
+      "type": "structure",
+      "required": [
+        "Host",
+        "Port"
+      ],
+      "members": {
+        "Host": "Host",
+        "Port": "Port",
+        "Credentials": "SecretArn"
+      }
+    },
+    "PublicChannelFilter": {
+      "type": "list",
+      "member": "String"
+    },
+    "PutPrincipalMappingRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "GroupId",
+        "GroupMembers"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "DataSourceId": "DataSourceId",
+        "GroupId": "GroupId",
+        "GroupMembers": "GroupMembers",
+        "OrderingId": "PrincipalOrderingId",
+        "RoleArn": "RoleArn"
+      }
+    },
+    "QueryCapacityUnit": {
+      "type": "integer",
+      "min": 0
+    },
+    "QueryId": {
+      "type": "string",
+      "min": 1,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]*"
+    },
+    "QueryIdentifiersEnclosingOption": {
+      "type": "string",
+      "enum": [
+        "DOUBLE_QUOTES",
+        "NONE"
+      ]
+    },
+    "QueryRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "QueryText": "QueryText",
+        "AttributeFilter": "AttributeFilter",
+        "Facets": "FacetList",
+        "RequestedDocumentAttributes": "DocumentAttributeKeyList",
+        "QueryResultTypeFilter": "QueryResultType",
+        "DocumentRelevanceOverrideConfigurations": "DocumentRelevanceOverrideConfigurationList",
+        "PageNumber": "Integer",
+        "PageSize": "Integer",
+        "SortingConfiguration": "SortingConfiguration",
+        "SortingConfigurations": "SortingConfigurationList",
+        "UserContext": "UserContext",
+        "VisitorId": "VisitorId",
+        "SpellCorrectionConfiguration": "SpellCorrectionConfiguration",
+        "CollapseConfiguration": "CollapseConfiguration"
+      }
+    },
+    "QueryResultType": {
+      "type": "string",
+      "enum": [
+        "DOCUMENT",
+        "QUESTION_ANSWER",
+        "ANSWER"
+      ]
+    },
+    "QuerySuggestionsBlockListId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9-]*"
+    },
+    "QuerySuggestionsBlockListName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[a-zA-Z0-9](-*[a-zA-Z0-9])*"
+    },
+    "QueryText": {
+      "type": "string"
+    },
+    "QueryTextList": {
+      "type": "list",
+      "min": 0,
+      "max": 49,
+      "member": "QueryText"
+    },
+    "QuipConfiguration": {
+      "type": "structure",
+      "required": [
+        "Domain",
+        "SecretArn"
+      ],
+      "members": {
+        "Domain": "Domain",
+        "SecretArn": "SecretArn",
+        "CrawlFileComments": "Boolean",
+        "CrawlChatRooms": "Boolean",
+        "CrawlAttachments": "Boolean",
+        "FolderIds": "FolderIdList",
+        "ThreadFieldMappings": "DataSourceToIndexFieldMappingList",
+        "MessageFieldMappings": "DataSourceToIndexFieldMappingList",
+        "AttachmentFieldMappings": "DataSourceToIndexFieldMappingList",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "VpcConfiguration": "DataSourceVpcConfiguration"
+      }
+    },
+    "ReadAccessType": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "DENY"
+      ]
+    },
+    "Relevance": {
+      "type": "structure",
+      "members": {
+        "Freshness": "DocumentMetadataBoolean",
+        "Importance": "Importance",
+        "Duration": "Duration",
+        "RankOrder": "Order",
+        "ValueImportanceMap": "ValueImportanceMap"
+      }
+    },
+    "RelevanceFeedback": {
+      "type": "structure",
+      "required": [
+        "ResultId",
+        "RelevanceValue"
+      ],
+      "members": {
+        "ResultId": "ResultId",
+        "RelevanceValue": "RelevanceType"
+      }
+    },
+    "RelevanceFeedbackList": {
+      "type": "list",
+      "member": "RelevanceFeedback"
+    },
+    "RelevanceType": {
+      "type": "string",
+      "enum": [
+        "RELEVANT",
+        "NOT_RELEVANT"
+      ]
+    },
+    "RepositoryName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[A-Za-z0-9_.-]+$"
+    },
+    "RepositoryNames": {
+      "type": "list",
+      "member": "RepositoryName"
+    },
+    "ResultId": {
+      "type": "string",
+      "min": 1,
+      "max": 73
+    },
+    "RetrieveRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "QueryText"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "QueryText": "QueryText",
+        "AttributeFilter": "AttributeFilter",
+        "RequestedDocumentAttributes": "DocumentAttributeKeyList",
+        "DocumentRelevanceOverrideConfigurations": "DocumentRelevanceOverrideConfigurationList",
+        "PageNumber": "Integer",
+        "PageSize": "Integer",
+        "UserContext": "UserContext"
+      }
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 0,
+      "max": 1284,
+      "pattern": "arn:[a-z0-9-\\.]{1,63}:[a-z0-9-\\.]{0,63}:[a-z0-9-\\.]{0,63}:[a-z0-9-\\.]{0,63}:[^/].{0,1023}"
+    },
+    "S3BucketName": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "[a-z0-9][\\.\\-a-z0-9]{1,61}[a-z0-9]"
+    },
+    "S3DataSourceConfiguration": {
+      "type": "structure",
+      "required": [
+        "BucketName"
+      ],
+      "members": {
+        "BucketName": "S3BucketName",
+        "InclusionPrefixes": "DataSourceInclusionsExclusionsStrings",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "DocumentsMetadataConfiguration": "DocumentsMetadataConfiguration",
+        "AccessControlListConfiguration": "AccessControlListConfiguration"
+      }
+    },
+    "S3ObjectKey": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "S3Path": {
+      "type": "structure",
+      "required": [
+        "Bucket",
+        "Key"
+      ],
+      "members": {
+        "Bucket": "S3BucketName",
+        "Key": "S3ObjectKey"
+      }
+    },
+    "SaaSConfiguration": {
+      "type": "structure",
+      "required": [
+        "OrganizationName",
+        "HostUrl"
+      ],
+      "members": {
+        "OrganizationName": "OrganizationName",
+        "HostUrl": "Url"
+      }
+    },
+    "SalesforceChatterFeedConfiguration": {
+      "type": "structure",
+      "required": [
+        "DocumentDataFieldName"
+      ],
+      "members": {
+        "DocumentDataFieldName": "DataSourceFieldName",
+        "DocumentTitleFieldName": "DataSourceFieldName",
+        "FieldMappings": "DataSourceToIndexFieldMappingList",
+        "IncludeFilterTypes": "SalesforceChatterFeedIncludeFilterTypes"
+      }
+    },
+    "SalesforceChatterFeedIncludeFilterType": {
+      "type": "string",
+      "enum": [
+        "ACTIVE_USER",
+        "STANDARD_USER"
+      ]
+    },
+    "SalesforceChatterFeedIncludeFilterTypes": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "SalesforceChatterFeedIncludeFilterType"
+    },
+    "SalesforceConfiguration": {
+      "type": "structure",
+      "required": [
+        "ServerUrl",
+        "SecretArn"
+      ],
+      "members": {
+        "ServerUrl": "Url",
+        "SecretArn": "SecretArn",
+        "StandardObjectConfigurations": "SalesforceStandardObjectConfigurationList",
+        "KnowledgeArticleConfiguration": "SalesforceKnowledgeArticleConfiguration",
+        "ChatterFeedConfiguration": "SalesforceChatterFeedConfiguration",
+        "CrawlAttachments": "Boolean",
+        "StandardObjectAttachmentConfiguration": "SalesforceStandardObjectAttachmentConfiguration",
+        "IncludeAttachmentFilePatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExcludeAttachmentFilePatterns": "DataSourceInclusionsExclusionsStrings"
+      }
+    },
+    "SalesforceCustomKnowledgeArticleTypeConfiguration": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "DocumentDataFieldName"
+      ],
+      "members": {
+        "Name": "SalesforceCustomKnowledgeArticleTypeName",
+        "DocumentDataFieldName": "DataSourceFieldName",
+        "DocumentTitleFieldName": "DataSourceFieldName",
+        "FieldMappings": "DataSourceToIndexFieldMappingList"
+      }
+    },
+    "SalesforceCustomKnowledgeArticleTypeConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "SalesforceCustomKnowledgeArticleTypeConfiguration"
+    },
+    "SalesforceCustomKnowledgeArticleTypeName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"
+    },
+    "SalesforceKnowledgeArticleConfiguration": {
+      "type": "structure",
+      "required": [
+        "IncludedStates"
+      ],
+      "members": {
+        "IncludedStates": "SalesforceKnowledgeArticleStateList",
+        "StandardKnowledgeArticleTypeConfiguration": "SalesforceStandardKnowledgeArticleTypeConfiguration",
+        "CustomKnowledgeArticleTypeConfigurations": "SalesforceCustomKnowledgeArticleTypeConfigurationList"
+      }
+    },
+    "SalesforceKnowledgeArticleState": {
+      "type": "string",
+      "enum": [
+        "DRAFT",
+        "PUBLISHED",
+        "ARCHIVED"
+      ]
+    },
+    "SalesforceKnowledgeArticleStateList": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "SalesforceKnowledgeArticleState"
+    },
+    "SalesforceStandardKnowledgeArticleTypeConfiguration": {
+      "type": "structure",
+      "required": [
+        "DocumentDataFieldName"
+      ],
+      "members": {
+        "DocumentDataFieldName": "DataSourceFieldName",
+        "DocumentTitleFieldName": "DataSourceFieldName",
+        "FieldMappings": "DataSourceToIndexFieldMappingList"
+      }
+    },
+    "SalesforceStandardObjectAttachmentConfiguration": {
+      "type": "structure",
+      "members": {
+        "DocumentTitleFieldName": "DataSourceFieldName",
+        "FieldMappings": "DataSourceToIndexFieldMappingList"
+      }
+    },
+    "SalesforceStandardObjectConfiguration": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "DocumentDataFieldName"
+      ],
+      "members": {
+        "Name": "SalesforceStandardObjectName",
+        "DocumentDataFieldName": "DataSourceFieldName",
+        "DocumentTitleFieldName": "DataSourceFieldName",
+        "FieldMappings": "DataSourceToIndexFieldMappingList"
+      }
+    },
+    "SalesforceStandardObjectConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "max": 17,
+      "member": "SalesforceStandardObjectConfiguration"
+    },
+    "SalesforceStandardObjectName": {
+      "type": "string",
+      "enum": [
+        "ACCOUNT",
+        "CAMPAIGN",
+        "CASE",
+        "CONTACT",
+        "CONTRACT",
+        "DOCUMENT",
+        "GROUP",
+        "IDEA",
+        "LEAD",
+        "OPPORTUNITY",
+        "PARTNER",
+        "PRICEBOOK",
+        "PRODUCT",
+        "PROFILE",
+        "SOLUTION",
+        "TASK",
+        "USER"
+      ]
+    },
+    "ScanSchedule": {
+      "type": "string"
+    },
+    "Search": {
+      "type": "structure",
+      "members": {
+        "Facetable": "Boolean",
+        "Searchable": "Boolean",
+        "Displayable": "Boolean",
+        "Sortable": "Boolean"
+      }
+    },
+    "SecretArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1284,
+      "pattern": "arn:[a-z0-9-\\.]{1,63}:[a-z0-9-\\.]{0,63}:[a-z0-9-\\.]{0,63}:[a-z0-9-\\.]{0,63}:[^/].{0,1023}"
+    },
+    "SecurityGroupIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "VpcSecurityGroupId"
+    },
+    "SeedUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^(https?):\\/\\/([^\\s]*)"
+    },
+    "SeedUrlConfiguration": {
+      "type": "structure",
+      "required": [
+        "SeedUrls"
+      ],
+      "members": {
+        "SeedUrls": "SeedUrlList",
+        "WebCrawlerMode": "WebCrawlerMode"
+      }
+    },
+    "SeedUrlList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "SeedUrl"
+    },
+    "ServerSideEncryptionConfiguration": {
+      "type": "structure",
+      "members": {
+        "KmsKeyId": "KmsKeyId"
+      }
+    },
+    "ServiceNowAuthenticationType": {
+      "type": "string",
+      "enum": [
+        "HTTP_BASIC",
+        "OAUTH2"
+      ]
+    },
+    "ServiceNowBuildVersionType": {
+      "type": "string",
+      "enum": [
+        "LONDON",
+        "OTHERS"
+      ]
+    },
+    "ServiceNowConfiguration": {
+      "type": "structure",
+      "required": [
+        "HostUrl",
+        "SecretArn",
+        "ServiceNowBuildVersion"
+      ],
+      "members": {
+        "HostUrl": "ServiceNowHostUrl",
+        "SecretArn": "SecretArn",
+        "ServiceNowBuildVersion": "ServiceNowBuildVersionType",
+        "KnowledgeArticleConfiguration": "ServiceNowKnowledgeArticleConfiguration",
+        "ServiceCatalogConfiguration": "ServiceNowServiceCatalogConfiguration",
+        "AuthenticationType": "ServiceNowAuthenticationType"
+      }
+    },
+    "ServiceNowHostUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^(?!(^(https?|ftp|file):\\/\\/))[a-z0-9-]+(\\.service-now\\.com)$"
+    },
+    "ServiceNowKnowledgeArticleConfiguration": {
+      "type": "structure",
+      "required": [
+        "DocumentDataFieldName"
+      ],
+      "members": {
+        "CrawlAttachments": "Boolean",
+        "IncludeAttachmentFilePatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExcludeAttachmentFilePatterns": "DataSourceInclusionsExclusionsStrings",
+        "DocumentDataFieldName": "DataSourceFieldName",
+        "DocumentTitleFieldName": "DataSourceFieldName",
+        "FieldMappings": "DataSourceToIndexFieldMappingList",
+        "FilterQuery": "ServiceNowKnowledgeArticleFilterQuery"
+      }
+    },
+    "ServiceNowKnowledgeArticleFilterQuery": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^\\P{C}*$"
+    },
+    "ServiceNowServiceCatalogConfiguration": {
+      "type": "structure",
+      "required": [
+        "DocumentDataFieldName"
+      ],
+      "members": {
+        "CrawlAttachments": "Boolean",
+        "IncludeAttachmentFilePatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExcludeAttachmentFilePatterns": "DataSourceInclusionsExclusionsStrings",
+        "DocumentDataFieldName": "DataSourceFieldName",
+        "DocumentTitleFieldName": "DataSourceFieldName",
+        "FieldMappings": "DataSourceToIndexFieldMappingList"
+      }
+    },
+    "SharePointConfiguration": {
+      "type": "structure",
+      "required": [
+        "SharePointVersion",
+        "Urls",
+        "SecretArn"
+      ],
+      "members": {
+        "SharePointVersion": "SharePointVersion",
+        "Urls": "SharePointUrlList",
+        "SecretArn": "SecretArn",
+        "CrawlAttachments": "Boolean",
+        "UseChangeLog": "Boolean",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "VpcConfiguration": "DataSourceVpcConfiguration",
+        "FieldMappings": "DataSourceToIndexFieldMappingList",
+        "DocumentTitleFieldName": "DataSourceFieldName",
+        "DisableLocalGroups": "Boolean",
+        "SslCertificateS3Path": "S3Path",
+        "AuthenticationType": "SharePointOnlineAuthenticationType",
+        "ProxyConfiguration": "ProxyConfiguration"
+      }
+    },
+    "SharePointOnlineAuthenticationType": {
+      "type": "string",
+      "enum": [
+        "HTTP_BASIC",
+        "OAUTH2"
+      ]
+    },
+    "SharePointUrlList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "Url"
+    },
+    "SharePointVersion": {
+      "type": "string",
+      "enum": [
+        "SHAREPOINT_2013",
+        "SHAREPOINT_2016",
+        "SHAREPOINT_ONLINE",
+        "SHAREPOINT_2019"
+      ]
+    },
+    "SharedDriveId": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^\\P{C}*$"
+    },
+    "SinceCrawlDate": {
+      "type": "string",
+      "min": 10,
+      "max": 10,
+      "pattern": "(20\\d{2})-(0?[1-9]|1[0-2])-(0?[1-9]|1\\d|2\\d|3[01])"
+    },
+    "SiteId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[A-Za-z0-9-]+$"
+    },
+    "SiteMap": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^(https?):\\/\\/([^\\s]*)"
+    },
+    "SiteMapsConfiguration": {
+      "type": "structure",
+      "required": [
+        "SiteMaps"
+      ],
+      "members": {
+        "SiteMaps": "SiteMapsList"
+      }
+    },
+    "SiteMapsList": {
+      "type": "list",
+      "min": 0,
+      "max": 3,
+      "member": "SiteMap"
+    },
+    "SiteUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^https:\\/\\/[a-zA-Z0-9_\\-\\.]+$"
+    },
+    "SlackConfiguration": {
+      "type": "structure",
+      "required": [
+        "TeamId",
+        "SecretArn",
+        "SlackEntityList",
+        "SinceCrawlDate"
+      ],
+      "members": {
+        "TeamId": "TeamId",
+        "SecretArn": "SecretArn",
+        "VpcConfiguration": "DataSourceVpcConfiguration",
+        "SlackEntityList": "SlackEntityList",
+        "UseChangeLog": "Boolean",
+        "CrawlBotMessage": "Boolean",
+        "ExcludeArchived": "Boolean",
+        "SinceCrawlDate": "SinceCrawlDate",
+        "LookBackPeriod": "LookBackPeriod",
+        "PrivateChannelFilter": "PrivateChannelFilter",
+        "PublicChannelFilter": "PublicChannelFilter",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "FieldMappings": "DataSourceToIndexFieldMappingList"
+      }
+    },
+    "SlackEntity": {
+      "type": "string",
+      "enum": [
+        "PUBLIC_CHANNEL",
+        "PRIVATE_CHANNEL",
+        "GROUP_MESSAGE",
+        "DIRECT_MESSAGE"
+      ]
+    },
+    "SlackEntityList": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "SlackEntity"
+    },
+    "SortOrder": {
+      "type": "string",
+      "enum": [
+        "DESC",
+        "ASC"
+      ]
+    },
+    "SortingConfiguration": {
+      "type": "structure",
+      "required": [
+        "DocumentAttributeKey",
+        "SortOrder"
+      ],
+      "members": {
+        "DocumentAttributeKey": "DocumentAttributeKey",
+        "SortOrder": "SortOrder"
+      }
+    },
+    "SortingConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "member": "SortingConfiguration"
+    },
+    "SpellCorrectionConfiguration": {
+      "type": "structure",
+      "required": [
+        "IncludeQuerySpellCheckSuggestions"
+      ],
+      "members": {
+        "IncludeQuerySpellCheckSuggestions": "Boolean"
+      }
+    },
+    "SqlConfiguration": {
+      "type": "structure",
+      "members": {
+        "QueryIdentifiersEnclosingOption": "QueryIdentifiersEnclosingOption"
+      }
+    },
+    "StartDataSourceSyncJobRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "DataSourceId",
+        "IndexId": "IndexId"
+      }
+    },
+    "StopDataSourceSyncJobRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "DataSourceId",
+        "IndexId": "IndexId"
+      }
+    },
+    "StorageCapacityUnit": {
+      "type": "integer",
+      "min": 0
+    },
+    "String": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "StringList": {
+      "type": "list",
+      "member": "String"
+    },
+    "SubmitFeedbackRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "QueryId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "QueryId": "QueryId",
+        "ClickFeedbackItems": "ClickFeedbackList",
+        "RelevanceFeedbackItems": "RelevanceFeedbackList"
+      }
+    },
+    "SubnetId": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[\\-0-9a-zA-Z]+"
+    },
+    "SubnetIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 6,
+      "member": "SubnetId"
+    },
+    "SuggestableConfig": {
+      "type": "structure",
+      "members": {
+        "AttributeName": "DocumentAttributeKey",
+        "Suggestable": "ObjectBoolean"
+      }
+    },
+    "SuggestableConfigList": {
+      "type": "list",
+      "member": "SuggestableConfig"
+    },
+    "SuggestionQueryText": {
+      "type": "string",
+      "pattern": "^\\P{C}*$"
+    },
+    "SuggestionType": {
+      "type": "string",
+      "enum": [
+        "QUERY",
+        "DOCUMENT_ATTRIBUTES"
+      ]
+    },
+    "SuggestionTypes": {
+      "type": "list",
+      "member": "SuggestionType"
+    },
+    "TableName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*$"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Tags"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TeamId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Z0-9]*"
+    },
+    "Template": {
+      "type": "structure",
+      "members": {}
+    },
+    "TemplateConfiguration": {
+      "type": "structure",
+      "members": {
+        "Template": "Template"
+      }
+    },
+    "TenantDomain": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^([a-zA-Z0-9]+(-[a-zA-Z0-9]+)*\\.)+[a-z]{2,}$"
+    },
+    "ThesaurusId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "ThesaurusName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "TimeRange": {
+      "type": "structure",
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp"
+      }
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "Title": {
+      "type": "string"
+    },
+    "Token": {
+      "type": "string",
+      "min": 1,
+      "max": 100000,
+      "pattern": "^\\P{C}*$"
+    },
+    "TopDocumentAttributeValueCountPairsSize": {
+      "type": "integer",
+      "min": 0,
+      "max": 5000
+    },
+    "Type": {
+      "type": "string",
+      "enum": [
+        "SAAS",
+        "ON_PREMISE"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateAccessControlConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Id"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Id": "AccessControlConfigurationId",
+        "Name": "AccessControlConfigurationName",
+        "Description": "Description",
+        "AccessControlList": "PrincipalList",
+        "HierarchicalAccessControlList": "HierarchicalPrincipalList"
+      }
+    },
+    "UpdateDataSourceRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "DataSourceId",
+        "Name": "DataSourceName",
+        "IndexId": "IndexId",
+        "Configuration": "DataSourceConfiguration",
+        "VpcConfiguration": "DataSourceVpcConfiguration",
+        "Description": "Description",
+        "Schedule": "ScanSchedule",
+        "RoleArn": "RoleArn",
+        "LanguageCode": "LanguageCode",
+        "CustomDocumentEnrichmentConfiguration": "CustomDocumentEnrichmentConfiguration"
+      }
+    },
+    "UpdateExperienceRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "ExperienceId",
+        "Name": "ExperienceName",
+        "IndexId": "IndexId",
+        "RoleArn": "RoleArn",
+        "Configuration": "ExperienceConfiguration",
+        "Description": "Description"
+      }
+    },
+    "UpdateFeaturedResultsSetRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "FeaturedResultsSetId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "FeaturedResultsSetId": "FeaturedResultsSetId",
+        "FeaturedResultsSetName": "FeaturedResultsSetName",
+        "Description": "FeaturedResultsSetDescription",
+        "Status": "FeaturedResultsSetStatus",
+        "QueryTexts": "QueryTextList",
+        "FeaturedDocuments": "FeaturedDocumentList"
+      }
+    },
+    "UpdateIndexRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "IndexId",
+        "Name": "IndexName",
+        "RoleArn": "RoleArn",
+        "Description": "Description",
+        "DocumentMetadataConfigurationUpdates": "DocumentMetadataConfigurationList",
+        "CapacityUnits": "CapacityUnitsConfiguration",
+        "UserTokenConfigurations": "UserTokenConfigurationList",
+        "UserContextPolicy": "UserContextPolicy",
+        "UserGroupResolutionConfiguration": "UserGroupResolutionConfiguration"
+      }
+    },
+    "UpdateQuerySuggestionsBlockListRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId",
+        "Id"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Id": "QuerySuggestionsBlockListId",
+        "Name": "QuerySuggestionsBlockListName",
+        "Description": "Description",
+        "SourceS3Path": "S3Path",
+        "RoleArn": "RoleArn"
+      }
+    },
+    "UpdateQuerySuggestionsConfigRequest": {
+      "type": "structure",
+      "required": [
+        "IndexId"
+      ],
+      "members": {
+        "IndexId": "IndexId",
+        "Mode": "Mode",
+        "QueryLogLookBackWindowInDays": "Integer",
+        "IncludeQueriesWithoutUserInformation": "ObjectBoolean",
+        "MinimumNumberOfQueryingUsers": "MinimumNumberOfQueryingUsers",
+        "MinimumQueryCount": "MinimumQueryCount",
+        "AttributeSuggestionsConfig": "AttributeSuggestionsUpdateConfig"
+      }
+    },
+    "UpdateThesaurusRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IndexId"
+      ],
+      "members": {
+        "Id": "ThesaurusId",
+        "Name": "ThesaurusName",
+        "IndexId": "IndexId",
+        "Description": "Description",
+        "RoleArn": "RoleArn",
+        "SourceS3Path": "S3Path"
+      }
+    },
+    "Url": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^(https?|ftp|file):\\/\\/([^\\s]*)"
+    },
+    "Urls": {
+      "type": "structure",
+      "members": {
+        "SeedUrlConfiguration": "SeedUrlConfiguration",
+        "SiteMapsConfiguration": "SiteMapsConfiguration"
+      }
+    },
+    "UserAccount": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^\\P{C}*$"
+    },
+    "UserContext": {
+      "type": "structure",
+      "members": {
+        "Token": "Token",
+        "UserId": "PrincipalName",
+        "Groups": "Groups",
+        "DataSourceGroups": "DataSourceGroups"
+      }
+    },
+    "UserContextPolicy": {
+      "type": "string",
+      "enum": [
+        "ATTRIBUTE_FILTER",
+        "USER_TOKEN"
+      ]
+    },
+    "UserGroupResolutionConfiguration": {
+      "type": "structure",
+      "required": [
+        "UserGroupResolutionMode"
+      ],
+      "members": {
+        "UserGroupResolutionMode": "UserGroupResolutionMode"
+      }
+    },
+    "UserGroupResolutionMode": {
+      "type": "string",
+      "enum": [
+        "AWS_SSO",
+        "NONE"
+      ]
+    },
+    "UserId": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^\\P{C}*$"
+    },
+    "UserIdentityConfiguration": {
+      "type": "structure",
+      "members": {
+        "IdentityAttributeName": "IdentityAttributeName"
+      }
+    },
+    "UserNameAttributeField": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^\\P{C}*$"
+    },
+    "UserTokenConfiguration": {
+      "type": "structure",
+      "members": {
+        "JwtTokenTypeConfiguration": "JwtTokenTypeConfiguration",
+        "JsonTokenTypeConfiguration": "JsonTokenTypeConfiguration"
+      }
+    },
+    "UserTokenConfigurationList": {
+      "type": "list",
+      "max": 1,
+      "member": "UserTokenConfiguration"
+    },
+    "ValueImportanceMap": {
+      "type": "map",
+      "key": "ValueImportanceMapKey",
+      "value": "Importance"
+    },
+    "ValueImportanceMapKey": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "VisitorId": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*"
+    },
+    "VpcSecurityGroupId": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[-0-9a-zA-Z]+"
+    },
+    "WebCrawlerConfiguration": {
+      "type": "structure",
+      "required": [
+        "Urls"
+      ],
+      "members": {
+        "Urls": "Urls",
+        "CrawlDepth": "CrawlDepth",
+        "MaxLinksPerPage": "MaxLinksPerPage",
+        "MaxContentSizePerPageInMegaBytes": "MaxContentSizePerPageInMegaBytes",
+        "MaxUrlsPerMinuteCrawlRate": "MaxUrlsPerMinuteCrawlRate",
+        "UrlInclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "UrlExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ProxyConfiguration": "ProxyConfiguration",
+        "AuthenticationConfiguration": "AuthenticationConfiguration"
+      }
+    },
+    "WebCrawlerMode": {
+      "type": "string",
+      "enum": [
+        "HOST_ONLY",
+        "SUBDOMAINS",
+        "EVERYTHING"
+      ]
+    },
+    "WorkDocsConfiguration": {
+      "type": "structure",
+      "required": [
+        "OrganizationId"
+      ],
+      "members": {
+        "OrganizationId": "OrganizationId",
+        "CrawlComments": "Boolean",
+        "UseChangeLog": "Boolean",
+        "InclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "ExclusionPatterns": "DataSourceInclusionsExclusionsStrings",
+        "FieldMappings": "DataSourceToIndexFieldMappingList"
+      }
+    }
+  }
+}

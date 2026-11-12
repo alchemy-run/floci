@@ -550,6 +550,10 @@ floci:
     glacier:
       enabled: true
       job-millis: 0
+    kendra:
+      enabled: true
+      transition-millis: 200
+      document-processing-millis: 200
     fms:
       enabled: true
       transition-millis: 0

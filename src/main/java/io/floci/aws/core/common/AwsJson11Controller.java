@@ -44,6 +44,7 @@ import io.floci.aws.services.fsx.FsxJsonHandler;
 import io.floci.aws.services.globalaccelerator.GlobalAcceleratorJsonHandler;
 import io.floci.aws.services.glue.GlueJsonHandler;
 import io.floci.aws.services.identitystore.IdentityStoreJsonHandler;
+import io.floci.aws.services.kendra.KendraJsonHandler;
 import io.floci.aws.services.kinesis.KinesisJsonHandler;
 import io.floci.aws.services.kinesisanalytics.KinesisAnalyticsV2JsonHandler;
 import io.floci.aws.services.kms.KmsJsonHandler;
@@ -141,6 +142,7 @@ public class AwsJson11Controller {
     private final EcrPublicJsonHandler ecrPublicJsonHandler;
     private final FmsJsonHandler fmsJsonHandler;
     private final ForecastJsonHandler forecastJsonHandler;
+    private final KendraJsonHandler kendraJsonHandler;
     private final FsxJsonHandler fsxJsonHandler;
     private final CostExplorerJsonHandler costExplorerJsonHandler;
     private final CurJsonHandler curJsonHandler;
@@ -208,6 +210,7 @@ public class AwsJson11Controller {
                                EcrPublicJsonHandler ecrPublicJsonHandler,
                                FmsJsonHandler fmsJsonHandler,
                                ForecastJsonHandler forecastJsonHandler,
+                               KendraJsonHandler kendraJsonHandler,
                                FsxJsonHandler fsxJsonHandler,
                                CostExplorerJsonHandler costExplorerJsonHandler,
                                CurJsonHandler curJsonHandler,
@@ -279,6 +282,7 @@ public class AwsJson11Controller {
         this.ecrPublicJsonHandler = ecrPublicJsonHandler;
         this.fmsJsonHandler = fmsJsonHandler;
         this.forecastJsonHandler = forecastJsonHandler;
+        this.kendraJsonHandler = kendraJsonHandler;
         this.fsxJsonHandler = fsxJsonHandler;
         this.costExplorerJsonHandler = costExplorerJsonHandler;
         this.curJsonHandler = curJsonHandler;
@@ -396,6 +400,7 @@ public class AwsJson11Controller {
                 case "ecr-public" -> ecrPublicJsonHandler.handle(action, request, region);
                 case "fms" -> fmsJsonHandler.handle(action, request, region);
                 case "forecast" -> forecastJsonHandler.handle(action, request, region);
+                case "kendra" -> kendraJsonHandler.handle(action, request, region);
                 case "forecastquery" -> forecastJsonHandler.handleQuery(action, request, region);
                 case "fsx" -> fsxJsonHandler.handle(action, request, region);
                 case "ce" -> costExplorerJsonHandler.handle(action, request, region);

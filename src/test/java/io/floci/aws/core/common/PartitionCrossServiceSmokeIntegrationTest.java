@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1515,6 +1515,36 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
         signed(region, "forecast").header("X-Amz-Target", "AmazonForecast.DeleteDatasetGroup").contentType(JSON_1_1)
                 .body("{\"DatasetGroupArn\":\"" + arn + "\"}").post("/").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void kendraIndexArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "kendra");
+        String roleName = unique("smoke-kendra", partitionCase);
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"kendra.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", roleName)
+                .formParam("AssumeRolePolicyDocument", trust).post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        cleanup.register(() -> signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteRole").formParam("RoleName", roleName).post("/"));
+        String id = signed(region, "kendra").header("X-Amz-Target", "AWSKendraFrontendService.CreateIndex")
+                .contentType(JSON_1_1).body("{\"Name\":\"" + roleName + "\",\"Edition\":\"DEVELOPER_EDITION\","
+                        + "\"RoleArn\":\"" + role + "\"}").post("/").then().statusCode(200).extract().path("Id");
+        cleanup.register(() -> signed(region, "kendra").header("X-Amz-Target", "AWSKendraFrontendService.DeleteIndex")
+                .contentType(JSON_1_1).body("{\"Id\":\"" + id + "\"}").post("/"));
+        String arn = role.substring(0, role.indexOf(":iam:")) + ":kendra:" + region + ":"
+                + role.split(":")[4] + ":index/" + id;
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "kendra").header("X-Amz-Target", "AWSKendraFrontendService.TagResource").contentType(JSON_1_1)
+                .body("{\"ResourceARN\":\"" + arn + "\",\"Tags\":[{\"Key\":\"smoke\",\"Value\":\"yes\"}]}")
+                .post("/").then().statusCode(200);
+        String key = signed(region, "kendra").header("X-Amz-Target", "AWSKendraFrontendService.ListTagsForResource")
+                .contentType(JSON_1_1).body("{\"ResourceARN\":\"" + arn + "\"}").post("/").then().statusCode(200)
+                .extract().path("Tags[0].Key");
+        assertTrue("smoke".equals(key), key);
     }
 
     @ParameterizedTest
