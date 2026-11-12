@@ -898,6 +898,8 @@ public interface EmulatorConfig {
 
         MediaConnectServiceConfig mediaConnect();
 
+        MediaConvertServiceConfig mediaConvert();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3020,6 +3022,26 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface MediaConvertServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a jobs query takes, four times over. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The concurrent jobs a new on-demand queue (and the Default queue) runs. */
+        @WithDefault("20")
+        int concurrentJobs();
+
+        /** How many jobs transcode at once across every queue: ffmpeg runs in one container. */
+        @WithDefault("2")
+        int maxRunningJobs();
+
+        @WithDefault("10")
+        int maxQueues();
     }
 
     interface MediaConnectServiceConfig {

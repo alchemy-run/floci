@@ -35,6 +35,7 @@ MODELS = {
     "emr-containers": "emrcontainers",
     "entityresolution": "entityresolution",
     "mediaconnect": "mediaconnect",
+    "mediaconvert": "mediaconvert",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

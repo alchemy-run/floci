@@ -1050,6 +1050,8 @@ floci:
       enabled: true
     airflow-serverless:
       enabled: true
+    media-convert:
+      enabled: true
     media-connect:
       enabled: true
     mail-manager:
