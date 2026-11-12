@@ -80,7 +80,7 @@ SERVICE_SUFFIX = ".amazonaws.com"
 NAMESPACES = (
     "application-autoscaling", "athena", "autoscaling", "budgets", "cloudformation", "cloudtrail",
     "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito-identity", "cognito-idp",
-    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medical-imaging", "neptune-graph", "notifications", "notifications-contacts", "osis", "observabilityadmin", "omics", "aoss", "personalize", "sms-voice", "qbusiness", "qapps", "rbin", "repostspace", "rolesanywhere", "route53profiles", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
+    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medical-imaging", "neptune-graph", "notifications", "notifications-contacts", "osis", "observabilityadmin", "omics", "aoss", "personalize", "sms-voice", "qbusiness", "qapps", "rbin", "repostspace", "rolesanywhere", "route53profiles", "s3files", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
     "events", "firehose", "glue", "iam", "kinesis", "kinesisanalytics", "lambda", "logs", "pipes",
     "rds", "redshift", "redshift-serverless", "rekognition", "resource-groups", "s3", "sagemaker", "scheduler",
     "secretsmanager", "servicecatalog", "ses", "sns", "ssm", "states", "swf", "textract",
@@ -293,6 +293,7 @@ NOT_READ = {
     "lambda:AddEventSource": "botocore's model has no such operation",
     "logs:CreateImportTask": "the reference passes the role to cloudtrail or logs and nothing says which",
     "rds:CreateBlueGreenDeployment": NO_ROLE_MEMBER,
+    "rolesanywhere:EnableProfile": "the roles are the profile's, named when it was created or updated",
     "s3:CreateAccessGrantsLocation": XML_BODY,
     "s3:PutBucketReplication": XML_BODY,
     "redshift:ModifyLakehouseConfiguration": NO_ROLE_MEMBER,

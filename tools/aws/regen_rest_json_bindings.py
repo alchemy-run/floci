@@ -54,6 +54,7 @@ MODELS = {
     "repostspace": "repostspace",
     "rolesanywhere": "rolesanywhere",
     "route53profiles": "route53profiles",
+    "s3files": "s3files",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

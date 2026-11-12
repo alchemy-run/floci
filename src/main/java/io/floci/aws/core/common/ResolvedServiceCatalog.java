@@ -100,6 +100,7 @@ import io.floci.aws.services.route53.Route53Controller;
 import io.floci.aws.services.route53profiles.Route53ProfilesController;
 import io.floci.aws.services.rum.RumController;
 import io.floci.aws.services.s3.S3Controller;
+import io.floci.aws.services.s3files.S3FilesController;
 import io.floci.aws.services.s3tables.S3TablesController;
 import io.floci.aws.services.s3vectors.S3VectorsController;
 import io.floci.aws.services.sagemaker.SageMakerFeatureStoreRuntimeController;
@@ -506,6 +507,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("OpenSearchServerless."), Set.of("aoss"), Set.of(), Set.of()),
+                descriptor("s3files", "s3files", config.services().s3files().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("s3files"), Set.of(), Set.of(S3FilesController.class)),
                 descriptor("route53profiles", "route53profiles", config.services().route53profiles().enabled(),
                         true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

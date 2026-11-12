@@ -938,6 +938,8 @@ public interface EmulatorConfig {
 
         Route53ProfilesServiceConfig route53profiles();
 
+        S3FilesServiceConfig s3files();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3102,6 +3104,15 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface S3FilesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long file systems, access points and mount targets take to create and delete, in milliseconds. */
         @WithDefault("2000")
         long transitionMillis();
     }

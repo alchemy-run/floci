@@ -571,6 +571,9 @@ floci:
     repostspace:
       enabled: true
       transition-millis: 200
+    s3files:
+      enabled: true
+      transition-millis: 200
     route53profiles:
       enabled: true
       transition-millis: 200
