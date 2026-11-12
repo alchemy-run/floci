@@ -105,6 +105,8 @@ public final class RequestConstraintCheck {
             case "double", "float" -> value.isNumber();
             case "timestamp" -> value.isTextual() || value.isNumber();
             case "blob" -> value.isTextual();
+            // a Smithy document holds any JSON value
+            case "document" -> true;
             default -> false;
         };
         if (!validType) {

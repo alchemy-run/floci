@@ -90,6 +90,10 @@ def build_constraints(model: dict, operations: tuple[str, ...], provenance: str,
         if name in kept:
             return
         shape = model["shapes"][name]
+        if shape.get("document"):
+            # a Smithy document holds any JSON value, so it has no constraints to check
+            kept[name] = {"type": "document"}
+            return
         entry = {k: shape[k] for k in ("type", "required", "min", "max", "pattern", "quotedPattern", "enum")
                  if k in shape}
         kept[name] = entry

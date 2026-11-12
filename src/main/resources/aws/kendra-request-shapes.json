@@ -3223,8 +3223,7 @@
       "pattern": "[A-Z0-9]*"
     },
     "Template": {
-      "type": "structure",
-      "members": {}
+      "type": "document"
     },
     "TemplateConfiguration": {
       "type": "structure",

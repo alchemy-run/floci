@@ -908,6 +908,8 @@ public interface EmulatorConfig {
 
         MedicalImagingServiceConfig medicalImaging();
 
+        NeptuneGraphServiceConfig neptuneGraph();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3030,6 +3032,33 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface NeptuneGraphServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a graph, snapshot, endpoint or task stays in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /**
+         * What runs graphs' openCypher: {@code neo4j}, a Neo4j container per graph, or {@code none}, for graphs that
+         * only keep their metadata.
+         */
+        @WithDefault("neo4j")
+        String queryEngine();
+
+        /** The Neo4j image graphs run on. */
+        @WithDefault("neo4j:5-community")
+        String image();
+
+        /** The Docker network graph containers join, overriding {@code floci.services.docker-network}. */
+        Optional<String> dockerNetwork();
+
+        /** How long a graph's container may take to answer queries. */
+        @WithDefault("120")
+        int readySeconds();
     }
 
     interface MedicalImagingServiceConfig {

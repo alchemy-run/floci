@@ -233,8 +233,7 @@
       "max": 255
     },
     "Document": {
-      "type": "structure",
-      "members": {}
+      "type": "document"
     },
     "EntityName": {
       "type": "string",

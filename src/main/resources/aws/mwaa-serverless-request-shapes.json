@@ -78,8 +78,7 @@
       "pattern": ".+"
     },
     "Document": {
-      "type": "structure",
-      "members": {}
+      "type": "document"
     },
     "EncryptionConfiguration": {
       "type": "structure",

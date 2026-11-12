@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1515,6 +1515,20 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
         signed(region, "forecast").header("X-Amz-Target", "AmazonForecast.DeleteDatasetGroup").contentType(JSON_1_1)
                 .body("{\"DatasetGroupArn\":\"" + arn + "\"}").post("/").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void neptuneGraphArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "neptune-graph");
+        String id = signed(region, "neptune-graph").contentType("application/json")
+                .body("{\"graphName\":\"partition-" + region + "\",\"provisionedMemory\":16,"
+                        + "\"deletionProtection\":false}")
+                .post("/graphs").then().statusCode(201).extract().path("id");
+        cleanup.register(() -> signed(region, "neptune-graph").queryParam("skipSnapshot", true)
+                .delete("/graphs/" + id));
+        String arn = signed(region, "neptune-graph").get("/graphs/" + id).then().statusCode(200).extract().path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
     @ParameterizedTest

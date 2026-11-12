@@ -288,8 +288,7 @@
       "pattern": "[/a-zA-Z0-9\\._ -]+"
     },
     "CapabilityProperties": {
-      "type": "structure",
-      "members": {}
+      "type": "document"
     },
     "CapabilityReport": {
       "type": "structure",
@@ -926,8 +925,7 @@
       ]
     },
     "DeviceMetadata": {
-      "type": "structure",
-      "members": {}
+      "type": "document"
     },
     "DeviceType": {
       "type": "string",
@@ -1503,8 +1501,7 @@
       "pattern": "0[xX][0-9a-fA-F]+$|^[0-9]+"
     },
     "MatterAttributes": {
-      "type": "structure",
-      "members": {}
+      "type": "document"
     },
     "MatterCapabilityReport": {
       "type": "structure",
@@ -1527,8 +1524,7 @@
       }
     },
     "MatterCapabilityReportAttributeValue": {
-      "type": "structure",
-      "members": {}
+      "type": "document"
     },
     "MatterCapabilityReportAttributes": {
       "type": "list",
@@ -1684,8 +1680,7 @@
       "value": "MatterFields"
     },
     "MatterFields": {
-      "type": "structure",
-      "members": {}
+      "type": "document"
     },
     "MaxResults": {
       "type": "integer",
@@ -2415,8 +2410,7 @@
       "type": "integer"
     },
     "ValidationSchema": {
-      "type": "structure",
-      "members": {}
+      "type": "document"
     },
     "WiFiSimpleSetupConfiguration": {
       "type": "structure",

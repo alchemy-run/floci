@@ -553,6 +553,10 @@ floci:
     airflow-serverless:
       enabled: true
       transition-millis: 200
+    neptune-graph:
+      enabled: true
+      transition-millis: 200
+      query-engine: none
     medical-imaging:
       enabled: true
       transition-millis: 200

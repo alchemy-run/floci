@@ -40,6 +40,7 @@ MODELS = {
     "mediapackagev2": "mediapackagev2",
     "mediatailor": "mediatailor",
     "medical-imaging": "medicalimaging",
+    "neptune-graph": "neptunegraph",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}
