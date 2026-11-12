@@ -300,6 +300,10 @@ services:
     doc: docs/services/iotmanagedintegrations.md
     sources:
       - { path: services/iotmanagedintegrations/IotMiController.java, mode: rest }
+  - service: iotwireless
+    doc: docs/services/iotwireless.md
+    sources:
+      - { path: services/iotwireless/WirelessController.java, mode: rest }
   - service: iotsitewise
     doc: docs/services/iotsitewise.md
     sources:

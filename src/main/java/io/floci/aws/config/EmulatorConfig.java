@@ -901,6 +901,8 @@ public interface EmulatorConfig {
         IotMiServiceConfig iotmanagedintegrations();
 
         IotSiteWiseServiceConfig iotsitewise();
+
+        IotWirelessServiceConfig iotwireless();
         DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
@@ -3034,6 +3036,15 @@ public interface EmulatorConfig {
         /** How often enabled lifecycle policies are evaluated; Image Builder evaluates them daily. */
         @WithDefault("3600")
         long lifecycleIntervalSeconds();
+    }
+
+    interface IotWirelessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** Downlink messages a device's queue holds. */
+        @WithDefault("100")
+        int maxQueuedMessages();
     }
 
     interface IotSiteWiseServiceConfig {

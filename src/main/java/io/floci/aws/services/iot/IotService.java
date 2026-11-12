@@ -1677,6 +1677,32 @@ public class IotService {
     }
 
     /**
+     * Runs a topic rule on a message sent to the rule itself rather than published to a topic, as IoT Wireless and
+     * other services that name a rule as their destination do: the rule's SQL runs as if the message had been
+     * published to the topic its FROM clause names, and its actions run on what the SQL selects. A disabled rule
+     * does nothing; a rule that doesn't exist is an UnauthorizedException, as GetTopicRule reports it.
+     */
+    public void invokeTopicRule(String ruleName, byte[] payload, String region) {
+        IotTopicRule rule = getTopicRule(ruleName, region);
+        if (rule.isRuleDisabled()) {
+            return;
+        }
+        RuleSql query = ruleQuery(rule);
+        String topic = query == null ? extractTopicPattern(rule.getSql()) : query.topicFilter();
+        byte[] document;
+        if (query == null) {
+            document = payload;
+        } else {
+            RuleSqlContext context = new RuleSqlContext(topic, null,
+                    AwsArnUtils.accountOrDefault(rule.getRuleArn(), config.defaultAccountId()));
+            document = ruleSqlEvaluator.evaluate(rule.getRuleName(), query, context, payload).orElse(null);
+        }
+        if (document != null) {
+            executeTopicRule(rule, topic, payload, document);
+        }
+    }
+
+    /**
      * Returns the document the rule's actions should receive, or empty when the rule does not
      * fire for this message. Rules whose SQL could not be parsed take the pre-parser path: the
      * topic filter is read straight out of the SQL and the payload is forwarded untouched.

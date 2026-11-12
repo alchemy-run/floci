@@ -4,6 +4,7 @@ import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.AwsRegions;
 import io.floci.aws.core.common.RequestHost;
 import io.floci.aws.core.common.ServiceConfigAccess;
+import io.floci.aws.core.common.TextWebSocket;
 import io.floci.aws.core.common.WebSocketUpgrades;
 import io.vertx.core.Vertx;
 import io.vertx.core.http.HttpServerRequest;
@@ -82,12 +83,12 @@ public class IvsChatEdge {
         response.setStatusCode(101)
                 .putHeader("Upgrade", "websocket")
                 .putHeader("Connection", "Upgrade")
-                .putHeader("Sec-WebSocket-Accept", IvsChatSocket.accept(key))
+                .putHeader("Sec-WebSocket-Accept", TextWebSocket.accept(key))
                 .putHeader("Sec-WebSocket-Protocol", token);
         String ip = request.remoteAddress() == null ? null : request.remoteAddress().hostAddress();
         request.toNetSocket().onSuccess(socket -> {
             AtomicReference<IvsChatService.Connection> connection = new AtomicReference<>();
-            IvsChatSocket chat = new IvsChatSocket(socket,
+            TextWebSocket chat = new TextWebSocket(socket,
                     text -> service.receive(connection.get(), text),
                     () -> {
                         if (connection.get() != null) {

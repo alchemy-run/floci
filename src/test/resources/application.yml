@@ -526,6 +526,8 @@ floci:
       enabled: true
     iotmanagedintegrations:
       enabled: true
+    iotwireless:
+      enabled: true
     iotsitewise:
       enabled: true
       transition-millis: 200

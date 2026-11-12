@@ -1,4 +1,4 @@
-package io.floci.aws.services.ivschat;
+package io.floci.aws.core.common;
 
 import io.vertx.core.buffer.Buffer;
 import io.vertx.core.net.NetSocket;
@@ -12,15 +12,15 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
 
 /**
- * One chat connection's WebSocket (RFC 6455) over the socket its handshake upgraded. The messaging API takes the
- * chat token as the connection's subprotocol, which the server echoes; Vert.x echoes only subprotocols named in the
- * server's options, so the handshake is answered by hand and frames are read and written here: text messages
- * (fragmented or not), pings answered with pongs, and the close handshake.
+ * A server-side WebSocket (RFC 6455) of text messages over the socket a handshake answered by hand upgraded, for
+ * protocols Vert.x's WebSocket server can't serve as-is (IVS Chat echoes a token as the subprotocol, which Vert.x
+ * echoes only when named in the server's options): text messages (fragmented or not), pings answered with pongs,
+ * and the close handshake.
  */
-final class IvsChatSocket {
+public final class TextWebSocket {
 
-    /** The largest message a connection takes, reassembled; the messaging API's are far smaller. */
-    static final int MAX_MESSAGE_BYTES = 64 * 1024;
+    /** The largest message a connection takes, reassembled. */
+    public static final int MAX_MESSAGE_BYTES = 64 * 1024;
 
     private static final String ACCEPT_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
     private static final int TEXT = 0x1;
@@ -37,7 +37,7 @@ final class IvsChatSocket {
     private ByteArrayOutputStream message;
     private int messageOpcode;
 
-    IvsChatSocket(NetSocket socket, Consumer<String> onText, Runnable onClosed) {
+    public TextWebSocket(NetSocket socket, Consumer<String> onText, Runnable onClosed) {
         this.socket = socket;
         this.onText = onText;
         this.onClosed = onClosed;
@@ -47,7 +47,7 @@ final class IvsChatSocket {
     }
 
     /** The {@code Sec-WebSocket-Accept} answer to a handshake's {@code Sec-WebSocket-Key}. */
-    static String accept(String key) {
+    public static String accept(String key) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-1")
                     .digest((key.trim() + ACCEPT_GUID).getBytes(StandardCharsets.US_ASCII));
@@ -58,14 +58,14 @@ final class IvsChatSocket {
     }
 
     /** Sends a text message, unless the connection is closing. */
-    void send(String text) {
+    public void send(String text) {
         if (!closed.get()) {
             socket.write(frame(TEXT, text.getBytes(StandardCharsets.UTF_8)));
         }
     }
 
     /** Starts the close handshake with a status and reason, and ends the connection. */
-    void close(int code, String reason) {
+    public void close(int code, String reason) {
         if (closed.compareAndSet(false, true)) {
             byte[] text = reason == null ? new byte[0] : reason.getBytes(StandardCharsets.UTF_8);
             int length = Math.min(text.length, 123);
@@ -75,7 +75,7 @@ final class IvsChatSocket {
         }
     }
 
-    boolean isOpen() {
+    public boolean isOpen() {
         return !closed.get();
     }
 
@@ -187,7 +187,7 @@ final class IvsChatSocket {
             byte[] whole = message.toByteArray();
             message = null;
             if (messageOpcode == BINARY) {
-                close(1003, "The messaging API takes text messages.");
+                close(1003, "This endpoint takes text messages.");
                 return;
             }
             onText.accept(new String(whole, StandardCharsets.UTF_8));

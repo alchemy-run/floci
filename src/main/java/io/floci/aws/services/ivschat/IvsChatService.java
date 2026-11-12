@@ -9,6 +9,7 @@ import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.RequestScopes;
 import io.floci.aws.core.common.Resettable;
 import io.floci.aws.core.common.ServiceCallAuthorizer;
+import io.floci.aws.core.common.TextWebSocket;
 import io.floci.aws.services.iam.IamPolicyEvaluator;
 import io.floci.aws.services.lambda.LambdaService;
 import io.floci.aws.services.lambda.model.InvocationType;
@@ -81,11 +82,11 @@ public class IvsChatService implements Resettable {
     /** A room's connection, and the queue its messaging requests are handled on, in order. */
     static final class Connection {
         final Grant grant;
-        final IvsChatSocket socket;
+        final TextWebSocket socket;
         final String ip;
         private CompletableFuture<Void> tail = CompletableFuture.completedFuture(null);
 
-        Connection(Grant grant, IvsChatSocket socket, String ip) {
+        Connection(Grant grant, TextWebSocket socket, String ip) {
             this.grant = grant;
             this.socket = socket;
             this.ip = ip;
@@ -407,7 +408,7 @@ public class IvsChatService implements Resettable {
         return grant;
     }
 
-    Connection connect(Grant grant, IvsChatSocket socket, String ip) {
+    Connection connect(Grant grant, TextWebSocket socket, String ip) {
         Connection connection = new Connection(grant, socket, ip);
         connections.computeIfAbsent(connection.room(), ignored -> new CopyOnWriteArraySet<>()).add(connection);
         return connection;

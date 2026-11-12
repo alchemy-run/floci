@@ -126,6 +126,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Managed Grafana](grafana.md) | `/workspaces/*`, `/tags/*`, `/versions` | REST JSON | 25 |
 | [IoT Greengrass V2](greengrassv2.md) | `/greengrass/v2/*`, `/greengrass/things/*`, `/greengrass/servicerole`, `/tags/*` | REST JSON | 29 |
 | [Managed integrations](iotmanagedintegrations.md) | `/managed-things`, `/cloud-connectors`, `/schema-versions` and the rest, signed for `iotmanagedintegrations`; connectors are Lambda functions | REST JSON | 83 |
+| [IoT Wireless](iotwireless.md) | `/wireless-devices`, `/wireless-gateways`, `/destinations` and the rest, signed for `iotwireless`; a LoRaWAN network server for Basics Station gateways | REST JSON | 112 |
 | [IoT SiteWise](iotsitewise.md) | `/asset-models`, `/assets`, `/properties/*`, `/queries/execution`, `/portals` and the rest, signed for `iotsitewise`; computes transforms and metrics, publishes to IoT MQTT | REST JSON | 149 |
 | [IoT FleetWise](iotfleetwise.md) | `POST /` + `X-Amz-Target: IoTAutobahnControlPlane.*`; talks to vehicles over IoT MQTT | JSON 1.0 | 57 |
 | [HealthLake](healthlake.md) | `POST /` + `X-Amz-Target: HealthLake.*` | JSON 1.0 | 26 |
