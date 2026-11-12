@@ -210,6 +210,16 @@ class QBusinessIntegrationTest {
                 .body("systemMessage", containsString("seven"));
 
         q().delete("/applications/" + app + "/indices/" + index).then().statusCode(409);
+        String orphan = q().body("{\"displayName\":\"orphan\",\"identityCenterInstanceArn\":"
+                + "\"arn:aws:sso:::instance/ssoins-0000000000000000\"}").post("/applications").then().statusCode(200)
+                .extract().path("applicationId");
+        await().atMost(Duration.ofSeconds(20)).until(() -> "FAILED".equals(q().get("/applications/" + orphan).then()
+                .extract().path("status")));
+        q().get("/applications/" + orphan).then().body("error.errorCode", equalTo("ResourceNotFound"));
+        q().get("/applications/" + orphan + "/subscriptions").then().statusCode(200);
+        q().get("/applications/aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/subscriptions").then().statusCode(200)
+                .body("subscriptions", hasSize(0));
+        q().delete("/applications/" + orphan).then().statusCode(200);
         q().get("/applications/" + app).then().body("status", equalTo("ACTIVE"));
         q().delete("/applications/" + app).then().statusCode(200);
         q().get("/applications/" + app).then().statusCode(404).body("__type", containsString(
@@ -222,7 +232,8 @@ class QBusinessIntegrationTest {
                 + "\"qAppsConfiguration\":{\"qAppsControlMode\":\"ENABLED\"}}");
         String disabled = application("{\"displayName\":\"no-apps\",\"identityType\":\"ANONYMOUS\"}");
         apps(disabled).get("/apps.list").then().statusCode(403);
-        apps("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").get("/apps.list").then().statusCode(404);
+        apps("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").get("/apps.list").then().statusCode(403);
+        apps("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee").queryParam("appId", "x").get("/apps.get").then().statusCode(403);
         String index = index(instance);
         q().body("{\"documents\":[{\"id\":\"travel\",\"content\":{\"blob\":\"" + b64("Travel to Lisbon needs a "
                 + "manager approval. Hotels in Lisbon are capped at 180 euros a night.") + "\"}}]}")

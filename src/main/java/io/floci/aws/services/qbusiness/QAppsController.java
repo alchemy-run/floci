@@ -59,6 +59,7 @@ public class QAppsController {
         String path = uri.getRequestUri().getRawPath().substring(QBusinessRouteFilter.QAPPS.length());
         String region = regions.resolveRegion(headers);
         return dispatcher.dispatch(method, path, uri.getQueryParameters(), headers, body, (operation, input) -> {
+            service.checkInstance(input, region);
             SHAPES.check(operation, input);
             return service.handle(operation, input, region);
         });

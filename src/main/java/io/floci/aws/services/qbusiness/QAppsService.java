@@ -66,18 +66,24 @@ public class QAppsService {
     /** The Q Business application an instance id names, with Q Apps enabled. */
     private ObjectNode instance(String region, String id) {
         ObjectNode app = store.find(region, QBusinessStore.APPLICATION, id)
-                .orElseThrow(() -> QBusinessStore.notFound("instance", id));
+                .orElseThrow(() -> QBusinessStore.denied("The caller isn't a user of the Q Apps instance " + id + "."));
         if (!"ENABLED".equals(app.at("/qAppsConfiguration/qAppsControlMode").asText())) {
             throw QBusinessStore.denied("Q Apps is disabled for the instance " + id + ".");
         }
         return app;
     }
 
-    public ObjectNode handle(String operation, JsonNode in, String region) {
+    /** Fails unless the request's instance exists with Q Apps enabled, as the service checks before anything else. */
+    void checkInstance(JsonNode in, String region) {
         String instanceId = QBusinessService.opt(in, "instanceId");
         if (instanceId != null) {
             instance(region, instanceId);
         }
+    }
+
+    public ObjectNode handle(String operation, JsonNode in, String region) {
+        String instanceId = QBusinessService.opt(in, "instanceId");
+        checkInstance(in, region);
         return switch (operation) {
             case "CreateQApp" -> createQApp(in, region, instanceId);
             case "GetQApp" -> getQApp(in, region, instanceId);

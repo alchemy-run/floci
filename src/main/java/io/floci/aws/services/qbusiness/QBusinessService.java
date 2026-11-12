@@ -10,6 +10,8 @@ import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.RequestScopes;
 import io.floci.aws.services.iam.IamService;
 import io.floci.aws.services.s3.S3Service;
+import io.floci.aws.services.ssoadmin.SsoAdminService;
+import io.floci.aws.services.ssoadmin.model.SsoInstance;
 import io.floci.aws.services.s3.model.S3Object;
 import io.vertx.core.Vertx;
 import jakarta.annotation.PreDestroy;
@@ -59,6 +61,7 @@ public class QBusinessService {
     private final ObjectMapper mapper;
     private final Provider<S3Service> s3;
     private final Provider<IamService> iam;
+    private final Provider<SsoAdminService> sso;
     private final Vertx vertx;
     private final ExecutorService worker = Executors.newFixedThreadPool(2, task -> {
         Thread thread = new Thread(task, "qbusiness");
@@ -67,11 +70,13 @@ public class QBusinessService {
     });
 
     @Inject
-    public QBusinessService(QBusinessStore store, Provider<S3Service> s3, Provider<IamService> iam, Vertx vertx) {
+    public QBusinessService(QBusinessStore store, Provider<S3Service> s3, Provider<IamService> iam,
+                            Provider<SsoAdminService> sso, Vertx vertx) {
         this.store = store;
         this.mapper = store.mapper();
         this.s3 = s3;
         this.iam = iam;
+        this.sso = sso;
         this.vertx = vertx;
     }
 
@@ -257,7 +262,13 @@ public class QBusinessService {
         if (opt(in, "clientToken") != null) {
             QBusinessStore.meta(record).put("clientToken", in.get("clientToken").asText());
         }
-        store.transition(record, "status", "CREATING", "ACTIVE");
+        boolean instanceExists = idc == null || sso.get().listInstances(store.account()).stream()
+                .map(SsoInstance::instanceArn).anyMatch(idc::equals);
+        if (!instanceExists) {
+            record.putObject("error").put("errorCode", "ResourceNotFound").put("errorMessage",
+                    "The IAM Identity Center instance " + idc + " doesn't exist.");
+        }
+        store.transition(record, "status", "CREATING", instanceExists ? "ACTIVE" : "FAILED");
         QBusinessStore.addTags(record, in.path("tags"));
         store.put(region, QBusinessStore.APPLICATION, id, record);
         ObjectNode controls = store.record();
@@ -1964,7 +1975,6 @@ public class QBusinessService {
 
     public ObjectNode listSubscriptions(JsonNode in, String region) {
         String appId = req(in, "applicationId");
-        application(region, appId);
         List<ObjectNode> views = new ArrayList<>();
         store.list(region, QBusinessStore.SUBSCRIPTION, appId + "/").forEach(s -> views.add(copy(s, "subscriptionId",
                 "subscriptionArn", "principal", "currentSubscription", "nextSubscription")));
