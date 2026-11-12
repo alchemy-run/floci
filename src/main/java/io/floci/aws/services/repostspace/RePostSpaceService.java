@@ -186,6 +186,13 @@ public class RePostSpaceService implements Resettable {
 
     // ================================================================ operations
 
+    /** Fails when the request names a space that doesn't exist, as the service checks before validating the rest. */
+    void checkSpace(JsonNode in, String region) {
+        if (in.hasNonNull("spaceId")) {
+            space(region, in.get("spaceId").asText());
+        }
+    }
+
     public ObjectNode handle(String operation, JsonNode in, String region) {
         return switch (operation) {
             case "CreateSpace" -> createSpace(in, region);

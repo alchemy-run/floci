@@ -74,6 +74,7 @@ public class RePostSpaceController {
         String path = uri.getRequestUri().getRawPath().substring(RePostSpaceRouteFilter.PREFIX.length());
         String region = regions.resolveRegion(headers);
         return dispatcher.dispatch(method, path, uri.getQueryParameters(), headers, body, (operation, input) -> {
+            service.checkSpace(input, region);
             SHAPES.check(operation, input);
             return service.handle(operation, input, region);
         });
