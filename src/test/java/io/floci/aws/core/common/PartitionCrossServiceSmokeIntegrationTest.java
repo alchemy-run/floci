@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "notifications", "notificationscontacts", "osis", "observabilityadmin", "omics", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "notifications", "notificationscontacts", "osis", "observabilityadmin", "omics", "opensearchserverless", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1554,6 +1554,20 @@ class PartitionCrossServiceSmokeIntegrationTest {
                 .post("/2022-09-19/emailcontacts").then().statusCode(201).extract().path("arn");
         cleanup.register(() -> signed(region, "notifications-contacts").delete("/emailcontacts/" + arn));
         PartitionMatrix.assertGlobalArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void openSearchServerlessCollectionArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "aoss");
+        String policy = "{\\\"Rules\\\":[{\\\"ResourceType\\\":\\\"collection\\\",\\\"Resource\\\":"
+                + "[\\\"collection/partition*\\\"]}],\\\"AWSOwnedKey\\\":true}";
+        json10(region, "aoss", "OpenSearchServerless.CreateSecurityPolicy", "{\"type\":\"encryption\",\"name\":"
+                + "\"partition-enc\",\"policy\":\"" + policy + "\"}").post("/").then().statusCode(200);
+        String arn = json10(region, "aoss", "OpenSearchServerless.CreateCollection",
+                "{\"name\":\"partition-c\"}").post("/").then().statusCode(200)
+                .extract().path("createCollectionDetail.arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
     @ParameterizedTest

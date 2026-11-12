@@ -566,6 +566,11 @@ floci:
       enabled: true
       transition-millis: 200
       engine: none
+    opensearch-serverless:
+      enabled: true
+      transition-millis: 200
+      engine: none
+      stream-poll-seconds: 1
     omics:
       enabled: true
       transition-millis: 200

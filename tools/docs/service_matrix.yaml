@@ -32,6 +32,7 @@ aliases:
   airflow-serverless: airflowserverless  # MWAA Serverless, documented in airflowserverless.md
   medical-imaging: medicalimaging        # HealthImaging's SigV4 signing name is "medical-imaging"
   notifications-contacts: notificationscontacts  # User Notifications Contacts' SigV4 signing name
+  aoss: opensearchserverless             # OpenSearch Serverless' SigV4 signing name is "aoss"
   neptune-graph: neptunegraph            # Neptune Analytics' SigV4 signing name is "neptune-graph"
   greengrass: greengrassv2               # Greengrass V2's SigV4 signing name is "greengrass"
   geo: location                         # Location's SigV4 signing name is "geo"

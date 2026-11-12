@@ -1,0 +1,1388 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_opensearchserverless_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "BatchGetCollection": "BatchGetCollectionRequest",
+    "BatchGetCollectionGroup": "BatchGetCollectionGroupRequest",
+    "BatchGetEffectiveLifecyclePolicy": "BatchGetEffectiveLifecyclePolicyRequest",
+    "BatchGetLifecyclePolicy": "BatchGetLifecyclePolicyRequest",
+    "BatchGetVpcEndpoint": "BatchGetVpcEndpointRequest",
+    "CancelIngestionJob": "CancelIngestionJobRequest",
+    "CreateAccessPolicy": "CreateAccessPolicyRequest",
+    "CreateCollection": "CreateCollectionRequest",
+    "CreateCollectionGroup": "CreateCollectionGroupRequest",
+    "CreateIndex": "CreateIndexRequest",
+    "CreateIngestionJob": "CreateIngestionJobRequest",
+    "CreateIngestionStream": "CreateIngestionStreamRequest",
+    "CreateLifecyclePolicy": "CreateLifecyclePolicyRequest",
+    "CreateSecurityConfig": "CreateSecurityConfigRequest",
+    "CreateSecurityPolicy": "CreateSecurityPolicyRequest",
+    "CreateVpcEndpoint": "CreateVpcEndpointRequest",
+    "DeleteAccessPolicy": "DeleteAccessPolicyRequest",
+    "DeleteCollection": "DeleteCollectionRequest",
+    "DeleteCollectionGroup": "DeleteCollectionGroupRequest",
+    "DeleteIndex": "DeleteIndexRequest",
+    "DeleteIngestionStream": "DeleteIngestionStreamRequest",
+    "DeleteLifecyclePolicy": "DeleteLifecyclePolicyRequest",
+    "DeleteSecurityConfig": "DeleteSecurityConfigRequest",
+    "DeleteSecurityPolicy": "DeleteSecurityPolicyRequest",
+    "DeleteVpcEndpoint": "DeleteVpcEndpointRequest",
+    "GetAccessPolicy": "GetAccessPolicyRequest",
+    "GetAccountSettings": "GetAccountSettingsRequest",
+    "GetIndex": "GetIndexRequest",
+    "GetIngestionJob": "GetIngestionJobRequest",
+    "GetIngestionStream": "GetIngestionStreamRequest",
+    "GetPoliciesStats": "GetPoliciesStatsRequest",
+    "GetSecurityConfig": "GetSecurityConfigRequest",
+    "GetSecurityPolicy": "GetSecurityPolicyRequest",
+    "ListAccessPolicies": "ListAccessPoliciesRequest",
+    "ListCollectionGroups": "ListCollectionGroupsRequest",
+    "ListCollections": "ListCollectionsRequest",
+    "ListIngestionJobs": "ListIngestionJobsRequest",
+    "ListIngestionStreams": "ListIngestionStreamsRequest",
+    "ListLifecyclePolicies": "ListLifecyclePoliciesRequest",
+    "ListSecurityConfigs": "ListSecurityConfigsRequest",
+    "ListSecurityPolicies": "ListSecurityPoliciesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListVpcEndpoints": "ListVpcEndpointsRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateAccessPolicy": "UpdateAccessPolicyRequest",
+    "UpdateAccountSettings": "UpdateAccountSettingsRequest",
+    "UpdateCollection": "UpdateCollectionRequest",
+    "UpdateCollectionGroup": "UpdateCollectionGroupRequest",
+    "UpdateIndex": "UpdateIndexRequest",
+    "UpdateLifecyclePolicy": "UpdateLifecyclePolicyRequest",
+    "UpdateSecurityConfig": "UpdateSecurityConfigRequest",
+    "UpdateSecurityPolicy": "UpdateSecurityPolicyRequest",
+    "UpdateVpcEndpoint": "UpdateVpcEndpointRequest"
+  },
+  "shapes": {
+    "AccessPolicyType": {
+      "type": "string",
+      "enum": [
+        "data"
+      ]
+    },
+    "Arn": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "BatchGetCollectionGroupRequest": {
+      "type": "structure",
+      "members": {
+        "ids": "CollectionGroupIds",
+        "names": "CollectionGroupNames"
+      }
+    },
+    "BatchGetCollectionRequest": {
+      "type": "structure",
+      "members": {
+        "ids": "CollectionIds",
+        "names": "CollectionNames"
+      }
+    },
+    "BatchGetEffectiveLifecyclePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "resourceIdentifiers"
+      ],
+      "members": {
+        "resourceIdentifiers": "LifecyclePolicyResourceIdentifiers"
+      }
+    },
+    "BatchGetLifecyclePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "identifiers"
+      ],
+      "members": {
+        "identifiers": "LifecyclePolicyIdentifiers"
+      }
+    },
+    "BatchGetVpcEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "ids"
+      ],
+      "members": {
+        "ids": "VpcEndpointIds"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BucketOwnerAccountId": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "[0-9]{12}"
+    },
+    "CancelIngestionJobRequest": {
+      "type": "structure",
+      "required": [
+        "collectionId",
+        "ingestionJobId"
+      ],
+      "members": {
+        "collectionId": "CollectionId",
+        "ingestionJobId": "IngestionJobId",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CapacityLimits": {
+      "type": "structure",
+      "members": {
+        "maxIndexingCapacityInOCU": "IndexingCapacityValue",
+        "maxSearchCapacityInOCU": "SearchCapacityValue"
+      }
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "CollectionFilters": {
+      "type": "structure",
+      "members": {
+        "name": "CollectionName",
+        "status": "CollectionStatus",
+        "collectionGroupName": "CollectionGroupName"
+      }
+    },
+    "CollectionGroupCapacityLimits": {
+      "type": "structure",
+      "members": {
+        "maxIndexingCapacityInOCU": "CollectionGroupMaxIndexingCapacityValue",
+        "maxSearchCapacityInOCU": "CollectionGroupMaxSearchCapacityValue",
+        "minIndexingCapacityInOCU": "CollectionGroupMinIndexingCapacityValue",
+        "minSearchCapacityInOCU": "CollectionGroupMinSearchCapacityValue"
+      }
+    },
+    "CollectionGroupId": {
+      "type": "string",
+      "min": 3,
+      "max": 40,
+      "pattern": "[a-z0-9]{3,40}"
+    },
+    "CollectionGroupIds": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "CollectionGroupId"
+    },
+    "CollectionGroupMaxIndexingCapacityValue": {
+      "type": "float",
+      "min": 1
+    },
+    "CollectionGroupMaxSearchCapacityValue": {
+      "type": "float",
+      "min": 1
+    },
+    "CollectionGroupMinIndexingCapacityValue": {
+      "type": "float",
+      "min": 0
+    },
+    "CollectionGroupMinSearchCapacityValue": {
+      "type": "float",
+      "min": 0
+    },
+    "CollectionGroupName": {
+      "type": "string",
+      "min": 3,
+      "max": 32,
+      "pattern": "[a-z][a-z0-9-]+"
+    },
+    "CollectionGroupNames": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "CollectionGroupName"
+    },
+    "CollectionId": {
+      "type": "string",
+      "min": 3,
+      "max": 40,
+      "pattern": "[a-z0-9]{3,40}"
+    },
+    "CollectionIds": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "CollectionId"
+    },
+    "CollectionName": {
+      "type": "string",
+      "min": 3,
+      "max": 64,
+      "pattern": "[a-z][a-z0-9_-]+"
+    },
+    "CollectionNames": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "CollectionName"
+    },
+    "CollectionStatus": {
+      "type": "string",
+      "enum": [
+        "CREATING",
+        "UPDATING",
+        "DELETING",
+        "ACTIVE",
+        "FAILED",
+        "UPDATE_FAILED"
+      ]
+    },
+    "CollectionType": {
+      "type": "string",
+      "enum": [
+        "SEARCH",
+        "TIMESERIES",
+        "VECTORSEARCH"
+      ]
+    },
+    "ConfigDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 1000
+    },
+    "ConfigName": {
+      "type": "string",
+      "min": 3,
+      "max": 32,
+      "pattern": "[a-z][a-z0-9-]+"
+    },
+    "CreateAccessPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name",
+        "policy"
+      ],
+      "members": {
+        "type": "AccessPolicyType",
+        "name": "PolicyName",
+        "description": "PolicyDescription",
+        "policy": "PolicyDocument",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateCollectionGroupRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "standbyReplicas"
+      ],
+      "members": {
+        "name": "CollectionGroupName",
+        "standbyReplicas": "StandbyReplicas",
+        "description": "CreateCollectionGroupRequestDescriptionString",
+        "tags": "Tags",
+        "capacityLimits": "CollectionGroupCapacityLimits",
+        "generation": "ServerlessGeneration",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateCollectionGroupRequestDescriptionString": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "CreateCollectionRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "CollectionName",
+        "type": "CollectionType",
+        "description": "CreateCollectionRequestDescriptionString",
+        "tags": "Tags",
+        "standbyReplicas": "StandbyReplicas",
+        "vectorOptions": "VectorOptions",
+        "collectionGroupName": "CollectionGroupName",
+        "encryptionConfig": "EncryptionConfig",
+        "deletionProtection": "DeletionProtection",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateCollectionRequestDescriptionString": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "CreateIamIdentityCenterConfigOptions": {
+      "type": "structure",
+      "required": [
+        "instanceArn"
+      ],
+      "members": {
+        "instanceArn": "IamIdentityCenterInstanceArn",
+        "userAttribute": "IamIdentityCenterUserAttribute",
+        "groupAttribute": "IamIdentityCenterGroupAttribute"
+      }
+    },
+    "CreateIndexRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "indexName"
+      ],
+      "members": {
+        "id": "CollectionId",
+        "indexName": "IndexName",
+        "indexSchema": "IndexSchema"
+      }
+    },
+    "CreateIngestionJobRequest": {
+      "type": "structure",
+      "required": [
+        "collectionId",
+        "ingestionJobName",
+        "indexName",
+        "source"
+      ],
+      "members": {
+        "collectionId": "CollectionId",
+        "ingestionJobName": "IngestionJobName",
+        "indexName": "IngestionIndexName",
+        "failureIndexName": "IngestionIndexName",
+        "source": "IngestionJobSource",
+        "tags": "Tags",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateIngestionStreamRequest": {
+      "type": "structure",
+      "required": [
+        "collectionId",
+        "ingestionStreamName",
+        "indexName",
+        "source",
+        "roleArn"
+      ],
+      "members": {
+        "collectionId": "CollectionId",
+        "ingestionStreamName": "IngestionStreamName",
+        "indexName": "IngestionIndexName",
+        "failureIndexName": "IngestionIndexName",
+        "source": "IngestionStreamSource",
+        "roleArn": "RoleArn",
+        "tags": "Tags",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateLifecyclePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name",
+        "policy"
+      ],
+      "members": {
+        "type": "LifecyclePolicyType",
+        "name": "PolicyName",
+        "description": "PolicyDescription",
+        "policy": "PolicyDocument",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateSecurityConfigRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name"
+      ],
+      "members": {
+        "type": "SecurityConfigType",
+        "name": "ConfigName",
+        "description": "ConfigDescription",
+        "samlOptions": "SamlConfigOptions",
+        "iamIdentityCenterOptions": "CreateIamIdentityCenterConfigOptions",
+        "iamFederationOptions": "IamFederationConfigOptions",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateSecurityPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name",
+        "policy"
+      ],
+      "members": {
+        "type": "SecurityPolicyType",
+        "name": "PolicyName",
+        "description": "PolicyDescription",
+        "policy": "PolicyDocument",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateVpcEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "vpcId",
+        "subnetIds"
+      ],
+      "members": {
+        "name": "VpcEndpointName",
+        "vpcId": "VpcId",
+        "subnetIds": "SubnetIds",
+        "securityGroupIds": "SecurityGroupIds",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteAccessPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name"
+      ],
+      "members": {
+        "type": "AccessPolicyType",
+        "name": "PolicyName",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteCollectionGroupRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "CollectionGroupId",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteCollectionRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "CollectionId",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteIndexRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "indexName"
+      ],
+      "members": {
+        "id": "CollectionId",
+        "indexName": "IndexName"
+      }
+    },
+    "DeleteIngestionStreamRequest": {
+      "type": "structure",
+      "required": [
+        "collectionId",
+        "ingestionStreamId"
+      ],
+      "members": {
+        "collectionId": "CollectionId",
+        "ingestionStreamId": "IngestionStreamId",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteLifecyclePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name"
+      ],
+      "members": {
+        "type": "LifecyclePolicyType",
+        "name": "PolicyName",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteSecurityConfigRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "SecurityConfigId",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteSecurityPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name"
+      ],
+      "members": {
+        "type": "SecurityPolicyType",
+        "name": "PolicyName",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteVpcEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "VpcEndpointId",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeletionProtection": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "EncryptionConfig": {
+      "type": "structure",
+      "members": {
+        "aWSOwnedKey": "Boolean",
+        "kmsKeyArn": "EncryptionConfigKmsKeyArnString"
+      }
+    },
+    "EncryptionConfigKmsKeyArnString": {
+      "type": "string",
+      "min": 10,
+      "max": 2048,
+      "pattern": "arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-c|aws-iso-d|aws-iso-e):(kms):[a-zA-Z-]+\\d{1}:\\d{12}:(key)\\/.{1,2048}.*"
+    },
+    "GetAccessPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name"
+      ],
+      "members": {
+        "type": "AccessPolicyType",
+        "name": "PolicyName"
+      }
+    },
+    "GetAccountSettingsRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetIndexRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "indexName"
+      ],
+      "members": {
+        "id": "CollectionId",
+        "indexName": "IndexName"
+      }
+    },
+    "GetIngestionJobRequest": {
+      "type": "structure",
+      "required": [
+        "collectionId",
+        "ingestionJobId"
+      ],
+      "members": {
+        "collectionId": "CollectionId",
+        "ingestionJobId": "IngestionJobId"
+      }
+    },
+    "GetIngestionStreamRequest": {
+      "type": "structure",
+      "required": [
+        "collectionId",
+        "ingestionStreamId"
+      ],
+      "members": {
+        "collectionId": "CollectionId",
+        "ingestionStreamId": "IngestionStreamId"
+      }
+    },
+    "GetPoliciesStatsRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetSecurityConfigRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "SecurityConfigId"
+      }
+    },
+    "GetSecurityPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name"
+      ],
+      "members": {
+        "type": "SecurityPolicyType",
+        "name": "PolicyName"
+      }
+    },
+    "IamFederationConfigOptions": {
+      "type": "structure",
+      "members": {
+        "groupAttribute": "iamFederationGroupAttribute",
+        "userAttribute": "iamFederationUserAttribute"
+      }
+    },
+    "IamIdentityCenterGroupAttribute": {
+      "type": "string",
+      "enum": [
+        "GroupId",
+        "GroupName"
+      ]
+    },
+    "IamIdentityCenterInstanceArn": {
+      "type": "string",
+      "min": 10,
+      "max": 1224,
+      "pattern": "arn:(aws|aws-us-gov|aws-cn|aws-iso|aws-iso-b):sso:::instance/(sso)?ins-[a-zA-Z0-9-.]{16}"
+    },
+    "IamIdentityCenterUserAttribute": {
+      "type": "string",
+      "enum": [
+        "UserId",
+        "UserName",
+        "Email"
+      ]
+    },
+    "IndexName": {
+      "type": "string"
+    },
+    "IndexSchema": {
+      "type": "document"
+    },
+    "IndexingCapacityValue": {
+      "type": "integer",
+      "min": 2
+    },
+    "IngestionIndexName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-z0-9.][a-z0-9._-]*"
+    },
+    "IngestionJobId": {
+      "type": "string",
+      "min": 20,
+      "max": 64,
+      "pattern": "[a-z0-9]+"
+    },
+    "IngestionJobName": {
+      "type": "string",
+      "min": 3,
+      "max": 32,
+      "pattern": "[a-z][a-z0-9-]*"
+    },
+    "IngestionJobS3Source": {
+      "type": "structure",
+      "members": {
+        "bucket": "S3BucketNameOrArn",
+        "bucketOwnerAccountId": "BucketOwnerAccountId",
+        "keyPrefix": "IngestionJobS3SourceKeyPrefixString"
+      }
+    },
+    "IngestionJobS3SourceKeyPrefixString": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "IngestionJobSource": {
+      "type": "structure",
+      "required": [
+        "s3"
+      ],
+      "members": {
+        "s3": "IngestionJobS3Source"
+      }
+    },
+    "IngestionStreamId": {
+      "type": "string",
+      "min": 20,
+      "max": 64,
+      "pattern": "[a-z0-9]+"
+    },
+    "IngestionStreamName": {
+      "type": "string",
+      "min": 3,
+      "max": 32,
+      "pattern": "[a-z][a-z0-9-]*"
+    },
+    "IngestionStreamS3Source": {
+      "type": "structure",
+      "required": [
+        "sqsArn"
+      ],
+      "members": {
+        "sqsArn": "SqsArn",
+        "buckets": "StreamBucketConfigs"
+      }
+    },
+    "IngestionStreamSource": {
+      "type": "structure",
+      "required": [
+        "s3"
+      ],
+      "members": {
+        "s3": "IngestionStreamS3Source"
+      }
+    },
+    "InitialScan": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "LifecyclePolicyIdentifier": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name"
+      ],
+      "members": {
+        "type": "LifecyclePolicyType",
+        "name": "PolicyName"
+      }
+    },
+    "LifecyclePolicyIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 40,
+      "member": "LifecyclePolicyIdentifier"
+    },
+    "LifecyclePolicyResourceIdentifier": {
+      "type": "structure",
+      "required": [
+        "type",
+        "resource"
+      ],
+      "members": {
+        "type": "LifecyclePolicyType",
+        "resource": "ResourceName"
+      }
+    },
+    "LifecyclePolicyResourceIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "LifecyclePolicyResourceIdentifier"
+    },
+    "LifecyclePolicyType": {
+      "type": "string",
+      "enum": [
+        "retention"
+      ]
+    },
+    "LifecycleResource": {
+      "type": "string"
+    },
+    "ListAccessPoliciesRequest": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "AccessPolicyType",
+        "resource": "ListAccessPoliciesRequestResourceList",
+        "nextToken": "String",
+        "maxResults": "ListAccessPoliciesRequestMaxResultsInteger"
+      }
+    },
+    "ListAccessPoliciesRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListAccessPoliciesRequestResourceList": {
+      "type": "list",
+      "min": 1,
+      "max": 1000,
+      "member": "Resource"
+    },
+    "ListCollectionGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "String",
+        "maxResults": "ListCollectionGroupsRequestMaxResultsInteger"
+      }
+    },
+    "ListCollectionGroupsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListCollectionsRequest": {
+      "type": "structure",
+      "members": {
+        "collectionFilters": "CollectionFilters",
+        "nextToken": "String",
+        "maxResults": "ListCollectionsRequestMaxResultsInteger"
+      }
+    },
+    "ListCollectionsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListIngestionJobsRequest": {
+      "type": "structure",
+      "required": [
+        "collectionId"
+      ],
+      "members": {
+        "collectionId": "CollectionId",
+        "nextToken": "String",
+        "maxResults": "ListIngestionJobsRequestMaxResultsInteger"
+      }
+    },
+    "ListIngestionJobsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListIngestionStreamsRequest": {
+      "type": "structure",
+      "required": [
+        "collectionId"
+      ],
+      "members": {
+        "collectionId": "CollectionId",
+        "nextToken": "String",
+        "maxResults": "ListIngestionStreamsRequestMaxResultsInteger"
+      }
+    },
+    "ListIngestionStreamsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListLifecyclePoliciesRequest": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "LifecyclePolicyType",
+        "resources": "ListLifecyclePoliciesRequestResourcesList",
+        "nextToken": "String",
+        "maxResults": "ListLifecyclePoliciesRequestMaxResultsInteger"
+      }
+    },
+    "ListLifecyclePoliciesRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListLifecyclePoliciesRequestResourcesList": {
+      "type": "list",
+      "min": 1,
+      "max": 1000,
+      "member": "LifecycleResource"
+    },
+    "ListSecurityConfigsRequest": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "SecurityConfigType",
+        "nextToken": "String",
+        "maxResults": "ListSecurityConfigsRequestMaxResultsInteger"
+      }
+    },
+    "ListSecurityConfigsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListSecurityPoliciesRequest": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "SecurityPolicyType",
+        "resource": "ListSecurityPoliciesRequestResourceList",
+        "nextToken": "String",
+        "maxResults": "ListSecurityPoliciesRequestMaxResultsInteger"
+      }
+    },
+    "ListSecurityPoliciesRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListSecurityPoliciesRequestResourceList": {
+      "type": "list",
+      "min": 1,
+      "max": 1000,
+      "member": "Resource"
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "Arn"
+      }
+    },
+    "ListVpcEndpointsRequest": {
+      "type": "structure",
+      "members": {
+        "vpcEndpointFilters": "VpcEndpointFilters",
+        "nextToken": "String",
+        "maxResults": "ListVpcEndpointsRequestMaxResultsInteger"
+      }
+    },
+    "ListVpcEndpointsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "PolicyDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "PolicyDocument": {
+      "type": "string",
+      "min": 1,
+      "max": 20480,
+      "pattern": ".*[\\u0009\\u000A\\u000D\\u0020-\\u007E\\u00A1-\\u00FF]+.*"
+    },
+    "PolicyName": {
+      "type": "string",
+      "min": 3,
+      "max": 32,
+      "pattern": "[a-z][a-z0-9-]+"
+    },
+    "PolicyVersion": {
+      "type": "string",
+      "min": 20,
+      "max": 36,
+      "pattern": "([0-9a-zA-Z+/]{4})*(([0-9a-zA-Z+/]{2}==)|([0-9a-zA-Z+/]{3}=))?"
+    },
+    "Resource": {
+      "type": "string"
+    },
+    "ResourceName": {
+      "type": "string",
+      "pattern": "index/[a-z][a-z0-9-]{3,63}/([a-z;0-9&$%][+.~=\\-_a-z;0-9&$%]*)"
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-c|aws-iso-d|aws-iso-e):iam::\\d{12}:role/.+"
+    },
+    "S3BucketNameOrArn": {
+      "type": "string",
+      "min": 3,
+      "max": 2048,
+      "pattern": "(arn:[a-z0-9\\-]+:s3:::[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]|[a-z0-9][a-z0-9.-]{1,61}[a-z0-9])"
+    },
+    "SamlConfigOptions": {
+      "type": "structure",
+      "required": [
+        "metadata"
+      ],
+      "members": {
+        "metadata": "samlMetadata",
+        "userAttribute": "samlUserAttribute",
+        "groupAttribute": "samlGroupAttribute",
+        "openSearchServerlessEntityId": "openSearchServerlessEntityId",
+        "sessionTimeout": "SamlConfigOptionsSessionTimeoutInteger"
+      }
+    },
+    "SamlConfigOptionsSessionTimeoutInteger": {
+      "type": "integer",
+      "min": 5,
+      "max": 720
+    },
+    "SearchCapacityValue": {
+      "type": "integer",
+      "min": 2
+    },
+    "SecurityConfigId": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "SecurityConfigType": {
+      "type": "string",
+      "enum": [
+        "saml",
+        "iamidentitycenter",
+        "iamfederation"
+      ]
+    },
+    "SecurityGroupId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\w+\\-]+"
+    },
+    "SecurityGroupIds": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "SecurityGroupId"
+    },
+    "SecurityPolicyType": {
+      "type": "string",
+      "enum": [
+        "encryption",
+        "network"
+      ]
+    },
+    "ServerlessGeneration": {
+      "type": "string",
+      "enum": [
+        "CLASSIC",
+        "NEXTGEN"
+      ]
+    },
+    "ServerlessVectorAccelerationStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED",
+        "ALLOWED"
+      ]
+    },
+    "SqsArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "arn:(?:aws|aws-cn|aws-us-gov|aws-iso|aws-iso-b|aws-iso-c|aws-iso-d|aws-iso-e):sqs:[a-z0-9-]+:\\d{12}:.+"
+    },
+    "StandbyReplicas": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "StreamBucketConfig": {
+      "type": "structure",
+      "required": [
+        "bucket"
+      ],
+      "members": {
+        "bucket": "S3BucketNameOrArn",
+        "bucketOwnerAccountId": "BucketOwnerAccountId",
+        "initialScan": "InitialScan"
+      }
+    },
+    "StreamBucketConfigs": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "StreamBucketConfig"
+    },
+    "String": {
+      "type": "string"
+    },
+    "SubnetId": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "subnet-([0-9a-f]{8}|[0-9a-f]{17})"
+    },
+    "SubnetIds": {
+      "type": "list",
+      "min": 1,
+      "member": "SubnetId"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "key",
+        "value"
+      ],
+      "members": {
+        "key": "TagKey",
+        "value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "Tags": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "Tag"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tagKeys": "TagKeys"
+      }
+    },
+    "UpdateAccessPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name",
+        "policyVersion"
+      ],
+      "members": {
+        "type": "AccessPolicyType",
+        "name": "PolicyName",
+        "policyVersion": "PolicyVersion",
+        "description": "PolicyDescription",
+        "policy": "PolicyDocument",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateAccountSettingsRequest": {
+      "type": "structure",
+      "members": {
+        "capacityLimits": "CapacityLimits"
+      }
+    },
+    "UpdateCollectionGroupRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "CollectionGroupId",
+        "description": "UpdateCollectionGroupRequestDescriptionString",
+        "capacityLimits": "CollectionGroupCapacityLimits",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateCollectionGroupRequestDescriptionString": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "UpdateCollectionRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "CollectionId",
+        "description": "UpdateCollectionRequestDescriptionString",
+        "vectorOptions": "VectorOptions",
+        "deletionProtection": "DeletionProtection",
+        "encryptionConfig": "EncryptionConfig",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateCollectionRequestDescriptionString": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "UpdateIamIdentityCenterConfigOptions": {
+      "type": "structure",
+      "members": {
+        "userAttribute": "IamIdentityCenterUserAttribute",
+        "groupAttribute": "IamIdentityCenterGroupAttribute"
+      }
+    },
+    "UpdateIndexRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "indexName"
+      ],
+      "members": {
+        "id": "CollectionId",
+        "indexName": "IndexName",
+        "indexSchema": "IndexSchema"
+      }
+    },
+    "UpdateLifecyclePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name",
+        "policyVersion"
+      ],
+      "members": {
+        "type": "LifecyclePolicyType",
+        "name": "PolicyName",
+        "policyVersion": "PolicyVersion",
+        "description": "PolicyDescription",
+        "policy": "PolicyDocument",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateSecurityConfigRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "configVersion"
+      ],
+      "members": {
+        "id": "SecurityConfigId",
+        "configVersion": "PolicyVersion",
+        "description": "ConfigDescription",
+        "samlOptions": "SamlConfigOptions",
+        "iamIdentityCenterOptionsUpdates": "UpdateIamIdentityCenterConfigOptions",
+        "iamFederationOptions": "IamFederationConfigOptions",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateSecurityPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "type",
+        "name",
+        "policyVersion"
+      ],
+      "members": {
+        "type": "SecurityPolicyType",
+        "name": "PolicyName",
+        "policyVersion": "PolicyVersion",
+        "description": "PolicyDescription",
+        "policy": "PolicyDocument",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateVpcEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "VpcEndpointId",
+        "addSubnetIds": "SubnetIds",
+        "removeSubnetIds": "SubnetIds",
+        "addSecurityGroupIds": "SecurityGroupIds",
+        "removeSecurityGroupIds": "SecurityGroupIds",
+        "clientToken": "ClientToken"
+      }
+    },
+    "VectorOptions": {
+      "type": "structure",
+      "required": [
+        "ServerlessVectorAcceleration"
+      ],
+      "members": {
+        "ServerlessVectorAcceleration": "ServerlessVectorAccelerationStatus"
+      }
+    },
+    "VpcEndpointFilters": {
+      "type": "structure",
+      "members": {
+        "status": "VpcEndpointStatus"
+      }
+    },
+    "VpcEndpointId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "vpce-[0-9a-z]*"
+    },
+    "VpcEndpointIds": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "VpcEndpointId"
+    },
+    "VpcEndpointName": {
+      "type": "string",
+      "min": 3,
+      "max": 32,
+      "pattern": "[a-z][a-z0-9-]+"
+    },
+    "VpcEndpointStatus": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "DELETING",
+        "ACTIVE",
+        "FAILED"
+      ]
+    },
+    "VpcId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "vpc-[0-9a-z]*"
+    },
+    "iamFederationGroupAttribute": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z][A-Za-z0-9_.:/=+\\-@]*"
+    },
+    "iamFederationUserAttribute": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z][A-Za-z0-9_.:/=+\\-@]*"
+    },
+    "openSearchServerlessEntityId": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "aws:opensearch:[0-9]{12}:*.*"
+    },
+    "samlGroupAttribute": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": ".*[\\w+=,.@-]+.*"
+    },
+    "samlMetadata": {
+      "type": "string",
+      "min": 1,
+      "max": 51200,
+      "pattern": ".*[\\u0009\\u000A\\u000D\\u0020-\\u007E\\u00A1-\\u00FF]+.*"
+    },
+    "samlUserAttribute": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": ".*[\\w+=,.@-]+.*"
+    }
+  }
+}

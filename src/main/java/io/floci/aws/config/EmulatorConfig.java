@@ -920,6 +920,8 @@ public interface EmulatorConfig {
 
         OmicsServiceConfig omics();
 
+        OpenSearchServerlessServiceConfig opensearchServerless();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3049,6 +3051,35 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long event rules, hubs and configurations stay in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface OpenSearchServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** What collections run on: {@code opensearch} (a container per collection), or {@code none}. */
+        @WithDefault("opensearch")
+        String engine();
+
+        /** The OpenSearch image collections run on. */
+        @WithDefault("opensearchproject/opensearch:2.19.5")
+        String image();
+
+        /** The Java heap of a collection's OpenSearch, in MiB. */
+        @WithDefault("512")
+        int heapMb();
+
+        /** How long a collection's OpenSearch may take to start. */
+        @WithDefault("180")
+        int readySeconds();
+
+        /** How often ingestion streams poll their queue. */
+        @WithDefault("5")
+        int streamPollSeconds();
+
+        /** How long collections, endpoints and jobs stay in a transitional state. */
         @WithDefault("2000")
         long transitionMillis();
     }

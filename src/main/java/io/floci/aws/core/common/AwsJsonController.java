@@ -22,6 +22,7 @@ import io.floci.aws.services.keyspaces.KeyspacesJsonHandler;
 import io.floci.aws.services.mailmanager.MailManagerJsonHandler;
 import io.floci.aws.services.marketplace.MarketplaceJsonHandler;
 import io.floci.aws.services.networkfirewall.NetworkFirewallJsonHandler;
+import io.floci.aws.services.opensearchserverless.AossJsonHandler;
 import io.floci.aws.services.paymentcryptography.PaymentCryptographyJsonHandler;
 import io.floci.aws.services.sns.SnsJsonHandler;
 import io.floci.aws.services.sqs.SqsJsonHandler;
@@ -78,6 +79,7 @@ public class AwsJsonController {
     private final CodeConnectionsJsonHandler codeConnectionsJsonHandler;
     private final KeyspacesJsonHandler keyspacesJsonHandler;
     private final AirflowServerlessJsonHandler airflowServerlessJsonHandler;
+    private final AossJsonHandler aossJsonHandler;
     private final MarketplaceJsonHandler marketplaceJsonHandler;
     private final VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler;
     private final BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler;
@@ -106,6 +108,7 @@ public class AwsJsonController {
                              CodeConnectionsJsonHandler codeConnectionsJsonHandler,
                              KeyspacesJsonHandler keyspacesJsonHandler,
                              AirflowServerlessJsonHandler airflowServerlessJsonHandler,
+                             AossJsonHandler aossJsonHandler,
                              MarketplaceJsonHandler marketplaceJsonHandler,
                              VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler,
                              BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler,
@@ -131,6 +134,7 @@ public class AwsJsonController {
         this.codeConnectionsJsonHandler = codeConnectionsJsonHandler;
         this.keyspacesJsonHandler = keyspacesJsonHandler;
         this.airflowServerlessJsonHandler = airflowServerlessJsonHandler;
+        this.aossJsonHandler = aossJsonHandler;
         this.marketplaceJsonHandler = marketplaceJsonHandler;
         this.verifiedPermissionsJsonHandler = verifiedPermissionsJsonHandler;
         this.bcmPricingCalculatorJsonHandler = bcmPricingCalculatorJsonHandler;
@@ -234,6 +238,7 @@ public class AwsJsonController {
                 case "codeconnections" -> codeConnectionsJsonHandler.handle(action, request, region);
                 case "keyspaces" -> keyspacesJsonHandler.handle(action, request, region);
                 case "airflow-serverless" -> airflowServerlessJsonHandler.handle(action, request, region);
+                case "aoss" -> aossJsonHandler.handle(action, request, region);
                 case "keyspacesstreams" -> keyspacesJsonHandler.handleStreams(action, request, region);
                 case "marketplace" -> marketplaceJsonHandler.handle(action, request, region);
                 case "verifiedpermissions" -> verifiedPermissionsJsonHandler.handle(action, request, region);
