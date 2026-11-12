@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.aws.core.common.AwsException;
+import io.floci.aws.core.common.docker.ContainerLifecycleManager;
 import io.floci.aws.services.ec2.Ec2Service;
 import io.floci.aws.services.ec2.model.Image;
 import io.floci.aws.services.inspector2.Inspector2Service;
@@ -43,16 +44,19 @@ public class ImageBuilderImages {
     private final Instance<S3Service> s3;
     private final Instance<Ec2Service> ec2;
     private final Instance<Inspector2Service> inspector;
+    private final Instance<ContainerLifecycleManager> containers;
 
     @Inject
     public ImageBuilderImages(ImageBuilderStore store, ImageBuilderService service, ImageBuilderEngine engine,
-                              Instance<S3Service> s3, Instance<Ec2Service> ec2, Instance<Inspector2Service> inspector) {
+                              Instance<S3Service> s3, Instance<Ec2Service> ec2, Instance<Inspector2Service> inspector,
+                              Instance<ContainerLifecycleManager> containers) {
         this.store = store;
         this.service = service;
         this.engine = engine;
         this.s3 = s3;
         this.ec2 = ec2;
         this.inspector = inspector;
+        this.containers = containers;
     }
 
     S3Service s3() {
@@ -401,6 +405,11 @@ public class ImageBuilderImages {
             if (imageArn.equals(step.path("imageBuildVersionArn").asText())) {
                 store.delete(key(region, meta(step).path("resource").asText()));
             }
+        }
+        // The local Docker image a container recipe built goes with the image; distributed copies stay in ECR.
+        String built = meta(image).path("containerImage").asText("");
+        if (!built.isEmpty()) {
+            containers.get().removeImage(built);
         }
         store.delete(key(region, meta(image).path("resource").asText()));
         return response().put("imageBuildVersionArn", imageArn);
