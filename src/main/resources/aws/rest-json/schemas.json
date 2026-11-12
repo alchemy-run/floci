@@ -1,0 +1,1469 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "schemas",
+ "apiVersion": "2019-12-02",
+ "operations": {
+  "CreateDiscoverer": {
+   "method": "POST",
+   "requestUri": "/v1/discoverers",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "CreateDiscovererRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateDiscovererResponse"
+   }
+  },
+  "CreateRegistry": {
+   "method": "POST",
+   "requestUri": "/v1/registries/name/{registryName}",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     }
+    },
+    "shape": "CreateRegistryRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateRegistryResponse"
+   }
+  },
+  "CreateSchema": {
+   "method": "POST",
+   "requestUri": "/v1/registries/name/{registryName}/schemas/name/{schemaName}",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     },
+     "SchemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     }
+    },
+    "shape": "CreateSchemaRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "LastModified",
+     "VersionCreatedDate"
+    ],
+    "shape": "CreateSchemaResponse"
+   }
+  },
+  "DeleteDiscoverer": {
+   "method": "DELETE",
+   "requestUri": "/v1/discoverers/id/{discovererId}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "DiscovererId": {
+      "location": "uri",
+      "name": "discovererId"
+     }
+    },
+    "shape": "DeleteDiscovererRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteRegistry": {
+   "method": "DELETE",
+   "requestUri": "/v1/registries/name/{registryName}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     }
+    },
+    "shape": "DeleteRegistryRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteResourcePolicy": {
+   "method": "DELETE",
+   "requestUri": "/v1/policy",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "querystring",
+      "name": "registryName"
+     }
+    },
+    "shape": "DeleteResourcePolicyRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSchema": {
+   "method": "DELETE",
+   "requestUri": "/v1/registries/name/{registryName}/schemas/name/{schemaName}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     },
+     "SchemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     }
+    },
+    "shape": "DeleteSchemaRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSchemaVersion": {
+   "method": "DELETE",
+   "requestUri": "/v1/registries/name/{registryName}/schemas/name/{schemaName}/version/{schemaVersion}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     },
+     "SchemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     },
+     "SchemaVersion": {
+      "location": "uri",
+      "name": "schemaVersion"
+     }
+    },
+    "shape": "DeleteSchemaVersionRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeCodeBinding": {
+   "method": "GET",
+   "requestUri": "/v1/registries/name/{registryName}/schemas/name/{schemaName}/language/{language}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Language": {
+      "location": "uri",
+      "name": "language"
+     },
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     },
+     "SchemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     },
+     "SchemaVersion": {
+      "location": "querystring",
+      "name": "schemaVersion"
+     }
+    },
+    "shape": "DescribeCodeBindingRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "CreationDate",
+     "LastModified"
+    ],
+    "shape": "DescribeCodeBindingResponse"
+   }
+  },
+  "DescribeDiscoverer": {
+   "method": "GET",
+   "requestUri": "/v1/discoverers/id/{discovererId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "DiscovererId": {
+      "location": "uri",
+      "name": "discovererId"
+     }
+    },
+    "shape": "DescribeDiscovererRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeDiscovererResponse"
+   }
+  },
+  "DescribeRegistry": {
+   "method": "GET",
+   "requestUri": "/v1/registries/name/{registryName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     }
+    },
+    "shape": "DescribeRegistryRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeRegistryResponse"
+   }
+  },
+  "DescribeSchema": {
+   "method": "GET",
+   "requestUri": "/v1/registries/name/{registryName}/schemas/name/{schemaName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     },
+     "SchemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     },
+     "SchemaVersion": {
+      "location": "querystring",
+      "name": "schemaVersion"
+     }
+    },
+    "shape": "DescribeSchemaRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "LastModified",
+     "VersionCreatedDate"
+    ],
+    "shape": "DescribeSchemaResponse"
+   }
+  },
+  "ExportSchema": {
+   "method": "GET",
+   "requestUri": "/v1/registries/name/{registryName}/schemas/name/{schemaName}/export",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     },
+     "SchemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     },
+     "SchemaVersion": {
+      "location": "querystring",
+      "name": "schemaVersion"
+     },
+     "Type": {
+      "location": "querystring",
+      "name": "type"
+     }
+    },
+    "shape": "ExportSchemaRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ExportSchemaResponse"
+   }
+  },
+  "GetCodeBindingSource": {
+   "method": "GET",
+   "requestUri": "/v1/registries/name/{registryName}/schemas/name/{schemaName}/language/{language}/source",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Language": {
+      "location": "uri",
+      "name": "language"
+     },
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     },
+     "SchemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     },
+     "SchemaVersion": {
+      "location": "querystring",
+      "name": "schemaVersion"
+     }
+    },
+    "shape": "GetCodeBindingSourceRequest"
+   },
+   "output": {
+    "members": {
+     "Body": {
+      "location": "payload",
+      "type": "blob"
+     }
+    },
+    "shape": "GetCodeBindingSourceResponse"
+   }
+  },
+  "GetDiscoveredSchema": {
+   "method": "POST",
+   "requestUri": "/v1/discover",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "shape": "GetDiscoveredSchemaRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetDiscoveredSchemaResponse"
+   }
+  },
+  "GetResourcePolicy": {
+   "method": "GET",
+   "requestUri": "/v1/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "querystring",
+      "name": "registryName"
+     }
+    },
+    "shape": "GetResourcePolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetResourcePolicyResponse"
+   }
+  },
+  "ListDiscoverers": {
+   "method": "GET",
+   "requestUri": "/v1/discoverers",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "DiscovererIdPrefix": {
+      "location": "querystring",
+      "name": "discovererIdPrefix"
+     },
+     "Limit": {
+      "location": "querystring",
+      "name": "limit",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "SourceArnPrefix": {
+      "location": "querystring",
+      "name": "sourceArnPrefix"
+     }
+    },
+    "shape": "ListDiscoverersRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListDiscoverersResponse"
+   }
+  },
+  "ListRegistries": {
+   "method": "GET",
+   "requestUri": "/v1/registries",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Limit": {
+      "location": "querystring",
+      "name": "limit",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "RegistryNamePrefix": {
+      "location": "querystring",
+      "name": "registryNamePrefix"
+     },
+     "Scope": {
+      "location": "querystring",
+      "name": "scope"
+     }
+    },
+    "shape": "ListRegistriesRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListRegistriesResponse"
+   }
+  },
+  "ListSchemaVersions": {
+   "method": "GET",
+   "requestUri": "/v1/registries/name/{registryName}/schemas/name/{schemaName}/versions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Limit": {
+      "location": "querystring",
+      "name": "limit",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     },
+     "SchemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     }
+    },
+    "shape": "ListSchemaVersionsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListSchemaVersionsResponse"
+   }
+  },
+  "ListSchemas": {
+   "method": "GET",
+   "requestUri": "/v1/registries/name/{registryName}/schemas",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Limit": {
+      "location": "querystring",
+      "name": "limit",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     },
+     "SchemaNamePrefix": {
+      "location": "querystring",
+      "name": "schemaNamePrefix"
+     }
+    },
+    "shape": "ListSchemasRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "Schemas[].LastModified"
+    ],
+    "shape": "ListSchemasResponse"
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resource-arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "resource-arn"
+     }
+    },
+    "shape": "ListTagsForResourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListTagsForResourceResponse"
+   }
+  },
+  "PutCodeBinding": {
+   "method": "POST",
+   "requestUri": "/v1/registries/name/{registryName}/schemas/name/{schemaName}/language/{language}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "Language": {
+      "location": "uri",
+      "name": "language"
+     },
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     },
+     "SchemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     },
+     "SchemaVersion": {
+      "location": "querystring",
+      "name": "schemaVersion"
+     }
+    },
+    "shape": "PutCodeBindingRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "CreationDate",
+     "LastModified"
+    ],
+    "shape": "PutCodeBindingResponse"
+   }
+  },
+  "PutResourcePolicy": {
+   "method": "PUT",
+   "requestUri": "/v1/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "querystring",
+      "name": "registryName"
+     }
+    },
+    "shape": "PutResourcePolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "PutResourcePolicyResponse"
+   }
+  },
+  "SearchSchemas": {
+   "method": "GET",
+   "requestUri": "/v1/registries/name/{registryName}/schemas/search",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Keywords": {
+      "location": "querystring",
+      "name": "keywords"
+     },
+     "Limit": {
+      "location": "querystring",
+      "name": "limit",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     }
+    },
+    "shape": "SearchSchemasRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "Schemas[].SchemaVersions[].CreatedDate"
+    ],
+    "shape": "SearchSchemasResponse"
+   }
+  },
+  "StartDiscoverer": {
+   "method": "POST",
+   "requestUri": "/v1/discoverers/id/{discovererId}/start",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "DiscovererId": {
+      "location": "uri",
+      "name": "discovererId"
+     }
+    },
+    "shape": "StartDiscovererRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "StartDiscovererResponse"
+   }
+  },
+  "StopDiscoverer": {
+   "method": "POST",
+   "requestUri": "/v1/discoverers/id/{discovererId}/stop",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "DiscovererId": {
+      "location": "uri",
+      "name": "discovererId"
+     }
+    },
+    "shape": "StopDiscovererRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "StopDiscovererResponse"
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resource-arn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "resource-arn"
+     }
+    },
+    "shape": "TagResourceRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resource-arn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "resource-arn"
+     },
+     "TagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    },
+    "shape": "UntagResourceRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateDiscoverer": {
+   "method": "PUT",
+   "requestUri": "/v1/discoverers/id/{discovererId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "DiscovererId": {
+      "location": "uri",
+      "name": "discovererId"
+     }
+    },
+    "shape": "UpdateDiscovererRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateDiscovererResponse"
+   }
+  },
+  "UpdateRegistry": {
+   "method": "PUT",
+   "requestUri": "/v1/registries/name/{registryName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     }
+    },
+    "shape": "UpdateRegistryRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateRegistryResponse"
+   }
+  },
+  "UpdateSchema": {
+   "method": "PUT",
+   "requestUri": "/v1/registries/name/{registryName}/schemas/name/{schemaName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ClientTokenId": {
+      "location": "body",
+      "idempotencyToken": true
+     },
+     "RegistryName": {
+      "location": "uri",
+      "name": "registryName"
+     },
+     "SchemaName": {
+      "location": "uri",
+      "name": "schemaName"
+     }
+    },
+    "shape": "UpdateSchemaRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "LastModified",
+     "VersionCreatedDate"
+    ],
+    "shape": "UpdateSchemaResponse"
+   }
+  }
+ },
+ "shapes": {
+  "BadRequestException": {
+   "members": {
+    "Code": {},
+    "Message": {}
+   }
+  },
+  "CodeBindingOutput": {
+   "members": {
+    "CreationDate": {},
+    "LastModified": {},
+    "SchemaVersion": {},
+    "Status": {}
+   }
+  },
+  "ConflictException": {
+   "members": {
+    "Code": {},
+    "Message": {}
+   }
+  },
+  "CreateDiscovererInput": {
+   "members": {
+    "Description": {},
+    "SourceArn": {},
+    "CrossAccount": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "CreateDiscovererRequest": {
+   "members": {
+    "Description": {},
+    "SourceArn": {},
+    "CrossAccount": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "CreateDiscovererResponse": {
+   "members": {
+    "Description": {},
+    "DiscovererArn": {},
+    "DiscovererId": {},
+    "SourceArn": {},
+    "State": {},
+    "CrossAccount": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "CreateRegistryInput": {
+   "members": {
+    "Description": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "CreateRegistryRequest": {
+   "members": {
+    "Description": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "CreateRegistryResponse": {
+   "members": {
+    "Description": {},
+    "RegistryArn": {},
+    "RegistryName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "CreateSchemaInput": {
+   "members": {
+    "Content": {},
+    "Description": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    },
+    "Type": {}
+   }
+  },
+  "CreateSchemaRequest": {
+   "members": {
+    "Content": {},
+    "Description": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    },
+    "Type": {}
+   }
+  },
+  "CreateSchemaResponse": {
+   "members": {
+    "Description": {},
+    "LastModified": {},
+    "SchemaArn": {},
+    "SchemaName": {},
+    "SchemaVersion": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    },
+    "Type": {},
+    "VersionCreatedDate": {}
+   }
+  },
+  "DeleteDiscovererRequest": {
+   "members": {}
+  },
+  "DeleteRegistryRequest": {
+   "members": {}
+  },
+  "DeleteResourcePolicyRequest": {
+   "members": {}
+  },
+  "DeleteSchemaRequest": {
+   "members": {}
+  },
+  "DeleteSchemaVersionRequest": {
+   "members": {}
+  },
+  "DescribeCodeBindingRequest": {
+   "members": {}
+  },
+  "DescribeCodeBindingResponse": {
+   "members": {
+    "CreationDate": {},
+    "LastModified": {},
+    "SchemaVersion": {},
+    "Status": {}
+   }
+  },
+  "DescribeDiscovererRequest": {
+   "members": {}
+  },
+  "DescribeDiscovererResponse": {
+   "members": {
+    "Description": {},
+    "DiscovererArn": {},
+    "DiscovererId": {},
+    "SourceArn": {},
+    "State": {},
+    "CrossAccount": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "DescribeRegistryRequest": {
+   "members": {}
+  },
+  "DescribeRegistryResponse": {
+   "members": {
+    "Description": {},
+    "RegistryArn": {},
+    "RegistryName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "DescribeSchemaOutput": {
+   "members": {
+    "Content": {},
+    "Description": {},
+    "LastModified": {},
+    "SchemaArn": {},
+    "SchemaName": {},
+    "SchemaVersion": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    },
+    "Type": {},
+    "VersionCreatedDate": {}
+   }
+  },
+  "DescribeSchemaRequest": {
+   "members": {}
+  },
+  "DescribeSchemaResponse": {
+   "members": {
+    "Content": {},
+    "Description": {},
+    "LastModified": {},
+    "SchemaArn": {},
+    "SchemaName": {},
+    "SchemaVersion": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    },
+    "Type": {},
+    "VersionCreatedDate": {}
+   }
+  },
+  "DiscovererOutput": {
+   "members": {
+    "Description": {},
+    "DiscovererArn": {},
+    "DiscovererId": {},
+    "SourceArn": {},
+    "State": {},
+    "CrossAccount": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "DiscovererStateOutput": {
+   "members": {
+    "DiscovererId": {},
+    "State": {}
+   }
+  },
+  "DiscovererSummary": {
+   "members": {
+    "DiscovererArn": {},
+    "DiscovererId": {},
+    "SourceArn": {},
+    "State": {},
+    "CrossAccount": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "ErrorOutput": {
+   "members": {
+    "Code": {},
+    "Message": {}
+   }
+  },
+  "ExportSchemaOutput": {
+   "members": {
+    "Content": {},
+    "SchemaArn": {},
+    "SchemaName": {},
+    "SchemaVersion": {},
+    "Type": {}
+   }
+  },
+  "ExportSchemaRequest": {
+   "members": {}
+  },
+  "ExportSchemaResponse": {
+   "members": {
+    "Content": {},
+    "SchemaArn": {},
+    "SchemaName": {},
+    "SchemaVersion": {},
+    "Type": {}
+   }
+  },
+  "ForbiddenException": {
+   "members": {
+    "Code": {},
+    "Message": {}
+   }
+  },
+  "GetCodeBindingSourceRequest": {
+   "members": {}
+  },
+  "GetCodeBindingSourceResponse": {
+   "members": {
+    "Body": {}
+   }
+  },
+  "GetDiscoveredSchemaInput": {
+   "members": {
+    "Events": {
+     "shape": "__listOfGetDiscoveredSchemaVersionItemInput"
+    },
+    "Type": {}
+   }
+  },
+  "GetDiscoveredSchemaOutput": {
+   "members": {
+    "Content": {}
+   }
+  },
+  "GetDiscoveredSchemaRequest": {
+   "members": {
+    "Events": {
+     "shape": "__listOfGetDiscoveredSchemaVersionItemInput"
+    },
+    "Type": {}
+   }
+  },
+  "GetDiscoveredSchemaResponse": {
+   "members": {
+    "Content": {}
+   }
+  },
+  "GetResourcePolicyOutput": {
+   "members": {
+    "Policy": {},
+    "RevisionId": {}
+   }
+  },
+  "GetResourcePolicyRequest": {
+   "members": {}
+  },
+  "GetResourcePolicyResponse": {
+   "members": {
+    "Policy": {},
+    "RevisionId": {}
+   }
+  },
+  "GoneException": {
+   "members": {
+    "Code": {},
+    "Message": {}
+   }
+  },
+  "InternalServerErrorException": {
+   "members": {
+    "Code": {},
+    "Message": {}
+   }
+  },
+  "ListDiscoverersOutput": {
+   "members": {
+    "Discoverers": {
+     "shape": "__listOfDiscovererSummary"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListDiscoverersRequest": {
+   "members": {}
+  },
+  "ListDiscoverersResponse": {
+   "members": {
+    "Discoverers": {
+     "shape": "__listOfDiscovererSummary"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListRegistriesOutput": {
+   "members": {
+    "NextToken": {},
+    "Registries": {
+     "shape": "__listOfRegistrySummary"
+    }
+   }
+  },
+  "ListRegistriesRequest": {
+   "members": {}
+  },
+  "ListRegistriesResponse": {
+   "members": {
+    "NextToken": {},
+    "Registries": {
+     "shape": "__listOfRegistrySummary"
+    }
+   }
+  },
+  "ListSchemaVersionsOutput": {
+   "members": {
+    "NextToken": {},
+    "SchemaVersions": {
+     "shape": "__listOfSchemaVersionSummary"
+    }
+   }
+  },
+  "ListSchemaVersionsRequest": {
+   "members": {}
+  },
+  "ListSchemaVersionsResponse": {
+   "members": {
+    "NextToken": {},
+    "SchemaVersions": {
+     "shape": "__listOfSchemaVersionSummary"
+    }
+   }
+  },
+  "ListSchemasOutput": {
+   "members": {
+    "NextToken": {},
+    "Schemas": {
+     "shape": "__listOfSchemaSummary"
+    }
+   }
+  },
+  "ListSchemasRequest": {
+   "members": {}
+  },
+  "ListSchemasResponse": {
+   "members": {
+    "NextToken": {},
+    "Schemas": {
+     "shape": "__listOfSchemaSummary"
+    }
+   }
+  },
+  "ListTagsForResourceOutput": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "ListTagsForResourceRequest": {
+   "members": {}
+  },
+  "ListTagsForResourceResponse": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "NotFoundException": {
+   "members": {
+    "Code": {},
+    "Message": {}
+   }
+  },
+  "PreconditionFailedException": {
+   "members": {
+    "Code": {},
+    "Message": {}
+   }
+  },
+  "PutCodeBindingRequest": {
+   "members": {}
+  },
+  "PutCodeBindingResponse": {
+   "members": {
+    "CreationDate": {},
+    "LastModified": {},
+    "SchemaVersion": {},
+    "Status": {}
+   }
+  },
+  "PutResourcePolicyInput": {
+   "members": {
+    "Policy": {},
+    "RevisionId": {}
+   }
+  },
+  "PutResourcePolicyOutput": {
+   "members": {
+    "Policy": {},
+    "RevisionId": {}
+   }
+  },
+  "PutResourcePolicyRequest": {
+   "members": {
+    "Policy": {},
+    "RevisionId": {}
+   }
+  },
+  "PutResourcePolicyResponse": {
+   "members": {
+    "Policy": {},
+    "RevisionId": {}
+   }
+  },
+  "RegistryOutput": {
+   "members": {
+    "Description": {},
+    "RegistryArn": {},
+    "RegistryName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "RegistrySummary": {
+   "members": {
+    "RegistryArn": {},
+    "RegistryName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "SchemaOutput": {
+   "members": {
+    "Description": {},
+    "LastModified": {},
+    "SchemaArn": {},
+    "SchemaName": {},
+    "SchemaVersion": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    },
+    "Type": {},
+    "VersionCreatedDate": {}
+   }
+  },
+  "SchemaSummary": {
+   "members": {
+    "LastModified": {},
+    "SchemaArn": {},
+    "SchemaName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    },
+    "VersionCount": {}
+   }
+  },
+  "SchemaVersionSummary": {
+   "members": {
+    "SchemaArn": {},
+    "SchemaName": {},
+    "SchemaVersion": {},
+    "Type": {}
+   }
+  },
+  "SearchSchemaSummary": {
+   "members": {
+    "RegistryName": {},
+    "SchemaArn": {},
+    "SchemaName": {},
+    "SchemaVersions": {
+     "shape": "__listOfSearchSchemaVersionSummary"
+    }
+   }
+  },
+  "SearchSchemaVersionSummary": {
+   "members": {
+    "CreatedDate": {},
+    "SchemaVersion": {},
+    "Type": {}
+   }
+  },
+  "SearchSchemasOutput": {
+   "members": {
+    "NextToken": {},
+    "Schemas": {
+     "shape": "__listOfSearchSchemaSummary"
+    }
+   }
+  },
+  "SearchSchemasRequest": {
+   "members": {}
+  },
+  "SearchSchemasResponse": {
+   "members": {
+    "NextToken": {},
+    "Schemas": {
+     "shape": "__listOfSearchSchemaSummary"
+    }
+   }
+  },
+  "ServiceUnavailableException": {
+   "members": {
+    "Code": {},
+    "Message": {}
+   }
+  },
+  "StartDiscovererRequest": {
+   "members": {}
+  },
+  "StartDiscovererResponse": {
+   "members": {
+    "DiscovererId": {},
+    "State": {}
+   }
+  },
+  "StopDiscovererRequest": {
+   "members": {}
+  },
+  "StopDiscovererResponse": {
+   "members": {
+    "DiscovererId": {},
+    "State": {}
+   }
+  },
+  "TagResourceInput": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "TagResourceRequest": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "Tags": {
+   "map": "__string"
+  },
+  "TooManyRequestsException": {
+   "members": {
+    "Code": {},
+    "Message": {}
+   }
+  },
+  "UnauthorizedException": {
+   "members": {
+    "Code": {},
+    "Message": {}
+   }
+  },
+  "UntagResourceRequest": {
+   "members": {}
+  },
+  "UpdateDiscovererInput": {
+   "members": {
+    "Description": {},
+    "CrossAccount": {}
+   }
+  },
+  "UpdateDiscovererRequest": {
+   "members": {
+    "Description": {},
+    "CrossAccount": {}
+   }
+  },
+  "UpdateDiscovererResponse": {
+   "members": {
+    "Description": {},
+    "DiscovererArn": {},
+    "DiscovererId": {},
+    "SourceArn": {},
+    "State": {},
+    "CrossAccount": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "UpdateRegistryInput": {
+   "members": {
+    "Description": {}
+   }
+  },
+  "UpdateRegistryRequest": {
+   "members": {
+    "Description": {}
+   }
+  },
+  "UpdateRegistryResponse": {
+   "members": {
+    "Description": {},
+    "RegistryArn": {},
+    "RegistryName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    }
+   }
+  },
+  "UpdateSchemaInput": {
+   "members": {
+    "ClientTokenId": {},
+    "Content": {},
+    "Description": {},
+    "Type": {}
+   }
+  },
+  "UpdateSchemaRequest": {
+   "members": {
+    "ClientTokenId": {},
+    "Content": {},
+    "Description": {},
+    "Type": {}
+   }
+  },
+  "UpdateSchemaResponse": {
+   "members": {
+    "Description": {},
+    "LastModified": {},
+    "SchemaArn": {},
+    "SchemaName": {},
+    "SchemaVersion": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "Tags"
+    },
+    "Type": {},
+    "VersionCreatedDate": {}
+   }
+  },
+  "__listOfDiscovererSummary": {
+   "list": "DiscovererSummary"
+  },
+  "__listOfGetDiscoveredSchemaVersionItemInput": {
+   "list": "GetDiscoveredSchemaVersionItemInput"
+  },
+  "__listOfRegistrySummary": {
+   "list": "RegistrySummary"
+  },
+  "__listOfSchemaSummary": {
+   "list": "SchemaSummary"
+  },
+  "__listOfSchemaVersionSummary": {
+   "list": "SchemaVersionSummary"
+  },
+  "__listOfSearchSchemaSummary": {
+   "list": "SearchSchemaSummary"
+  },
+  "__listOfSearchSchemaVersionSummary": {
+   "list": "SearchSchemaVersionSummary"
+  },
+  "__listOf__string": {
+   "list": "__string"
+  }
+ }
+}

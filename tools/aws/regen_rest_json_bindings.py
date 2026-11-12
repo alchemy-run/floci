@@ -56,6 +56,7 @@ MODELS = {
     "route53profiles": "route53profiles",
     "s3files": "s3files",
     "ssm-incidents": "ssmincidents",
+    "schemas": "schemas",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

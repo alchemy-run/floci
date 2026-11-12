@@ -571,6 +571,9 @@ floci:
     repostspace:
       enabled: true
       transition-millis: 200
+    schemas:
+      enabled: true
+      code-binding-millis: 200
     ssm-incidents:
       enabled: true
       transition-millis: 200

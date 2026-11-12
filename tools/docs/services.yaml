@@ -291,6 +291,10 @@ services:
     doc: docs/services/opensearchserverless.md
     sources:
       - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: schemas
+    doc: docs/services/schemas.md
+    sources:
+      - { path: services/schemas/SchemasService.java, mode: switch }
   - service: ssm-incidents
     doc: docs/services/ssm-incidents.md
     sources:

@@ -940,6 +940,8 @@ public interface EmulatorConfig {
 
         S3FilesServiceConfig s3files();
 
+        SchemasServiceConfig schemas();
+
         SsmIncidentsServiceConfig ssmIncidents();
 
         SsmContactsServiceConfig ssmContacts();
@@ -3110,6 +3112,15 @@ public interface EmulatorConfig {
         /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface SchemasServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a code binding takes to generate, in milliseconds. */
+        @WithDefault("2000")
+        long codeBindingMillis();
     }
 
     interface SsmIncidentsServiceConfig {

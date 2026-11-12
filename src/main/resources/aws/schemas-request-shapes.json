@@ -1,0 +1,440 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_schemas_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateDiscoverer": "CreateDiscovererRequest",
+    "CreateRegistry": "CreateRegistryRequest",
+    "CreateSchema": "CreateSchemaRequest",
+    "DeleteDiscoverer": "DeleteDiscovererRequest",
+    "DeleteRegistry": "DeleteRegistryRequest",
+    "DeleteResourcePolicy": "DeleteResourcePolicyRequest",
+    "DeleteSchema": "DeleteSchemaRequest",
+    "DeleteSchemaVersion": "DeleteSchemaVersionRequest",
+    "DescribeCodeBinding": "DescribeCodeBindingRequest",
+    "DescribeDiscoverer": "DescribeDiscovererRequest",
+    "DescribeRegistry": "DescribeRegistryRequest",
+    "DescribeSchema": "DescribeSchemaRequest",
+    "ExportSchema": "ExportSchemaRequest",
+    "GetCodeBindingSource": "GetCodeBindingSourceRequest",
+    "GetDiscoveredSchema": "GetDiscoveredSchemaRequest",
+    "GetResourcePolicy": "GetResourcePolicyRequest",
+    "ListDiscoverers": "ListDiscoverersRequest",
+    "ListRegistries": "ListRegistriesRequest",
+    "ListSchemaVersions": "ListSchemaVersionsRequest",
+    "ListSchemas": "ListSchemasRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutCodeBinding": "PutCodeBindingRequest",
+    "PutResourcePolicy": "PutResourcePolicyRequest",
+    "SearchSchemas": "SearchSchemasRequest",
+    "StartDiscoverer": "StartDiscovererRequest",
+    "StopDiscoverer": "StopDiscovererRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateDiscoverer": "UpdateDiscovererRequest",
+    "UpdateRegistry": "UpdateRegistryRequest",
+    "UpdateSchema": "UpdateSchemaRequest"
+  },
+  "shapes": {
+    "CreateDiscovererRequest": {
+      "type": "structure",
+      "required": [
+        "SourceArn"
+      ],
+      "members": {
+        "Description": "__stringMin0Max256",
+        "SourceArn": "__stringMin20Max1600",
+        "CrossAccount": "__boolean",
+        "Tags": "Tags"
+      }
+    },
+    "CreateRegistryRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName"
+      ],
+      "members": {
+        "Description": "__stringMin0Max256",
+        "RegistryName": "__string",
+        "Tags": "Tags"
+      }
+    },
+    "CreateSchemaRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName",
+        "SchemaName",
+        "Type",
+        "Content"
+      ],
+      "members": {
+        "Content": "__stringMin1Max100000",
+        "Description": "__stringMin0Max256",
+        "RegistryName": "__string",
+        "SchemaName": "__string",
+        "Tags": "Tags",
+        "Type": "Type"
+      }
+    },
+    "DeleteDiscovererRequest": {
+      "type": "structure",
+      "required": [
+        "DiscovererId"
+      ],
+      "members": {
+        "DiscovererId": "__string"
+      }
+    },
+    "DeleteRegistryRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName"
+      ],
+      "members": {
+        "RegistryName": "__string"
+      }
+    },
+    "DeleteResourcePolicyRequest": {
+      "type": "structure",
+      "members": {
+        "RegistryName": "__string"
+      }
+    },
+    "DeleteSchemaRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName",
+        "SchemaName"
+      ],
+      "members": {
+        "RegistryName": "__string",
+        "SchemaName": "__string"
+      }
+    },
+    "DeleteSchemaVersionRequest": {
+      "type": "structure",
+      "required": [
+        "SchemaVersion",
+        "RegistryName",
+        "SchemaName"
+      ],
+      "members": {
+        "RegistryName": "__string",
+        "SchemaName": "__string",
+        "SchemaVersion": "__string"
+      }
+    },
+    "DescribeCodeBindingRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName",
+        "SchemaName",
+        "Language"
+      ],
+      "members": {
+        "Language": "__string",
+        "RegistryName": "__string",
+        "SchemaName": "__string",
+        "SchemaVersion": "__string"
+      }
+    },
+    "DescribeDiscovererRequest": {
+      "type": "structure",
+      "required": [
+        "DiscovererId"
+      ],
+      "members": {
+        "DiscovererId": "__string"
+      }
+    },
+    "DescribeRegistryRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName"
+      ],
+      "members": {
+        "RegistryName": "__string"
+      }
+    },
+    "DescribeSchemaRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName",
+        "SchemaName"
+      ],
+      "members": {
+        "RegistryName": "__string",
+        "SchemaName": "__string",
+        "SchemaVersion": "__string"
+      }
+    },
+    "ExportSchemaRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName",
+        "SchemaName",
+        "Type"
+      ],
+      "members": {
+        "RegistryName": "__string",
+        "SchemaName": "__string",
+        "SchemaVersion": "__string",
+        "Type": "__string"
+      }
+    },
+    "GetCodeBindingSourceRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName",
+        "SchemaName",
+        "Language"
+      ],
+      "members": {
+        "Language": "__string",
+        "RegistryName": "__string",
+        "SchemaName": "__string",
+        "SchemaVersion": "__string"
+      }
+    },
+    "GetDiscoveredSchemaRequest": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "Events"
+      ],
+      "members": {
+        "Events": "__listOfGetDiscoveredSchemaVersionItemInput",
+        "Type": "Type"
+      }
+    },
+    "GetDiscoveredSchemaVersionItemInput": {
+      "type": "string",
+      "min": 1,
+      "max": 100000
+    },
+    "GetResourcePolicyRequest": {
+      "type": "structure",
+      "members": {
+        "RegistryName": "__string"
+      }
+    },
+    "ListDiscoverersRequest": {
+      "type": "structure",
+      "members": {
+        "DiscovererIdPrefix": "__string",
+        "Limit": "__integer",
+        "NextToken": "__string",
+        "SourceArnPrefix": "__string"
+      }
+    },
+    "ListRegistriesRequest": {
+      "type": "structure",
+      "members": {
+        "Limit": "__integer",
+        "NextToken": "__string",
+        "RegistryNamePrefix": "__string",
+        "Scope": "__string"
+      }
+    },
+    "ListSchemaVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName",
+        "SchemaName"
+      ],
+      "members": {
+        "Limit": "__integer",
+        "NextToken": "__string",
+        "RegistryName": "__string",
+        "SchemaName": "__string"
+      }
+    },
+    "ListSchemasRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName"
+      ],
+      "members": {
+        "Limit": "__integer",
+        "NextToken": "__string",
+        "RegistryName": "__string",
+        "SchemaNamePrefix": "__string"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "__string"
+      }
+    },
+    "PutCodeBindingRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName",
+        "SchemaName",
+        "Language"
+      ],
+      "members": {
+        "Language": "__string",
+        "RegistryName": "__string",
+        "SchemaName": "__string",
+        "SchemaVersion": "__string"
+      }
+    },
+    "PutResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "Policy"
+      ],
+      "members": {
+        "Policy": "__string",
+        "RegistryName": "__string",
+        "RevisionId": "__string"
+      }
+    },
+    "SearchSchemasRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName",
+        "Keywords"
+      ],
+      "members": {
+        "Keywords": "__string",
+        "Limit": "__integer",
+        "NextToken": "__string",
+        "RegistryName": "__string"
+      }
+    },
+    "StartDiscovererRequest": {
+      "type": "structure",
+      "required": [
+        "DiscovererId"
+      ],
+      "members": {
+        "DiscovererId": "__string"
+      }
+    },
+    "StopDiscovererRequest": {
+      "type": "structure",
+      "required": [
+        "DiscovererId"
+      ],
+      "members": {
+        "DiscovererId": "__string"
+      }
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "__string",
+        "Tags": "Tags"
+      }
+    },
+    "Tags": {
+      "type": "map",
+      "key": "__string",
+      "value": "__string"
+    },
+    "Type": {
+      "type": "string",
+      "enum": [
+        "OpenApi3",
+        "JSONSchemaDraft4"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "TagKeys",
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "__string",
+        "TagKeys": "__listOf__string"
+      }
+    },
+    "UpdateDiscovererRequest": {
+      "type": "structure",
+      "required": [
+        "DiscovererId"
+      ],
+      "members": {
+        "Description": "__stringMin0Max256",
+        "DiscovererId": "__string",
+        "CrossAccount": "__boolean"
+      }
+    },
+    "UpdateRegistryRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName"
+      ],
+      "members": {
+        "Description": "__stringMin0Max256",
+        "RegistryName": "__string"
+      }
+    },
+    "UpdateSchemaRequest": {
+      "type": "structure",
+      "required": [
+        "RegistryName",
+        "SchemaName"
+      ],
+      "members": {
+        "ClientTokenId": "__stringMin0Max36",
+        "Content": "__stringMin1Max100000",
+        "Description": "__stringMin0Max256",
+        "RegistryName": "__string",
+        "SchemaName": "__string",
+        "Type": "Type"
+      }
+    },
+    "__boolean": {
+      "type": "boolean"
+    },
+    "__integer": {
+      "type": "integer"
+    },
+    "__listOfGetDiscoveredSchemaVersionItemInput": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "GetDiscoveredSchemaVersionItemInput"
+    },
+    "__listOf__string": {
+      "type": "list",
+      "member": "__string"
+    },
+    "__string": {
+      "type": "string"
+    },
+    "__stringMin0Max256": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "__stringMin0Max36": {
+      "type": "string",
+      "min": 0,
+      "max": 36
+    },
+    "__stringMin1Max100000": {
+      "type": "string",
+      "min": 1,
+      "max": 100000
+    },
+    "__stringMin20Max1600": {
+      "type": "string",
+      "min": 20,
+      "max": 1600
+    }
+  }
+}

@@ -158,6 +158,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Route 53 Profiles](route53profiles.md) | `/profile`, `/profileassociation`, `/profileresourceassociation` (signed `route53profiles`); profiles apply Resolver rules to their VPCs' DNS | REST JSON | 16 |
 | [S3 Files](s3files.md) | `/file-systems`, `/access-points`, `/mount-targets` (signed `s3files`); file systems over versioned buckets, mount targets hold EC2 network interfaces | REST JSON | 21 |
 | [Incident Manager](ssm-incidents.md) | `/createReplicationSet`, `/startIncident` and the rest (signed `ssm-incidents`); incidents notify SNS topics and engage contacts | REST JSON | 31 |
+| [EventBridge Schemas](schemas.md) | `/v1/registries`, `/v1/discoverers`, `/v1/discover` (signed `schemas`); discoverers infer schemas from bus events, code bindings | REST JSON | 31 |
 | [SSM Contacts](ssm-contacts.md) | `POST /` + `X-Amz-Target: SSMContacts.*`; channels activated by code, pages delivered through SES and SNS, rotation shifts | JSON 1.1 | 39 |
 | [HealthOmics](omics.md) | `/referencestore`, `/sequencestore`, `/workflow`, `/run`, ... (signed `omics`); runs on Cromwell, Nextflow and cwltool | REST JSON | 107 |
 | [CloudWatch Observability Admin](observabilityadmin.md) | `POST /<Operation>` (signed `observabilityadmin`); telemetry rules configure resources, pipelines run processors | REST JSON | 45 |

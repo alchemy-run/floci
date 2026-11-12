@@ -1060,6 +1060,8 @@ floci:
       enabled: true
     repostspace:
       enabled: true
+    schemas:
+      enabled: true
     ssm-incidents:
       enabled: true
     ssm-contacts:
