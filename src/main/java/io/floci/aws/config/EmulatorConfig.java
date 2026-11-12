@@ -942,6 +942,8 @@ public interface EmulatorConfig {
 
         SchemasServiceConfig schemas();
 
+        SecurityLakeServiceConfig securitylake();
+
         SsmIncidentsServiceConfig ssmIncidents();
 
         SsmContactsServiceConfig ssmContacts();
@@ -3110,6 +3112,15 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface SecurityLakeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a data lake takes to finish setting up, in milliseconds. */
         @WithDefault("2000")
         long transitionMillis();
     }

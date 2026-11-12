@@ -108,6 +108,7 @@ import io.floci.aws.services.sagemaker.SageMakerRuntimeController;
 import io.floci.aws.services.scheduler.SchedulerController;
 import io.floci.aws.services.schemas.SchemasController;
 import io.floci.aws.services.securityhub.SecurityHubController;
+import io.floci.aws.services.securitylake.SecurityLakeController;
 import io.floci.aws.services.ses.SesAccountController;
 import io.floci.aws.services.ses.SesConfigurationSetController;
 import io.floci.aws.services.ses.SesContactController;
@@ -509,6 +510,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("OpenSearchServerless."), Set.of("aoss"), Set.of(), Set.of()),
+                descriptor("securitylake", "securitylake", config.services().securitylake().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("securitylake"), Set.of(), Set.of(SecurityLakeController.class)),
                 descriptor("schemas", "schemas", config.services().schemas().enabled(),
                         true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

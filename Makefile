@@ -340,6 +340,7 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_s3files_shapes.py
 	$(PYTHON) tools/aws/regen_incidentmanager_shapes.py
 	$(PYTHON) tools/aws/regen_schemas_shapes.py
+	$(PYTHON) tools/aws/regen_securitylake_shapes.py
 	$(PYTHON) tools/aws/regen_fsx_shapes.py
 	$(PYTHON) tools/aws/regen_ds_shapes.py
 	$(PYTHON) tools/aws/regen_rest_json_bindings.py
@@ -649,6 +650,10 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_rbin_shapes.py --check || { \
 		echo "error: Recycle Bin request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_securitylake_shapes.py --check || { \
+		echo "error: Security Lake request shapes are out of date; run 'make aws-data-sync'."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_schemas_shapes.py --check || { \

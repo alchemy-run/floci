@@ -80,7 +80,7 @@ SERVICE_SUFFIX = ".amazonaws.com"
 NAMESPACES = (
     "application-autoscaling", "athena", "autoscaling", "budgets", "cloudformation", "cloudtrail",
     "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito-identity", "cognito-idp",
-    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medical-imaging", "neptune-graph", "notifications", "notifications-contacts", "osis", "observabilityadmin", "omics", "aoss", "personalize", "sms-voice", "qbusiness", "qapps", "rbin", "repostspace", "rolesanywhere", "route53profiles", "s3files", "ssm-contacts", "ssm-incidents", "schemas", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
+    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medical-imaging", "neptune-graph", "notifications", "notifications-contacts", "osis", "observabilityadmin", "omics", "aoss", "personalize", "sms-voice", "qbusiness", "qapps", "rbin", "repostspace", "rolesanywhere", "route53profiles", "s3files", "ssm-contacts", "ssm-incidents", "schemas", "securitylake", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
     "events", "firehose", "glue", "iam", "kinesis", "kinesisanalytics", "lambda", "logs", "pipes",
     "rds", "redshift", "redshift-serverless", "rekognition", "resource-groups", "s3", "sagemaker", "scheduler",
     "secretsmanager", "servicecatalog", "ses", "sns", "ssm", "states", "swf", "textract",
@@ -404,6 +404,15 @@ EXTRA_MEMBERS = {
 ECS_INFRASTRUCTURE = "ecs"
 ECS_TASKS = "ecs-tasks"
 MEMBER_SERVICES = {
+    # Security Lake: S3 assumes the replication role to copy objects between Regions, and the metastore manager
+    # role is the one its partition-updating Lambda runs as.
+    "securitylake:CreateDataLake": {
+        "configurations[].replicationConfiguration.roleArn": "s3",
+        "metaStoreManagerRoleArn": "lambda",
+    },
+    "securitylake:UpdateDataLake": {
+        "configurations[].replicationConfiguration.roleArn": "s3",
+    },
     # A dataset integration's role is assumed by CloudWatch Logs to read the integrated data.
     "observabilityadmin:*": {
         "RoleArn": "logs",

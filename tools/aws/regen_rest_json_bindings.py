@@ -57,6 +57,7 @@ MODELS = {
     "s3files": "s3files",
     "ssm-incidents": "ssmincidents",
     "schemas": "schemas",
+    "securitylake": "securitylake",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}
