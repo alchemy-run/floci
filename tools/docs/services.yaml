@@ -279,6 +279,10 @@ services:
     doc: docs/services/airflowserverless.md
     sources:
       - { path: services/airflowserverless/AirflowServerlessJsonHandler.java, mode: switch }
+  - service: medical-imaging
+    doc: docs/services/medicalimaging.md
+    sources:
+      - { path: services/medicalimaging/MedicalImagingController.java, mode: switch }
   - service: mediatailor
     doc: docs/services/mediatailor.md
     sources:

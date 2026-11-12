@@ -1050,6 +1050,8 @@ floci:
       enabled: true
     airflow-serverless:
       enabled: true
+    medical-imaging:
+      enabled: true
     media-tailor:
       enabled: true
     media-package-v2:

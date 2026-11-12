@@ -517,6 +517,7 @@ public final class RestJsonDispatcher {
         Response.ResponseBuilder builder = null;
         Object entity = output;
         String contentType = MediaType.APPLICATION_JSON;
+        String declaredType = null;
         if (binding != null) {
             List<String[]> headers = new ArrayList<>();
             for (Map.Entry<String, JsonNode> entry : binding.path("output").path("members").properties()) {
@@ -528,7 +529,12 @@ public final class RestJsonDispatcher {
                 }
                 switch (spec.path("location").asText()) {
                     case "header" -> {
-                        headers.add(new String[] {spec.path("name").asText(name), headerValue(spec, value)});
+                        String header = spec.path("name").asText(name);
+                        if ("Content-Type".equalsIgnoreCase(header)) {
+                            declaredType = headerValue(spec, value);
+                        } else {
+                            headers.add(new String[] {header, headerValue(spec, value)});
+                        }
                         output.remove(name);
                     }
                     case "headers" -> {
@@ -571,6 +577,7 @@ public final class RestJsonDispatcher {
         if (status == 204) {
             return builder.build();
         }
-        return builder.entity(entity).type(contentType).build();
+        // A modelled Content-Type header (a blob payload's media type) is the response's.
+        return builder.entity(entity).type(declaredType != null ? declaredType : contentType).build();
     }
 }

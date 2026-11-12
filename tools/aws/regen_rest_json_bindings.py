@@ -39,6 +39,7 @@ MODELS = {
     "medialive": "medialive",
     "mediapackagev2": "mediapackagev2",
     "mediatailor": "mediatailor",
+    "medical-imaging": "medicalimaging",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

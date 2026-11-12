@@ -906,6 +906,8 @@ public interface EmulatorConfig {
 
         MediaTailorServiceConfig mediaTailor();
 
+        MedicalImagingServiceConfig medicalImaging();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3028,6 +3030,19 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface MedicalImagingServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a data store, import job or image set stays in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The image HealthImaging's frame codecs (OpenJPH, OpenJPEG, DCMTK) are installed into. */
+        @WithDefault("debian:trixie-slim")
+        String codecImage();
     }
 
     interface MediaTailorServiceConfig {
