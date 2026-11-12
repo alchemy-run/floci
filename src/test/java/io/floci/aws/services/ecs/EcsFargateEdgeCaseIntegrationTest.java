@@ -1,5 +1,6 @@
 package io.floci.aws.services.ecs;
 
+import io.floci.aws.testing.Ec2Defaults;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
@@ -36,7 +37,7 @@ class EcsFargateEdgeCaseIntegrationTest {
     private static final String CLUSTER = "fargate-edge-cluster";
     private static final String NETWORK =
             "\"networkConfiguration\":{\"awsvpcConfiguration\":{\"subnets\":"
-                    + "[\"subnet-default-us-east-1-a\"]}}";
+                    + "[\"" + Ec2Defaults.SUBNET_A + "\"]}}";
 
     @BeforeAll
     static void configure() {
@@ -445,7 +446,7 @@ class EcsFargateEdgeCaseIntegrationTest {
 
         call("RunTask", "{\"cluster\":\"" + CLUSTER + "\",\"taskDefinition\":\"" + family
                 + "\",\"launchType\":\"FARGATE\",\"networkConfiguration\":{\"awsvpcConfiguration\":"
-                + "{\"subnets\":[\"subnet-default-us-east-1-a\"],\"securityGroups\":[\"sg-nope\"]}}}", 400)
+                + "{\"subnets\":[\"" + Ec2Defaults.SUBNET_A + "\"],\"securityGroups\":[\"sg-nope\"]}}}", 400)
                 .then()
                 .body("__type", containsString("InvalidParameterException"))
                 .body("message", containsString("sg-nope"));
@@ -774,7 +775,7 @@ class EcsFargateEdgeCaseIntegrationTest {
         // A changed network configuration starts new tasks, so it rolls.
         call("UpdateService", "{\"cluster\":\"" + CLUSTER + "\",\"service\":\"edge-roll-svc\","
                 + "\"networkConfiguration\":{\"awsvpcConfiguration\":{\"subnets\":"
-                + "[\"subnet-default-us-east-1-b\"]}}}", 200);
+                + "[\"" + Ec2Defaults.SUBNET_B + "\"]}}}", 200);
         assertNotEquals(initial, deploymentId("edge-roll-svc"),
                 "a changed network configuration must roll the deployment");
 
@@ -1062,7 +1063,7 @@ class EcsFargateEdgeCaseIntegrationTest {
                 + "\"launchType\":\"FARGATE\",\"externalId\":\"d-EXAMPLE\","
                 + "\"scale\":{\"value\":50,\"unit\":\"PERCENT\"},"
                 + "\"networkConfiguration\":{\"awsvpcConfiguration\":{\"subnets\":"
-                + "[\"subnet-default-us-east-1-a\"]}},"
+                + "[\"" + Ec2Defaults.SUBNET_A + "\"]}},"
                 + "\"loadBalancers\":[{\"targetGroupArn\":\"arn:aws:elasticloadbalancing:us-east-1:"
                 + "000000000000:targetgroup/tg/1\",\"containerName\":\"app\",\"containerPort\":80}],"
                 + "\"tags\":[{\"key\":\"team\",\"value\":\"platform\"}]}", 200);

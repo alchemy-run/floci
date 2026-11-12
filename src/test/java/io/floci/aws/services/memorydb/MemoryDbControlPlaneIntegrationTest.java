@@ -1,5 +1,6 @@
 package io.floci.aws.services.memorydb;
 
+import io.floci.aws.testing.Ec2Defaults;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
@@ -67,8 +68,8 @@ class MemoryDbControlPlaneIntegrationTest {
     @Test
     void subnetGroupUsesScopedEc2SubnetsAndUpdatesDescription() {
         String name = "mdb-subnet-lifecycle";
-        String first = "subnet-default-us-east-1-a";
-        String second = "subnet-default-us-east-1-b";
+        String first = Ec2Defaults.SUBNET_A;
+        String second = Ec2Defaults.SUBNET_B;
         call("CreateSubnetGroup", Map.of("SubnetGroupName", name, "SubnetIds", new String[]{first}),
                 "eu-west-1", ACCOUNT).then().statusCode(400).body("__type", equalTo("InvalidSubnet"));
         String arn = call("CreateSubnetGroup", Map.of("SubnetGroupName", name, "Description", "initial",

@@ -1,6 +1,7 @@
 package io.floci.aws.services.ec2;
 
 import io.floci.aws.testing.AwsTestClients;
+import io.floci.aws.testing.Ec2Defaults;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.RestAssured;
 import io.restassured.response.Response;
@@ -279,7 +280,7 @@ class Ec2DhcpOptionsIntegrationTest {
                 .formParam("VpcId.1", vpcId)
                 .header("Authorization", AUTH_HEADER)
             .when().post("/").then().statusCode(200)
-                .body("DescribeVpcsResponse.vpcSet.item.dhcpOptionsId", equalTo("dopt-default"));
+                .body("DescribeVpcsResponse.vpcSet.item.dhcpOptionsId", equalTo(Ec2Defaults.DHCP_OPTIONS));
 
             given()
                 .formParam("Action", "DeleteDhcpOptions")
@@ -332,7 +333,7 @@ class Ec2DhcpOptionsIntegrationTest {
             }
             given()
                 .formParam("Action", "DeleteDhcpOptions")
-                .formParam("DhcpOptionsId", "dopt-default")
+                .formParam("DhcpOptionsId", Ec2Defaults.DHCP_OPTIONS)
                 .header("Authorization", isolatedAuth)
             .when().post("/").then().statusCode(200);
 
@@ -341,14 +342,14 @@ class Ec2DhcpOptionsIntegrationTest {
                 .formParam("CidrBlock", "10.252.0.0/16")
                 .header("Authorization", isolatedAuth)
             .when().post("/").then().statusCode(200)
-                .body("CreateVpcResponse.vpc.dhcpOptionsId", equalTo("dopt-default"))
+                .body("CreateVpcResponse.vpc.dhcpOptionsId", equalTo(Ec2Defaults.DHCP_OPTIONS))
                 .extract().xmlPath().getString("CreateVpcResponse.vpc.vpcId");
             given()
                 .formParam("Action", "DescribeDhcpOptions")
-                .formParam("DhcpOptionsId.1", "dopt-default")
+                .formParam("DhcpOptionsId.1", Ec2Defaults.DHCP_OPTIONS)
                 .header("Authorization", isolatedAuth)
             .when().post("/").then().statusCode(200)
-                .body("DescribeDhcpOptionsResponse.dhcpOptionsSet.item.dhcpOptionsId", equalTo("dopt-default"));
+                .body("DescribeDhcpOptionsResponse.dhcpOptionsSet.item.dhcpOptionsId", equalTo(Ec2Defaults.DHCP_OPTIONS));
         } finally {
             if (secondVpcId != null) {
                 given()
@@ -364,7 +365,7 @@ class Ec2DhcpOptionsIntegrationTest {
             .when().post("/").then().statusCode(200);
             given()
                 .formParam("Action", "AssociateDhcpOptions")
-                .formParam("DhcpOptionsId", "dopt-default")
+                .formParam("DhcpOptionsId", Ec2Defaults.DHCP_OPTIONS)
                 .formParam("VpcId", defaultVpcId)
                 .header("Authorization", isolatedAuth)
             .when().post("/").then().statusCode(200);

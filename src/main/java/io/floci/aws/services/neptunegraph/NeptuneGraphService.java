@@ -8,6 +8,7 @@ import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.RequestScopes;
 import io.floci.aws.core.common.ServicePrincipals;
+import io.floci.aws.services.ec2.Ec2Service;
 import io.floci.aws.services.floci.duck.FlociDuckClient;
 import io.floci.aws.services.iam.IamService;
 import io.floci.aws.services.iam.model.IamRole;
@@ -919,7 +920,7 @@ public class NeptuneGraphService {
     public ObjectNode createPrivateGraphEndpoint(JsonNode in, String region) {
         ObjectNode graph = graph(region, required(in, "graphIdentifier"));
         String graphId = graph.path("id").asText();
-        String vpc = in.path("vpcId").asText("vpc-default");
+        String vpc = in.path("vpcId").asText(Ec2Service.defaultVpcId(region));
         if (store.get(region, NeptuneGraphStore.ENDPOINT, graphId + "/" + vpc).isPresent()) {
             throw NeptuneGraphStore.conflict("The graph " + graphId + " already has an endpoint in " + vpc + ".");
         }

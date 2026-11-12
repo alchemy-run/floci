@@ -580,6 +580,11 @@ floci:
     vpc-lattice:
       enabled: true
       transition-millis: 100
+    xray:
+      enabled: true
+      transition-millis: 100
+      daemon-port: 0
+      insights-interval-millis: 1000
     sdb:
       enabled: true
     signer:

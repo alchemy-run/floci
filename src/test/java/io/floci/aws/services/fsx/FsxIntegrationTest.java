@@ -1,5 +1,6 @@
 package io.floci.aws.services.fsx;
 
+import io.floci.aws.testing.Ec2Defaults;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.ValidatableResponse;
@@ -237,9 +238,9 @@ class FsxIntegrationTest {
     @Test
     void aFileSystemTakesFlocisDefaultSubnets() {
         String id = fsx("CreateFileSystem", "{\"FileSystemType\":\"LUSTRE\",\"StorageCapacity\":1200,"
-                + "\"SubnetIds\":[\"subnet-default-us-east-1-a\"],\"LustreConfiguration\":{\"DeploymentType\":"
+                + "\"SubnetIds\":[\"" + Ec2Defaults.SUBNET_A + "\"],\"LustreConfiguration\":{\"DeploymentType\":"
                 + "\"SCRATCH_2\"}}").statusCode(200).body("FileSystem.SubnetIds[0]",
-                        equalTo("subnet-default-us-east-1-a")).extract().path("FileSystem.FileSystemId");
+                        equalTo(Ec2Defaults.SUBNET_A)).extract().path("FileSystem.FileSystemId");
         fsx("CreateFileSystem", "{\"FileSystemType\":\"LUSTRE\",\"StorageCapacity\":1200,\"SubnetIds\":"
                 + "[\"subnet-unknown\"],\"LustreConfiguration\":{\"DeploymentType\":\"SCRATCH_2\"}}")
                 .statusCode(400).body("__type", containsString("InvalidNetworkSettings"));

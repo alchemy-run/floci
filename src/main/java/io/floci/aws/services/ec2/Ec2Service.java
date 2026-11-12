@@ -121,6 +121,8 @@ import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -1478,7 +1480,10 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     private void ensureDefaultDhcpOptions(String region, String ownerAccountId) {
-        String defaultOptionsId = "dopt-default";
+        ensureDefaultDhcpOptions(region, ownerAccountId, defaultDhcpOptionsId(region));
+    }
+
+    private void ensureDefaultDhcpOptions(String region, String ownerAccountId, String defaultOptionsId) {
         if (dhcpOptions.get(key(region, defaultOptionsId)).isEmpty()) {
             DhcpOptions defaultOptions = new DhcpOptions();
             defaultOptions.setDhcpOptionsId(defaultOptionsId);
@@ -1514,7 +1519,11 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         // Already provisioned in a previous run and reloaded from persistent storage: the default
         // VPC (and everything else) is present, so don't re-seed and create duplicates (#1297).
         if (!existingVpcs.isEmpty()) {
-            if (existingVpcs.stream().anyMatch(vpc -> "dopt-default".equals(vpc.getDhcpOptionsId()))) {
+            // VPCs persisted before default ids were AWS-shaped still name the legacy options set.
+            if (existingVpcs.stream().anyMatch(vpc -> LEGACY_DEFAULT_DHCP_OPTIONS.equals(vpc.getDhcpOptionsId()))) {
+                ensureDefaultDhcpOptions(region, ownerAccountId, LEGACY_DEFAULT_DHCP_OPTIONS);
+            }
+            if (existingVpcs.stream().anyMatch(vpc -> defaultDhcpOptionsId(region).equals(vpc.getDhcpOptionsId()))) {
                 ensureDefaultDhcpOptions(region, ownerAccountId);
             }
             return;
@@ -1526,13 +1535,14 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         String vpcId = defaultVpcId(region);
         Vpc defaultVpc = new Vpc();
         defaultVpc.setVpcId(vpcId);
+        defaultVpc.setDhcpOptionsId(defaultDhcpOptionsId(region));
         defaultVpc.setCidrBlock("172.31.0.0/16");
         defaultVpc.setState("available");
         defaultVpc.setDefault(true);
         defaultVpc.setOwnerId(ownerAccountId);
         defaultVpc.setRegion(region);
         defaultVpc.getCidrBlockAssociationSet().add(
-                new VpcCidrBlockAssociation("vpc-cidr-assoc-default", "172.31.0.0/16"));
+                new VpcCidrBlockAssociation(defaultId("vpc-cidr-assoc", region), "172.31.0.0/16"));
         vpcs.put(key(region, vpcId), defaultVpc);
         declareVpcNetwork(region, vpcId, "172.31.0.0/16");
 
@@ -1564,7 +1574,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         createDefaultSecurityGroup(region, vpcId, defaultSecurityGroupId(region));
 
         // Default NACL, with the default subnets associated to it.
-        String defaultAclId = createDefaultNetworkAcl(region, vpcId, "acl-default");
+        String defaultAclId = createDefaultNetworkAcl(region, vpcId, defaultNetworkAclId(region));
         NetworkAcl defaultAcl = networkAcls.get(key(region, defaultAclId)).orElse(null);
         if (defaultAcl != null) {
             for (String subnetId : subnetIds) {
@@ -1578,7 +1588,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         }
 
         // Default internet gateway
-        String igwId = "igw-default";
+        String igwId = defaultId("igw", region);
         InternetGateway igw = new InternetGateway();
         igw.setInternetGatewayId(igwId);
         igw.setOwnerId(ownerAccountId);
@@ -1586,7 +1596,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         igw.getAttachments().add(new InternetGatewayAttachment(vpcId, "available"));
         internetGateways.put(key(region, igwId), igw);
 
-        String rtId = createMainRouteTable(region, defaultVpc, "rtb-default", "rtbassoc-default");
+        String rtId = createMainRouteTable(region, defaultVpc, defaultId("rtb", region), defaultId("rtbassoc", region));
 
         RouteTable mainRt = routeTables.get(key(region, rtId)).orElse(null);
         if (mainRt != null) {
@@ -2185,12 +2195,34 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     // is identical text in every region's response even though storage itself is already
     // correctly keyed by region. RdsService derives the same ids from these methods so its
     // default DB subnet group resolves against the right region's default VPC.
+    // Default ids are shaped as AWS shapes them (a prefix and 17 hex digits), so every API that checks an id's pattern
+    // accepts them, and derived from the region, so they stay the same across restarts.
     public static String defaultVpcId(String region) {
-        return "vpc-default-" + region;
+        return defaultId("vpc", region);
     }
 
     public static String defaultSubnetId(String region, String azSuffix) {
-        return "subnet-default-" + region + "-" + azSuffix;
+        return defaultId("subnet", region + azSuffix);
+    }
+
+    public static String defaultNetworkAclId(String region) {
+        return defaultId("acl", region);
+    }
+
+    public static String defaultDhcpOptionsId(String region) {
+        return defaultId("dopt", region);
+    }
+
+    private static final String LEGACY_DEFAULT_DHCP_OPTIONS = "dopt-default";
+
+    static String defaultId(String prefix, String scope) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest((prefix + "/" + scope).getBytes(StandardCharsets.UTF_8));
+            return prefix + "-" + HexFormat.of().formatHex(digest).substring(0, 17);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     public static boolean isModelledAvailabilityZone(String region, String zone) {
@@ -2198,7 +2230,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
     }
 
     public static String defaultSecurityGroupId(String region) {
-        return "sg-default-" + region;
+        return defaultId("sg", region);
     }
 
     // Resolves the default VPC/security-group id actually on file for a region, falling back to
@@ -2212,8 +2244,12 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         if (vpcs.get(key(region, scoped)).isPresent()) {
             return scoped;
         }
-        String legacy = "vpc-default";
-        return vpcs.get(key(region, legacy)).isPresent() ? legacy : scoped;
+        for (String legacy : List.of("vpc-default-" + region, "vpc-default")) {
+            if (vpcs.get(key(region, legacy)).isPresent()) {
+                return legacy;
+            }
+        }
+        return scoped;
     }
 
     public String resolveDefaultSecurityGroupId(String region) {
@@ -2221,8 +2257,12 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         if (securityGroups.get(key(region, scoped)).isPresent()) {
             return scoped;
         }
-        String legacy = "sg-default";
-        return securityGroups.get(key(region, legacy)).isPresent() ? legacy : scoped;
+        for (String legacy : List.of("sg-default-" + region, "sg-default")) {
+            if (securityGroups.get(key(region, legacy)).isPresent()) {
+                return legacy;
+            }
+        }
+        return scoped;
     }
 
     // Per-resource mutation locks (#1464): storage get() returns the live stored object, so
@@ -4059,10 +4099,10 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         } else if (availabilityZone != null && !availabilityZone.isBlank()) {
             subnet = resolveSubnetForAvailabilityZone(region, availabilityZone);
         } else {
-            // Pick first default subnet
+            // The default subnet of the Region's first Availability Zone.
             subnet = subnets.scan(k -> true).stream()
                     .filter(s -> s.getRegion().equals(region) && s.isDefaultForAz())
-                    .findFirst()
+                    .min(Comparator.comparing(s -> String.valueOf(s.getAvailabilityZone())))
                     .orElse(null);
         }
 
@@ -6376,6 +6416,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         String vpcId = "vpc-" + randomHex(8);
         Vpc vpc = new Vpc();
         vpc.setVpcId(vpcId);
+        vpc.setDhcpOptionsId(defaultDhcpOptionsId(region));
         vpc.setCidrBlock(cidrBlock);
         vpc.setState("available");
         vpc.setDefault(isDefault);
