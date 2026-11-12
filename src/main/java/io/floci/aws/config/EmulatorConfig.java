@@ -886,6 +886,8 @@ public interface EmulatorConfig {
 
         KeyspacesServiceConfig keyspaces();
 
+        KinesisVideoServiceConfig kinesisVideo();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3008,6 +3010,29 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface KinesisVideoServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a stream or signaling channel takes to finish creating, updating or deleting. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long GetMedia waits for a new fragment before it ends with a continuation token. */
+        @WithDefault("3000")
+        long getMediaIdleMillis();
+
+        @WithDefault("10000")
+        int maxStreams();
+
+        @WithDefault("10000")
+        int maxChannels();
+
+        /** The image with ffmpeg that clips, HLS and DASH segments and images are transcoded in. */
+        @WithDefault("bluenviron/mediamtx:1.21.3-ffmpeg")
+        String ffmpegImage();
     }
 
     interface KeyspacesServiceConfig {

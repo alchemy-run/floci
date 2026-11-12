@@ -71,6 +71,12 @@ MODELS: dict[str, str] = {
     "iot-managed-integrations": "iotmanagedintegrations",
     "iotsitewise": "iotsitewise",
     "iotwireless": "iotwireless",
+    "kinesisvideo": "kinesisvideo",
+    "kinesis-video-media": "kinesisvideo",
+    "kinesis-video-archived-media": "kinesisvideo",
+    "kinesis-video-signaling": "kinesisvideo",
+    # kinesis-video-webrtc-storage is signed for kinesisvideo too, but models access denied as 403 where the
+    # other Kinesis Video APIs model 401, and one scope has one status; its two routes stay unchecked.
     "dsql": "dsql",
     "eks": "eks",
     "es": "es",
@@ -117,6 +123,10 @@ INTERNAL_ROUTES: dict[str, tuple[str, bool]] = {
     "iot-managed-integrations": ("/_iotmanagedintegrations", False),
     "iotsitewise": ("/_iotsitewise", False),
     "iotwireless": ("/_iotwireless", False),
+    "kinesisvideo": ("/_kinesisvideo", False),
+    "kinesis-video-media": ("/_kinesisvideo", False),
+    "kinesis-video-archived-media": ("/_kinesisvideo", False),
+    "kinesis-video-signaling": ("/_kinesisvideo", False),
 }
 
 

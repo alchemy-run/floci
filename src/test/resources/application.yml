@@ -550,6 +550,10 @@ floci:
     glacier:
       enabled: true
       job-millis: 0
+    kinesis-video:
+      enabled: true
+      transition-millis: 200
+      get-media-idle-millis: 1000
     keyspaces:
       enabled: true
       transition-millis: 200

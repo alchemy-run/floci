@@ -1718,6 +1718,72 @@
         "UpdateRoom": {"method": "POST", "requestUri": "/_ivschat/UpdateRoom"}
       }
     },
+    "kinesis-video-archived-media": {
+      "credentialScope": "kinesisvideo",
+      "apiVersion": "2017-09-30",
+      "operations": {
+        "GetClip": {"method": "POST", "requestUri": "/_kinesisvideo/getClip"},
+        "GetDASHStreamingSessionURL": {"method": "POST", "requestUri": "/_kinesisvideo/getDASHStreamingSessionURL"},
+        "GetHLSStreamingSessionURL": {"method": "POST", "requestUri": "/_kinesisvideo/getHLSStreamingSessionURL"},
+        "GetImages": {"method": "POST", "requestUri": "/_kinesisvideo/getImages"},
+        "GetMediaForFragmentList": {"method": "POST", "requestUri": "/_kinesisvideo/getMediaForFragmentList"},
+        "ListFragments": {"method": "POST", "requestUri": "/_kinesisvideo/listFragments"}
+      }
+    },
+    "kinesis-video-media": {
+      "credentialScope": "kinesisvideo",
+      "apiVersion": "2017-09-30",
+      "operations": {
+        "GetMedia": {"method": "POST", "requestUri": "/_kinesisvideo/getMedia"}
+      }
+    },
+    "kinesis-video-signaling": {
+      "credentialScope": "kinesisvideo",
+      "apiVersion": "2019-12-04",
+      "operations": {
+        "GetIceServerConfig": {"method": "POST", "requestUri": "/_kinesisvideo/v1/get-ice-server-config"},
+        "SendAlexaOfferToMaster": {"method": "POST", "requestUri": "/_kinesisvideo/v1/send-alexa-offer-to-master"}
+      }
+    },
+    "kinesisvideo": {
+      "credentialScope": "kinesisvideo",
+      "apiVersion": "2017-09-30",
+      "accessDeniedStatus": 401,
+      "operations": {
+        "CreateSignalingChannel": {"method": "POST", "requestUri": "/_kinesisvideo/createSignalingChannel"},
+        "CreateStream": {"method": "POST", "requestUri": "/_kinesisvideo/createStream"},
+        "DeleteEdgeConfiguration": {"method": "POST", "requestUri": "/_kinesisvideo/deleteEdgeConfiguration"},
+        "DeleteSignalingChannel": {"method": "POST", "requestUri": "/_kinesisvideo/deleteSignalingChannel"},
+        "DeleteStream": {"method": "POST", "requestUri": "/_kinesisvideo/deleteStream"},
+        "DescribeEdgeConfiguration": {"method": "POST", "requestUri": "/_kinesisvideo/describeEdgeConfiguration"},
+        "DescribeImageGenerationConfiguration": {"method": "POST", "requestUri": "/_kinesisvideo/describeImageGenerationConfiguration"},
+        "DescribeMappedResourceConfiguration": {"method": "POST", "requestUri": "/_kinesisvideo/describeMappedResourceConfiguration"},
+        "DescribeMediaStorageConfiguration": {"method": "POST", "requestUri": "/_kinesisvideo/describeMediaStorageConfiguration"},
+        "DescribeNotificationConfiguration": {"method": "POST", "requestUri": "/_kinesisvideo/describeNotificationConfiguration"},
+        "DescribeSignalingChannel": {"method": "POST", "requestUri": "/_kinesisvideo/describeSignalingChannel"},
+        "DescribeStream": {"method": "POST", "requestUri": "/_kinesisvideo/describeStream"},
+        "DescribeStreamStorageConfiguration": {"method": "POST", "requestUri": "/_kinesisvideo/describeStreamStorageConfiguration"},
+        "GetDataEndpoint": {"method": "POST", "requestUri": "/_kinesisvideo/getDataEndpoint"},
+        "GetSignalingChannelEndpoint": {"method": "POST", "requestUri": "/_kinesisvideo/getSignalingChannelEndpoint"},
+        "ListEdgeAgentConfigurations": {"method": "POST", "requestUri": "/_kinesisvideo/listEdgeAgentConfigurations"},
+        "ListSignalingChannels": {"method": "POST", "requestUri": "/_kinesisvideo/listSignalingChannels"},
+        "ListStreams": {"method": "POST", "requestUri": "/_kinesisvideo/listStreams"},
+        "ListTagsForResource": {"method": "POST", "requestUri": "/_kinesisvideo/ListTagsForResource"},
+        "ListTagsForStream": {"method": "POST", "requestUri": "/_kinesisvideo/listTagsForStream"},
+        "StartEdgeConfigurationUpdate": {"method": "POST", "requestUri": "/_kinesisvideo/startEdgeConfigurationUpdate"},
+        "TagResource": {"method": "POST", "requestUri": "/_kinesisvideo/TagResource"},
+        "TagStream": {"method": "POST", "requestUri": "/_kinesisvideo/tagStream"},
+        "UntagResource": {"method": "POST", "requestUri": "/_kinesisvideo/UntagResource"},
+        "UntagStream": {"method": "POST", "requestUri": "/_kinesisvideo/untagStream"},
+        "UpdateDataRetention": {"method": "POST", "requestUri": "/_kinesisvideo/updateDataRetention"},
+        "UpdateImageGenerationConfiguration": {"method": "POST", "requestUri": "/_kinesisvideo/updateImageGenerationConfiguration"},
+        "UpdateMediaStorageConfiguration": {"method": "POST", "requestUri": "/_kinesisvideo/updateMediaStorageConfiguration"},
+        "UpdateNotificationConfiguration": {"method": "POST", "requestUri": "/_kinesisvideo/updateNotificationConfiguration"},
+        "UpdateSignalingChannel": {"method": "POST", "requestUri": "/_kinesisvideo/updateSignalingChannel"},
+        "UpdateStream": {"method": "POST", "requestUri": "/_kinesisvideo/updateStream"},
+        "UpdateStreamStorageConfiguration": {"method": "POST", "requestUri": "/_kinesisvideo/updateStreamStorageConfiguration"}
+      }
+    },
     "lambda": {
       "credentialScope": "lambda",
       "apiVersion": "2015-03-31",

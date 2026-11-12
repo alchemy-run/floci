@@ -1,0 +1,67 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_kinesisvideo_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "GetIceServerConfig": "GetIceServerConfigRequest",
+    "SendAlexaOfferToMaster": "SendAlexaOfferToMasterRequest"
+  },
+  "shapes": {
+    "ClientId": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "GetIceServerConfigRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelARN"
+      ],
+      "members": {
+        "ChannelARN": "ResourceARN",
+        "ClientId": "ClientId",
+        "Service": "Service",
+        "Username": "Username"
+      }
+    },
+    "MessagePayload": {
+      "type": "string",
+      "min": 1,
+      "max": 10000,
+      "pattern": "[a-zA-Z0-9+/=]+"
+    },
+    "ResourceARN": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "arn:aws[a-z0-9-]*:kinesisvideo:[a-z0-9-]+:[0-9]+:[a-z]+/[a-zA-Z0-9_.-]+/[0-9]+"
+    },
+    "SendAlexaOfferToMasterRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelARN",
+        "SenderClientId",
+        "MessagePayload"
+      ],
+      "members": {
+        "ChannelARN": "ResourceARN",
+        "SenderClientId": "ClientId",
+        "MessagePayload": "MessagePayload"
+      }
+    },
+    "Service": {
+      "type": "string",
+      "enum": [
+        "TURN"
+      ]
+    },
+    "Username": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    }
+  }
+}
