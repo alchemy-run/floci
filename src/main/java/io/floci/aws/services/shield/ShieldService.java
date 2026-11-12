@@ -106,6 +106,18 @@ public class ShieldService implements Resettable {
         }
     }
 
+    /**
+     * Reads of a protection group report a missing group before they check the request, as AWS does: an id longer
+     * than the model allows is simply not found.
+     */
+    public void checkGroup(String action, JsonNode in) {
+        if (("DescribeProtectionGroup".equals(action) || "ListResourcesInProtectionGroup".equals(action))
+                && in.hasNonNull("ProtectionGroupId") && groups.get(in.get("ProtectionGroupId").asText()).isEmpty()) {
+            throw notFound("The referenced protection group " + in.get("ProtectionGroupId").asText()
+                    + " does not exist.");
+        }
+    }
+
     private static String key(String name) {
         return name + "/" + PARTITION.get();
     }

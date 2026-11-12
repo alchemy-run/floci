@@ -62,6 +62,7 @@ public class ShieldJsonHandler {
     }
 
     public Response handle(String action, JsonNode request, String region) {
+        service.checkGroup(action, request);
         SHAPES.check(action, request);
         return Response.ok(service.handle(action, request, region)).build();
     }

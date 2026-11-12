@@ -52,6 +52,8 @@ class ShieldIntegrationTest {
                 .body("message", equalTo("The subscription does not exist."));
         shield("DescribeProtectionGroup", "{\"ProtectionGroupId\":\"nope\"}").post("/").then().statusCode(400)
                 .body("message", containsString("protection group nope"));
+        shield("DescribeProtectionGroup", "{\"ProtectionGroupId\":\"a-group-id-longer-than-the-model-allows-at-all\"}")
+                .post("/").then().statusCode(400).body("__type", containsString("ResourceNotFoundException"));
         shield("DescribeAttackStatistics", "{}").post("/").then().statusCode(200).body("DataItems", hasSize(0));
 
         shield("CreateSubscription", "{}").post("/").then().statusCode(200);
