@@ -84,6 +84,10 @@ public final class RestJsonDispatcher {
     private static Route route(String operation, JsonNode binding) {
         String uri = binding.path("requestUri").asText();
         String path = uri.contains("?") ? uri.substring(0, uri.indexOf('?')) : uri;
+        // A URI's trailing '/' is optional, as clients drop it (OpenSearch Ingestion's /osis/tagResource/).
+        if (path.length() > 1 && path.endsWith("/")) {
+            path = path.substring(0, path.length() - 1);
+        }
         List<String> queryLiterals = new ArrayList<>();
         if (uri.contains("?")) {
             for (String part : uri.substring(uri.indexOf('?') + 1).split("&")) {

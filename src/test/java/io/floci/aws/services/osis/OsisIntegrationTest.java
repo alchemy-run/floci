@@ -139,8 +139,8 @@ class OsisIntegrationTest {
 
         String arn = "arn:aws:osis:us-east-1:000000000000:pipeline/states";
         osis().queryParam("arn", arn).body("{\"Tags\":[{\"Key\":\"env\",\"Value\":\"dev\"}]}")
-                .post(API + "/tagResource/").then().statusCode(200);
-        osis().queryParam("arn", arn).get(API + "/listTagsForResource/").then().statusCode(200)
+                .post(API + "/tagResource").then().statusCode(200);
+        osis().queryParam("arn", arn).get(API + "/listTagsForResource").then().statusCode(200)
                 .body("Tags.Key", hasItem("env")).body("Tags.Key", hasItem("team"));
         osis().queryParam("arn", arn).body("{\"TagKeys\":[\"team\"]}").post(API + "/untagResource/").then()
                 .statusCode(200);
