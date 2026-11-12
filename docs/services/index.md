@@ -162,6 +162,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Security Lake](securitylake.md) | `/v1/datalake`, `/v1/subscribers` (signed `securitylake`); data lakes with real S3 buckets and Glue tables, subscriber queues fed by the bucket | REST JSON | 31 |
 | [Shield](shield.md) | `POST /` + `X-Amz-Target: AWSShield_20160616.*`; protections on resources that exist, groups by pattern, response team access | JSON 1.1 | 36 |
 | [Signer](signer.md) | `/signing-profiles`, `/signing-jobs` (signed `signer`); real ECDSA signatures that Lambda code signing verifies | REST JSON | 19 |
+| [SimpleDB](sdb.md) | `POST /` + `Action=…` (signed `sdb`); multi-valued attributes, conditional writes, the select language | Query | 10 |
 | [SSM Contacts](ssm-contacts.md) | `POST /` + `X-Amz-Target: SSMContacts.*`; channels activated by code, pages delivered through SES and SNS, rotation shifts | JSON 1.1 | 39 |
 | [HealthOmics](omics.md) | `/referencestore`, `/sequencestore`, `/workflow`, `/run`, ... (signed `omics`); runs on Cromwell, Nextflow and cwltool | REST JSON | 107 |
 | [CloudWatch Observability Admin](observabilityadmin.md) | `POST /<Operation>` (signed `observabilityadmin`); telemetry rules configure resources, pipelines run processors | REST JSON | 45 |

@@ -291,6 +291,10 @@ services:
     doc: docs/services/opensearchserverless.md
     sources:
       - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: sdb
+    doc: docs/services/sdb.md
+    sources:
+      - { path: services/sdb/SimpleDbQueryHandler.java, mode: switch }
   - service: signer
     doc: docs/services/signer.md
     sources:

@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "notifications", "notificationscontacts", "osis", "observabilityadmin", "omics", "opensearchserverless", "personalize", "pinpointsmsvoicev2", "qbusiness", "rbin", "repostspace", "rolesanywhere", "route53profiles", "s3files", "schemas", "securitylake", "shield", "signer", "ssmcontacts", "ssmincidents", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "notifications", "notificationscontacts", "osis", "observabilityadmin", "omics", "opensearchserverless", "personalize", "pinpointsmsvoicev2", "qbusiness", "rbin", "repostspace", "rolesanywhere", "route53profiles", "route53resolver", "s3files", "schemas", "securitylake", "shield", "signer", "ssmcontacts", "ssmincidents", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1672,6 +1672,16 @@ class PartitionCrossServiceSmokeIntegrationTest {
         String arn = signed(region, "s3files").contentType("application/json").body("{\"bucket\":\"arn:"
                 + role.split(":")[1] + ":s3:::" + bucket + "\",\"roleArn\":\"" + role + "\"}")
                 .put("/file-systems").then().statusCode(201).extract().path("fileSystemArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void route53ResolverFirewallRuleGroupArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "route53resolver");
+        String arn = json11(region, "route53resolver", "Route53Resolver.CreateFirewallRuleGroup",
+                "{\"CreatorRequestId\":\"" + unique("smoke", partitionCase) + "\",\"Name\":\"smoke\"}")
+                .when().post("/").then().statusCode(200).extract().jsonPath().getString("FirewallRuleGroup.Arn");
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
