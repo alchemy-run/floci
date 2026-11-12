@@ -93,7 +93,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Data Firehose](firehose.md) | `POST /` + `X-Amz-Target: Firehose_20150804.*` | JSON 1.1 | 12 |
 | [ECS](ecs.md) | `POST /` + `X-Amz-Target: AmazonEC2ContainerServiceV20141113.*` | JSON 1.1 | 59 |
 | [EFS](efs.md) | `/2015-02-01/...` | REST JSON | 27 |
-| [EC2](ec2.md) | `POST /` with `Action=` param | EC2 Query | 231 |
+| [EC2](ec2.md) | `POST /` with `Action=` param | EC2 Query | 237 |
 | [Lightsail](lightsail.md) | `POST /` + `X-Amz-Target: Lightsail_20161128.*` | JSON 1.1 | 79 local responses; 161 recognized actions |
 | [ACM](acm.md) | `POST /` + `X-Amz-Target: CertificateManager.*` | JSON 1.1 | 17 |
 | [App Runner](apprunner.md) | `POST /` + `X-Amz-Target: AppRunner.*`; services by `Host` | JSON 1.0 | 37 |
