@@ -299,6 +299,10 @@ services:
     doc: docs/services/synthetics.md
     sources:
       - { path: services/synthetics/SyntheticsService.java, mode: switch }
+  - service: vpc-lattice
+    doc: docs/services/vpclattice.md
+    sources:
+      - { path: services/vpclattice/VpcLatticeService.java, mode: switch }
   - service: sdb
     doc: docs/services/sdb.md
     sources:

@@ -1064,6 +1064,8 @@ floci:
       enabled: true
     synthetics:
       enabled: true
+    vpc-lattice:
+      enabled: true
     sdb:
       enabled: true
     signer:

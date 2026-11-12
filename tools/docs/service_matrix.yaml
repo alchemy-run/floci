@@ -35,6 +35,7 @@ aliases:
   aoss: opensearchserverless             # OpenSearch Serverless' SigV4 signing name is "aoss"
   sms-voice: pinpointsmsvoicev2                 # SMS and Voice v2 signs as "sms-voice"
   social-messaging: socialmessaging             # End User Messaging Social signs as "social-messaging"
+  vpc-lattice: vpclattice                       # VPC Lattice signs as "vpc-lattice"
   neptune-graph: neptunegraph            # Neptune Analytics' SigV4 signing name is "neptune-graph"
   greengrass: greengrassv2               # Greengrass V2's SigV4 signing name is "greengrass"
   geo: location                         # Location's SigV4 signing name is "geo"

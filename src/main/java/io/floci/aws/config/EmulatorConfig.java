@@ -954,6 +954,8 @@ public interface EmulatorConfig {
 
         SyntheticsServiceConfig synthetics();
 
+        VpcLatticeServiceConfig vpcLattice();
+
         SsmIncidentsServiceConfig ssmIncidents();
 
         SsmContactsServiceConfig ssmContacts();
@@ -3123,6 +3125,15 @@ public interface EmulatorConfig {
 
         /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
         @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface VpcLatticeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long VPC Lattice's asynchronous creates and deletes take, in milliseconds. */
+        @WithDefault("1000")
         long transitionMillis();
     }
 

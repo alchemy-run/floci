@@ -135,6 +135,7 @@ import io.floci.aws.services.ssooidc.SsoOidcController;
 import io.floci.aws.services.ssoportal.SsoPortalController;
 import io.floci.aws.services.swf.model.SwfConstants;
 import io.floci.aws.services.synthetics.SyntheticsController;
+import io.floci.aws.services.vpclattice.VpcLatticeController;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -522,6 +523,10 @@ public class ResolvedServiceCatalog {
                         true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("synthetics"), Set.of(), Set.of(SyntheticsController.class)),
+                descriptor("vpc-lattice", "vpclattice", config.services().vpcLattice().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("vpc-lattice"), Set.of(), Set.of(VpcLatticeController.class)),
                 descriptor("sdb", "sdb", config.services().sdb().enabled(),
                         true, null, null, 5000L, SimpleDbQueryHandler.NS, ServiceProtocol.QUERY,
                         protocols(ServiceProtocol.QUERY),

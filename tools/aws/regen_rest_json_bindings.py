@@ -61,6 +61,7 @@ MODELS = {
     "signer": "signer",
     "socialmessaging": "socialmessaging",
     "synthetics": "synthetics",
+    "vpc-lattice": "vpclattice",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

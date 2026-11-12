@@ -165,6 +165,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [SimpleDB](sdb.md) | `POST /` + `Action=…` (signed `sdb`); multi-valued attributes, conditional writes, the select language | Query | 10 |
 | [End User Messaging Social](socialmessaging.md) | `/v1/whatsapp/...` (signed `social-messaging`); WhatsApp signup, reviewed templates, messages announced to SNS, flows | REST JSON | 38 |
 | [CloudWatch Synthetics](synthetics.md) | `/canary/...` (signed `synthetics`); canaries run on backing Lambda functions, artifacts in S3, metrics and EventBridge events, groups | REST JSON | 22 |
+| [VPC Lattice](vpclattice.md) | `/servicenetworks/...`, `/services/...`, `/targetgroups/...` (signed `vpc-lattice`); service networks, services, listeners and rules, target health, policies, access logs, resource gateways | REST JSON | 73 |
 | [SSM Contacts](ssm-contacts.md) | `POST /` + `X-Amz-Target: SSMContacts.*`; channels activated by code, pages delivered through SES and SNS, rotation shifts | JSON 1.1 | 39 |
 | [HealthOmics](omics.md) | `/referencestore`, `/sequencestore`, `/workflow`, `/run`, ... (signed `omics`); runs on Cromwell, Nextflow and cwltool | REST JSON | 107 |
 | [CloudWatch Observability Admin](observabilityadmin.md) | `POST /<Operation>` (signed `observabilityadmin`); telemetry rules configure resources, pipelines run processors | REST JSON | 45 |

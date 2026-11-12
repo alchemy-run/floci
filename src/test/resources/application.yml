@@ -577,6 +577,9 @@ floci:
     synthetics:
       enabled: true
       transition-millis: 100
+    vpc-lattice:
+      enabled: true
+      transition-millis: 100
     sdb:
       enabled: true
     signer:
