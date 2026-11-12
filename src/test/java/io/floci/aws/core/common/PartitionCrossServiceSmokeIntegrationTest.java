@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "notifications", "notificationscontacts", "osis", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "notifications", "notificationscontacts", "osis", "observabilityadmin", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1554,6 +1554,24 @@ class PartitionCrossServiceSmokeIntegrationTest {
                 .post("/2022-09-19/emailcontacts").then().statusCode(201).extract().path("arn");
         cleanup.register(() -> signed(region, "notifications-contacts").delete("/emailcontacts/" + arn));
         PartitionMatrix.assertGlobalArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void observabilityAdminPipelineArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "observabilityadmin");
+        String body = "pipeline:\\n  source:\\n    cloudwatch_logs:\\n      log_event_metadata:\\n"
+                + "        data_source_name: app\\n  sink:\\n    - cloudwatch_logs:\\n        log_group: '@original'\\n";
+        String arn = signed(region, "observabilityadmin").contentType("application/json")
+                .body("{\"Name\":\"partition\",\"Configuration\":{\"Body\":\"" + body + "\"}}")
+                .post("/CreateTelemetryPipeline").then().statusCode(200).extract().path("Arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        await().atMost(Duration.ofSeconds(30)).until(() -> "ACTIVE".equals(signed(region, "observabilityadmin")
+                .contentType("application/json").body("{\"PipelineIdentifier\":\"partition\"}")
+                .post("/GetTelemetryPipeline").then().extract().path("Pipeline.Status")));
+        signed(region, "observabilityadmin").contentType("application/json")
+                .body("{\"PipelineIdentifier\":\"partition\"}").post("/DeleteTelemetryPipeline").then()
+                .statusCode(200);
     }
 
     @ParameterizedTest

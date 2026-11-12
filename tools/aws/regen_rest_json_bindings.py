@@ -44,6 +44,7 @@ MODELS = {
     "notifications": "notifications",
     "notificationscontacts": "notificationscontacts",
     "osis": "osis",
+    "observabilityadmin": "observabilityadmin",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

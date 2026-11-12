@@ -916,6 +916,8 @@ public interface EmulatorConfig {
 
         OsisServiceConfig osis();
 
+        ObservabilityAdminServiceConfig observabilityAdmin();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3045,6 +3047,23 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long event rules, hubs and configurations stay in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface ObservabilityAdminServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How often running telemetry evaluation applies telemetry rules to resources. */
+        @WithDefault("60")
+        int evaluationIntervalSeconds();
+
+        /** How often telemetry pipelines with an S3 source poll their queue. */
+        @WithDefault("5")
+        int pipelinePollSeconds();
+
+        /** How long evaluation, pipelines and rules stay in a transitional state. */
         @WithDefault("2000")
         long transitionMillis();
     }

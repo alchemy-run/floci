@@ -566,6 +566,11 @@ floci:
       enabled: true
       transition-millis: 200
       engine: none
+    observability-admin:
+      enabled: true
+      transition-millis: 200
+      evaluation-interval-seconds: 1
+      pipeline-poll-seconds: 1
     medical-imaging:
       enabled: true
       transition-millis: 200

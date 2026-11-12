@@ -80,7 +80,7 @@ SERVICE_SUFFIX = ".amazonaws.com"
 NAMESPACES = (
     "application-autoscaling", "athena", "autoscaling", "budgets", "cloudformation", "cloudtrail",
     "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito-identity", "cognito-idp",
-    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medical-imaging", "neptune-graph", "notifications", "notifications-contacts", "osis", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
+    "comprehend", "config", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medical-imaging", "neptune-graph", "notifications", "notifications-contacts", "osis", "observabilityadmin", "ivs", "ivschat", "dax", "dms", "dsql", "ec2", "ecr", "ecs", "eks", "elasticmapreduce",
     "events", "firehose", "glue", "iam", "kinesis", "kinesisanalytics", "lambda", "logs", "pipes",
     "rds", "redshift", "redshift-serverless", "rekognition", "resource-groups", "s3", "sagemaker", "scheduler",
     "secretsmanager", "servicecatalog", "ses", "sns", "ssm", "states", "swf", "textract",
@@ -263,6 +263,10 @@ URI_LABEL = "the role is a label of the request URI, which PassedRoles does not 
 
 # Operations whose request names no role this file can read.
 NOT_READ = {
+    "observabilityadmin:CreateTelemetryPipeline": "the role is the source's aws.sts_role_arn inside the YAML "
+                                                   "configuration body",
+    "observabilityadmin:UpdateTelemetryPipeline": "the role is the source's aws.sts_role_arn inside the YAML "
+                                                   "configuration body",
     "config:PutConformancePack": NO_ROLE_MEMBER,
     "config:PutOrganizationConformancePack": NO_ROLE_MEMBER,
     "config:PutRemediationConfigurations": RUNBOOK_PARAMETER,
@@ -398,6 +402,10 @@ EXTRA_MEMBERS = {
 ECS_INFRASTRUCTURE = "ecs"
 ECS_TASKS = "ecs-tasks"
 MEMBER_SERVICES = {
+    # A dataset integration's role is assumed by CloudWatch Logs to read the integrated data.
+    "observabilityadmin:*": {
+        "RoleArn": "logs",
+    },
     # "The Amazon Resource Name (ARN) for CodePipeline to use", and "The pipeline role ARN associated
     # with the rule".
     "codepipeline:*": {
