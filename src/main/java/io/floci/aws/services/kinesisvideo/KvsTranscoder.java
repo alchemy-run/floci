@@ -52,7 +52,7 @@ public class KvsTranscoder implements ContainerTeardown {
     }
 
     /** A failed job, with ffmpeg's output. */
-    static final class TranscodeException extends RuntimeException {
+    public static final class TranscodeException extends RuntimeException {
         TranscodeException(String message) {
             super(message);
         }
@@ -87,8 +87,9 @@ public class KvsTranscoder implements ContainerTeardown {
 
     /**
      * Runs a script over input files and returns the files it leaves in its directory (inputs excluded), by name.
+     * MediaConnect makes its thumbnails here too.
      */
-    Map<String, byte[]> run(Map<String, byte[]> inputs, String script) {
+    public Map<String, byte[]> run(Map<String, byte[]> inputs, String script) {
         String id = ensureStarted();
         String work = "/tmp/kvs-" + UUID.randomUUID();
         exec(id, List.of("mkdir", "-p", work));
