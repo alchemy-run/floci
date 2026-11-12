@@ -275,6 +275,10 @@ services:
     doc: docs/services/forecast.md
     sources:
       - { path: services/forecast/ForecastJsonHandler.java, mode: switch }
+  - service: licensemanager
+    doc: docs/services/licensemanager.md
+    sources:
+      - { path: services/licensemanager/LicenseManagerJsonHandler.java, mode: switch }
   - service: lexv2
     doc: docs/services/lexv2.md
     sources:

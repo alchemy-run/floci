@@ -1048,6 +1048,8 @@ floci:
       enabled: true
     glacier:
       enabled: true
+    license-manager:
+      enabled: true
     lexv2:
       enabled: true
     kinesis-video:

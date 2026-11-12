@@ -550,6 +550,9 @@ floci:
     glacier:
       enabled: true
       job-millis: 0
+    license-manager:
+      enabled: true
+      transition-millis: 200
     lexv2:
       enabled: true
       transition-millis: 200

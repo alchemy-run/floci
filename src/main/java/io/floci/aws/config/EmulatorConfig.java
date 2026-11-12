@@ -890,6 +890,8 @@ public interface EmulatorConfig {
 
         LexV2ServiceConfig lexv2();
 
+        LicenseManagerServiceConfig licenseManager();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3012,6 +3014,18 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface LicenseManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a license takes to become available, or a conversion task to finish. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        @WithDefault("1000")
+        int maxLicenseConfigurations();
     }
 
     interface LexV2ServiceConfig {
