@@ -159,7 +159,7 @@ OUTPUT = REPO_ROOT / "src/main/resources/aws/iam-request-resources.json"
 # are the ones its handlers mint.
 NAMESPACES = ("access-analyzer", "acm", "application-autoscaling", "athena", "bcm-data-exports",
               "bcm-pricing-calculator", "budgets", "ce", "cloudtrail", "codebuild", "codepipeline", "cognito-identity",
-              "cognito-idp", "cur", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "ivs", "ivschat", "dax", "ecr", "elasticloadbalancing", "elasticmapreduce", "es", "events",
+              "cognito-idp", "cur", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "medialive", "ivs", "ivschat", "dax", "ecr", "elasticloadbalancing", "elasticmapreduce", "es", "events",
               "firehose", "globalaccelerator", "kinesisanalytics", "payment-cryptography", "quicksight", "redshift",
               "redshift-data", "rekognition", "servicediscovery", "servicequotas", "sso", "states", "textract",
               "timestream-influxdb", "translate")
@@ -318,6 +318,10 @@ NOT_COVERED: dict[str, str] = {
 # them apart (EventBridge's `events` and EventBridge V2's `eventsv2`): Floci applies it only to a request the service
 # of that endpoint serves, never by a member a caller could add to a request of the other.
 CORRECTIONS: dict[str, tuple[list[dict], str]] = {
+    "mediaconnect:PurchaseOffering": ([{"type": "Reservation", "fill": {"ReservationName": "ReservationName"}}],
+                                      "the request names the offering to buy by OfferingArn, an Offering ARN, "
+                                      "never a reservation's, so the reference's Reservation is the one the "
+                                      "purchase creates, named by ReservationName with the id MediaConnect mints"),
     "quicksight:CreateDataSet": ([{"types": ["datasource"], "arn": f"PhysicalTableMap{{}}.{kind}.DataSourceArn"}
                                  for kind in ("S3Source", "RelationalTable", "CustomSql", "SaaSTable", "FileSource")],
                                 "CreateDataSet acts on each data source named by its physical tables; "
@@ -702,7 +706,7 @@ READ_PROTOCOLS = {"json", "query", "ec2", "smithy-rpc-v2-cbor", "rest-json"}
 BODY_LOCATIONS = (None, "")
 # Where a REST request carries a member outside its body, as the file writes it: a label of its path, `{Name}`, or a
 # parameter of its query, `?name`.
-LOCATED_RE = re.compile(r"^(\{[A-Za-z0-9_]+\}|\?[A-Za-z0-9_.-]+)$")
+LOCATED_RE = re.compile(r"^(\{[A-Za-z0-9_-]+\}|\?[A-Za-z0-9_.-]+)$")
 
 
 def stem(name: str) -> str:
@@ -743,14 +747,25 @@ def checked_actions(documents: list[dict]) -> dict[str, dict]:
     return found
 
 
+# ARN formats the reference gives wrong, as `<namespace>:<type>`: the right format, and why.
+FORMAT_CORRECTIONS: dict[str, tuple[str, str]] = {
+    "mediaconnect:Offering": ("arn:${Partition}:mediaconnect:${Region}:${Account}:offering:${OfferingId}",
+                              "the reference leaves out the account, which an offering's ARN has: "
+                              "arn:aws:mediaconnect:us-west-2:<account>:offering:<id> (MediaConnect API Reference, "
+                              "Offering.OfferingArn), so its id would read as the account"),
+}
+
+
 def arn_formats(documents: list[dict], namespaces: set[str]) -> dict[str, dict[str, str]]:
     """Each resource type of the namespaces given, as its first ARN format, its account `${Account}` where the
-    reference names it `${AccountId}` (DataSync's, IAM Identity Center's applications)."""
+    reference names it `${AccountId}` (DataSync's, IAM Identity Center's applications), and corrected where
+    FORMAT_CORRECTIONS says the reference is wrong."""
     formats = {}
     for document in documents:
         if document["Name"] in namespaces:
             formats[document["Name"]] = dict(sorted(
-                (resource["Name"], ACCOUNT_ID_SLOT_RE.sub(r"\1${Account}:", resource["ARNFormats"][0]))
+                (resource["Name"], FORMAT_CORRECTIONS.get(document["Name"] + ":" + resource["Name"], (
+                    ACCOUNT_ID_SLOT_RE.sub(r"\1${Account}:", resource["ARNFormats"][0]), ""))[0])
                 for resource in document.get("Resources", []) if resource.get("ARNFormats")))
     return dict(sorted(formats.items()))
 
