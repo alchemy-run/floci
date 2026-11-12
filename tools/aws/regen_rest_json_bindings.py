@@ -52,6 +52,7 @@ MODELS = {
     "qapps": "qapps",
     "rbin": "rbin",
     "repostspace": "repostspace",
+    "rolesanywhere": "rolesanywhere",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

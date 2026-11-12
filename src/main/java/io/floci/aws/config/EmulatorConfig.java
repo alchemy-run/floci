@@ -934,6 +934,8 @@ public interface EmulatorConfig {
 
         RePostSpaceServiceConfig repostspace();
 
+        RolesAnywhereServiceConfig rolesanywhere();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3086,6 +3088,11 @@ public interface EmulatorConfig {
         /** Whether retrieval answers are written by {@link #model()}; otherwise they're the sentences that answer. */
         @WithDefault("false")
         boolean generateAnswers();
+    }
+
+    interface RolesAnywhereServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface RePostSpaceServiceConfig {

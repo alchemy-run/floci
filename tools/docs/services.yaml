@@ -291,6 +291,10 @@ services:
     doc: docs/services/opensearchserverless.md
     sources:
       - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: rolesanywhere
+    doc: docs/services/rolesanywhere.md
+    sources:
+      - { path: services/rolesanywhere/RolesAnywhereService.java, mode: switch }
   - service: repostspace
     doc: docs/services/repostspace.md
     sources:

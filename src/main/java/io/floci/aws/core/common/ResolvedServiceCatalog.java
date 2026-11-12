@@ -95,6 +95,7 @@ import io.floci.aws.services.rdsdata.RdsDataController;
 import io.floci.aws.services.repostspace.RePostSpaceController;
 import io.floci.aws.services.resourceexplorer2.ResourceExplorer2Controller;
 import io.floci.aws.services.resourcegroups.ResourceGroupsController;
+import io.floci.aws.services.rolesanywhere.RolesAnywhereController;
 import io.floci.aws.services.route53.Route53Controller;
 import io.floci.aws.services.rum.RumController;
 import io.floci.aws.services.s3.S3Controller;
@@ -504,6 +505,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("OpenSearchServerless."), Set.of("aoss"), Set.of(), Set.of()),
+                descriptor("rolesanywhere", "rolesanywhere", config.services().rolesanywhere().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("rolesanywhere"), Set.of(), Set.of(RolesAnywhereController.class)),
                 descriptor("repostspace", "repostspace", config.services().repostspace().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
