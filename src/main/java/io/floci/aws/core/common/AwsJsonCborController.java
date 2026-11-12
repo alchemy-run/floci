@@ -14,6 +14,7 @@ import io.floci.aws.services.codeconnections.CodeConnectionsJsonHandler;
 import io.floci.aws.services.dynamodb.DynamoDbJsonHandler;
 import io.floci.aws.services.dynamodb.DynamoDbStreamsJsonHandler;
 import io.floci.aws.services.eventbridgev2.EventBridgeV2Handler;
+import io.floci.aws.services.keyspaces.KeyspacesJsonHandler;
 import io.floci.aws.services.kinesis.KinesisJsonHandler;
 import io.floci.aws.services.marketplace.MarketplaceEntitlementController;
 import io.floci.aws.services.sns.SnsJsonHandler;
@@ -52,6 +53,10 @@ import java.util.zip.GZIPInputStream;
  */
 @Path("/")
 public class AwsJsonCborController {
+
+    /** Amazon Keyspaces, whose SDKs speak Smithy RPC v2 CBOR. */
+    @Inject
+    Instance<KeyspacesJsonHandler> keyspaces;
 
     /** AWS CodeConnections, whose SDKs speak Smithy RPC v2 CBOR. */
     @Inject
@@ -524,6 +529,7 @@ public class AwsJsonCborController {
             case "marketplace" -> marketplaceEntitlementController.handle(operation, request, region);
             case "eventsv2" -> eventBridgeV2Handler.handle(operation, request, region);
             case "codeconnections" -> codeConnections.get().handle(operation, request, region);
+            case "keyspaces" -> keyspaces.get().handle(operation, request, region);
             default -> null;
         };
     }

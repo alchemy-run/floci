@@ -550,6 +550,10 @@ floci:
     glacier:
       enabled: true
       job-millis: 0
+    keyspaces:
+      enabled: true
+      transition-millis: 200
+      cql-port: 19142
     kendra:
       enabled: true
       transition-millis: 200

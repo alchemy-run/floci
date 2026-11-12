@@ -133,6 +133,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [EC2 Image Builder](imagebuilder.md) | `PUT`/`GET`/`POST`/`DELETE /<Operation>`, `/tags/*` signed for `imagebuilder`; AMIs built on Docker-backed instances, containers pushed to ECR | REST JSON | 77 |
 | [Internet Monitor](internetmonitor.md) | `/v20210603/Monitors/*`, `/v20210603/InternetEvents/*`, `/tags/*` signed for `internetmonitor`; measures the traffic CloudFront and load balancers serve | REST JSON | 16 |
 | [Kendra](kendra.md) | `POST /` + `X-Amz-Target: AWSKendraFrontendService.*`; a search engine over documents, S3, websites and databases | JSON 1.1 | 66 |
+| [Keyspaces](keyspaces.md) | `POST /` + `X-Amz-Target: KeyspacesService.*`, `KeyspacesStreams.*` (signed `cassandra`); CQL on port 9142 | JSON 1.0 / CBOR | 23 |
 | [IVS](ivs.md) | `POST /<Operation>`, `/tags/*` signed for `ivs` (with Real-Time) | REST JSON | 78 |
 | [IVS Chat](ivschat.md) | `POST /<Operation>`, `/tags/*` signed for `ivschat` | REST JSON | 17 |
 | [FSx](fsx.md) | `POST /` + `X-Amz-Target: AWSSimbaAPIService_v20180301.*` | JSON 1.1 | 48 |

@@ -1048,6 +1048,8 @@ floci:
       enabled: true
     glacier:
       enabled: true
+    keyspaces:
+      enabled: true
     kendra:
       enabled: true
     fms:

@@ -17,6 +17,7 @@ import io.floci.aws.services.dynamodb.DynamoDbResponses;
 import io.floci.aws.services.dynamodb.DynamoDbStreamsJsonHandler;
 import io.floci.aws.services.healthlake.HealthLakeJsonHandler;
 import io.floci.aws.services.iotfleetwise.IotFleetWiseJsonHandler;
+import io.floci.aws.services.keyspaces.KeyspacesJsonHandler;
 import io.floci.aws.services.marketplace.MarketplaceJsonHandler;
 import io.floci.aws.services.networkfirewall.NetworkFirewallJsonHandler;
 import io.floci.aws.services.paymentcryptography.PaymentCryptographyJsonHandler;
@@ -73,6 +74,7 @@ public class AwsJsonController {
     private final AppRunnerJsonHandler appRunnerJsonHandler;
     private final B2biJsonHandler b2biJsonHandler;
     private final CodeConnectionsJsonHandler codeConnectionsJsonHandler;
+    private final KeyspacesJsonHandler keyspacesJsonHandler;
     private final MarketplaceJsonHandler marketplaceJsonHandler;
     private final VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler;
     private final BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler;
@@ -97,6 +99,7 @@ public class AwsJsonController {
                              AppRunnerJsonHandler appRunnerJsonHandler,
                              B2biJsonHandler b2biJsonHandler,
                              CodeConnectionsJsonHandler codeConnectionsJsonHandler,
+                             KeyspacesJsonHandler keyspacesJsonHandler,
                              MarketplaceJsonHandler marketplaceJsonHandler,
                              VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler,
                              BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler,
@@ -120,6 +123,7 @@ public class AwsJsonController {
         this.appRunnerJsonHandler = appRunnerJsonHandler;
         this.b2biJsonHandler = b2biJsonHandler;
         this.codeConnectionsJsonHandler = codeConnectionsJsonHandler;
+        this.keyspacesJsonHandler = keyspacesJsonHandler;
         this.marketplaceJsonHandler = marketplaceJsonHandler;
         this.verifiedPermissionsJsonHandler = verifiedPermissionsJsonHandler;
         this.bcmPricingCalculatorJsonHandler = bcmPricingCalculatorJsonHandler;
@@ -221,6 +225,8 @@ public class AwsJsonController {
                 case "apprunner" -> appRunnerJsonHandler.handle(action, request, region);
                 case "b2bi" -> b2biJsonHandler.handle(action, request, region);
                 case "codeconnections" -> codeConnectionsJsonHandler.handle(action, request, region);
+                case "keyspaces" -> keyspacesJsonHandler.handle(action, request, region);
+                case "keyspacesstreams" -> keyspacesJsonHandler.handleStreams(action, request, region);
                 case "marketplace" -> marketplaceJsonHandler.handle(action, request, region);
                 case "verifiedpermissions" -> verifiedPermissionsJsonHandler.handle(action, request, region);
                 case "bcm-pricing-calculator" -> bcmPricingCalculatorJsonHandler.handle(action, request, region);

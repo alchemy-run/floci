@@ -884,6 +884,8 @@ public interface EmulatorConfig {
 
         KendraServiceConfig kendra();
 
+        KeyspacesServiceConfig keyspaces();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3006,6 +3008,33 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface KeyspacesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a keyspace, table, type or stream takes to finish creating, updating, restoring or deleting. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The account's keyspace quota. */
+        @WithDefault("256")
+        int maxKeyspaces();
+
+        /** The account's table quota. */
+        @WithDefault("256")
+        int maxTables();
+
+        /**
+         * The CQL endpoint's port, as Keyspaces serves CQL on 9142 (with TLS while {@code floci.tls.enabled} is true);
+         * {@code 0} disables it.
+         */
+        @WithDefault("9142")
+        int cqlPort();
+
+        @WithDefault("0.0.0.0")
+        String cqlHost();
     }
 
     interface KendraServiceConfig {
