@@ -1066,6 +1066,8 @@ floci:
       enabled: true
     vpc-lattice:
       enabled: true
+    xray:
+      enabled: true
     sdb:
       enabled: true
     signer:

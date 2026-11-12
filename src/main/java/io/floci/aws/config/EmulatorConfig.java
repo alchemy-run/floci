@@ -956,6 +956,8 @@ public interface EmulatorConfig {
 
         VpcLatticeServiceConfig vpcLattice();
 
+        XRayServiceConfig xray();
+
         SsmIncidentsServiceConfig ssmIncidents();
 
         SsmContactsServiceConfig ssmContacts();
@@ -3126,6 +3128,23 @@ public interface EmulatorConfig {
         /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface XRayServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long asynchronous changes (encryption, the segment destination, trace retrievals) take, in ms. */
+        @WithDefault("1000")
+        long transitionMillis();
+
+        /** The UDP port of the X-Ray daemon that traced Lambda functions send their subsegments to; 0 disables it. */
+        @WithDefault("2000")
+        int daemonPort();
+
+        /** How often insights are evaluated, in milliseconds. */
+        @WithDefault("60000")
+        long insightsIntervalMillis();
     }
 
     interface VpcLatticeServiceConfig {

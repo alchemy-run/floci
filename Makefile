@@ -346,6 +346,7 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_socialmessaging_shapes.py
 	$(PYTHON) tools/aws/regen_synthetics_shapes.py
 	$(PYTHON) tools/aws/regen_vpclattice_shapes.py
+	$(PYTHON) tools/aws/regen_xray_shapes.py
 	$(PYTHON) tools/aws/regen_fsx_shapes.py
 	$(PYTHON) tools/aws/regen_ds_shapes.py
 	$(PYTHON) tools/aws/regen_rest_json_bindings.py
@@ -667,6 +668,10 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_vpclattice_shapes.py --check || { \
 		echo "error: VPC Lattice request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_xray_shapes.py --check || { \
+		echo "error: X-Ray request shapes are out of date; run 'make aws-data-sync'."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_signer_shapes.py --check || { \

@@ -1,0 +1,459 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "xray",
+ "apiVersion": "2016-04-12",
+ "operations": {
+  "BatchGetTraces": {
+   "method": "POST",
+   "requestUri": "/Traces",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CancelTraceRetrieval": {
+   "method": "POST",
+   "requestUri": "/CancelTraceRetrieval",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateGroup": {
+   "method": "POST",
+   "requestUri": "/CreateGroup",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateSamplingRule": {
+   "method": "POST",
+   "requestUri": "/CreateSamplingRule",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteGroup": {
+   "method": "POST",
+   "requestUri": "/DeleteGroup",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteResourcePolicy": {
+   "method": "POST",
+   "requestUri": "/DeleteResourcePolicy",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSamplingRule": {
+   "method": "POST",
+   "requestUri": "/DeleteSamplingRule",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetEncryptionConfig": {
+   "method": "POST",
+   "requestUri": "/EncryptionConfig",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetGroup": {
+   "method": "POST",
+   "requestUri": "/GetGroup",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetGroups": {
+   "method": "POST",
+   "requestUri": "/Groups",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetIndexingRules": {
+   "method": "POST",
+   "requestUri": "/GetIndexingRules",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetInsight": {
+   "method": "POST",
+   "requestUri": "/Insight",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetInsightEvents": {
+   "method": "POST",
+   "requestUri": "/InsightEvents",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetInsightImpactGraph": {
+   "method": "POST",
+   "requestUri": "/InsightImpactGraph",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StartTime",
+     "EndTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetInsightSummaries": {
+   "method": "POST",
+   "requestUri": "/InsightSummaries",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StartTime",
+     "EndTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetRetrievedTracesGraph": {
+   "method": "POST",
+   "requestUri": "/GetRetrievedTracesGraph",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetSamplingRules": {
+   "method": "POST",
+   "requestUri": "/GetSamplingRules",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetSamplingStatisticSummaries": {
+   "method": "POST",
+   "requestUri": "/SamplingStatisticSummaries",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetSamplingTargets": {
+   "method": "POST",
+   "requestUri": "/SamplingTargets",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "SamplingStatisticsDocuments[].Timestamp",
+     "SamplingBoostStatisticsDocuments[].Timestamp"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetServiceGraph": {
+   "method": "POST",
+   "requestUri": "/ServiceGraph",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StartTime",
+     "EndTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTimeSeriesServiceStatistics": {
+   "method": "POST",
+   "requestUri": "/TimeSeriesServiceStatistics",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StartTime",
+     "EndTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTraceGraph": {
+   "method": "POST",
+   "requestUri": "/TraceGraph",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTraceSegmentDestination": {
+   "method": "POST",
+   "requestUri": "/GetTraceSegmentDestination",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTraceSummaries": {
+   "method": "POST",
+   "requestUri": "/TraceSummaries",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StartTime",
+     "EndTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListResourcePolicies": {
+   "method": "POST",
+   "requestUri": "/ListResourcePolicies",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListRetrievedTraces": {
+   "method": "POST",
+   "requestUri": "/ListRetrievedTraces",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "POST",
+   "requestUri": "/ListTagsForResource",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutEncryptionConfig": {
+   "method": "POST",
+   "requestUri": "/PutEncryptionConfig",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutResourcePolicy": {
+   "method": "POST",
+   "requestUri": "/PutResourcePolicy",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutTelemetryRecords": {
+   "method": "POST",
+   "requestUri": "/TelemetryRecords",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "TelemetryRecords[].Timestamp"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutTraceSegments": {
+   "method": "POST",
+   "requestUri": "/TraceSegments",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartTraceRetrieval": {
+   "method": "POST",
+   "requestUri": "/StartTraceRetrieval",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StartTime",
+     "EndTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/TagResource",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "POST",
+   "requestUri": "/UntagResource",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateGroup": {
+   "method": "POST",
+   "requestUri": "/UpdateGroup",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateIndexingRule": {
+   "method": "POST",
+   "requestUri": "/UpdateIndexingRule",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateSamplingRule": {
+   "method": "POST",
+   "requestUri": "/UpdateSamplingRule",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateTraceSegmentDestination": {
+   "method": "POST",
+   "requestUri": "/UpdateTraceSegmentDestination",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

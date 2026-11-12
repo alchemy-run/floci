@@ -62,6 +62,7 @@ MODELS = {
     "socialmessaging": "socialmessaging",
     "synthetics": "synthetics",
     "vpc-lattice": "vpclattice",
+    "xray": "xray",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

@@ -303,6 +303,10 @@ services:
     doc: docs/services/vpclattice.md
     sources:
       - { path: services/vpclattice/VpcLatticeService.java, mode: switch }
+  - service: xray
+    doc: docs/services/xray.md
+    sources:
+      - { path: services/xray/XRayService.java, mode: switch }
   - service: sdb
     doc: docs/services/sdb.md
     sources:

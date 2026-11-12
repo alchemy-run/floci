@@ -13,6 +13,7 @@ public class PendingInvocation {
     private final CompletableFuture<InvokeResult> resultFuture;
     private final CompletableFuture<Void> dispatchedFuture = new CompletableFuture<>();
     private volatile String clientContext;
+    private volatile String traceHeader;
 
     public PendingInvocation(String requestId, byte[] payload, long deadlineMs,
                               String functionArn, CompletableFuture<InvokeResult> resultFuture) {
@@ -39,6 +40,9 @@ public class PendingInvocation {
     public String getFunctionArn() { return functionArn; }
     public String getClientContext() { return clientContext; }
     public void setClientContext(String clientContext) { this.clientContext = clientContext; }
+    /** The X-Ray trace header the runtime receives as {@code Lambda-Runtime-Trace-Id}, or null. */
+    public String getTraceHeader() { return traceHeader; }
+    public void setTraceHeader(String traceHeader) { this.traceHeader = traceHeader; }
     public CompletableFuture<InvokeResult> getResultFuture() { return resultFuture; }
     public CompletableFuture<Void> getDispatchedFuture() { return dispatchedFuture; }
 
