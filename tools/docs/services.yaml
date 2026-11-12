@@ -291,6 +291,10 @@ services:
     doc: docs/services/opensearchserverless.md
     sources:
       - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: sms-voice
+    doc: docs/services/pinpointsmsvoicev2.md
+    sources:
+      - { path: services/pinpointsmsvoicev2/SmsVoiceJsonHandler.java, mode: switch }
   - service: personalize
     doc: docs/services/personalize.md
     sources:

@@ -1,0 +1,3198 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_pinpointsmsvoicev2_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateOriginationIdentity": "AssociateOriginationIdentityRequest",
+    "AssociateProtectConfiguration": "AssociateProtectConfigurationRequest",
+    "CarrierLookup": "CarrierLookupRequest",
+    "CreateConfigurationSet": "CreateConfigurationSetRequest",
+    "CreateEventDestination": "CreateEventDestinationRequest",
+    "CreateNotifyConfiguration": "CreateNotifyConfigurationRequest",
+    "CreateOptOutList": "CreateOptOutListRequest",
+    "CreatePool": "CreatePoolRequest",
+    "CreateProtectConfiguration": "CreateProtectConfigurationRequest",
+    "CreateRcsAgent": "CreateRcsAgentRequest",
+    "CreateRegistration": "CreateRegistrationRequest",
+    "CreateRegistrationAssociation": "CreateRegistrationAssociationRequest",
+    "CreateRegistrationAttachment": "CreateRegistrationAttachmentRequest",
+    "CreateRegistrationVersion": "CreateRegistrationVersionRequest",
+    "CreateVerifiedDestinationNumber": "CreateVerifiedDestinationNumberRequest",
+    "DeleteAccountDefaultProtectConfiguration": "DeleteAccountDefaultProtectConfigurationRequest",
+    "DeleteConfigurationSet": "DeleteConfigurationSetRequest",
+    "DeleteDefaultMessageType": "DeleteDefaultMessageTypeRequest",
+    "DeleteDefaultSenderId": "DeleteDefaultSenderIdRequest",
+    "DeleteEventDestination": "DeleteEventDestinationRequest",
+    "DeleteKeyword": "DeleteKeywordRequest",
+    "DeleteMediaMessageSpendLimitOverride": "DeleteMediaMessageSpendLimitOverrideRequest",
+    "DeleteNotifyConfiguration": "DeleteNotifyConfigurationRequest",
+    "DeleteNotifyMessageSpendLimitOverride": "DeleteNotifyMessageSpendLimitOverrideRequest",
+    "DeleteOptOutList": "DeleteOptOutListRequest",
+    "DeleteOptedOutNumber": "DeleteOptedOutNumberRequest",
+    "DeletePool": "DeletePoolRequest",
+    "DeleteProtectConfiguration": "DeleteProtectConfigurationRequest",
+    "DeleteProtectConfigurationRuleSetNumberOverride": "DeleteProtectConfigurationRuleSetNumberOverrideRequest",
+    "DeleteRcsAgent": "DeleteRcsAgentRequest",
+    "DeleteRcsMessageSpendLimitOverride": "DeleteRcsMessageSpendLimitOverrideRequest",
+    "DeleteRegistration": "DeleteRegistrationRequest",
+    "DeleteRegistrationAttachment": "DeleteRegistrationAttachmentRequest",
+    "DeleteRegistrationFieldValue": "DeleteRegistrationFieldValueRequest",
+    "DeleteResourcePolicy": "DeleteResourcePolicyRequest",
+    "DeleteTextMessageSpendLimitOverride": "DeleteTextMessageSpendLimitOverrideRequest",
+    "DeleteVerifiedDestinationNumber": "DeleteVerifiedDestinationNumberRequest",
+    "DeleteVoiceMessageSpendLimitOverride": "DeleteVoiceMessageSpendLimitOverrideRequest",
+    "DescribeAccountAttributes": "DescribeAccountAttributesRequest",
+    "DescribeAccountLimits": "DescribeAccountLimitsRequest",
+    "DescribeConfigurationSets": "DescribeConfigurationSetsRequest",
+    "DescribeKeywords": "DescribeKeywordsRequest",
+    "DescribeNotifyConfigurations": "DescribeNotifyConfigurationsRequest",
+    "DescribeNotifyTemplates": "DescribeNotifyTemplatesRequest",
+    "DescribeOptOutLists": "DescribeOptOutListsRequest",
+    "DescribeOptedOutNumbers": "DescribeOptedOutNumbersRequest",
+    "DescribePhoneNumbers": "DescribePhoneNumbersRequest",
+    "DescribePools": "DescribePoolsRequest",
+    "DescribeProtectConfigurations": "DescribeProtectConfigurationsRequest",
+    "DescribeRcsAgentCountryLaunchStatus": "DescribeRcsAgentCountryLaunchStatusRequest",
+    "DescribeRcsAgents": "DescribeRcsAgentsRequest",
+    "DescribeRegistrationAttachments": "DescribeRegistrationAttachmentsRequest",
+    "DescribeRegistrationFieldDefinitions": "DescribeRegistrationFieldDefinitionsRequest",
+    "DescribeRegistrationFieldValues": "DescribeRegistrationFieldValuesRequest",
+    "DescribeRegistrationSectionDefinitions": "DescribeRegistrationSectionDefinitionsRequest",
+    "DescribeRegistrationTypeDefinitions": "DescribeRegistrationTypeDefinitionsRequest",
+    "DescribeRegistrationVersions": "DescribeRegistrationVersionsRequest",
+    "DescribeRegistrations": "DescribeRegistrationsRequest",
+    "DescribeSenderIds": "DescribeSenderIdsRequest",
+    "DescribeSpendLimits": "DescribeSpendLimitsRequest",
+    "DescribeVerifiedDestinationNumbers": "DescribeVerifiedDestinationNumbersRequest",
+    "DisassociateOriginationIdentity": "DisassociateOriginationIdentityRequest",
+    "DisassociateProtectConfiguration": "DisassociateProtectConfigurationRequest",
+    "DiscardRegistrationVersion": "DiscardRegistrationVersionRequest",
+    "GetProtectConfigurationCountryRuleSet": "GetProtectConfigurationCountryRuleSetRequest",
+    "GetResourcePolicy": "GetResourcePolicyRequest",
+    "ListAvailablePhoneNumbers": "ListAvailablePhoneNumbersRequest",
+    "ListNotifyCountries": "ListNotifyCountriesRequest",
+    "ListPoolOriginationIdentities": "ListPoolOriginationIdentitiesRequest",
+    "ListProtectConfigurationRuleSetNumberOverrides": "ListProtectConfigurationRuleSetNumberOverridesRequest",
+    "ListRegistrationAssociations": "ListRegistrationAssociationsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutKeyword": "PutKeywordRequest",
+    "PutMessageFeedback": "PutMessageFeedbackRequest",
+    "PutOptedOutNumber": "PutOptedOutNumberRequest",
+    "PutProtectConfigurationRuleSetNumberOverride": "PutProtectConfigurationRuleSetNumberOverrideRequest",
+    "PutRegistrationFieldValue": "PutRegistrationFieldValueRequest",
+    "PutResourcePolicy": "PutResourcePolicyRequest",
+    "ReleasePhoneNumber": "ReleasePhoneNumberRequest",
+    "ReleaseSenderId": "ReleaseSenderIdRequest",
+    "RequestPhoneNumber": "RequestPhoneNumberRequest",
+    "RequestSenderId": "RequestSenderIdRequest",
+    "SendDestinationNumberVerificationCode": "SendDestinationNumberVerificationCodeRequest",
+    "SendMediaMessage": "SendMediaMessageRequest",
+    "SendNotifyTextMessage": "SendNotifyTextMessageRequest",
+    "SendNotifyVoiceMessage": "SendNotifyVoiceMessageRequest",
+    "SendRcsMessage": "SendRcsMessageRequest",
+    "SendTextMessage": "SendTextMessageRequest",
+    "SendVoiceMessage": "SendVoiceMessageRequest",
+    "SetAccountDefaultProtectConfiguration": "SetAccountDefaultProtectConfigurationRequest",
+    "SetDefaultMessageFeedbackEnabled": "SetDefaultMessageFeedbackEnabledRequest",
+    "SetDefaultMessageType": "SetDefaultMessageTypeRequest",
+    "SetDefaultSenderId": "SetDefaultSenderIdRequest",
+    "SetMediaMessageSpendLimitOverride": "SetMediaMessageSpendLimitOverrideRequest",
+    "SetNotifyMessageSpendLimitOverride": "SetNotifyMessageSpendLimitOverrideRequest",
+    "SetRcsMessageSpendLimitOverride": "SetRcsMessageSpendLimitOverrideRequest",
+    "SetTextMessageSpendLimitOverride": "SetTextMessageSpendLimitOverrideRequest",
+    "SetVoiceMessageSpendLimitOverride": "SetVoiceMessageSpendLimitOverrideRequest",
+    "SubmitRegistrationVersion": "SubmitRegistrationVersionRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateEventDestination": "UpdateEventDestinationRequest",
+    "UpdateNotifyConfiguration": "UpdateNotifyConfigurationRequest",
+    "UpdatePhoneNumber": "UpdatePhoneNumberRequest",
+    "UpdatePool": "UpdatePoolRequest",
+    "UpdateProtectConfiguration": "UpdateProtectConfigurationRequest",
+    "UpdateProtectConfigurationCountryRuleSet": "UpdateProtectConfigurationCountryRuleSetRequest",
+    "UpdateRcsAgent": "UpdateRcsAgentRequest",
+    "UpdateSenderId": "UpdateSenderIdRequest",
+    "VerifyDestinationNumber": "VerifyDestinationNumberRequest"
+  },
+  "shapes": {
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 20,
+      "max": 256,
+      "pattern": "arn:[A-Za-z0-9_:/-]+"
+    },
+    "AssociateOriginationIdentityRequest": {
+      "type": "structure",
+      "required": [
+        "PoolId",
+        "OriginationIdentity"
+      ],
+      "members": {
+        "PoolId": "PoolIdOrArn",
+        "OriginationIdentity": "PhoneOrSenderIdOrArn",
+        "IsoCountryCode": "IsoCountryCode",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "AssociateProtectConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectConfigurationId",
+        "ConfigurationSetName"
+      ],
+      "members": {
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "ConfigurationSetName": "ConfigurationSetNameOrArn"
+      }
+    },
+    "AttachmentBody": {
+      "type": "blob",
+      "min": 1,
+      "max": 6990508
+    },
+    "AttachmentUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "\\S+"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CarrierLookupInputPhoneNumberType": {
+      "type": "string",
+      "min": 1,
+      "max": 40,
+      "pattern": "\\+[({\\s\\[]?[1-9][0-9(){}\\s\\[\\],.-]{1,38}"
+    },
+    "CarrierLookupRequest": {
+      "type": "structure",
+      "required": [
+        "PhoneNumber"
+      ],
+      "members": {
+        "PhoneNumber": "CarrierLookupInputPhoneNumberType",
+        "EnableCleansing": "Boolean"
+      }
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[!-~]+"
+    },
+    "CloudWatchLogsDestination": {
+      "type": "structure",
+      "required": [
+        "IamRoleArn",
+        "LogGroupArn"
+      ],
+      "members": {
+        "IamRoleArn": "IamRoleArn",
+        "LogGroupArn": "LogGroupArn"
+      }
+    },
+    "ConfigurationSetFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "ConfigurationSetFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "ConfigurationSetFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "ConfigurationSetFilter"
+    },
+    "ConfigurationSetFilterName": {
+      "type": "string",
+      "enum": [
+        "event-destination-name",
+        "matching-event-types",
+        "default-message-type",
+        "default-sender-id",
+        "default-message-feedback-enabled",
+        "protect-configuration-id"
+      ]
+    },
+    "ConfigurationSetName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9_-]+"
+    },
+    "ConfigurationSetNameList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "ConfigurationSetNameOrArn"
+    },
+    "ConfigurationSetNameOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "ContextKey": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "\\S+"
+    },
+    "ContextMap": {
+      "type": "map",
+      "min": 0,
+      "max": 5,
+      "key": "ContextKey",
+      "value": "ContextValue"
+    },
+    "ContextValue": {
+      "type": "string",
+      "min": 1,
+      "max": 800,
+      "pattern": "(?!\\s)^[\\s\\S]+(?<!\\s)"
+    },
+    "CountryLaunchStatusFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "CountryLaunchStatusFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "CountryLaunchStatusFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "CountryLaunchStatusFilter"
+    },
+    "CountryLaunchStatusFilterName": {
+      "type": "string",
+      "enum": [
+        "country-launch-status"
+      ]
+    },
+    "CreateConfigurationSetRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationSetName"
+      ],
+      "members": {
+        "ConfigurationSetName": "ConfigurationSetName",
+        "Tags": "TagList",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateEventDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationSetName",
+        "EventDestinationName",
+        "MatchingEventTypes"
+      ],
+      "members": {
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "EventDestinationName": "EventDestinationName",
+        "MatchingEventTypes": "EventTypeList",
+        "CloudWatchLogsDestination": "CloudWatchLogsDestination",
+        "KinesisFirehoseDestination": "KinesisFirehoseDestination",
+        "SnsDestination": "SnsDestination",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateNotifyConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "DisplayName",
+        "UseCase",
+        "EnabledChannels"
+      ],
+      "members": {
+        "DisplayName": "NotifyConfigurationDisplayName",
+        "UseCase": "NotifyConfigurationUseCase",
+        "DefaultTemplateId": "NotifyTemplateId",
+        "PoolId": "PoolIdOrArn",
+        "EnabledCountries": "IsoCountryCodeList",
+        "EnabledChannels": "NotifyEnabledChannelsList",
+        "DeletionProtectionEnabled": "Boolean",
+        "ClientToken": "ClientToken",
+        "Tags": "TagList"
+      }
+    },
+    "CreateOptOutListRequest": {
+      "type": "structure",
+      "required": [
+        "OptOutListName"
+      ],
+      "members": {
+        "OptOutListName": "OptOutListName",
+        "Tags": "TagList",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreatePoolRequest": {
+      "type": "structure",
+      "required": [
+        "OriginationIdentity",
+        "MessageType"
+      ],
+      "members": {
+        "OriginationIdentity": "PhoneOrSenderIdOrArn",
+        "IsoCountryCode": "IsoCountryCode",
+        "MessageType": "MessageType",
+        "DeletionProtectionEnabled": "Boolean",
+        "Tags": "TagList",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateProtectConfigurationRequest": {
+      "type": "structure",
+      "members": {
+        "ClientToken": "ClientToken",
+        "DeletionProtectionEnabled": "Boolean",
+        "Tags": "TagList"
+      }
+    },
+    "CreateRcsAgentRequest": {
+      "type": "structure",
+      "members": {
+        "DeletionProtectionEnabled": "Boolean",
+        "OptOutListName": "OptOutListNameOrArn",
+        "Tags": "TagList",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateRegistrationAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationId",
+        "ResourceId"
+      ],
+      "members": {
+        "RegistrationId": "RegistrationIdOrArn",
+        "ResourceId": "ResourceIdOrArn"
+      }
+    },
+    "CreateRegistrationAttachmentRequest": {
+      "type": "structure",
+      "members": {
+        "AttachmentBody": "AttachmentBody",
+        "AttachmentUrl": "AttachmentUrl",
+        "Tags": "TagList",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateRegistrationRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationType"
+      ],
+      "members": {
+        "RegistrationType": "RegistrationType",
+        "Tags": "TagList",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateRegistrationVersionRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationId"
+      ],
+      "members": {
+        "RegistrationId": "RegistrationIdOrArn"
+      }
+    },
+    "CreateVerifiedDestinationNumberRequest": {
+      "type": "structure",
+      "required": [
+        "DestinationPhoneNumber"
+      ],
+      "members": {
+        "DestinationPhoneNumber": "PhoneNumber",
+        "RcsAgentId": "RcsAgentIdOrArn",
+        "Tags": "TagList",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "DeleteAccountDefaultProtectConfigurationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DeleteConfigurationSetRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationSetName"
+      ],
+      "members": {
+        "ConfigurationSetName": "ConfigurationSetNameOrArn"
+      }
+    },
+    "DeleteDefaultMessageTypeRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationSetName"
+      ],
+      "members": {
+        "ConfigurationSetName": "ConfigurationSetNameOrArn"
+      }
+    },
+    "DeleteDefaultSenderIdRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationSetName"
+      ],
+      "members": {
+        "ConfigurationSetName": "ConfigurationSetNameOrArn"
+      }
+    },
+    "DeleteEventDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationSetName",
+        "EventDestinationName"
+      ],
+      "members": {
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "EventDestinationName": "EventDestinationName"
+      }
+    },
+    "DeleteKeywordRequest": {
+      "type": "structure",
+      "required": [
+        "OriginationIdentity",
+        "Keyword"
+      ],
+      "members": {
+        "OriginationIdentity": "PhoneOrPoolIdOrArn",
+        "Keyword": "Keyword"
+      }
+    },
+    "DeleteMediaMessageSpendLimitOverrideRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DeleteNotifyConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "NotifyConfigurationId"
+      ],
+      "members": {
+        "NotifyConfigurationId": "NotifyConfigurationIdOrArn"
+      }
+    },
+    "DeleteNotifyMessageSpendLimitOverrideRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DeleteOptOutListRequest": {
+      "type": "structure",
+      "required": [
+        "OptOutListName"
+      ],
+      "members": {
+        "OptOutListName": "OptOutListNameOrArn"
+      }
+    },
+    "DeleteOptedOutNumberRequest": {
+      "type": "structure",
+      "required": [
+        "OptOutListName",
+        "OptedOutNumber"
+      ],
+      "members": {
+        "OptOutListName": "OptOutListNameOrArn",
+        "OptedOutNumber": "PhoneNumber"
+      }
+    },
+    "DeletePoolRequest": {
+      "type": "structure",
+      "required": [
+        "PoolId"
+      ],
+      "members": {
+        "PoolId": "PoolIdOrArn"
+      }
+    },
+    "DeleteProtectConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectConfigurationId"
+      ],
+      "members": {
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn"
+      }
+    },
+    "DeleteProtectConfigurationRuleSetNumberOverrideRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectConfigurationId",
+        "DestinationPhoneNumber"
+      ],
+      "members": {
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "DestinationPhoneNumber": "PhoneNumber"
+      }
+    },
+    "DeleteRcsAgentRequest": {
+      "type": "structure",
+      "required": [
+        "RcsAgentId"
+      ],
+      "members": {
+        "RcsAgentId": "RcsAgentIdOrArn"
+      }
+    },
+    "DeleteRcsMessageSpendLimitOverrideRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DeleteRegistrationAttachmentRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationAttachmentId"
+      ],
+      "members": {
+        "RegistrationAttachmentId": "RegistrationAttachmentIdOrArn"
+      }
+    },
+    "DeleteRegistrationFieldValueRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationId",
+        "FieldPath"
+      ],
+      "members": {
+        "RegistrationId": "RegistrationIdOrArn",
+        "FieldPath": "FieldPath"
+      }
+    },
+    "DeleteRegistrationRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationId"
+      ],
+      "members": {
+        "RegistrationId": "RegistrationIdOrArn"
+      }
+    },
+    "DeleteResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName"
+      }
+    },
+    "DeleteTextMessageSpendLimitOverrideRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DeleteVerifiedDestinationNumberRequest": {
+      "type": "structure",
+      "required": [
+        "VerifiedDestinationNumberId"
+      ],
+      "members": {
+        "VerifiedDestinationNumberId": "VerifiedDestinationNumberIdOrArn"
+      }
+    },
+    "DeleteVoiceMessageSpendLimitOverrideRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DeliveryStreamArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:\\S+"
+    },
+    "DescribeAccountAttributesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeAccountLimitsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeConfigurationSetsRequest": {
+      "type": "structure",
+      "members": {
+        "ConfigurationSetNames": "ConfigurationSetNameList",
+        "Filters": "ConfigurationSetFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeKeywordsRequest": {
+      "type": "structure",
+      "required": [
+        "OriginationIdentity"
+      ],
+      "members": {
+        "OriginationIdentity": "PhoneOrPoolIdOrArn",
+        "Keywords": "KeywordList",
+        "Filters": "KeywordFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeNotifyConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "NotifyConfigurationIds": "NotifyConfigurationIdList",
+        "Filters": "NotifyConfigurationFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeNotifyTemplatesRequest": {
+      "type": "structure",
+      "members": {
+        "TemplateIds": "NotifyTemplateIdList",
+        "Filters": "NotifyTemplateFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeOptOutListsRequest": {
+      "type": "structure",
+      "members": {
+        "OptOutListNames": "OptOutListNameList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Owner": "Owner"
+      }
+    },
+    "DescribeOptedOutNumbersRequest": {
+      "type": "structure",
+      "required": [
+        "OptOutListName"
+      ],
+      "members": {
+        "OptOutListName": "OptOutListNameOrArn",
+        "OptedOutNumbers": "OptedOutNumberList",
+        "Filters": "OptedOutFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribePhoneNumbersRequest": {
+      "type": "structure",
+      "members": {
+        "PhoneNumberIds": "PhoneNumberIdList",
+        "Filters": "PhoneNumberFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Owner": "Owner"
+      }
+    },
+    "DescribePoolsRequest": {
+      "type": "structure",
+      "members": {
+        "PoolIds": "PoolIdList",
+        "Filters": "PoolFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Owner": "Owner"
+      }
+    },
+    "DescribeProtectConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "ProtectConfigurationIds": "ProtectConfigurationIdList",
+        "Filters": "ProtectConfigurationFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeRcsAgentCountryLaunchStatusRequest": {
+      "type": "structure",
+      "required": [
+        "RcsAgentId"
+      ],
+      "members": {
+        "RcsAgentId": "RcsAgentIdOrArn",
+        "IsoCountryCodes": "IsoCountryCodeList",
+        "Filters": "CountryLaunchStatusFilterList",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "DescribeRcsAgentsRequest": {
+      "type": "structure",
+      "members": {
+        "RcsAgentIds": "RcsAgentIdList",
+        "Owner": "Owner",
+        "Filters": "RcsAgentFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeRegistrationAttachmentsRequest": {
+      "type": "structure",
+      "members": {
+        "RegistrationAttachmentIds": "RegistrationAttachmentIdList",
+        "Filters": "RegistrationAttachmentFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeRegistrationFieldDefinitionsRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationType"
+      ],
+      "members": {
+        "RegistrationType": "RegistrationType",
+        "SectionPath": "SectionPath",
+        "FieldPaths": "FieldPathList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeRegistrationFieldValuesRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationId"
+      ],
+      "members": {
+        "RegistrationId": "RegistrationIdOrArn",
+        "VersionNumber": "RegistrationVersionNumber",
+        "SectionPath": "SectionPath",
+        "FieldPaths": "FieldPathList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeRegistrationSectionDefinitionsRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationType"
+      ],
+      "members": {
+        "RegistrationType": "RegistrationType",
+        "SectionPaths": "SectionPathList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeRegistrationTypeDefinitionsRequest": {
+      "type": "structure",
+      "members": {
+        "RegistrationTypes": "RegistrationTypeList",
+        "Filters": "RegistrationTypeFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeRegistrationVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationId"
+      ],
+      "members": {
+        "RegistrationId": "RegistrationIdOrArn",
+        "VersionNumbers": "RegistrationVersionNumberList",
+        "Filters": "RegistrationVersionFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeRegistrationsRequest": {
+      "type": "structure",
+      "members": {
+        "RegistrationIds": "RegistrationIdList",
+        "Filters": "RegistrationFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeSenderIdsRequest": {
+      "type": "structure",
+      "members": {
+        "SenderIds": "SenderIdList",
+        "Filters": "SenderIdFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Owner": "Owner"
+      }
+    },
+    "DescribeSpendLimitsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DescribeVerifiedDestinationNumbersRequest": {
+      "type": "structure",
+      "members": {
+        "VerifiedDestinationNumberIds": "VerifiedDestinationNumberIdList",
+        "DestinationPhoneNumbers": "DestinationPhoneNumberList",
+        "Filters": "VerifiedDestinationNumberFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "DestinationCountryParameterKey": {
+      "type": "string",
+      "enum": [
+        "IN_TEMPLATE_ID",
+        "IN_ENTITY_ID"
+      ]
+    },
+    "DestinationCountryParameterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "\\S+"
+    },
+    "DestinationCountryParameters": {
+      "type": "map",
+      "min": 0,
+      "max": 10,
+      "key": "DestinationCountryParameterKey",
+      "value": "DestinationCountryParameterValue"
+    },
+    "DestinationPhoneNumberList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "PhoneNumber"
+    },
+    "DisassociateOriginationIdentityRequest": {
+      "type": "structure",
+      "required": [
+        "PoolId",
+        "OriginationIdentity"
+      ],
+      "members": {
+        "PoolId": "PoolIdOrArn",
+        "OriginationIdentity": "PhoneOrSenderIdOrArn",
+        "IsoCountryCode": "IsoCountryCode",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "DisassociateProtectConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectConfigurationId",
+        "ConfigurationSetName"
+      ],
+      "members": {
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "ConfigurationSetName": "ConfigurationSetNameOrArn"
+      }
+    },
+    "DiscardRegistrationVersionRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationId"
+      ],
+      "members": {
+        "RegistrationId": "RegistrationIdOrArn"
+      }
+    },
+    "EventDestinationName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9_-]+"
+    },
+    "EventType": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "TEXT_ALL",
+        "TEXT_SENT",
+        "TEXT_PENDING",
+        "TEXT_QUEUED",
+        "TEXT_SUCCESSFUL",
+        "TEXT_DELIVERED",
+        "TEXT_INVALID",
+        "TEXT_INVALID_MESSAGE",
+        "TEXT_UNREACHABLE",
+        "TEXT_CARRIER_UNREACHABLE",
+        "TEXT_BLOCKED",
+        "TEXT_CARRIER_BLOCKED",
+        "TEXT_SPAM",
+        "TEXT_UNKNOWN",
+        "TEXT_TTL_EXPIRED",
+        "TEXT_PROTECT_BLOCKED",
+        "VOICE_ALL",
+        "VOICE_INITIATED",
+        "VOICE_RINGING",
+        "VOICE_ANSWERED",
+        "VOICE_COMPLETED",
+        "VOICE_BUSY",
+        "VOICE_NO_ANSWER",
+        "VOICE_FAILED",
+        "VOICE_TTL_EXPIRED",
+        "MEDIA_ALL",
+        "MEDIA_PENDING",
+        "MEDIA_QUEUED",
+        "MEDIA_SUCCESSFUL",
+        "MEDIA_DELIVERED",
+        "MEDIA_INVALID",
+        "MEDIA_INVALID_MESSAGE",
+        "MEDIA_UNREACHABLE",
+        "MEDIA_CARRIER_UNREACHABLE",
+        "MEDIA_BLOCKED",
+        "MEDIA_CARRIER_BLOCKED",
+        "MEDIA_SPAM",
+        "MEDIA_UNKNOWN",
+        "MEDIA_TTL_EXPIRED",
+        "MEDIA_FILE_INACCESSIBLE",
+        "MEDIA_FILE_TYPE_UNSUPPORTED",
+        "MEDIA_FILE_SIZE_EXCEEDED",
+        "RCS_ALL",
+        "RCS_QUEUED",
+        "RCS_SENT",
+        "RCS_DELIVERED",
+        "RCS_READ",
+        "RCS_FAILED",
+        "RCS_TTL_EXPIRED",
+        "RCS_PROTECT_BLOCKED",
+        "RCS_FALLEN_BACK_TO_SMS"
+      ]
+    },
+    "EventTypeList": {
+      "type": "list",
+      "min": 1,
+      "max": 52,
+      "member": "EventType"
+    },
+    "FieldPath": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[A-Za-z0-9_\\.]+"
+    },
+    "FieldPathList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "FieldPath"
+    },
+    "FilterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[/\\.:A-Za-z0-9+_-]+"
+    },
+    "FilterValueList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "FilterValue"
+    },
+    "GetProtectConfigurationCountryRuleSetRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectConfigurationId",
+        "NumberCapability"
+      ],
+      "members": {
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "NumberCapability": "NumberCapability"
+      }
+    },
+    "GetResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName"
+      }
+    },
+    "IamRoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:\\S+"
+    },
+    "IamRoleArnOrUnset": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "(arn:\\S+|UNSET_RCS_MEDIA_CONFIGURATION)"
+    },
+    "IsoCountryCode": {
+      "type": "string",
+      "min": 2,
+      "max": 2,
+      "pattern": "[A-Z]{2}"
+    },
+    "IsoCountryCodeList": {
+      "type": "list",
+      "min": 0,
+      "max": 300,
+      "member": "IsoCountryCode"
+    },
+    "Keyword": {
+      "type": "string",
+      "min": 1,
+      "max": 30,
+      "pattern": "[ \\S]+"
+    },
+    "KeywordAction": {
+      "type": "string",
+      "enum": [
+        "AUTOMATIC_RESPONSE",
+        "OPT_OUT",
+        "OPT_IN"
+      ]
+    },
+    "KeywordFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "KeywordFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "KeywordFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "KeywordFilter"
+    },
+    "KeywordFilterName": {
+      "type": "string",
+      "enum": [
+        "keyword-action"
+      ]
+    },
+    "KeywordList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "Keyword"
+    },
+    "KeywordMessage": {
+      "type": "string",
+      "min": 1,
+      "max": 1600,
+      "pattern": "(?!\\s*$)[\\s\\S]+"
+    },
+    "KinesisFirehoseDestination": {
+      "type": "structure",
+      "required": [
+        "IamRoleArn",
+        "DeliveryStreamArn"
+      ],
+      "members": {
+        "IamRoleArn": "IamRoleArn",
+        "DeliveryStreamArn": "DeliveryStreamArn"
+      }
+    },
+    "LanguageCode": {
+      "type": "string",
+      "enum": [
+        "DE_DE",
+        "EN_GB",
+        "EN_US",
+        "ES_419",
+        "ES_ES",
+        "FR_CA",
+        "FR_FR",
+        "IT_IT",
+        "JA_JP",
+        "KO_KR",
+        "PT_BR",
+        "ZH_CN",
+        "ZH_TW"
+      ]
+    },
+    "ListAvailablePhoneNumbersMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "ListAvailablePhoneNumbersRequest": {
+      "type": "structure",
+      "required": [
+        "IsoCountryCode",
+        "NumberCapabilities",
+        "NumberType"
+      ],
+      "members": {
+        "IsoCountryCode": "IsoCountryCode",
+        "NumberCapabilities": "NumberCapabilityList",
+        "NumberType": "SearchableNumberType",
+        "RegistrationId": "RegistrationIdOrArn",
+        "NumberPreference": "NumberPreferenceList",
+        "NextToken": "NextToken",
+        "MaxResults": "ListAvailablePhoneNumbersMaxResults"
+      }
+    },
+    "ListNotifyCountriesRequest": {
+      "type": "structure",
+      "members": {
+        "Channels": "NotifyEnabledChannelsList",
+        "UseCases": "NotifyUseCaseList",
+        "Tier": "NotifyConfigurationTier",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListPoolOriginationIdentitiesRequest": {
+      "type": "structure",
+      "required": [
+        "PoolId"
+      ],
+      "members": {
+        "PoolId": "PoolIdOrArn",
+        "Filters": "PoolOriginationIdentitiesFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListProtectConfigurationRuleSetNumberOverrideFilter": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "ProtectConfigurationRuleSetNumberOverrideFilterItem"
+    },
+    "ListProtectConfigurationRuleSetNumberOverridesRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectConfigurationId"
+      ],
+      "members": {
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "Filters": "ListProtectConfigurationRuleSetNumberOverrideFilter",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListRegistrationAssociationsRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationId"
+      ],
+      "members": {
+        "RegistrationId": "RegistrationIdOrArn",
+        "Filters": "RegistrationAssociationFilterList",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName"
+      }
+    },
+    "LogGroupArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:\\S+"
+    },
+    "MaxPrice": {
+      "type": "string",
+      "min": 2,
+      "max": 8,
+      "pattern": "[0-9]{0,2}\\.[0-9]{1,5}"
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MediaMessageOriginationIdentity": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/\\+-]+"
+    },
+    "MediaUrlList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "MediaUrlValue"
+    },
+    "MediaUrlValue": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "s3://([a-z0-9\\.-]{3,63})/(.+)"
+    },
+    "MessageFeedbackStatus": {
+      "type": "string",
+      "enum": [
+        "RECEIVED",
+        "FAILED"
+      ]
+    },
+    "MessageId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "MessageType": {
+      "type": "string",
+      "enum": [
+        "TRANSACTIONAL",
+        "PROMOTIONAL"
+      ]
+    },
+    "MessageTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 2,
+      "member": "MessageType"
+    },
+    "MonthlyLimit": {
+      "type": "long",
+      "min": 0,
+      "max": 1000000000
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": ".+"
+    },
+    "NonEmptyTagList": {
+      "type": "list",
+      "min": 1,
+      "max": 200,
+      "member": "Tag"
+    },
+    "NotifyConfigurationDisplayName": {
+      "type": "string",
+      "min": 1,
+      "max": 15,
+      "pattern": "[A-Za-z0-9_ -]+"
+    },
+    "NotifyConfigurationFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "NotifyConfigurationFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "NotifyConfigurationFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "NotifyConfigurationFilter"
+    },
+    "NotifyConfigurationFilterName": {
+      "type": "string",
+      "enum": [
+        "display-name",
+        "enabled-countries",
+        "enabled-channels",
+        "default-template",
+        "default-pool",
+        "use-case",
+        "status",
+        "deletion-protection-enabled",
+        "tier-upgrade-status"
+      ]
+    },
+    "NotifyConfigurationIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "NotifyConfigurationIdOrArn"
+    },
+    "NotifyConfigurationIdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "NotifyConfigurationTier": {
+      "type": "string",
+      "enum": [
+        "BASIC",
+        "ADVANCED"
+      ]
+    },
+    "NotifyConfigurationUseCase": {
+      "type": "string",
+      "enum": [
+        "CODE_VERIFICATION"
+      ]
+    },
+    "NotifyEnabledChannelsList": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "NumberCapability"
+    },
+    "NotifyPoolIdOrUnset": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "([A-Za-z0-9_:/-]+|UNSET_DEFAULT_POOL_FOR_NOTIFY)"
+    },
+    "NotifyTemplateFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "NotifyTemplateFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "NotifyTemplateFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "NotifyTemplateFilter"
+    },
+    "NotifyTemplateFilterName": {
+      "type": "string",
+      "enum": [
+        "template-type",
+        "channels",
+        "tier-access",
+        "supported-countries",
+        "language-code",
+        "supported-voice-ids"
+      ]
+    },
+    "NotifyTemplateId": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "([A-Za-z0-9_-]*|UNSET_DEFAULT_TEMPLATE)"
+    },
+    "NotifyTemplateIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "NotifyTemplateId"
+    },
+    "NotifyUseCaseList": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "NotifyConfigurationUseCase"
+    },
+    "NumberCapability": {
+      "type": "string",
+      "enum": [
+        "SMS",
+        "VOICE",
+        "MMS",
+        "RCS"
+      ]
+    },
+    "NumberCapabilityList": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "NumberCapability"
+    },
+    "NumberFilterList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "NumberFilterValue"
+    },
+    "NumberFilterValue": {
+      "type": "string",
+      "min": 2,
+      "max": 16,
+      "pattern": "\\+?[0-9]{1,15}"
+    },
+    "NumberPreferenceItem": {
+      "type": "structure",
+      "required": [
+        "PreferenceType",
+        "Filter"
+      ],
+      "members": {
+        "PreferenceType": "PreferenceTypeList",
+        "Filter": "NumberFilterList"
+      }
+    },
+    "NumberPreferenceList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "NumberPreferenceItem"
+    },
+    "OptOutListName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9_-]+"
+    },
+    "OptOutListNameList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "OptOutListNameOrArn"
+    },
+    "OptOutListNameOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "OptedOutFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "OptedOutFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "OptedOutFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "OptedOutFilter"
+    },
+    "OptedOutFilterName": {
+      "type": "string",
+      "enum": [
+        "end-user-opted-out"
+      ]
+    },
+    "OptedOutNumberList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "PhoneNumber"
+    },
+    "Owner": {
+      "type": "string",
+      "enum": [
+        "SELF",
+        "SHARED"
+      ]
+    },
+    "PhoneNumber": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "pattern": "\\+?[1-9][0-9]{1,18}"
+    },
+    "PhoneNumberFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "PhoneNumberFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "PhoneNumberFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "PhoneNumberFilter"
+    },
+    "PhoneNumberFilterName": {
+      "type": "string",
+      "enum": [
+        "status",
+        "iso-country-code",
+        "message-type",
+        "number-capability",
+        "number-type",
+        "two-way-enabled",
+        "self-managed-opt-outs-enabled",
+        "opt-out-list-name",
+        "deletion-protection-enabled",
+        "two-way-channel-arn"
+      ]
+    },
+    "PhoneNumberIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "PhoneNumberIdOrArn"
+    },
+    "PhoneNumberIdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "PhoneOrPoolIdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "PhoneOrSenderIdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "PoolFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "PoolFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "PoolFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "PoolFilter"
+    },
+    "PoolFilterName": {
+      "type": "string",
+      "enum": [
+        "status",
+        "message-type",
+        "two-way-enabled",
+        "self-managed-opt-outs-enabled",
+        "opt-out-list-name",
+        "shared-routes-enabled",
+        "deletion-protection-enabled",
+        "two-way-channel-arn"
+      ]
+    },
+    "PoolIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "PoolIdOrArn"
+    },
+    "PoolIdOrArn": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]*"
+    },
+    "PoolOriginationIdentitiesFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "PoolOriginationIdentitiesFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "PoolOriginationIdentitiesFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "PoolOriginationIdentitiesFilter"
+    },
+    "PoolOriginationIdentitiesFilterName": {
+      "type": "string",
+      "enum": [
+        "iso-country-code",
+        "number-capability"
+      ]
+    },
+    "PreferenceType": {
+      "type": "string",
+      "enum": [
+        "StartsWith",
+        "EndsWith",
+        "Contains",
+        "ExactMatch"
+      ]
+    },
+    "PreferenceTypeList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "PreferenceType"
+    },
+    "PrimitiveBoolean": {
+      "type": "boolean"
+    },
+    "ProtectConfigurationCountryRuleSet": {
+      "type": "map",
+      "min": 1,
+      "max": 300,
+      "key": "IsoCountryCode",
+      "value": "ProtectConfigurationCountryRuleSetInformation"
+    },
+    "ProtectConfigurationCountryRuleSetInformation": {
+      "type": "structure",
+      "required": [
+        "ProtectStatus"
+      ],
+      "members": {
+        "ProtectStatus": "ProtectStatus"
+      }
+    },
+    "ProtectConfigurationFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "ProtectConfigurationFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "ProtectConfigurationFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "ProtectConfigurationFilter"
+    },
+    "ProtectConfigurationFilterName": {
+      "type": "string",
+      "enum": [
+        "account-default",
+        "deletion-protection-enabled"
+      ]
+    },
+    "ProtectConfigurationIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "ProtectConfigurationIdOrArn"
+    },
+    "ProtectConfigurationIdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "ProtectConfigurationRuleOverrideAction": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "BLOCK"
+      ]
+    },
+    "ProtectConfigurationRuleSetNumberOverrideFilterItem": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "ProtectConfigurationRuleSetNumberOverrideFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "ProtectConfigurationRuleSetNumberOverrideFilterName": {
+      "type": "string",
+      "enum": [
+        "iso-country-code",
+        "destination-phone-number-begins-with",
+        "action",
+        "expires-before",
+        "expires-after",
+        "created-before",
+        "created-after"
+      ]
+    },
+    "ProtectStatus": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "BLOCK",
+        "MONITOR",
+        "FILTER"
+      ]
+    },
+    "PutKeywordRequest": {
+      "type": "structure",
+      "required": [
+        "OriginationIdentity",
+        "Keyword",
+        "KeywordMessage"
+      ],
+      "members": {
+        "OriginationIdentity": "PhoneOrPoolIdOrArn",
+        "Keyword": "Keyword",
+        "KeywordMessage": "KeywordMessage",
+        "KeywordAction": "KeywordAction"
+      }
+    },
+    "PutMessageFeedbackRequest": {
+      "type": "structure",
+      "required": [
+        "MessageId",
+        "MessageFeedbackStatus"
+      ],
+      "members": {
+        "MessageId": "MessageId",
+        "MessageFeedbackStatus": "MessageFeedbackStatus"
+      }
+    },
+    "PutOptedOutNumberRequest": {
+      "type": "structure",
+      "required": [
+        "OptOutListName",
+        "OptedOutNumber"
+      ],
+      "members": {
+        "OptOutListName": "OptOutListNameOrArn",
+        "OptedOutNumber": "PhoneNumber"
+      }
+    },
+    "PutProtectConfigurationRuleSetNumberOverrideRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectConfigurationId",
+        "DestinationPhoneNumber",
+        "Action"
+      ],
+      "members": {
+        "ClientToken": "ClientToken",
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "DestinationPhoneNumber": "PhoneNumber",
+        "Action": "ProtectConfigurationRuleOverrideAction",
+        "ExpirationTimestamp": "Timestamp"
+      }
+    },
+    "PutRegistrationFieldValueRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationId",
+        "FieldPath"
+      ],
+      "members": {
+        "RegistrationId": "RegistrationIdOrArn",
+        "FieldPath": "FieldPath",
+        "SelectChoices": "SelectChoiceList",
+        "TextValue": "TextValue",
+        "RegistrationAttachmentId": "RegistrationAttachmentIdOrArn"
+      }
+    },
+    "PutResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Policy"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName",
+        "Policy": "ResourcePolicy"
+      }
+    },
+    "RcsAgentFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "RcsAgentFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "RcsAgentFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "RcsAgentFilter"
+    },
+    "RcsAgentFilterName": {
+      "type": "string",
+      "enum": [
+        "status",
+        "two-way-enabled",
+        "self-managed-opt-outs-enabled",
+        "opt-out-list-name",
+        "deletion-protection-enabled",
+        "two-way-channel-arn"
+      ]
+    },
+    "RcsAgentIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "RcsAgentIdOrArn"
+    },
+    "RcsAgentIdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "RcsCalendarEventDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 500
+    },
+    "RcsCalendarEventTitle": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "RcsCardContent": {
+      "type": "structure",
+      "members": {
+        "Title": "RcsCardTitle",
+        "Description": "RcsCardDescription",
+        "Media": "RcsCardMedia",
+        "Suggestions": "RcsCardSuggestedActionList"
+      }
+    },
+    "RcsCardDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 2000
+    },
+    "RcsCardMedia": {
+      "type": "structure",
+      "required": [
+        "FileUrl"
+      ],
+      "members": {
+        "FileUrl": "RcsMediaUrl",
+        "ThumbnailUrl": "RcsMediaUrl",
+        "Height": "RcsCardMediaHeightString"
+      }
+    },
+    "RcsCardMediaHeightString": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "[A-Z_]+"
+    },
+    "RcsCardSuggestedActionList": {
+      "type": "list",
+      "min": 0,
+      "max": 4,
+      "member": "RcsSuggestedAction"
+    },
+    "RcsCardTitle": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "RcsCarousel": {
+      "type": "structure",
+      "required": [
+        "CardWidth",
+        "CardContents"
+      ],
+      "members": {
+        "CardWidth": "RcsCarouselCardWidthString",
+        "CardContents": "RcsCarouselCardContentList"
+      }
+    },
+    "RcsCarouselCardContent": {
+      "type": "structure",
+      "members": {
+        "Title": "RcsCardTitle",
+        "Description": "RcsCardDescription",
+        "Media": "RcsCarouselCardMedia",
+        "Suggestions": "RcsCardSuggestedActionList"
+      }
+    },
+    "RcsCarouselCardContentList": {
+      "type": "list",
+      "min": 2,
+      "max": 10,
+      "member": "RcsCarouselCardContent"
+    },
+    "RcsCarouselCardMedia": {
+      "type": "structure",
+      "required": [
+        "FileUrl"
+      ],
+      "members": {
+        "FileUrl": "RcsMediaUrl",
+        "ThumbnailUrl": "RcsMediaUrl",
+        "Height": "RcsCarouselCardMediaHeightString"
+      }
+    },
+    "RcsCarouselCardMediaHeightString": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "[A-Z_]+"
+    },
+    "RcsCarouselCardWidthString": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "[A-Z_]+"
+    },
+    "RcsContent": {
+      "type": "structure",
+      "members": {
+        "TextMessage": "RcsTextMessage",
+        "FileMessage": "RcsFileMessage",
+        "RichCard": "RcsStandaloneCard",
+        "Carousel": "RcsCarousel"
+      }
+    },
+    "RcsCreateCalendarEventAction": {
+      "type": "structure",
+      "required": [
+        "Text",
+        "PostbackData",
+        "Title",
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "Text": "RcsSuggestedActionText",
+        "PostbackData": "RcsPostbackData",
+        "Title": "RcsCalendarEventTitle",
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp",
+        "Description": "RcsCalendarEventDescription"
+      }
+    },
+    "RcsDialPhoneAction": {
+      "type": "structure",
+      "required": [
+        "Text",
+        "PostbackData",
+        "PhoneNumber"
+      ],
+      "members": {
+        "Text": "RcsSuggestedActionText",
+        "PostbackData": "RcsPostbackData",
+        "PhoneNumber": "PhoneNumber"
+      }
+    },
+    "RcsEventType": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "RcsEventTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "RcsEventType"
+    },
+    "RcsFallbackChannel": {
+      "type": "string",
+      "enum": [
+        "SMS",
+        "MMS"
+      ]
+    },
+    "RcsFallbackConfiguration": {
+      "type": "structure",
+      "required": [
+        "Channel"
+      ],
+      "members": {
+        "Channel": "RcsFallbackChannel",
+        "MessageBody": "RcsFallbackMessageBody",
+        "MediaUrls": "MediaUrlList",
+        "OriginationIdentity": "RcsFallbackOriginationIdentity"
+      }
+    },
+    "RcsFallbackMessageBody": {
+      "type": "string",
+      "min": 1,
+      "max": 1600,
+      "pattern": "(?!\\s*$)[\\s\\S]+"
+    },
+    "RcsFallbackOriginationIdentity": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/\\+-]+"
+    },
+    "RcsFileMessage": {
+      "type": "structure",
+      "required": [
+        "FileUrl"
+      ],
+      "members": {
+        "FileUrl": "RcsMediaUrl",
+        "ThumbnailUrl": "RcsMediaUrl"
+      }
+    },
+    "RcsLocationLabel": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "RcsMediaUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 2000,
+      "pattern": "(https://|s3://).+"
+    },
+    "RcsMessageContent": {
+      "type": "structure",
+      "required": [
+        "Content"
+      ],
+      "members": {
+        "Content": "RcsContent",
+        "Suggestions": "RcsSuggestedActionList"
+      }
+    },
+    "RcsMessageOriginationIdentity": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/\\+-]+"
+    },
+    "RcsMessageTrafficType": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "RcsOpenUrlAction": {
+      "type": "structure",
+      "required": [
+        "Text",
+        "PostbackData",
+        "Url"
+      ],
+      "members": {
+        "Text": "RcsSuggestedActionText",
+        "PostbackData": "RcsPostbackData",
+        "Url": "RcsOpenUrlValue",
+        "Application": "RcsOpenUrlActionApplicationString",
+        "WebviewViewMode": "RcsOpenUrlActionWebviewViewModeString"
+      }
+    },
+    "RcsOpenUrlActionApplicationString": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "[A-Z_]+"
+    },
+    "RcsOpenUrlActionWebviewViewModeString": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "[A-Z_]+"
+    },
+    "RcsOpenUrlValue": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "https://\\S+"
+    },
+    "RcsPostbackData": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "RcsReplyAction": {
+      "type": "structure",
+      "required": [
+        "Text",
+        "PostbackData"
+      ],
+      "members": {
+        "Text": "RcsSuggestedActionText",
+        "PostbackData": "RcsPostbackData"
+      }
+    },
+    "RcsRequestLocationAction": {
+      "type": "structure",
+      "required": [
+        "Text",
+        "PostbackData"
+      ],
+      "members": {
+        "Text": "RcsSuggestedActionText",
+        "PostbackData": "RcsPostbackData"
+      }
+    },
+    "RcsShowLocationAction": {
+      "type": "structure",
+      "required": [
+        "Text",
+        "PostbackData",
+        "Latitude",
+        "Longitude"
+      ],
+      "members": {
+        "Text": "RcsSuggestedActionText",
+        "PostbackData": "RcsPostbackData",
+        "Latitude": "RcsShowLocationActionLatitudeDouble",
+        "Longitude": "RcsShowLocationActionLongitudeDouble",
+        "Label": "RcsLocationLabel"
+      }
+    },
+    "RcsShowLocationActionLatitudeDouble": {
+      "type": "double",
+      "min": -90,
+      "max": 90
+    },
+    "RcsShowLocationActionLongitudeDouble": {
+      "type": "double",
+      "min": -180,
+      "max": 180
+    },
+    "RcsStandaloneCard": {
+      "type": "structure",
+      "required": [
+        "CardOrientation",
+        "CardContent"
+      ],
+      "members": {
+        "CardOrientation": "RcsStandaloneCardCardOrientationString",
+        "ThumbnailImageAlignment": "RcsStandaloneCardThumbnailImageAlignmentString",
+        "CardContent": "RcsCardContent"
+      }
+    },
+    "RcsStandaloneCardCardOrientationString": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "[A-Z_]+"
+    },
+    "RcsStandaloneCardThumbnailImageAlignmentString": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "[A-Z_]+"
+    },
+    "RcsSuggestedAction": {
+      "type": "structure",
+      "members": {
+        "Reply": "RcsReplyAction",
+        "OpenUrl": "RcsOpenUrlAction",
+        "DialPhone": "RcsDialPhoneAction",
+        "ShowLocation": "RcsShowLocationAction",
+        "RequestLocation": "RcsRequestLocationAction",
+        "CreateCalendarEvent": "RcsCreateCalendarEventAction"
+      }
+    },
+    "RcsSuggestedActionList": {
+      "type": "list",
+      "min": 0,
+      "max": 11,
+      "member": "RcsSuggestedAction"
+    },
+    "RcsSuggestedActionText": {
+      "type": "string",
+      "min": 1,
+      "max": 25
+    },
+    "RcsTextBody": {
+      "type": "string",
+      "min": 1,
+      "max": 3072,
+      "pattern": "(?!\\s*$)[\\s\\S]+"
+    },
+    "RcsTextMessage": {
+      "type": "structure",
+      "required": [
+        "Body"
+      ],
+      "members": {
+        "Body": "RcsTextBody"
+      }
+    },
+    "RcsTimeToLive": {
+      "type": "integer",
+      "min": 1,
+      "max": 172800
+    },
+    "RegistrationAssociationFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "RegistrationAssociationFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "RegistrationAssociationFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "RegistrationAssociationFilter"
+    },
+    "RegistrationAssociationFilterName": {
+      "type": "string",
+      "enum": [
+        "resource-type",
+        "iso-country-code"
+      ]
+    },
+    "RegistrationAttachmentFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "RegistrationAttachmentFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "RegistrationAttachmentFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "RegistrationAttachmentFilter"
+    },
+    "RegistrationAttachmentFilterName": {
+      "type": "string",
+      "enum": [
+        "attachment-status"
+      ]
+    },
+    "RegistrationAttachmentIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "RegistrationIdOrArn"
+    },
+    "RegistrationAttachmentIdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "RegistrationFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "RegistrationFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "RegistrationFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "RegistrationFilter"
+    },
+    "RegistrationFilterName": {
+      "type": "string",
+      "enum": [
+        "registration-type",
+        "registration-status"
+      ]
+    },
+    "RegistrationIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "RegistrationIdOrArn"
+    },
+    "RegistrationIdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "RegistrationType": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9_]+"
+    },
+    "RegistrationTypeFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "RegistrationTypeFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "RegistrationTypeFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "RegistrationTypeFilter"
+    },
+    "RegistrationTypeFilterName": {
+      "type": "string",
+      "enum": [
+        "supported-association-resource-type",
+        "supported-association-iso-country-code"
+      ]
+    },
+    "RegistrationTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "RegistrationType"
+    },
+    "RegistrationVersionFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "RegistrationVersionFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "RegistrationVersionFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "RegistrationVersionFilter"
+    },
+    "RegistrationVersionFilterName": {
+      "type": "string",
+      "enum": [
+        "registration-version-status"
+      ]
+    },
+    "RegistrationVersionNumber": {
+      "type": "long",
+      "min": 1,
+      "max": 100000
+    },
+    "RegistrationVersionNumberList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "RegistrationVersionNumber"
+    },
+    "ReleasePhoneNumberRequest": {
+      "type": "structure",
+      "required": [
+        "PhoneNumberId"
+      ],
+      "members": {
+        "PhoneNumberId": "PhoneNumberIdOrArn"
+      }
+    },
+    "ReleaseSenderIdRequest": {
+      "type": "structure",
+      "required": [
+        "SenderId",
+        "IsoCountryCode"
+      ],
+      "members": {
+        "SenderId": "SenderIdOrArn",
+        "IsoCountryCode": "IsoCountryCode"
+      }
+    },
+    "RequestPhoneNumberRequest": {
+      "type": "structure",
+      "required": [
+        "IsoCountryCode",
+        "MessageType",
+        "NumberCapabilities",
+        "NumberType"
+      ],
+      "members": {
+        "IsoCountryCode": "IsoCountryCode",
+        "MessageType": "MessageType",
+        "NumberCapabilities": "NumberCapabilityList",
+        "NumberType": "RequestableNumberType",
+        "OptOutListName": "OptOutListNameOrArn",
+        "PoolId": "PoolIdOrArn",
+        "RegistrationId": "RegistrationIdOrArn",
+        "NumberPreference": "NumberPreferenceList",
+        "InternationalSendingEnabled": "Boolean",
+        "DeletionProtectionEnabled": "Boolean",
+        "Tags": "TagList",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "RequestSenderIdRequest": {
+      "type": "structure",
+      "required": [
+        "SenderId",
+        "IsoCountryCode"
+      ],
+      "members": {
+        "SenderId": "SenderId",
+        "IsoCountryCode": "IsoCountryCode",
+        "MessageTypes": "MessageTypeList",
+        "DeletionProtectionEnabled": "Boolean",
+        "Tags": "TagList",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "RequestableNumberType": {
+      "type": "string",
+      "enum": [
+        "LONG_CODE",
+        "TOLL_FREE",
+        "TEN_DLC",
+        "SIMULATOR"
+      ]
+    },
+    "ResourceIdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "ResourcePolicy": {
+      "type": "string",
+      "min": 1,
+      "max": 10000
+    },
+    "SearchableNumberType": {
+      "type": "string",
+      "enum": [
+        "TEN_DLC"
+      ]
+    },
+    "SectionPath": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[A-Za-z0-9_]+"
+    },
+    "SectionPathList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "SectionPath"
+    },
+    "SelectChoice": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "SelectChoiceList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "SelectChoice"
+    },
+    "SendDestinationNumberVerificationCodeRequest": {
+      "type": "structure",
+      "required": [
+        "VerifiedDestinationNumberId",
+        "VerificationChannel"
+      ],
+      "members": {
+        "VerifiedDestinationNumberId": "VerifiedDestinationNumberIdOrArn",
+        "VerificationChannel": "VerificationChannel",
+        "LanguageCode": "LanguageCode",
+        "OriginationIdentity": "VerificationMessageOriginationIdentity",
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "Context": "ContextMap",
+        "DestinationCountryParameters": "DestinationCountryParameters"
+      }
+    },
+    "SendMediaMessageRequest": {
+      "type": "structure",
+      "required": [
+        "DestinationPhoneNumber",
+        "OriginationIdentity"
+      ],
+      "members": {
+        "DestinationPhoneNumber": "PhoneNumber",
+        "OriginationIdentity": "MediaMessageOriginationIdentity",
+        "MessageBody": "TextMessageBody",
+        "MediaUrls": "MediaUrlList",
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "MaxPrice": "MaxPrice",
+        "TimeToLive": "TimeToLive",
+        "Context": "ContextMap",
+        "DryRun": "PrimitiveBoolean",
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "MessageFeedbackEnabled": "Boolean"
+      }
+    },
+    "SendNotifyTextMessageRequest": {
+      "type": "structure",
+      "required": [
+        "NotifyConfigurationId",
+        "DestinationPhoneNumber",
+        "TemplateVariables"
+      ],
+      "members": {
+        "NotifyConfigurationId": "NotifyConfigurationIdOrArn",
+        "DestinationPhoneNumber": "PhoneNumber",
+        "TemplateId": "NotifyTemplateId",
+        "TemplateVariables": "TemplateVariableSubstitutionMap",
+        "TimeToLive": "TimeToLive",
+        "Context": "ContextMap",
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "DryRun": "PrimitiveBoolean",
+        "MessageFeedbackEnabled": "Boolean"
+      }
+    },
+    "SendNotifyVoiceMessageRequest": {
+      "type": "structure",
+      "required": [
+        "NotifyConfigurationId",
+        "DestinationPhoneNumber",
+        "TemplateVariables"
+      ],
+      "members": {
+        "NotifyConfigurationId": "NotifyConfigurationIdOrArn",
+        "DestinationPhoneNumber": "PhoneNumber",
+        "TemplateId": "NotifyTemplateId",
+        "TemplateVariables": "TemplateVariableSubstitutionMap",
+        "VoiceId": "VoiceId",
+        "TimeToLive": "TimeToLive",
+        "Context": "ContextMap",
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "DryRun": "PrimitiveBoolean",
+        "MessageFeedbackEnabled": "Boolean"
+      }
+    },
+    "SendRcsMessageRequest": {
+      "type": "structure",
+      "required": [
+        "DestinationPhoneNumber",
+        "OriginationIdentity"
+      ],
+      "members": {
+        "DestinationPhoneNumber": "PhoneNumber",
+        "OriginationIdentity": "RcsMessageOriginationIdentity",
+        "RcsMessageContent": "RcsMessageContent",
+        "TimeToLive": "RcsTimeToLive",
+        "MessageTrafficType": "RcsMessageTrafficType",
+        "FallbackConfiguration": "RcsFallbackConfiguration",
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "MaxPrice": "MaxPrice",
+        "DryRun": "PrimitiveBoolean",
+        "Context": "ContextMap",
+        "MessageFeedbackEnabled": "Boolean"
+      }
+    },
+    "SendTextMessageRequest": {
+      "type": "structure",
+      "required": [
+        "DestinationPhoneNumber"
+      ],
+      "members": {
+        "DestinationPhoneNumber": "PhoneNumber",
+        "OriginationIdentity": "TextMessageOriginationIdentity",
+        "MessageBody": "TextMessageBody",
+        "MessageType": "MessageType",
+        "Keyword": "Keyword",
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "MaxPrice": "MaxPrice",
+        "TimeToLive": "TimeToLive",
+        "Context": "ContextMap",
+        "DestinationCountryParameters": "DestinationCountryParameters",
+        "DryRun": "PrimitiveBoolean",
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "MessageFeedbackEnabled": "Boolean"
+      }
+    },
+    "SendVoiceMessageRequest": {
+      "type": "structure",
+      "required": [
+        "DestinationPhoneNumber",
+        "OriginationIdentity"
+      ],
+      "members": {
+        "DestinationPhoneNumber": "PhoneNumber",
+        "OriginationIdentity": "VoiceMessageOriginationIdentity",
+        "MessageBody": "VoiceMessageBody",
+        "MessageBodyTextType": "VoiceMessageBodyTextType",
+        "VoiceId": "VoiceId",
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "MaxPricePerMinute": "MaxPrice",
+        "TimeToLive": "TimeToLive",
+        "Context": "ContextMap",
+        "DryRun": "PrimitiveBoolean",
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "MessageFeedbackEnabled": "Boolean"
+      }
+    },
+    "SenderId": {
+      "type": "string",
+      "min": 1,
+      "max": 11,
+      "pattern": "[A-Za-z0-9_-]+"
+    },
+    "SenderIdAndCountry": {
+      "type": "structure",
+      "required": [
+        "SenderId",
+        "IsoCountryCode"
+      ],
+      "members": {
+        "SenderId": "SenderIdOrArn",
+        "IsoCountryCode": "IsoCountryCode"
+      }
+    },
+    "SenderIdFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "SenderIdFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "SenderIdFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "SenderIdFilter"
+    },
+    "SenderIdFilterName": {
+      "type": "string",
+      "enum": [
+        "sender-id",
+        "iso-country-code",
+        "message-type",
+        "deletion-protection-enabled",
+        "registered"
+      ]
+    },
+    "SenderIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "SenderIdAndCountry"
+    },
+    "SenderIdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "SetAccountDefaultProtectConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectConfigurationId"
+      ],
+      "members": {
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn"
+      }
+    },
+    "SetDefaultMessageFeedbackEnabledRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationSetName",
+        "MessageFeedbackEnabled"
+      ],
+      "members": {
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "MessageFeedbackEnabled": "Boolean"
+      }
+    },
+    "SetDefaultMessageTypeRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationSetName",
+        "MessageType"
+      ],
+      "members": {
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "MessageType": "MessageType"
+      }
+    },
+    "SetDefaultSenderIdRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationSetName",
+        "SenderId"
+      ],
+      "members": {
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "SenderId": "SenderId"
+      }
+    },
+    "SetMediaMessageSpendLimitOverrideRequest": {
+      "type": "structure",
+      "required": [
+        "MonthlyLimit"
+      ],
+      "members": {
+        "MonthlyLimit": "MonthlyLimit"
+      }
+    },
+    "SetNotifyMessageSpendLimitOverrideRequest": {
+      "type": "structure",
+      "required": [
+        "MonthlyLimit"
+      ],
+      "members": {
+        "MonthlyLimit": "MonthlyLimit"
+      }
+    },
+    "SetRcsMessageSpendLimitOverrideRequest": {
+      "type": "structure",
+      "required": [
+        "MonthlyLimit"
+      ],
+      "members": {
+        "MonthlyLimit": "MonthlyLimit"
+      }
+    },
+    "SetTextMessageSpendLimitOverrideRequest": {
+      "type": "structure",
+      "required": [
+        "MonthlyLimit"
+      ],
+      "members": {
+        "MonthlyLimit": "MonthlyLimit"
+      }
+    },
+    "SetVoiceMessageSpendLimitOverrideRequest": {
+      "type": "structure",
+      "required": [
+        "MonthlyLimit"
+      ],
+      "members": {
+        "MonthlyLimit": "MonthlyLimit"
+      }
+    },
+    "SnsDestination": {
+      "type": "structure",
+      "required": [
+        "TopicArn"
+      ],
+      "members": {
+        "TopicArn": "SnsTopicArn"
+      }
+    },
+    "SnsTopicArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:\\S+"
+    },
+    "SubmitRegistrationVersionRequest": {
+      "type": "structure",
+      "required": [
+        "RegistrationId"
+      ],
+      "members": {
+        "RegistrationId": "RegistrationIdOrArn",
+        "AwsReview": "PrimitiveBoolean"
+      }
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": ".+"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName",
+        "Tags": "NonEmptyTagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": ".*"
+    },
+    "TemplateVariableName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9_]+"
+    },
+    "TemplateVariableSubstitutionMap": {
+      "type": "map",
+      "min": 0,
+      "max": 20,
+      "key": "TemplateVariableName",
+      "value": "TemplateVariableValue"
+    },
+    "TemplateVariableValue": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "TextMessageBody": {
+      "type": "string",
+      "min": 1,
+      "max": 1600,
+      "pattern": "(?!\\s*$)[\\s\\S]+"
+    },
+    "TextMessageOriginationIdentity": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/\\+-]+"
+    },
+    "TextValue": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "TimeToLive": {
+      "type": "integer",
+      "min": 5,
+      "max": 259200
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "TwoWayChannelArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "\\S+"
+    },
+    "TwoWayMediaS3BucketNameOrUnset": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "([a-z0-9][a-z0-9.-]*[a-z0-9]|UNSET_RCS_MEDIA_CONFIGURATION)"
+    },
+    "TwoWayMediaS3KeyPrefix": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "[\\S]+"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateEventDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationSetName",
+        "EventDestinationName"
+      ],
+      "members": {
+        "ConfigurationSetName": "ConfigurationSetNameOrArn",
+        "EventDestinationName": "EventDestinationName",
+        "Enabled": "Boolean",
+        "MatchingEventTypes": "EventTypeList",
+        "CloudWatchLogsDestination": "CloudWatchLogsDestination",
+        "KinesisFirehoseDestination": "KinesisFirehoseDestination",
+        "SnsDestination": "SnsDestination"
+      }
+    },
+    "UpdateNotifyConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "NotifyConfigurationId"
+      ],
+      "members": {
+        "NotifyConfigurationId": "NotifyConfigurationIdOrArn",
+        "DefaultTemplateId": "NotifyTemplateId",
+        "PoolId": "NotifyPoolIdOrUnset",
+        "EnabledCountries": "IsoCountryCodeList",
+        "EnabledChannels": "NotifyEnabledChannelsList",
+        "DeletionProtectionEnabled": "Boolean"
+      }
+    },
+    "UpdatePhoneNumberRequest": {
+      "type": "structure",
+      "required": [
+        "PhoneNumberId"
+      ],
+      "members": {
+        "PhoneNumberId": "PhoneNumberIdOrArn",
+        "TwoWayEnabled": "Boolean",
+        "TwoWayChannelArn": "TwoWayChannelArn",
+        "TwoWayChannelRole": "IamRoleArn",
+        "SelfManagedOptOutsEnabled": "Boolean",
+        "OptOutListName": "OptOutListNameOrArn",
+        "InternationalSendingEnabled": "Boolean",
+        "DeletionProtectionEnabled": "Boolean"
+      }
+    },
+    "UpdatePoolRequest": {
+      "type": "structure",
+      "required": [
+        "PoolId"
+      ],
+      "members": {
+        "PoolId": "PoolIdOrArn",
+        "TwoWayEnabled": "Boolean",
+        "TwoWayChannelArn": "TwoWayChannelArn",
+        "TwoWayChannelRole": "IamRoleArn",
+        "SelfManagedOptOutsEnabled": "Boolean",
+        "OptOutListName": "OptOutListNameOrArn",
+        "SharedRoutesEnabled": "Boolean",
+        "DeletionProtectionEnabled": "Boolean"
+      }
+    },
+    "UpdateProtectConfigurationCountryRuleSetRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectConfigurationId",
+        "NumberCapability",
+        "CountryRuleSetUpdates"
+      ],
+      "members": {
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "NumberCapability": "NumberCapability",
+        "CountryRuleSetUpdates": "ProtectConfigurationCountryRuleSet"
+      }
+    },
+    "UpdateProtectConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ProtectConfigurationId"
+      ],
+      "members": {
+        "ProtectConfigurationId": "ProtectConfigurationIdOrArn",
+        "DeletionProtectionEnabled": "Boolean"
+      }
+    },
+    "UpdateRcsAgentRequest": {
+      "type": "structure",
+      "required": [
+        "RcsAgentId"
+      ],
+      "members": {
+        "RcsAgentId": "RcsAgentIdOrArn",
+        "DeletionProtectionEnabled": "Boolean",
+        "OptOutListName": "OptOutListNameOrArn",
+        "SelfManagedOptOutsEnabled": "Boolean",
+        "TwoWayChannelArn": "TwoWayChannelArn",
+        "TwoWayChannelRole": "IamRoleArn",
+        "TwoWayEnabled": "Boolean",
+        "TwoWayMediaS3BucketName": "TwoWayMediaS3BucketNameOrUnset",
+        "TwoWayMediaS3KeyPrefix": "TwoWayMediaS3KeyPrefix",
+        "TwoWayMediaS3Role": "IamRoleArnOrUnset",
+        "TwoWayRcsEventsEnabled": "RcsEventTypeList"
+      }
+    },
+    "UpdateSenderIdRequest": {
+      "type": "structure",
+      "required": [
+        "SenderId",
+        "IsoCountryCode"
+      ],
+      "members": {
+        "SenderId": "SenderIdOrArn",
+        "IsoCountryCode": "IsoCountryCode",
+        "DeletionProtectionEnabled": "Boolean"
+      }
+    },
+    "VerificationChannel": {
+      "type": "string",
+      "enum": [
+        "TEXT",
+        "VOICE"
+      ]
+    },
+    "VerificationCode": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "pattern": "[A-Za-z0-9]+"
+    },
+    "VerificationMessageOriginationIdentity": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/\\+-]+"
+    },
+    "VerifiedDestinationNumberFilter": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "VerifiedDestinationNumberFilterName",
+        "Values": "FilterValueList"
+      }
+    },
+    "VerifiedDestinationNumberFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "VerifiedDestinationNumberFilter"
+    },
+    "VerifiedDestinationNumberFilterName": {
+      "type": "string",
+      "enum": [
+        "status",
+        "rcs-agent-id"
+      ]
+    },
+    "VerifiedDestinationNumberIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "VerifiedDestinationNumberIdOrArn"
+    },
+    "VerifiedDestinationNumberIdOrArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/-]+"
+    },
+    "VerifyDestinationNumberRequest": {
+      "type": "structure",
+      "required": [
+        "VerifiedDestinationNumberId",
+        "VerificationCode"
+      ],
+      "members": {
+        "VerifiedDestinationNumberId": "VerifiedDestinationNumberIdOrArn",
+        "VerificationCode": "VerificationCode"
+      }
+    },
+    "VoiceId": {
+      "type": "string",
+      "enum": [
+        "AMY",
+        "ASTRID",
+        "BIANCA",
+        "BRIAN",
+        "CAMILA",
+        "CARLA",
+        "CARMEN",
+        "CELINE",
+        "CHANTAL",
+        "CONCHITA",
+        "CRISTIANO",
+        "DORA",
+        "EMMA",
+        "ENRIQUE",
+        "EWA",
+        "FILIZ",
+        "GERAINT",
+        "GIORGIO",
+        "GWYNETH",
+        "HANS",
+        "INES",
+        "IVY",
+        "JACEK",
+        "JAN",
+        "JOANNA",
+        "JOEY",
+        "JUSTIN",
+        "KARL",
+        "KENDRA",
+        "KIMBERLY",
+        "LEA",
+        "LIV",
+        "LOTTE",
+        "LUCIA",
+        "LUPE",
+        "MADS",
+        "MAJA",
+        "MARLENE",
+        "MATHIEU",
+        "MATTHEW",
+        "MAXIM",
+        "MIA",
+        "MIGUEL",
+        "MIZUKI",
+        "NAJA",
+        "NICOLE",
+        "PENELOPE",
+        "RAVEENA",
+        "RICARDO",
+        "RUBEN",
+        "RUSSELL",
+        "SALLI",
+        "SEOYEON",
+        "TAKUMI",
+        "TATYANA",
+        "VICKI",
+        "VITORIA",
+        "ZEINA",
+        "ZHIYU"
+      ]
+    },
+    "VoiceMessageBody": {
+      "type": "string",
+      "min": 1,
+      "max": 6000,
+      "pattern": "(?!\\s*$)[\\s\\S]+"
+    },
+    "VoiceMessageBodyTextType": {
+      "type": "string",
+      "enum": [
+        "TEXT",
+        "SSML"
+      ]
+    },
+    "VoiceMessageOriginationIdentity": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[A-Za-z0-9_:/\\+-]+"
+    }
+  }
+}

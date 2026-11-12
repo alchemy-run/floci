@@ -924,6 +924,8 @@ public interface EmulatorConfig {
 
         PersonalizeServiceConfig personalize();
 
+        PinpointSmsVoiceV2ServiceConfig pinpointSmsVoiceV2();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3055,6 +3057,31 @@ public interface EmulatorConfig {
         /** How long event rules, hubs and configurations stay in a transitional state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface PinpointSmsVoiceV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long phone numbers, pools, Notify configurations and registration reviews take, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long after a send its delivery events go out, in milliseconds. */
+        @WithDefault("200")
+        long deliveryMillis();
+
+        /** {@code PRODUCTION}, or {@code SANDBOX}: send only to verified destination numbers and the account's own. */
+        @WithDefault("PRODUCTION")
+        String accountTier();
+
+        /** The monthly spend limit of each kind of message, and the most an override may set, in US dollars. */
+        @WithDefault("10000")
+        long monthlySpendLimit();
+
+        /** Whether a number its end user opted out of (with STOP) stays opted out until they opt back in. */
+        @WithDefault("false")
+        boolean endUserOptOutsLocked();
     }
 
     interface PersonalizeServiceConfig {
