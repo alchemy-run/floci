@@ -51,6 +51,7 @@ MODELS = {
     "qbusiness": "qbusiness",
     "qapps": "qapps",
     "rbin": "rbin",
+    "repostspace": "repostspace",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

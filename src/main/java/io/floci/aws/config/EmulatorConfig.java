@@ -932,6 +932,8 @@ public interface EmulatorConfig {
 
         RbinServiceConfig rbin();
 
+        RePostSpaceServiceConfig repostspace();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3084,6 +3086,15 @@ public interface EmulatorConfig {
         /** Whether retrieval answers are written by {@link #model()}; otherwise they're the sentences that answer. */
         @WithDefault("false")
         boolean generateAnswers();
+    }
+
+    interface RePostSpaceServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
     }
 
     interface RbinServiceConfig {

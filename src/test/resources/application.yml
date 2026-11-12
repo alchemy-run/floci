@@ -566,6 +566,9 @@ floci:
       enabled: true
       transition-millis: 200
       engine: none
+    repostspace:
+      enabled: true
+      transition-millis: 200
     rbin:
       enabled: true
       transition-millis: 200

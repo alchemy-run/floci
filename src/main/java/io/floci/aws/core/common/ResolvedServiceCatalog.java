@@ -92,6 +92,7 @@ import io.floci.aws.services.quicksight.QuickSightEmbedController;
 import io.floci.aws.services.ram.RamController;
 import io.floci.aws.services.rbin.RbinController;
 import io.floci.aws.services.rdsdata.RdsDataController;
+import io.floci.aws.services.repostspace.RePostSpaceController;
 import io.floci.aws.services.resourceexplorer2.ResourceExplorer2Controller;
 import io.floci.aws.services.resourcegroups.ResourceGroupsController;
 import io.floci.aws.services.route53.Route53Controller;
@@ -503,6 +504,10 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("OpenSearchServerless."), Set.of("aoss"), Set.of(), Set.of()),
+                descriptor("repostspace", "repostspace", config.services().repostspace().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("repostspace"), Set.of(), Set.of(RePostSpaceController.class)),
                 descriptor("rbin", "rbin", config.services().rbin().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

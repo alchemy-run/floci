@@ -153,6 +153,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Q Business](qbusiness.md) | `/applications/...` (signed `qbusiness`); indexes documents, answers chat with citations | REST JSON | 83 |
 | [Q Apps](qapps.md) | `/apps.*`, `/runtime.*`, `/catalog.*` (signed `qapps`); apps of cards computed on a Q Business instance | REST JSON | 35 |
 | [Recycle Bin](rbin.md) | `/rules`, `/list-rules`, `/tags/...` (signed `rbin`); keeps deleted EC2 snapshots, AMIs and volumes | REST JSON | 10 |
+| [re:Post Private](repostspace.md) | `/spaces/...` (signed `repostspace`); spaces on IAM Identity Center | REST JSON | 19 |
 | [HealthOmics](omics.md) | `/referencestore`, `/sequencestore`, `/workflow`, `/run`, ... (signed `omics`); runs on Cromwell, Nextflow and cwltool | REST JSON | 107 |
 | [CloudWatch Observability Admin](observabilityadmin.md) | `POST /<Operation>` (signed `observabilityadmin`); telemetry rules configure resources, pipelines run processors | REST JSON | 45 |
 | [OpenSearch Ingestion](osis.md) | `/2022-01-01/osis/*` (signed `osis`); pipelines run on Data Prepper, ingest on per-pipeline hosts | REST JSON | 22 |

@@ -334,6 +334,7 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_pinpointsmsvoicev2_shapes.py
 	$(PYTHON) tools/aws/regen_qbusiness_shapes.py
 	$(PYTHON) tools/aws/regen_rbin_shapes.py
+	$(PYTHON) tools/aws/regen_repostspace_shapes.py
 	$(PYTHON) tools/aws/regen_fsx_shapes.py
 	$(PYTHON) tools/aws/regen_ds_shapes.py
 	$(PYTHON) tools/aws/regen_rest_json_bindings.py
@@ -643,6 +644,10 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_rbin_shapes.py --check || { \
 		echo "error: Recycle Bin request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_repostspace_shapes.py --check || { \
+		echo "error: re:Post Private request shapes are out of date; run 'make aws-data-sync'."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_iotsitewise_shapes.py --check || { \
