@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
+import io.floci.aws.core.common.docker.ContainerReachableUrls;
 import io.floci.aws.services.kms.KmsService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -455,8 +456,14 @@ public class KvsService {
 
     // ---------------------------------------------------------------- endpoints
 
+    /**
+     * Floci's base URL, with a loopback host named {@code localhost.floci.io}: it resolves to the loopback address on
+     * the host and to Floci inside its containers, so Lambda functions can reach the data endpoints too.
+     */
     String endpoint() {
-        return store.emulator().effectiveBaseUrl().replaceAll("/+$", "");
+        String base = store.emulator().effectiveBaseUrl().replaceAll("/+$", "");
+        return base.replaceFirst("(?i)^((?:https?)://)(localhost|127\\.0\\.0\\.1|\\[::1\\])(?=[:/]|$)",
+                "$1" + ContainerReachableUrls.FLOCI_DNS_HOST);
     }
 
     public ObjectNode getDataEndpoint(JsonNode in, String region) {
