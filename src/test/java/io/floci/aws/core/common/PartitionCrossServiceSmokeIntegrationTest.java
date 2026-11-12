@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1515,6 +1515,24 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
         signed(region, "forecast").header("X-Amz-Target", "AmazonForecast.DeleteDatasetGroup").contentType(JSON_1_1)
                 .body("{\"DatasetGroupArn\":\"" + arn + "\"}").post("/").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void lexBotArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "lex");
+        String name = unique("smoke-lex", partitionCase);
+        String botId = signed(region, "lex").contentType(JSON).body("{\"botName\":\"" + name + "\",\"roleArn\":\"arn:"
+                + partitionCase.partition() + ":iam::000000000000:role/lex\",\"dataPrivacy\":{\"childDirected\":false},"
+                + "\"idleSessionTTLInSeconds\":300,\"botTags\":{\"smoke\":\"yes\"}}").put("/bots/").then().statusCode(202)
+                .extract().path("botId");
+        cleanup.register(() -> signed(region, "lex").queryParam("skipResourceInUseCheck", true)
+                .delete("/bots/" + botId + "/"));
+        String arn = "arn:" + partitionCase.partition() + ":lex:" + region + ":000000000000:bot/" + botId;
+        String tag = signed(region, "lex").get("/tags/" + arn.replace(":", "%3A").replace("/", "%2F")).then()
+                .statusCode(200).extract().path("tags.smoke");
+        assertEquals("yes", tag);
+        PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
     @ParameterizedTest

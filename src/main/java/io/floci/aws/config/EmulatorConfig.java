@@ -888,6 +888,8 @@ public interface EmulatorConfig {
 
         KinesisVideoServiceConfig kinesisVideo();
 
+        LexV2ServiceConfig lexv2();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3010,6 +3012,28 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface LexV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a bot, version, alias, export, import or test run takes to settle into its next status. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long a locale build takes. */
+        @WithDefault("3000")
+        long buildMillis();
+
+        @WithDefault("10000")
+        int maxBots();
+
+        @WithDefault("100")
+        int maxAliasesPerBot();
+
+        @WithDefault("1000")
+        int maxIntentsPerLocale();
     }
 
     interface KinesisVideoServiceConfig {

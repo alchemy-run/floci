@@ -313,6 +313,7 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_kendra_shapes.py
 	$(PYTHON) tools/aws/regen_keyspaces_shapes.py
 	$(PYTHON) tools/aws/regen_kinesisvideo_shapes.py
+	$(PYTHON) tools/aws/regen_lexv2_shapes.py
 	$(PYTHON) tools/aws/regen_fsx_shapes.py
 	$(PYTHON) tools/aws/regen_ds_shapes.py
 	$(PYTHON) tools/aws/regen_rest_json_bindings.py
@@ -538,6 +539,10 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_kinesisvideo_shapes.py --check || { \
 		echo "error: Kinesis Video request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_lexv2_shapes.py --check || { \
+		echo "error: Lex V2 request shapes are out of date; run 'make aws-data-sync'."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_iotsitewise_shapes.py --check || { \

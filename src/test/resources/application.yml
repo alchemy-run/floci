@@ -550,6 +550,10 @@ floci:
     glacier:
       enabled: true
       job-millis: 0
+    lexv2:
+      enabled: true
+      transition-millis: 200
+      build-millis: 300
     kinesis-video:
       enabled: true
       transition-millis: 200

@@ -135,6 +135,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Kendra](kendra.md) | `POST /` + `X-Amz-Target: AWSKendraFrontendService.*`; a search engine over documents, S3, websites and databases | JSON 1.1 | 66 |
 | [Keyspaces](keyspaces.md) | `POST /` + `X-Amz-Target: KeyspacesService.*`, `KeyspacesStreams.*` (signed `cassandra`); CQL on port 9142 | JSON 1.0 / CBOR | 23 |
 | [Kinesis Video Streams](kinesisvideo.md) | `/createStream`, `/putMedia`, `/getMedia`, `/getClip` and the rest, signed for `kinesisvideo`; HLS/DASH playback and WebRTC signaling | REST JSON | 44 |
+| [Lex V2](lexv2.md) | `/bots/*`, `/exports/*`, `/imports/*`, `/testsets/*`, `/tags/*`, `/policy/*` and the session paths, signed for `lex`; conversations with Lambda code hooks, StartConversation over HTTP/2 | REST JSON | 113 |
 | [IVS](ivs.md) | `POST /<Operation>`, `/tags/*` signed for `ivs` (with Real-Time) | REST JSON | 78 |
 | [IVS Chat](ivschat.md) | `POST /<Operation>`, `/tags/*` signed for `ivschat` | REST JSON | 17 |
 | [FSx](fsx.md) | `POST /` + `X-Amz-Target: AWSSimbaAPIService_v20180301.*` | JSON 1.1 | 48 |

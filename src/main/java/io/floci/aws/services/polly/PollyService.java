@@ -265,7 +265,7 @@ public class PollyService {
                 Set<String> markTypes, String textType, List<String> lexiconNames) {}
 
     /** The synthesized output and the characters billed for it. */
-    record Output(byte[] bytes, String contentType, int characters) {}
+    public record Output(byte[] bytes, String contentType, int characters) {}
 
     Plan plan(String voiceId, String engine, String languageCode, String format, String sampleRate,
               Set<String> markTypes, String textType, List<String> lexiconNames, String region) {
