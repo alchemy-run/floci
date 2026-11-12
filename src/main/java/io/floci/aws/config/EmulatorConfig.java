@@ -940,6 +940,10 @@ public interface EmulatorConfig {
 
         S3FilesServiceConfig s3files();
 
+        SsmIncidentsServiceConfig ssmIncidents();
+
+        SsmContactsServiceConfig ssmContacts();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3106,6 +3110,20 @@ public interface EmulatorConfig {
         /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface SsmIncidentsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long the replication set takes to create, update and delete, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface SsmContactsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface S3FilesServiceConfig {

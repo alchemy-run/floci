@@ -1,0 +1,1008 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_incidentmanager_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "BatchGetIncidentFindings": "BatchGetIncidentFindingsInput",
+    "CreateReplicationSet": "CreateReplicationSetInput",
+    "CreateResponsePlan": "CreateResponsePlanInput",
+    "CreateTimelineEvent": "CreateTimelineEventInput",
+    "DeleteIncidentRecord": "DeleteIncidentRecordInput",
+    "DeleteReplicationSet": "DeleteReplicationSetInput",
+    "DeleteResourcePolicy": "DeleteResourcePolicyInput",
+    "DeleteResponsePlan": "DeleteResponsePlanInput",
+    "DeleteTimelineEvent": "DeleteTimelineEventInput",
+    "GetIncidentRecord": "GetIncidentRecordInput",
+    "GetReplicationSet": "GetReplicationSetInput",
+    "GetResourcePolicies": "GetResourcePoliciesInput",
+    "GetResponsePlan": "GetResponsePlanInput",
+    "GetTimelineEvent": "GetTimelineEventInput",
+    "ListIncidentFindings": "ListIncidentFindingsInput",
+    "ListIncidentRecords": "ListIncidentRecordsInput",
+    "ListRelatedItems": "ListRelatedItemsInput",
+    "ListReplicationSets": "ListReplicationSetsInput",
+    "ListResponsePlans": "ListResponsePlansInput",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTimelineEvents": "ListTimelineEventsInput",
+    "PutResourcePolicy": "PutResourcePolicyInput",
+    "StartIncident": "StartIncidentInput",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateDeletionProtection": "UpdateDeletionProtectionInput",
+    "UpdateIncidentRecord": "UpdateIncidentRecordInput",
+    "UpdateRelatedItems": "UpdateRelatedItemsInput",
+    "UpdateReplicationSet": "UpdateReplicationSetInput",
+    "UpdateResponsePlan": "UpdateResponsePlanInput",
+    "UpdateTimelineEvent": "UpdateTimelineEventInput"
+  },
+  "shapes": {
+    "Action": {
+      "type": "structure",
+      "members": {
+        "ssmAutomation": "SsmAutomation"
+      }
+    },
+    "ActionsList": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "Action"
+    },
+    "AddRegionAction": {
+      "type": "structure",
+      "required": [
+        "regionName"
+      ],
+      "members": {
+        "regionName": "RegionName",
+        "sseKmsKeyId": "SseKmsKey"
+      }
+    },
+    "Arn": {
+      "type": "string",
+      "min": 0,
+      "max": 1000,
+      "pattern": "^arn:aws(-cn|-us-gov)?:[a-z0-9-]*:[a-z0-9-]*:([0-9]{12})?:.+$"
+    },
+    "AttributeValueList": {
+      "type": "structure",
+      "members": {
+        "integerValues": "IntegerList",
+        "stringValues": "StringList"
+      }
+    },
+    "BatchGetIncidentFindingsInput": {
+      "type": "structure",
+      "required": [
+        "findingIds",
+        "incidentRecordArn"
+      ],
+      "members": {
+        "findingIds": "FindingIdList",
+        "incidentRecordArn": "Arn"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "ChatChannel": {
+      "type": "structure",
+      "members": {
+        "chatbotSns": "ChatbotSnsConfigurationSet",
+        "empty": "EmptyChatChannel"
+      }
+    },
+    "ChatbotSnsConfigurationSet": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "SnsArn"
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "Condition": {
+      "type": "structure",
+      "members": {
+        "after": "Timestamp",
+        "before": "Timestamp",
+        "equals": "AttributeValueList"
+      }
+    },
+    "CreateReplicationSetInput": {
+      "type": "structure",
+      "required": [
+        "regions"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "regions": "RegionMapInput",
+        "tags": "TagMap"
+      }
+    },
+    "CreateResponsePlanInput": {
+      "type": "structure",
+      "required": [
+        "incidentTemplate",
+        "name"
+      ],
+      "members": {
+        "actions": "ActionsList",
+        "chatChannel": "ChatChannel",
+        "clientToken": "ClientToken",
+        "displayName": "ResponsePlanDisplayName",
+        "engagements": "EngagementSet",
+        "incidentTemplate": "IncidentTemplate",
+        "integrations": "Integrations",
+        "name": "ResponsePlanName",
+        "tags": "TagMap"
+      }
+    },
+    "CreateTimelineEventInput": {
+      "type": "structure",
+      "required": [
+        "eventData",
+        "eventTime",
+        "eventType",
+        "incidentRecordArn"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "eventData": "EventData",
+        "eventReferences": "EventReferenceList",
+        "eventTime": "Timestamp",
+        "eventType": "TimelineEventType",
+        "incidentRecordArn": "Arn"
+      }
+    },
+    "DedupeString": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "DeleteIncidentRecordInput": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "Arn"
+      }
+    },
+    "DeleteRegionAction": {
+      "type": "structure",
+      "required": [
+        "regionName"
+      ],
+      "members": {
+        "regionName": "RegionName"
+      }
+    },
+    "DeleteReplicationSetInput": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "Arn"
+      }
+    },
+    "DeleteResourcePolicyInput": {
+      "type": "structure",
+      "required": [
+        "policyId",
+        "resourceArn"
+      ],
+      "members": {
+        "policyId": "PolicyId",
+        "resourceArn": "Arn"
+      }
+    },
+    "DeleteResponsePlanInput": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "Arn"
+      }
+    },
+    "DeleteTimelineEventInput": {
+      "type": "structure",
+      "required": [
+        "eventId",
+        "incidentRecordArn"
+      ],
+      "members": {
+        "eventId": "UUID",
+        "incidentRecordArn": "Arn"
+      }
+    },
+    "DynamicSsmParameterValue": {
+      "type": "structure",
+      "members": {
+        "variable": "VariableType"
+      }
+    },
+    "DynamicSsmParameters": {
+      "type": "map",
+      "min": 1,
+      "max": 200,
+      "key": "DynamicSsmParametersKeyString",
+      "value": "DynamicSsmParameterValue"
+    },
+    "DynamicSsmParametersKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "EmptyChatChannel": {
+      "type": "structure",
+      "members": {}
+    },
+    "EngagementSet": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "SsmContactsArn"
+    },
+    "EventData": {
+      "type": "string",
+      "min": 0,
+      "max": 12000
+    },
+    "EventReference": {
+      "type": "structure",
+      "members": {
+        "relatedItemId": "GeneratedId",
+        "resource": "Arn"
+      }
+    },
+    "EventReferenceList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "EventReference"
+    },
+    "Filter": {
+      "type": "structure",
+      "required": [
+        "condition",
+        "key"
+      ],
+      "members": {
+        "condition": "Condition",
+        "key": "FilterKeyString"
+      }
+    },
+    "FilterKeyString": {
+      "type": "string",
+      "min": 0,
+      "max": 50
+    },
+    "FilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "Filter"
+    },
+    "FindingId": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "FindingIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "FindingId"
+    },
+    "GeneratedId": {
+      "type": "string",
+      "min": 0,
+      "max": 200,
+      "pattern": "^related-item/(ANALYSIS|INCIDENT|METRIC|PARENT|ATTACHMENT|OTHER|AUTOMATION|INVOLVED_RESOURCE|TASK)/([0-9]|[A-F]){32}$"
+    },
+    "GetIncidentRecordInput": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "Arn"
+      }
+    },
+    "GetReplicationSetInput": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "Arn"
+      }
+    },
+    "GetResourcePoliciesInput": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "resourceArn": "Arn"
+      }
+    },
+    "GetResponsePlanInput": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "Arn"
+      }
+    },
+    "GetTimelineEventInput": {
+      "type": "structure",
+      "required": [
+        "eventId",
+        "incidentRecordArn"
+      ],
+      "members": {
+        "eventId": "UUID",
+        "incidentRecordArn": "Arn"
+      }
+    },
+    "Impact": {
+      "type": "integer",
+      "min": 1,
+      "max": 5
+    },
+    "IncidentRecordStatus": {
+      "type": "string",
+      "enum": [
+        "OPEN",
+        "RESOLVED"
+      ]
+    },
+    "IncidentSource": {
+      "type": "string",
+      "min": 0,
+      "max": 50
+    },
+    "IncidentSummary": {
+      "type": "string",
+      "min": 0,
+      "max": 8000
+    },
+    "IncidentTemplate": {
+      "type": "structure",
+      "required": [
+        "impact",
+        "title"
+      ],
+      "members": {
+        "dedupeString": "DedupeString",
+        "impact": "Impact",
+        "incidentTags": "TagMap",
+        "notificationTargets": "NotificationTargetSet",
+        "summary": "IncidentSummary",
+        "title": "IncidentTitle"
+      }
+    },
+    "IncidentTitle": {
+      "type": "string",
+      "min": 0,
+      "max": 200
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "IntegerList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "Integer"
+    },
+    "Integration": {
+      "type": "structure",
+      "members": {
+        "pagerDutyConfiguration": "PagerDutyConfiguration"
+      }
+    },
+    "Integrations": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "Integration"
+    },
+    "ItemIdentifier": {
+      "type": "structure",
+      "required": [
+        "type",
+        "value"
+      ],
+      "members": {
+        "type": "ItemType",
+        "value": "ItemValue"
+      }
+    },
+    "ItemType": {
+      "type": "string",
+      "enum": [
+        "ANALYSIS",
+        "INCIDENT",
+        "METRIC",
+        "PARENT",
+        "ATTACHMENT",
+        "OTHER",
+        "AUTOMATION",
+        "INVOLVED_RESOURCE",
+        "TASK"
+      ]
+    },
+    "ItemValue": {
+      "type": "structure",
+      "members": {
+        "arn": "Arn",
+        "metricDefinition": "MetricDefinition",
+        "pagerDutyIncidentDetail": "PagerDutyIncidentDetail",
+        "url": "Url"
+      }
+    },
+    "ListIncidentFindingsInput": {
+      "type": "structure",
+      "required": [
+        "incidentRecordArn"
+      ],
+      "members": {
+        "incidentRecordArn": "Arn",
+        "maxResults": "ListIncidentFindingsInputMaxResultsInteger",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListIncidentFindingsInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "ListIncidentRecordsInput": {
+      "type": "structure",
+      "members": {
+        "filters": "FilterList",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListRelatedItemsInput": {
+      "type": "structure",
+      "required": [
+        "incidentRecordArn"
+      ],
+      "members": {
+        "incidentRecordArn": "Arn",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListReplicationSetsInput": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListResponsePlansInput": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "String"
+      }
+    },
+    "ListTimelineEventsInput": {
+      "type": "structure",
+      "required": [
+        "incidentRecordArn"
+      ],
+      "members": {
+        "filters": "FilterList",
+        "incidentRecordArn": "Arn",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "sortBy": "TimelineEventSort",
+        "sortOrder": "SortOrder"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MetricDefinition": {
+      "type": "string",
+      "min": 0,
+      "max": 4000
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 0,
+      "max": 2000
+    },
+    "NotificationTargetItem": {
+      "type": "structure",
+      "members": {
+        "snsTopicArn": "Arn"
+      }
+    },
+    "NotificationTargetSet": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "NotificationTargetItem"
+    },
+    "PagerDutyConfiguration": {
+      "type": "structure",
+      "required": [
+        "name",
+        "pagerDutyIncidentConfiguration",
+        "secretId"
+      ],
+      "members": {
+        "name": "PagerDutyConfigurationNameString",
+        "pagerDutyIncidentConfiguration": "PagerDutyIncidentConfiguration",
+        "secretId": "PagerDutyConfigurationSecretIdString"
+      }
+    },
+    "PagerDutyConfigurationNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "PagerDutyConfigurationSecretIdString": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "PagerDutyIncidentConfiguration": {
+      "type": "structure",
+      "required": [
+        "serviceId"
+      ],
+      "members": {
+        "serviceId": "PagerDutyIncidentConfigurationServiceIdString"
+      }
+    },
+    "PagerDutyIncidentConfigurationServiceIdString": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "PagerDutyIncidentDetail": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "autoResolve": "Boolean",
+        "id": "PagerDutyIncidentDetailIdString",
+        "secretId": "PagerDutyIncidentDetailSecretIdString"
+      }
+    },
+    "PagerDutyIncidentDetailIdString": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "PagerDutyIncidentDetailSecretIdString": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "Policy": {
+      "type": "string",
+      "min": 0,
+      "max": 4000
+    },
+    "PolicyId": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "PutResourcePolicyInput": {
+      "type": "structure",
+      "required": [
+        "policy",
+        "resourceArn"
+      ],
+      "members": {
+        "policy": "Policy",
+        "resourceArn": "Arn"
+      }
+    },
+    "RawData": {
+      "type": "string",
+      "min": 0,
+      "max": 10000
+    },
+    "RegionMapInput": {
+      "type": "map",
+      "min": 1,
+      "max": 3,
+      "key": "RegionName",
+      "value": "RegionMapInputValue"
+    },
+    "RegionMapInputValue": {
+      "type": "structure",
+      "members": {
+        "sseKmsKeyId": "SseKmsKey"
+      }
+    },
+    "RegionName": {
+      "type": "string",
+      "min": 0,
+      "max": 20
+    },
+    "RelatedItem": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "generatedId": "GeneratedId",
+        "identifier": "ItemIdentifier",
+        "title": "RelatedItemTitleString"
+      }
+    },
+    "RelatedItemList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "RelatedItem"
+    },
+    "RelatedItemTitleString": {
+      "type": "string",
+      "min": 0,
+      "max": 200
+    },
+    "RelatedItemsUpdate": {
+      "type": "structure",
+      "members": {
+        "itemToAdd": "RelatedItem",
+        "itemToRemove": "ItemIdentifier"
+      }
+    },
+    "ResponsePlanDisplayName": {
+      "type": "string",
+      "min": 0,
+      "max": 200
+    },
+    "ResponsePlanName": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "^[a-zA-Z0-9-_]*$"
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 0,
+      "max": 1000,
+      "pattern": "^arn:aws(-cn|-us-gov)?:iam::([0-9]{12})?:role/.+$"
+    },
+    "SnsArn": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "SortOrder": {
+      "type": "string",
+      "enum": [
+        "ASCENDING",
+        "DESCENDING"
+      ]
+    },
+    "SseKmsKey": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "SsmAutomation": {
+      "type": "structure",
+      "required": [
+        "documentName",
+        "roleArn"
+      ],
+      "members": {
+        "documentName": "SsmAutomationDocumentNameString",
+        "documentVersion": "SsmAutomationDocumentVersionString",
+        "dynamicParameters": "DynamicSsmParameters",
+        "parameters": "SsmParameters",
+        "roleArn": "RoleArn",
+        "targetAccount": "SsmTargetAccount"
+      }
+    },
+    "SsmAutomationDocumentNameString": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9_\\-.:/]{3,128}$"
+    },
+    "SsmAutomationDocumentVersionString": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "SsmContactsArn": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "^arn:aws(-cn|-us-gov)?:ssm-contacts:[a-z0-9-]*:([0-9]{12}):contact/[a-z0-9_-]+$"
+    },
+    "SsmParameterValues": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "SsmParameterValuesMemberString"
+    },
+    "SsmParameterValuesMemberString": {
+      "type": "string",
+      "min": 0,
+      "max": 512
+    },
+    "SsmParameters": {
+      "type": "map",
+      "min": 1,
+      "max": 200,
+      "key": "SsmParametersKeyString",
+      "value": "SsmParameterValues"
+    },
+    "SsmParametersKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "SsmTargetAccount": {
+      "type": "string",
+      "enum": [
+        "RESPONSE_PLAN_OWNER_ACCOUNT",
+        "IMPACTED_ACCOUNT"
+      ]
+    },
+    "StartIncidentInput": {
+      "type": "structure",
+      "required": [
+        "responsePlanArn"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "impact": "Impact",
+        "relatedItems": "RelatedItemList",
+        "responsePlanArn": "Arn",
+        "title": "IncidentTitle",
+        "triggerDetails": "TriggerDetails"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "StringListMemberString"
+    },
+    "StringListMemberString": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^(?!aws:)[A-Za-z0-9 _=@:.+-/]+$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 1,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagMapUpdate": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "String",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "^[A-Za-z0-9 _=@:.+-/]*$"
+    },
+    "TimelineEventSort": {
+      "type": "string",
+      "enum": [
+        "EVENT_TIME"
+      ]
+    },
+    "TimelineEventType": {
+      "type": "string",
+      "min": 0,
+      "max": 100
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "TriggerDetails": {
+      "type": "structure",
+      "required": [
+        "source",
+        "timestamp"
+      ],
+      "members": {
+        "rawData": "RawData",
+        "source": "IncidentSource",
+        "timestamp": "Timestamp",
+        "triggerArn": "Arn"
+      }
+    },
+    "UUID": {
+      "type": "string",
+      "min": 0,
+      "max": 50
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "String",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateDeletionProtectionInput": {
+      "type": "structure",
+      "required": [
+        "arn",
+        "deletionProtected"
+      ],
+      "members": {
+        "arn": "Arn",
+        "clientToken": "ClientToken",
+        "deletionProtected": "Boolean"
+      }
+    },
+    "UpdateIncidentRecordInput": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "Arn",
+        "chatChannel": "ChatChannel",
+        "clientToken": "ClientToken",
+        "impact": "Impact",
+        "notificationTargets": "NotificationTargetSet",
+        "status": "IncidentRecordStatus",
+        "summary": "IncidentSummary",
+        "title": "IncidentTitle"
+      }
+    },
+    "UpdateRelatedItemsInput": {
+      "type": "structure",
+      "required": [
+        "incidentRecordArn",
+        "relatedItemsUpdate"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "incidentRecordArn": "Arn",
+        "relatedItemsUpdate": "RelatedItemsUpdate"
+      }
+    },
+    "UpdateReplicationSetAction": {
+      "type": "structure",
+      "members": {
+        "addRegionAction": "AddRegionAction",
+        "deleteRegionAction": "DeleteRegionAction"
+      }
+    },
+    "UpdateReplicationSetInput": {
+      "type": "structure",
+      "required": [
+        "actions",
+        "arn"
+      ],
+      "members": {
+        "actions": "UpdateReplicationSetInputActionsList",
+        "arn": "Arn",
+        "clientToken": "ClientToken"
+      }
+    },
+    "UpdateReplicationSetInputActionsList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "UpdateReplicationSetAction"
+    },
+    "UpdateResponsePlanInput": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "actions": "ActionsList",
+        "arn": "Arn",
+        "chatChannel": "ChatChannel",
+        "clientToken": "ClientToken",
+        "displayName": "ResponsePlanDisplayName",
+        "engagements": "EngagementSet",
+        "incidentTemplateDedupeString": "DedupeString",
+        "incidentTemplateImpact": "Impact",
+        "incidentTemplateNotificationTargets": "NotificationTargetSet",
+        "incidentTemplateSummary": "IncidentSummary",
+        "incidentTemplateTags": "TagMapUpdate",
+        "incidentTemplateTitle": "IncidentTitle",
+        "integrations": "Integrations"
+      }
+    },
+    "UpdateTimelineEventInput": {
+      "type": "structure",
+      "required": [
+        "eventId",
+        "incidentRecordArn"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "eventData": "EventData",
+        "eventId": "UUID",
+        "eventReferences": "EventReferenceList",
+        "eventTime": "Timestamp",
+        "eventType": "TimelineEventType",
+        "incidentRecordArn": "Arn"
+      }
+    },
+    "Url": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "VariableType": {
+      "type": "string",
+      "enum": [
+        "INCIDENT_RECORD_ARN",
+        "INVOLVED_RESOURCES"
+      ]
+    }
+  }
+}

@@ -291,6 +291,14 @@ services:
     doc: docs/services/opensearchserverless.md
     sources:
       - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: ssm-incidents
+    doc: docs/services/ssm-incidents.md
+    sources:
+      - { path: services/ssmincidents/SsmIncidentsService.java, mode: switch }
+  - service: ssm-contacts
+    doc: docs/services/ssm-contacts.md
+    sources:
+      - { path: services/ssmcontacts/SsmContactsService.java, mode: switch }
   - service: s3files
     doc: docs/services/s3files.md
     sources:

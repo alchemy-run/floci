@@ -55,6 +55,7 @@ MODELS = {
     "rolesanywhere": "rolesanywhere",
     "route53profiles": "route53profiles",
     "s3files": "s3files",
+    "ssm-incidents": "ssmincidents",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

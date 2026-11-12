@@ -125,6 +125,7 @@ import io.floci.aws.services.ses.SesTagController;
 import io.floci.aws.services.ses.SesTemplateController;
 import io.floci.aws.services.ses.SesTenantController;
 import io.floci.aws.services.signin.SigninController;
+import io.floci.aws.services.ssmincidents.SsmIncidentsController;
 import io.floci.aws.services.ssooidc.SsoOidcController;
 import io.floci.aws.services.ssoportal.SsoPortalController;
 import io.floci.aws.services.swf.model.SwfConstants;
@@ -507,6 +508,14 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("OpenSearchServerless."), Set.of("aoss"), Set.of(), Set.of()),
+                descriptor("ssm-incidents", "ssmincidents", config.services().ssmIncidents().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("ssm-incidents"), Set.of(), Set.of(SsmIncidentsController.class)),
+                descriptor("ssm-contacts", "ssmcontacts", config.services().ssmContacts().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("SSMContacts."), Set.of("ssm-contacts"), Set.of(), Set.of()),
                 descriptor("s3files", "s3files", config.services().s3files().enabled(),
                         true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

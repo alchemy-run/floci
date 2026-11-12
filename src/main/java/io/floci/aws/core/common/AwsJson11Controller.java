@@ -69,6 +69,7 @@ import io.floci.aws.services.servicecatalog.ServiceCatalogJsonHandler;
 import io.floci.aws.services.servicequotas.ServiceQuotasJsonHandler;
 import io.floci.aws.services.ssm.Ec2MessagesJsonHandler;
 import io.floci.aws.services.ssm.SsmJsonHandler;
+import io.floci.aws.services.ssmcontacts.SsmContactsJsonHandler;
 import io.floci.aws.services.ssoadmin.SsoAdminJsonHandler;
 import io.floci.aws.services.textract.TextractJsonHandler;
 import io.floci.aws.services.transcribe.TranscribeJsonHandler;
@@ -145,6 +146,7 @@ public class AwsJson11Controller {
     private final FmsJsonHandler fmsJsonHandler;
     private final ForecastJsonHandler forecastJsonHandler;
     private final PersonalizeJsonHandler personalizeJsonHandler;
+    private final SsmContactsJsonHandler ssmContactsJsonHandler;
     private final KendraJsonHandler kendraJsonHandler;
     private final LicenseManagerJsonHandler licenseManagerJsonHandler;
     private final FsxJsonHandler fsxJsonHandler;
@@ -215,6 +217,7 @@ public class AwsJson11Controller {
                                FmsJsonHandler fmsJsonHandler,
                                ForecastJsonHandler forecastJsonHandler,
                                PersonalizeJsonHandler personalizeJsonHandler,
+                               SsmContactsJsonHandler ssmContactsJsonHandler,
                                KendraJsonHandler kendraJsonHandler,
                                LicenseManagerJsonHandler licenseManagerJsonHandler,
                                FsxJsonHandler fsxJsonHandler,
@@ -289,6 +292,7 @@ public class AwsJson11Controller {
         this.fmsJsonHandler = fmsJsonHandler;
         this.forecastJsonHandler = forecastJsonHandler;
         this.personalizeJsonHandler = personalizeJsonHandler;
+        this.ssmContactsJsonHandler = ssmContactsJsonHandler;
         this.kendraJsonHandler = kendraJsonHandler;
         this.licenseManagerJsonHandler = licenseManagerJsonHandler;
         this.fsxJsonHandler = fsxJsonHandler;
@@ -409,6 +413,7 @@ public class AwsJson11Controller {
                 case "fms" -> fmsJsonHandler.handle(action, request, region);
                 case "forecast" -> forecastJsonHandler.handle(action, request, region);
                 case "personalize" -> personalizeJsonHandler.handle(action, request, region);
+                case "ssm-contacts" -> ssmContactsJsonHandler.handle(action, request, region);
                 case "kendra" -> kendraJsonHandler.handle(action, request, region);
                 case "license-manager" -> licenseManagerJsonHandler.handle(action, request, region);
                 case "forecastquery" -> forecastJsonHandler.handleQuery(action, request, region);

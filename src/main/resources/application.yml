@@ -1060,6 +1060,10 @@ floci:
       enabled: true
     repostspace:
       enabled: true
+    ssm-incidents:
+      enabled: true
+    ssm-contacts:
+      enabled: true
     s3files:
       enabled: true
     route53profiles:

@@ -1,0 +1,936 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_incidentmanager_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AcceptPage": "AcceptPageRequest",
+    "ActivateContactChannel": "ActivateContactChannelRequest",
+    "CreateContact": "CreateContactRequest",
+    "CreateContactChannel": "CreateContactChannelRequest",
+    "CreateRotation": "CreateRotationRequest",
+    "CreateRotationOverride": "CreateRotationOverrideRequest",
+    "DeactivateContactChannel": "DeactivateContactChannelRequest",
+    "DeleteContact": "DeleteContactRequest",
+    "DeleteContactChannel": "DeleteContactChannelRequest",
+    "DeleteRotation": "DeleteRotationRequest",
+    "DeleteRotationOverride": "DeleteRotationOverrideRequest",
+    "DescribeEngagement": "DescribeEngagementRequest",
+    "DescribePage": "DescribePageRequest",
+    "GetContact": "GetContactRequest",
+    "GetContactChannel": "GetContactChannelRequest",
+    "GetContactPolicy": "GetContactPolicyRequest",
+    "GetRotation": "GetRotationRequest",
+    "GetRotationOverride": "GetRotationOverrideRequest",
+    "ListContactChannels": "ListContactChannelsRequest",
+    "ListContacts": "ListContactsRequest",
+    "ListEngagements": "ListEngagementsRequest",
+    "ListPageReceipts": "ListPageReceiptsRequest",
+    "ListPageResolutions": "ListPageResolutionsRequest",
+    "ListPagesByContact": "ListPagesByContactRequest",
+    "ListPagesByEngagement": "ListPagesByEngagementRequest",
+    "ListPreviewRotationShifts": "ListPreviewRotationShiftsRequest",
+    "ListRotationOverrides": "ListRotationOverridesRequest",
+    "ListRotationShifts": "ListRotationShiftsRequest",
+    "ListRotations": "ListRotationsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutContactPolicy": "PutContactPolicyRequest",
+    "SendActivationCode": "SendActivationCodeRequest",
+    "StartEngagement": "StartEngagementRequest",
+    "StopEngagement": "StopEngagementRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateContact": "UpdateContactRequest",
+    "UpdateContactChannel": "UpdateContactChannelRequest",
+    "UpdateRotation": "UpdateRotationRequest"
+  },
+  "shapes": {
+    "AcceptCode": {
+      "type": "string",
+      "min": 6,
+      "max": 10,
+      "pattern": "^[0-9]*$"
+    },
+    "AcceptCodeValidation": {
+      "type": "string",
+      "enum": [
+        "IGNORE",
+        "ENFORCE"
+      ]
+    },
+    "AcceptPageRequest": {
+      "type": "structure",
+      "required": [
+        "PageId",
+        "AcceptType",
+        "AcceptCode"
+      ],
+      "members": {
+        "PageId": "SsmContactsArn",
+        "ContactChannelId": "SsmContactsArn",
+        "AcceptType": "AcceptType",
+        "Note": "ReceiptInfo",
+        "AcceptCode": "AcceptCode",
+        "AcceptCodeValidation": "AcceptCodeValidation"
+      }
+    },
+    "AcceptType": {
+      "type": "string",
+      "enum": [
+        "DELIVERED",
+        "READ"
+      ]
+    },
+    "ActivateContactChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ContactChannelId",
+        "ActivationCode"
+      ],
+      "members": {
+        "ContactChannelId": "SsmContactsArn",
+        "ActivationCode": "ActivationCode"
+      }
+    },
+    "ActivationCode": {
+      "type": "string",
+      "min": 6,
+      "max": 10,
+      "pattern": "^[0-9]*$"
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "ChannelName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^[\\p{L}\\p{Z}\\p{N}_.\\-]*$"
+    },
+    "ChannelTargetInfo": {
+      "type": "structure",
+      "required": [
+        "ContactChannelId"
+      ],
+      "members": {
+        "ContactChannelId": "SsmContactsArn",
+        "RetryIntervalInMinutes": "RetryIntervalInMinutes"
+      }
+    },
+    "ChannelType": {
+      "type": "string",
+      "enum": [
+        "SMS",
+        "VOICE",
+        "EMAIL"
+      ]
+    },
+    "ContactAlias": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^[a-z0-9_\\-]*$"
+    },
+    "ContactChannelAddress": {
+      "type": "structure",
+      "members": {
+        "SimpleAddress": "SimpleAddress"
+      }
+    },
+    "ContactName": {
+      "type": "string",
+      "min": 0,
+      "max": 255,
+      "pattern": "^[\\p{L}\\p{Z}\\p{N}_.\\-]*$"
+    },
+    "ContactTargetInfo": {
+      "type": "structure",
+      "required": [
+        "IsEssential"
+      ],
+      "members": {
+        "ContactId": "SsmContactsArn",
+        "IsEssential": "IsEssential"
+      }
+    },
+    "ContactType": {
+      "type": "string",
+      "enum": [
+        "PERSONAL",
+        "ESCALATION",
+        "ONCALL_SCHEDULE"
+      ]
+    },
+    "Content": {
+      "type": "string",
+      "min": 1,
+      "max": 8192,
+      "pattern": "^[.\\s\\S]*$"
+    },
+    "CoverageTime": {
+      "type": "structure",
+      "members": {
+        "Start": "HandOffTime",
+        "End": "HandOffTime"
+      }
+    },
+    "CoverageTimes": {
+      "type": "list",
+      "member": "CoverageTime"
+    },
+    "CreateContactChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ContactId",
+        "Name",
+        "Type",
+        "DeliveryAddress"
+      ],
+      "members": {
+        "ContactId": "SsmContactsArn",
+        "Name": "ChannelName",
+        "Type": "ChannelType",
+        "DeliveryAddress": "ContactChannelAddress",
+        "DeferActivation": "DeferActivation",
+        "IdempotencyToken": "IdempotencyToken"
+      }
+    },
+    "CreateContactRequest": {
+      "type": "structure",
+      "required": [
+        "Alias",
+        "Type",
+        "Plan"
+      ],
+      "members": {
+        "Alias": "ContactAlias",
+        "DisplayName": "ContactName",
+        "Type": "ContactType",
+        "Plan": "Plan",
+        "Tags": "TagsList",
+        "IdempotencyToken": "IdempotencyToken"
+      }
+    },
+    "CreateRotationOverrideRequest": {
+      "type": "structure",
+      "required": [
+        "RotationId",
+        "NewContactIds",
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "RotationId": "SsmContactsArn",
+        "NewContactIds": "RotationOverrideContactsArnList",
+        "StartTime": "DateTime",
+        "EndTime": "DateTime",
+        "IdempotencyToken": "IdempotencyToken"
+      }
+    },
+    "CreateRotationRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "ContactIds",
+        "TimeZoneId",
+        "Recurrence"
+      ],
+      "members": {
+        "Name": "RotationName",
+        "ContactIds": "RotationContactsArnList",
+        "StartTime": "DateTime",
+        "TimeZoneId": "TimeZoneId",
+        "Recurrence": "RecurrenceSettings",
+        "Tags": "TagsList",
+        "IdempotencyToken": "IdempotencyToken"
+      }
+    },
+    "DailySettings": {
+      "type": "list",
+      "member": "HandOffTime"
+    },
+    "DateTime": {
+      "type": "timestamp"
+    },
+    "DayOfMonth": {
+      "type": "integer",
+      "min": 1,
+      "max": 31
+    },
+    "DayOfWeek": {
+      "type": "string",
+      "enum": [
+        "MON",
+        "TUE",
+        "WED",
+        "THU",
+        "FRI",
+        "SAT",
+        "SUN"
+      ]
+    },
+    "DeactivateContactChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ContactChannelId"
+      ],
+      "members": {
+        "ContactChannelId": "SsmContactsArn"
+      }
+    },
+    "DeferActivation": {
+      "type": "boolean"
+    },
+    "DeleteContactChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ContactChannelId"
+      ],
+      "members": {
+        "ContactChannelId": "SsmContactsArn"
+      }
+    },
+    "DeleteContactRequest": {
+      "type": "structure",
+      "required": [
+        "ContactId"
+      ],
+      "members": {
+        "ContactId": "SsmContactsArn"
+      }
+    },
+    "DeleteRotationOverrideRequest": {
+      "type": "structure",
+      "required": [
+        "RotationId",
+        "RotationOverrideId"
+      ],
+      "members": {
+        "RotationId": "SsmContactsArn",
+        "RotationOverrideId": "Uuid"
+      }
+    },
+    "DeleteRotationRequest": {
+      "type": "structure",
+      "required": [
+        "RotationId"
+      ],
+      "members": {
+        "RotationId": "SsmContactsArn"
+      }
+    },
+    "DescribeEngagementRequest": {
+      "type": "structure",
+      "required": [
+        "EngagementId"
+      ],
+      "members": {
+        "EngagementId": "SsmContactsArn"
+      }
+    },
+    "DescribePageRequest": {
+      "type": "structure",
+      "required": [
+        "PageId"
+      ],
+      "members": {
+        "PageId": "SsmContactsArn"
+      }
+    },
+    "GetContactChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ContactChannelId"
+      ],
+      "members": {
+        "ContactChannelId": "SsmContactsArn"
+      }
+    },
+    "GetContactPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ContactArn"
+      ],
+      "members": {
+        "ContactArn": "SsmContactsArn"
+      }
+    },
+    "GetContactRequest": {
+      "type": "structure",
+      "required": [
+        "ContactId"
+      ],
+      "members": {
+        "ContactId": "SsmContactsArn"
+      }
+    },
+    "GetRotationOverrideRequest": {
+      "type": "structure",
+      "required": [
+        "RotationId",
+        "RotationOverrideId"
+      ],
+      "members": {
+        "RotationId": "SsmContactsArn",
+        "RotationOverrideId": "Uuid"
+      }
+    },
+    "GetRotationRequest": {
+      "type": "structure",
+      "required": [
+        "RotationId"
+      ],
+      "members": {
+        "RotationId": "SsmContactsArn"
+      }
+    },
+    "HandOffTime": {
+      "type": "structure",
+      "required": [
+        "HourOfDay",
+        "MinuteOfHour"
+      ],
+      "members": {
+        "HourOfDay": "HourOfDay",
+        "MinuteOfHour": "MinuteOfHour"
+      }
+    },
+    "HourOfDay": {
+      "type": "integer",
+      "min": 0,
+      "max": 23
+    },
+    "IdempotencyToken": {
+      "type": "string",
+      "max": 2048,
+      "pattern": "^[\\\\\\/a-zA-Z0-9_+=\\-]*$"
+    },
+    "IncidentId": {
+      "type": "string",
+      "max": 1024,
+      "pattern": "^[\\\\a-zA-Z0-9_@#%*+=:?.\\/!\\s-]*$"
+    },
+    "IsEssential": {
+      "type": "boolean"
+    },
+    "ListContactChannelsRequest": {
+      "type": "structure",
+      "required": [
+        "ContactId"
+      ],
+      "members": {
+        "ContactId": "SsmContactsArn",
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListContactsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults",
+        "AliasPrefix": "ContactAlias",
+        "Type": "ContactType"
+      }
+    },
+    "ListEngagementsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults",
+        "IncidentId": "IncidentId",
+        "TimeRangeValue": "TimeRange"
+      }
+    },
+    "ListPageReceiptsRequest": {
+      "type": "structure",
+      "required": [
+        "PageId"
+      ],
+      "members": {
+        "PageId": "SsmContactsArn",
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListPageResolutionsRequest": {
+      "type": "structure",
+      "required": [
+        "PageId"
+      ],
+      "members": {
+        "NextToken": "PaginationToken",
+        "PageId": "SsmContactsArn"
+      }
+    },
+    "ListPagesByContactRequest": {
+      "type": "structure",
+      "required": [
+        "ContactId"
+      ],
+      "members": {
+        "ContactId": "SsmContactsArn",
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListPagesByEngagementRequest": {
+      "type": "structure",
+      "required": [
+        "EngagementId"
+      ],
+      "members": {
+        "EngagementId": "SsmContactsArn",
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListPreviewRotationShiftsRequest": {
+      "type": "structure",
+      "required": [
+        "EndTime",
+        "Members",
+        "TimeZoneId",
+        "Recurrence"
+      ],
+      "members": {
+        "RotationStartTime": "DateTime",
+        "StartTime": "DateTime",
+        "EndTime": "DateTime",
+        "Members": "RotationPreviewMemberList",
+        "TimeZoneId": "TimeZoneId",
+        "Recurrence": "RecurrenceSettings",
+        "Overrides": "OverrideList",
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListRotationOverridesRequest": {
+      "type": "structure",
+      "required": [
+        "RotationId",
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "RotationId": "SsmContactsArn",
+        "StartTime": "DateTime",
+        "EndTime": "DateTime",
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListRotationShiftsRequest": {
+      "type": "structure",
+      "required": [
+        "RotationId",
+        "EndTime"
+      ],
+      "members": {
+        "RotationId": "SsmContactsArn",
+        "StartTime": "DateTime",
+        "EndTime": "DateTime",
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListRotationsRequest": {
+      "type": "structure",
+      "members": {
+        "RotationNamePrefix": "RotationName",
+        "NextToken": "PaginationToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 0,
+      "max": 1024
+    },
+    "Member": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": ".*\\S.*"
+    },
+    "MinuteOfHour": {
+      "type": "integer",
+      "min": 0,
+      "max": 59
+    },
+    "MonthlySetting": {
+      "type": "structure",
+      "required": [
+        "DayOfMonth",
+        "HandOffTime"
+      ],
+      "members": {
+        "DayOfMonth": "DayOfMonth",
+        "HandOffTime": "HandOffTime"
+      }
+    },
+    "MonthlySettings": {
+      "type": "list",
+      "member": "MonthlySetting"
+    },
+    "NumberOfOnCalls": {
+      "type": "integer",
+      "min": 1
+    },
+    "OverrideList": {
+      "type": "list",
+      "member": "PreviewOverride"
+    },
+    "PaginationToken": {
+      "type": "string",
+      "max": 2048,
+      "pattern": "^[\\\\\\/a-zA-Z0-9_+=\\-]*$"
+    },
+    "Plan": {
+      "type": "structure",
+      "members": {
+        "Stages": "StagesList",
+        "RotationIds": "SsmContactsArnList"
+      }
+    },
+    "Policy": {
+      "type": "string",
+      "min": 1,
+      "max": 395000,
+      "pattern": ".*\\S.*"
+    },
+    "PreviewOverride": {
+      "type": "structure",
+      "members": {
+        "NewMembers": "RotationOverridePreviewMemberList",
+        "StartTime": "DateTime",
+        "EndTime": "DateTime"
+      }
+    },
+    "PublicContent": {
+      "type": "string",
+      "min": 1,
+      "max": 8192,
+      "pattern": "^[.\\s\\S]*$"
+    },
+    "PublicSubject": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^[.\\s\\S]*$"
+    },
+    "PutContactPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ContactArn",
+        "Policy"
+      ],
+      "members": {
+        "ContactArn": "SsmContactsArn",
+        "Policy": "Policy"
+      }
+    },
+    "ReceiptInfo": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^[.\\s\\S]*$"
+    },
+    "RecurrenceMultiplier": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "RecurrenceSettings": {
+      "type": "structure",
+      "required": [
+        "NumberOfOnCalls",
+        "RecurrenceMultiplier"
+      ],
+      "members": {
+        "MonthlySettings": "MonthlySettings",
+        "WeeklySettings": "WeeklySettings",
+        "DailySettings": "DailySettings",
+        "NumberOfOnCalls": "NumberOfOnCalls",
+        "ShiftCoverages": "ShiftCoveragesMap",
+        "RecurrenceMultiplier": "RecurrenceMultiplier"
+      }
+    },
+    "RetryIntervalInMinutes": {
+      "type": "integer",
+      "min": 0,
+      "max": 60
+    },
+    "RotationContactsArnList": {
+      "type": "list",
+      "min": 1,
+      "max": 30,
+      "member": "SsmContactsArn"
+    },
+    "RotationName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^[a-zA-Z0-9_\\-\\s\\.]*$"
+    },
+    "RotationOverrideContactsArnList": {
+      "type": "list",
+      "min": 0,
+      "max": 30,
+      "member": "SsmContactsArn"
+    },
+    "RotationOverridePreviewMemberList": {
+      "type": "list",
+      "min": 0,
+      "max": 30,
+      "member": "Member"
+    },
+    "RotationPreviewMemberList": {
+      "type": "list",
+      "min": 1,
+      "max": 30,
+      "member": "Member"
+    },
+    "SendActivationCodeRequest": {
+      "type": "structure",
+      "required": [
+        "ContactChannelId"
+      ],
+      "members": {
+        "ContactChannelId": "SsmContactsArn"
+      }
+    },
+    "Sender": {
+      "type": "string",
+      "max": 255,
+      "pattern": "^[\\\\a-zA-Z0-9_@#%*+=:?.\\/!\\s-]*$"
+    },
+    "ShiftCoveragesMap": {
+      "type": "map",
+      "key": "DayOfWeek",
+      "value": "CoverageTimes"
+    },
+    "SimpleAddress": {
+      "type": "string",
+      "min": 1,
+      "max": 320
+    },
+    "SsmContactsArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "arn:(aws|aws-cn|aws-us-gov):ssm-contacts:[-\\w+=\\/,.@]*:[0-9]+:([\\w+=\\/,.@:-]+)*"
+    },
+    "SsmContactsArnList": {
+      "type": "list",
+      "min": 0,
+      "max": 25,
+      "member": "SsmContactsArn"
+    },
+    "Stage": {
+      "type": "structure",
+      "required": [
+        "DurationInMinutes",
+        "Targets"
+      ],
+      "members": {
+        "DurationInMinutes": "StageDurationInMins",
+        "Targets": "TargetsList"
+      }
+    },
+    "StageDurationInMins": {
+      "type": "integer",
+      "min": 0,
+      "max": 30
+    },
+    "StagesList": {
+      "type": "list",
+      "member": "Stage"
+    },
+    "StartEngagementRequest": {
+      "type": "structure",
+      "required": [
+        "ContactId",
+        "Sender",
+        "Subject",
+        "Content"
+      ],
+      "members": {
+        "ContactId": "SsmContactsArn",
+        "Sender": "Sender",
+        "Subject": "Subject",
+        "Content": "Content",
+        "PublicSubject": "PublicSubject",
+        "PublicContent": "PublicContent",
+        "IncidentId": "IncidentId",
+        "IdempotencyToken": "IdempotencyToken"
+      }
+    },
+    "StopEngagementRequest": {
+      "type": "structure",
+      "required": [
+        "EngagementId"
+      ],
+      "members": {
+        "EngagementId": "SsmContactsArn",
+        "Reason": "StopReason"
+      }
+    },
+    "StopReason": {
+      "type": "string",
+      "max": 255,
+      "pattern": "^[.\\s\\S]*$"
+    },
+    "Subject": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^[.\\s\\S]*$"
+    },
+    "Tag": {
+      "type": "structure",
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^[\\\\\\/a-zA-Z0-9_+=\\-]*$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Tags"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "Tags": "TagsList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^[\\p{L}\\p{Z}\\p{N}_.:\\/=+\\-@]*$"
+    },
+    "TagsList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "Tag"
+    },
+    "Target": {
+      "type": "structure",
+      "members": {
+        "ChannelTargetInfo": "ChannelTargetInfo",
+        "ContactTargetInfo": "ContactTargetInfo"
+      }
+    },
+    "TargetsList": {
+      "type": "list",
+      "member": "Target"
+    },
+    "TimeRange": {
+      "type": "structure",
+      "members": {
+        "StartTime": "DateTime",
+        "EndTime": "DateTime"
+      }
+    },
+    "TimeZoneId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^[:a-zA-Z0-9_\\-\\s\\.\\\\/]*$"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateContactChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ContactChannelId"
+      ],
+      "members": {
+        "ContactChannelId": "SsmContactsArn",
+        "Name": "ChannelName",
+        "DeliveryAddress": "ContactChannelAddress"
+      }
+    },
+    "UpdateContactRequest": {
+      "type": "structure",
+      "required": [
+        "ContactId"
+      ],
+      "members": {
+        "ContactId": "SsmContactsArn",
+        "DisplayName": "ContactName",
+        "Plan": "Plan"
+      }
+    },
+    "UpdateRotationRequest": {
+      "type": "structure",
+      "required": [
+        "RotationId",
+        "Recurrence"
+      ],
+      "members": {
+        "RotationId": "SsmContactsArn",
+        "ContactIds": "RotationContactsArnList",
+        "StartTime": "DateTime",
+        "TimeZoneId": "TimeZoneId",
+        "Recurrence": "RecurrenceSettings"
+      }
+    },
+    "Uuid": {
+      "type": "string",
+      "min": 36,
+      "max": 39,
+      "pattern": "([a-fA-Z0-9]{8,11}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}){1}"
+    },
+    "WeeklySetting": {
+      "type": "structure",
+      "required": [
+        "DayOfWeek",
+        "HandOffTime"
+      ],
+      "members": {
+        "DayOfWeek": "DayOfWeek",
+        "HandOffTime": "HandOffTime"
+      }
+    },
+    "WeeklySettings": {
+      "type": "list",
+      "member": "WeeklySetting"
+    }
+  }
+}
