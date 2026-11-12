@@ -1060,6 +1060,8 @@ floci:
       enabled: true
     repostspace:
       enabled: true
+    socialmessaging:
+      enabled: true
     sdb:
       enabled: true
     signer:

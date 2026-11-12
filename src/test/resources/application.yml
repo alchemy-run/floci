@@ -571,6 +571,9 @@ floci:
     repostspace:
       enabled: true
       transition-millis: 200
+    socialmessaging:
+      enabled: true
+      review-millis: 200
     sdb:
       enabled: true
     signer:

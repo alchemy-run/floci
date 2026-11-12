@@ -291,6 +291,10 @@ services:
     doc: docs/services/opensearchserverless.md
     sources:
       - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: social-messaging
+    doc: docs/services/socialmessaging.md
+    sources:
+      - { path: services/socialmessaging/SocialMessagingService.java, mode: switch }
   - service: sdb
     doc: docs/services/sdb.md
     sources:

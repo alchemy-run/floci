@@ -59,6 +59,7 @@ MODELS = {
     "schemas": "schemas",
     "securitylake": "securitylake",
     "signer": "signer",
+    "socialmessaging": "socialmessaging",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

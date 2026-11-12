@@ -1,0 +1,595 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "socialmessaging",
+ "apiVersion": "2024-01-01",
+ "operations": {
+  "AssociateWhatsAppBusinessAccount": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/signup",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateWhatsAppDataset": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/waba/dataset",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateWhatsAppFlow": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/flow/create",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateWhatsAppMessageTemplate": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/template/put",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateWhatsAppMessageTemplateFromLibrary": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/template/create",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateWhatsAppMessageTemplateMedia": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/template/media",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteWhatsAppFlow": {
+   "method": "DELETE",
+   "requestUri": "/v1/whatsapp/flow",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     },
+     "flowId": {
+      "location": "querystring",
+      "name": "flowId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteWhatsAppMessageMedia": {
+   "method": "DELETE",
+   "requestUri": "/v1/whatsapp/media",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "mediaId": {
+      "location": "querystring",
+      "name": "mediaId"
+     },
+     "originationPhoneNumberId": {
+      "location": "querystring",
+      "name": "originationPhoneNumberId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteWhatsAppMessageTemplate": {
+   "method": "DELETE",
+   "requestUri": "/v1/whatsapp/template",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "metaTemplateId": {
+      "location": "querystring",
+      "name": "metaTemplateId"
+     },
+     "deleteAllLanguages": {
+      "location": "querystring",
+      "name": "deleteAllTemplates",
+      "type": "boolean"
+     },
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     },
+     "templateName": {
+      "location": "querystring",
+      "name": "templateName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeprecateWhatsAppFlow": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/flow/deprecate",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateWhatsAppBusinessAccount": {
+   "method": "DELETE",
+   "requestUri": "/v1/whatsapp/waba/disassociate",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetLinkedWhatsAppBusinessAccount": {
+   "method": "GET",
+   "requestUri": "/v1/whatsapp/waba/details",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetLinkedWhatsAppBusinessAccountPhoneNumber": {
+   "method": "GET",
+   "requestUri": "/v1/whatsapp/waba/phone/details",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetWhatsAppBusinessPublicKey": {
+   "method": "GET",
+   "requestUri": "/v1/whatsapp/business-public-key",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "originationPhoneNumberId": {
+      "location": "querystring",
+      "name": "originationPhoneNumberId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetWhatsAppCallPermission": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/call/permission/get",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetWhatsAppFlow": {
+   "method": "GET",
+   "requestUri": "/v1/whatsapp/flow",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     },
+     "flowId": {
+      "location": "querystring",
+      "name": "flowId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetWhatsAppFlowPreview": {
+   "method": "GET",
+   "requestUri": "/v1/whatsapp/flow/preview",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     },
+     "flowId": {
+      "location": "querystring",
+      "name": "flowId"
+     },
+     "invalidate": {
+      "location": "querystring",
+      "name": "invalidate",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetWhatsAppMessageMedia": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/media/get",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetWhatsAppMessageTemplate": {
+   "method": "GET",
+   "requestUri": "/v1/whatsapp/template",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "metaTemplateId": {
+      "location": "querystring",
+      "name": "metaTemplateId"
+     },
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     },
+     "templateName": {
+      "location": "querystring",
+      "name": "templateName"
+     },
+     "templateLanguageCode": {
+      "location": "querystring",
+      "name": "templateLanguageCode"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListLinkedWhatsAppBusinessAccounts": {
+   "method": "GET",
+   "requestUri": "/v1/whatsapp/waba/list",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/v1/tags/list",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "querystring",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListWhatsAppFlowAssets": {
+   "method": "GET",
+   "requestUri": "/v1/whatsapp/flow/assets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     },
+     "flowId": {
+      "location": "querystring",
+      "name": "flowId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListWhatsAppFlows": {
+   "method": "GET",
+   "requestUri": "/v1/whatsapp/flow/list",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListWhatsAppMessageTemplates": {
+   "method": "GET",
+   "requestUri": "/v1/whatsapp/template/list",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListWhatsAppTemplateLibrary": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/template/library",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PostWhatsAppMessageMedia": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/media",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PublishWhatsAppFlow": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/flow/publish",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutWhatsAppBusinessAccountEventDestinations": {
+   "method": "PUT",
+   "requestUri": "/v1/whatsapp/waba/eventdestinations",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutWhatsAppBusinessPublicKey": {
+   "method": "PUT",
+   "requestUri": "/v1/whatsapp/business-public-key",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SendWhatsAppCallEvent": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/call/event",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SendWhatsAppConversionEvent": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/waba/dataset/events",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SendWhatsAppMessage": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/send",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/v1/tags/tag-resource",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "POST",
+   "requestUri": "/v1/tags/untag-resource",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateLinkedWhatsAppBusinessAccountPhoneNumber": {
+   "method": "PUT",
+   "requestUri": "/v1/whatsapp/waba/phone",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "querystring",
+      "name": "id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateWhatsAppFlow": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/flow/update",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateWhatsAppFlowAssets": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/flow/assets/update",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateWhatsAppMessageTemplate": {
+   "method": "POST",
+   "requestUri": "/v1/whatsapp/template",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

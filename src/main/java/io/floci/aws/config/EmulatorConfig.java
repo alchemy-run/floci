@@ -950,6 +950,8 @@ public interface EmulatorConfig {
 
         SimpleDbServiceConfig sdb();
 
+        SocialMessagingServiceConfig socialmessaging();
+
         SsmIncidentsServiceConfig ssmIncidents();
 
         SsmContactsServiceConfig ssmContacts();
@@ -3120,6 +3122,15 @@ public interface EmulatorConfig {
         /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface SocialMessagingServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long Meta takes to review a marketing template, in milliseconds. */
+        @WithDefault("2000")
+        long reviewMillis();
     }
 
     interface SimpleDbServiceConfig {
