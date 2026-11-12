@@ -571,6 +571,8 @@ floci:
     repostspace:
       enabled: true
       transition-millis: 200
+    shield:
+      enabled: true
     securitylake:
       enabled: true
       transition-millis: 200

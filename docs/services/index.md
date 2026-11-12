@@ -160,6 +160,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Incident Manager](ssm-incidents.md) | `/createReplicationSet`, `/startIncident` and the rest (signed `ssm-incidents`); incidents notify SNS topics and engage contacts | REST JSON | 31 |
 | [EventBridge Schemas](schemas.md) | `/v1/registries`, `/v1/discoverers`, `/v1/discover` (signed `schemas`); discoverers infer schemas from bus events, code bindings | REST JSON | 31 |
 | [Security Lake](securitylake.md) | `/v1/datalake`, `/v1/subscribers` (signed `securitylake`); data lakes with real S3 buckets and Glue tables, subscriber queues fed by the bucket | REST JSON | 31 |
+| [Shield](shield.md) | `POST /` + `X-Amz-Target: AWSShield_20160616.*`; protections on resources that exist, groups by pattern, response team access | JSON 1.1 | 36 |
 | [SSM Contacts](ssm-contacts.md) | `POST /` + `X-Amz-Target: SSMContacts.*`; channels activated by code, pages delivered through SES and SNS, rotation shifts | JSON 1.1 | 39 |
 | [HealthOmics](omics.md) | `/referencestore`, `/sequencestore`, `/workflow`, `/run`, ... (signed `omics`); runs on Cromwell, Nextflow and cwltool | REST JSON | 107 |
 | [CloudWatch Observability Admin](observabilityadmin.md) | `POST /<Operation>` (signed `observabilityadmin`); telemetry rules configure resources, pipelines run processors | REST JSON | 45 |

@@ -1060,6 +1060,8 @@ floci:
       enabled: true
     repostspace:
       enabled: true
+    shield:
+      enabled: true
     securitylake:
       enabled: true
     schemas:

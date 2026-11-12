@@ -291,6 +291,10 @@ services:
     doc: docs/services/opensearchserverless.md
     sources:
       - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: shield
+    doc: docs/services/shield.md
+    sources:
+      - { path: services/shield/ShieldService.java, mode: switch }
   - service: securitylake
     doc: docs/services/securitylake.md
     sources:

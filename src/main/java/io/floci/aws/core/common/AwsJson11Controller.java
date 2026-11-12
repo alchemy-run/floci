@@ -67,6 +67,7 @@ import io.floci.aws.services.sagemaker.SageMakerJsonHandler;
 import io.floci.aws.services.secretsmanager.SecretsManagerJsonHandler;
 import io.floci.aws.services.servicecatalog.ServiceCatalogJsonHandler;
 import io.floci.aws.services.servicequotas.ServiceQuotasJsonHandler;
+import io.floci.aws.services.shield.ShieldJsonHandler;
 import io.floci.aws.services.ssm.Ec2MessagesJsonHandler;
 import io.floci.aws.services.ssm.SsmJsonHandler;
 import io.floci.aws.services.ssmcontacts.SsmContactsJsonHandler;
@@ -147,6 +148,7 @@ public class AwsJson11Controller {
     private final ForecastJsonHandler forecastJsonHandler;
     private final PersonalizeJsonHandler personalizeJsonHandler;
     private final SsmContactsJsonHandler ssmContactsJsonHandler;
+    private final ShieldJsonHandler shieldJsonHandler;
     private final KendraJsonHandler kendraJsonHandler;
     private final LicenseManagerJsonHandler licenseManagerJsonHandler;
     private final FsxJsonHandler fsxJsonHandler;
@@ -218,6 +220,7 @@ public class AwsJson11Controller {
                                ForecastJsonHandler forecastJsonHandler,
                                PersonalizeJsonHandler personalizeJsonHandler,
                                SsmContactsJsonHandler ssmContactsJsonHandler,
+                               ShieldJsonHandler shieldJsonHandler,
                                KendraJsonHandler kendraJsonHandler,
                                LicenseManagerJsonHandler licenseManagerJsonHandler,
                                FsxJsonHandler fsxJsonHandler,
@@ -293,6 +296,7 @@ public class AwsJson11Controller {
         this.forecastJsonHandler = forecastJsonHandler;
         this.personalizeJsonHandler = personalizeJsonHandler;
         this.ssmContactsJsonHandler = ssmContactsJsonHandler;
+        this.shieldJsonHandler = shieldJsonHandler;
         this.kendraJsonHandler = kendraJsonHandler;
         this.licenseManagerJsonHandler = licenseManagerJsonHandler;
         this.fsxJsonHandler = fsxJsonHandler;
@@ -414,6 +418,7 @@ public class AwsJson11Controller {
                 case "forecast" -> forecastJsonHandler.handle(action, request, region);
                 case "personalize" -> personalizeJsonHandler.handle(action, request, region);
                 case "ssm-contacts" -> ssmContactsJsonHandler.handle(action, request, region);
+                case "shield" -> shieldJsonHandler.handle(action, request, region);
                 case "kendra" -> kendraJsonHandler.handle(action, request, region);
                 case "license-manager" -> licenseManagerJsonHandler.handle(action, request, region);
                 case "forecastquery" -> forecastJsonHandler.handleQuery(action, request, region);
