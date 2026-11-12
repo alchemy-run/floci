@@ -84,7 +84,10 @@ class SocialMessagingIntegrationTest {
         social().body("{\"signupCallback\":{\"accessToken\":\"meta-token-1\"}}").post("/v1/whatsapp/signup").then()
                 .statusCode(409);
         String arn = social().queryParam("id", wabaId).get("/v1/whatsapp/waba/details").then().statusCode(200)
-                .body("account.registrationStatus", equalTo("COMPLETE")).extract().path("account.arn");
+                .body("account.registrationStatus", equalTo("COMPLETE"))
+                .body("account.phoneNumbers.phoneNumberId", equalTo(List.of(phoneId))).extract().path("account.arn");
+        social().get("/v1/whatsapp/waba/list").then().statusCode(200)
+                .body("linkedAccounts.find { it.id == '" + wabaId + "' }.phoneNumbers", equalTo(null));
         social().queryParam("id", phoneId).get("/v1/whatsapp/waba/phone/details").then().statusCode(200)
                 .body("linkedWhatsAppBusinessAccountId", equalTo(wabaId))
                 .body("phoneNumber.phoneNumber", startsWith("+1206555"));

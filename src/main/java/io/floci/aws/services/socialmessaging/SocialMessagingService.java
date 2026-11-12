@@ -88,7 +88,8 @@ public class SocialMessagingService implements Resettable {
     public ObjectNode handle(String op, JsonNode in, String region) {
         return switch (op) {
             case "AssociateWhatsAppBusinessAccount" -> associate(in, region);
-            case "GetLinkedWhatsAppBusinessAccount" -> wrap("account", accountView(account(region, required(in, "id"))));
+            case "GetLinkedWhatsAppBusinessAccount" ->
+                    wrap("account", accountView(account(region, required(in, "id")), true));
             case "ListLinkedWhatsAppBusinessAccounts" -> listAccounts(region);
             case "DisassociateWhatsAppBusinessAccount" -> disassociate(in, region);
             case "PutWhatsAppBusinessAccountEventDestinations" -> putDestinations(in, region);
@@ -235,10 +236,13 @@ public class SocialMessagingService implements Resettable {
                 .orElseThrow(() -> notFound("The linked WhatsApp Business Account " + id + " doesn't exist."));
     }
 
-    private ObjectNode accountView(ObjectNode account) {
+    /** Get returns the registered phone numbers; the List summaries leave them out. */
+    private ObjectNode accountView(ObjectNode account, boolean withPhones) {
         ObjectNode view = account.deepCopy();
         view.remove("_");
-        view.remove("phoneNumbers");
+        if (!withPhones) {
+            view.remove("phoneNumbers");
+        }
         return view;
     }
 
@@ -248,7 +252,7 @@ public class SocialMessagingService implements Resettable {
 
     private ObjectNode listAccounts(String region) {
         ArrayNode out = mapper.createArrayNode();
-        accounts.scan(k -> k.startsWith(region + "/")).forEach(a -> out.add(accountView(a)));
+        accounts.scan(k -> k.startsWith(region + "/")).forEach(a -> out.add(accountView(a, false)));
         return wrap("linkedAccounts", out);
     }
 
