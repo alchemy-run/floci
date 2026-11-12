@@ -117,6 +117,15 @@ public class SignerService implements Resettable, CodeSignatureVerifier {
         };
     }
 
+    /** A profile read reports a missing profile before it checks the request, as Signer does. */
+    public void checkProfile(String operation, JsonNode in, String region) {
+        if (("GetSigningProfile".equals(operation) || "ListProfilePermissions".equals(operation))
+                && in.hasNonNull("profileName")
+                && profiles.get(key(region, decode(in.get("profileName").asText()))).isEmpty()) {
+            throw notFound("Signing profile " + in.get("profileName").asText() + " does not exist.");
+        }
+    }
+
     // ---------- for CloudFormation ----------
 
     /** Creates a profile for {@code AWS::Signer::SigningProfile}; returns its version, as PutSigningProfile does. */

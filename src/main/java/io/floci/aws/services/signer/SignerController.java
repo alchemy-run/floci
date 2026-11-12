@@ -67,6 +67,7 @@ public class SignerController {
         String path = uri.getRequestUri().getRawPath().substring(SignerRouteFilter.PREFIX.length());
         String region = regions.resolveRegion(headers);
         return dispatcher.dispatch(method, path, uri.getQueryParameters(), headers, body, (operation, input) -> {
+            service.checkProfile(operation, input, region);
             SHAPES.check(operation, input);
             return service.handle(operation, input, region);
         });

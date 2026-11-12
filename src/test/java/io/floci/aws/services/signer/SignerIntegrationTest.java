@@ -92,6 +92,11 @@ class SignerIntegrationTest {
                 .path("profileVersionArn");
         signer().body("{\"platformId\":\"AWSLambda-SHA384-ECDSA\"}").put("/signing-profiles/release").then()
                 .statusCode(400).body("message", containsString("already exists"));
+        signer().body("{\"platformId\":\"AWSLambda-SHA384-ECDSA\"}")
+                .put("/signing-profiles/a_profile_name_far_longer_than_a_certificate_common_name_can").then()
+                .statusCode(200);
+        signer().get("/signing-profiles/not-a-valid-profile-name").then().statusCode(404)
+                .body("__type", containsString("ResourceNotFoundException"));
 
         // Permissions are revisioned.
         String revision = signer().body("{\"action\":\"signer:StartSigningJob\",\"principal\":\"111122223333\","

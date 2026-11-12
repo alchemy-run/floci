@@ -60,7 +60,12 @@ final class SignerCrypto {
             generator.initialize(new ECGenParameterSpec("secp384r1"), RANDOM);
             KeyPair pair = generator.generateKeyPair();
             Instant now = Instant.now();
-            X500Name name = new X500Name("CN=" + subject.replaceAll("[,=+<>#;\"\\\\]", "_") + ",O=AWS Signer");
+            String commonName = subject.replaceAll("[,=+<>#;\"\\\\]", "_");
+            // A common name has at most 64 characters (RFC 5280); keep the end, which holds the version.
+            if (commonName.length() > 64) {
+                commonName = commonName.substring(commonName.length() - 64);
+            }
+            X500Name name = new X500Name("CN=" + commonName + ",O=AWS Signer");
             X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(name,
                     new BigInteger(64, RANDOM).abs(), Date.from(now), Date.from(now.plusSeconds(20L * 365 * 86400)),
                     name, pair.getPublic());
