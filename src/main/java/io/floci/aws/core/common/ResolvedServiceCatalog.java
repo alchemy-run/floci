@@ -82,6 +82,7 @@ import io.floci.aws.services.oam.OamController;
 import io.floci.aws.services.opensearch.ElasticsearchController;
 import io.floci.aws.services.opensearch.OpenSearchController;
 import io.floci.aws.services.paymentcryptography.PaymentCryptographyCryptoController;
+import io.floci.aws.services.personalize.PersonalizeController;
 import io.floci.aws.services.pipes.PipesController;
 import io.floci.aws.services.polly.PollyController;
 import io.floci.aws.services.quicksight.QuickSightController;
@@ -499,6 +500,11 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("OpenSearchServerless."), Set.of("aoss"), Set.of(), Set.of()),
+                descriptor("personalize", "personalize", config.services().personalize().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON, ServiceProtocol.REST_JSON),
+                        Set.of("AmazonPersonalize."), Set.of("personalize"), Set.of(),
+                        Set.of(PersonalizeController.class)),
                 descriptor("omics", "omics", config.services().omics().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),

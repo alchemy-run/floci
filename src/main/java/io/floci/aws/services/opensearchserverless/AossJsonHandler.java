@@ -124,7 +124,7 @@ public class AossJsonHandler {
         };
         if (result == null) {
             return Response.status(400).entity(new AwsErrorResponse("UnknownOperationException",
-                    "Unknown operation: AmazonMWAAServerless." + action)).build();
+                    "Unknown operation: OpenSearchServerless." + action)).build();
         }
         return Response.ok(result).build();
     }

@@ -55,6 +55,7 @@ import io.floci.aws.services.marketplace.MarketplaceMeteringController;
 import io.floci.aws.services.memorydb.MemoryDbHandler;
 import io.floci.aws.services.networkfirewall.NetworkFirewallJsonHandler;
 import io.floci.aws.services.organizations.OrganizationsJsonHandler;
+import io.floci.aws.services.personalize.PersonalizeJsonHandler;
 import io.floci.aws.services.pricing.PricingJsonHandler;
 import io.floci.aws.services.redshiftdata.RedshiftDataJsonHandler;
 import io.floci.aws.services.redshiftserverless.RedshiftServerlessJsonHandler;
@@ -143,6 +144,7 @@ public class AwsJson11Controller {
     private final EcrPublicJsonHandler ecrPublicJsonHandler;
     private final FmsJsonHandler fmsJsonHandler;
     private final ForecastJsonHandler forecastJsonHandler;
+    private final PersonalizeJsonHandler personalizeJsonHandler;
     private final KendraJsonHandler kendraJsonHandler;
     private final LicenseManagerJsonHandler licenseManagerJsonHandler;
     private final FsxJsonHandler fsxJsonHandler;
@@ -212,6 +214,7 @@ public class AwsJson11Controller {
                                EcrPublicJsonHandler ecrPublicJsonHandler,
                                FmsJsonHandler fmsJsonHandler,
                                ForecastJsonHandler forecastJsonHandler,
+                               PersonalizeJsonHandler personalizeJsonHandler,
                                KendraJsonHandler kendraJsonHandler,
                                LicenseManagerJsonHandler licenseManagerJsonHandler,
                                FsxJsonHandler fsxJsonHandler,
@@ -285,6 +288,7 @@ public class AwsJson11Controller {
         this.ecrPublicJsonHandler = ecrPublicJsonHandler;
         this.fmsJsonHandler = fmsJsonHandler;
         this.forecastJsonHandler = forecastJsonHandler;
+        this.personalizeJsonHandler = personalizeJsonHandler;
         this.kendraJsonHandler = kendraJsonHandler;
         this.licenseManagerJsonHandler = licenseManagerJsonHandler;
         this.fsxJsonHandler = fsxJsonHandler;
@@ -404,6 +408,7 @@ public class AwsJson11Controller {
                 case "ecr-public" -> ecrPublicJsonHandler.handle(action, request, region);
                 case "fms" -> fmsJsonHandler.handle(action, request, region);
                 case "forecast" -> forecastJsonHandler.handle(action, request, region);
+                case "personalize" -> personalizeJsonHandler.handle(action, request, region);
                 case "kendra" -> kendraJsonHandler.handle(action, request, region);
                 case "license-manager" -> licenseManagerJsonHandler.handle(action, request, region);
                 case "forecastquery" -> forecastJsonHandler.handleQuery(action, request, region);

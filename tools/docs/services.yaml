@@ -291,6 +291,11 @@ services:
     doc: docs/services/opensearchserverless.md
     sources:
       - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: personalize
+    doc: docs/services/personalize.md
+    sources:
+      - { path: services/personalize/PersonalizeJsonHandler.java, mode: switch }
+      - { path: services/personalize/PersonalizeController.java, mode: switch }
   - service: omics
     doc: docs/services/omics.md
     sources:

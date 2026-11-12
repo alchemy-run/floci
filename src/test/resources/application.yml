@@ -566,6 +566,10 @@ floci:
       enabled: true
       transition-millis: 200
       engine: none
+    personalize:
+      enabled: true
+      transition-millis: 200
+      min-training-interactions: 10
     opensearch-serverless:
       enabled: true
       transition-millis: 200

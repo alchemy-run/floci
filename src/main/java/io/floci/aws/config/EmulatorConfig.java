@@ -922,6 +922,8 @@ public interface EmulatorConfig {
 
         OpenSearchServerlessServiceConfig opensearchServerless();
 
+        PersonalizeServiceConfig personalize();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3053,6 +3055,19 @@ public interface EmulatorConfig {
         /** How long event rules, hubs and configurations stay in a transitional state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface PersonalizeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long datasets, solutions, campaigns and jobs stay pending before they move on, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The fewest interactions a solution version or recommender trains on, as Personalize requires. */
+        @WithDefault("1000")
+        int minTrainingInteractions();
     }
 
     interface OpenSearchServerlessServiceConfig {

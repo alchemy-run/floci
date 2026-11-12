@@ -46,6 +46,8 @@ MODELS = {
     "osis": "osis",
     "observabilityadmin": "observabilityadmin",
     "omics": "omics",
+    "personalize-runtime": "personalizeruntime",
+    "personalize-events": "personalizeevents",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}
