@@ -749,7 +749,7 @@ public class MediaConvertJobs {
             RequestScopes.runAs(account, region, () -> events.get().publishServiceEvent("aws.mediaconvert",
                     "MediaConvert Job State Change", detail.toString(), job.path("Arn").asText(), region));
         } catch (RuntimeException e) {
-            LOG.debugv("MediaConvert couldn't send the {0} event of job {1}: {2}", status, job.path("Id").asText(),
+            LOG.debugv("MediaConvert could not send the {0} event of job {1}: {2}", status, job.path("Id").asText(),
                     e.getMessage());
         }
     }

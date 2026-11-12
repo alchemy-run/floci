@@ -155,7 +155,7 @@ public class MediaConnectFlows {
             RequestScopes.runAs(account, region, () -> events.get().publishServiceEvent("aws.mediaconnect",
                     detailType, detail.toString(), resourceArn, region));
         } catch (RuntimeException e) {
-            LOG.debugv("MediaConnect couldn't send {0} for {1}: {2}", detailType, resourceArn, e.getMessage());
+            LOG.debugv("MediaConnect could not send {0} for {1}: {2}", detailType, resourceArn, e.getMessage());
         }
     }
 
@@ -988,7 +988,7 @@ public class MediaConnectFlows {
         try {
             ec2.get().deleteNetworkInterface(region, eniId);
         } catch (RuntimeException e) {
-            LOG.debugv("MediaConnect couldn't delete network interface {0}: {1}", eniId, e.getMessage());
+            LOG.debugv("MediaConnect could not delete network interface {0}: {1}", eniId, e.getMessage());
         }
     }
 

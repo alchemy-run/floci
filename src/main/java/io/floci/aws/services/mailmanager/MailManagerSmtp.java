@@ -317,7 +317,7 @@ public class MailManagerSmtp {
                 }
                 return value;
             } catch (JsonProcessingException | RuntimeException e) {
-                LOG.debugv("Mail Manager couldn't read the ingress point secret {0}: {1}", secretArn, e.getMessage());
+                LOG.debugv("Mail Manager could not read the ingress point secret {0}: {1}", secretArn, e.getMessage());
                 return null;
             }
         }
