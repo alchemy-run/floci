@@ -571,6 +571,9 @@ floci:
     repostspace:
       enabled: true
       transition-millis: 200
+    route53profiles:
+      enabled: true
+      transition-millis: 200
     rbin:
       enabled: true
       transition-millis: 200

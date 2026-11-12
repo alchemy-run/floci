@@ -291,6 +291,10 @@ services:
     doc: docs/services/opensearchserverless.md
     sources:
       - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: route53profiles
+    doc: docs/services/route53profiles.md
+    sources:
+      - { path: services/route53profiles/Route53ProfilesService.java, mode: switch }
   - service: rolesanywhere
     doc: docs/services/rolesanywhere.md
     sources:

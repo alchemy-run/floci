@@ -53,6 +53,7 @@ MODELS = {
     "rbin": "rbin",
     "repostspace": "repostspace",
     "rolesanywhere": "rolesanywhere",
+    "route53profiles": "route53profiles",
 }
 
 TYPED = {"integer", "long", "boolean", "double", "float", "timestamp", "list", "map", "blob", "structure"}

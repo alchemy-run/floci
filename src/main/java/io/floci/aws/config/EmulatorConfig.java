@@ -936,6 +936,8 @@ public interface EmulatorConfig {
 
         RolesAnywhereServiceConfig rolesanywhere();
 
+        Route53ProfilesServiceConfig route53profiles();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3100,6 +3102,15 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface Route53ProfilesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long profiles and their associations take to create, update and delete, in milliseconds. */
         @WithDefault("2000")
         long transitionMillis();
     }

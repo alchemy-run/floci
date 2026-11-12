@@ -12,6 +12,7 @@ import io.floci.aws.services.ec2.Ec2Service;
 import io.floci.aws.services.ec2.model.NetworkInterface;
 import io.floci.aws.services.ec2.model.Subnet;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 
 import java.nio.charset.StandardCharsets;
@@ -87,6 +88,9 @@ public class Route53ResolverService {
     private final StorageBackend<String, ObjectNode> endpointIpRequestStore;
     private final ObjectMapper objectMapper;
     private final Ec2Service ec2;
+    /** The DNS Firewall rule groups, whose ARNs this service tags. Absent in hermetic tests. */
+    @Inject
+    Instance<Route53ResolverFirewallRuleGroups> firewallRuleGroups;
 
     @Inject
     public Route53ResolverService(StorageFactory storageFactory, ObjectMapper objectMapper, Ec2Service ec2) {
@@ -718,6 +722,12 @@ public class Route53ResolverService {
             case "resolver-endpoint" -> endpointStore;
             case "resolver-rule" -> ruleStore;
             case "firewall-domain-list" -> domainListStore;
+            case "firewall-rule-group" -> {
+                if (firewallRuleGroups == null || !firewallRuleGroups.isResolvable()) {
+                    throw new AwsException(INVALID_PARAMETER, "Unsupported resolver resource ARN", 400);
+                }
+                yield firewallRuleGroups.get().store();
+            }
             default -> throw new AwsException(INVALID_PARAMETER, "Unsupported resolver resource ARN", 400);
         };
     }

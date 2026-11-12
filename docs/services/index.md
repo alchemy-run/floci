@@ -155,6 +155,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Recycle Bin](rbin.md) | `/rules`, `/list-rules`, `/tags/...` (signed `rbin`); keeps deleted EC2 snapshots, AMIs and volumes | REST JSON | 10 |
 | [re:Post Private](repostspace.md) | `/spaces/...` (signed `repostspace`); spaces on IAM Identity Center | REST JSON | 19 |
 | [IAM Roles Anywhere](rolesanywhere.md) | `/trustanchors`, `/profiles`, `/crls`, `POST /sessions` (signed `rolesanywhere`); certificates exchanged for role credentials | REST JSON | 30 |
+| [Route 53 Profiles](route53profiles.md) | `/profile`, `/profileassociation`, `/profileresourceassociation` (signed `route53profiles`); profiles apply Resolver rules to their VPCs' DNS | REST JSON | 16 |
 | [HealthOmics](omics.md) | `/referencestore`, `/sequencestore`, `/workflow`, `/run`, ... (signed `omics`); runs on Cromwell, Nextflow and cwltool | REST JSON | 107 |
 | [CloudWatch Observability Admin](observabilityadmin.md) | `POST /<Operation>` (signed `observabilityadmin`); telemetry rules configure resources, pipelines run processors | REST JSON | 45 |
 | [OpenSearch Ingestion](osis.md) | `/2022-01-01/osis/*` (signed `osis`); pipelines run on Data Prepper, ingest on per-pipeline hosts | REST JSON | 22 |
@@ -203,7 +204,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [CodeArtifact](codeartifact.md) | `/v1/domain*`, `/v1/repository*`, `/v1/package`, `/v1/package/version*`, `/v1/tag*`, `/v1/authorization-token`, `/codeartifact/maven/*`, `/codeartifact/npm/*`, `/codeartifact/pypi/*` | REST JSON | 38 |
 | [CloudFront](cloudfront.md) | `/2020-05-31/distribution/*`, `/2020-05-31/cache-policy/*`, `/2020-05-31/function/*` | REST XML | 50 |
 | [Route53](route53.md) | `/2013-04-01/hostedzone/*`, `/2013-04-01/healthcheck/*`, `/2013-04-01/change/*`, `/2013-04-01/delegationset/*` | REST XML | 33 |
-| [Route 53 Resolver](route53resolver.md) | `POST /` + `X-Amz-Target: Route53Resolver.*` | JSON 1.1 | 22 |
+| [Route 53 Resolver](route53resolver.md) | `POST /` + `X-Amz-Target: Route53Resolver.*` | JSON 1.1 | 30 |
 | [Amazon SageMaker](sagemaker.md) | `POST /` + `X-Amz-Target: SageMaker.*` | JSON 1.1 | 43 |
 | [SageMaker Runtime](sagemaker.md#endpoint-hosting) | `/endpoints/{EndpointName}/invocations` | REST (binary payload) | 1 |
 | [Cloud Map](cloudmap.md) | `POST /` + `X-Amz-Target: Route53AutoNaming_v20170314.*` | JSON 1.1 | 30 |

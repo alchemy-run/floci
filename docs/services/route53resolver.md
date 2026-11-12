@@ -9,6 +9,14 @@
 | `GetFirewallDomainList` | Returns a single DNS Firewall domain list by id, whether AWS-managed or custom. |
 | `CreateFirewallDomainList` | Creates a custom DNS Firewall domain list with a random-suffix `rslvr-fdl-` id. |
 | `DeleteFirewallDomainList` | Deletes a custom DNS Firewall domain list; AWS-managed lists cannot be deleted. |
+| `CreateFirewallRuleGroup` | Create a DNS Firewall rule group |
+| `GetFirewallRuleGroup` | Describe a rule group |
+| `ListFirewallRuleGroups` | List rule groups |
+| `DeleteFirewallRuleGroup` | Delete a rule group nothing uses |
+| `CreateFirewallRule` | Add a rule for a domain list to a rule group |
+| `UpdateFirewallRule` | Change a rule's priority, action or block response |
+| `DeleteFirewallRule` | Remove a rule from a rule group |
+| `ListFirewallRules` | List a rule group's rules |
 | `CreateResolverEndpoint` | Creates an inbound (`rslvr-in-`) or outbound (`rslvr-out-`) resolver endpoint, returned immediately as `OPERATIONAL`. |
 | `DeleteResolverEndpoint` | Deletes a resolver endpoint and returns its final description. |
 | `GetResolverEndpoint` | Returns a resolver endpoint by id. |
@@ -30,6 +38,10 @@
 <!-- floci:actions:end -->
 
 ## Design notes
+
+DNS Firewall rule groups hold rules that each name a domain list, with an action (`ALLOW`, `BLOCK` or `ALERT`) and a
+unique priority. A rule group attached to a Route 53 Profile can't be deleted. Rule groups don't filter DNS queries
+yet: `AssociateFirewallRuleGroup` isn't implemented.
 
 The four AWS-managed DNS Firewall domain lists (`AWSManagedDomainsAggregateThreatList`
 and friends) are computed on every call from a fixed name list, with ids derived
