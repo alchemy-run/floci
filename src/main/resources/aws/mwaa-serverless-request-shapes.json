@@ -1,0 +1,425 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_airflowserverless_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateWorkflow": "CreateWorkflowRequest",
+    "DeleteWorkflow": "DeleteWorkflowRequest",
+    "GetTaskInstance": "GetTaskInstanceRequest",
+    "GetWorkflow": "GetWorkflowRequest",
+    "GetWorkflowRun": "GetWorkflowRunRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTaskInstances": "ListTaskInstancesRequest",
+    "ListWorkflowRuns": "ListWorkflowRunsRequest",
+    "ListWorkflowVersions": "ListWorkflowVersionsRequest",
+    "ListWorkflows": "ListWorkflowsRequest",
+    "StartWorkflowRun": "StartWorkflowRunRequest",
+    "StopWorkflowRun": "StopWorkflowRunRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateWorkflow": "UpdateWorkflowRequest"
+  },
+  "shapes": {
+    "Code": {
+      "type": "structure",
+      "members": {
+        "S3Location": "S3Location"
+      }
+    },
+    "CreateWorkflowRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "DefinitionS3Location",
+        "RoleArn"
+      ],
+      "members": {
+        "Name": "NameString",
+        "ClientToken": "IdempotencyTokenString",
+        "DefinitionS3Location": "DefinitionS3Location",
+        "Code": "Code",
+        "RoleArn": "RoleARN",
+        "Description": "DescriptionString",
+        "EncryptionConfiguration": "EncryptionConfiguration",
+        "LoggingConfiguration": "LoggingConfiguration",
+        "EngineVersion": "EngineVersion",
+        "NetworkConfiguration": "NetworkConfiguration",
+        "Tags": "Tags",
+        "TriggerMode": "GenericString"
+      }
+    },
+    "DefinitionS3Location": {
+      "type": "structure",
+      "required": [
+        "Bucket",
+        "ObjectKey"
+      ],
+      "members": {
+        "Bucket": "String",
+        "ObjectKey": "String",
+        "VersionId": "String"
+      }
+    },
+    "DeleteWorkflowRequest": {
+      "type": "structure",
+      "required": [
+        "WorkflowArn"
+      ],
+      "members": {
+        "WorkflowArn": "WorkflowArn",
+        "WorkflowVersion": "WorkflowVersion"
+      }
+    },
+    "DescriptionString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": ".+"
+    },
+    "Document": {
+      "type": "structure",
+      "members": {}
+    },
+    "EncryptionConfiguration": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "Type": "EncryptionType",
+        "KmsKeyId": "String"
+      }
+    },
+    "EncryptionType": {
+      "type": "string",
+      "enum": [
+        "AWS_MANAGED_KEY",
+        "CUSTOMER_MANAGED_KEY"
+      ]
+    },
+    "EngineVersion": {
+      "type": "integer"
+    },
+    "GenericString": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": ".*"
+    },
+    "GetTaskInstanceRequest": {
+      "type": "structure",
+      "required": [
+        "WorkflowArn",
+        "TaskInstanceId",
+        "RunId"
+      ],
+      "members": {
+        "WorkflowArn": "WorkflowArn",
+        "TaskInstanceId": "IdString",
+        "RunId": "IdString"
+      }
+    },
+    "GetWorkflowRequest": {
+      "type": "structure",
+      "required": [
+        "WorkflowArn"
+      ],
+      "members": {
+        "WorkflowArn": "WorkflowArn",
+        "WorkflowVersion": "WorkflowVersion"
+      }
+    },
+    "GetWorkflowRunRequest": {
+      "type": "structure",
+      "required": [
+        "WorkflowArn",
+        "RunId"
+      ],
+      "members": {
+        "WorkflowArn": "WorkflowArn",
+        "RunId": "IdString"
+      }
+    },
+    "IdString": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9]+[a-zA-Z0-9\\.\\-_]*"
+    },
+    "IdempotencyTokenString": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\x21-\\x7E]+"
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "TaggableResourceArn"
+      }
+    },
+    "ListTaskInstancesRequest": {
+      "type": "structure",
+      "required": [
+        "WorkflowArn",
+        "RunId"
+      ],
+      "members": {
+        "WorkflowArn": "WorkflowArn",
+        "RunId": "IdString",
+        "MaxResults": "ListTaskInstancesRequestMaxResultsInteger",
+        "NextToken": "String"
+      }
+    },
+    "ListTaskInstancesRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListWorkflowRunsRequest": {
+      "type": "structure",
+      "required": [
+        "WorkflowArn"
+      ],
+      "members": {
+        "MaxResults": "ListWorkflowRunsRequestMaxResultsInteger",
+        "NextToken": "String",
+        "WorkflowArn": "WorkflowArn",
+        "WorkflowVersion": "VersionId"
+      }
+    },
+    "ListWorkflowRunsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListWorkflowVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "WorkflowArn"
+      ],
+      "members": {
+        "MaxResults": "ListWorkflowVersionsRequestMaxResultsInteger",
+        "NextToken": "String",
+        "WorkflowArn": "WorkflowArn"
+      }
+    },
+    "ListWorkflowVersionsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListWorkflowsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "ListWorkflowsRequestMaxResultsInteger",
+        "NextToken": "String"
+      }
+    },
+    "ListWorkflowsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "LoggingConfiguration": {
+      "type": "structure",
+      "required": [
+        "LogGroupName"
+      ],
+      "members": {
+        "LogGroupName": "String"
+      }
+    },
+    "NameString": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9]+[a-zA-Z0-9\\.\\-_]*"
+    },
+    "NetworkConfiguration": {
+      "type": "structure",
+      "members": {
+        "SecurityGroupIds": "SecurityGroupIds",
+        "SubnetIds": "SubnetIds"
+      }
+    },
+    "ObjectMap": {
+      "type": "map",
+      "key": "String",
+      "value": "Document"
+    },
+    "RoleARN": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "arn:aws[a-z0-9-]*:iam::[0-9]{12}:role(/[a-zA-Z0-9+=,.@_\\-]{1,512})*?/[a-zA-Z0-9+=,.@_\\-]{1,64}"
+    },
+    "S3Location": {
+      "type": "structure",
+      "required": [
+        "Bucket",
+        "ObjectKey"
+      ],
+      "members": {
+        "Bucket": "S3LocationBucketString",
+        "ObjectKey": "S3LocationObjectKeyString",
+        "VersionId": "S3LocationVersionIdString"
+      }
+    },
+    "S3LocationBucketString": {
+      "type": "string",
+      "min": 3,
+      "max": 63
+    },
+    "S3LocationObjectKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "S3LocationVersionIdString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "SecurityGroupIds": {
+      "type": "list",
+      "member": "SecurityGroupString"
+    },
+    "SecurityGroupString": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "sg-[a-z0-9]*"
+    },
+    "StartWorkflowRunRequest": {
+      "type": "structure",
+      "required": [
+        "WorkflowArn"
+      ],
+      "members": {
+        "WorkflowArn": "WorkflowArn",
+        "ClientToken": "IdempotencyTokenString",
+        "OverrideParameters": "ObjectMap",
+        "WorkflowVersion": "VersionId"
+      }
+    },
+    "StopWorkflowRunRequest": {
+      "type": "structure",
+      "required": [
+        "WorkflowArn",
+        "RunId"
+      ],
+      "members": {
+        "WorkflowArn": "WorkflowArn",
+        "RunId": "IdString"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "SubnetIds": {
+      "type": "list",
+      "member": "SubnetString"
+    },
+    "SubnetString": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "subnet-[a-z0-9]*"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": ".*"
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "TaggableResourceArn",
+        "Tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": ".*"
+    },
+    "TaggableResourceArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:aws[a-z0-9-]*:airflow-serverless:([a-z]{2,4}(-[a-z]{1,16})+-[0-9]+):([0-9]{12}):workflow/([a-zA-Z0-9][a-zA-Z0-9\\.\\-_]{0,254}-[a-zA-Z0-9]{10})"
+    },
+    "Tags": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "TaggableResourceArn",
+        "TagKeys": "TagKeys"
+      }
+    },
+    "UpdateWorkflowRequest": {
+      "type": "structure",
+      "required": [
+        "WorkflowArn",
+        "DefinitionS3Location",
+        "RoleArn"
+      ],
+      "members": {
+        "WorkflowArn": "WorkflowArn",
+        "DefinitionS3Location": "DefinitionS3Location",
+        "Code": "Code",
+        "RoleArn": "RoleARN",
+        "Description": "DescriptionString",
+        "LoggingConfiguration": "LoggingConfiguration",
+        "EngineVersion": "EngineVersion",
+        "NetworkConfiguration": "NetworkConfiguration",
+        "TriggerMode": "GenericString"
+      }
+    },
+    "VersionId": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": ".+"
+    },
+    "WorkflowArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "arn:aws[a-z0-9-]*:airflow-serverless:([a-z]{2,4}(-[a-z]{1,16})+-[0-9]+):([0-9]{12}):workflow/([a-zA-Z0-9][a-zA-Z0-9\\.\\-_]{0,254}-[a-zA-Z0-9]{10})"
+    },
+    "WorkflowVersion": {
+      "type": "string",
+      "min": 32,
+      "max": 32,
+      "pattern": "[a-z0-9]{32}"
+    }
+  }
+}

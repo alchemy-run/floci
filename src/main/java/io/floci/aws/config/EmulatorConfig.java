@@ -892,6 +892,8 @@ public interface EmulatorConfig {
 
         LicenseManagerServiceConfig licenseManager();
 
+        AirflowServerlessServiceConfig airflowServerless();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3014,6 +3016,32 @@ public interface EmulatorConfig {
         /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface AirflowServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a deleted workflow stays DELETING. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The Apache Airflow image runs execute in. */
+        @WithDefault("apache/airflow:3.1.3-python3.12")
+        String airflowImage();
+
+        /** The Docker network the Airflow runtime joins; the services' network when unset. */
+        Optional<String> dockerNetwork();
+
+        /** How long a run may take before it times out. */
+        @WithDefault("60")
+        int maxRunMinutes();
+
+        @WithDefault("1000")
+        int maxWorkflows();
+
+        @WithDefault("20")
+        int maxConcurrentRuns();
     }
 
     interface LicenseManagerServiceConfig {

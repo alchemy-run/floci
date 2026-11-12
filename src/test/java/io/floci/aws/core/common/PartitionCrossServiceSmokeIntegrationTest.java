@@ -42,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1515,6 +1515,25 @@ class PartitionCrossServiceSmokeIntegrationTest {
         PartitionMatrix.assertArnIn(partitionCase, arn);
         signed(region, "forecast").header("X-Amz-Target", "AmazonForecast.DeleteDatasetGroup").contentType(JSON_1_1)
                 .body("{\"DatasetGroupArn\":\"" + arn + "\"}").post("/").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void airflowServerlessWorkflowArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "airflow-serverless");
+        String bucket = unique("smoke-mwaas", partitionCase);
+        signed(region, "s3").contentType("application/xml").body("<CreateBucketConfiguration><LocationConstraint>"
+                + region + "</LocationConstraint></CreateBucketConfiguration>").put("/" + bucket).then()
+                .statusCode(200);
+        signed(region, "s3").body("d:\n  tasks:\n    a:\n      operator: airflow.operators.empty.EmptyOperator\n")
+                .put("/" + bucket + "/w.yaml").then().statusCode(200);
+        String arn = json10(region, "airflow-serverless", "AmazonMWAAServerless.CreateWorkflow",
+                "{\"Name\":\"smoke\",\"DefinitionS3Location\":{\"Bucket\":\"" + bucket + "\",\"ObjectKey\":"
+                        + "\"w.yaml\"},\"RoleArn\":\"arn:" + partitionCase.partition() + ":iam::000000000000:role/r\"}")
+                .post("/").then().statusCode(200).extract().path("WorkflowArn");
+        cleanup.register(() -> json10(region, "airflow-serverless", "AmazonMWAAServerless.DeleteWorkflow",
+                "{\"WorkflowArn\":\"" + arn + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 
     @ParameterizedTest

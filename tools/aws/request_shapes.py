@@ -123,7 +123,10 @@ EVERY_PARTITION = "arn:aws[a-z0-9-]*:"
 COMMERCIAL_REGION = "[a-z]{2}-[a-z]{1,16}-[0-9]+"
 EVERY_REGION = "[a-z]{2,4}(-[a-z]{1,16})+-[0-9]+"
 # Other spellings models use for the same two-part commercial region (HealthLake's Lambda ARN).
-COMMERCIAL_REGION_SPELLINGS = (COMMERCIAL_REGION, r"[a-z]{2}-[a-z]+-\d{1}")
+COMMERCIAL_REGION_SPELLINGS = (COMMERCIAL_REGION, r"[a-z]{2}-[a-z]+-\d{1}", "[a-z]{2}-[a-z]+-[0-9]{1}")
+# Partition alternations models spell out instead of the commercial prefix (MWAA Serverless's
+# ARNs), which leave out partitions published since.
+PARTITION_SPELLINGS = ("arn:aws(?:-(?:cn|us-gov|iso|iso-b|iso-e|iso-f))?:",)
 
 
 def widen_partition_and_region(model: dict) -> dict:
@@ -136,6 +139,8 @@ def widen_partition_and_region(model: dict) -> dict:
     for shape in model["shapes"].values():
         pattern = shape.get("pattern")
         if pattern:
+            for spelling in PARTITION_SPELLINGS:
+                pattern = pattern.replace(spelling, EVERY_PARTITION)
             pattern = pattern.replace(COMMERCIAL, EVERY_PARTITION)
             for spelling in COMMERCIAL_REGION_SPELLINGS:
                 pattern = pattern.replace(spelling, EVERY_REGION)

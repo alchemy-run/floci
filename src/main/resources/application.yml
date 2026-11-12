@@ -1048,6 +1048,8 @@ floci:
       enabled: true
     glacier:
       enabled: true
+    airflow-serverless:
+      enabled: true
     license-manager:
       enabled: true
     lexv2:

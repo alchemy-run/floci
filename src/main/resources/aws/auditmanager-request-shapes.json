@@ -956,7 +956,7 @@
     },
     "Region": {
       "type": "string",
-      "pattern": "^[a-z]{2}-[a-z]+-[0-9]{1}$"
+      "pattern": "^[a-z]{2,4}(-[a-z]{1,16})+-[0-9]+$"
     },
     "RegisterAccountRequest": {
       "type": "structure",

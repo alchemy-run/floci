@@ -550,6 +550,9 @@ floci:
     glacier:
       enabled: true
       job-millis: 0
+    airflow-serverless:
+      enabled: true
+      transition-millis: 200
     license-manager:
       enabled: true
       transition-millis: 200

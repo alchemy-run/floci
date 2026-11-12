@@ -275,6 +275,10 @@ services:
     doc: docs/services/forecast.md
     sources:
       - { path: services/forecast/ForecastJsonHandler.java, mode: switch }
+  - service: airflowserverless
+    doc: docs/services/airflowserverless.md
+    sources:
+      - { path: services/airflowserverless/AirflowServerlessJsonHandler.java, mode: switch }
   - service: licensemanager
     doc: docs/services/licensemanager.md
     sources:

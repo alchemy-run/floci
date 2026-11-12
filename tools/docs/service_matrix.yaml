@@ -29,6 +29,7 @@ aliases:
   forecastquery: forecast                # Forecast's query API, documented in forecast.md
   keyspacesstreams: keyspaces            # Keyspaces Streams, documented in keyspaces.md
   license-manager: licensemanager        # License Manager, documented in licensemanager.md
+  airflow-serverless: airflowserverless  # MWAA Serverless, documented in airflowserverless.md
   greengrass: greengrassv2               # Greengrass V2's SigV4 signing name is "greengrass"
   geo: location                         # Location's SigV4 signing name is "geo"
   geo-maps: location                    # Maps API facet, documented in location.md
