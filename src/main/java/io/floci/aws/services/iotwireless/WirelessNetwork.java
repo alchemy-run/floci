@@ -851,12 +851,16 @@ public class WirelessNetwork {
         store.put(account, region, DEVICE, device.get("Id").asText(), device);
     }
 
-    /** The largest application payload at the device's last data rate, or the lowest data rate's. */
+    /** The largest application payload at the device's last data rate. */
     private int maxPayload(String account, String region, ObjectNode device) {
         String rfRegion = store.get(account, region, DEVICE_PROFILE,
                 device.path("LoRaWAN").path("DeviceProfileId").asText("")).map(p -> p.path("LoRaWAN")
                 .path("RfRegion").asText("US915")).orElse("US915");
         LoRaRegions.Region radio = LoRaRegions.region(rfRegion);
+        if (!meta(device).path("net").has("lastDr")) {
+            // Until the device is heard, its data rate is unknown: the region's largest payload.
+            return radio.fixed() ? 242 : 222;
+        }
         int dr = meta(device).path("net").path("lastDr").asInt(0);
         LoRaRegions.DataRate rate = radio.dr(dr);
         if (rate == null) {
