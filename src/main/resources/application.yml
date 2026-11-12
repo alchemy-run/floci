@@ -1056,6 +1056,8 @@ floci:
       enabled: true
     osis:
       enabled: true
+    omics:
+      enabled: true
     observability-admin:
       enabled: true
     neptune-graph:

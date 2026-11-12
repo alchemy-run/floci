@@ -566,6 +566,10 @@ floci:
       enabled: true
       transition-millis: 200
       engine: none
+    omics:
+      enabled: true
+      transition-millis: 200
+      engine: none
     observability-admin:
       enabled: true
       transition-millis: 200

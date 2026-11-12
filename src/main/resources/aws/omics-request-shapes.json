@@ -1,0 +1,3309 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_omics_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AbortMultipartReadSetUpload": "AbortMultipartReadSetUploadRequest",
+    "AcceptShare": "AcceptShareRequest",
+    "BatchDeleteReadSet": "BatchDeleteReadSetRequest",
+    "CancelAnnotationImportJob": "CancelAnnotationImportRequest",
+    "CancelRun": "CancelRunRequest",
+    "CancelRunBatch": "CancelRunBatchRequest",
+    "CancelVariantImportJob": "CancelVariantImportRequest",
+    "CompleteMultipartReadSetUpload": "CompleteMultipartReadSetUploadRequest",
+    "CreateAnnotationStore": "CreateAnnotationStoreRequest",
+    "CreateAnnotationStoreVersion": "CreateAnnotationStoreVersionRequest",
+    "CreateConfiguration": "CreateConfigurationRequest",
+    "CreateMultipartReadSetUpload": "CreateMultipartReadSetUploadRequest",
+    "CreateReferenceStore": "CreateReferenceStoreRequest",
+    "CreateRunCache": "CreateRunCacheRequest",
+    "CreateRunGroup": "CreateRunGroupRequest",
+    "CreateSequenceStore": "CreateSequenceStoreRequest",
+    "CreateShare": "CreateShareRequest",
+    "CreateVariantStore": "CreateVariantStoreRequest",
+    "CreateWorkflow": "CreateWorkflowRequest",
+    "CreateWorkflowVersion": "CreateWorkflowVersionRequest",
+    "DeleteAnnotationStore": "DeleteAnnotationStoreRequest",
+    "DeleteAnnotationStoreVersions": "DeleteAnnotationStoreVersionsRequest",
+    "DeleteBatch": "DeleteBatchRequest",
+    "DeleteConfiguration": "DeleteConfigurationRequest",
+    "DeleteReference": "DeleteReferenceRequest",
+    "DeleteReferenceStore": "DeleteReferenceStoreRequest",
+    "DeleteRun": "DeleteRunRequest",
+    "DeleteRunBatch": "DeleteRunBatchRequest",
+    "DeleteRunCache": "DeleteRunCacheRequest",
+    "DeleteRunGroup": "DeleteRunGroupRequest",
+    "DeleteS3AccessPolicy": "DeleteS3AccessPolicyRequest",
+    "DeleteSequenceStore": "DeleteSequenceStoreRequest",
+    "DeleteShare": "DeleteShareRequest",
+    "DeleteVariantStore": "DeleteVariantStoreRequest",
+    "DeleteWorkflow": "DeleteWorkflowRequest",
+    "DeleteWorkflowVersion": "DeleteWorkflowVersionRequest",
+    "GetAnnotationImportJob": "GetAnnotationImportRequest",
+    "GetAnnotationStore": "GetAnnotationStoreRequest",
+    "GetAnnotationStoreVersion": "GetAnnotationStoreVersionRequest",
+    "GetBatch": "GetBatchRequest",
+    "GetConfiguration": "GetConfigurationRequest",
+    "GetReadSet": "GetReadSetRequest",
+    "GetReadSetActivationJob": "GetReadSetActivationJobRequest",
+    "GetReadSetExportJob": "GetReadSetExportJobRequest",
+    "GetReadSetImportJob": "GetReadSetImportJobRequest",
+    "GetReadSetMetadata": "GetReadSetMetadataRequest",
+    "GetReference": "GetReferenceRequest",
+    "GetReferenceImportJob": "GetReferenceImportJobRequest",
+    "GetReferenceMetadata": "GetReferenceMetadataRequest",
+    "GetReferenceStore": "GetReferenceStoreRequest",
+    "GetRun": "GetRunRequest",
+    "GetRunCache": "GetRunCacheRequest",
+    "GetRunGroup": "GetRunGroupRequest",
+    "GetRunTask": "GetRunTaskRequest",
+    "GetS3AccessPolicy": "GetS3AccessPolicyRequest",
+    "GetSequenceStore": "GetSequenceStoreRequest",
+    "GetShare": "GetShareRequest",
+    "GetVariantImportJob": "GetVariantImportRequest",
+    "GetVariantStore": "GetVariantStoreRequest",
+    "GetWorkflow": "GetWorkflowRequest",
+    "GetWorkflowVersion": "GetWorkflowVersionRequest",
+    "ListAnnotationImportJobs": "ListAnnotationImportJobsRequest",
+    "ListAnnotationStoreVersions": "ListAnnotationStoreVersionsRequest",
+    "ListAnnotationStores": "ListAnnotationStoresRequest",
+    "ListBatch": "ListBatchRequest",
+    "ListConfigurations": "ListConfigurationsRequest",
+    "ListMultipartReadSetUploads": "ListMultipartReadSetUploadsRequest",
+    "ListReadSetActivationJobs": "ListReadSetActivationJobsRequest",
+    "ListReadSetExportJobs": "ListReadSetExportJobsRequest",
+    "ListReadSetImportJobs": "ListReadSetImportJobsRequest",
+    "ListReadSetUploadParts": "ListReadSetUploadPartsRequest",
+    "ListReadSets": "ListReadSetsRequest",
+    "ListReferenceImportJobs": "ListReferenceImportJobsRequest",
+    "ListReferenceStores": "ListReferenceStoresRequest",
+    "ListReferences": "ListReferencesRequest",
+    "ListRunCaches": "ListRunCachesRequest",
+    "ListRunGroups": "ListRunGroupsRequest",
+    "ListRunTasks": "ListRunTasksRequest",
+    "ListRuns": "ListRunsRequest",
+    "ListRunsInBatch": "ListRunsInBatchRequest",
+    "ListSequenceStores": "ListSequenceStoresRequest",
+    "ListShares": "ListSharesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListVariantImportJobs": "ListVariantImportJobsRequest",
+    "ListVariantStores": "ListVariantStoresRequest",
+    "ListWorkflowVersions": "ListWorkflowVersionsRequest",
+    "ListWorkflows": "ListWorkflowsRequest",
+    "PutS3AccessPolicy": "PutS3AccessPolicyRequest",
+    "StartAnnotationImportJob": "StartAnnotationImportRequest",
+    "StartReadSetActivationJob": "StartReadSetActivationJobRequest",
+    "StartReadSetExportJob": "StartReadSetExportJobRequest",
+    "StartReadSetImportJob": "StartReadSetImportJobRequest",
+    "StartReferenceImportJob": "StartReferenceImportJobRequest",
+    "StartRun": "StartRunRequest",
+    "StartRunBatch": "StartRunBatchRequest",
+    "StartVariantImportJob": "StartVariantImportRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateAnnotationStore": "UpdateAnnotationStoreRequest",
+    "UpdateAnnotationStoreVersion": "UpdateAnnotationStoreVersionRequest",
+    "UpdateRunCache": "UpdateRunCacheRequest",
+    "UpdateRunGroup": "UpdateRunGroupRequest",
+    "UpdateSequenceStore": "UpdateSequenceStoreRequest",
+    "UpdateVariantStore": "UpdateVariantStoreRequest",
+    "UpdateWorkflow": "UpdateWorkflowRequest",
+    "UpdateWorkflowVersion": "UpdateWorkflowVersionRequest",
+    "UploadReadSetPart": "UploadReadSetPartRequest"
+  },
+  "shapes": {
+    "AbortMultipartReadSetUploadRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId",
+        "uploadId"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "uploadId": "UploadId"
+      }
+    },
+    "Accelerators": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "GPU"
+      ]
+    },
+    "AcceptShareRequest": {
+      "type": "structure",
+      "required": [
+        "shareId"
+      ],
+      "members": {
+        "shareId": "String"
+      }
+    },
+    "AccessLogLocation": {
+      "type": "string",
+      "pattern": "$|^s3://([a-z0-9][a-z0-9-.]{1,61}[a-z0-9])/?((.{1,800})/)?"
+    },
+    "ActivateReadSetFilter": {
+      "type": "structure",
+      "members": {
+        "status": "ReadSetActivationJobStatus",
+        "createdAfter": "SyntheticTimestamp_date_time",
+        "createdBefore": "SyntheticTimestamp_date_time"
+      }
+    },
+    "ActivationJobId": {
+      "type": "string",
+      "min": 10,
+      "max": 36,
+      "pattern": "[0-9]+"
+    },
+    "AnnotationFieldMap": {
+      "type": "map",
+      "key": "AnnotationFieldMapKeyString",
+      "value": "AnnotationFieldMapValueString"
+    },
+    "AnnotationFieldMapKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 21
+    },
+    "AnnotationFieldMapValueString": {
+      "type": "string",
+      "min": 1,
+      "max": 21
+    },
+    "AnnotationImportItemSource": {
+      "type": "structure",
+      "required": [
+        "source"
+      ],
+      "members": {
+        "source": "S3Uri"
+      }
+    },
+    "AnnotationImportItemSources": {
+      "type": "list",
+      "min": 1,
+      "member": "AnnotationImportItemSource"
+    },
+    "AnnotationType": {
+      "type": "string",
+      "enum": [
+        "GENERIC",
+        "CHR_POS",
+        "CHR_POS_REF_ALT",
+        "CHR_START_END_ONE_BASE",
+        "CHR_START_END_REF_ALT_ONE_BASE",
+        "CHR_START_END_ZERO_BASE",
+        "CHR_START_END_REF_ALT_ZERO_BASE"
+      ]
+    },
+    "Arn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:([^: ]*):([^: ]*):([^: ]*):([0-9]{12}):([^: ]*)"
+    },
+    "ArnList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "String"
+    },
+    "AwsAccountId": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "[0-9]+"
+    },
+    "BatchDeleteReadSetRequest": {
+      "type": "structure",
+      "required": [
+        "ids",
+        "sequenceStoreId"
+      ],
+      "members": {
+        "ids": "ReadSetIdList",
+        "sequenceStoreId": "SequenceStoreId"
+      }
+    },
+    "BatchId": {
+      "type": "string",
+      "min": 1,
+      "max": 18,
+      "pattern": "[0-9]+"
+    },
+    "BatchName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "BatchRequestId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "BatchRunSettings": {
+      "type": "structure",
+      "members": {
+        "inlineSettings": "InlineSettings",
+        "s3UriSettings": "S3UriSettings"
+      }
+    },
+    "BatchStatus": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "CREATING",
+        "PENDING",
+        "SUBMITTING",
+        "INPROGRESS",
+        "STOPPING",
+        "CANCELLED",
+        "FAILED",
+        "PROCESSED",
+        "RUNS_DELETING",
+        "RUNS_DELETE_FAILED",
+        "RUNS_DELETED"
+      ]
+    },
+    "Blob": {
+      "type": "blob"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CacheBehavior": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "CACHE_ON_FAILURE",
+        "CACHE_ALWAYS"
+      ]
+    },
+    "CancelAnnotationImportRequest": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "ResourceId"
+      }
+    },
+    "CancelRunBatchRequest": {
+      "type": "structure",
+      "required": [
+        "batchId"
+      ],
+      "members": {
+        "batchId": "BatchId"
+      }
+    },
+    "CancelRunRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "RunId"
+      }
+    },
+    "CancelVariantImportRequest": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "ResourceId"
+      }
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 127,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "CommentChar": {
+      "type": "string",
+      "min": 1,
+      "max": 1
+    },
+    "CompleteMultipartReadSetUploadRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId",
+        "uploadId",
+        "parts"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "uploadId": "UploadId",
+        "parts": "CompleteReadSetUploadPartList"
+      }
+    },
+    "CompleteReadSetUploadPartList": {
+      "type": "list",
+      "member": "CompleteReadSetUploadPartListItem"
+    },
+    "CompleteReadSetUploadPartListItem": {
+      "type": "structure",
+      "required": [
+        "partNumber",
+        "partSource",
+        "checksum"
+      ],
+      "members": {
+        "partNumber": "CompleteReadSetUploadPartListItemPartNumberInteger",
+        "partSource": "ReadSetPartSource",
+        "checksum": "CompleteReadSetUploadPartListItemChecksumString"
+      }
+    },
+    "CompleteReadSetUploadPartListItemChecksumString": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "CompleteReadSetUploadPartListItemPartNumberInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 10000
+    },
+    "ConfigurationDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "ConfigurationListToken": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "ConfigurationName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9\\-\\._]*"
+    },
+    "ConfigurationRequestId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "ConnectionArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "arn:aws(-[\\w]+)*:.+:.+:[0-9]{12}:.+"
+    },
+    "ContainerRegistryMap": {
+      "type": "structure",
+      "members": {
+        "registryMappings": "RegistryMappingsList",
+        "imageMappings": "ImageMappingsList"
+      }
+    },
+    "CreateAnnotationStoreRequest": {
+      "type": "structure",
+      "required": [
+        "storeFormat"
+      ],
+      "members": {
+        "reference": "ReferenceItem",
+        "name": "StoreName",
+        "description": "Description",
+        "tags": "TagMap",
+        "versionName": "VersionName",
+        "sseConfig": "SseConfig",
+        "storeFormat": "StoreFormat",
+        "storeOptions": "StoreOptions"
+      }
+    },
+    "CreateAnnotationStoreVersionRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "versionName"
+      ],
+      "members": {
+        "name": "StoreName",
+        "versionName": "VersionName",
+        "description": "Description",
+        "versionOptions": "VersionOptions",
+        "tags": "TagMap"
+      }
+    },
+    "CreateConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "runConfigurations",
+        "requestId"
+      ],
+      "members": {
+        "name": "ConfigurationName",
+        "description": "ConfigurationDescription",
+        "runConfigurations": "RunConfigurations",
+        "tags": "TagMap",
+        "requestId": "ConfigurationRequestId"
+      }
+    },
+    "CreateMultipartReadSetUploadRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId",
+        "sourceFileType",
+        "subjectId",
+        "sampleId",
+        "name"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "clientToken": "ClientToken",
+        "sourceFileType": "FileType",
+        "subjectId": "SubjectId",
+        "sampleId": "SampleId",
+        "generatedFrom": "GeneratedFrom",
+        "referenceArn": "ReferenceArn",
+        "name": "ReadSetName",
+        "description": "ReadSetDescription",
+        "tags": "TagMap"
+      }
+    },
+    "CreateReferenceStoreRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "ReferenceStoreName",
+        "description": "ReferenceStoreDescription",
+        "sseConfig": "SseConfig",
+        "tags": "TagMap",
+        "clientToken": "ClientToken"
+      }
+    },
+    "CreateRunCacheRequest": {
+      "type": "structure",
+      "required": [
+        "cacheS3Location",
+        "requestId"
+      ],
+      "members": {
+        "cacheBehavior": "CacheBehavior",
+        "cacheS3Location": "S3UriForBucketOrObject",
+        "description": "UserCustomDescription",
+        "name": "UserCustomName",
+        "requestId": "RunCacheRequestId",
+        "tags": "TagMap",
+        "cacheBucketOwnerId": "AwsAccountId"
+      }
+    },
+    "CreateRunGroupRequest": {
+      "type": "structure",
+      "required": [
+        "requestId"
+      ],
+      "members": {
+        "name": "RunGroupName",
+        "maxCpus": "CreateRunGroupRequestMaxCpusInteger",
+        "maxRuns": "CreateRunGroupRequestMaxRunsInteger",
+        "maxDuration": "CreateRunGroupRequestMaxDurationInteger",
+        "tags": "TagMap",
+        "requestId": "RunGroupRequestId",
+        "maxGpus": "CreateRunGroupRequestMaxGpusInteger"
+      }
+    },
+    "CreateRunGroupRequestMaxCpusInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100000
+    },
+    "CreateRunGroupRequestMaxDurationInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100000
+    },
+    "CreateRunGroupRequestMaxGpusInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100000
+    },
+    "CreateRunGroupRequestMaxRunsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100000
+    },
+    "CreateSequenceStoreRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "SequenceStoreName",
+        "description": "SequenceStoreDescription",
+        "sseConfig": "SseConfig",
+        "tags": "TagMap",
+        "clientToken": "ClientToken",
+        "fallbackLocation": "FallbackLocation",
+        "eTagAlgorithmFamily": "ETagAlgorithmFamily",
+        "propagatedSetLevelTags": "PropagatedSetLevelTags",
+        "s3AccessConfig": "S3AccessConfig"
+      }
+    },
+    "CreateShareRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "principalSubscriber"
+      ],
+      "members": {
+        "resourceArn": "String",
+        "principalSubscriber": "String",
+        "shareName": "ShareName"
+      }
+    },
+    "CreateVariantStoreRequest": {
+      "type": "structure",
+      "required": [
+        "reference"
+      ],
+      "members": {
+        "reference": "ReferenceItem",
+        "name": "StoreName",
+        "description": "Description",
+        "tags": "TagMap",
+        "sseConfig": "SseConfig"
+      }
+    },
+    "CreateWorkflowRequest": {
+      "type": "structure",
+      "required": [
+        "requestId"
+      ],
+      "members": {
+        "name": "WorkflowName",
+        "description": "WorkflowDescription",
+        "engine": "WorkflowEngine",
+        "definitionZip": "Blob",
+        "definitionUri": "WorkflowDefinition",
+        "main": "WorkflowMain",
+        "parameterTemplate": "WorkflowParameterTemplate",
+        "storageCapacity": "CreateWorkflowRequestStorageCapacityInteger",
+        "tags": "TagMap",
+        "requestId": "WorkflowRequestId",
+        "accelerators": "Accelerators",
+        "storageType": "StorageType",
+        "containerRegistryMap": "ContainerRegistryMap",
+        "containerRegistryMapUri": "Uri",
+        "readmeMarkdown": "ReadmeMarkdown",
+        "parameterTemplatePath": "ParameterTemplatePath",
+        "readmePath": "ReadmePath",
+        "definitionRepository": "DefinitionRepository",
+        "workflowBucketOwnerId": "WorkflowBucketOwnerId",
+        "readmeUri": "S3UriForObject"
+      }
+    },
+    "CreateWorkflowRequestStorageCapacityInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 100000
+    },
+    "CreateWorkflowVersionRequest": {
+      "type": "structure",
+      "required": [
+        "workflowId",
+        "versionName",
+        "requestId"
+      ],
+      "members": {
+        "workflowId": "WorkflowId",
+        "versionName": "WorkflowVersionName",
+        "definitionZip": "Blob",
+        "definitionUri": "WorkflowDefinition",
+        "accelerators": "Accelerators",
+        "description": "WorkflowVersionDescription",
+        "engine": "WorkflowEngine",
+        "main": "WorkflowMain",
+        "parameterTemplate": "WorkflowParameterTemplate",
+        "requestId": "WorkflowRequestId",
+        "storageType": "StorageType",
+        "storageCapacity": "CreateWorkflowVersionRequestStorageCapacityInteger",
+        "tags": "TagMap",
+        "workflowBucketOwnerId": "WorkflowBucketOwnerId",
+        "containerRegistryMap": "ContainerRegistryMap",
+        "containerRegistryMapUri": "Uri",
+        "readmeMarkdown": "ReadmeMarkdown",
+        "parameterTemplatePath": "ParameterTemplatePath",
+        "readmePath": "ReadmePath",
+        "definitionRepository": "DefinitionRepository",
+        "readmeUri": "S3UriForObject"
+      }
+    },
+    "CreateWorkflowVersionRequestStorageCapacityInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 100000
+    },
+    "CreationType": {
+      "type": "string",
+      "enum": [
+        "IMPORT",
+        "UPLOAD"
+      ]
+    },
+    "DefaultRunSetting": {
+      "type": "structure",
+      "required": [
+        "workflowId",
+        "roleArn"
+      ],
+      "members": {
+        "workflowId": "WorkflowId",
+        "workflowType": "WorkflowType",
+        "roleArn": "RunRoleArn",
+        "name": "RunName",
+        "cacheId": "NumericIdInArn",
+        "cacheBehavior": "CacheBehavior",
+        "runGroupId": "RunGroupId",
+        "priority": "DefaultRunSettingPriorityInteger",
+        "parameters": "RunParameters",
+        "storageCapacity": "DefaultRunSettingStorageCapacityInteger",
+        "outputUri": "RunOutputUri",
+        "logLevel": "RunLogLevel",
+        "runTags": "TagMap",
+        "retentionMode": "RunRetentionMode",
+        "storageType": "StorageType",
+        "workflowOwnerId": "WorkflowOwnerId",
+        "outputBucketOwnerId": "AwsAccountId",
+        "workflowVersionName": "WorkflowVersionName",
+        "networkingMode": "NetworkingMode",
+        "configurationName": "ConfigurationName",
+        "sessionPolicy": "SessionPolicy",
+        "engineSettings": "EngineSettings",
+        "scratchStorageMode": "ScratchStorageMode"
+      }
+    },
+    "DefaultRunSettingPriorityInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 100000
+    },
+    "DefaultRunSettingStorageCapacityInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 100000
+    },
+    "DefinitionRepository": {
+      "type": "structure",
+      "required": [
+        "connectionArn",
+        "fullRepositoryId"
+      ],
+      "members": {
+        "connectionArn": "ConnectionArn",
+        "fullRepositoryId": "FullRepositoryId",
+        "sourceReference": "SourceReference",
+        "excludeFilePatterns": "ExcludeFilePatternList"
+      }
+    },
+    "DeleteAnnotationStoreRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "String",
+        "force": "PrimitiveBoolean"
+      }
+    },
+    "DeleteAnnotationStoreVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "versions"
+      ],
+      "members": {
+        "name": "String",
+        "versions": "VersionList",
+        "force": "PrimitiveBoolean"
+      }
+    },
+    "DeleteBatchRequest": {
+      "type": "structure",
+      "required": [
+        "batchId"
+      ],
+      "members": {
+        "batchId": "BatchId"
+      }
+    },
+    "DeleteConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "ConfigurationName"
+      }
+    },
+    "DeleteReferenceRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "referenceStoreId"
+      ],
+      "members": {
+        "id": "ReferenceId",
+        "referenceStoreId": "ReferenceStoreId"
+      }
+    },
+    "DeleteReferenceStoreRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "ReferenceStoreId"
+      }
+    },
+    "DeleteRunBatchRequest": {
+      "type": "structure",
+      "required": [
+        "batchId"
+      ],
+      "members": {
+        "batchId": "BatchId"
+      }
+    },
+    "DeleteRunCacheRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "RunCacheId"
+      }
+    },
+    "DeleteRunGroupRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "RunGroupId"
+      }
+    },
+    "DeleteRunRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "RunId"
+      }
+    },
+    "DeleteS3AccessPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "s3AccessPointArn"
+      ],
+      "members": {
+        "s3AccessPointArn": "S3AccessPointArn"
+      }
+    },
+    "DeleteSequenceStoreRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "SequenceStoreId"
+      }
+    },
+    "DeleteShareRequest": {
+      "type": "structure",
+      "required": [
+        "shareId"
+      ],
+      "members": {
+        "shareId": "String"
+      }
+    },
+    "DeleteVariantStoreRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "String",
+        "force": "PrimitiveBoolean"
+      }
+    },
+    "DeleteWorkflowRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "WorkflowId"
+      }
+    },
+    "DeleteWorkflowVersionRequest": {
+      "type": "structure",
+      "required": [
+        "workflowId",
+        "versionName"
+      ],
+      "members": {
+        "workflowId": "WorkflowId",
+        "versionName": "WorkflowVersionName"
+      }
+    },
+    "Description": {
+      "type": "string",
+      "min": 0,
+      "max": 500
+    },
+    "ETagAlgorithmFamily": {
+      "type": "string",
+      "enum": [
+        "MD5up",
+        "SHA256up",
+        "SHA512up"
+      ]
+    },
+    "EcrRepositoryPrefix": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "Encoding": {
+      "type": "string",
+      "min": 1,
+      "max": 20
+    },
+    "EncryptionType": {
+      "type": "string",
+      "enum": [
+        "KMS"
+      ]
+    },
+    "EngineSettings": {
+      "type": "document"
+    },
+    "EscapeChar": {
+      "type": "string",
+      "min": 1,
+      "max": 1
+    },
+    "EscapeQuotes": {
+      "type": "boolean"
+    },
+    "ExcludeFilePatternList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "String"
+    },
+    "ExportJobId": {
+      "type": "string",
+      "min": 10,
+      "max": 36,
+      "pattern": "[0-9]+"
+    },
+    "ExportReadSet": {
+      "type": "structure",
+      "required": [
+        "readSetId"
+      ],
+      "members": {
+        "readSetId": "ReadSetId"
+      }
+    },
+    "ExportReadSetFilter": {
+      "type": "structure",
+      "members": {
+        "status": "ReadSetExportJobStatus",
+        "createdAfter": "SyntheticTimestamp_date_time",
+        "createdBefore": "SyntheticTimestamp_date_time"
+      }
+    },
+    "FallbackLocation": {
+      "type": "string",
+      "pattern": "$|^s3://([a-z0-9][a-z0-9-.]{1,61}[a-z0-9])/?((.{1,1024})/)?"
+    },
+    "FileType": {
+      "type": "string",
+      "enum": [
+        "FASTQ",
+        "BAM",
+        "CRAM",
+        "UBAM"
+      ]
+    },
+    "Filter": {
+      "type": "structure",
+      "members": {
+        "resourceArns": "ArnList",
+        "status": "StatusList",
+        "type": "TypeList"
+      }
+    },
+    "FormatOptions": {
+      "type": "structure",
+      "members": {
+        "tsvOptions": "TsvOptions",
+        "vcfOptions": "VcfOptions"
+      }
+    },
+    "FormatToHeader": {
+      "type": "map",
+      "key": "FormatToHeaderKey",
+      "value": "FormatToHeaderValueString"
+    },
+    "FormatToHeaderKey": {
+      "type": "string",
+      "enum": [
+        "CHR",
+        "START",
+        "END",
+        "REF",
+        "ALT",
+        "POS"
+      ]
+    },
+    "FormatToHeaderValueString": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "FullRepositoryId": {
+      "type": "string",
+      "pattern": ".+/.+"
+    },
+    "GeneratedFrom": {
+      "type": "string",
+      "min": 1,
+      "max": 127,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "GetAnnotationImportRequest": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "ResourceId"
+      }
+    },
+    "GetAnnotationStoreRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "String"
+      }
+    },
+    "GetAnnotationStoreVersionRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "versionName"
+      ],
+      "members": {
+        "name": "String",
+        "versionName": "String"
+      }
+    },
+    "GetBatchRequest": {
+      "type": "structure",
+      "required": [
+        "batchId"
+      ],
+      "members": {
+        "batchId": "BatchId"
+      }
+    },
+    "GetConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "ConfigurationName"
+      }
+    },
+    "GetReadSetActivationJobRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "sequenceStoreId"
+      ],
+      "members": {
+        "id": "ActivationJobId",
+        "sequenceStoreId": "SequenceStoreId"
+      }
+    },
+    "GetReadSetExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId",
+        "id"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "id": "ExportJobId"
+      }
+    },
+    "GetReadSetImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "sequenceStoreId"
+      ],
+      "members": {
+        "id": "ImportJobId",
+        "sequenceStoreId": "SequenceStoreId"
+      }
+    },
+    "GetReadSetMetadataRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "sequenceStoreId"
+      ],
+      "members": {
+        "id": "ReadSetId",
+        "sequenceStoreId": "SequenceStoreId"
+      }
+    },
+    "GetReadSetRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "sequenceStoreId",
+        "partNumber"
+      ],
+      "members": {
+        "id": "ReadSetId",
+        "sequenceStoreId": "SequenceStoreId",
+        "file": "ReadSetFile",
+        "partNumber": "GetReadSetRequestPartNumberInteger"
+      }
+    },
+    "GetReadSetRequestPartNumberInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 10000
+    },
+    "GetReferenceImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "referenceStoreId"
+      ],
+      "members": {
+        "id": "ImportJobId",
+        "referenceStoreId": "ReferenceStoreId"
+      }
+    },
+    "GetReferenceMetadataRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "referenceStoreId"
+      ],
+      "members": {
+        "id": "ReferenceId",
+        "referenceStoreId": "ReferenceStoreId"
+      }
+    },
+    "GetReferenceRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "referenceStoreId",
+        "partNumber"
+      ],
+      "members": {
+        "id": "ReferenceId",
+        "referenceStoreId": "ReferenceStoreId",
+        "range": "Range",
+        "partNumber": "GetReferenceRequestPartNumberInteger",
+        "file": "ReferenceFile"
+      }
+    },
+    "GetReferenceRequestPartNumberInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 10000
+    },
+    "GetReferenceStoreRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "ReferenceStoreId"
+      }
+    },
+    "GetRunCacheRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "RunCacheId"
+      }
+    },
+    "GetRunGroupRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "RunGroupId"
+      }
+    },
+    "GetRunRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "RunId",
+        "export": "RunExportList"
+      }
+    },
+    "GetRunTaskRequest": {
+      "type": "structure",
+      "required": [
+        "id",
+        "taskId"
+      ],
+      "members": {
+        "id": "RunId",
+        "taskId": "TaskId"
+      }
+    },
+    "GetS3AccessPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "s3AccessPointArn"
+      ],
+      "members": {
+        "s3AccessPointArn": "S3AccessPointArn"
+      }
+    },
+    "GetSequenceStoreRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "SequenceStoreId"
+      }
+    },
+    "GetShareRequest": {
+      "type": "structure",
+      "required": [
+        "shareId"
+      ],
+      "members": {
+        "shareId": "String"
+      }
+    },
+    "GetVariantImportRequest": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "ResourceId"
+      }
+    },
+    "GetVariantStoreRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "String"
+      }
+    },
+    "GetWorkflowRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "WorkflowId",
+        "type": "WorkflowType",
+        "export": "WorkflowExportList",
+        "workflowOwnerId": "WorkflowOwnerId"
+      }
+    },
+    "GetWorkflowVersionRequest": {
+      "type": "structure",
+      "required": [
+        "workflowId",
+        "versionName"
+      ],
+      "members": {
+        "workflowId": "WorkflowId",
+        "versionName": "WorkflowVersionName",
+        "type": "WorkflowType",
+        "export": "WorkflowExportList",
+        "workflowOwnerId": "WorkflowOwnerId"
+      }
+    },
+    "Header": {
+      "type": "boolean"
+    },
+    "ImageMapping": {
+      "type": "structure",
+      "members": {
+        "sourceImage": "Uri",
+        "destinationImage": "Uri"
+      }
+    },
+    "ImageMappingsList": {
+      "type": "list",
+      "member": "ImageMapping"
+    },
+    "ImportJobId": {
+      "type": "string",
+      "min": 10,
+      "max": 36,
+      "pattern": "[0-9]+"
+    },
+    "ImportReadSetFilter": {
+      "type": "structure",
+      "members": {
+        "status": "ReadSetImportJobStatus",
+        "createdAfter": "SyntheticTimestamp_date_time",
+        "createdBefore": "SyntheticTimestamp_date_time"
+      }
+    },
+    "ImportReferenceFilter": {
+      "type": "structure",
+      "members": {
+        "status": "ReferenceImportJobStatus",
+        "createdAfter": "SyntheticTimestamp_date_time",
+        "createdBefore": "SyntheticTimestamp_date_time"
+      }
+    },
+    "InlineSetting": {
+      "type": "structure",
+      "required": [
+        "runSettingId"
+      ],
+      "members": {
+        "runSettingId": "RunSettingId",
+        "name": "RunName",
+        "outputUri": "RunOutputUri",
+        "priority": "InlineSettingPriorityInteger",
+        "parameters": "RunParameters",
+        "outputBucketOwnerId": "AwsAccountId",
+        "runTags": "TagMap",
+        "engineSettings": "EngineSettings"
+      }
+    },
+    "InlineSettingPriorityInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 100000
+    },
+    "InlineSettings": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "InlineSetting"
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "JobStatus": {
+      "type": "string",
+      "enum": [
+        "SUBMITTED",
+        "IN_PROGRESS",
+        "CANCELLED",
+        "COMPLETED",
+        "FAILED",
+        "COMPLETED_WITH_FAILURES"
+      ]
+    },
+    "LineSep": {
+      "type": "string",
+      "min": 1,
+      "max": 20
+    },
+    "ListAnnotationImportJobsFilter": {
+      "type": "structure",
+      "members": {
+        "status": "JobStatus",
+        "storeName": "String"
+      }
+    },
+    "ListAnnotationImportJobsRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "ListAnnotationImportJobsRequestMaxResultsInteger",
+        "ids": "ListAnnotationImportJobsRequestIdsList",
+        "nextToken": "ListAnnotationImportJobsRequestNextTokenString",
+        "filter": "ListAnnotationImportJobsFilter"
+      }
+    },
+    "ListAnnotationImportJobsRequestIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "ResourceIdentifier"
+    },
+    "ListAnnotationImportJobsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListAnnotationImportJobsRequestNextTokenString": {
+      "type": "string",
+      "min": 1,
+      "max": 10000
+    },
+    "ListAnnotationStoreVersionsFilter": {
+      "type": "structure",
+      "members": {
+        "status": "VersionStatus"
+      }
+    },
+    "ListAnnotationStoreVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "String",
+        "maxResults": "ListAnnotationStoreVersionsRequestMaxResultsInteger",
+        "nextToken": "ListAnnotationStoreVersionsRequestNextTokenString",
+        "filter": "ListAnnotationStoreVersionsFilter"
+      }
+    },
+    "ListAnnotationStoreVersionsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListAnnotationStoreVersionsRequestNextTokenString": {
+      "type": "string",
+      "min": 1,
+      "max": 10000
+    },
+    "ListAnnotationStoresFilter": {
+      "type": "structure",
+      "members": {
+        "status": "StoreStatus"
+      }
+    },
+    "ListAnnotationStoresRequest": {
+      "type": "structure",
+      "members": {
+        "ids": "ListAnnotationStoresRequestIdsList",
+        "maxResults": "ListAnnotationStoresRequestMaxResultsInteger",
+        "nextToken": "ListAnnotationStoresRequestNextTokenString",
+        "filter": "ListAnnotationStoresFilter"
+      }
+    },
+    "ListAnnotationStoresRequestIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "ResourceIdentifier"
+    },
+    "ListAnnotationStoresRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListAnnotationStoresRequestNextTokenString": {
+      "type": "string",
+      "min": 1,
+      "max": 10000
+    },
+    "ListBatchRequest": {
+      "type": "structure",
+      "members": {
+        "maxItems": "ListBatchRequestMaxItemsInteger",
+        "startingToken": "ListToken",
+        "status": "BatchStatus",
+        "name": "BatchName",
+        "runGroupId": "RunGroupId"
+      }
+    },
+    "ListBatchRequestMaxItemsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "ListConfigurationsRequestMaxResultsInteger",
+        "startingToken": "ConfigurationListToken"
+      }
+    },
+    "ListConfigurationsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "ListMultipartReadSetUploadsRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "maxResults": "ListMultipartReadSetUploadsRequestMaxResultsInteger",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListMultipartReadSetUploadsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListReadSetActivationJobsRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "maxResults": "ListReadSetActivationJobsRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "filter": "ActivateReadSetFilter"
+      }
+    },
+    "ListReadSetActivationJobsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListReadSetExportJobsRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "maxResults": "ListReadSetExportJobsRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "filter": "ExportReadSetFilter"
+      }
+    },
+    "ListReadSetExportJobsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListReadSetImportJobsRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId"
+      ],
+      "members": {
+        "maxResults": "ListReadSetImportJobsRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "sequenceStoreId": "SequenceStoreId",
+        "filter": "ImportReadSetFilter"
+      }
+    },
+    "ListReadSetImportJobsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListReadSetUploadPartsRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId",
+        "uploadId",
+        "partSource"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "uploadId": "UploadId",
+        "partSource": "ReadSetPartSource",
+        "maxResults": "ListReadSetUploadPartsRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "filter": "ReadSetUploadPartListFilter"
+      }
+    },
+    "ListReadSetUploadPartsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListReadSetsRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "maxResults": "ListReadSetsRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "filter": "ReadSetFilter"
+      }
+    },
+    "ListReadSetsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListReferenceImportJobsRequest": {
+      "type": "structure",
+      "required": [
+        "referenceStoreId"
+      ],
+      "members": {
+        "maxResults": "ListReferenceImportJobsRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "referenceStoreId": "ReferenceStoreId",
+        "filter": "ImportReferenceFilter"
+      }
+    },
+    "ListReferenceImportJobsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListReferenceStoresRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "ListReferenceStoresRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "filter": "ReferenceStoreFilter"
+      }
+    },
+    "ListReferenceStoresRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListReferencesRequest": {
+      "type": "structure",
+      "required": [
+        "referenceStoreId"
+      ],
+      "members": {
+        "referenceStoreId": "ReferenceStoreId",
+        "maxResults": "ListReferencesRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "filter": "ReferenceFilter"
+      }
+    },
+    "ListReferencesRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListRunCachesRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "ListRunCachesRequestMaxResultsInteger",
+        "startingToken": "ListToken"
+      }
+    },
+    "ListRunCachesRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListRunGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "name": "RunGroupName",
+        "startingToken": "RunGroupListToken",
+        "maxResults": "ListRunGroupsRequestMaxResultsInteger"
+      }
+    },
+    "ListRunGroupsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListRunTasksRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "RunId",
+        "status": "TaskStatus",
+        "startingToken": "TaskListToken",
+        "maxResults": "ListRunTasksRequestMaxResultsInteger"
+      }
+    },
+    "ListRunTasksRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListRunsInBatchRequest": {
+      "type": "structure",
+      "required": [
+        "batchId"
+      ],
+      "members": {
+        "batchId": "BatchId",
+        "maxItems": "ListRunsInBatchRequestMaxItemsInteger",
+        "startingToken": "ListToken",
+        "submissionStatus": "SubmissionStatus",
+        "runSettingId": "String",
+        "runId": "String"
+      }
+    },
+    "ListRunsInBatchRequestMaxItemsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListRunsRequest": {
+      "type": "structure",
+      "members": {
+        "name": "RunName",
+        "runGroupId": "RunGroupId",
+        "batchId": "BatchId",
+        "startingToken": "RunListToken",
+        "maxResults": "ListRunsRequestMaxResultsInteger",
+        "status": "RunStatus"
+      }
+    },
+    "ListRunsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListSequenceStoresRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "ListSequenceStoresRequestMaxResultsInteger",
+        "nextToken": "NextToken",
+        "filter": "SequenceStoreFilter"
+      }
+    },
+    "ListSequenceStoresRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListSharesRequest": {
+      "type": "structure",
+      "required": [
+        "resourceOwner"
+      ],
+      "members": {
+        "resourceOwner": "ResourceOwner",
+        "filter": "Filter",
+        "nextToken": "String",
+        "maxResults": "Integer"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "TagArn"
+      }
+    },
+    "ListToken": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "ListVariantImportJobsFilter": {
+      "type": "structure",
+      "members": {
+        "status": "JobStatus",
+        "storeName": "String"
+      }
+    },
+    "ListVariantImportJobsRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "ListVariantImportJobsRequestMaxResultsInteger",
+        "ids": "ListVariantImportJobsRequestIdsList",
+        "nextToken": "ListVariantImportJobsRequestNextTokenString",
+        "filter": "ListVariantImportJobsFilter"
+      }
+    },
+    "ListVariantImportJobsRequestIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "ResourceIdentifier"
+    },
+    "ListVariantImportJobsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListVariantImportJobsRequestNextTokenString": {
+      "type": "string",
+      "min": 1,
+      "max": 10000
+    },
+    "ListVariantStoresFilter": {
+      "type": "structure",
+      "members": {
+        "status": "StoreStatus"
+      }
+    },
+    "ListVariantStoresRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "ListVariantStoresRequestMaxResultsInteger",
+        "ids": "ListVariantStoresRequestIdsList",
+        "nextToken": "ListVariantStoresRequestNextTokenString",
+        "filter": "ListVariantStoresFilter"
+      }
+    },
+    "ListVariantStoresRequestIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "ResourceIdentifier"
+    },
+    "ListVariantStoresRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListVariantStoresRequestNextTokenString": {
+      "type": "string",
+      "min": 1,
+      "max": 10000
+    },
+    "ListWorkflowVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "workflowId"
+      ],
+      "members": {
+        "workflowId": "WorkflowId",
+        "type": "WorkflowType",
+        "workflowOwnerId": "WorkflowOwnerId",
+        "startingToken": "WorkflowVersionListToken",
+        "maxResults": "ListWorkflowVersionsRequestMaxResultsInteger"
+      }
+    },
+    "ListWorkflowVersionsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListWorkflowsRequest": {
+      "type": "structure",
+      "members": {
+        "type": "WorkflowType",
+        "name": "WorkflowName",
+        "startingToken": "WorkflowListToken",
+        "maxResults": "ListWorkflowsRequestMaxResultsInteger"
+      }
+    },
+    "ListWorkflowsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "Md5": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[\\p{L}||\\p{N}]+"
+    },
+    "NetworkingMode": {
+      "type": "string",
+      "enum": [
+        "RESTRICTED",
+        "VPC"
+      ]
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 6144,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "NumericIdInArn": {
+      "type": "string",
+      "min": 1,
+      "max": 18,
+      "pattern": "[0-9]+"
+    },
+    "ParameterTemplatePath": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "PrimitiveBoolean": {
+      "type": "boolean"
+    },
+    "PropagatedSetLevelTags": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "PutS3AccessPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "s3AccessPointArn",
+        "s3AccessPolicy"
+      ],
+      "members": {
+        "s3AccessPointArn": "S3AccessPointArn",
+        "s3AccessPolicy": "S3AccessPolicy"
+      }
+    },
+    "Quote": {
+      "type": "string",
+      "min": 1,
+      "max": 1
+    },
+    "QuoteAll": {
+      "type": "boolean"
+    },
+    "Range": {
+      "type": "string",
+      "min": 1,
+      "max": 127,
+      "pattern": "[\\p{N}||\\p{P}]+"
+    },
+    "ReadOptions": {
+      "type": "structure",
+      "members": {
+        "sep": "Separator",
+        "encoding": "Encoding",
+        "quote": "Quote",
+        "quoteAll": "QuoteAll",
+        "escape": "EscapeChar",
+        "escapeQuotes": "EscapeQuotes",
+        "comment": "CommentChar",
+        "header": "Header",
+        "lineSep": "LineSep"
+      }
+    },
+    "ReadSetActivationJobStatus": {
+      "type": "string",
+      "enum": [
+        "SUBMITTED",
+        "IN_PROGRESS",
+        "CANCELLING",
+        "CANCELLED",
+        "FAILED",
+        "COMPLETED",
+        "COMPLETED_WITH_FAILURES"
+      ]
+    },
+    "ReadSetDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "ReadSetExportJobStatus": {
+      "type": "string",
+      "enum": [
+        "SUBMITTED",
+        "IN_PROGRESS",
+        "CANCELLING",
+        "CANCELLED",
+        "FAILED",
+        "COMPLETED",
+        "COMPLETED_WITH_FAILURES"
+      ]
+    },
+    "ReadSetFile": {
+      "type": "string",
+      "enum": [
+        "SOURCE1",
+        "SOURCE2",
+        "INDEX"
+      ]
+    },
+    "ReadSetFilter": {
+      "type": "structure",
+      "members": {
+        "name": "ReadSetName",
+        "status": "ReadSetStatus",
+        "referenceArn": "ReferenceArnFilter",
+        "createdAfter": "SyntheticTimestamp_date_time",
+        "createdBefore": "SyntheticTimestamp_date_time",
+        "sampleId": "SampleId",
+        "subjectId": "SubjectId",
+        "generatedFrom": "GeneratedFrom",
+        "creationType": "CreationType"
+      }
+    },
+    "ReadSetId": {
+      "type": "string",
+      "min": 10,
+      "max": 36,
+      "pattern": "[0-9]+"
+    },
+    "ReadSetIdList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "ReadSetId"
+    },
+    "ReadSetImportJobStatus": {
+      "type": "string",
+      "enum": [
+        "SUBMITTED",
+        "IN_PROGRESS",
+        "CANCELLING",
+        "CANCELLED",
+        "FAILED",
+        "COMPLETED",
+        "COMPLETED_WITH_FAILURES"
+      ]
+    },
+    "ReadSetName": {
+      "type": "string",
+      "min": 1,
+      "max": 127,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "ReadSetPartSource": {
+      "type": "string",
+      "enum": [
+        "SOURCE1",
+        "SOURCE2"
+      ]
+    },
+    "ReadSetPartStreamingBlob": {
+      "type": "blob"
+    },
+    "ReadSetStatus": {
+      "type": "string",
+      "enum": [
+        "ARCHIVED",
+        "ACTIVATING",
+        "ACTIVE",
+        "DELETING",
+        "DELETED",
+        "PROCESSING_UPLOAD",
+        "UPLOAD_FAILED"
+      ]
+    },
+    "ReadSetUploadPartListFilter": {
+      "type": "structure",
+      "members": {
+        "createdAfter": "SyntheticTimestamp_date_time",
+        "createdBefore": "SyntheticTimestamp_date_time"
+      }
+    },
+    "ReadmeMarkdown": {
+      "type": "string"
+    },
+    "ReadmePath": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "ReferenceArn": {
+      "type": "string",
+      "min": 1,
+      "max": 127,
+      "pattern": "arn:.+"
+    },
+    "ReferenceArnFilter": {
+      "type": "string",
+      "min": 0,
+      "max": 127,
+      "pattern": "$|^arn:.+"
+    },
+    "ReferenceDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "ReferenceFile": {
+      "type": "string",
+      "enum": [
+        "SOURCE",
+        "INDEX"
+      ]
+    },
+    "ReferenceFilter": {
+      "type": "structure",
+      "members": {
+        "name": "ReferenceName",
+        "md5": "Md5",
+        "createdAfter": "SyntheticTimestamp_date_time",
+        "createdBefore": "SyntheticTimestamp_date_time"
+      }
+    },
+    "ReferenceId": {
+      "type": "string",
+      "min": 10,
+      "max": 36,
+      "pattern": "[0-9]+"
+    },
+    "ReferenceImportJobStatus": {
+      "type": "string",
+      "enum": [
+        "SUBMITTED",
+        "IN_PROGRESS",
+        "CANCELLING",
+        "CANCELLED",
+        "FAILED",
+        "COMPLETED",
+        "COMPLETED_WITH_FAILURES"
+      ]
+    },
+    "ReferenceItem": {
+      "type": "structure",
+      "members": {
+        "referenceArn": "ReferenceArn"
+      }
+    },
+    "ReferenceName": {
+      "type": "string",
+      "min": 3,
+      "max": 255,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "ReferenceStoreDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "ReferenceStoreFilter": {
+      "type": "structure",
+      "members": {
+        "name": "ReferenceStoreName",
+        "createdAfter": "SyntheticTimestamp_date_time",
+        "createdBefore": "SyntheticTimestamp_date_time"
+      }
+    },
+    "ReferenceStoreId": {
+      "type": "string",
+      "min": 10,
+      "max": 36,
+      "pattern": "[0-9]+"
+    },
+    "ReferenceStoreName": {
+      "type": "string",
+      "min": 1,
+      "max": 127,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "RegistryMapping": {
+      "type": "structure",
+      "required": [
+        "upstreamRegistryUrl",
+        "ecrRepositoryPrefix"
+      ],
+      "members": {
+        "upstreamRegistryUrl": "Uri",
+        "ecrRepositoryPrefix": "EcrRepositoryPrefix",
+        "upstreamRepositoryPrefix": "UpstreamRepositoryPrefix",
+        "ecrAccountId": "AwsAccountId",
+        "credentialArn": "SecretArn"
+      }
+    },
+    "RegistryMappingsList": {
+      "type": "list",
+      "member": "RegistryMapping"
+    },
+    "ResourceId": {
+      "type": "string",
+      "pattern": "[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}"
+    },
+    "ResourceIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "ResourceOwner": {
+      "type": "string",
+      "enum": [
+        "SELF",
+        "OTHER"
+      ]
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:.*"
+    },
+    "RunCacheId": {
+      "type": "string",
+      "min": 1,
+      "max": 18,
+      "pattern": "[0-9]+"
+    },
+    "RunCacheRequestId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "RunConfigurations": {
+      "type": "structure",
+      "members": {
+        "vpcConfig": "VpcConfig"
+      }
+    },
+    "RunExport": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "DEFINITION"
+      ]
+    },
+    "RunExportList": {
+      "type": "list",
+      "min": 0,
+      "max": 32,
+      "member": "RunExport"
+    },
+    "RunGroupId": {
+      "type": "string",
+      "min": 1,
+      "max": 18,
+      "pattern": "[0-9]+"
+    },
+    "RunGroupListToken": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "RunGroupName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "RunGroupRequestId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "RunId": {
+      "type": "string",
+      "min": 1,
+      "max": 18,
+      "pattern": "[0-9]+"
+    },
+    "RunLeftNormalization": {
+      "type": "boolean"
+    },
+    "RunListToken": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "RunLogLevel": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "OFF",
+        "FATAL",
+        "ERROR",
+        "ALL"
+      ]
+    },
+    "RunName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "RunOutputUri": {
+      "type": "string",
+      "min": 1,
+      "max": 750,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "RunParameters": {
+      "type": "document"
+    },
+    "RunRequestId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "RunRetentionMode": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "RETAIN",
+        "REMOVE"
+      ]
+    },
+    "RunRoleArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:.+"
+    },
+    "RunSettingId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "RunStatus": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "PENDING",
+        "STARTING",
+        "RUNNING",
+        "STOPPING",
+        "COMPLETED",
+        "DELETED",
+        "CANCELLED",
+        "FAILED"
+      ]
+    },
+    "S3AccessConfig": {
+      "type": "structure",
+      "members": {
+        "accessLogLocation": "AccessLogLocation"
+      }
+    },
+    "S3AccessPointArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "arn:[^:]*:s3:[^:]*:[^:]*:accesspoint/.*"
+    },
+    "S3AccessPolicy": {
+      "type": "string",
+      "min": 1,
+      "max": 100000
+    },
+    "S3Destination": {
+      "type": "string",
+      "pattern": "s3://([a-z0-9][a-z0-9-.]{1,61}[a-z0-9])/?((.{1,1024})/)?"
+    },
+    "S3Uri": {
+      "type": "string",
+      "pattern": "s3://([a-z0-9][a-z0-9-.]{1,61}[a-z0-9])/(.{1,1024})"
+    },
+    "S3UriForBucketOrObject": {
+      "type": "string",
+      "pattern": "s3://([a-z0-9][a-z0-9-.]{1,61}[a-z0-9])(/(.{0,1024}))?"
+    },
+    "S3UriForObject": {
+      "type": "string",
+      "pattern": "s3://([a-z0-9][a-z0-9-.]{1,61}[a-z0-9])/((.{1,1024}))"
+    },
+    "S3UriSettings": {
+      "type": "string",
+      "min": 1,
+      "max": 750,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "SampleId": {
+      "type": "string",
+      "min": 1,
+      "max": 127,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "SchemaItem": {
+      "type": "map",
+      "min": 1,
+      "max": 1,
+      "key": "SchemaItemKeyString",
+      "value": "SchemaValueType"
+    },
+    "SchemaItemKeyString": {
+      "type": "string",
+      "pattern": "[a-z0-9_]{1,255}"
+    },
+    "SchemaValueType": {
+      "type": "string",
+      "enum": [
+        "LONG",
+        "INT",
+        "STRING",
+        "FLOAT",
+        "DOUBLE",
+        "BOOLEAN"
+      ]
+    },
+    "ScratchStorageMode": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "LOCAL",
+        "SHARED"
+      ]
+    },
+    "SecretArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:aws(-\\w+)*:secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[a-zA-Z0-9\\/_+=.@-]+"
+    },
+    "SecurityGroupId": {
+      "type": "string",
+      "min": 4,
+      "max": 128,
+      "pattern": "sg-[0-9a-f]+"
+    },
+    "Separator": {
+      "type": "string",
+      "min": 1,
+      "max": 20
+    },
+    "SequenceStoreDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "SequenceStoreFilter": {
+      "type": "structure",
+      "members": {
+        "name": "SequenceStoreName",
+        "createdAfter": "SyntheticTimestamp_date_time",
+        "createdBefore": "SyntheticTimestamp_date_time",
+        "status": "SequenceStoreStatus",
+        "updatedAfter": "SyntheticTimestamp_date_time",
+        "updatedBefore": "SyntheticTimestamp_date_time"
+      }
+    },
+    "SequenceStoreId": {
+      "type": "string",
+      "min": 10,
+      "max": 36,
+      "pattern": "[0-9]+"
+    },
+    "SequenceStoreName": {
+      "type": "string",
+      "min": 1,
+      "max": 127,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "SequenceStoreStatus": {
+      "type": "string",
+      "enum": [
+        "CREATING",
+        "ACTIVE",
+        "UPDATING",
+        "DELETING",
+        "FAILED"
+      ]
+    },
+    "SessionPolicy": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "[\\p{L}\\p{M}\\p{Z}\\p{S}\\p{N}\\p{P}\\t\\n\\r]+"
+    },
+    "ShareName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "ShareResourceType": {
+      "type": "string",
+      "enum": [
+        "VARIANT_STORE",
+        "ANNOTATION_STORE",
+        "WORKFLOW"
+      ]
+    },
+    "ShareStatus": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "ACTIVATING",
+        "ACTIVE",
+        "DELETING",
+        "DELETED",
+        "FAILED"
+      ]
+    },
+    "SourceFiles": {
+      "type": "structure",
+      "required": [
+        "source1"
+      ],
+      "members": {
+        "source1": "S3Uri",
+        "source2": "S3Uri"
+      }
+    },
+    "SourceReference": {
+      "type": "structure",
+      "required": [
+        "type",
+        "value"
+      ],
+      "members": {
+        "type": "SourceReferenceType",
+        "value": "SourceReferenceValue"
+      }
+    },
+    "SourceReferenceType": {
+      "type": "string",
+      "enum": [
+        "BRANCH",
+        "TAG",
+        "COMMIT"
+      ]
+    },
+    "SourceReferenceValue": {
+      "type": "string"
+    },
+    "SseConfig": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "EncryptionType",
+        "keyArn": "SseConfigKeyArnString"
+      }
+    },
+    "SseConfigKeyArnString": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": ".*arn:([^: ]*):([^: ]*):([^: ]*):([0-9]{12}):([^: ]*).*"
+    },
+    "StartAnnotationImportRequest": {
+      "type": "structure",
+      "required": [
+        "destinationName",
+        "roleArn",
+        "items"
+      ],
+      "members": {
+        "destinationName": "StoreName",
+        "roleArn": "Arn",
+        "items": "AnnotationImportItemSources",
+        "versionName": "VersionName",
+        "formatOptions": "FormatOptions",
+        "runLeftNormalization": "RunLeftNormalization",
+        "annotationFields": "AnnotationFieldMap"
+      }
+    },
+    "StartReadSetActivationJobRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId",
+        "sources"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "clientToken": "ClientToken",
+        "sources": "StartReadSetActivationJobRequestSourcesList"
+      }
+    },
+    "StartReadSetActivationJobRequestSourcesList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "StartReadSetActivationJobSourceItem"
+    },
+    "StartReadSetActivationJobSourceItem": {
+      "type": "structure",
+      "required": [
+        "readSetId"
+      ],
+      "members": {
+        "readSetId": "ReadSetId"
+      }
+    },
+    "StartReadSetExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId",
+        "destination",
+        "roleArn",
+        "sources"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "destination": "S3Destination",
+        "roleArn": "RoleArn",
+        "clientToken": "ClientToken",
+        "sources": "StartReadSetExportJobRequestSourcesList"
+      }
+    },
+    "StartReadSetExportJobRequestSourcesList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "ExportReadSet"
+    },
+    "StartReadSetImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId",
+        "roleArn",
+        "sources"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "roleArn": "RoleArn",
+        "clientToken": "ClientToken",
+        "sources": "StartReadSetImportJobRequestSourcesList"
+      }
+    },
+    "StartReadSetImportJobRequestSourcesList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "StartReadSetImportJobSourceItem"
+    },
+    "StartReadSetImportJobSourceItem": {
+      "type": "structure",
+      "required": [
+        "sourceFiles",
+        "sourceFileType",
+        "subjectId",
+        "sampleId"
+      ],
+      "members": {
+        "sourceFiles": "SourceFiles",
+        "sourceFileType": "FileType",
+        "subjectId": "SubjectId",
+        "sampleId": "SampleId",
+        "generatedFrom": "GeneratedFrom",
+        "referenceArn": "ReferenceArn",
+        "name": "ReadSetName",
+        "description": "ReadSetDescription",
+        "tags": "TagMap"
+      }
+    },
+    "StartReferenceImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "referenceStoreId",
+        "roleArn",
+        "sources"
+      ],
+      "members": {
+        "referenceStoreId": "ReferenceStoreId",
+        "roleArn": "RoleArn",
+        "clientToken": "ClientToken",
+        "sources": "StartReferenceImportJobRequestSourcesList"
+      }
+    },
+    "StartReferenceImportJobRequestSourcesList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "StartReferenceImportJobSourceItem"
+    },
+    "StartReferenceImportJobSourceItem": {
+      "type": "structure",
+      "required": [
+        "sourceFile",
+        "name"
+      ],
+      "members": {
+        "sourceFile": "S3Uri",
+        "name": "ReferenceName",
+        "description": "ReferenceDescription",
+        "tags": "TagMap"
+      }
+    },
+    "StartRunBatchRequest": {
+      "type": "structure",
+      "required": [
+        "requestId",
+        "defaultRunSetting",
+        "batchRunSettings"
+      ],
+      "members": {
+        "batchName": "BatchName",
+        "requestId": "BatchRequestId",
+        "tags": "TagMap",
+        "defaultRunSetting": "DefaultRunSetting",
+        "batchRunSettings": "BatchRunSettings"
+      }
+    },
+    "StartRunRequest": {
+      "type": "structure",
+      "required": [
+        "roleArn",
+        "outputUri",
+        "requestId"
+      ],
+      "members": {
+        "workflowId": "WorkflowId",
+        "workflowType": "WorkflowType",
+        "runId": "RunId",
+        "roleArn": "RunRoleArn",
+        "name": "RunName",
+        "cacheId": "NumericIdInArn",
+        "cacheBehavior": "CacheBehavior",
+        "runGroupId": "RunGroupId",
+        "priority": "StartRunRequestPriorityInteger",
+        "parameters": "RunParameters",
+        "storageCapacity": "StartRunRequestStorageCapacityInteger",
+        "outputUri": "RunOutputUri",
+        "logLevel": "RunLogLevel",
+        "tags": "TagMap",
+        "requestId": "RunRequestId",
+        "retentionMode": "RunRetentionMode",
+        "storageType": "StorageType",
+        "workflowOwnerId": "WorkflowOwnerId",
+        "workflowVersionName": "WorkflowVersionName",
+        "networkingMode": "NetworkingMode",
+        "scratchStorageMode": "ScratchStorageMode",
+        "configurationName": "ConfigurationName",
+        "sessionPolicy": "SessionPolicy",
+        "engineSettings": "EngineSettings"
+      }
+    },
+    "StartRunRequestPriorityInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 100000
+    },
+    "StartRunRequestStorageCapacityInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 100000
+    },
+    "StartVariantImportRequest": {
+      "type": "structure",
+      "required": [
+        "destinationName",
+        "roleArn",
+        "items"
+      ],
+      "members": {
+        "destinationName": "StoreName",
+        "roleArn": "Arn",
+        "items": "VariantImportItemSources",
+        "runLeftNormalization": "RunLeftNormalization",
+        "annotationFields": "AnnotationFieldMap"
+      }
+    },
+    "StatusList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "ShareStatus"
+    },
+    "StorageType": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "STATIC",
+        "DYNAMIC"
+      ]
+    },
+    "StoreFormat": {
+      "type": "string",
+      "enum": [
+        "GFF",
+        "TSV",
+        "VCF"
+      ]
+    },
+    "StoreName": {
+      "type": "string",
+      "min": 3,
+      "max": 255,
+      "pattern": "([a-z]){1}([a-z0-9_]){2,254}"
+    },
+    "StoreOptions": {
+      "type": "structure",
+      "members": {
+        "tsvStoreOptions": "TsvStoreOptions"
+      }
+    },
+    "StoreStatus": {
+      "type": "string",
+      "enum": [
+        "CREATING",
+        "UPDATING",
+        "DELETING",
+        "ACTIVE",
+        "FAILED"
+      ]
+    },
+    "String": {
+      "type": "string"
+    },
+    "SubjectId": {
+      "type": "string",
+      "min": 1,
+      "max": 127,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "SubmissionStatus": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "SUCCESS",
+        "FAILED",
+        "CANCEL_SUCCESS",
+        "CANCEL_FAILED",
+        "DELETE_SUCCESS",
+        "DELETE_FAILED"
+      ]
+    },
+    "SubnetId": {
+      "type": "string",
+      "min": 8,
+      "max": 128,
+      "pattern": "subnet-[0-9a-f]+"
+    },
+    "SyntheticTimestamp_date_time": {
+      "type": "timestamp"
+    },
+    "TagArn": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "arn:.+"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "TagArn",
+        "tags": "TagResourceRequestTagsMap"
+      }
+    },
+    "TagResourceRequestTagsMap": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TaskId": {
+      "type": "string",
+      "min": 1,
+      "max": 18,
+      "pattern": "[0-9]+"
+    },
+    "TaskListToken": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "TaskStatus": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "PENDING",
+        "STARTING",
+        "RUNNING",
+        "STOPPING",
+        "COMPLETED",
+        "CANCELLED",
+        "FAILED"
+      ]
+    },
+    "TsvOptions": {
+      "type": "structure",
+      "members": {
+        "readOptions": "ReadOptions"
+      }
+    },
+    "TsvStoreOptions": {
+      "type": "structure",
+      "members": {
+        "annotationType": "AnnotationType",
+        "formatToHeader": "FormatToHeader",
+        "schema": "TsvStoreOptionsSchemaList"
+      }
+    },
+    "TsvStoreOptionsSchemaList": {
+      "type": "list",
+      "min": 1,
+      "max": 5000,
+      "member": "SchemaItem"
+    },
+    "TsvVersionOptions": {
+      "type": "structure",
+      "members": {
+        "annotationType": "AnnotationType",
+        "formatToHeader": "FormatToHeader",
+        "schema": "TsvVersionOptionsSchemaList"
+      }
+    },
+    "TsvVersionOptionsSchemaList": {
+      "type": "list",
+      "min": 1,
+      "max": 5000,
+      "member": "SchemaItem"
+    },
+    "TypeList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "ShareResourceType"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "TagArn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateAnnotationStoreRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "String",
+        "description": "Description"
+      }
+    },
+    "UpdateAnnotationStoreVersionRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "versionName"
+      ],
+      "members": {
+        "name": "String",
+        "versionName": "String",
+        "description": "Description"
+      }
+    },
+    "UpdateRunCacheRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "cacheBehavior": "CacheBehavior",
+        "description": "UserCustomDescription",
+        "id": "RunCacheId",
+        "name": "UserCustomName"
+      }
+    },
+    "UpdateRunGroupRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "RunGroupId",
+        "name": "RunGroupName",
+        "maxCpus": "UpdateRunGroupRequestMaxCpusInteger",
+        "maxRuns": "UpdateRunGroupRequestMaxRunsInteger",
+        "maxDuration": "UpdateRunGroupRequestMaxDurationInteger",
+        "maxGpus": "UpdateRunGroupRequestMaxGpusInteger"
+      }
+    },
+    "UpdateRunGroupRequestMaxCpusInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100000
+    },
+    "UpdateRunGroupRequestMaxDurationInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100000
+    },
+    "UpdateRunGroupRequestMaxGpusInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100000
+    },
+    "UpdateRunGroupRequestMaxRunsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100000
+    },
+    "UpdateSequenceStoreRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "SequenceStoreId",
+        "name": "SequenceStoreName",
+        "description": "SequenceStoreDescription",
+        "clientToken": "ClientToken",
+        "fallbackLocation": "FallbackLocation",
+        "propagatedSetLevelTags": "PropagatedSetLevelTags",
+        "s3AccessConfig": "S3AccessConfig"
+      }
+    },
+    "UpdateVariantStoreRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "String",
+        "description": "Description"
+      }
+    },
+    "UpdateWorkflowRequest": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "WorkflowId",
+        "name": "WorkflowName",
+        "description": "WorkflowDescription",
+        "storageType": "StorageType",
+        "storageCapacity": "UpdateWorkflowRequestStorageCapacityInteger",
+        "readmeMarkdown": "ReadmeMarkdown"
+      }
+    },
+    "UpdateWorkflowRequestStorageCapacityInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 100000
+    },
+    "UpdateWorkflowVersionRequest": {
+      "type": "structure",
+      "required": [
+        "workflowId",
+        "versionName"
+      ],
+      "members": {
+        "workflowId": "WorkflowId",
+        "versionName": "WorkflowVersionName",
+        "description": "WorkflowVersionDescription",
+        "storageType": "StorageType",
+        "storageCapacity": "UpdateWorkflowVersionRequestStorageCapacityInteger",
+        "readmeMarkdown": "ReadmeMarkdown"
+      }
+    },
+    "UpdateWorkflowVersionRequestStorageCapacityInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 100000
+    },
+    "UploadId": {
+      "type": "string",
+      "min": 10,
+      "max": 36,
+      "pattern": "[0-9]+"
+    },
+    "UploadReadSetPartRequest": {
+      "type": "structure",
+      "required": [
+        "sequenceStoreId",
+        "uploadId",
+        "partSource",
+        "partNumber",
+        "payload"
+      ],
+      "members": {
+        "sequenceStoreId": "SequenceStoreId",
+        "uploadId": "UploadId",
+        "partSource": "ReadSetPartSource",
+        "partNumber": "UploadReadSetPartRequestPartNumberInteger",
+        "payload": "ReadSetPartStreamingBlob"
+      }
+    },
+    "UploadReadSetPartRequestPartNumberInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 10000
+    },
+    "UpstreamRepositoryPrefix": {
+      "type": "string",
+      "min": 2,
+      "max": 30,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "Uri": {
+      "type": "string",
+      "min": 1,
+      "max": 750,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "UserCustomDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "UserCustomName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "VariantImportItemSource": {
+      "type": "structure",
+      "required": [
+        "source"
+      ],
+      "members": {
+        "source": "S3Uri"
+      }
+    },
+    "VariantImportItemSources": {
+      "type": "list",
+      "min": 1,
+      "member": "VariantImportItemSource"
+    },
+    "VcfOptions": {
+      "type": "structure",
+      "members": {
+        "ignoreQualField": "Boolean",
+        "ignoreFilterField": "Boolean"
+      }
+    },
+    "VersionList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "VersionName"
+    },
+    "VersionName": {
+      "type": "string",
+      "min": 3,
+      "max": 255,
+      "pattern": "([a-z]){1}([a-z0-9_]){2,254}"
+    },
+    "VersionOptions": {
+      "type": "structure",
+      "members": {
+        "tsvVersionOptions": "TsvVersionOptions"
+      }
+    },
+    "VersionStatus": {
+      "type": "string",
+      "enum": [
+        "CREATING",
+        "UPDATING",
+        "DELETING",
+        "ACTIVE",
+        "FAILED"
+      ]
+    },
+    "VpcConfig": {
+      "type": "structure",
+      "members": {
+        "securityGroupIds": "VpcConfigSecurityGroupIdsList",
+        "subnetIds": "VpcConfigSubnetIdsList",
+        "vpcOwnerAccountId": "AwsAccountId"
+      }
+    },
+    "VpcConfigSecurityGroupIdsList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "SecurityGroupId"
+    },
+    "VpcConfigSubnetIdsList": {
+      "type": "list",
+      "min": 0,
+      "max": 16,
+      "member": "SubnetId"
+    },
+    "WorkflowBucketOwnerId": {
+      "type": "string",
+      "pattern": "[0-9]{12}"
+    },
+    "WorkflowDefinition": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "WorkflowDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "WorkflowEngine": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "WDL",
+        "NEXTFLOW",
+        "CWL",
+        "WDL_LENIENT"
+      ]
+    },
+    "WorkflowExport": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "DEFINITION",
+        "README"
+      ]
+    },
+    "WorkflowExportList": {
+      "type": "list",
+      "min": 0,
+      "max": 32,
+      "member": "WorkflowExport"
+    },
+    "WorkflowId": {
+      "type": "string",
+      "min": 1,
+      "max": 18,
+      "pattern": "[0-9]+"
+    },
+    "WorkflowListToken": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "WorkflowMain": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "WorkflowName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "WorkflowOwnerId": {
+      "type": "string",
+      "pattern": "[0-9]{12}"
+    },
+    "WorkflowParameter": {
+      "type": "structure",
+      "members": {
+        "description": "WorkflowParameterDescription",
+        "optional": "Boolean"
+      }
+    },
+    "WorkflowParameterDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "WorkflowParameterName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "WorkflowParameterTemplate": {
+      "type": "map",
+      "min": 1,
+      "max": 2000,
+      "key": "WorkflowParameterName",
+      "value": "WorkflowParameter"
+    },
+    "WorkflowRequestId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "WorkflowType": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "enum": [
+        "PRIVATE",
+        "READY2RUN"
+      ]
+    },
+    "WorkflowVersionDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "WorkflowVersionListToken": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\p{L}||\\p{M}||\\p{Z}||\\p{S}||\\p{N}||\\p{P}]+"
+    },
+    "WorkflowVersionName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9\\-\\._]*"
+    }
+  }
+}

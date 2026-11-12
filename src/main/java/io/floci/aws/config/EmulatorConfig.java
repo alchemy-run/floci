@@ -918,6 +918,8 @@ public interface EmulatorConfig {
 
         ObservabilityAdminServiceConfig observabilityAdmin();
 
+        OmicsServiceConfig omics();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3047,6 +3049,47 @@ public interface EmulatorConfig {
         boolean enabled();
 
         /** How long event rules, hubs and configurations stay in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface OmicsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** What runs workflows: {@code docker} (each language's engine in a container), or {@code none}. */
+        @WithDefault("docker")
+        String engine();
+
+        /** The Cromwell image WDL runs on. */
+        @WithDefault("broadinstitute/cromwell:87")
+        String wdlImage();
+
+        /** The Nextflow image Nextflow runs on. */
+        @WithDefault("nextflow/nextflow:24.10.4")
+        String nextflowImage();
+
+        /** The cwltool image CWL runs on. */
+        @WithDefault("quay.io/commonwl/cwltool:3.1.20241217163858")
+        String cwlImage();
+
+        /** The Java heap of a run's engine, in MiB. */
+        @WithDefault("1024")
+        int engineHeapMb();
+
+        /** How long a run outside a run group may take, in minutes. */
+        @WithDefault("120")
+        int runTimeoutMinutes();
+
+        /** How long a read set goes unread before it's archived. */
+        @WithDefault("30")
+        int archiveAfterDays();
+
+        /** How many reference stores a Region holds. */
+        @WithDefault("5")
+        int maxReferenceStores();
+
+        /** How long stores, workflows and jobs stay in a transitional state. */
         @WithDefault("2000")
         long transitionMillis();
     }

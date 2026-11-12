@@ -287,6 +287,10 @@ services:
     doc: docs/services/notificationscontacts.md
     sources:
       - { path: services/notificationscontacts/NotificationsContactsController.java, mode: switch }
+  - service: omics
+    doc: docs/services/omics.md
+    sources:
+      - { path: services/omics/OmicsController.java, mode: switch }
   - service: observabilityadmin
     doc: docs/services/observabilityadmin.md
     sources:
