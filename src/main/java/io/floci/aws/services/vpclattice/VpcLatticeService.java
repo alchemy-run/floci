@@ -1989,6 +1989,11 @@ public class VpcLatticeService implements Resettable {
         return resources.accountId();
     }
 
+    /** Every Lattice resource of every account, keyed {@code <region>/<id>}. */
+    List<AccountAwareStorageBackend.AccountEntry<ObjectNode>> allResources() {
+        return resources.scanAllAccountEntries(k -> true);
+    }
+
     List<AccountAwareStorageBackend.AccountEntry<ObjectNode>> allTargetGroups() {
         return resources.scanAllAccountEntries(k -> true).stream()
                 .filter(e -> TARGET_GROUP.equals(e.value().path("_kind").asText())).toList();

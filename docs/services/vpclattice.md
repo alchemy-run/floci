@@ -51,6 +51,26 @@ destination type and resource.
 
 A domain verification is `PENDING` until its TXT record is published in a Route 53 hosted zone, then `VERIFIED`.
 
+## Traffic
+
+Services carry traffic. Each listener port has a listener in Floci, and a service that is in a service network
+with a VPC association is answered on its DNS name and listener ports to the containers Floci launches, through a
+relay of its own.
+
+Requests are served the way Lattice serves them:
+
+- **Reachability:** a client in a known VPC must be in a network the service belongs to.
+- **Auth:** an `AWS_IAM` network or service needs its auth policy to allow `vpc-lattice-svcs:Invoke` for the SigV4
+  caller or anonymously.
+- **Rules:** rules match method, path and headers by priority.
+- **Forwarding:** a forward picks a target group by weight and a healthy target, or any target when none is healthy.
+  IP and instance targets are proxied with the `x-amzn-lattice-*` headers. Lambda targets get Lattice's V1 or V2
+  event, and ALB targets are forwarded to the load balancer.
+- **HTTPS and TLS:** HTTPS listeners present certificates from Floci's CA, and `TLS_PASSTHROUGH` listeners relay by
+  server name.
+- **Access logs:** each request is written to the access log subscriptions of the service and network, in CloudWatch
+  Logs, S3 or Firehose.
+
 ## Resource gateways and configurations
 
 A resource gateway lives in a VPC's subnets. Resource configurations describe a DNS name, IP address, ARN or CIDR

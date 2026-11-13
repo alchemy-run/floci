@@ -4,6 +4,8 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Map;
+
 /**
  * Makes resource endpoints reachable from the containers Floci launches (Lambda, ECS, EC2) on the
  * hostname and port the endpoint advertises, whether Floci runs in Docker or from source.
@@ -73,6 +75,29 @@ public class ContainerEndpoints {
             return false;
         }
         String address = relays.start(hostname, port, target, flociPort);
+        dnsServer.routeHost(hostname, address);
+        return true;
+    }
+
+    /**
+     * Containers reach {@code hostname} on each port of {@code ports} at an address of its own, relayed to the
+     * listener of Floci's process on the port it maps to: an endpoint with several listeners keeps one name and
+     * one address.
+     *
+     * @return whether containers can now reach the hostname; false when the containers Floci launches do not use
+     *         its DNS, so no name of it could be answered
+     * @throws RuntimeException when the relay could not be started
+     */
+    public boolean relayToFloci(String hostname, Map<Integer, Integer> ports) {
+        if (hostname == null || relays == null || ports.isEmpty()) {
+            return false;
+        }
+        String target = dnsServer.isSourceMode() ? SourceNetworkHelper.HOST_GATEWAY
+                : dnsServer.getServerIp().orElse(null);
+        if (target == null || dnsServer.getServerIp().isEmpty()) {
+            return false;
+        }
+        String address = relays.start(hostname, ports, target);
         dnsServer.routeHost(hostname, address);
         return true;
     }
