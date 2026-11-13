@@ -6,10 +6,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
 import io.floci.aws.services.acm.AcmJsonHandler;
+import io.floci.aws.services.acmpca.AcmPcaJsonHandler;
 import io.floci.aws.services.apigatewayv2.ApiGatewayV2JsonHandler;
 import io.floci.aws.services.applicationautoscaling.ApplicationAutoScalingJsonHandler;
 import io.floci.aws.services.athena.AthenaJsonHandler;
 import io.floci.aws.services.bcmdataexports.BcmDataExportsJsonHandler;
+import io.floci.aws.services.bedrockdataautomation.BdaRuntimeJsonHandler;
 import io.floci.aws.services.budgets.BudgetsJsonHandler;
 import io.floci.aws.services.ce.CostExplorerJsonHandler;
 import io.floci.aws.services.cloudcontrol.CloudControlJsonHandler;
@@ -23,39 +25,52 @@ import io.floci.aws.services.codepipeline.CodePipelineJsonHandler;
 import io.floci.aws.services.cognito.CognitoJsonHandler;
 import io.floci.aws.services.cognitoidentity.CognitoIdentityJsonHandler;
 import io.floci.aws.services.comprehend.ComprehendJsonHandler;
+import io.floci.aws.services.comprehendmedical.ComprehendMedicalJsonHandler;
 import io.floci.aws.services.configservice.ConfigServiceJsonHandler;
 import io.floci.aws.services.cur.CurJsonHandler;
 import io.floci.aws.services.datasync.DataSyncJsonHandler;
+import io.floci.aws.services.dax.DaxJsonHandler;
+import io.floci.aws.services.directoryservice.DirectoryJsonHandler;
 import io.floci.aws.services.dms.DmsJsonHandler;
 import io.floci.aws.services.ecr.EcrJsonHandler;
+import io.floci.aws.services.ecrpublic.EcrPublicJsonHandler;
 import io.floci.aws.services.ecs.EcsJsonHandler;
 import io.floci.aws.services.emr.EmrHandler;
 import io.floci.aws.services.eventbridge.EventBridgeHandler;
 import io.floci.aws.services.firehose.FirehoseJsonHandler;
+import io.floci.aws.services.fms.FmsJsonHandler;
+import io.floci.aws.services.forecast.ForecastJsonHandler;
+import io.floci.aws.services.fsx.FsxJsonHandler;
 import io.floci.aws.services.globalaccelerator.GlobalAcceleratorJsonHandler;
 import io.floci.aws.services.glue.GlueJsonHandler;
 import io.floci.aws.services.identitystore.IdentityStoreJsonHandler;
+import io.floci.aws.services.kendra.KendraJsonHandler;
 import io.floci.aws.services.kinesis.KinesisJsonHandler;
 import io.floci.aws.services.kinesisanalytics.KinesisAnalyticsV2JsonHandler;
 import io.floci.aws.services.kms.KmsJsonHandler;
+import io.floci.aws.services.licensemanager.LicenseManagerJsonHandler;
 import io.floci.aws.services.lightsail.LightsailJsonHandler;
 import io.floci.aws.services.marketplace.MarketplaceEntitlementController;
 import io.floci.aws.services.marketplace.MarketplaceMeteringController;
 import io.floci.aws.services.memorydb.MemoryDbHandler;
 import io.floci.aws.services.networkfirewall.NetworkFirewallJsonHandler;
 import io.floci.aws.services.organizations.OrganizationsJsonHandler;
+import io.floci.aws.services.personalize.PersonalizeJsonHandler;
 import io.floci.aws.services.pricing.PricingJsonHandler;
 import io.floci.aws.services.redshiftdata.RedshiftDataJsonHandler;
 import io.floci.aws.services.redshiftserverless.RedshiftServerlessJsonHandler;
 import io.floci.aws.services.rekognition.RekognitionJsonHandler;
 import io.floci.aws.services.resourcegroupstagging.ResourceGroupsTaggingJsonHandler;
+import io.floci.aws.services.route53domains.Route53DomainsJsonHandler;
 import io.floci.aws.services.route53resolver.Route53ResolverJsonHandler;
 import io.floci.aws.services.sagemaker.SageMakerJsonHandler;
 import io.floci.aws.services.secretsmanager.SecretsManagerJsonHandler;
 import io.floci.aws.services.servicecatalog.ServiceCatalogJsonHandler;
 import io.floci.aws.services.servicequotas.ServiceQuotasJsonHandler;
+import io.floci.aws.services.shield.ShieldJsonHandler;
 import io.floci.aws.services.ssm.Ec2MessagesJsonHandler;
 import io.floci.aws.services.ssm.SsmJsonHandler;
+import io.floci.aws.services.ssmcontacts.SsmContactsJsonHandler;
 import io.floci.aws.services.ssoadmin.SsoAdminJsonHandler;
 import io.floci.aws.services.textract.TextractJsonHandler;
 import io.floci.aws.services.transcribe.TranscribeJsonHandler;
@@ -118,10 +133,25 @@ public class AwsJson11Controller {
     private final TransferHandler transferHandler;
     private final TextractJsonHandler textractJsonHandler;
     private final ComprehendJsonHandler comprehendJsonHandler;
+    private final ComprehendMedicalJsonHandler comprehendMedicalJsonHandler;
+    private final Route53DomainsJsonHandler route53DomainsJsonHandler;
+    private final AcmPcaJsonHandler acmPcaJsonHandler;
     private final RekognitionJsonHandler rekognitionJsonHandler;
     private final PricingJsonHandler pricingJsonHandler;
     private final TranscribeJsonHandler transcribeJsonHandler;
     private final TranslateJsonHandler translateJsonHandler;
+    private final BdaRuntimeJsonHandler bdaRuntimeJsonHandler;
+    private final DaxJsonHandler daxJsonHandler;
+    private final DirectoryJsonHandler directoryJsonHandler;
+    private final EcrPublicJsonHandler ecrPublicJsonHandler;
+    private final FmsJsonHandler fmsJsonHandler;
+    private final ForecastJsonHandler forecastJsonHandler;
+    private final PersonalizeJsonHandler personalizeJsonHandler;
+    private final SsmContactsJsonHandler ssmContactsJsonHandler;
+    private final ShieldJsonHandler shieldJsonHandler;
+    private final KendraJsonHandler kendraJsonHandler;
+    private final LicenseManagerJsonHandler licenseManagerJsonHandler;
+    private final FsxJsonHandler fsxJsonHandler;
     private final CostExplorerJsonHandler costExplorerJsonHandler;
     private final CurJsonHandler curJsonHandler;
     private final BcmDataExportsJsonHandler bcmDataExportsJsonHandler;
@@ -175,10 +205,25 @@ public class AwsJson11Controller {
                                TransferHandler transferHandler,
                                TextractJsonHandler textractJsonHandler,
                                ComprehendJsonHandler comprehendJsonHandler,
+                               ComprehendMedicalJsonHandler comprehendMedicalJsonHandler,
+                               Route53DomainsJsonHandler route53DomainsJsonHandler,
+                               AcmPcaJsonHandler acmPcaJsonHandler,
                                RekognitionJsonHandler rekognitionJsonHandler,
                                PricingJsonHandler pricingJsonHandler,
                                TranscribeJsonHandler transcribeJsonHandler,
                                TranslateJsonHandler translateJsonHandler,
+                               BdaRuntimeJsonHandler bdaRuntimeJsonHandler,
+                               DaxJsonHandler daxJsonHandler,
+                               DirectoryJsonHandler directoryJsonHandler,
+                               EcrPublicJsonHandler ecrPublicJsonHandler,
+                               FmsJsonHandler fmsJsonHandler,
+                               ForecastJsonHandler forecastJsonHandler,
+                               PersonalizeJsonHandler personalizeJsonHandler,
+                               SsmContactsJsonHandler ssmContactsJsonHandler,
+                               ShieldJsonHandler shieldJsonHandler,
+                               KendraJsonHandler kendraJsonHandler,
+                               LicenseManagerJsonHandler licenseManagerJsonHandler,
+                               FsxJsonHandler fsxJsonHandler,
                                CostExplorerJsonHandler costExplorerJsonHandler,
                                CurJsonHandler curJsonHandler,
                                BcmDataExportsJsonHandler bcmDataExportsJsonHandler,
@@ -236,10 +281,25 @@ public class AwsJson11Controller {
         this.transferHandler = transferHandler;
         this.textractJsonHandler = textractJsonHandler;
         this.comprehendJsonHandler = comprehendJsonHandler;
+        this.comprehendMedicalJsonHandler = comprehendMedicalJsonHandler;
+        this.route53DomainsJsonHandler = route53DomainsJsonHandler;
+        this.acmPcaJsonHandler = acmPcaJsonHandler;
         this.rekognitionJsonHandler = rekognitionJsonHandler;
         this.pricingJsonHandler = pricingJsonHandler;
         this.transcribeJsonHandler = transcribeJsonHandler;
         this.translateJsonHandler = translateJsonHandler;
+        this.bdaRuntimeJsonHandler = bdaRuntimeJsonHandler;
+        this.daxJsonHandler = daxJsonHandler;
+        this.directoryJsonHandler = directoryJsonHandler;
+        this.ecrPublicJsonHandler = ecrPublicJsonHandler;
+        this.fmsJsonHandler = fmsJsonHandler;
+        this.forecastJsonHandler = forecastJsonHandler;
+        this.personalizeJsonHandler = personalizeJsonHandler;
+        this.ssmContactsJsonHandler = ssmContactsJsonHandler;
+        this.shieldJsonHandler = shieldJsonHandler;
+        this.kendraJsonHandler = kendraJsonHandler;
+        this.licenseManagerJsonHandler = licenseManagerJsonHandler;
+        this.fsxJsonHandler = fsxJsonHandler;
         this.costExplorerJsonHandler = costExplorerJsonHandler;
         this.curJsonHandler = curJsonHandler;
         this.bcmDataExportsJsonHandler = bcmDataExportsJsonHandler;
@@ -343,10 +403,26 @@ public class AwsJson11Controller {
                 case "transfer" -> transferHandler.handle(action, request, region);
                 case "textract" -> textractJsonHandler.handle(action, request, region);
                 case "comprehend" -> comprehendJsonHandler.handle(action, request, region);
+                case "comprehendmedical" -> comprehendMedicalJsonHandler.handle(action, request, region);
+                case "route53domains" -> route53DomainsJsonHandler.handle(action, request, region);
+                case "acm-pca" -> acmPcaJsonHandler.handle(action, request, region);
                 case "rekognition" -> rekognitionJsonHandler.handle(action, request, region);
                 case "pricing" -> pricingJsonHandler.handle(action, request, region);
-                case "transcribe" -> transcribeJsonHandler.handle(action, request);
+                case "transcribe" -> transcribeJsonHandler.handle(action, request, region);
                 case "translate" -> translateJsonHandler.handle(action, request, region);
+                case "bedrock-data-automation-runtime" -> bdaRuntimeJsonHandler.handle(action, request, region);
+                case "dax" -> daxJsonHandler.handle(action, request, region);
+                case "ds" -> directoryJsonHandler.handle(action, request, region);
+                case "ecr-public" -> ecrPublicJsonHandler.handle(action, request, region);
+                case "fms" -> fmsJsonHandler.handle(action, request, region);
+                case "forecast" -> forecastJsonHandler.handle(action, request, region);
+                case "personalize" -> personalizeJsonHandler.handle(action, request, region);
+                case "ssm-contacts" -> ssmContactsJsonHandler.handle(action, request, region);
+                case "shield" -> shieldJsonHandler.handle(action, request, region);
+                case "kendra" -> kendraJsonHandler.handle(action, request, region);
+                case "license-manager" -> licenseManagerJsonHandler.handle(action, request, region);
+                case "forecastquery" -> forecastJsonHandler.handleQuery(action, request, region);
+                case "fsx" -> fsxJsonHandler.handle(action, request, region);
                 case "ce" -> costExplorerJsonHandler.handle(action, request, region);
                 case "cur" -> curJsonHandler.handle(action, request, region);
                 case "bcm-data-exports" -> bcmDataExportsJsonHandler.handle(action, request, region);

@@ -1,0 +1,2099 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_iotfleetwise_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateVehicleFleet": "AssociateVehicleFleetRequest",
+    "BatchCreateVehicle": "BatchCreateVehicleRequest",
+    "BatchUpdateVehicle": "BatchUpdateVehicleRequest",
+    "CreateCampaign": "CreateCampaignRequest",
+    "CreateDecoderManifest": "CreateDecoderManifestRequest",
+    "CreateFleet": "CreateFleetRequest",
+    "CreateModelManifest": "CreateModelManifestRequest",
+    "CreateSignalCatalog": "CreateSignalCatalogRequest",
+    "CreateStateTemplate": "CreateStateTemplateRequest",
+    "CreateVehicle": "CreateVehicleRequest",
+    "DeleteCampaign": "DeleteCampaignRequest",
+    "DeleteDecoderManifest": "DeleteDecoderManifestRequest",
+    "DeleteFleet": "DeleteFleetRequest",
+    "DeleteModelManifest": "DeleteModelManifestRequest",
+    "DeleteSignalCatalog": "DeleteSignalCatalogRequest",
+    "DeleteStateTemplate": "DeleteStateTemplateRequest",
+    "DeleteVehicle": "DeleteVehicleRequest",
+    "DisassociateVehicleFleet": "DisassociateVehicleFleetRequest",
+    "GetCampaign": "GetCampaignRequest",
+    "GetDecoderManifest": "GetDecoderManifestRequest",
+    "GetEncryptionConfiguration": "GetEncryptionConfigurationRequest",
+    "GetFleet": "GetFleetRequest",
+    "GetLoggingOptions": "GetLoggingOptionsRequest",
+    "GetModelManifest": "GetModelManifestRequest",
+    "GetRegisterAccountStatus": "GetRegisterAccountStatusRequest",
+    "GetSignalCatalog": "GetSignalCatalogRequest",
+    "GetStateTemplate": "GetStateTemplateRequest",
+    "GetVehicle": "GetVehicleRequest",
+    "GetVehicleStatus": "GetVehicleStatusRequest",
+    "ImportDecoderManifest": "ImportDecoderManifestRequest",
+    "ImportSignalCatalog": "ImportSignalCatalogRequest",
+    "ListCampaigns": "ListCampaignsRequest",
+    "ListDecoderManifestNetworkInterfaces": "ListDecoderManifestNetworkInterfacesRequest",
+    "ListDecoderManifestSignals": "ListDecoderManifestSignalsRequest",
+    "ListDecoderManifests": "ListDecoderManifestsRequest",
+    "ListFleets": "ListFleetsRequest",
+    "ListFleetsForVehicle": "ListFleetsForVehicleRequest",
+    "ListModelManifestNodes": "ListModelManifestNodesRequest",
+    "ListModelManifests": "ListModelManifestsRequest",
+    "ListSignalCatalogNodes": "ListSignalCatalogNodesRequest",
+    "ListSignalCatalogs": "ListSignalCatalogsRequest",
+    "ListStateTemplates": "ListStateTemplatesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListVehicles": "ListVehiclesRequest",
+    "ListVehiclesInFleet": "ListVehiclesInFleetRequest",
+    "PutEncryptionConfiguration": "PutEncryptionConfigurationRequest",
+    "PutLoggingOptions": "PutLoggingOptionsRequest",
+    "RegisterAccount": "RegisterAccountRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateCampaign": "UpdateCampaignRequest",
+    "UpdateDecoderManifest": "UpdateDecoderManifestRequest",
+    "UpdateFleet": "UpdateFleetRequest",
+    "UpdateModelManifest": "UpdateModelManifestRequest",
+    "UpdateSignalCatalog": "UpdateSignalCatalogRequest",
+    "UpdateStateTemplate": "UpdateStateTemplateRequest",
+    "UpdateVehicle": "UpdateVehicleRequest"
+  },
+  "shapes": {
+    "Actuator": {
+      "type": "structure",
+      "required": [
+        "fullyQualifiedName",
+        "dataType"
+      ],
+      "members": {
+        "fullyQualifiedName": "ActuatorFullyQualifiedNameString",
+        "dataType": "NodeDataType",
+        "description": "description",
+        "unit": "string",
+        "allowedValues": "listOfStrings",
+        "min": "double",
+        "max": "double",
+        "assignedValue": "string",
+        "deprecationMessage": "message",
+        "comment": "message",
+        "structFullyQualifiedName": "NodePath"
+      }
+    },
+    "ActuatorFullyQualifiedNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:.*"
+    },
+    "AssociateVehicleFleetRequest": {
+      "type": "structure",
+      "required": [
+        "vehicleName",
+        "fleetId"
+      ],
+      "members": {
+        "vehicleName": "vehicleName",
+        "fleetId": "fleetId"
+      }
+    },
+    "Attribute": {
+      "type": "structure",
+      "required": [
+        "fullyQualifiedName",
+        "dataType"
+      ],
+      "members": {
+        "fullyQualifiedName": "AttributeFullyQualifiedNameString",
+        "dataType": "NodeDataType",
+        "description": "description",
+        "unit": "string",
+        "allowedValues": "listOfStrings",
+        "min": "double",
+        "max": "double",
+        "assignedValue": "string",
+        "defaultValue": "string",
+        "deprecationMessage": "message",
+        "comment": "message"
+      }
+    },
+    "AttributeFullyQualifiedNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "BatchCreateVehicleRequest": {
+      "type": "structure",
+      "required": [
+        "vehicles"
+      ],
+      "members": {
+        "vehicles": "createVehicleRequestItems"
+      }
+    },
+    "BatchUpdateVehicleRequest": {
+      "type": "structure",
+      "required": [
+        "vehicles"
+      ],
+      "members": {
+        "vehicles": "updateVehicleRequestItems"
+      }
+    },
+    "Branch": {
+      "type": "structure",
+      "required": [
+        "fullyQualifiedName"
+      ],
+      "members": {
+        "fullyQualifiedName": "BranchFullyQualifiedNameString",
+        "description": "description",
+        "deprecationMessage": "message",
+        "comment": "message"
+      }
+    },
+    "BranchFullyQualifiedNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "CanDbcDefinition": {
+      "type": "structure",
+      "required": [
+        "networkInterface",
+        "canDbcFiles"
+      ],
+      "members": {
+        "networkInterface": "InterfaceId",
+        "canDbcFiles": "NetworkFilesList",
+        "signalsMap": "ModelSignalsMap"
+      }
+    },
+    "CanInterface": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "CanInterfaceName",
+        "protocolName": "ProtocolName",
+        "protocolVersion": "ProtocolVersion"
+      }
+    },
+    "CanInterfaceName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "CanSignal": {
+      "type": "structure",
+      "required": [
+        "messageId",
+        "isBigEndian",
+        "isSigned",
+        "startBit",
+        "offset",
+        "factor",
+        "length"
+      ],
+      "members": {
+        "messageId": "nonNegativeInteger",
+        "isBigEndian": "PrimitiveBoolean",
+        "isSigned": "PrimitiveBoolean",
+        "startBit": "nonNegativeInteger",
+        "offset": "double",
+        "factor": "double",
+        "length": "nonNegativeInteger",
+        "name": "CanSignalName",
+        "signalValueType": "SignalValueType"
+      }
+    },
+    "CanSignalName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "CloudWatchLogDeliveryOptions": {
+      "type": "structure",
+      "required": [
+        "logType"
+      ],
+      "members": {
+        "logType": "LogType",
+        "logGroupName": "CloudWatchLogGroupName"
+      }
+    },
+    "CloudWatchLogGroupName": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "[\\.\\-_\\/#A-Za-z0-9]+"
+    },
+    "CollectionScheme": {
+      "type": "structure",
+      "members": {
+        "timeBasedCollectionScheme": "TimeBasedCollectionScheme",
+        "conditionBasedCollectionScheme": "ConditionBasedCollectionScheme"
+      }
+    },
+    "Compression": {
+      "type": "string",
+      "enum": [
+        "OFF",
+        "SNAPPY"
+      ]
+    },
+    "ConditionBasedCollectionScheme": {
+      "type": "structure",
+      "required": [
+        "expression"
+      ],
+      "members": {
+        "expression": "eventExpression",
+        "minimumTriggerIntervalMs": "uint32",
+        "triggerMode": "TriggerMode",
+        "conditionLanguageVersion": "languageVersion"
+      }
+    },
+    "ConditionBasedSignalFetchConfig": {
+      "type": "structure",
+      "required": [
+        "conditionExpression",
+        "triggerMode"
+      ],
+      "members": {
+        "conditionExpression": "fetchConfigEventExpression",
+        "triggerMode": "TriggerMode"
+      }
+    },
+    "CreateCampaignRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "signalCatalogArn",
+        "targetArn",
+        "collectionScheme"
+      ],
+      "members": {
+        "name": "campaignName",
+        "description": "description",
+        "signalCatalogArn": "arn",
+        "targetArn": "arn",
+        "startTime": "timestamp",
+        "expiryTime": "timestamp",
+        "postTriggerCollectionDuration": "uint32",
+        "diagnosticsMode": "DiagnosticsMode",
+        "spoolingMode": "SpoolingMode",
+        "compression": "Compression",
+        "priority": "priority",
+        "signalsToCollect": "SignalInformationList",
+        "collectionScheme": "CollectionScheme",
+        "dataExtraDimensions": "DataExtraDimensionNodePathList",
+        "tags": "TagList",
+        "dataDestinationConfigs": "DataDestinationConfigs",
+        "dataPartitions": "DataPartitions",
+        "signalsToFetch": "SignalFetchInformationList"
+      }
+    },
+    "CreateDecoderManifestRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "modelManifestArn"
+      ],
+      "members": {
+        "name": "resourceName",
+        "description": "description",
+        "modelManifestArn": "CreateDecoderManifestRequestModelManifestArnString",
+        "signalDecoders": "SignalDecoders",
+        "networkInterfaces": "NetworkInterfaces",
+        "defaultForUnmappedSignals": "DefaultForUnmappedSignalsType",
+        "tags": "TagList"
+      }
+    },
+    "CreateDecoderManifestRequestModelManifestArnString": {
+      "type": "string",
+      "pattern": "arn:aws[a-z0-9-]*:iotfleetwise:[a-z0-9-]+:[0-9]{12}:model-manifest/[a-zA-Z\\d\\-_:]{1,100}"
+    },
+    "CreateFleetRequest": {
+      "type": "structure",
+      "required": [
+        "fleetId",
+        "signalCatalogArn"
+      ],
+      "members": {
+        "fleetId": "fleetId",
+        "description": "description",
+        "signalCatalogArn": "arn",
+        "tags": "TagList"
+      }
+    },
+    "CreateModelManifestRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "nodes",
+        "signalCatalogArn"
+      ],
+      "members": {
+        "name": "resourceName",
+        "description": "description",
+        "nodes": "CreateModelManifestRequestNodesList",
+        "signalCatalogArn": "arn",
+        "tags": "TagList"
+      }
+    },
+    "CreateModelManifestRequestNodesList": {
+      "type": "list",
+      "min": 0,
+      "max": 500,
+      "member": "string"
+    },
+    "CreateSignalCatalogRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName",
+        "description": "description",
+        "nodes": "Nodes",
+        "tags": "TagList"
+      }
+    },
+    "CreateStateTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "signalCatalogArn",
+        "stateTemplateProperties"
+      ],
+      "members": {
+        "name": "resourceName",
+        "description": "description",
+        "signalCatalogArn": "arn",
+        "stateTemplateProperties": "StateTemplateProperties",
+        "dataExtraDimensions": "StateTemplateDataExtraDimensionNodePathList",
+        "metadataExtraDimensions": "StateTemplateMetadataExtraDimensionNodePathList",
+        "tags": "TagList"
+      }
+    },
+    "CreateVehicleRequest": {
+      "type": "structure",
+      "required": [
+        "vehicleName",
+        "modelManifestArn",
+        "decoderManifestArn"
+      ],
+      "members": {
+        "vehicleName": "vehicleName",
+        "modelManifestArn": "arn",
+        "decoderManifestArn": "arn",
+        "attributes": "attributesMap",
+        "associationBehavior": "VehicleAssociationBehavior",
+        "tags": "TagList",
+        "stateTemplates": "StateTemplateAssociations"
+      }
+    },
+    "CreateVehicleRequestItem": {
+      "type": "structure",
+      "required": [
+        "vehicleName",
+        "modelManifestArn",
+        "decoderManifestArn"
+      ],
+      "members": {
+        "vehicleName": "vehicleName",
+        "modelManifestArn": "arn",
+        "decoderManifestArn": "arn",
+        "attributes": "attributesMap",
+        "associationBehavior": "VehicleAssociationBehavior",
+        "tags": "TagList",
+        "stateTemplates": "StateTemplateAssociations"
+      }
+    },
+    "CustomDecodingId": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "(?!.*\\.\\.)[a-zA-Z0-9_\\-#:.]+"
+    },
+    "CustomDecodingInterface": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "CustomDecodingSignalInterfaceName"
+      }
+    },
+    "CustomDecodingSignal": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "CustomDecodingId"
+      }
+    },
+    "CustomDecodingSignalInterfaceName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z\\d\\-_:]+"
+    },
+    "CustomProperty": {
+      "type": "structure",
+      "required": [
+        "fullyQualifiedName",
+        "dataType"
+      ],
+      "members": {
+        "fullyQualifiedName": "CustomPropertyFullyQualifiedNameString",
+        "dataType": "NodeDataType",
+        "dataEncoding": "NodeDataEncoding",
+        "description": "description",
+        "deprecationMessage": "message",
+        "comment": "message",
+        "structFullyQualifiedName": "NodePath"
+      }
+    },
+    "CustomPropertyFullyQualifiedNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "CustomStruct": {
+      "type": "structure",
+      "required": [
+        "fullyQualifiedName"
+      ],
+      "members": {
+        "fullyQualifiedName": "CustomStructFullyQualifiedNameString",
+        "description": "description",
+        "deprecationMessage": "message",
+        "comment": "message"
+      }
+    },
+    "CustomStructFullyQualifiedNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "DataDestinationConfig": {
+      "type": "structure",
+      "members": {
+        "s3Config": "S3Config",
+        "timestreamConfig": "TimestreamConfig",
+        "mqttTopicConfig": "MqttTopicConfig"
+      }
+    },
+    "DataDestinationConfigs": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "DataDestinationConfig"
+    },
+    "DataExtraDimensionNodePathList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "NodePath"
+    },
+    "DataFormat": {
+      "type": "string",
+      "enum": [
+        "JSON",
+        "PARQUET"
+      ]
+    },
+    "DataPartition": {
+      "type": "structure",
+      "required": [
+        "id",
+        "storageOptions"
+      ],
+      "members": {
+        "id": "DataPartitionId",
+        "storageOptions": "DataPartitionStorageOptions",
+        "uploadOptions": "DataPartitionUploadOptions"
+      }
+    },
+    "DataPartitionId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9]+"
+    },
+    "DataPartitionStorageOptions": {
+      "type": "structure",
+      "required": [
+        "maximumSize",
+        "storageLocation",
+        "minimumTimeToLive"
+      ],
+      "members": {
+        "maximumSize": "StorageMaximumSize",
+        "storageLocation": "StorageLocation",
+        "minimumTimeToLive": "StorageMinimumTimeToLive"
+      }
+    },
+    "DataPartitionUploadOptions": {
+      "type": "structure",
+      "required": [
+        "expression"
+      ],
+      "members": {
+        "expression": "eventExpression",
+        "conditionLanguageVersion": "languageVersion"
+      }
+    },
+    "DataPartitions": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "DataPartition"
+    },
+    "DefaultForUnmappedSignalsType": {
+      "type": "string",
+      "enum": [
+        "CUSTOM_DECODING"
+      ]
+    },
+    "DeleteCampaignRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "campaignName"
+      }
+    },
+    "DeleteDecoderManifestRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName"
+      }
+    },
+    "DeleteFleetRequest": {
+      "type": "structure",
+      "required": [
+        "fleetId"
+      ],
+      "members": {
+        "fleetId": "fleetId"
+      }
+    },
+    "DeleteModelManifestRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName"
+      }
+    },
+    "DeleteSignalCatalogRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName"
+      }
+    },
+    "DeleteStateTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "ResourceIdentifier"
+      }
+    },
+    "DeleteVehicleRequest": {
+      "type": "structure",
+      "required": [
+        "vehicleName"
+      ],
+      "members": {
+        "vehicleName": "vehicleName"
+      }
+    },
+    "DiagnosticsMode": {
+      "type": "string",
+      "enum": [
+        "OFF",
+        "SEND_ACTIVE_DTCS"
+      ]
+    },
+    "DisassociateVehicleFleetRequest": {
+      "type": "structure",
+      "required": [
+        "vehicleName",
+        "fleetId"
+      ],
+      "members": {
+        "vehicleName": "vehicleName",
+        "fleetId": "fleetId"
+      }
+    },
+    "EncryptionType": {
+      "type": "string",
+      "enum": [
+        "KMS_BASED_ENCRYPTION",
+        "FLEETWISE_DEFAULT_ENCRYPTION"
+      ]
+    },
+    "EventExpressionList": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "actionEventExpression"
+    },
+    "FormattedVss": {
+      "type": "structure",
+      "members": {
+        "vssJson": "String"
+      }
+    },
+    "Fqns": {
+      "type": "list",
+      "min": 1,
+      "max": 500,
+      "member": "FullyQualifiedName"
+    },
+    "FullyQualifiedName": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "GetCampaignRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "campaignName"
+      }
+    },
+    "GetDecoderManifestRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName"
+      }
+    },
+    "GetEncryptionConfigurationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetFleetRequest": {
+      "type": "structure",
+      "required": [
+        "fleetId"
+      ],
+      "members": {
+        "fleetId": "fleetId"
+      }
+    },
+    "GetLoggingOptionsRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetModelManifestRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName"
+      }
+    },
+    "GetRegisterAccountStatusRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetSignalCatalogRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName"
+      }
+    },
+    "GetStateTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "ResourceIdentifier"
+      }
+    },
+    "GetVehicleRequest": {
+      "type": "structure",
+      "required": [
+        "vehicleName"
+      ],
+      "members": {
+        "vehicleName": "vehicleName"
+      }
+    },
+    "GetVehicleStatusRequest": {
+      "type": "structure",
+      "required": [
+        "vehicleName"
+      ],
+      "members": {
+        "nextToken": "nextToken",
+        "maxResults": "maxResults",
+        "vehicleName": "vehicleName"
+      }
+    },
+    "IAMRoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:(aws[a-zA-Z0-9-]*):iam::(\\d{12})?:(role((\\u002F)|(\\u002F[\\u0021-\\u007F]+\\u002F))[\\w+=,.@-]+)"
+    },
+    "IamResources": {
+      "type": "structure",
+      "required": [
+        "roleArn"
+      ],
+      "members": {
+        "roleArn": "IAMRoleArn"
+      }
+    },
+    "ImportDecoderManifestRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "networkFileDefinitions"
+      ],
+      "members": {
+        "name": "resourceName",
+        "networkFileDefinitions": "NetworkFileDefinitions"
+      }
+    },
+    "ImportSignalCatalogRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName",
+        "description": "description",
+        "vss": "FormattedVss",
+        "tags": "TagList"
+      }
+    },
+    "InterfaceId": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "[-a-zA-Z0-9_.]+"
+    },
+    "InterfaceIds": {
+      "type": "list",
+      "min": 1,
+      "max": 500,
+      "member": "InterfaceId"
+    },
+    "ListCampaignsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "nextToken",
+        "maxResults": "maxResults",
+        "status": "statusStr",
+        "listResponseScope": "ListResponseScope"
+      }
+    },
+    "ListDecoderManifestNetworkInterfacesRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName",
+        "nextToken": "nextToken",
+        "maxResults": "maxResults"
+      }
+    },
+    "ListDecoderManifestSignalsRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName",
+        "nextToken": "nextToken",
+        "maxResults": "maxResults"
+      }
+    },
+    "ListDecoderManifestsRequest": {
+      "type": "structure",
+      "members": {
+        "modelManifestArn": "arn",
+        "nextToken": "nextToken",
+        "maxResults": "maxResults",
+        "listResponseScope": "ListResponseScope"
+      }
+    },
+    "ListFleetsForVehicleRequest": {
+      "type": "structure",
+      "required": [
+        "vehicleName"
+      ],
+      "members": {
+        "vehicleName": "vehicleName",
+        "nextToken": "nextToken",
+        "maxResults": "maxResults"
+      }
+    },
+    "ListFleetsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "nextToken",
+        "maxResults": "maxResults",
+        "listResponseScope": "ListResponseScope"
+      }
+    },
+    "ListModelManifestNodesRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName",
+        "nextToken": "nextToken",
+        "maxResults": "maxResults"
+      }
+    },
+    "ListModelManifestsRequest": {
+      "type": "structure",
+      "members": {
+        "signalCatalogArn": "arn",
+        "nextToken": "nextToken",
+        "maxResults": "maxResults",
+        "listResponseScope": "ListResponseScope"
+      }
+    },
+    "ListResponseScope": {
+      "type": "string",
+      "enum": [
+        "METADATA_ONLY"
+      ]
+    },
+    "ListSignalCatalogNodesRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName",
+        "nextToken": "nextToken",
+        "maxResults": "maxResults",
+        "signalNodeType": "SignalNodeType"
+      }
+    },
+    "ListSignalCatalogsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "nextToken",
+        "maxResults": "maxResults"
+      }
+    },
+    "ListStateTemplatesRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "nextToken",
+        "maxResults": "maxResults",
+        "listResponseScope": "ListResponseScope"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName"
+      }
+    },
+    "ListVehiclesInFleetRequest": {
+      "type": "structure",
+      "required": [
+        "fleetId"
+      ],
+      "members": {
+        "fleetId": "fleetId",
+        "nextToken": "nextToken",
+        "maxResults": "maxResults"
+      }
+    },
+    "ListVehiclesRequest": {
+      "type": "structure",
+      "members": {
+        "modelManifestArn": "arn",
+        "attributeNames": "attributeNamesList",
+        "attributeValues": "attributeValuesList",
+        "nextToken": "nextToken",
+        "maxResults": "listVehiclesMaxResults",
+        "listResponseScope": "ListResponseScope"
+      }
+    },
+    "LogType": {
+      "type": "string",
+      "enum": [
+        "OFF",
+        "ERROR"
+      ]
+    },
+    "ManifestStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "DRAFT",
+        "INVALID",
+        "VALIDATING"
+      ]
+    },
+    "MessageSignal": {
+      "type": "structure",
+      "required": [
+        "topicName",
+        "structuredMessage"
+      ],
+      "members": {
+        "topicName": "TopicName",
+        "structuredMessage": "StructuredMessage"
+      }
+    },
+    "ModelSignalsMap": {
+      "type": "map",
+      "key": "string",
+      "value": "string"
+    },
+    "MqttTopicArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:.*"
+    },
+    "MqttTopicConfig": {
+      "type": "structure",
+      "required": [
+        "mqttTopicArn",
+        "executionRoleArn"
+      ],
+      "members": {
+        "mqttTopicArn": "MqttTopicArn",
+        "executionRoleArn": "IAMRoleArn"
+      }
+    },
+    "NetworkFileBlob": {
+      "type": "blob",
+      "min": 0,
+      "max": 200000000
+    },
+    "NetworkFileDefinition": {
+      "type": "structure",
+      "members": {
+        "canDbc": "CanDbcDefinition"
+      }
+    },
+    "NetworkFileDefinitions": {
+      "type": "list",
+      "member": "NetworkFileDefinition"
+    },
+    "NetworkFilesList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "NetworkFileBlob"
+    },
+    "NetworkInterface": {
+      "type": "structure",
+      "required": [
+        "interfaceId",
+        "type"
+      ],
+      "members": {
+        "interfaceId": "InterfaceId",
+        "type": "NetworkInterfaceType",
+        "canInterface": "CanInterface",
+        "obdInterface": "ObdInterface",
+        "vehicleMiddleware": "VehicleMiddleware",
+        "customDecodingInterface": "CustomDecodingInterface"
+      }
+    },
+    "NetworkInterfaceType": {
+      "type": "string",
+      "enum": [
+        "CAN_INTERFACE",
+        "OBD_INTERFACE",
+        "VEHICLE_MIDDLEWARE",
+        "CUSTOM_DECODING_INTERFACE"
+      ]
+    },
+    "NetworkInterfaces": {
+      "type": "list",
+      "min": 1,
+      "max": 500,
+      "member": "NetworkInterface"
+    },
+    "Node": {
+      "type": "structure",
+      "members": {
+        "branch": "Branch",
+        "sensor": "Sensor",
+        "actuator": "Actuator",
+        "attribute": "Attribute",
+        "struct": "CustomStruct",
+        "property": "CustomProperty"
+      }
+    },
+    "NodeDataEncoding": {
+      "type": "string",
+      "enum": [
+        "BINARY",
+        "TYPED"
+      ]
+    },
+    "NodeDataType": {
+      "type": "string",
+      "enum": [
+        "INT8",
+        "UINT8",
+        "INT16",
+        "UINT16",
+        "INT32",
+        "UINT32",
+        "INT64",
+        "UINT64",
+        "BOOLEAN",
+        "FLOAT",
+        "DOUBLE",
+        "STRING",
+        "UNIX_TIMESTAMP",
+        "INT8_ARRAY",
+        "UINT8_ARRAY",
+        "INT16_ARRAY",
+        "UINT16_ARRAY",
+        "INT32_ARRAY",
+        "UINT32_ARRAY",
+        "INT64_ARRAY",
+        "UINT64_ARRAY",
+        "BOOLEAN_ARRAY",
+        "FLOAT_ARRAY",
+        "DOUBLE_ARRAY",
+        "STRING_ARRAY",
+        "UNIX_TIMESTAMP_ARRAY",
+        "UNKNOWN",
+        "STRUCT",
+        "STRUCT_ARRAY"
+      ]
+    },
+    "NodePath": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "NodePaths": {
+      "type": "list",
+      "min": 1,
+      "max": 500,
+      "member": "NodePath"
+    },
+    "Nodes": {
+      "type": "list",
+      "min": 0,
+      "max": 500,
+      "member": "Node"
+    },
+    "ObdBitmaskLength": {
+      "type": "integer",
+      "min": 1,
+      "max": 8
+    },
+    "ObdByteLength": {
+      "type": "integer",
+      "min": 1,
+      "max": 8
+    },
+    "ObdInterface": {
+      "type": "structure",
+      "required": [
+        "name",
+        "requestMessageId"
+      ],
+      "members": {
+        "name": "ObdInterfaceName",
+        "requestMessageId": "nonNegativeInteger",
+        "obdStandard": "ObdStandard",
+        "pidRequestIntervalSeconds": "nonNegativeInteger",
+        "dtcRequestIntervalSeconds": "nonNegativeInteger",
+        "useExtendedIds": "PrimitiveBoolean",
+        "hasTransmissionEcu": "PrimitiveBoolean"
+      }
+    },
+    "ObdInterfaceName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "ObdSignal": {
+      "type": "structure",
+      "required": [
+        "pidResponseLength",
+        "serviceMode",
+        "pid",
+        "scaling",
+        "offset",
+        "startByte",
+        "byteLength"
+      ],
+      "members": {
+        "pidResponseLength": "positiveInteger",
+        "serviceMode": "nonNegativeInteger",
+        "pid": "nonNegativeInteger",
+        "scaling": "double",
+        "offset": "double",
+        "startByte": "nonNegativeInteger",
+        "byteLength": "ObdByteLength",
+        "bitRightShift": "nonNegativeInteger",
+        "bitMaskLength": "ObdBitmaskLength",
+        "isSigned": "PrimitiveBoolean",
+        "signalValueType": "SignalValueType"
+      }
+    },
+    "ObdStandard": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "OnChangeStateTemplateUpdateStrategy": {
+      "type": "structure",
+      "members": {}
+    },
+    "PeriodicStateTemplateUpdateStrategy": {
+      "type": "structure",
+      "required": [
+        "stateTemplateUpdateRate"
+      ],
+      "members": {
+        "stateTemplateUpdateRate": "TimePeriod"
+      }
+    },
+    "Prefix": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "[a-zA-Z0-9-_:./!*'()]+"
+    },
+    "PrimitiveBoolean": {
+      "type": "boolean"
+    },
+    "PrimitiveMessageDefinition": {
+      "type": "structure",
+      "members": {
+        "ros2PrimitiveMessageDefinition": "ROS2PrimitiveMessageDefinition"
+      }
+    },
+    "ProtocolName": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "ProtocolVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 50,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "PutEncryptionConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "encryptionType"
+      ],
+      "members": {
+        "kmsKeyId": "PutEncryptionConfigurationRequestKmsKeyIdString",
+        "encryptionType": "EncryptionType"
+      }
+    },
+    "PutEncryptionConfigurationRequestKmsKeyIdString": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "PutLoggingOptionsRequest": {
+      "type": "structure",
+      "required": [
+        "cloudWatchLogDelivery"
+      ],
+      "members": {
+        "cloudWatchLogDelivery": "CloudWatchLogDeliveryOptions"
+      }
+    },
+    "ROS2PrimitiveMessageDefinition": {
+      "type": "structure",
+      "required": [
+        "primitiveType"
+      ],
+      "members": {
+        "primitiveType": "ROS2PrimitiveType",
+        "offset": "double",
+        "scaling": "double",
+        "upperBound": "ROS2PrimitiveMessageDefinitionUpperBoundLong"
+      }
+    },
+    "ROS2PrimitiveMessageDefinitionUpperBoundLong": {
+      "type": "long",
+      "min": 0,
+      "max": 2048
+    },
+    "ROS2PrimitiveType": {
+      "type": "string",
+      "enum": [
+        "BOOL",
+        "BYTE",
+        "CHAR",
+        "FLOAT32",
+        "FLOAT64",
+        "INT8",
+        "UINT8",
+        "INT16",
+        "UINT16",
+        "INT32",
+        "UINT32",
+        "INT64",
+        "UINT64",
+        "STRING",
+        "WSTRING"
+      ]
+    },
+    "RegisterAccountRequest": {
+      "type": "structure",
+      "members": {
+        "timestreamResources": "TimestreamResources",
+        "iamResources": "IamResources"
+      }
+    },
+    "ResourceIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z\\d\\-_:]+"
+    },
+    "S3BucketArn": {
+      "type": "string",
+      "min": 16,
+      "max": 100,
+      "pattern": "arn:(aws[a-zA-Z0-9-]*):s3:::.+"
+    },
+    "S3Config": {
+      "type": "structure",
+      "required": [
+        "bucketArn"
+      ],
+      "members": {
+        "bucketArn": "S3BucketArn",
+        "dataFormat": "DataFormat",
+        "storageCompressionFormat": "StorageCompressionFormat",
+        "prefix": "Prefix"
+      }
+    },
+    "Sensor": {
+      "type": "structure",
+      "required": [
+        "fullyQualifiedName",
+        "dataType"
+      ],
+      "members": {
+        "fullyQualifiedName": "SensorFullyQualifiedNameString",
+        "dataType": "NodeDataType",
+        "description": "description",
+        "unit": "string",
+        "allowedValues": "listOfStrings",
+        "min": "double",
+        "max": "double",
+        "deprecationMessage": "message",
+        "comment": "message",
+        "structFullyQualifiedName": "NodePath"
+      }
+    },
+    "SensorFullyQualifiedNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "[a-zA-Z0-9_.]+"
+    },
+    "SignalDecoder": {
+      "type": "structure",
+      "required": [
+        "fullyQualifiedName",
+        "type",
+        "interfaceId"
+      ],
+      "members": {
+        "fullyQualifiedName": "FullyQualifiedName",
+        "type": "SignalDecoderType",
+        "interfaceId": "InterfaceId",
+        "canSignal": "CanSignal",
+        "obdSignal": "ObdSignal",
+        "messageSignal": "MessageSignal",
+        "customDecodingSignal": "CustomDecodingSignal"
+      }
+    },
+    "SignalDecoderType": {
+      "type": "string",
+      "enum": [
+        "CAN_SIGNAL",
+        "OBD_SIGNAL",
+        "MESSAGE_SIGNAL",
+        "CUSTOM_DECODING_SIGNAL"
+      ]
+    },
+    "SignalDecoders": {
+      "type": "list",
+      "min": 1,
+      "max": 500,
+      "member": "SignalDecoder"
+    },
+    "SignalFetchConfig": {
+      "type": "structure",
+      "members": {
+        "timeBased": "TimeBasedSignalFetchConfig",
+        "conditionBased": "ConditionBasedSignalFetchConfig"
+      }
+    },
+    "SignalFetchInformation": {
+      "type": "structure",
+      "required": [
+        "fullyQualifiedName",
+        "signalFetchConfig",
+        "actions"
+      ],
+      "members": {
+        "fullyQualifiedName": "NodePath",
+        "signalFetchConfig": "SignalFetchConfig",
+        "conditionLanguageVersion": "languageVersion",
+        "actions": "EventExpressionList"
+      }
+    },
+    "SignalFetchInformationList": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "SignalFetchInformation"
+    },
+    "SignalInformation": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "wildcardSignalName",
+        "maxSampleCount": "maxSampleCount",
+        "minimumSamplingIntervalMs": "uint32",
+        "dataPartitionId": "DataPartitionId"
+      }
+    },
+    "SignalInformationList": {
+      "type": "list",
+      "min": 0,
+      "max": 1000,
+      "member": "SignalInformation"
+    },
+    "SignalNodeType": {
+      "type": "string",
+      "enum": [
+        "SENSOR",
+        "ACTUATOR",
+        "ATTRIBUTE",
+        "BRANCH",
+        "CUSTOM_STRUCT",
+        "CUSTOM_PROPERTY"
+      ]
+    },
+    "SignalValueType": {
+      "type": "string",
+      "enum": [
+        "INTEGER",
+        "FLOATING_POINT"
+      ]
+    },
+    "SpoolingMode": {
+      "type": "string",
+      "enum": [
+        "OFF",
+        "TO_DISK"
+      ]
+    },
+    "StateTemplateAssociation": {
+      "type": "structure",
+      "required": [
+        "identifier",
+        "stateTemplateUpdateStrategy"
+      ],
+      "members": {
+        "identifier": "ResourceIdentifier",
+        "stateTemplateUpdateStrategy": "StateTemplateUpdateStrategy"
+      }
+    },
+    "StateTemplateAssociationIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "ResourceIdentifier"
+    },
+    "StateTemplateAssociations": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "StateTemplateAssociation"
+    },
+    "StateTemplateDataExtraDimensionNodePathList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "NodePath"
+    },
+    "StateTemplateMetadataExtraDimensionNodePathList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "NodePath"
+    },
+    "StateTemplateProperties": {
+      "type": "list",
+      "min": 1,
+      "max": 500,
+      "member": "NodePath"
+    },
+    "StateTemplateUpdateStrategy": {
+      "type": "structure",
+      "members": {
+        "periodic": "PeriodicStateTemplateUpdateStrategy",
+        "onChange": "OnChangeStateTemplateUpdateStrategy"
+      }
+    },
+    "StorageCompressionFormat": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "GZIP"
+      ]
+    },
+    "StorageLocation": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "StorageMaximumSize": {
+      "type": "structure",
+      "required": [
+        "unit",
+        "value"
+      ],
+      "members": {
+        "unit": "StorageMaximumSizeUnit",
+        "value": "StorageMaximumSizeValue"
+      }
+    },
+    "StorageMaximumSizeUnit": {
+      "type": "string",
+      "enum": [
+        "MB",
+        "GB",
+        "TB"
+      ]
+    },
+    "StorageMaximumSizeValue": {
+      "type": "integer",
+      "min": 1,
+      "max": 1073741824
+    },
+    "StorageMinimumTimeToLive": {
+      "type": "structure",
+      "required": [
+        "unit",
+        "value"
+      ],
+      "members": {
+        "unit": "StorageMinimumTimeToLiveUnit",
+        "value": "StorageMinimumTimeToLiveValue"
+      }
+    },
+    "StorageMinimumTimeToLiveUnit": {
+      "type": "string",
+      "enum": [
+        "HOURS",
+        "DAYS",
+        "WEEKS"
+      ]
+    },
+    "StorageMinimumTimeToLiveValue": {
+      "type": "integer",
+      "min": 1,
+      "max": 876600
+    },
+    "String": {
+      "type": "string"
+    },
+    "StructureMessageName": {
+      "type": "string",
+      "min": 1,
+      "max": 150
+    },
+    "StructuredMessage": {
+      "type": "structure",
+      "members": {
+        "primitiveMessageDefinition": "PrimitiveMessageDefinition",
+        "structuredMessageListDefinition": "StructuredMessageListDefinition",
+        "structuredMessageDefinition": "StructuredMessageDefinition"
+      }
+    },
+    "StructuredMessageDefinition": {
+      "type": "list",
+      "min": 1,
+      "max": 500,
+      "member": "StructuredMessageFieldNameAndDataTypePair"
+    },
+    "StructuredMessageFieldNameAndDataTypePair": {
+      "type": "structure",
+      "required": [
+        "fieldName",
+        "dataType"
+      ],
+      "members": {
+        "fieldName": "StructureMessageName",
+        "dataType": "StructuredMessage"
+      }
+    },
+    "StructuredMessageListDefinition": {
+      "type": "structure",
+      "required": [
+        "name",
+        "memberType",
+        "listType"
+      ],
+      "members": {
+        "name": "StructureMessageName",
+        "memberType": "StructuredMessage",
+        "listType": "StructuredMessageListType",
+        "capacity": "nonNegativeInteger"
+      }
+    },
+    "StructuredMessageListType": {
+      "type": "string",
+      "enum": [
+        "FIXED_CAPACITY",
+        "DYNAMIC_UNBOUNDED_CAPACITY",
+        "DYNAMIC_BOUNDED_CAPACITY"
+      ]
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Tags"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TimeBasedCollectionScheme": {
+      "type": "structure",
+      "required": [
+        "periodMs"
+      ],
+      "members": {
+        "periodMs": "collectionPeriodMs"
+      }
+    },
+    "TimeBasedSignalFetchConfig": {
+      "type": "structure",
+      "required": [
+        "executionFrequencyMs"
+      ],
+      "members": {
+        "executionFrequencyMs": "positiveLong"
+      }
+    },
+    "TimePeriod": {
+      "type": "structure",
+      "required": [
+        "unit",
+        "value"
+      ],
+      "members": {
+        "unit": "TimeUnit",
+        "value": "positiveInteger"
+      }
+    },
+    "TimeUnit": {
+      "type": "string",
+      "enum": [
+        "MILLISECOND",
+        "SECOND",
+        "MINUTE",
+        "HOUR"
+      ]
+    },
+    "TimestreamConfig": {
+      "type": "structure",
+      "required": [
+        "timestreamTableArn",
+        "executionRoleArn"
+      ],
+      "members": {
+        "timestreamTableArn": "TimestreamTableArn",
+        "executionRoleArn": "IAMRoleArn"
+      }
+    },
+    "TimestreamDatabaseName": {
+      "type": "string",
+      "min": 3,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "TimestreamResources": {
+      "type": "structure",
+      "required": [
+        "timestreamDatabaseName",
+        "timestreamTableName"
+      ],
+      "members": {
+        "timestreamDatabaseName": "TimestreamDatabaseName",
+        "timestreamTableName": "TimestreamTableName"
+      }
+    },
+    "TimestreamTableArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:(aws[a-zA-Z0-9-]*):timestream:[a-zA-Z0-9-]+:[0-9]{12}:database/[a-zA-Z0-9_.-]+/table/[a-zA-Z0-9_.-]+"
+    },
+    "TimestreamTableName": {
+      "type": "string",
+      "min": 3,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "TopicName": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "[a-zA-Z0-9_\\-#:./]+"
+    },
+    "TriggerMode": {
+      "type": "string",
+      "enum": [
+        "ALWAYS",
+        "RISING_EDGE"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceARN": "AmazonResourceName",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateCampaignAction": {
+      "type": "string",
+      "enum": [
+        "APPROVE",
+        "SUSPEND",
+        "RESUME",
+        "UPDATE"
+      ]
+    },
+    "UpdateCampaignRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "action"
+      ],
+      "members": {
+        "name": "campaignName",
+        "description": "description",
+        "dataExtraDimensions": "DataExtraDimensionNodePathList",
+        "action": "UpdateCampaignAction"
+      }
+    },
+    "UpdateDecoderManifestRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName",
+        "description": "description",
+        "signalDecodersToAdd": "SignalDecoders",
+        "signalDecodersToUpdate": "SignalDecoders",
+        "signalDecodersToRemove": "Fqns",
+        "networkInterfacesToAdd": "NetworkInterfaces",
+        "networkInterfacesToUpdate": "NetworkInterfaces",
+        "networkInterfacesToRemove": "InterfaceIds",
+        "status": "ManifestStatus",
+        "defaultForUnmappedSignals": "DefaultForUnmappedSignalsType"
+      }
+    },
+    "UpdateFleetRequest": {
+      "type": "structure",
+      "required": [
+        "fleetId"
+      ],
+      "members": {
+        "fleetId": "fleetId",
+        "description": "description"
+      }
+    },
+    "UpdateMode": {
+      "type": "string",
+      "enum": [
+        "Overwrite",
+        "Merge"
+      ]
+    },
+    "UpdateModelManifestRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName",
+        "description": "description",
+        "nodesToAdd": "NodePaths",
+        "nodesToRemove": "NodePaths",
+        "status": "ManifestStatus"
+      }
+    },
+    "UpdateSignalCatalogRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "resourceName",
+        "description": "description",
+        "nodesToAdd": "Nodes",
+        "nodesToUpdate": "Nodes",
+        "nodesToRemove": "NodePaths"
+      }
+    },
+    "UpdateStateTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "ResourceIdentifier",
+        "description": "description",
+        "stateTemplatePropertiesToAdd": "StateTemplateProperties",
+        "stateTemplatePropertiesToRemove": "StateTemplateProperties",
+        "dataExtraDimensions": "StateTemplateDataExtraDimensionNodePathList",
+        "metadataExtraDimensions": "StateTemplateMetadataExtraDimensionNodePathList"
+      }
+    },
+    "UpdateVehicleRequest": {
+      "type": "structure",
+      "required": [
+        "vehicleName"
+      ],
+      "members": {
+        "vehicleName": "vehicleName",
+        "modelManifestArn": "arn",
+        "decoderManifestArn": "arn",
+        "attributes": "attributesMap",
+        "attributeUpdateMode": "UpdateMode",
+        "stateTemplatesToAdd": "StateTemplateAssociations",
+        "stateTemplatesToRemove": "StateTemplateAssociationIdentifiers",
+        "stateTemplatesToUpdate": "StateTemplateAssociations"
+      }
+    },
+    "UpdateVehicleRequestItem": {
+      "type": "structure",
+      "required": [
+        "vehicleName"
+      ],
+      "members": {
+        "vehicleName": "vehicleName",
+        "modelManifestArn": "arn",
+        "decoderManifestArn": "arn",
+        "attributes": "attributesMap",
+        "attributeUpdateMode": "UpdateMode",
+        "stateTemplatesToAdd": "StateTemplateAssociations",
+        "stateTemplatesToRemove": "StateTemplateAssociationIdentifiers",
+        "stateTemplatesToUpdate": "StateTemplateAssociations"
+      }
+    },
+    "VehicleAssociationBehavior": {
+      "type": "string",
+      "enum": [
+        "CreateIotThing",
+        "ValidateIotThingExists"
+      ]
+    },
+    "VehicleMiddleware": {
+      "type": "structure",
+      "required": [
+        "name",
+        "protocolName"
+      ],
+      "members": {
+        "name": "VehicleMiddlewareName",
+        "protocolName": "VehicleMiddlewareProtocol"
+      }
+    },
+    "VehicleMiddlewareName": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "VehicleMiddlewareProtocol": {
+      "type": "string",
+      "enum": [
+        "ROS_2"
+      ]
+    },
+    "actionEventExpression": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "arn": {
+      "type": "string"
+    },
+    "attributeName": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "attributeNamesList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "attributeName"
+    },
+    "attributeValue": {
+      "type": "string"
+    },
+    "attributeValuesList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "attributeValue"
+    },
+    "attributesMap": {
+      "type": "map",
+      "key": "attributeName",
+      "value": "attributeValue"
+    },
+    "campaignName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z\\d\\-_:]+"
+    },
+    "collectionPeriodMs": {
+      "type": "long",
+      "min": 10000,
+      "max": 86400000
+    },
+    "createVehicleRequestItems": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "CreateVehicleRequestItem"
+    },
+    "description": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "[^\\u0000-\\u001F\\u007F]+"
+    },
+    "double": {
+      "type": "double"
+    },
+    "eventExpression": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "fetchConfigEventExpression": {
+      "type": "string",
+      "min": 1,
+      "max": 400
+    },
+    "fleetId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9:_-]+"
+    },
+    "languageVersion": {
+      "type": "integer",
+      "min": 1,
+      "max": 1
+    },
+    "listOfStrings": {
+      "type": "list",
+      "member": "string"
+    },
+    "listVehiclesMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "maxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "maxSampleCount": {
+      "type": "long",
+      "min": 1,
+      "max": 4294967295
+    },
+    "message": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "[^\\u0000-\\u001F\\u007F]+"
+    },
+    "nextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "nonNegativeInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 2147483647
+    },
+    "positiveInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 2147483647
+    },
+    "positiveLong": {
+      "type": "long",
+      "min": 1,
+      "max": 9223372036854775807
+    },
+    "priority": {
+      "type": "integer",
+      "min": 0
+    },
+    "resourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z\\d\\-_:]+"
+    },
+    "statusStr": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "pattern": "[A-Z_]*"
+    },
+    "string": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "timestamp"
+    },
+    "uint32": {
+      "type": "long",
+      "min": 0,
+      "max": 4294967295
+    },
+    "updateVehicleRequestItems": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "UpdateVehicleRequestItem"
+    },
+    "vehicleName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z\\d\\-_:]+"
+    },
+    "wildcardSignalName": {
+      "type": "string",
+      "min": 1,
+      "max": 150,
+      "pattern": "[\\w|*|-]+(\\.[\\w|*|-]+)*"
+    }
+  }
+}

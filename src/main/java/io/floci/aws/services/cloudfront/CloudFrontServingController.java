@@ -2,8 +2,10 @@ package io.floci.aws.services.cloudfront;
 
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.config.TlsProxyServer;
+import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.RequestHost;
+import io.floci.aws.core.common.ViewerTraffic;
 import io.floci.aws.services.apigateway.ApiGatewayExecuteApiHostFilter;
 import io.floci.aws.services.apigateway.ApiGatewayService;
 import io.floci.aws.services.apigatewayv2.ApiGatewayV2Service;
@@ -129,6 +131,9 @@ public class CloudFrontServingController {
     private final TlsProxyServer tlsProxyServer;
     private final CloudFrontOriginHttpClient httpClient;
     private final CloudFrontOriginHttpClient flociClient = CloudFrontOriginHttpClient.toFloci();
+
+    @Inject
+    ViewerTraffic viewerTraffic;
 
     @Inject
     public CloudFrontServingController(CloudFrontService service, S3Service s3Service,
@@ -303,6 +308,7 @@ public class CloudFrontServingController {
         if (dist == null || !distId.equals(dist.getId())) {
             return textError(404, "Distribution not found.");
         }
+        observeViewer(dist);
         DistributionConfig config = dist.getConfig();
         if (config == null) {
             return textError(502, "Distribution has no configuration.");
@@ -1711,6 +1717,7 @@ public class CloudFrontServingController {
         if (dist == null || !distId.equals(dist.getId())) {
             return textError(404, "Distribution not found.");
         }
+        observeViewer(dist);
         DistributionConfig config = dist.getConfig();
         if (config == null) {
             return textError(502, "Distribution has no configuration.");
@@ -1758,6 +1765,15 @@ public class CloudFrontServingController {
     }
 
     /** CloudFront rejects ports in DomainName; this loopback form is an emulator-only dev origin. */
+    /** Records the current viewer request for the distribution once its response is sent. */
+    public void observeViewer(Distribution distribution) {
+        if (viewerTraffic == null || distribution.getArn() == null) {
+            return;
+        }
+        viewerTraffic.observe(currentVertxRequest.getCurrent(), AwsArnUtils.parse(distribution.getArn()).accountId(),
+                null, "CloudFront", List.of(distribution.getArn()));
+    }
+
     public static boolean isLocalDevOrigin(String authority) {
         return CloudFrontOriginHttpClient.isLocalDevOrigin(authority);
     }

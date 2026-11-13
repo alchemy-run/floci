@@ -51,6 +51,9 @@ public class BackupRule {
     @JsonProperty("EnableContinuousBackup")
     private Boolean enableContinuousBackup;
 
+    @JsonProperty("IndexActions")
+    private List<Map<String, Object>> indexActions;
+
     public BackupRule() {}
 
     public String getRuleName() { return ruleName; }
@@ -88,4 +91,7 @@ public class BackupRule {
 
     public Boolean getEnableContinuousBackup() { return enableContinuousBackup; }
     public void setEnableContinuousBackup(Boolean enableContinuousBackup) { this.enableContinuousBackup = enableContinuousBackup; }
+
+    public List<Map<String, Object>> getIndexActions() { return indexActions; }
+    public void setIndexActions(List<Map<String, Object>> indexActions) { this.indexActions = indexActions; }
 }

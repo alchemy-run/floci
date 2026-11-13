@@ -4,7 +4,10 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.services.cloudformation.model.StackResource;
+import io.floci.aws.services.signer.SignerService;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
+import jakarta.inject.Inject;
 
 import java.util.List;
 import java.util.Map;
@@ -14,9 +17,10 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.regex.Pattern;
 
 /**
- * Provisions {@code AWS::Signer::SigningProfile}. Floci has no Signer API, so a profile is only the
- * identifiers CloudFormation hands the template: {@code Ref} is the profile ARN, and the attributes
- * carry the name, a version and the version ARN a code signing config lists. Every property but
+ * Provisions {@code AWS::Signer::SigningProfile} as a real Signer profile, with its own key: {@code Ref} is the
+ * profile ARN, and the attributes carry the name, its version and the version ARN a code signing config lists.
+ * Deleting or replacing the profile cancels it, as Signer has no delete. With Signer disabled the profile is only
+ * these identifiers. Every property but
  * {@code Tags} is create-only: an update that keeps them keeps the profile, one that changes them
  * mints a new one, and one that would keep an explicit name is refused, as CloudFormation refuses
  * replacing any custom-named resource. A replaced or deleted profile leaves nothing behind to clean
@@ -32,6 +36,22 @@ public class SignerCfnProvisioner implements CfnResourceProvisioner {
     private static final String ALPHANUMERIC = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     /** The create-only properties the profile was minted from, so an update can tell whether it is replaced. */
     private static final String CREATE_ONLY_ATTR = "FlociSigningProfileCreateOnly";
+
+    private final Instance<SignerService> signer;
+
+    @Inject
+    public SignerCfnProvisioner(Instance<SignerService> signer) {
+        this.signer = signer;
+    }
+
+    /** Without Signer: the profile is only its identifiers. */
+    SignerCfnProvisioner() {
+        this(null);
+    }
+
+    private boolean hasSigner() {
+        return signer != null && signer.isResolvable();
+    }
 
     @Override
     public Set<String> resourceTypes() {
@@ -61,7 +81,7 @@ public class SignerCfnProvisioner implements CfnResourceProvisioner {
                         "CloudFormation cannot update a stack when a custom-named resource requires "
                                 + "replacing. Rename " + explicitName + " and update the stack again.", 400);
             }
-            mint(r, ctx, explicitName, createOnly);
+            mint(r, ctx, explicitName, createOnly, period);
         }
         ReplacementCleanup.record(r, ctx, attributesBefore);
     }
@@ -89,18 +109,35 @@ public class SignerCfnProvisioner implements CfnResourceProvisioner {
         }
     }
 
-    private static void mint(StackResource r, ProvisionContext ctx, String explicitName, String createOnly) {
+    private void mint(StackResource r, ProvisionContext ctx, String explicitName, String createOnly,
+                      JsonNode period) {
         String name = explicitName != null ? explicitName
                 : r.getLogicalId().substring(0, Math.min(r.getLogicalId().length(), 51)) + "_" + random(12);
         String arn = AwsArnUtils.Arn.of("signer", ctx.region(), ctx.accountId(), "/signing-profiles/" + name)
                 .toString();
-        String version = random(10);
+        String platformId = createOnly.substring(0, createOnly.indexOf('|'));
+        String version = hasSigner()
+                ? signer.get().createProfileForStack(ctx.region(), name, platformId,
+                        period.isMissingNode() ? null : period.path("Type").asText(),
+                        period.isMissingNode() ? null : ctx.resolveOptionalInt(period, "Value"))
+                : random(10);
         r.setPhysicalId(arn);
         r.getAttributes().put("Arn", arn);
         r.getAttributes().put("ProfileName", name);
         r.getAttributes().put("ProfileVersion", version);
         r.getAttributes().put("ProfileVersionArn", arn + "/" + version);
         r.getAttributes().put(CREATE_ONLY_ATTR, createOnly);
+    }
+
+    /** Signer has no delete: the profile is canceled. */
+    @Override
+    public void delete(String resourceType, String physicalId, String region) {
+        if (physicalId == null || !hasSigner() || !AwsArnUtils.isArnFor(physicalId, "signer")) {
+            return;
+        }
+        String resource = AwsArnUtils.parse(physicalId).resource();
+        signer.get().cancelProfileForStack(AwsArnUtils.parse(physicalId).region(),
+                resource.substring(resource.lastIndexOf('/') + 1));
     }
 
     @Override

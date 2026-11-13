@@ -111,16 +111,16 @@ class Ec2ServicePersistenceTest {
         String defaultVpcId = original.describeVpcs(REGION, List.of(), List.of()).stream()
                 .filter(Vpc::isDefault).findFirst().orElseThrow().getVpcId();
         original.associateDhcpOptions(REGION, "default", defaultVpcId);
-        original.deleteDhcpOptions(REGION, "dopt-default");
+        original.deleteDhcpOptions(REGION, Ec2Service.defaultDhcpOptionsId(REGION));
 
         Ec2Service restarted = newService(dir);
         restarted.ensureDefaultResources(REGION);
         assertTrue(restarted.describeDhcpOptions(REGION, List.of(), List.of(), 0, null)
                 .items().isEmpty());
-        assertEquals("dopt-default", restarted.createVpc(REGION, "10.78.0.0/16", false).getDhcpOptionsId());
-        DhcpOptions restored = restarted.describeDhcpOptions(REGION, List.of("dopt-default"), List.of(), 0, null)
+        assertEquals(Ec2Service.defaultDhcpOptionsId(REGION), restarted.createVpc(REGION, "10.78.0.0/16", false).getDhcpOptionsId());
+        DhcpOptions restored = restarted.describeDhcpOptions(REGION, List.of(Ec2Service.defaultDhcpOptionsId(REGION)), List.of(), 0, null)
                 .items().getFirst();
-        assertEquals("dopt-default", restored.getDhcpOptionsId());
+        assertEquals(Ec2Service.defaultDhcpOptionsId(REGION), restored.getDhcpOptionsId());
         assertEquals("default", restarted.requireVpc(REGION, defaultVpcId).getDhcpOptionsId());
     }
 

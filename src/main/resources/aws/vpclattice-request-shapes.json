@@ -1,0 +1,1655 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_vpclattice_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "BatchUpdateRule": "BatchUpdateRuleRequest",
+    "CreateAccessLogSubscription": "CreateAccessLogSubscriptionRequest",
+    "CreateListener": "CreateListenerRequest",
+    "CreateResourceConfiguration": "CreateResourceConfigurationRequest",
+    "CreateResourceGateway": "CreateResourceGatewayRequest",
+    "CreateRule": "CreateRuleRequest",
+    "CreateService": "CreateServiceRequest",
+    "CreateServiceNetwork": "CreateServiceNetworkRequest",
+    "CreateServiceNetworkResourceAssociation": "CreateServiceNetworkResourceAssociationRequest",
+    "CreateServiceNetworkServiceAssociation": "CreateServiceNetworkServiceAssociationRequest",
+    "CreateServiceNetworkVpcAssociation": "CreateServiceNetworkVpcAssociationRequest",
+    "CreateTargetGroup": "CreateTargetGroupRequest",
+    "DeleteAccessLogSubscription": "DeleteAccessLogSubscriptionRequest",
+    "DeleteAuthPolicy": "DeleteAuthPolicyRequest",
+    "DeleteDomainVerification": "DeleteDomainVerificationRequest",
+    "DeleteListener": "DeleteListenerRequest",
+    "DeleteResourceConfiguration": "DeleteResourceConfigurationRequest",
+    "DeleteResourceEndpointAssociation": "DeleteResourceEndpointAssociationRequest",
+    "DeleteResourceGateway": "DeleteResourceGatewayRequest",
+    "DeleteResourcePolicy": "DeleteResourcePolicyRequest",
+    "DeleteRule": "DeleteRuleRequest",
+    "DeleteService": "DeleteServiceRequest",
+    "DeleteServiceNetwork": "DeleteServiceNetworkRequest",
+    "DeleteServiceNetworkResourceAssociation": "DeleteServiceNetworkResourceAssociationRequest",
+    "DeleteServiceNetworkServiceAssociation": "DeleteServiceNetworkServiceAssociationRequest",
+    "DeleteServiceNetworkVpcAssociation": "DeleteServiceNetworkVpcAssociationRequest",
+    "DeleteTargetGroup": "DeleteTargetGroupRequest",
+    "DeregisterTargets": "DeregisterTargetsRequest",
+    "GetAccessLogSubscription": "GetAccessLogSubscriptionRequest",
+    "GetAuthPolicy": "GetAuthPolicyRequest",
+    "GetDomainVerification": "GetDomainVerificationRequest",
+    "GetListener": "GetListenerRequest",
+    "GetResourceConfiguration": "GetResourceConfigurationRequest",
+    "GetResourceGateway": "GetResourceGatewayRequest",
+    "GetResourcePolicy": "GetResourcePolicyRequest",
+    "GetRule": "GetRuleRequest",
+    "GetService": "GetServiceRequest",
+    "GetServiceNetwork": "GetServiceNetworkRequest",
+    "GetServiceNetworkResourceAssociation": "GetServiceNetworkResourceAssociationRequest",
+    "GetServiceNetworkServiceAssociation": "GetServiceNetworkServiceAssociationRequest",
+    "GetServiceNetworkVpcAssociation": "GetServiceNetworkVpcAssociationRequest",
+    "GetTargetGroup": "GetTargetGroupRequest",
+    "ListAccessLogSubscriptions": "ListAccessLogSubscriptionsRequest",
+    "ListDomainVerifications": "ListDomainVerificationsRequest",
+    "ListListeners": "ListListenersRequest",
+    "ListResourceConfigurations": "ListResourceConfigurationsRequest",
+    "ListResourceEndpointAssociations": "ListResourceEndpointAssociationsRequest",
+    "ListResourceGateways": "ListResourceGatewaysRequest",
+    "ListRules": "ListRulesRequest",
+    "ListServiceNetworkResourceAssociations": "ListServiceNetworkResourceAssociationsRequest",
+    "ListServiceNetworkServiceAssociations": "ListServiceNetworkServiceAssociationsRequest",
+    "ListServiceNetworkVpcAssociations": "ListServiceNetworkVpcAssociationsRequest",
+    "ListServiceNetworkVpcEndpointAssociations": "ListServiceNetworkVpcEndpointAssociationsRequest",
+    "ListServiceNetworks": "ListServiceNetworksRequest",
+    "ListServices": "ListServicesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTargetGroups": "ListTargetGroupsRequest",
+    "ListTargets": "ListTargetsRequest",
+    "PutAuthPolicy": "PutAuthPolicyRequest",
+    "PutResourcePolicy": "PutResourcePolicyRequest",
+    "RegisterTargets": "RegisterTargetsRequest",
+    "StartDomainVerification": "StartDomainVerificationRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateAccessLogSubscription": "UpdateAccessLogSubscriptionRequest",
+    "UpdateListener": "UpdateListenerRequest",
+    "UpdateResourceConfiguration": "UpdateResourceConfigurationRequest",
+    "UpdateResourceGateway": "UpdateResourceGatewayRequest",
+    "UpdateRule": "UpdateRuleRequest",
+    "UpdateService": "UpdateServiceRequest",
+    "UpdateServiceNetwork": "UpdateServiceNetworkRequest",
+    "UpdateServiceNetworkVpcAssociation": "UpdateServiceNetworkVpcAssociationRequest",
+    "UpdateTargetGroup": "UpdateTargetGroupRequest"
+  },
+  "shapes": {
+    "AccessLogDestinationArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn(:[a-z0-9]+([.-][a-z0-9]+)*){2}(:([a-z0-9]+([.-][a-z0-9]+)*)?){2}:([^/].*)?"
+    },
+    "AccessLogSubscriptionIdentifier": {
+      "type": "string",
+      "min": 17,
+      "max": 2048,
+      "pattern": "((als-[0-9a-z]{17})|(arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:accesslogsubscription/als-[0-9a-z]{17}))"
+    },
+    "Arn": {
+      "type": "string",
+      "min": 0,
+      "max": 1224,
+      "pattern": "arn:[a-z0-9][-.a-z0-9]{0,62}:vpc-lattice:([a-z0-9][-.a-z0-9]{0,62})?:\\d{12}?:[^/].{0,1023}"
+    },
+    "ArnResource": {
+      "type": "structure",
+      "members": {
+        "arn": "WildcardArn"
+      }
+    },
+    "AuthPolicyString": {
+      "type": "string",
+      "min": 0,
+      "max": 36864
+    },
+    "AuthType": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "AWS_IAM"
+      ]
+    },
+    "BatchUpdateRuleRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier",
+        "listenerIdentifier",
+        "rules"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "listenerIdentifier": "ListenerIdentifier",
+        "rules": "RuleUpdateList"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CertificateArn": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "(arn(:[a-z0-9]+([.-][a-z0-9]+)*){2}(:([a-z0-9]+([.-][a-z0-9]+)*)?){2}:certificate/[0-9a-z-]+)?"
+    },
+    "CidrRange": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "CidrRangeList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "CidrRange"
+    },
+    "CidrResource": {
+      "type": "structure",
+      "members": {
+        "cidrRanges": "CidrRangeList"
+      }
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": ".*[!-~]+.*"
+    },
+    "CreateAccessLogSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "resourceIdentifier",
+        "destinationArn"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "resourceIdentifier": "ResourceIdentifier",
+        "destinationArn": "AccessLogDestinationArn",
+        "serviceNetworkLogType": "ServiceNetworkLogType",
+        "tags": "TagMap"
+      }
+    },
+    "CreateListenerRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier",
+        "name",
+        "protocol",
+        "defaultAction"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "name": "ListenerName",
+        "protocol": "ListenerProtocol",
+        "port": "Port",
+        "defaultAction": "RuleAction",
+        "clientToken": "ClientToken",
+        "tags": "TagMap"
+      }
+    },
+    "CreateResourceConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "type"
+      ],
+      "members": {
+        "name": "ResourceConfigurationName",
+        "type": "ResourceConfigurationType",
+        "portRanges": "PortRangeList",
+        "protocol": "ProtocolType",
+        "resourceGatewayIdentifier": "ResourceGatewayIdentifier",
+        "resourceConfigurationGroupIdentifier": "ResourceConfigurationIdentifier",
+        "resourceConfigurationDefinition": "ResourceConfigurationDefinition",
+        "allowAssociationToShareableServiceNetwork": "Boolean",
+        "customDomainName": "DomainName",
+        "groupDomain": "DomainName",
+        "domainVerificationIdentifier": "DomainVerificationIdentifier",
+        "clientToken": "ClientToken",
+        "tags": "TagMap"
+      }
+    },
+    "CreateResourceGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "name": "ResourceGatewayName",
+        "vpcIdentifier": "VpcId",
+        "subnetIds": "SubnetList",
+        "securityGroupIds": "CreateResourceGatewayRequestSecurityGroupIdsList",
+        "ipAddressType": "ResourceGatewayIpAddressType",
+        "ipv4AddressesPerEni": "Ipv4AddressesPerEni",
+        "resourceConfigDnsResolution": "ResourceConfigDnsResolution",
+        "tags": "TagMap"
+      }
+    },
+    "CreateResourceGatewayRequestSecurityGroupIdsList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "SecurityGroupId"
+    },
+    "CreateRuleRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier",
+        "listenerIdentifier",
+        "name",
+        "match",
+        "priority",
+        "action"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "listenerIdentifier": "ListenerIdentifier",
+        "name": "RuleName",
+        "match": "RuleMatch",
+        "priority": "RulePriority",
+        "action": "RuleAction",
+        "clientToken": "ClientToken",
+        "tags": "TagMap"
+      }
+    },
+    "CreateServiceNetworkRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "name": "ServiceNetworkName",
+        "authType": "AuthType",
+        "tags": "TagMap",
+        "sharingConfig": "SharingConfig"
+      }
+    },
+    "CreateServiceNetworkResourceAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "resourceConfigurationIdentifier",
+        "serviceNetworkIdentifier"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "resourceConfigurationIdentifier": "ResourceConfigurationIdentifier",
+        "serviceNetworkIdentifier": "ServiceNetworkIdentifierWithoutRegex",
+        "privateDnsEnabled": "Boolean",
+        "tags": "TagMap"
+      }
+    },
+    "CreateServiceNetworkServiceAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier",
+        "serviceNetworkIdentifier"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "serviceIdentifier": "ServiceIdentifier",
+        "serviceNetworkIdentifier": "ServiceNetworkIdentifier",
+        "tags": "TagMap"
+      }
+    },
+    "CreateServiceNetworkVpcAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkIdentifier",
+        "vpcIdentifier"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "serviceNetworkIdentifier": "ServiceNetworkIdentifierWithoutRegex",
+        "vpcIdentifier": "VpcId",
+        "privateDnsEnabled": "Boolean",
+        "securityGroupIds": "CreateServiceNetworkVpcAssociationRequestSecurityGroupIdsList",
+        "tags": "TagMap",
+        "dnsOptions": "DnsOptions"
+      }
+    },
+    "CreateServiceNetworkVpcAssociationRequestSecurityGroupIdsList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "SecurityGroupId"
+    },
+    "CreateServiceRequest": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "name": "ServiceName",
+        "tags": "TagMap",
+        "customDomainName": "ServiceCustomDomainName",
+        "certificateArn": "CertificateArn",
+        "authType": "AuthType",
+        "idleTimeoutSeconds": "IdleTimeoutSeconds"
+      }
+    },
+    "CreateTargetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "type"
+      ],
+      "members": {
+        "name": "TargetGroupName",
+        "type": "TargetGroupType",
+        "config": "TargetGroupConfig",
+        "clientToken": "ClientToken",
+        "tags": "TagMap"
+      }
+    },
+    "DeleteAccessLogSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "accessLogSubscriptionIdentifier"
+      ],
+      "members": {
+        "accessLogSubscriptionIdentifier": "AccessLogSubscriptionIdentifier"
+      }
+    },
+    "DeleteAuthPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "resourceIdentifier"
+      ],
+      "members": {
+        "resourceIdentifier": "ResourceIdentifier"
+      }
+    },
+    "DeleteDomainVerificationRequest": {
+      "type": "structure",
+      "required": [
+        "domainVerificationIdentifier"
+      ],
+      "members": {
+        "domainVerificationIdentifier": "DomainVerificationIdentifier"
+      }
+    },
+    "DeleteListenerRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier",
+        "listenerIdentifier"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "listenerIdentifier": "ListenerIdentifier"
+      }
+    },
+    "DeleteResourceConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "resourceConfigurationIdentifier"
+      ],
+      "members": {
+        "resourceConfigurationIdentifier": "ResourceConfigurationIdentifier"
+      }
+    },
+    "DeleteResourceEndpointAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "resourceEndpointAssociationIdentifier"
+      ],
+      "members": {
+        "resourceEndpointAssociationIdentifier": "ResourceEndpointAssociationIdentifier"
+      }
+    },
+    "DeleteResourceGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "resourceGatewayIdentifier"
+      ],
+      "members": {
+        "resourceGatewayIdentifier": "ResourceGatewayIdentifier"
+      }
+    },
+    "DeleteResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn"
+      }
+    },
+    "DeleteRuleRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier",
+        "listenerIdentifier",
+        "ruleIdentifier"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "listenerIdentifier": "ListenerIdentifier",
+        "ruleIdentifier": "RuleIdentifier"
+      }
+    },
+    "DeleteServiceNetworkRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkIdentifier"
+      ],
+      "members": {
+        "serviceNetworkIdentifier": "ServiceNetworkIdentifier"
+      }
+    },
+    "DeleteServiceNetworkResourceAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkResourceAssociationIdentifier"
+      ],
+      "members": {
+        "serviceNetworkResourceAssociationIdentifier": "ServiceNetworkResourceAssociationIdentifier"
+      }
+    },
+    "DeleteServiceNetworkServiceAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkServiceAssociationIdentifier"
+      ],
+      "members": {
+        "serviceNetworkServiceAssociationIdentifier": "ServiceNetworkServiceAssociationIdentifier"
+      }
+    },
+    "DeleteServiceNetworkVpcAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkVpcAssociationIdentifier"
+      ],
+      "members": {
+        "serviceNetworkVpcAssociationIdentifier": "ServiceNetworkVpcAssociationIdentifier"
+      }
+    },
+    "DeleteServiceRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier"
+      }
+    },
+    "DeleteTargetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "targetGroupIdentifier"
+      ],
+      "members": {
+        "targetGroupIdentifier": "TargetGroupIdentifier"
+      }
+    },
+    "DeregisterTargetsRequest": {
+      "type": "structure",
+      "required": [
+        "targetGroupIdentifier",
+        "targets"
+      ],
+      "members": {
+        "targetGroupIdentifier": "TargetGroupIdentifier",
+        "targets": "DeregisterTargetsRequestTargetsList"
+      }
+    },
+    "DeregisterTargetsRequestTargetsList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "Target"
+    },
+    "DnsOptions": {
+      "type": "structure",
+      "members": {
+        "privateDnsPreference": "PrivateDnsPreference",
+        "privateDnsSpecifiedDomains": "PrivateDnsSpecifiedDomainsList"
+      }
+    },
+    "DnsResource": {
+      "type": "structure",
+      "members": {
+        "domainName": "DomainName",
+        "ipAddressType": "ResourceConfigurationIpAddressType"
+      }
+    },
+    "DomainName": {
+      "type": "string",
+      "min": 3,
+      "max": 255
+    },
+    "DomainVerificationIdentifier": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "((dv-[0-9a-z]{17})|(arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:domainverification/dv-[a-fA-F0-9]{17}))"
+    },
+    "FixedResponseAction": {
+      "type": "structure",
+      "required": [
+        "statusCode"
+      ],
+      "members": {
+        "statusCode": "HttpStatusCode"
+      }
+    },
+    "ForwardAction": {
+      "type": "structure",
+      "required": [
+        "targetGroups"
+      ],
+      "members": {
+        "targetGroups": "WeightedTargetGroupList"
+      }
+    },
+    "GetAccessLogSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "accessLogSubscriptionIdentifier"
+      ],
+      "members": {
+        "accessLogSubscriptionIdentifier": "AccessLogSubscriptionIdentifier"
+      }
+    },
+    "GetAuthPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "resourceIdentifier"
+      ],
+      "members": {
+        "resourceIdentifier": "ResourceIdentifier"
+      }
+    },
+    "GetDomainVerificationRequest": {
+      "type": "structure",
+      "required": [
+        "domainVerificationIdentifier"
+      ],
+      "members": {
+        "domainVerificationIdentifier": "DomainVerificationIdentifier"
+      }
+    },
+    "GetListenerRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier",
+        "listenerIdentifier"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "listenerIdentifier": "ListenerIdentifier"
+      }
+    },
+    "GetResourceConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "resourceConfigurationIdentifier"
+      ],
+      "members": {
+        "resourceConfigurationIdentifier": "ResourceConfigurationIdentifier"
+      }
+    },
+    "GetResourceGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "resourceGatewayIdentifier"
+      ],
+      "members": {
+        "resourceGatewayIdentifier": "ResourceGatewayIdentifier"
+      }
+    },
+    "GetResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn"
+      }
+    },
+    "GetRuleRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier",
+        "listenerIdentifier",
+        "ruleIdentifier"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "listenerIdentifier": "ListenerIdentifier",
+        "ruleIdentifier": "RuleIdentifier"
+      }
+    },
+    "GetServiceNetworkRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkIdentifier"
+      ],
+      "members": {
+        "serviceNetworkIdentifier": "ServiceNetworkIdentifier"
+      }
+    },
+    "GetServiceNetworkResourceAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkResourceAssociationIdentifier"
+      ],
+      "members": {
+        "serviceNetworkResourceAssociationIdentifier": "ServiceNetworkResourceAssociationIdentifier"
+      }
+    },
+    "GetServiceNetworkServiceAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkServiceAssociationIdentifier"
+      ],
+      "members": {
+        "serviceNetworkServiceAssociationIdentifier": "ServiceNetworkServiceAssociationIdentifier"
+      }
+    },
+    "GetServiceNetworkVpcAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkVpcAssociationIdentifier"
+      ],
+      "members": {
+        "serviceNetworkVpcAssociationIdentifier": "ServiceNetworkVpcAssociationIdentifier"
+      }
+    },
+    "GetServiceRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier"
+      }
+    },
+    "GetTargetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "targetGroupIdentifier"
+      ],
+      "members": {
+        "targetGroupIdentifier": "TargetGroupIdentifier"
+      }
+    },
+    "HeaderMatch": {
+      "type": "structure",
+      "required": [
+        "name",
+        "match"
+      ],
+      "members": {
+        "name": "HeaderMatchName",
+        "match": "HeaderMatchType",
+        "caseSensitive": "Boolean"
+      }
+    },
+    "HeaderMatchContains": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "HeaderMatchExact": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "HeaderMatchList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "HeaderMatch"
+    },
+    "HeaderMatchName": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "HeaderMatchPrefix": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "HeaderMatchType": {
+      "type": "structure",
+      "members": {
+        "exact": "HeaderMatchExact",
+        "prefix": "HeaderMatchPrefix",
+        "contains": "HeaderMatchContains"
+      }
+    },
+    "HealthCheckConfig": {
+      "type": "structure",
+      "members": {
+        "enabled": "Boolean",
+        "protocol": "TargetGroupProtocol",
+        "protocolVersion": "HealthCheckProtocolVersion",
+        "port": "HealthCheckPort",
+        "path": "HealthCheckPath",
+        "healthCheckIntervalSeconds": "HealthCheckIntervalSeconds",
+        "healthCheckTimeoutSeconds": "HealthCheckTimeoutSeconds",
+        "healthyThresholdCount": "HealthyThresholdCount",
+        "unhealthyThresholdCount": "UnhealthyThresholdCount",
+        "matcher": "Matcher"
+      }
+    },
+    "HealthCheckIntervalSeconds": {
+      "type": "integer",
+      "min": 0,
+      "max": 300
+    },
+    "HealthCheckPath": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": ".*(^/[a-zA-Z0-9@:%_+.~#?&/=-]*$|(^$)).*"
+    },
+    "HealthCheckPort": {
+      "type": "integer",
+      "min": 0,
+      "max": 65535
+    },
+    "HealthCheckProtocolVersion": {
+      "type": "string",
+      "enum": [
+        "HTTP1",
+        "HTTP2"
+      ]
+    },
+    "HealthCheckTimeoutSeconds": {
+      "type": "integer",
+      "min": 0,
+      "max": 120
+    },
+    "HealthyThresholdCount": {
+      "type": "integer",
+      "min": 0,
+      "max": 10
+    },
+    "HttpCodeMatcher": {
+      "type": "string",
+      "min": 0,
+      "max": 2000,
+      "pattern": ".*(^[0-9-,]+$|(^$)).*"
+    },
+    "HttpMatch": {
+      "type": "structure",
+      "members": {
+        "method": "HttpMethod",
+        "pathMatch": "PathMatch",
+        "headerMatches": "HeaderMatchList"
+      }
+    },
+    "HttpMethod": {
+      "type": "string",
+      "min": 0,
+      "max": 16
+    },
+    "HttpStatusCode": {
+      "type": "integer",
+      "min": 100,
+      "max": 599
+    },
+    "IdleTimeoutSeconds": {
+      "type": "integer",
+      "min": 60,
+      "max": 600
+    },
+    "IpAddress": {
+      "type": "string",
+      "min": 4,
+      "max": 39
+    },
+    "IpAddressType": {
+      "type": "string",
+      "enum": [
+        "IPV4",
+        "IPV6"
+      ]
+    },
+    "IpResource": {
+      "type": "structure",
+      "members": {
+        "ipAddress": "IpAddress"
+      }
+    },
+    "Ipv4AddressesPerEni": {
+      "type": "integer",
+      "min": 1,
+      "max": 62
+    },
+    "LambdaEventStructureVersion": {
+      "type": "string",
+      "enum": [
+        "V1",
+        "V2"
+      ]
+    },
+    "ListAccessLogSubscriptionsRequest": {
+      "type": "structure",
+      "required": [
+        "resourceIdentifier"
+      ],
+      "members": {
+        "resourceIdentifier": "ResourceIdentifier",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListDomainVerificationsRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListListenersRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListResourceConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "resourceGatewayIdentifier": "ResourceGatewayIdentifier",
+        "resourceConfigurationGroupIdentifier": "ResourceConfigurationIdentifier",
+        "domainVerificationIdentifier": "DomainVerificationIdentifier",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListResourceEndpointAssociationsRequest": {
+      "type": "structure",
+      "required": [
+        "resourceConfigurationIdentifier"
+      ],
+      "members": {
+        "resourceConfigurationIdentifier": "ResourceConfigurationIdentifier",
+        "resourceEndpointAssociationIdentifier": "ResourceEndpointAssociationIdentifier",
+        "vpcEndpointId": "VpcEndpointId",
+        "vpcEndpointOwner": "VpcEndpointOwner",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListResourceGatewaysRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListRulesRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier",
+        "listenerIdentifier"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "listenerIdentifier": "ListenerIdentifier",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListServiceNetworkResourceAssociationsRequest": {
+      "type": "structure",
+      "members": {
+        "serviceNetworkIdentifier": "ServiceNetworkIdentifier",
+        "resourceConfigurationIdentifier": "ResourceConfigurationIdentifier",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "includeChildren": "Boolean"
+      }
+    },
+    "ListServiceNetworkServiceAssociationsRequest": {
+      "type": "structure",
+      "members": {
+        "serviceNetworkIdentifier": "ServiceNetworkIdentifier",
+        "serviceIdentifier": "ServiceIdentifier",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListServiceNetworkVpcAssociationsRequest": {
+      "type": "structure",
+      "members": {
+        "serviceNetworkIdentifier": "ServiceNetworkIdentifier",
+        "vpcIdentifier": "VpcId",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListServiceNetworkVpcEndpointAssociationsRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkIdentifier"
+      ],
+      "members": {
+        "serviceNetworkIdentifier": "ServiceNetworkIdentifier",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListServiceNetworksRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListServicesRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "Arn"
+      }
+    },
+    "ListTargetGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "vpcIdentifier": "VpcId",
+        "targetGroupType": "TargetGroupType"
+      }
+    },
+    "ListTargetsRequest": {
+      "type": "structure",
+      "required": [
+        "targetGroupIdentifier"
+      ],
+      "members": {
+        "targetGroupIdentifier": "TargetGroupIdentifier",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "targets": "ListTargetsRequestTargetsList"
+      }
+    },
+    "ListTargetsRequestTargetsList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "Target"
+    },
+    "ListenerIdentifier": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "((listener-[0-9a-z]{17})|(^arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:service/svc-[0-9a-z]{17}/listener/listener-[0-9a-z]{17}$))"
+    },
+    "ListenerName": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "(?!listener-)(?![-])(?!.*[-]$)(?!.*[-]{2})[a-z0-9-]+"
+    },
+    "ListenerProtocol": {
+      "type": "string",
+      "enum": [
+        "HTTP",
+        "HTTPS",
+        "TLS_PASSTHROUGH"
+      ]
+    },
+    "Matcher": {
+      "type": "structure",
+      "members": {
+        "httpCode": "HttpCodeMatcher"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "PathMatch": {
+      "type": "structure",
+      "required": [
+        "match"
+      ],
+      "members": {
+        "match": "PathMatchType",
+        "caseSensitive": "Boolean"
+      }
+    },
+    "PathMatchExact": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "/[a-zA-Z0-9@:%_+.~#?&/=-]*"
+    },
+    "PathMatchPrefix": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "/[a-zA-Z0-9@:%_+.~#?&/=-]*"
+    },
+    "PathMatchType": {
+      "type": "structure",
+      "members": {
+        "exact": "PathMatchExact",
+        "prefix": "PathMatchPrefix"
+      }
+    },
+    "PolicyString": {
+      "type": "string",
+      "min": 1,
+      "max": 10000,
+      "pattern": ".*\\S.*"
+    },
+    "Port": {
+      "type": "integer",
+      "min": 1,
+      "max": 65535
+    },
+    "PortRange": {
+      "type": "string",
+      "min": 1,
+      "max": 11,
+      "pattern": "((\\d{1,5}\\-\\d{1,5})|(\\d+))"
+    },
+    "PortRangeList": {
+      "type": "list",
+      "member": "PortRange"
+    },
+    "PrivateDnsPreference": {
+      "type": "string",
+      "enum": [
+        "VERIFIED_DOMAINS_ONLY",
+        "ALL_DOMAINS",
+        "VERIFIED_DOMAINS_AND_SPECIFIED_DOMAINS",
+        "SPECIFIED_DOMAINS_ONLY"
+      ]
+    },
+    "PrivateDnsSpecifiedDomain": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "PrivateDnsSpecifiedDomainsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "PrivateDnsSpecifiedDomain"
+    },
+    "ProtocolType": {
+      "type": "string",
+      "enum": [
+        "TCP",
+        "TCP_UDP"
+      ]
+    },
+    "PutAuthPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "resourceIdentifier",
+        "policy"
+      ],
+      "members": {
+        "resourceIdentifier": "ResourceIdentifier",
+        "policy": "AuthPolicyString"
+      }
+    },
+    "PutResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "policy"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn",
+        "policy": "PolicyString"
+      }
+    },
+    "RegisterTargetsRequest": {
+      "type": "structure",
+      "required": [
+        "targetGroupIdentifier",
+        "targets"
+      ],
+      "members": {
+        "targetGroupIdentifier": "TargetGroupIdentifier",
+        "targets": "RegisterTargetsRequestTargetsList"
+      }
+    },
+    "RegisterTargetsRequestTargetsList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "Target"
+    },
+    "ResourceArn": {
+      "type": "string",
+      "min": 20,
+      "max": 200,
+      "pattern": "arn(:[a-z0-9]+([.-][a-z0-9]+)*){2}(:([a-z0-9]+([.-][a-z0-9]+)*)?){2}:((servicenetwork/sn)|(service/svc)|(resourceconfiguration/rcfg))-[0-9a-z]{17}"
+    },
+    "ResourceConfigDnsResolution": {
+      "type": "string",
+      "enum": [
+        "IN_VPC",
+        "PUBLIC"
+      ]
+    },
+    "ResourceConfigurationDefinition": {
+      "type": "structure",
+      "members": {
+        "dnsResource": "DnsResource",
+        "ipResource": "IpResource",
+        "arnResource": "ArnResource",
+        "cidrResource": "CidrResource"
+      }
+    },
+    "ResourceConfigurationIdentifier": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "((rcfg-[0-9a-z]{17})|(arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:resourceconfiguration/rcfg-[0-9a-z]{17}))"
+    },
+    "ResourceConfigurationIpAddressType": {
+      "type": "string",
+      "enum": [
+        "IPV4",
+        "IPV6",
+        "DUALSTACK"
+      ]
+    },
+    "ResourceConfigurationName": {
+      "type": "string",
+      "min": 3,
+      "max": 40,
+      "pattern": "(?!rcfg-)(?![-])(?!.*[-]$)(?!.*[-]{2})[a-z0-9-]+"
+    },
+    "ResourceConfigurationType": {
+      "type": "string",
+      "enum": [
+        "GROUP",
+        "CHILD",
+        "SINGLE",
+        "ARN",
+        "CIDR"
+      ]
+    },
+    "ResourceEndpointAssociationIdentifier": {
+      "type": "string",
+      "min": 21,
+      "max": 2048,
+      "pattern": "((rea-[0-9a-f]{17})|(arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:resourceendpointassociation/rea-[0-9a-f]{17}))"
+    },
+    "ResourceGatewayIdentifier": {
+      "type": "string",
+      "min": 17,
+      "max": 2048,
+      "pattern": "((rgw-[0-9a-z]{17})|(arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:resourcegateway/rgw-[0-9a-z]{17}))"
+    },
+    "ResourceGatewayIpAddressType": {
+      "type": "string",
+      "enum": [
+        "IPV4",
+        "IPV6",
+        "DUALSTACK"
+      ]
+    },
+    "ResourceGatewayName": {
+      "type": "string",
+      "min": 3,
+      "max": 40,
+      "pattern": "(?!rgw-)(?![-])(?!.*[-]$)(?!.*[-]{2})[a-z0-9-]+"
+    },
+    "ResourceIdentifier": {
+      "type": "string",
+      "min": 17,
+      "max": 200,
+      "pattern": "((((sn)|(svc)|(rcfg))-[0-9a-z]{17})|(arn(:[a-z0-9]+([.-][a-z0-9]+)*){2}(:([a-z0-9]+([.-][a-z0-9]+)*)?){2}:((servicenetwork/sn)|(resourceconfiguration/rcfg)|(service/svc))-[0-9a-z]{17}))"
+    },
+    "RuleAction": {
+      "type": "structure",
+      "members": {
+        "forward": "ForwardAction",
+        "fixedResponse": "FixedResponseAction"
+      }
+    },
+    "RuleIdentifier": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "((rule-[0-9a-z]{17})|(^arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:service/svc-[0-9a-z]{17}/listener/listener-[0-9a-z]{17}/rule/rule-[0-9a-z]{17}$))"
+    },
+    "RuleMatch": {
+      "type": "structure",
+      "members": {
+        "httpMatch": "HttpMatch"
+      }
+    },
+    "RuleName": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "(?!rule-)(?![-])(?!.*[-]$)(?!.*[-]{2})[a-z0-9-]+"
+    },
+    "RulePriority": {
+      "type": "integer",
+      "min": 1,
+      "max": 2000
+    },
+    "RuleUpdate": {
+      "type": "structure",
+      "required": [
+        "ruleIdentifier"
+      ],
+      "members": {
+        "ruleIdentifier": "RuleIdentifier",
+        "match": "RuleMatch",
+        "priority": "RulePriority",
+        "action": "RuleAction"
+      }
+    },
+    "RuleUpdateList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "RuleUpdate"
+    },
+    "SecurityGroupId": {
+      "type": "string",
+      "min": 5,
+      "max": 200,
+      "pattern": "sg-(([0-9a-z]{8})|([0-9a-z]{17}))"
+    },
+    "ServiceCustomDomainName": {
+      "type": "string",
+      "min": 3,
+      "max": 255
+    },
+    "ServiceIdentifier": {
+      "type": "string",
+      "min": 17,
+      "max": 2048,
+      "pattern": "((svc-[0-9a-z]{17})|(arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:service/svc-[0-9a-z]{17}))"
+    },
+    "ServiceName": {
+      "type": "string",
+      "min": 3,
+      "max": 40,
+      "pattern": "(?!svc-)(?![-])(?!.*[-]$)(?!.*[-]{2})[a-z0-9-]+"
+    },
+    "ServiceNetworkIdentifier": {
+      "type": "string",
+      "min": 3,
+      "max": 2048,
+      "pattern": "((sn-[0-9a-z]{17})|(arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:servicenetwork/sn-[0-9a-z]{17}))"
+    },
+    "ServiceNetworkIdentifierWithoutRegex": {
+      "type": "string",
+      "min": 3,
+      "max": 2048
+    },
+    "ServiceNetworkLogType": {
+      "type": "string",
+      "enum": [
+        "SERVICE",
+        "RESOURCE"
+      ]
+    },
+    "ServiceNetworkName": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "(?![-])(?!.*[-]$)(?!.*[-]{2})[a-z0-9-]+"
+    },
+    "ServiceNetworkResourceAssociationIdentifier": {
+      "type": "string",
+      "min": 22,
+      "max": 2048,
+      "pattern": "((snra-[0-9a-z]{17})|(arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:servicenetworkresourceassociation/snra-[0-9a-f]{17}))"
+    },
+    "ServiceNetworkServiceAssociationIdentifier": {
+      "type": "string",
+      "min": 17,
+      "max": 2048,
+      "pattern": "((snsa-[0-9a-z]{17})|(arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:servicenetworkserviceassociation/snsa-[0-9a-z]{17}))"
+    },
+    "ServiceNetworkVpcAssociationIdentifier": {
+      "type": "string",
+      "min": 17,
+      "max": 2048,
+      "pattern": "((snva-[0-9a-z]{17})|(arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:servicenetworkvpcassociation/snva-[0-9a-z]{17}))"
+    },
+    "SharingConfig": {
+      "type": "structure",
+      "members": {
+        "enabled": "Boolean"
+      }
+    },
+    "StartDomainVerificationRequest": {
+      "type": "structure",
+      "required": [
+        "domainName"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "domainName": "DomainName",
+        "tags": "TagMap"
+      }
+    },
+    "SubnetId": {
+      "type": "string",
+      "min": 5,
+      "max": 200
+    },
+    "SubnetList": {
+      "type": "list",
+      "member": "SubnetId"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 0,
+      "max": 200,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "Target": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "TargetIdString",
+        "port": "Port"
+      }
+    },
+    "TargetGroupConfig": {
+      "type": "structure",
+      "members": {
+        "port": "Port",
+        "protocol": "TargetGroupProtocol",
+        "protocolVersion": "TargetGroupProtocolVersion",
+        "ipAddressType": "IpAddressType",
+        "vpcIdentifier": "VpcId",
+        "healthCheck": "HealthCheckConfig",
+        "lambdaEventStructureVersion": "LambdaEventStructureVersion"
+      }
+    },
+    "TargetGroupIdentifier": {
+      "type": "string",
+      "min": 17,
+      "max": 2048,
+      "pattern": "((tg-[0-9a-z]{17})|(arn:[a-z0-9\\-]+:vpc-lattice:[a-zA-Z0-9\\-]+:\\d{12}:targetgroup/tg-[0-9a-z]{17}))"
+    },
+    "TargetGroupName": {
+      "type": "string",
+      "min": 3,
+      "max": 128,
+      "pattern": "(?!tg-)(?![-])(?!.*[-]$)(?!.*[-]{2})[a-z0-9-]+"
+    },
+    "TargetGroupProtocol": {
+      "type": "string",
+      "enum": [
+        "HTTP",
+        "HTTPS",
+        "TCP"
+      ]
+    },
+    "TargetGroupProtocolVersion": {
+      "type": "string",
+      "enum": [
+        "HTTP1",
+        "HTTP2",
+        "GRPC"
+      ]
+    },
+    "TargetGroupType": {
+      "type": "string",
+      "enum": [
+        "IP",
+        "LAMBDA",
+        "INSTANCE",
+        "ALB"
+      ]
+    },
+    "TargetGroupWeight": {
+      "type": "integer",
+      "min": 0,
+      "max": 999
+    },
+    "TargetIdString": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "UnhealthyThresholdCount": {
+      "type": "integer",
+      "min": 0,
+      "max": 10
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tagKeys": "TagKeys"
+      }
+    },
+    "UpdateAccessLogSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "accessLogSubscriptionIdentifier",
+        "destinationArn"
+      ],
+      "members": {
+        "accessLogSubscriptionIdentifier": "AccessLogSubscriptionIdentifier",
+        "destinationArn": "AccessLogDestinationArn"
+      }
+    },
+    "UpdateListenerRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier",
+        "listenerIdentifier",
+        "defaultAction"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "listenerIdentifier": "ListenerIdentifier",
+        "defaultAction": "RuleAction"
+      }
+    },
+    "UpdateResourceConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "resourceConfigurationIdentifier"
+      ],
+      "members": {
+        "resourceConfigurationIdentifier": "ResourceConfigurationIdentifier",
+        "resourceConfigurationDefinition": "ResourceConfigurationDefinition",
+        "allowAssociationToShareableServiceNetwork": "Boolean",
+        "portRanges": "PortRangeList"
+      }
+    },
+    "UpdateResourceGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "resourceGatewayIdentifier"
+      ],
+      "members": {
+        "resourceGatewayIdentifier": "ResourceGatewayIdentifier",
+        "securityGroupIds": "UpdateResourceGatewayRequestSecurityGroupIdsList"
+      }
+    },
+    "UpdateResourceGatewayRequestSecurityGroupIdsList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "SecurityGroupId"
+    },
+    "UpdateRuleRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier",
+        "listenerIdentifier",
+        "ruleIdentifier"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "listenerIdentifier": "ListenerIdentifier",
+        "ruleIdentifier": "RuleIdentifier",
+        "match": "RuleMatch",
+        "priority": "RulePriority",
+        "action": "RuleAction"
+      }
+    },
+    "UpdateServiceNetworkRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkIdentifier",
+        "authType"
+      ],
+      "members": {
+        "serviceNetworkIdentifier": "ServiceNetworkIdentifier",
+        "authType": "AuthType"
+      }
+    },
+    "UpdateServiceNetworkVpcAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "serviceNetworkVpcAssociationIdentifier"
+      ],
+      "members": {
+        "serviceNetworkVpcAssociationIdentifier": "ServiceNetworkVpcAssociationIdentifier",
+        "securityGroupIds": "UpdateServiceNetworkVpcAssociationRequestSecurityGroupIdsList",
+        "privateDnsEnabled": "Boolean",
+        "dnsOptions": "DnsOptions"
+      }
+    },
+    "UpdateServiceNetworkVpcAssociationRequestSecurityGroupIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "SecurityGroupId"
+    },
+    "UpdateServiceRequest": {
+      "type": "structure",
+      "required": [
+        "serviceIdentifier"
+      ],
+      "members": {
+        "serviceIdentifier": "ServiceIdentifier",
+        "certificateArn": "CertificateArn",
+        "authType": "AuthType",
+        "idleTimeoutSeconds": "IdleTimeoutSeconds"
+      }
+    },
+    "UpdateTargetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "targetGroupIdentifier",
+        "healthCheck"
+      ],
+      "members": {
+        "targetGroupIdentifier": "TargetGroupIdentifier",
+        "healthCheck": "HealthCheckConfig"
+      }
+    },
+    "VpcEndpointId": {
+      "type": "string",
+      "min": 22,
+      "max": 22,
+      "pattern": "vpce-[0-9a-f]{17}"
+    },
+    "VpcEndpointOwner": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "\\d{12}"
+    },
+    "VpcId": {
+      "type": "string",
+      "min": 5,
+      "max": 50,
+      "pattern": "vpc-(([0-9a-z]{8})|([0-9a-z]{17}))"
+    },
+    "WeightedTargetGroup": {
+      "type": "structure",
+      "required": [
+        "targetGroupIdentifier"
+      ],
+      "members": {
+        "targetGroupIdentifier": "TargetGroupIdentifier",
+        "weight": "TargetGroupWeight"
+      }
+    },
+    "WeightedTargetGroupList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "WeightedTargetGroup"
+    },
+    "WildcardArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:[a-z0-9][-.a-z0-9]{0,62}:[a-z0-9][-.a-z0-9]{0,62}:([a-z0-9][-.a-z0-9]{0,62})?:\\d{12}?:[^/].{0,1023}"
+    }
+  }
+}

@@ -55,14 +55,18 @@ class IamRestRouteCoverageTest {
             "DeleteBucketMetadataConfiguration", "s3:DeleteBucket");
 
     /**
-     * The S3 Control operations Floci serves, the rest-routes entry of which is a route the
-     * registry maps. Every other operation of the s3control model has no route in Floci: the
-     * request falls through to the S3 data plane and is checked as the object or bucket
-     * operation that runs.
+     * The S3 Control operations whose routes the registry leaves to the S3 data plane rules: S3 on
+     * Outposts buckets, which Floci answers {@code NoSuchOutpost} for and AWS authorizes in the
+     * {@code s3-outposts} namespace, and the directory buckets' access point listing, which AWS
+     * authorizes as {@code s3express:ListAccessPointsForDirectoryBuckets}. Every other operation
+     * of the s3control model is served, and checked as its own {@code s3:} action.
      */
-    private static final Set<String> SERVED_S3_CONTROL_OPERATIONS = Set.of(
-            "DeletePublicAccessBlock", "GetPublicAccessBlock", "ListAccessPoints", "ListTagsForResource",
-            "PutPublicAccessBlock", "TagResource", "UntagResource");
+    private static final Set<String> UNMAPPED_S3_CONTROL_OPERATIONS = Set.of(
+            "ListAccessPointsForDirectoryBuckets", "ListRegionalBuckets", "CreateBucket", "GetBucket",
+            "DeleteBucket", "GetBucketLifecycleConfiguration", "PutBucketLifecycleConfiguration",
+            "DeleteBucketLifecycleConfiguration", "GetBucketPolicy", "PutBucketPolicy", "DeleteBucketPolicy",
+            "GetBucketReplication", "PutBucketReplication", "DeleteBucketReplication", "GetBucketTagging",
+            "PutBucketTagging", "DeleteBucketTagging", "GetBucketVersioning", "PutBucketVersioning");
 
     /**
      * The account-level Block Public Access, the one route the Service Reference cannot settle.
@@ -186,20 +190,22 @@ class IamRestRouteCoverageTest {
     }
 
     /**
-     * Every route of the s3control model, which signs with the s3 scope. A route Floci serves is
-     * checked as the action the Service Reference gives the operation, with the account-level
-     * Block Public Access as its one written-down exception; a route Floci does not serve runs
-     * as the S3 data plane, so it must not resolve to any of the served routes' actions.
+     * Every route of the s3control model, which signs with the s3 scope. A route the registry maps
+     * is checked as the action the Service Reference gives the operation, with the account-level
+     * Block Public Access as its one written-down exception; an unmapped route runs as the S3
+     * data plane, so it must not resolve to any of the mapped routes' actions.
      */
     @TestFactory
     Stream<DynamicTest> everyS3ControlRouteIsCheckedAsTheServiceReferenceGivesIt() throws IOException {
         JsonNode models = load("/aws/rest-routes.json").path("models");
         JsonNode authorized = load("/aws/iam-authorized-actions.json").path("authorizedActions");
         Map<String, String> served = new HashMap<>();
-        for (String operation : SERVED_S3_CONTROL_OPERATIONS) {
-            served.put(operation, ACCOUNT_PUBLIC_ACCESS_BLOCK_ACTIONS.getOrDefault(operation,
-                    authorized.path("s3").path(operation).asText("s3:" + operation)));
-        }
+        models.path("s3control").path("operations").fieldNames().forEachRemaining(operation -> {
+            if (!UNMAPPED_S3_CONTROL_OPERATIONS.contains(operation)) {
+                served.put(operation, ACCOUNT_PUBLIC_ACCESS_BLOCK_ACTIONS.getOrDefault(operation,
+                        authorized.path("s3").path(operation).asText("s3:" + operation)));
+            }
+        });
         List<DynamicTest> tests = new ArrayList<>();
         Iterator<Map.Entry<String, JsonNode>> operations =
                 models.path("s3control").path("operations").fields();

@@ -1,9 +1,18 @@
 {
-  "_source": {"generator": "tools/aws/regen_iam_passed_roles.py", "reference": "https://servicereference.us-east-1.amazonaws.com/", "botocore": "botocore 1.43.118 (installed package)", "retrieved": "2026-11-06", "note": "make iam-passed-roles-check re-derives every member from botocore; make iam-passed-roles-verify checks every operation against AWS."},
-  "namespaces": {"application-autoscaling": ["application-autoscaling"], "athena": ["athena"], "autoscaling": ["autoscaling"], "budgets": ["budgets"], "cloudformation": ["cloudcontrol", "cloudformation"], "cloudtrail": ["cloudtrail"], "cloudwatch": ["cloudwatch", "cloudwatchomni"], "codebuild": ["codebuild"], "codedeploy": ["codedeploy"], "codepipeline": ["codepipeline"], "cognito-identity": ["cognito-identity"], "cognito-idp": ["cognito-idp"], "comprehend": ["comprehend"], "config": ["config"], "datasync": ["datasync"], "dms": ["dms"], "dsql": ["dsql"], "ec2": ["ec2"], "ecr": ["ecr"], "ecs": ["ecs"], "eks": ["eks"], "elasticmapreduce": ["emr"], "events": ["eventbridgev2", "events"], "firehose": ["firehose"], "glue": ["glue"], "iam": ["iam"], "kinesis": ["kinesis"], "kinesisanalytics": ["kinesisanalytics", "kinesisanalyticsv2"], "lambda": ["lambda", "lambda-core", "lambda-microvms", "lambda-web"], "logs": ["logs"], "pipes": ["pipes"], "rds": ["docdb", "neptune", "rds"], "redshift": ["redshift"], "redshift-serverless": ["redshift-serverless"], "rekognition": ["rekognition"], "resource-groups": ["resource-groups"], "s3": ["s3", "s3control"], "sagemaker": ["sagemaker"], "scheduler": ["scheduler"], "secretsmanager": ["secretsmanager"], "servicecatalog": ["servicecatalog"], "ses": ["mailmanager", "pinpoint-email", "ses", "sesv2"], "sns": ["sns"], "ssm": ["ssm"], "states": ["stepfunctions"], "swf": ["swf"], "textract": ["textract"], "transcribe": ["transcribe"], "transfer": ["transfer"], "translate": ["translate"]},
-  "notCovered": {"access-analyzer": "REST routes no rule maps yet", "airflow": "REST routes no rule maps yet", "apigateway": "authorized by HTTP method, so no request is checked as one of these operations", "appconfig": "REST routes no rule maps yet", "appsync": "REST routes no rule maps yet", "aps": "REST routes no rule maps yet", "aws-marketplace": "REST routes no rule maps yet", "backup": "REST routes no rule maps yet", "batch": "REST routes no rule maps yet", "bedrock": "REST routes no rule maps yet", "bedrock-agentcore": "REST routes no rule maps yet", "cloudfront": "REST routes no rule maps yet", "dlm": "REST routes no rule maps yet", "elasticfilesystem": "REST routes no rule maps yet", "emr-serverless": "REST routes no rule maps yet", "es": "REST routes no rule maps yet", "fis": "REST routes no rule maps yet", "guardduty": "REST routes no rule maps yet", "iot": "REST routes no rule maps yet", "kafka": "REST routes no rule maps yet", "macie2": "REST routes no rule maps yet", "mq": "REST routes no rule maps yet", "quicksight": "metadata-only REST subset; role passing and iam:PassRole checks are not implemented", "rum": "REST routes no rule maps yet", "s3tables": "REST routes no rule maps yet", "timestream": "the Alchemy fork's Timestream service; its requests are not read yet"},
-  "otherNamespaces": ["agent-registry", "aidevops", "aiops", "airflow-serverless", "amplify", "aoss", "appflow", "appmesh", "apprunner", "appstream", "arc-region-switch", "backup-gateway", "backup-search", "bcm-dashboards", "braket", "chatbot", "chime", "cleanrooms", "cleanrooms-ml", "codeconnections", "codestar-connections", "cognito-sync", "comprehendmedical", "databrew", "dataexchange", "datapipeline", "datazone", "dax", "deadline", "devicefarm", "elemental-inference", "emr-containers", "entityresolution", "fms", "forecast", "frauddetector", "gamelift", "gameliftstreams", "geo", "grafana", "greengrass", "groundstation", "health-agent", "healthlake", "imagebuilder", "iotdeviceadvisor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iottwinmaker", "iotwireless", "kafkaconnect", "kendra", "lex", "lookoutequipment", "m2", "machinelearning", "mediaconnect", "mediaconvert", "medialive", "mediapackage", "mediapackage-vod", "mediapackagev2", "mediastore", "medical-imaging", "mobiletargeting", "neptune-graph", "observabilityadmin", "odb", "omics", "opensearch", "osis", "partnercentral", "pcs", "personalize", "profile", "proton", "qbusiness", "repostspace", "resiliencehub", "rolesanywhere", "s3files", "sagemaker-geospatial", "securityagent", "securitylake", "shield", "sms-voice", "snowball", "social-messaging", "ssm-incidents", "ssm-quicksetup", "storagegateway", "supportapp", "synthetics", "voiceid", "wellarchitected", "wisdom", "workmail", "workspaces"],
+  "_source": {"generator": "tools/aws/regen_iam_passed_roles.py", "reference": "--source-dir /tmp/svcref2", "botocore": "botocore 1.43.118 (installed package)", "retrieved": "2026-11-12", "note": "make iam-passed-roles-check re-derives every member from botocore; make iam-passed-roles-verify checks every operation against AWS."},
+  "namespaces": {"airflow-serverless": ["mwaa-serverless"], "aoss": ["opensearchserverless"], "application-autoscaling": ["application-autoscaling"], "athena": ["athena"], "autoscaling": ["autoscaling"], "budgets": ["budgets"], "cassandra": [], "cloudformation": ["cloudcontrol", "cloudformation"], "cloudtrail": ["cloudtrail"], "cloudwatch": ["cloudwatch", "cloudwatchomni"], "codebuild": ["codebuild"], "codedeploy": ["codedeploy"], "codepipeline": ["codepipeline"], "cognito-identity": ["cognito-identity"], "cognito-idp": ["cognito-idp"], "comprehend": ["comprehend"], "config": ["config"], "databrew": ["databrew"], "dataexchange": ["dataexchange"], "datasync": ["datasync"], "datazone": ["datazone"], "dax": ["dax"], "deadline": ["deadline"], "devops-guru": [], "dms": ["dms"], "docdb-elastic": [], "ds": [], "dsql": ["dsql"], "ec2": ["ec2"], "ecr": ["ecr"], "ecr-public": [], "ecs": ["ecs"], "eks": ["eks"], "elasticmapreduce": ["emr"], "emr-containers": ["emr-containers"], "entityresolution": ["entityresolution"], "events": ["eventbridgev2", "events"], "firehose": ["firehose"], "fms": ["fms"], "forecast": ["forecast"], "fsx": [], "glacier": [], "glue": ["glue"], "grafana": ["grafana"], "greengrass": ["greengrass", "greengrassv2"], "healthlake": ["healthlake"], "iam": ["iam"], "imagebuilder": ["imagebuilder"], "internetmonitor": [], "iotfleetwise": ["iotfleetwise"], "iotmanagedintegrations": ["iot-managed-integrations"], "iotsitewise": ["iotsitewise"], "iotwireless": ["iotwireless"], "ivs": [], "ivschat": [], "kendra": ["kendra"], "kinesis": ["kinesis"], "kinesisanalytics": ["kinesisanalytics", "kinesisanalyticsv2"], "kinesisvideo": [], "lambda": ["lambda", "lambda-core", "lambda-microvms", "lambda-web"], "lex": ["lex-models", "lexv2-models"], "license-manager": [], "logs": ["logs"], "mediaconnect": ["mediaconnect"], "mediaconvert": ["mediaconvert"], "medialive": ["medialive"], "mediapackagev2": ["mediapackagev2"], "mediatailor": [], "medical-imaging": ["medical-imaging"], "neptune-graph": ["neptune-graph"], "notifications": [], "notifications-contacts": [], "observabilityadmin": ["observabilityadmin"], "omics": ["omics"], "osis": ["osis"], "personalize": ["personalize"], "pipes": ["pipes"], "qapps": [], "qbusiness": ["qbusiness"], "rbin": [], "rds": ["docdb", "neptune", "rds"], "redshift": ["redshift"], "redshift-serverless": ["redshift-serverless"], "rekognition": ["rekognition"], "repostspace": ["repostspace"], "resource-groups": ["resource-groups"], "rolesanywhere": ["rolesanywhere"], "route53profiles": [], "s3": ["s3", "s3control"], "s3files": ["s3files"], "sagemaker": ["sagemaker"], "scheduler": ["scheduler"], "schemas": [], "sdb": [], "secretsmanager": ["secretsmanager"], "securitylake": ["securitylake"], "servicecatalog": ["servicecatalog"], "ses": ["mailmanager", "pinpoint-email", "ses", "sesv2"], "shield": ["shield"], "signer": [], "sms-voice": ["pinpoint-sms-voice-v2"], "sns": ["sns"], "social-messaging": ["socialmessaging"], "ssm": ["ssm"], "ssm-contacts": [], "ssm-incidents": ["ssm-incidents"], "states": ["stepfunctions"], "swf": ["swf"], "synthetics": ["synthetics"], "textract": ["textract"], "transcribe": ["transcribe"], "transfer": ["transfer"], "translate": ["translate"], "vpc-lattice": [], "xray": []},
+  "notCovered": {"access-analyzer": "REST routes no rule maps yet", "aiops": "REST routes no rule maps yet", "airflow": "REST routes no rule maps yet", "amplify": "REST routes no rule maps yet", "apigateway": "authorized by HTTP method, so no request is checked as one of these operations", "appconfig": "REST routes no rule maps yet", "appflow": "REST routes no rule maps yet", "apprunner": "not read yet: CreateService and UpdateService pass AccessRoleArn and InstanceRoleArn", "appsync": "REST routes no rule maps yet", "aps": "REST routes no rule maps yet", "aws-marketplace": "REST routes no rule maps yet", "backup": "REST routes no rule maps yet", "backup-search": "REST routes no rule maps yet: StartSearchResultExportJob passes RoleArn", "batch": "REST routes no rule maps yet", "bedrock": "REST routes no rule maps yet", "bedrock-agentcore": "REST routes no rule maps yet", "chatbot": "REST routes no rule maps yet: channel configurations pass IamRoleArn", "cloudfront": "REST routes no rule maps yet", "codeconnections": "not read yet: its JSON operations name connections, hosts and repository links by ARN or ID", "comprehendmedical": "not read yet: its Start*Job operations pass DataAccessRoleArn; a later batch", "dlm": "REST routes no rule maps yet", "elasticfilesystem": "REST routes no rule maps yet", "emr-serverless": "REST routes no rule maps yet", "es": "REST routes no rule maps yet", "fis": "REST routes no rule maps yet", "geo": "REST routes no rule maps yet", "guardduty": "REST routes no rule maps yet", "iot": "REST routes no rule maps yet", "kafka": "REST routes no rule maps yet", "macie2": "REST routes no rule maps yet", "mq": "REST routes no rule maps yet", "quicksight": "metadata-only REST subset; role passing and iam:PassRole checks are not implemented", "rum": "REST routes no rule maps yet", "s3tables": "REST routes no rule maps yet", "timestream": "the Alchemy fork's Timestream service; its requests are not read yet"},
+  "otherNamespaces": ["agent-registry", "aidevops", "appmesh", "appstream", "arc-region-switch", "backup-gateway", "bcm-dashboards", "braket", "chime", "cleanrooms", "cleanrooms-ml", "codestar-connections", "cognito-sync", "datapipeline", "devicefarm", "elemental-inference", "frauddetector", "gamelift", "gameliftstreams", "groundstation", "health-agent", "iotdeviceadvisor", "iottwinmaker", "kafkaconnect", "lookoutequipment", "m2", "machinelearning", "mediapackage", "mediapackage-vod", "mediastore", "mobiletargeting", "odb", "opensearch", "partnercentral", "pcs", "profile", "proton", "resiliencehub", "sagemaker-geospatial", "securityagent", "snowball", "ssm-quicksetup", "storagegateway", "supportapp", "voiceid", "wellarchitected", "wisdom", "workmail", "workspaces"],
   "operations": {
+    "airflow-serverless:CreateWorkflow": {"passedTo": ["airflow-serverless"], "roles": [
+      {"member": "RoleArn", "passedTo": "airflow-serverless"}
+    ]},
+    "airflow-serverless:UpdateWorkflow": {"passedTo": ["airflow-serverless"], "roles": [
+      {"member": "RoleArn", "passedTo": "airflow-serverless"}
+    ]},
+    "aoss:CreateIngestionStream": {"passedTo": [], "roles": [
+      {"member": "roleArn"}
+    ]},
     "application-autoscaling:RegisterScalableTarget": {"passedTo": ["application-autoscaling"], "byHand": "the scalable target's role"},
     "athena:CreateWorkGroup": {"passedTo": ["athena"], "roles": [
       {"member": "Configuration.ExecutionRole", "passedTo": "athena"}
@@ -222,6 +231,27 @@
     "config:PutConformancePack": {"passedTo": ["ssm"], "notRead": "no member of the request names a role"},
     "config:PutOrganizationConformancePack": {"passedTo": ["ssm"], "notRead": "no member of the request names a role"},
     "config:PutRemediationConfigurations": {"passedTo": ["ssm"], "notRead": "the role is a parameter of the runbook it runs, not a member of the request"},
+    "databrew:CreateProfileJob": {"passedTo": ["databrew"], "roles": [
+      {"member": "RoleArn", "passedTo": "databrew"}
+    ]},
+    "databrew:CreateProject": {"passedTo": ["databrew"], "roles": [
+      {"member": "RoleArn", "passedTo": "databrew"}
+    ]},
+    "databrew:CreateRecipeJob": {"passedTo": ["databrew"], "roles": [
+      {"member": "RoleArn", "passedTo": "databrew"}
+    ]},
+    "databrew:UpdateProfileJob": {"passedTo": ["databrew"], "roles": [
+      {"member": "RoleArn", "passedTo": "databrew"}
+    ]},
+    "databrew:UpdateProject": {"passedTo": ["databrew"], "roles": [
+      {"member": "RoleArn", "passedTo": "databrew"}
+    ]},
+    "databrew:UpdateRecipeJob": {"passedTo": ["databrew"], "roles": [
+      {"member": "RoleArn", "passedTo": "databrew"}
+    ]},
+    "dataexchange:CreateJob": {"passedTo": ["dataexchange"], "roles": [
+      {"member": "Details.ImportAssetsFromLakeFormationTagPolicy.RoleArn", "passedTo": "dataexchange"}
+    ]},
     "datasync:CreateLocationAzureBlob": {"passedTo": ["datasync"], "roles": [
       {"member": "CustomSecretConfig.SecretAccessRoleArn", "passedTo": "datasync"}
     ]},
@@ -281,6 +311,75 @@
     "datasync:UpdateTask": {"passedTo": ["datasync"], "roles": [
       {"member": "ManifestConfig.Source.S3.BucketAccessRoleArn", "passedTo": "datasync"},
       {"member": "TaskReportConfig.Destination.S3.BucketAccessRoleArn", "passedTo": "datasync"}
+    ]},
+    "datazone:AssociateEnvironmentRole": {"passedTo": ["datazone"], "notRead": "the role is a label of the request URI, which PassedRoles does not read"},
+    "datazone:CreateAccountPool": {"passedTo": ["datazone"], "roles": [
+      {"member": "accountSource.customAccountPoolHandler.lambdaExecutionRoleArn", "passedTo": "datazone"}
+    ]},
+    "datazone:CreateConnection": {"passedTo": ["datazone"], "roles": [
+      {"member": "awsLocation.accessRole", "passedTo": "datazone"},
+      {"member": "props.iamProperties.roleArn", "passedTo": "datazone"},
+      {"member": "props.snowflakeProperties.snowflakeRole", "passedTo": "datazone"},
+      {"member": "props.sparkEmrProperties.runtimeRole", "passedTo": "datazone"}
+    ]},
+    "datazone:CreateDataSource": {"passedTo": ["datazone"], "roles": [
+      {"member": "configuration.glueRunConfiguration.dataAccessRole", "passedTo": "datazone"},
+      {"member": "configuration.redshiftRunConfiguration.dataAccessRole", "passedTo": "datazone"}
+    ]},
+    "datazone:CreateDomain": {"passedTo": ["datazone"], "roles": [
+      {"member": "domainExecutionRole", "passedTo": "datazone"},
+      {"member": "serviceRole", "passedTo": "datazone"}
+    ]},
+    "datazone:CreateProject": {"passedTo": ["datazone"], "roles": [
+      {"member": "projectExecutionRole", "passedTo": "datazone"}
+    ]},
+    "datazone:CreateSubscriptionTarget": {"passedTo": ["datazone"], "roles": [
+      {"member": "manageAccessRole", "passedTo": "datazone"}
+    ]},
+    "datazone:PutEnvironmentBlueprintConfiguration": {"passedTo": ["datazone"], "roles": [
+      {"member": "manageAccessRoleArn", "passedTo": "datazone"},
+      {"member": "provisioningConfigurations[].lakeFormationConfiguration.locationRegistrationRole", "passedTo": "datazone"},
+      {"member": "provisioningRoleArn", "passedTo": "datazone"}
+    ]},
+    "datazone:UpdateAccountPool": {"passedTo": ["datazone"], "roles": [
+      {"member": "accountSource.customAccountPoolHandler.lambdaExecutionRoleArn", "passedTo": "datazone"}
+    ]},
+    "datazone:UpdateConnection": {"passedTo": ["datazone"], "roles": [
+      {"member": "awsLocation.accessRole", "passedTo": "datazone"},
+      {"member": "props.snowflakeProperties.snowflakeRole", "passedTo": "datazone"},
+      {"member": "props.sparkEmrProperties.runtimeRole", "passedTo": "datazone"}
+    ]},
+    "datazone:UpdateDataSource": {"passedTo": ["datazone"], "roles": [
+      {"member": "configuration.glueRunConfiguration.dataAccessRole", "passedTo": "datazone"},
+      {"member": "configuration.redshiftRunConfiguration.dataAccessRole", "passedTo": "datazone"}
+    ]},
+    "datazone:UpdateDomain": {"passedTo": ["datazone"], "roles": [
+      {"member": "domainExecutionRole", "passedTo": "datazone"},
+      {"member": "serviceRole", "passedTo": "datazone"}
+    ]},
+    "datazone:UpdateSubscriptionTarget": {"passedTo": ["datazone"], "roles": [
+      {"member": "manageAccessRole", "passedTo": "datazone"}
+    ]},
+    "dax:CreateCluster": {"passedTo": ["dax"], "roles": [
+      {"member": "IamRoleArn", "passedTo": "dax"}
+    ]},
+    "deadline:CreateFleet": {"passedTo": ["deadline"], "roles": [
+      {"member": "roleArn", "passedTo": "deadline"}
+    ]},
+    "deadline:CreateMonitor": {"passedTo": ["deadline"], "roles": [
+      {"member": "roleArn", "passedTo": "deadline"}
+    ]},
+    "deadline:CreateQueue": {"passedTo": ["deadline"], "roles": [
+      {"member": "roleArn", "passedTo": "deadline"}
+    ]},
+    "deadline:UpdateFleet": {"passedTo": ["deadline"], "roles": [
+      {"member": "roleArn", "passedTo": "deadline"}
+    ]},
+    "deadline:UpdateMonitor": {"passedTo": ["deadline"], "roles": [
+      {"member": "roleArn", "passedTo": "deadline"}
+    ]},
+    "deadline:UpdateQueue": {"passedTo": ["deadline"], "roles": [
+      {"member": "roleArn", "passedTo": "deadline"}
     ]},
     "dms:CreateDataMigration": {"passedTo": ["dms"], "roles": [
       {"member": "ServiceAccessRoleArn", "passedTo": "dms"}
@@ -413,6 +512,33 @@
       {"member": "ExecutionRoleArn", "passedTo": "elasticmapreduce"}
     ]},
     "elasticmapreduce:UpdateStudio": {"passedTo": [], "notRead": "no member of the request names a role"},
+    "emr-containers:CreateManagedEndpoint": {"passedTo": ["pods.eks"], "roles": [
+      {"member": "executionRoleArn", "passedTo": "pods.eks"}
+    ]},
+    "emr-containers:StartJobRun": {"passedTo": ["pods.eks"], "roles": [
+      {"member": "executionRoleArn", "passedTo": "pods.eks"}
+    ]},
+    "entityresolution:CreateIdMappingWorkflow": {"passedTo": ["entityresolution"], "roles": [
+      {"member": "roleArn", "passedTo": "entityresolution"}
+    ]},
+    "entityresolution:CreateIdNamespace": {"passedTo": ["entityresolution"], "roles": [
+      {"member": "roleArn", "passedTo": "entityresolution"}
+    ]},
+    "entityresolution:CreateMatchingWorkflow": {"passedTo": ["entityresolution"], "roles": [
+      {"member": "roleArn", "passedTo": "entityresolution"}
+    ]},
+    "entityresolution:StartIdMappingJob": {"passedTo": ["entityresolution"], "roles": [
+      {"member": "outputSourceConfig[].roleArn", "passedTo": "entityresolution"}
+    ]},
+    "entityresolution:UpdateIdMappingWorkflow": {"passedTo": ["entityresolution"], "roles": [
+      {"member": "roleArn", "passedTo": "entityresolution"}
+    ]},
+    "entityresolution:UpdateIdNamespace": {"passedTo": ["entityresolution"], "roles": [
+      {"member": "roleArn", "passedTo": "entityresolution"}
+    ]},
+    "entityresolution:UpdateMatchingWorkflow": {"passedTo": ["entityresolution"], "roles": [
+      {"member": "roleArn", "passedTo": "entityresolution"}
+    ]},
     "events:CreateEndpoint": {"passedTo": ["events"], "roles": [
       {"member": "RoleArn", "passedTo": "events"}
     ]},
@@ -484,6 +610,30 @@
       {"member": "SnowflakeDestinationUpdate.SecretsManagerConfiguration.RoleARN", "passedTo": "firehose"},
       {"member": "SplunkDestinationUpdate.S3Update.RoleARN", "passedTo": "firehose"},
       {"member": "SplunkDestinationUpdate.SecretsManagerConfiguration.RoleARN", "passedTo": "firehose"}
+    ]},
+    "fms:PutNotificationChannel": {"passedTo": ["fms"], "roles": [
+      {"member": "SnsRoleName", "passedTo": "fms", "byName": true}
+    ]},
+    "forecast:CreateAutoPredictor": {"passedTo": ["forecast"], "roles": [
+      {"member": "EncryptionConfig.RoleArn", "passedTo": "forecast"}
+    ]},
+    "forecast:CreateDataset": {"passedTo": ["forecast"], "roles": [
+      {"member": "EncryptionConfig.RoleArn", "passedTo": "forecast"}
+    ]},
+    "forecast:CreateDatasetImportJob": {"passedTo": ["forecast"], "roles": [
+      {"member": "DataSource.S3Config.RoleArn", "passedTo": "forecast"}
+    ]},
+    "forecast:CreateExplainabilityExport": {"passedTo": ["forecast"], "roles": [
+      {"member": "Destination.S3Config.RoleArn", "passedTo": "forecast"}
+    ]},
+    "forecast:CreateForecastExportJob": {"passedTo": ["forecast"], "roles": [
+      {"member": "Destination.S3Config.RoleArn", "passedTo": "forecast"}
+    ]},
+    "forecast:CreatePredictor": {"passedTo": ["forecast"], "roles": [
+      {"member": "EncryptionConfig.RoleArn", "passedTo": "forecast"}
+    ]},
+    "forecast:CreatePredictorBacktestExportJob": {"passedTo": ["forecast"], "roles": [
+      {"member": "Destination.S3Config.RoleArn", "passedTo": "forecast"}
     ]},
     "glue:CreateCatalog": {"passedTo": ["glue"], "roles": [
       {"member": "CatalogInput.CatalogProperties.DataLakeAccessProperties.DataTransferRole", "passedTo": "glue"},
@@ -569,7 +719,164 @@
     "glue:UpdateTableOptimizer": {"passedTo": ["glue"], "roles": [
       {"member": "TableOptimizerConfiguration.roleArn", "passedTo": "glue"}
     ]},
+    "grafana:CreateWorkspace": {"passedTo": ["grafana"], "roles": [
+      {"member": "organizationRoleName", "passedTo": "grafana", "byName": true},
+      {"member": "workspaceRoleArn", "passedTo": "grafana"}
+    ]},
+    "grafana:UpdateWorkspace": {"passedTo": ["grafana"], "roles": [
+      {"member": "organizationRoleName", "passedTo": "grafana", "byName": true},
+      {"member": "workspaceRoleArn", "passedTo": "grafana"}
+    ]},
+    "greengrass:AssociateRoleToGroup": {"passedTo": ["greengrass"], "roles": [
+      {"member": "RoleArn", "passedTo": "greengrass"}
+    ]},
+    "greengrass:AssociateServiceRoleToAccount": {"passedTo": ["greengrass"], "roles": [
+      {"member": "RoleArn", "passedTo": "greengrass"}
+    ]},
+    "greengrass:CreateSoftwareUpdateJob": {"passedTo": ["greengrass"], "roles": [
+      {"member": "S3UrlSignerRole", "passedTo": "greengrass"}
+    ]},
+    "greengrass:StartBulkDeployment": {"passedTo": ["greengrass"], "roles": [
+      {"member": "ExecutionRoleArn", "passedTo": "greengrass"}
+    ]},
+    "healthlake:StartDataTransformationJob": {"passedTo": ["healthlake"], "roles": [
+      {"member": "DataAccessRoleArn", "passedTo": "healthlake"}
+    ]},
+    "healthlake:StartFHIRExportJob": {"passedTo": ["healthlake"], "roles": [
+      {"member": "DataAccessRoleArn", "passedTo": "healthlake"}
+    ]},
+    "healthlake:StartFHIRImportJob": {"passedTo": ["healthlake"], "roles": [
+      {"member": "DataAccessRoleArn", "passedTo": "healthlake"}
+    ]},
     "iam:AddRoleToInstanceProfile": {"passedTo": ["ec2"], "byHand": "the role it adds, on the ARN IAM holds it under"},
+    "imagebuilder:CreateDistributionConfiguration": {"passedTo": ["vmie"], "roles": [
+      {"member": "distributions[].s3ExportConfiguration.roleName", "passedTo": "vmie", "byName": true}
+    ]},
+    "imagebuilder:CreateImage": {"passedTo": ["imagebuilder"], "roles": [
+      {"member": "executionRole", "passedTo": "imagebuilder", "byName": true}
+    ]},
+    "imagebuilder:CreateImagePipeline": {"passedTo": ["imagebuilder"], "roles": [
+      {"member": "executionRole", "passedTo": "imagebuilder", "byName": true}
+    ]},
+    "imagebuilder:CreateInfrastructureConfiguration": {"passedTo": ["ec2"], "byHand": "the roles of the instance profile it names"},
+    "imagebuilder:CreateLifecyclePolicy": {"passedTo": ["imagebuilder"], "roles": [
+      {"member": "executionRole", "passedTo": "imagebuilder", "byName": true}
+    ]},
+    "imagebuilder:DistributeImage": {"passedTo": ["imagebuilder"], "roles": [
+      {"member": "executionRole", "passedTo": "imagebuilder", "byName": true}
+    ]},
+    "imagebuilder:ImportDiskImage": {"passedTo": ["imagebuilder"], "roles": [
+      {"member": "executionRole", "passedTo": "imagebuilder", "byName": true}
+    ]},
+    "imagebuilder:StartResourceStateUpdate": {"passedTo": ["imagebuilder"], "roles": [
+      {"member": "executionRole", "passedTo": "imagebuilder", "byName": true}
+    ]},
+    "imagebuilder:UpdateDistributionConfiguration": {"passedTo": ["vmie"], "roles": [
+      {"member": "distributions[].s3ExportConfiguration.roleName", "passedTo": "vmie", "byName": true}
+    ]},
+    "imagebuilder:UpdateImagePipeline": {"passedTo": ["imagebuilder"], "roles": [
+      {"member": "executionRole", "passedTo": "imagebuilder", "byName": true}
+    ]},
+    "imagebuilder:UpdateInfrastructureConfiguration": {"passedTo": ["ec2"], "byHand": "the roles of the instance profile it names"},
+    "imagebuilder:UpdateLifecyclePolicy": {"passedTo": ["imagebuilder"], "roles": [
+      {"member": "executionRole", "passedTo": "imagebuilder", "byName": true}
+    ]},
+    "iotfleetwise:CreateCampaign": {"passedTo": ["iotfleetwise"], "roles": [
+      {"member": "dataDestinationConfigs[].mqttTopicConfig.executionRoleArn", "passedTo": "iotfleetwise"},
+      {"member": "dataDestinationConfigs[].timestreamConfig.executionRoleArn", "passedTo": "iotfleetwise"}
+    ]},
+    "iotmanagedintegrations:CreateDestination": {"passedTo": [], "roles": [
+      {"member": "RoleArn"}
+    ]},
+    "iotsitewise:CreateAssetModelCompositeModel": {"passedTo": ["iotsitewise"], "notRead": "the role is in the default value of an AWS/L4E_ANOMALY_PERMISSIONS attribute, a JSON document"},
+    "iotsitewise:CreateBulkImportJob": {"passedTo": ["iotsitewise"], "roles": [
+      {"member": "jobRoleArn", "passedTo": "iotsitewise"}
+    ]},
+    "iotsitewise:CreateDataset": {"passedTo": ["iotsitewise"], "roles": [
+      {"member": "datasetSource.sourceDetail.kendra.roleArn", "passedTo": "iotsitewise"}
+    ]},
+    "iotsitewise:CreateGateway": {"passedTo": ["iotsitewise"], "notRead": "no member of the request names a role"},
+    "iotsitewise:CreatePortal": {"passedTo": ["iotsitewise"], "roles": [
+      {"member": "alarms.alarmRoleArn", "passedTo": "iotsitewise"},
+      {"member": "roleArn", "passedTo": "iotsitewise"}
+    ]},
+    "iotsitewise:CreateTask": {"passedTo": ["iotsitewise"], "roles": [
+      {"member": "taskConfiguration.containerTaskConfiguration.taskExecutionRole", "passedTo": "iotsitewise"}
+    ]},
+    "iotsitewise:PutStorageConfiguration": {"passedTo": ["iotsitewise"], "roles": [
+      {"member": "multiLayerStorage.customerManagedS3Storage.roleArn", "passedTo": "iotsitewise"}
+    ]},
+    "iotsitewise:UpdateAssetModelCompositeModel": {"passedTo": ["iotsitewise"], "notRead": "the role is in the default value of an AWS/L4E_ANOMALY_PERMISSIONS attribute, a JSON document"},
+    "iotsitewise:UpdateDataset": {"passedTo": ["iotsitewise"], "roles": [
+      {"member": "datasetSource.sourceDetail.kendra.roleArn", "passedTo": "iotsitewise"}
+    ]},
+    "iotsitewise:UpdatePortal": {"passedTo": ["iotsitewise"], "roles": [
+      {"member": "alarms.alarmRoleArn", "passedTo": "iotsitewise"},
+      {"member": "roleArn", "passedTo": "iotsitewise"}
+    ]},
+    "iotsitewise:UpdateTask": {"passedTo": ["iotsitewise"], "roles": [
+      {"member": "taskConfiguration.containerTaskConfiguration.taskExecutionRole", "passedTo": "iotsitewise"}
+    ]},
+    "iotwireless:CreateDestination": {"passedTo": ["iotwireless"], "roles": [
+      {"member": "RoleArn", "passedTo": "iotwireless"}
+    ]},
+    "iotwireless:CreateFuotaTask": {"passedTo": ["iotwireless"], "roles": [
+      {"member": "FirmwareUpdateRole", "passedTo": "iotwireless"}
+    ]},
+    "iotwireless:CreateWirelessGatewayTaskDefinition": {"passedTo": ["iotwireless"], "roles": [
+      {"member": "Update.UpdateDataRole", "passedTo": "iotwireless"}
+    ]},
+    "iotwireless:StartWirelessDeviceImportTask": {"passedTo": ["iotwireless"], "roles": [
+      {"member": "Sidewalk.Role", "passedTo": "iotwireless"}
+    ]},
+    "iotwireless:UpdateDestination": {"passedTo": ["iotwireless"], "roles": [
+      {"member": "RoleArn", "passedTo": "iotwireless"}
+    ]},
+    "iotwireless:UpdateFuotaTask": {"passedTo": ["iotwireless"], "roles": [
+      {"member": "FirmwareUpdateRole", "passedTo": "iotwireless"}
+    ]},
+    "kendra:BatchPutDocument": {"passedTo": ["kendra"], "roles": [
+      {"member": "CustomDocumentEnrichmentConfiguration.RoleArn", "passedTo": "kendra"},
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:CreateDataSource": {"passedTo": ["kendra"], "roles": [
+      {"member": "CustomDocumentEnrichmentConfiguration.RoleArn", "passedTo": "kendra"},
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:CreateExperience": {"passedTo": ["kendra"], "roles": [
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:CreateFaq": {"passedTo": ["kendra"], "roles": [
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:CreateIndex": {"passedTo": ["kendra"], "roles": [
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:CreateQuerySuggestionsBlockList": {"passedTo": ["kendra"], "roles": [
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:CreateThesaurus": {"passedTo": ["kendra"], "roles": [
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:PutPrincipalMapping": {"passedTo": ["kendra"], "roles": [
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:UpdateDataSource": {"passedTo": ["kendra"], "roles": [
+      {"member": "CustomDocumentEnrichmentConfiguration.RoleArn", "passedTo": "kendra"},
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:UpdateExperience": {"passedTo": ["kendra"], "roles": [
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:UpdateIndex": {"passedTo": ["kendra"], "roles": [
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:UpdateQuerySuggestionsBlockList": {"passedTo": ["kendra"], "roles": [
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
+    "kendra:UpdateThesaurus": {"passedTo": ["kendra"], "roles": [
+      {"member": "RoleArn", "passedTo": "kendra"}
+    ]},
     "kinesis:CreateChannel": {"passedTo": ["kinesis"], "roles": [
       {"member": "ServiceExecutionRoleARN", "passedTo": "kinesis"}
     ]},
@@ -629,6 +936,19 @@
     "lambda:UpdateFunctionConfiguration": {"passedTo": ["lambda"], "byHand": "the execution role"},
     "lambda:UpdateMicrovmImage": {"passedTo": ["lambda"], "byHand": "the build role"},
     "lambda:UpdateNetworkConnector": {"passedTo": ["lambda"], "byHand": "the operator role"},
+    "lex:CreateBot": {"passedTo": ["lexv2"], "roles": [
+      {"member": "roleArn", "passedTo": "lexv2"}
+    ]},
+    "lex:StartImport": {"passedTo": ["lexv2"], "roles": [
+      {"member": "resourceSpecification.botImportSpecification.roleArn", "passedTo": "lexv2"},
+      {"member": "resourceSpecification.testSetImportResourceSpecification.roleArn", "passedTo": "lexv2"}
+    ]},
+    "lex:StartTestSetGeneration": {"passedTo": ["lexv2"], "roles": [
+      {"member": "roleArn", "passedTo": "lexv2"}
+    ]},
+    "lex:UpdateBot": {"passedTo": ["lexv2"], "roles": [
+      {"member": "roleArn", "passedTo": "lexv2"}
+    ]},
     "logs:CreateImportTask": {"passedTo": ["cloudtrail", "logs"], "notRead": "the reference passes the role to cloudtrail or logs and nothing says which"},
     "logs:CreateScheduledQuery": {"passedTo": ["logs"], "roles": [
       {"member": "destinationConfiguration.lookupTableConfiguration.roleArn", "passedTo": "logs"},
@@ -647,8 +967,228 @@
       {"member": "destinationConfiguration.s3Configuration.roleArn", "passedTo": "logs"},
       {"member": "executionRoleArn", "passedTo": "logs"}
     ]},
+    "mediaconnect:AddFlowOutputs": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "outputs[].encryption.roleArn", "passedTo": "mediaconnect"},
+      {"member": "outputs[].routerIntegrationTransitEncryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconnect:AddFlowSources": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "sources[].decryption.roleArn", "passedTo": "mediaconnect"},
+      {"member": "sources[].routerIntegrationTransitDecryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconnect:AddFlowVpcInterfaces": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "vpcInterfaces[].roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconnect:CreateFlow": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "entitlements[].encryption.roleArn", "passedTo": "mediaconnect"},
+      {"member": "outputs[].encryption.roleArn", "passedTo": "mediaconnect"},
+      {"member": "outputs[].routerIntegrationTransitEncryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"},
+      {"member": "source.decryption.roleArn", "passedTo": "mediaconnect"},
+      {"member": "source.routerIntegrationTransitDecryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"},
+      {"member": "sources[].decryption.roleArn", "passedTo": "mediaconnect"},
+      {"member": "sources[].routerIntegrationTransitDecryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"},
+      {"member": "vpcInterfaces[].roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconnect:CreateRouterInput": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "configuration.failover.protocolConfigurations[].srtCaller.decryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.failover.protocolConfigurations[].srtListener.decryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.mediaConnectFlow.sourceTransitDecryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.mediaLiveChannel.sourceTransitDecryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.standard.protocolConfiguration.srtCaller.decryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.standard.protocolConfiguration.srtListener.decryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"},
+      {"member": "transitEncryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconnect:CreateRouterOutput": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "configuration.mediaConnectFlow.destinationTransitEncryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.mediaLiveInput.destinationTransitEncryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.standard.protocolConfiguration.srtCaller.encryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.standard.protocolConfiguration.srtListener.encryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconnect:GrantFlowEntitlements": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "entitlements[].encryption.roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconnect:UpdateFlowEntitlement": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "encryption.roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconnect:UpdateFlowOutput": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "encryption.roleArn", "passedTo": "mediaconnect"},
+      {"member": "routerIntegrationTransitEncryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconnect:UpdateFlowSource": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "decryption.roleArn", "passedTo": "mediaconnect"},
+      {"member": "routerIntegrationTransitDecryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconnect:UpdateRouterInput": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "configuration.failover.protocolConfigurations[].srtCaller.decryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.failover.protocolConfigurations[].srtListener.decryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.mediaConnectFlow.sourceTransitDecryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.mediaLiveChannel.sourceTransitDecryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.standard.protocolConfiguration.srtCaller.decryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.standard.protocolConfiguration.srtListener.decryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"},
+      {"member": "transitEncryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconnect:UpdateRouterOutput": {"passedTo": ["mediaconnect"], "roles": [
+      {"member": "configuration.mediaConnectFlow.destinationTransitEncryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.mediaLiveInput.destinationTransitEncryption.encryptionKeyConfiguration.secretsManager.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.standard.protocolConfiguration.srtCaller.encryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"},
+      {"member": "configuration.standard.protocolConfiguration.srtListener.encryptionConfiguration.encryptionKey.roleArn", "passedTo": "mediaconnect"}
+    ]},
+    "mediaconvert:CreateJob": {"passedTo": ["mediaconvert"], "roles": [
+      {"member": "role", "passedTo": "mediaconvert"}
+    ]},
+    "medialive:CreateChannel": {"passedTo": ["medialive"], "roles": [
+      {"member": "roleArn", "passedTo": "medialive"}
+    ]},
+    "medialive:CreateCluster": {"passedTo": ["medialive"], "roles": [
+      {"member": "instanceRoleArn", "passedTo": "medialive"}
+    ]},
+    "medialive:CreateInput": {"passedTo": ["medialive"], "roles": [
+      {"member": "roleArn", "passedTo": "medialive"}
+    ]},
+    "medialive:UpdateChannel": {"passedTo": ["medialive"], "roles": [
+      {"member": "roleArn", "passedTo": "medialive"}
+    ]},
+    "medialive:UpdateInput": {"passedTo": ["medialive"], "roles": [
+      {"member": "roleArn", "passedTo": "medialive"}
+    ]},
+    "medialive:UpdateInputDevice": {"passedTo": ["medialive"], "roles": [
+      {"member": "hdDeviceSettings.mediaconnectSettings.roleArn", "passedTo": "medialive"},
+      {"member": "uhdDeviceSettings.mediaconnectSettings.roleArn", "passedTo": "medialive"}
+    ]},
+    "mediapackagev2:CreateOriginEndpoint": {"passedTo": ["mediapackagev2"], "roles": [
+      {"member": "Segment.Encryption.SpekeKeyProvider.RoleArn", "passedTo": "mediapackagev2"}
+    ]},
+    "mediapackagev2:PutOriginEndpointPolicy": {"passedTo": ["mediapackagev2"], "roles": [
+      {"member": "CdnAuthConfiguration.SecretsRoleArn", "passedTo": "mediapackagev2"}
+    ]},
+    "mediapackagev2:UpdateOriginEndpoint": {"passedTo": ["mediapackagev2"], "roles": [
+      {"member": "Segment.Encryption.SpekeKeyProvider.RoleArn", "passedTo": "mediapackagev2"}
+    ]},
+    "medical-imaging:StartDICOMImportJob": {"passedTo": ["medical-imaging"], "roles": [
+      {"member": "dataAccessRoleArn", "passedTo": "medical-imaging"}
+    ]},
+    "neptune-graph:CreateGraphUsingImportTask": {"passedTo": ["neptune-graph"], "roles": [
+      {"member": "roleArn", "passedTo": "neptune-graph"}
+    ]},
+    "neptune-graph:StartExportTask": {"passedTo": ["neptune-graph"], "roles": [
+      {"member": "roleArn", "passedTo": "neptune-graph"}
+    ]},
+    "neptune-graph:StartImportTask": {"passedTo": ["neptune-graph"], "roles": [
+      {"member": "roleArn", "passedTo": "neptune-graph"}
+    ]},
+    "observabilityadmin:CreateDatasetIntegration": {"passedTo": ["logs", "test.logs"], "roles": [
+      {"member": "RoleArn", "passedTo": "logs"}
+    ]},
+    "observabilityadmin:CreateS3TableIntegration": {"passedTo": ["logs"], "roles": [
+      {"member": "RoleArn", "passedTo": "logs"}
+    ]},
+    "observabilityadmin:CreateTelemetryPipeline": {"passedTo": ["logs", "telemetry-pipelines.observabilityadmin"], "notRead": "the role is the source's aws.sts_role_arn inside the YAML configuration body"},
+    "observabilityadmin:UpdateDatasetIntegration": {"passedTo": ["logs", "test.logs"], "roles": [
+      {"member": "RoleArn", "passedTo": "logs"}
+    ]},
+    "observabilityadmin:UpdateTelemetryPipeline": {"passedTo": ["logs", "telemetry-pipelines.observabilityadmin"], "notRead": "the role is the source's aws.sts_role_arn inside the YAML configuration body"},
+    "omics:CreateConfiguration": {"passedTo": ["omics"], "notRead": "no member of the request names a role"},
+    "omics:StartAnnotationImportJob": {"passedTo": ["omics"], "roles": [
+      {"member": "roleArn", "passedTo": "omics"}
+    ]},
+    "omics:StartReadSetExportJob": {"passedTo": ["omics"], "roles": [
+      {"member": "roleArn", "passedTo": "omics"}
+    ]},
+    "omics:StartReadSetImportJob": {"passedTo": ["omics"], "roles": [
+      {"member": "roleArn", "passedTo": "omics"}
+    ]},
+    "omics:StartReferenceImportJob": {"passedTo": ["omics"], "roles": [
+      {"member": "roleArn", "passedTo": "omics"}
+    ]},
+    "omics:StartRun": {"passedTo": ["omics"], "roles": [
+      {"member": "roleArn", "passedTo": "omics"}
+    ]},
+    "omics:StartRunBatch": {"passedTo": ["omics"], "roles": [
+      {"member": "defaultRunSetting.roleArn", "passedTo": "omics"}
+    ]},
+    "omics:StartVariantImportJob": {"passedTo": ["omics"], "roles": [
+      {"member": "roleArn", "passedTo": "omics"}
+    ]},
+    "osis:CreatePipeline": {"passedTo": ["osis-pipelines"], "roles": [
+      {"member": "PipelineRoleArn", "passedTo": "osis-pipelines"}
+    ]},
+    "osis:UpdatePipeline": {"passedTo": ["osis-pipelines"], "roles": [
+      {"member": "PipelineRoleArn", "passedTo": "osis-pipelines"}
+    ]},
+    "personalize:CreateBatchInferenceJob": {"passedTo": ["personalize"], "roles": [
+      {"member": "roleArn", "passedTo": "personalize"}
+    ]},
+    "personalize:CreateBatchSegmentJob": {"passedTo": ["personalize"], "roles": [
+      {"member": "roleArn", "passedTo": "personalize"}
+    ]},
+    "personalize:CreateDataDeletionJob": {"passedTo": ["personalize"], "roles": [
+      {"member": "roleArn", "passedTo": "personalize"}
+    ]},
+    "personalize:CreateDatasetExportJob": {"passedTo": ["personalize"], "roles": [
+      {"member": "roleArn", "passedTo": "personalize"}
+    ]},
+    "personalize:CreateDatasetGroup": {"passedTo": ["personalize"], "roles": [
+      {"member": "roleArn", "passedTo": "personalize"}
+    ]},
+    "personalize:CreateDatasetImportJob": {"passedTo": ["personalize"], "roles": [
+      {"member": "roleArn", "passedTo": "personalize"}
+    ]},
+    "personalize:CreateMetricAttribution": {"passedTo": ["personalize"], "roles": [
+      {"member": "metricsOutputConfig.roleArn", "passedTo": "personalize"}
+    ]},
+    "personalize:UpdateMetricAttribution": {"passedTo": ["personalize"], "roles": [
+      {"member": "metricsOutputConfig.roleArn", "passedTo": "personalize"}
+    ]},
     "pipes:CreatePipe": {"passedTo": ["pipes"], "byHand": "the pipe's role"},
     "pipes:UpdatePipe": {"passedTo": ["pipes"], "byHand": "the pipe's role"},
+    "qbusiness:BatchPutDocument": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "documents[].documentEnrichmentConfiguration.postExtractionHookConfiguration.roleArn", "passedTo": "qbusiness"},
+      {"member": "documents[].documentEnrichmentConfiguration.preExtractionHookConfiguration.roleArn", "passedTo": "qbusiness"},
+      {"member": "roleArn", "passedTo": "qbusiness"}
+    ]},
+    "qbusiness:CreateApplication": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "roleArn", "passedTo": "qbusiness"}
+    ]},
+    "qbusiness:CreateDataSource": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "documentEnrichmentConfiguration.postExtractionHookConfiguration.roleArn", "passedTo": "qbusiness"},
+      {"member": "documentEnrichmentConfiguration.preExtractionHookConfiguration.roleArn", "passedTo": "qbusiness"},
+      {"member": "roleArn", "passedTo": "qbusiness"}
+    ]},
+    "qbusiness:CreatePlugin": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "authConfiguration.basicAuthConfiguration.roleArn", "passedTo": "qbusiness"},
+      {"member": "authConfiguration.idcAuthConfiguration.roleArn", "passedTo": "qbusiness"},
+      {"member": "authConfiguration.oAuth2ClientCredentialConfiguration.roleArn", "passedTo": "qbusiness"}
+    ]},
+    "qbusiness:CreateRetriever": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "roleArn", "passedTo": "qbusiness"}
+    ]},
+    "qbusiness:CreateWebExperience": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "identityProviderConfiguration.openIDConnectConfiguration.secretsRole", "passedTo": "qbusiness"},
+      {"member": "roleArn", "passedTo": "qbusiness"}
+    ]},
+    "qbusiness:PutGroup": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "roleArn", "passedTo": "qbusiness"}
+    ]},
+    "qbusiness:UpdateApplication": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "roleArn", "passedTo": "qbusiness"}
+    ]},
+    "qbusiness:UpdateDataSource": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "documentEnrichmentConfiguration.postExtractionHookConfiguration.roleArn", "passedTo": "qbusiness"},
+      {"member": "documentEnrichmentConfiguration.preExtractionHookConfiguration.roleArn", "passedTo": "qbusiness"},
+      {"member": "roleArn", "passedTo": "qbusiness"}
+    ]},
+    "qbusiness:UpdatePlugin": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "authConfiguration.basicAuthConfiguration.roleArn", "passedTo": "qbusiness"},
+      {"member": "authConfiguration.idcAuthConfiguration.roleArn", "passedTo": "qbusiness"},
+      {"member": "authConfiguration.oAuth2ClientCredentialConfiguration.roleArn", "passedTo": "qbusiness"}
+    ]},
+    "qbusiness:UpdateRetriever": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "roleArn", "passedTo": "qbusiness"}
+    ]},
+    "qbusiness:UpdateWebExperience": {"passedTo": ["qbusiness"], "roles": [
+      {"member": "authenticationConfiguration.samlConfiguration.roleArn", "passedTo": "qbusiness"},
+      {"member": "identityProviderConfiguration.openIDConnectConfiguration.secretsRole", "passedTo": "qbusiness"},
+      {"member": "roleArn", "passedTo": "qbusiness"}
+    ]},
     "rds:AddRoleToDBCluster": {"passedTo": ["rds"], "byHand": "the role it adds"},
     "rds:AddRoleToDBInstance": {"passedTo": ["rds", "rds-preview"], "byHand": "the role it adds"},
     "rds:CreateBlueGreenDeployment": {"passedTo": ["rds"], "notRead": "no member of the request names a role"},
@@ -715,11 +1255,27 @@
     "rekognition:StartTextDetection": {"passedTo": ["rekognition"], "roles": [
       {"member": "NotificationChannel.RoleArn", "passedTo": "rekognition"}
     ]},
+    "repostspace:CreateSpace": {"passedTo": ["repostspace"], "roles": [
+      {"member": "roleArn", "passedTo": "repostspace"}
+    ]},
+    "repostspace:UpdateSpace": {"passedTo": ["repostspace"], "roles": [
+      {"member": "roleArn", "passedTo": "repostspace"}
+    ]},
     "resource-groups:StartTagSyncTask": {"passedTo": ["resource-groups"], "roles": [
       {"member": "RoleArn", "passedTo": "resource-groups"}
     ]},
+    "rolesanywhere:CreateProfile": {"passedTo": ["rolesanywhere"], "roles": [
+      {"member": "roleArns[]", "passedTo": "rolesanywhere"}
+    ]},
+    "rolesanywhere:EnableProfile": {"passedTo": ["rolesanywhere"], "notRead": "the roles are the profile's, named when it was created or updated"},
+    "rolesanywhere:UpdateProfile": {"passedTo": ["rolesanywhere"], "roles": [
+      {"member": "roleArns[]", "passedTo": "rolesanywhere"}
+    ]},
     "s3:CreateAccessGrantsLocation": {"passedTo": [], "notRead": "the request body is XML, which PassedRoles does not read"},
     "s3:PutBucketReplication": {"passedTo": ["s3"], "notRead": "the request body is XML, which PassedRoles does not read"},
+    "s3files:CreateFileSystem": {"passedTo": ["elasticfilesystem"], "roles": [
+      {"member": "roleArn", "passedTo": "elasticfilesystem"}
+    ]},
     "sagemaker:CreateAIBenchmarkJob": {"passedTo": ["sagemaker"], "roles": [
       {"member": "RoleArn", "passedTo": "sagemaker"}
     ]},
@@ -876,6 +1432,23 @@
     "secretsmanager:RotateSecret": {"passedTo": ["secretsmanager"], "roles": [
       {"member": "ExternalSecretRotationRoleArn", "passedTo": "secretsmanager"}
     ]},
+    "securitylake:CreateCustomLogSource": {"passedTo": ["glue"], "roles": [
+      {"member": "configuration.crawlerConfiguration.roleArn", "passedTo": "glue"}
+    ]},
+    "securitylake:CreateDataLake": {"passedTo": ["lambda", "s3"], "roles": [
+      {"member": "configurations[].replicationConfiguration.roleArn", "passedTo": "s3"},
+      {"member": "metaStoreManagerRoleArn", "passedTo": "lambda"}
+    ]},
+    "securitylake:CreateSubscriberNotification": {"passedTo": ["events"], "roles": [
+      {"member": "configuration.httpsNotificationConfiguration.targetRoleArn", "passedTo": "events"}
+    ]},
+    "securitylake:UpdateDataLake": {"passedTo": ["s3"], "roles": [
+      {"member": "configurations[].replicationConfiguration.roleArn", "passedTo": "s3"},
+      {"member": "metaStoreManagerRoleArn", "passedTo": "s3"}
+    ]},
+    "securitylake:UpdateSubscriberNotification": {"passedTo": ["events"], "roles": [
+      {"member": "configuration.httpsNotificationConfiguration.targetRoleArn", "passedTo": "events"}
+    ]},
     "servicecatalog:CreateConstraint": {"passedTo": ["servicecatalog"], "byHand": "a launch constraint's role, from its parameters document"},
     "servicecatalog:CreateServiceAction": {"passedTo": ["servicecatalog"], "roles": [
       {"member": "Definition{AssumeRole}", "passedTo": "servicecatalog"}
@@ -921,6 +1494,27 @@
       {"member": "Rules[].Actions[].Send.RoleArn", "passedTo": "ses"},
       {"member": "Rules[].Actions[].WriteToS3.RoleArn", "passedTo": "ses"}
     ]},
+    "shield:AssociateDRTRole": {"passedTo": ["drt.shield"], "roles": [
+      {"member": "RoleArn", "passedTo": "drt.shield"}
+    ]},
+    "sms-voice:CreateEventDestination": {"passedTo": ["sms-voice"], "roles": [
+      {"member": "CloudWatchLogsDestination.IamRoleArn", "passedTo": "sms-voice"},
+      {"member": "KinesisFirehoseDestination.IamRoleArn", "passedTo": "sms-voice"}
+    ]},
+    "sms-voice:UpdateEventDestination": {"passedTo": ["sms-voice"], "roles": [
+      {"member": "CloudWatchLogsDestination.IamRoleArn", "passedTo": "sms-voice"},
+      {"member": "KinesisFirehoseDestination.IamRoleArn", "passedTo": "sms-voice"}
+    ]},
+    "sms-voice:UpdatePhoneNumber": {"passedTo": ["sms-voice"], "roles": [
+      {"member": "TwoWayChannelRole", "passedTo": "sms-voice"}
+    ]},
+    "sms-voice:UpdatePool": {"passedTo": ["sms-voice"], "roles": [
+      {"member": "TwoWayChannelRole", "passedTo": "sms-voice"}
+    ]},
+    "sms-voice:UpdateRcsAgent": {"passedTo": ["sms-voice"], "roles": [
+      {"member": "TwoWayChannelRole", "passedTo": "sms-voice"},
+      {"member": "TwoWayMediaS3Role", "passedTo": "sms-voice"}
+    ]},
     "sns:CreatePlatformApplication": {"passedTo": ["sns"], "byHand": "the delivery status roles among its attributes"},
     "sns:CreateTopic": {"passedTo": ["sns"], "byHand": "the delivery status roles among its attributes"},
     "sns:SetPlatformApplicationAttributes": {"passedTo": ["sns"], "byHand": "the delivery status roles among its attributes"},
@@ -928,6 +1522,18 @@
     "sns:SetSubscriptionAttributes": {"passedTo": ["sns"], "byHand": "the subscription role, when it is the attribute set"},
     "sns:SetTopicAttributes": {"passedTo": ["sns"], "byHand": "a delivery status role, when it is the attribute set"},
     "sns:Subscribe": {"passedTo": ["sns"], "byHand": "the subscription role among its attributes"},
+    "social-messaging:AssociateWhatsAppBusinessAccount": {"passedTo": ["social-messaging"], "roles": [
+      {"member": "setupFinalization.waba.eventDestinations[].roleArn", "passedTo": "social-messaging"}
+    ]},
+    "social-messaging:PutWhatsAppBusinessAccountEventDestinations": {"passedTo": ["social-messaging"], "roles": [
+      {"member": "eventDestinations[].roleArn", "passedTo": "social-messaging"}
+    ]},
+    "ssm-incidents:CreateResponsePlan": {"passedTo": ["ssm-incidents"], "roles": [
+      {"member": "actions[].ssmAutomation.roleArn", "passedTo": "ssm-incidents"}
+    ]},
+    "ssm-incidents:UpdateResponsePlan": {"passedTo": ["ssm-incidents"], "roles": [
+      {"member": "actions[].ssmAutomation.roleArn", "passedTo": "ssm-incidents"}
+    ]},
     "ssm:CreateActivation": {"passedTo": ["ssm"], "roles": [
       {"member": "IamRole", "passedTo": "ssm", "byName": true}
     ]},
@@ -975,6 +1581,15 @@
     "swf:RespondDecisionTaskCompleted": {"passedTo": ["swf"], "byHand": "the Lambda role of each decision that starts an execution, read from the attributes its decisionType names"},
     "swf:StartWorkflowExecution": {"passedTo": ["swf"], "roles": [
       {"member": "lambdaRole", "passedTo": "swf"}
+    ]},
+    "synthetics:CreateCanary": {"passedTo": ["synthetics"], "roles": [
+      {"member": "ExecutionRoleArn", "passedTo": "synthetics"}
+    ]},
+    "synthetics:StartCanaryDryRun": {"passedTo": ["synthetics"], "roles": [
+      {"member": "ExecutionRoleArn", "passedTo": "synthetics"}
+    ]},
+    "synthetics:UpdateCanary": {"passedTo": ["synthetics"], "roles": [
+      {"member": "ExecutionRoleArn", "passedTo": "synthetics"}
     ]},
     "textract:StartDocumentAnalysis": {"passedTo": ["textract"], "roles": [
       {"member": "NotificationChannel.RoleArn", "passedTo": "textract"}

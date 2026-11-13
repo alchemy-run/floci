@@ -34,6 +34,10 @@ class ResourceGroupsServiceTest {
              {"Type":"AWS::ResourceGroups::Generic","Parameters":[
                {"Name":"allowed-resource-types","Values":["AWS::EC2::CapacityReservation"]}]}]
             """;
+    static final List<Map<String, Object>> CONFIGURATION_NODE = List.of(
+            Map.of("Type", "AWS::EC2::CapacityReservationPool"),
+            Map.of("Type", "AWS::ResourceGroups::Generic", "Parameters", List.of(
+                    Map.of("Name", "allowed-resource-types", "Values", List.of("AWS::EC2::CapacityReservation")))));
     private final ObjectMapper mapper = new ObjectMapper();
     private final Map<String, CapacityReservation> reservations = new HashMap<>();
     private ResourceGroupsService service;

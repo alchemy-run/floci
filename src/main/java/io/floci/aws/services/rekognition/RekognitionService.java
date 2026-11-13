@@ -4,7 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.aws.core.common.AiMockConfigLoader;
-import io.floci.aws.core.common.AwsGeometry;
+import io.floci.aws.core.common.AwsException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
@@ -16,12 +16,12 @@ import java.util.Optional;
  * checked by {@link RekognitionImageValidator}, so an image Rekognition would refuse never
  * reaches this class.
  * <p>
- * Content-listing operations (DetectLabels, DetectText) always return one canned
- * entry, matching the TextractService stub precedent. Face/moderation operations
- * (DetectFaces, CompareFaces, DetectModerationLabels) return empty results by
- * default — an honest "nothing detected" response, rather than fabricating
- * biometric attributes or a moderation flag for content that was never analyzed,
- * matching the ComprehendService PII-detection precedent.
+ * DetectLabels always returns one canned label, as every photo has at least one.
+ * Text, face, person, celebrity, and moderation operations return nothing detected
+ * by default — an honest response,
+ * rather than fabricating biometric attributes or a moderation flag for content that
+ * was never analyzed. Where Rekognition refuses an image without a face
+ * (CompareFaces), so does Floci.
  * <p>
  * Callers can override the default stub per exact "Bucket/Name" S3Object key via
  * {@link AiMockConfigLoader} — see {@code docs/services/rekognition.md}
@@ -74,8 +74,8 @@ public class RekognitionService {
         return Response.ok(root).build();
     }
     /**
-     * DetectText — always returns one stub LINE and its child WORD, matching
-     * Textract's PAGE/LINE/WORD block-hierarchy convention.
+     * DetectText — reports no text unless mocked: Floci reads no pixels, and
+     * inventing a line would claim text the image may not have.
      * Response shape: https://docs.aws.amazon.com/rekognition/latest/APIReference/API_DetectText.html
      */
     public Response detectText(String mockKey) {
@@ -84,26 +84,14 @@ public class RekognitionService {
             return Response.ok(mock.get()).build();
         }
         ObjectNode root = objectMapper.createObjectNode();
-        ArrayNode detections = root.putArray("TextDetections");
-        ObjectNode line = detections.addObject();
-        line.put("DetectedText", "Floci");
-        line.put("Type", "LINE");
-        line.put("Id", 0);
-        line.put("Confidence", 99.9);
-        line.set("Geometry", AwsGeometry.buildGeometry(0.1, 0.1, 0.15, 0.05));
-        ObjectNode word = detections.addObject();
-        word.put("DetectedText", "Floci");
-        word.put("Type", "WORD");
-        word.put("Id", 1);
-        word.put("ParentId", 0);
-        word.put("Confidence", 99.9);
-        word.set("Geometry", AwsGeometry.buildGeometry(0.1, 0.1, 0.15, 0.05));
+        root.putArray("TextDetections");
         root.put("TextModelVersion", MODEL_VERSION);
         return Response.ok(root).build();
     }
     /**
-     * CompareFaces — always reports no matches (SourceImageFace is optional and
-     * legitimately omitted when no face is found in the source image).
+     * CompareFaces — Floci finds no face in an image it isn't told about, and
+     * Rekognition refuses to compare when the source image has no face, so an
+     * unmocked comparison is {@code InvalidParameterException}.
      * Response shape: https://docs.aws.amazon.com/rekognition/latest/APIReference/API_CompareFaces.html
      */
     public Response compareFaces(String mockKey) {
@@ -111,10 +99,56 @@ public class RekognitionService {
         if (mock.isPresent()) {
             return Response.ok(mock.get()).build();
         }
+        throw new AwsException("InvalidParameterException", "There are no faces in the source image.", 400);
+    }
+
+    /**
+     * DetectProtectiveEquipment — no persons unless mocked.
+     * Response shape: https://docs.aws.amazon.com/rekognition/latest/APIReference/API_DetectProtectiveEquipment.html
+     */
+    public Response detectProtectiveEquipment(String mockKey) {
+        Optional<JsonNode> mock = mockConfigLoader.lookup(SERVICE_KEY, mockKey, "DetectProtectiveEquipment");
+        if (mock.isPresent()) {
+            return Response.ok(mock.get()).build();
+        }
         ObjectNode root = objectMapper.createObjectNode();
-        root.putArray("FaceMatches");
-        root.putArray("UnmatchedFaces");
+        root.put("ProtectiveEquipmentModelVersion", MODEL_VERSION);
+        root.putArray("Persons");
+        ObjectNode summary = root.putObject("Summary");
+        summary.putArray("PersonsWithRequiredEquipment");
+        summary.putArray("PersonsWithoutRequiredEquipment");
+        summary.putArray("PersonsIndeterminate");
         return Response.ok(root).build();
+    }
+
+    /**
+     * RecognizeCelebrities — no celebrities unless mocked.
+     * Response shape: https://docs.aws.amazon.com/rekognition/latest/APIReference/API_RecognizeCelebrities.html
+     */
+    public Response recognizeCelebrities(String mockKey) {
+        Optional<JsonNode> mock = mockConfigLoader.lookup(SERVICE_KEY, mockKey, "RecognizeCelebrities");
+        if (mock.isPresent()) {
+            return Response.ok(mock.get()).build();
+        }
+        ObjectNode root = objectMapper.createObjectNode();
+        root.putArray("CelebrityFaces");
+        root.putArray("UnrecognizedFaces");
+        return Response.ok(root).build();
+    }
+
+    /**
+     * GetCelebrityInfo — a celebrity id is answered from the mock config
+     * (keyed by the id); Floci knows no celebrities otherwise.
+     */
+    public Response getCelebrityInfo(String id) {
+        if (id == null || id.isEmpty()) {
+            throw new AwsException("InvalidParameterException", "Id is a required field.", 400);
+        }
+        Optional<JsonNode> mock = mockConfigLoader.lookup(SERVICE_KEY, id, "GetCelebrityInfo");
+        if (mock.isPresent()) {
+            return Response.ok(mock.get()).build();
+        }
+        throw new AwsException("ResourceNotFoundException", "Celebrity " + id + " was not found.", 400);
     }
     /**
      * DetectModerationLabels — always reports no moderation labels found.

@@ -19,6 +19,29 @@
 # documents a facet of another service and deliberately has no row of its own).
 
 aliases:
+  servicecatalog-appregistry: appregistry   # AppRegistry's endpoint prefix; it signs with "servicecatalog"
+  acm-pca: acmpca                       # Private CA's SigV4 signing name is "acm-pca"
+  backup-search: backupsearch            # Backup Search's SigV4 signing name is "backup-search"
+  emr-containers: emrcontainers          # EMR on EKS's SigV4 signing name is "emr-containers"
+  ecr-public: ecrpublic                  # ECR Public's SigV4 signing name is "ecr-public"
+  docdb-elastic: docdbelastic            # DocumentDB Elastic Clusters' SigV4 signing name is "docdb-elastic"
+  bedrock-data-automation-runtime: bedrock-data-automation  # the runtime half of Bedrock Data Automation
+  forecastquery: forecast                # Forecast's query API, documented in forecast.md
+  keyspacesstreams: keyspaces            # Keyspaces Streams, documented in keyspaces.md
+  license-manager: licensemanager        # License Manager, documented in licensemanager.md
+  airflow-serverless: airflowserverless  # MWAA Serverless, documented in airflowserverless.md
+  medical-imaging: medicalimaging        # HealthImaging's SigV4 signing name is "medical-imaging"
+  notifications-contacts: notificationscontacts  # User Notifications Contacts' SigV4 signing name
+  aoss: opensearchserverless             # OpenSearch Serverless' SigV4 signing name is "aoss"
+  sms-voice: pinpointsmsvoicev2                 # SMS and Voice v2 signs as "sms-voice"
+  social-messaging: socialmessaging             # End User Messaging Social signs as "social-messaging"
+  vpc-lattice: vpclattice                       # VPC Lattice signs as "vpc-lattice"
+  neptune-graph: neptunegraph            # Neptune Analytics' SigV4 signing name is "neptune-graph"
+  greengrass: greengrassv2               # Greengrass V2's SigV4 signing name is "greengrass"
+  geo: location                         # Location's SigV4 signing name is "geo"
+  geo-maps: location                    # Maps API facet, documented in location.md
+  geo-places: location                  # Places API facet, documented in location.md
+  geo-routes: location                  # Routes API facet, documented in location.md
   apigateway: api-gateway               # "API Gateway v1" row title
   apigatewayv2: api-gateway             # v2 facet, documented at api-gateway.md#v2
   aps: managed-prometheus               # AMP's SigV4 signing name is "aps"

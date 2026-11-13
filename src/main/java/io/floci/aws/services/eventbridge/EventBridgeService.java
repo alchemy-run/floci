@@ -43,6 +43,7 @@ import io.floci.aws.services.eventbridge.model.Target;
 import io.floci.aws.services.resourcegroupstagging.ResourceGroupsTaggingService;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -85,6 +86,10 @@ public class EventBridgeService implements ResourceProvider, StoredResourceArns 
     private final ResourceGroupsTaggingService resourceGroupsTaggingService;
     private final ReplayDispatcher replayDispatcher;
     private final AppSyncTargetValidator appSyncTargetValidator;
+
+    /** Services that watch the events buses accept. Absent when the service is built outside CDI. */
+    @Inject
+    Instance<EventBusObserver> busObservers;
 
     @Inject
     public EventBridgeService(StorageFactory storageFactory,
@@ -1066,6 +1071,18 @@ public class EventBridgeService implements ResourceProvider, StoredResourceArns 
             String eventId = UUID.randomUUID().toString();
             String rulePrefix = ruleKeyPrefix(region, effectiveBus);
             List<Rule> candidateRules = accountScan(ruleStore, accountId, k -> k.startsWith(rulePrefix));
+            if (busObservers != null && !busObservers.isUnsatisfied()) {
+                String observed = buildEventEnvelope(entry, effectiveBus, eventId, region, accountId);
+                for (EventBusObserver observer : busObservers) {
+                    try {
+                        observer.accepted(accountId != null ? accountId : regionResolver.getAccountId(), region,
+                                effectiveBus, observed);
+                    } catch (RuntimeException e) {
+                        LOG.debugv("Event bus observer {0} failed: {1}", observer.getClass().getSimpleName(),
+                                e.getMessage());
+                    }
+                }
+            }
 
             for (Rule rule : candidateRules) {
                 if (rule.getState() != RuleState.ENABLED) {

@@ -81,6 +81,10 @@ public class LambdaExecutorService implements Resettable {
             new LinkedBlockingQueue<>(500),
             new ThreadPoolExecutor.CallerRunsPolicy());
 
+    /** Traces invocations of functions with active tracing; unresolvable in the constructor tests use. */
+    @Inject
+    Instance<LambdaTracing> tracing;
+
     @Inject
     public LambdaExecutorService(WarmPool warmPool,
                                  ObjectMapper objectMapper,
@@ -361,6 +365,34 @@ public class LambdaExecutorService implements Resettable {
 
     private InvokeResult executeSync(LambdaFunction fn, byte[] payload, String requestId,
                                      String clientContext, String invokedQualifier) {
+        LambdaTracing tracer = tracing != null && tracing.isResolvable() ? tracing.get() : null;
+        LambdaTracing.Trace trace = null;
+        if (tracer != null) {
+            try {
+                trace = tracer.begin(fn);
+            } catch (RuntimeException e) {
+                LOG.warnv(e, "Could not start the trace of an invocation of {0}", fn.getFunctionName());
+            }
+        }
+        long start = System.currentTimeMillis();
+        long[] dispatched = {0};
+        boolean[] coldStart = {false};
+        InvokeResult result = executeSync(fn, payload, requestId, clientContext, invokedQualifier, trace, dispatched,
+                coldStart);
+        if (trace != null) {
+            try {
+                tracer.end(trace, fn, start, dispatched[0] == 0 ? start : dispatched[0], System.currentTimeMillis(),
+                        coldStart[0], result);
+            } catch (RuntimeException e) {
+                LOG.warnv(e, "Could not record the trace of an invocation of {0}", fn.getFunctionName());
+            }
+        }
+        return result;
+    }
+
+    private InvokeResult executeSync(LambdaFunction fn, byte[] payload, String requestId, String clientContext,
+                                     String invokedQualifier, LambdaTracing.Trace trace, long[] dispatched,
+                                     boolean[] coldStart) {
         ContainerHandle handle;
         try {
             handle = warmPool.acquireProvisioned(fn, invokedQualifier);
@@ -378,8 +410,13 @@ public class LambdaExecutorService implements Resettable {
                 requestId, payload, deadlineMs, fn.getFunctionArn(),
                 new CompletableFuture<>());
         invocation.setClientContext(clientContext);
+        if (trace != null) {
+            invocation.setTraceHeader(trace.header());
+        }
+        invocation.getDispatchedFuture().thenRun(() -> dispatched[0] = System.currentTimeMillis());
         RuntimeApiServer runtimeApiServer = handle.getRuntimeApiServer();
         boolean initializing = !runtimeApiServer.hasRuntimePolled();
+        coldStart[0] = initializing;
         long dispatchWaitMs = dispatchWaitMs(fn.getTimeout(), initializing,
                 runtimeApiServer.getContainerStartedAtMs(), System.currentTimeMillis());
         try {

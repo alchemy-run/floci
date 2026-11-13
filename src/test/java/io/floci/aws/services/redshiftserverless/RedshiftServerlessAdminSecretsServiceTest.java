@@ -14,6 +14,7 @@ import io.floci.aws.services.redshift.model.Endpoint;
 import io.floci.aws.services.redshift.proxy.RedshiftProxyManager;
 import io.floci.aws.services.redshiftserverless.model.Namespace;
 import io.floci.aws.services.redshiftserverless.model.RedshiftServerlessSnapshot;
+import io.floci.aws.services.redshiftserverless.model.Workgroup;
 import io.floci.aws.services.secretsmanager.SecretsManagerService;
 import io.floci.aws.services.secretsmanager.model.Secret;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.RETURNS_DEEP_STUBS;
@@ -89,11 +91,11 @@ class RedshiftServerlessAdminSecretsServiceTest {
                 .thenAnswer(invocation -> "arn:aws:redshift-serverless:" + REGION + ":" + ACCOUNT + ":"
                         + invocation.getArgument(2, String.class));
         endpoints = mock(RedshiftServerlessEndpoints.class);
-        when(endpoints.allocate()).thenReturn(new Endpoint("localhost", 7100));
+        doAnswer(invocation -> { Workgroup w = invocation.getArgument(0); w.setProxyPort(7100); w.setEndpoint(new Endpoint("localhost", 7100)); return null; }).when(endpoints).allocate(any(), any(), any());
         runtime = mock(RedshiftServerlessRuntime.class);
         when(runtime.generatePassword()).thenReturn(GENERATED_PASSWORD);
         when(runtime.start(any(String.class), any(String.class), any(String.class), any(String.class),
-                any(String.class), any(String.class), any(Endpoint.class), anyBoolean(), any()))
+                any(String.class), any(String.class), any(Endpoint.class), anyInt(), anyBoolean(), anyBoolean(), any()))
                 .thenReturn(new RedshiftServerlessRuntime.Backend("127.0.0.1", 55432));
         secrets = mock(SecretsManagerService.class);
         Secret secret = new Secret();

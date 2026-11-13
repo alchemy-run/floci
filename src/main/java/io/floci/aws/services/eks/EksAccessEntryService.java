@@ -1,6 +1,7 @@
 package io.floci.aws.services.eks;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.storage.AccountAwareStorageBackend;
 import io.floci.aws.core.storage.StorageBackend;
@@ -135,6 +136,38 @@ public class EksAccessEntryService {
                 type, username, List.copyOf(groups), Map.copyOf(tags), now, now);
         entries.put(key, new StoredEntry(entry, principalId, token));
         return entry;
+    }
+
+    /**
+     * The access entry a service adds for its own service-linked role, as EMR on EKS does for a virtual cluster on a
+     * cluster that authenticates with access entries: a STANDARD entry for the role's ARN without its path, which a
+     * caller's CreateAccessEntry refuses for a service-linked role. An existing entry for the role is kept.
+     */
+    public synchronized AccessEntry serviceEntry(Cluster cluster, String principalArn, String principalId,
+                                                 String username) {
+        requireApiAccess(cluster);
+        String key = prefix(cluster) + principalArn;
+        Optional<StoredEntry> existing = entries.get(key);
+        if (existing.isPresent()) {
+            return existing.get().entry();
+        }
+        AwsArnUtils.Arn clusterArn = AwsArnUtils.parse(cluster.getArn());
+        AwsArnUtils.Arn principal = AwsArnUtils.parse(principalArn);
+        String name = principalArn.substring(principalArn.lastIndexOf('/') + 1);
+        double now = Instant.now().toEpochMilli() / 1000.0;
+        String entryArn = new AwsArnUtils.Arn(clusterArn.partition(), "eks", clusterArn.region(),
+                clusterArn.accountId(), "access-entry/" + cluster.getName() + "/role/" + principal.accountId() + "/"
+                        + name + "/" + UUID.randomUUID()).toString();
+        AccessEntry entry = new AccessEntry(entryArn, cluster.getName(), principalArn, "STANDARD", username,
+                List.of(), Map.of(), now, now);
+        entries.put(key, new StoredEntry(entry, principalId, null));
+        return entry;
+    }
+
+    /** Whether a cluster authenticates with access entries, so a service may add one. */
+    public static boolean usesAccessEntries(Cluster cluster) {
+        String mode = cluster.getAccessConfig() == null ? null : cluster.getAccessConfig().authenticationMode();
+        return mode != null && mode.startsWith("API");
     }
 
     synchronized Optional<AccessEntry> workerEntry(Cluster cluster, String accountId, String principal, String roleId) {

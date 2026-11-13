@@ -18,6 +18,7 @@ import io.floci.aws.services.neptune.NeptuneService;
 import io.floci.aws.services.rds.RdsQueryHandler;
 import io.floci.aws.services.rds.RdsService;
 import io.floci.aws.services.redshift.RedshiftQueryHandler;
+import io.floci.aws.services.sdb.SimpleDbQueryHandler;
 import io.floci.aws.services.ses.SesQueryHandler;
 import io.floci.aws.services.sns.SnsQueryHandler;
 import io.floci.aws.services.sqs.SqsQueryHandler;
@@ -86,6 +87,7 @@ public class AwsQueryController {
     private final ElbClassicQueryHandler elbClassicQueryHandler;
     private final AutoScalingQueryHandler autoScalingQueryHandler;
     private final ElasticBeanstalkQueryHandler elasticBeanstalkQueryHandler;
+    private final SimpleDbQueryHandler simpleDbQueryHandler;
     private final RedshiftQueryHandler redshiftQueryHandler;
     private final AwsQueryServiceResolver serviceResolver;
     private final RegionResolver regionResolver;
@@ -109,6 +111,7 @@ public class AwsQueryController {
                               ElbClassicQueryHandler elbClassicQueryHandler,
                               AutoScalingQueryHandler autoScalingQueryHandler,
                               ElasticBeanstalkQueryHandler elasticBeanstalkQueryHandler,
+                              SimpleDbQueryHandler simpleDbQueryHandler,
                               RedshiftQueryHandler redshiftQueryHandler,
                               AwsQueryServiceResolver serviceResolver,
                               RegionResolver regionResolver) {
@@ -132,6 +135,7 @@ public class AwsQueryController {
         this.elbClassicQueryHandler = elbClassicQueryHandler;
         this.autoScalingQueryHandler = autoScalingQueryHandler;
         this.elasticBeanstalkQueryHandler = elasticBeanstalkQueryHandler;
+        this.simpleDbQueryHandler = simpleDbQueryHandler;
         this.redshiftQueryHandler = redshiftQueryHandler;
         this.serviceResolver = serviceResolver;
         this.regionResolver = regionResolver;
@@ -243,6 +247,7 @@ public class AwsQueryController {
                     : elbV2QueryHandler.handle(action, formParams, region);
             case "autoscaling" -> autoScalingQueryHandler.handle(action, formParams, region);
             case "elasticbeanstalk" -> elasticBeanstalkQueryHandler.handle(action, formParams, region);
+            case "sdb" -> simpleDbQueryHandler.handle(action, formParams, region);
             case "redshift" -> redshiftQueryHandler.handle(action, formParams, authorization);
             default -> xmlErrorResponse("UnknownService",
                     "Unknown or unsupported service: " + service, 400);
@@ -472,6 +477,7 @@ public class AwsQueryController {
             QueryService.modeled("elasticloadbalancing"),
             QueryService.modeled("autoscaling"),
             QueryService.modeled("elasticbeanstalk"),
+            QueryService.modeled("sdb"),
             QueryService.modeled("redshift"),
             QueryService.modeled("sqs"));
 

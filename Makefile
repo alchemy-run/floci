@@ -44,6 +44,10 @@
 # maps by, and IamRestRouteCoverageTest checks the rules against, is generated from botocore's models
 # by tools/aws/regen_rest_routes.py. A model it adds also needs make iam-authorized-actions-sync, whose
 # check fails until the actions of no resource type list the model's scope.
+# src/main/resources/aws/datazone-request-shapes.json, the constraints DataZone requests are checked
+# against, is generated from botocore's DataZone model by tools/aws/regen_datazone_shapes.py.
+# src/main/resources/aws/rest-json/*.json, the HTTP bindings RestJsonDispatcher routes REST JSON
+# requests by, are generated from botocore's models by tools/aws/regen_rest_json_bindings.py.
 # src/main/resources/aws/iam-paginators.json, what each paged IAM list pages by, is generated
 # from botocore's IAM model and paginators by tools/aws/regen_iam_paginators.py.
 
@@ -273,6 +277,81 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_dynamodb_shapes.py
 	$(PYTHON) tools/aws/regen_redshift_serverless_shapes.py
 	$(PYTHON) tools/aws/regen_resource_groups_shapes.py
+	$(PYTHON) tools/aws/regen_location_shapes.py
+	$(PYTHON) tools/aws/regen_acmpca_shapes.py
+	$(PYTHON) tools/aws/regen_aiops_shapes.py
+	$(PYTHON) tools/aws/regen_amplify_shapes.py
+	$(PYTHON) tools/aws/regen_appflow_shapes.py
+	$(PYTHON) tools/aws/regen_appregistry_shapes.py
+	$(PYTHON) tools/aws/regen_apprunner_shapes.py
+	$(PYTHON) tools/aws/regen_auditmanager_shapes.py
+	$(PYTHON) tools/aws/regen_b2bi_shapes.py
+	$(PYTHON) tools/aws/regen_backupsearch_shapes.py
+	$(PYTHON) tools/aws/regen_bedrock_data_automation_shapes.py
+	$(PYTHON) tools/aws/regen_chatbot_shapes.py
+	$(PYTHON) tools/aws/regen_codeconnections_shapes.py
+	$(PYTHON) tools/aws/regen_databrew_shapes.py
+	$(PYTHON) tools/aws/regen_dataexchange_shapes.py
+	$(PYTHON) tools/aws/regen_datazone_shapes.py
+	$(PYTHON) tools/aws/regen_deadline_shapes.py
+	$(PYTHON) tools/aws/regen_devopsguru_shapes.py
+	$(PYTHON) tools/aws/regen_docdbelastic_shapes.py
+	$(PYTHON) tools/aws/regen_ecrpublic_shapes.py
+	$(PYTHON) tools/aws/regen_emrcontainers_shapes.py
+	$(PYTHON) tools/aws/regen_entityresolution_shapes.py
+	$(PYTHON) tools/aws/regen_fms_shapes.py
+	$(PYTHON) tools/aws/regen_forecast_shapes.py
+	$(PYTHON) tools/aws/regen_healthlake_shapes.py
+	$(PYTHON) tools/aws/regen_ivs_shapes.py
+	$(PYTHON) tools/aws/regen_ivschat_shapes.py
+	$(PYTHON) tools/aws/regen_imagebuilder_shapes.py
+	$(PYTHON) tools/aws/regen_internetmonitor_shapes.py
+	$(PYTHON) tools/aws/regen_iotfleetwise_shapes.py
+	$(PYTHON) tools/aws/regen_iotmanagedintegrations_shapes.py
+	$(PYTHON) tools/aws/regen_iotsitewise_shapes.py
+	$(PYTHON) tools/aws/regen_iotwireless_shapes.py
+	$(PYTHON) tools/aws/regen_kendra_shapes.py
+	$(PYTHON) tools/aws/regen_keyspaces_shapes.py
+	$(PYTHON) tools/aws/regen_kinesisvideo_shapes.py
+	$(PYTHON) tools/aws/regen_lexv2_shapes.py
+	$(PYTHON) tools/aws/regen_licensemanager_shapes.py
+	$(PYTHON) tools/aws/regen_airflowserverless_shapes.py
+	$(PYTHON) tools/aws/regen_mailmanager_shapes.py
+	$(PYTHON) tools/aws/regen_mediaconnect_shapes.py
+	$(PYTHON) tools/aws/regen_mediaconvert_shapes.py
+	$(PYTHON) tools/aws/regen_medialive_shapes.py
+	$(PYTHON) tools/aws/regen_mediapackagev2_shapes.py
+	$(PYTHON) tools/aws/regen_mediatailor_shapes.py
+	$(PYTHON) tools/aws/regen_medicalimaging_shapes.py
+	$(PYTHON) tools/aws/regen_neptunegraph_shapes.py
+	$(PYTHON) tools/aws/regen_notifications_shapes.py
+	$(PYTHON) tools/aws/regen_notificationscontacts_shapes.py
+	$(PYTHON) tools/aws/regen_osis_shapes.py
+	$(PYTHON) tools/aws/regen_observabilityadmin_shapes.py
+	$(PYTHON) tools/aws/regen_omics_shapes.py
+	$(PYTHON) tools/aws/regen_opensearchserverless_shapes.py
+	$(PYTHON) tools/aws/regen_personalize_shapes.py
+	$(PYTHON) tools/aws/regen_pinpointsmsvoicev2_shapes.py
+	$(PYTHON) tools/aws/regen_qbusiness_shapes.py
+	$(PYTHON) tools/aws/regen_rbin_shapes.py
+	$(PYTHON) tools/aws/regen_repostspace_shapes.py
+	$(PYTHON) tools/aws/regen_rolesanywhere_shapes.py
+	$(PYTHON) tools/aws/regen_route53profiles_shapes.py
+	$(PYTHON) tools/aws/regen_s3files_shapes.py
+	$(PYTHON) tools/aws/regen_incidentmanager_shapes.py
+	$(PYTHON) tools/aws/regen_schemas_shapes.py
+	$(PYTHON) tools/aws/regen_securitylake_shapes.py
+	$(PYTHON) tools/aws/regen_shield_shapes.py
+	$(PYTHON) tools/aws/regen_signer_shapes.py
+	$(PYTHON) tools/aws/regen_socialmessaging_shapes.py
+	$(PYTHON) tools/aws/regen_synthetics_shapes.py
+	$(PYTHON) tools/aws/regen_vpclattice_shapes.py
+	$(PYTHON) tools/aws/regen_xray_shapes.py
+	$(PYTHON) tools/aws/regen_fsx_shapes.py
+	$(PYTHON) tools/aws/regen_ds_shapes.py
+	$(PYTHON) tools/aws/regen_rest_json_bindings.py
+	$(PYTHON) tools/aws/regen_dax_shapes.py
+	$(PYTHON) tools/aws/regen_rest_xml_shapes.py
 	$(PYTHON) tools/aws/regen_logs_delivery_shapes.py
 	$(PYTHON) tools/aws/regen_ecr_shapes.py
 	$(PYTHON) tools/aws/regen_payment_cryptography_shapes.py
@@ -353,6 +432,311 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_resource_groups_shapes.py --check || { \
 		echo "error: Resource Groups request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_location_shapes.py --check || { \
+		echo "error: Location and Geo request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_acmpca_shapes.py --check || { \
+		echo "error: Private CA request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_aiops_shapes.py --check || { \
+		echo "error: AIOps request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_amplify_shapes.py --check || { \
+		echo "error: Amplify request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_appflow_shapes.py --check || { \
+		echo "error: AppFlow request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_appregistry_shapes.py --check || { \
+		echo "error: AppRegistry request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_apprunner_shapes.py --check || { \
+		echo "error: App Runner request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_auditmanager_shapes.py --check || { \
+		echo "error: Audit Manager request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_b2bi_shapes.py --check || { \
+		echo "error: B2BI request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_backupsearch_shapes.py --check || { \
+		echo "error: Backup Search request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_bedrock_data_automation_shapes.py --check || { \
+		echo "error: Bedrock Data Automation request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_chatbot_shapes.py --check || { \
+		echo "error: Chatbot request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_codeconnections_shapes.py --check || { \
+		echo "error: CodeConnections request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_databrew_shapes.py --check || { \
+		echo "error: DataBrew request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_dataexchange_shapes.py --check || { \
+		echo "error: Data Exchange request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_datazone_shapes.py --check || { \
+		echo "error: DataZone request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_deadline_shapes.py --check || { \
+		echo "error: Deadline Cloud request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_devopsguru_shapes.py --check || { \
+		echo "error: DevOps Guru request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_docdbelastic_shapes.py --check || { \
+		echo "error: DocumentDB elastic request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_ecrpublic_shapes.py --check || { \
+		echo "error: ECR Public request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_emrcontainers_shapes.py --check || { \
+		echo "error: EMR on EKS request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_entityresolution_shapes.py --check || { \
+		echo "error: Entity Resolution request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_fms_shapes.py --check || { \
+		echo "error: Firewall Manager request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_forecast_shapes.py --check || { \
+		echo "error: Forecast request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_healthlake_shapes.py --check || { \
+		echo "error: HealthLake request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_ivs_shapes.py --check || { \
+		echo "error: IVS request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_ivschat_shapes.py --check || { \
+		echo "error: IVS Chat request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_imagebuilder_shapes.py --check || { \
+		echo "error: Image Builder request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_internetmonitor_shapes.py --check || { \
+		echo "error: Internet Monitor request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_iotfleetwise_shapes.py --check || { \
+		echo "error: IoT FleetWise request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_iotmanagedintegrations_shapes.py --check || { \
+		echo "error: Managed integrations request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_iotwireless_shapes.py --check || { \
+		echo "error: IoT Wireless request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_kendra_shapes.py --check || { \
+		echo "error: Kendra request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_keyspaces_shapes.py --check || { \
+		echo "error: Keyspaces request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_kinesisvideo_shapes.py --check || { \
+		echo "error: Kinesis Video request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_lexv2_shapes.py --check || { \
+		echo "error: Lex V2 request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_licensemanager_shapes.py --check || { \
+		echo "error: License Manager request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_airflowserverless_shapes.py --check || { \
+		echo "error: MWAA Serverless request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_mailmanager_shapes.py --check || { \
+		echo "error: Mail Manager request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_mediaconnect_shapes.py --check || { \
+		echo "error: MediaConnect request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_mediaconvert_shapes.py --check || { \
+		echo "error: MediaConvert request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_medialive_shapes.py --check || { \
+		echo "error: MediaLive request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_mediapackagev2_shapes.py --check || { \
+		echo "error: MediaPackage v2 request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_mediatailor_shapes.py --check || { \
+		echo "error: MediaTailor request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_medicalimaging_shapes.py --check || { \
+		echo "error: HealthImaging request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_neptunegraph_shapes.py --check || { \
+		echo "error: Neptune Analytics request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_notifications_shapes.py --check || { \
+		echo "error: User Notifications request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_notificationscontacts_shapes.py --check || { \
+		echo "error: User Notifications Contacts request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_osis_shapes.py --check || { \
+		echo "error: OpenSearch Ingestion request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_observabilityadmin_shapes.py --check || { \
+		echo "error: CloudWatch Observability Admin request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_omics_shapes.py --check || { \
+		echo "error: AWS HealthOmics request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_opensearchserverless_shapes.py --check || { \
+		echo "error: OpenSearch Serverless request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_personalize_shapes.py --check || { \
+		echo "error: Amazon Personalize request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_pinpointsmsvoicev2_shapes.py --check || { \
+		echo "error: SMS and Voice v2 request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_qbusiness_shapes.py --check || { \
+		echo "error: Q Business and Q Apps request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_rbin_shapes.py --check || { \
+		echo "error: Recycle Bin request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_socialmessaging_shapes.py --check || { \
+		echo "error: End User Messaging Social request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_synthetics_shapes.py --check || { \
+		echo "error: Synthetics request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_vpclattice_shapes.py --check || { \
+		echo "error: VPC Lattice request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_xray_shapes.py --check || { \
+		echo "error: X-Ray request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_signer_shapes.py --check || { \
+		echo "error: Signer request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_shield_shapes.py --check || { \
+		echo "error: Shield request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_securitylake_shapes.py --check || { \
+		echo "error: Security Lake request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_schemas_shapes.py --check || { \
+		echo "error: EventBridge schema registry request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_incidentmanager_shapes.py --check || { \
+		echo "error: Incident Manager request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_s3files_shapes.py --check || { \
+		echo "error: S3 Files request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_route53profiles_shapes.py --check || { \
+		echo "error: Route 53 Profiles request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_repostspace_shapes.py --check || { \
+		echo "error: re:Post Private request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_rolesanywhere_shapes.py --check || { \
+		echo "error: IAM Roles Anywhere request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_iotsitewise_shapes.py --check || { \
+		echo "error: IoT SiteWise request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_iotmi_matter_schemas.py --check || { \
+		echo "error: the Managed integrations Matter schema catalog is incomplete."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_fsx_shapes.py --check || { \
+		echo "error: FSx request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_ds_shapes.py --check || { \
+		echo "error: Directory Service request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_rest_json_bindings.py --check || { \
+		echo "error: the REST JSON bindings under src/main/resources/aws/rest-json are out of date."; \
+		echo "       Run 'make aws-data-sync' and commit the result."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_dax_shapes.py --check || { \
+		echo "error: DAX request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_rest_xml_shapes.py --check || { \
+		echo "error: REST-XML models are out of date; run 'make aws-data-sync'."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_logs_delivery_shapes.py --check || { \

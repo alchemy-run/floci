@@ -1,0 +1,104 @@
+{
+  "interchanges": [
+    {
+      "ISA_01_AuthorizationQualifier": "00",
+      "ISA_02_AuthorizationInformation": "          ",
+      "ISA_03_SecurityQualifier": "00",
+      "ISA_04_SecurityInformation": "          ",
+      "ISA_05_SenderQualifier": "ZZ",
+      "ISA_06_SenderId": "SENDERID       ",
+      "ISA_07_ReceiverQualifier": "ZZ",
+      "ISA_08_ReceiverId": "RECEIVERID     ",
+      "ISA_09_Date": "210101",
+      "ISA_10_Time": "1253",
+      "ISA_11_StandardsId": "U",
+      "ISA_12_Version": "00401",
+      "ISA_13_InterchangeControlNumber": "000000001",
+      "ISA_14_AcknowledgmentRequested": "0",
+      "ISA_15_TestIndicator": "T",
+      "functional_groups": [
+        {
+          "GS_01_FunctionalIdentifierCode": "PO",
+          "GS_02_ApplicationSenderCode": "SENDERID",
+          "GS_03_ApplicationReceiverCode": "RECEIVERID",
+          "GS_04_Date": "20210101",
+          "GS_05_Time": "1253",
+          "GS_06_GroupControlNumber": "1",
+          "GS_07_ResponsibleAgencyCode": "X",
+          "GS_08_Version": "004010",
+          "transactions": [
+            {
+              "ST_01_TransactionSetIdentifierCode": "850",
+              "ST_02_TransactionSetControlNumber": "0001",
+              "segments": [
+                {
+                  "BEG_01": "00",
+                  "BEG_02": "SA",
+                  "BEG_03": "XX-1234",
+                  "BEG_05": "20210101"
+                },
+                {
+                  "REF_01": "DP",
+                  "REF_02": "038"
+                },
+                {
+                  "N1-4000_loop": [
+                    {
+                      "N1_01": "ST",
+                      "N1_02": "ACME",
+                      "N1_03": "92",
+                      "N1_04": "123"
+                    },
+                    {
+                      "N3_01": "1 MAIN ST"
+                    }
+                  ]
+                },
+                {
+                  "PO1-8000_loop": [
+                    {
+                      "PO1_01": "1",
+                      "PO1_02": "10",
+                      "PO1_03": "EA",
+                      "PO1_04": "9.25",
+                      "PO1_05": "TE",
+                      "PO1_06": "CB",
+                      "PO1_07": "065322-117"
+                    },
+                    {
+                      "PID-8150_loop": [
+                        {
+                          "PID_01": "F",
+                          "PID_05": "WIDGET"
+                        }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "PO1-8000_loop": [
+                    {
+                      "PO1_01": "2",
+                      "PO1_02": "5",
+                      "PO1_03": "EA",
+                      "PO1_04": "1.5",
+                      "PO1_06": "CB",
+                      "PO1_07": "999"
+                    }
+                  ]
+                },
+                {
+                  "CTT-9000_loop": [
+                    {
+                      "CTT_01": "2"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

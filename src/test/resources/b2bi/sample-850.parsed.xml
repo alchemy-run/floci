@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ediroot>
+    <interchange Standard="ANSI X.12" AuthorizationQual="00" Authorization="          " SecurityQual="00" Security="          " Date="210101" Time="1253" StandardsId="U" Version="00401" Control="000000001" AckRequest="0" TestIndicator="T">
+        <sender>
+            <address Id="SENDERID       " Qual="ZZ"/>
+        </sender>
+        <receiver>
+            <address Id="RECEIVERID     " Qual="ZZ"/>
+        </receiver>
+        <group GroupType="PO" ApplSender="SENDERID" ApplReceiver="RECEIVERID" Date="20210101" Time="1253" Control="1" StandardCode="X" StandardVersion="004010">
+            <transaction DocType="850" Name="Purchase Order" Control="0001">
+                <segment Id="BEG">
+                    <element Id="BEG01">00</element>
+                    <element Id="BEG02">SA</element>
+                    <element Id="BEG03">XX-1234</element>
+                    <element Id="BEG05">20210101</element>
+                </segment>
+                <segment Id="REF">
+                    <element Id="REF01">DP</element>
+                    <element Id="REF02">038</element>
+                </segment>
+                <loop Id="N1-4000">
+                    <segment Id="N1">
+                        <element Id="N101">ST</element>
+                        <element Id="N102">ACME</element>
+                        <element Id="N103">92</element>
+                        <element Id="N104">123</element>
+                    </segment>
+                    <segment Id="N3">
+                        <element Id="N301">1 MAIN ST</element>
+                    </segment>
+                </loop>
+                <loop Id="PO1-8000">
+                    <segment Id="PO1">
+                        <element Id="PO101">1</element>
+                        <element Id="PO102">10</element>
+                        <element Id="PO103">EA</element>
+                        <element Id="PO104">9.25</element>
+                        <element Id="PO105">TE</element>
+                        <element Id="PO106">CB</element>
+                        <element Id="PO107">065322-117</element>
+                    </segment>
+                    <loop Id="PID-8150">
+                        <segment Id="PID">
+                            <element Id="PID01">F</element>
+                            <element Id="PID05">WIDGET</element>
+                        </segment>
+                    </loop>
+                </loop>
+                <loop Id="PO1-8000">
+                    <segment Id="PO1">
+                        <element Id="PO101">2</element>
+                        <element Id="PO102">5</element>
+                        <element Id="PO103">EA</element>
+                        <element Id="PO104">1.5</element>
+                        <element Id="PO106">CB</element>
+                        <element Id="PO107">999</element>
+                    </segment>
+                </loop>
+                <loop Id="CTT-9000">
+                    <segment Id="CTT">
+                        <element Id="CTT01">2</element>
+                    </segment>
+                </loop>
+            </transaction>
+        </group>
+    </interchange>
+</ediroot>

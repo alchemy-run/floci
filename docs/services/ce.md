@@ -23,7 +23,34 @@ sees those changes in the next `GetCostAndUsage` call.
 | `GetReservationUtilization` | Stub; returns zeroed totals |
 | `GetSavingsPlansCoverage` | Stub; returns empty list |
 | `GetSavingsPlansUtilization` | Stub; returns zeroed totals |
-| `GetCostCategories` | Stub; returns empty list (cost-category management not yet emulated) |
+| `GetSavingsPlansUtilizationDetails` | Validates the period; returns an empty per-plan list (Floci has no Savings Plans) |
+| `GetCostCategories` | Lists the categories in effect in a period, or the values one assigns to the period's usage |
+| `CreateCostCategoryDefinition` | Create a category with ordered `REGULAR` / `INHERITED_VALUE` rules, a default value, split charge rules and tags |
+| `DescribeCostCategoryDefinition` | Read a category, optionally as of `EffectiveOn` |
+| `UpdateCostCategoryDefinition` | Replace a category's rules, default value and split charge rules |
+| `DeleteCostCategoryDefinition` | Delete a category and return its `EffectiveEnd` |
+| `ListCostCategoryDefinitions` | List categories in effect on `EffectiveOn` with their rule counts and values |
+| `ListCostCategoryResourceAssociations` | Validates the category; returns an empty association list |
+| `GetCostForecast` | Projects the trailing day's cost run rate over `DAILY` or `MONTHLY` periods with a prediction interval |
+| `GetUsageForecast` | Projects usage for a `USAGE_TYPE` / `USAGE_TYPE_GROUP` filter in its single unit |
+| `GetApproximateUsageRecords` | Counts usage records per service over the last 30 days for a granularity and dimension |
+| `GetCostAndUsageComparisons` | Compares two calendar months in total and per group |
+| `GetCostComparisonDrivers` | Compares two calendar months per group, broken down by usage type |
+| `GetReservationPurchaseRecommendation` | Recommends EC2 Reserved Instances sized to steadily running instances |
+| `GetSavingsPlansPurchaseRecommendation` | Recommends Compute or EC2 Instance Savings Plans sized to steady on-demand spend |
+| `GetSavingsPlanPurchaseRecommendationDetails` | Returns a recommendation's detail with per-day lookback metrics |
+| `GetRightsizingRecommendation` | Recommends terminating or downsizing EC2 instances from their CloudWatch CPU utilization |
+| `StartSavingsPlansPurchaseRecommendationGeneration` | Records a recommendation refresh that completes immediately (3 per day) |
+| `ListSavingsPlansPurchaseRecommendationGeneration` | Lists recommendation refreshes with status and ID filters |
+| `StartCommitmentPurchaseAnalysis` | Runs a `MAX_SAVINGS` or `CUSTOM_COMMITMENT` Savings Plans analysis over the lookback usage |
+| `GetCommitmentPurchaseAnalysis` | Returns an analysis with its estimated coverage, utilization and savings |
+| `ListCommitmentPurchaseAnalyses` | Lists analyses with status and ID filters |
+| `ListCostAllocationTags` | Lists tag keys seen on usage in the last 12 months with their activation status |
+| `UpdateCostAllocationTagsStatus` | Activates or deactivates tag keys, reporting unknown keys per entry |
+| `StartCostAllocationTagBackfill` | Records a backfill from a month in the last 12 months (one per 24 hours) |
+| `ListCostAllocationTagBackfillHistory` | Lists backfill requests, newest first |
+| `GetAnomalies` | Validates the monitor and date interval; returns no anomalies (none are generated) |
+| `ProvideAnomalyFeedback` | Rejects feedback with `ValidationException`, as no anomalies exist |
 | `CreateAnomalyMonitor` | Store a dimensional or custom monitor with optional resource tags |
 | `GetAnomalyMonitors` | List account-scoped monitors with ARN filters and pagination |
 | `UpdateAnomalyMonitor` | Update a monitor's name |
@@ -76,6 +103,37 @@ MONITOR_ARN=$(aws ce create-anomaly-monitor --endpoint-url http://localhost:4566
 aws ce create-anomaly-subscription --endpoint-url http://localhost:4566 \
   --anomaly-subscription "{\"SubscriptionName\":\"daily-alerts\",\"Frequency\":\"DAILY\",\"MonitorArnList\":[\"$MONITOR_ARN\"],\"Subscribers\":[{\"Address\":\"alerts@example.com\",\"Type\":\"EMAIL\"}],\"ThresholdExpression\":{\"Dimensions\":{\"Key\":\"ANOMALY_TOTAL_IMPACT_ABSOLUTE\",\"Values\":[\"100\"],\"MatchOptions\":[\"GREATER_THAN_OR_EQUAL\"]}}}"
 ```
+
+## Cost categories
+
+Cost category rules are evaluated in order against every usage line. A `REGULAR` rule assigns its `Value` when
+its `Rule` expression matches; an `INHERITED_VALUE` rule takes the value of a tag (`TAG` with a `DimensionKey`) or
+the linked account (`LINKED_ACCOUNT_NAME`). A line no rule matches gets `DefaultValue`, or no value. The result
+backs `CostCategories` filters in every query, `GroupBy` with `Type=COST_CATEGORY` (group keys read
+`<category>$<value>`, as tag group keys read `<key>$<value>`), and `GetCostCategories`.
+
+Filters and rules support the `EQUALS`, `ABSENT`, `STARTS_WITH`, `ENDS_WITH` and `CONTAINS` match options with
+`CASE_SENSITIVE` or `CASE_INSENSITIVE`. `EffectiveStart` defaults to the start of the current month and may be
+the start of any of the previous 12 months. Split charge rules are validated and stored but do not redistribute
+cost. Floci keeps no history of a category's earlier rule versions: a category reads the same for any
+`EffectiveOn` at or after its `EffectiveStart`, and is gone once deleted.
+
+## Forecasts, comparisons and recommendations
+
+Floci derives usage from current resource state, so cost is a steady run rate. Forecasts project the trailing
+day's rate over each requested period and widen the prediction interval with `PredictionIntervalLevel`; when the
+filter matches no cost they fail with `DataUnavailableException`, as AWS does without history. Month comparisons
+differ only by the number of days in each month while resources stay the same.
+
+Reserved Instance and Savings Plans recommendations size the commitment to the instances that ran for the whole
+lookback period (and, for Compute Savings Plans, Lambda spend), priced with typical discounts for the term,
+payment option and offering class. Rightsizing reads each instance's `AWS/EC2` `CPUUtilization` from CloudWatch
+over 14 days: a peak at or below 1% recommends `TERMINATE`, a peak below 40% recommends `MODIFY` to the next size
+down in the family, and an instance without metrics gets no recommendation.
+
+Cost allocation tags are the tag keys seen on usage in the last 12 months; `aws:` keys are `AWSGenerated`, the
+rest `UserDefined`, and every key starts `Inactive`. No anomalies are generated, so `GetAnomalies` returns an
+empty list and `ProvideAnomalyFeedback` rejects every anomaly ID.
 
 ## Cost synthesis model
 

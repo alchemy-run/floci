@@ -4,6 +4,7 @@ import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
@@ -16,9 +17,24 @@ import static org.hamcrest.Matchers.*;
 @QuarkusTest
 class TranscribeIntegrationTest {
 
+    private static boolean mediaUploaded;
+
     @BeforeAll
     static void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
+    }
+
+    /** Transcribe reads a job's media, so the objects the jobs name exist. */
+    @BeforeEach
+    void uploadMedia() {
+        if (mediaUploaded) {
+            return;
+        }
+        for (String[] object : new String[][]{{"my-bucket", "audio.mp3"}, {"bucket", "audio.wav"}, {"b", "a.wav"}}) {
+            given().when().put("/" + object[0]);
+            given().body(new byte[]{1, 2, 3}).when().put("/" + object[0] + "/" + object[1]).then().statusCode(200);
+        }
+        mediaUploaded = true;
     }
 
     private static final String CONTENT_TYPE = "application/x-amz-json-1.1";
@@ -170,7 +186,7 @@ class TranscribeIntegrationTest {
             .post("/")
         .then()
             .statusCode(400)
-            .body("__type", equalTo("NotFoundException"));
+            .body("__type", equalTo("BadRequestException"));
     }
 
     // ── ListTranscriptionJobs ────────────────────────────────────────────────
@@ -299,7 +315,7 @@ class TranscribeIntegrationTest {
             .post("/")
         .then()
             .statusCode(400)
-            .body("__type", equalTo("NotFoundException"));
+            .body("__type", equalTo("BadRequestException"));
     }
 
     @Test
@@ -326,7 +342,7 @@ class TranscribeIntegrationTest {
             .header("X-Amz-Target", "Transcribe.CreateVocabulary")
             .header("Authorization", AUTH_HEADER)
             .body("""
-                {"VocabularyName":"test-vocab-create","LanguageCode":"en-US"}""")
+                {"VocabularyName":"test-vocab-create","LanguageCode":"en-US","Phrases":["alchemy"]}""")
         .when()
             .post("/")
         .then()
@@ -340,7 +356,7 @@ class TranscribeIntegrationTest {
     @Test
     void createVocabulary_duplicateName_returnsConflict() {
         String body = """
-            {"VocabularyName":"test-vocab-dup","LanguageCode":"en-US"}""";
+            {"VocabularyName":"test-vocab-dup","LanguageCode":"en-US","Phrases":["alchemy"]}""";
 
         given()
             .contentType(CONTENT_TYPE)
@@ -373,7 +389,7 @@ class TranscribeIntegrationTest {
             .header("X-Amz-Target", "Transcribe.CreateVocabulary")
             .header("Authorization", AUTH_HEADER)
             .body("""
-                {"VocabularyName":"test-vocab-get","LanguageCode":"de-DE"}""")
+                {"VocabularyName":"test-vocab-get","LanguageCode":"de-DE","Phrases":["alchemy"]}""")
         .when()
             .post("/")
         .then()
@@ -406,7 +422,7 @@ class TranscribeIntegrationTest {
             .post("/")
         .then()
             .statusCode(400)
-            .body("__type", equalTo("NotFoundException"));
+            .body("__type", equalTo("BadRequestException"));
     }
 
     // ── ListVocabularies ─────────────────────────────────────────────────────
@@ -418,7 +434,7 @@ class TranscribeIntegrationTest {
                 .contentType(CONTENT_TYPE)
                 .header("X-Amz-Target", "Transcribe.CreateVocabulary")
                 .header("Authorization", AUTH_HEADER)
-                .body("{\"VocabularyName\":\"" + name + "\",\"LanguageCode\":\"en-US\"}")
+                .body("{\"VocabularyName\":\"" + name + "\",\"LanguageCode\":\"en-US\",\"Phrases\":[\"alchemy\"]}")
             .when()
                 .post("/")
             .then()
@@ -446,7 +462,7 @@ class TranscribeIntegrationTest {
                 .contentType(CONTENT_TYPE)
                 .header("X-Amz-Target", "Transcribe.CreateVocabulary")
                 .header("Authorization", AUTH_HEADER)
-                .body("{\"VocabularyName\":\"" + name + "\",\"LanguageCode\":\"en-US\"}")
+                .body("{\"VocabularyName\":\"" + name + "\",\"LanguageCode\":\"en-US\",\"Phrases\":[\"alchemy\"]}")
             .when()
                 .post("/")
             .then()
@@ -504,7 +520,7 @@ class TranscribeIntegrationTest {
             .header("X-Amz-Target", "Transcribe.CreateVocabulary")
             .header("Authorization", AUTH_HEADER)
             .body("""
-                {"VocabularyName":"test-vocab-delete","LanguageCode":"en-US"}""")
+                {"VocabularyName":"test-vocab-delete","LanguageCode":"en-US","Phrases":["alchemy"]}""")
         .when()
             .post("/")
         .then()
@@ -531,7 +547,7 @@ class TranscribeIntegrationTest {
             .post("/")
         .then()
             .statusCode(400)
-            .body("__type", equalTo("NotFoundException"));
+            .body("__type", equalTo("BadRequestException"));
     }
 
     @Test

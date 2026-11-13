@@ -80,6 +80,8 @@ quarkus:
       # is not worth depending on the static initialiser running at build time.
       includes:
         - pricing-snapshots/**
+        - polly/*
+        - location/*
         - ui/*.html
         - appsync/*.mjs
         - lambdaweb/*.mjs
@@ -170,6 +172,9 @@ quarkus:
       - --initialize-at-run-time=io.floci.aws.services.ecs.exec.EcsExecSessionRegistry
       - --initialize-at-run-time=io.floci.aws.services.stepfunctions.ApiGatewayTaskInvoker
       - --initialize-at-run-time=io.floci.aws.services.eventbridge.GlobalEndpointService
+      - --initialize-at-run-time=io.floci.aws.services.location.LocationService
+      - --initialize-at-run-time=io.floci.aws.services.route53domains.Route53DomainsService
+      - --initialize-at-run-time=io.floci.aws.services.acmpca.AcmPcaCrypto
       # snappy-java (Firehose Snappy/HADOOP_SNAPPY delivery) extracts and loads a
       # bundled JNI library from the static initializers of these two classes.
       - --initialize-at-run-time=org.xerial.snappy.Snappy
@@ -620,12 +625,15 @@ floci:
       shutdown-timeout-seconds: ${FLOCI_SERVICES_REDSHIFT_DATA_SHUTDOWN_TIMEOUT_SECONDS:10}
     redshift-serverless:
       enabled: true
+      endpoint-domain: redshift-serverless.localhost.floci.io  # FLOCI_SERVICES_REDSHIFT_SERVERLESS_ENDPOINT_DOMAIN; AWS-shaped workgroup endpoint names on the workgroup's port, routed by TLS server name
       snapshot-expiration-enabled: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SNAPSHOT_EXPIRATION_ENABLED:true}
       snapshot-expiration-sweep-interval-seconds: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SNAPSHOT_EXPIRATION_SWEEP_INTERVAL_SECONDS:60}
       snapshot-copy-enabled: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SNAPSHOT_COPY_ENABLED:true}
       snapshot-copy-sweep-interval-seconds: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SNAPSHOT_COPY_SWEEP_INTERVAL_SECONDS:60}
       scheduled-actions-enabled: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SCHEDULED_ACTIONS_ENABLED:true}
       scheduled-action-sweep-interval-seconds: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_SCHEDULED_ACTION_SWEEP_INTERVAL_SECONDS:60}
+      recovery-points-enabled: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_RECOVERY_POINTS_ENABLED:true}  # a recovery point of each running workgroup's namespace every interval, kept a day
+      recovery-point-interval-seconds: ${FLOCI_SERVICES_REDSHIFT_SERVERLESS_RECOVERY_POINT_INTERVAL_SECONDS:1800}
     neptune:
       enabled: true
       proxy-base-port: 8182
@@ -714,6 +722,7 @@ floci:
     duck:
       # url: http://floci-duck:3000   # set to skip container management
       default-image: "floci/floci-duck:latest"
+      startup-timeout-seconds: 120
     glue:
       enabled: true
       job-run-duration-seconds: 0   # 0 = job runs succeed as soon as they start
@@ -968,6 +977,170 @@ floci:
     textract:
       enabled: true
     comprehend:
+      enabled: true
+    comprehend-medical:
+      enabled: true
+    polly:
+      enabled: true
+    location:
+      enabled: true
+    route53-domains:
+      enabled: true
+    acm-pca:
+      enabled: true
+    ai-ops:
+      enabled: true
+    amplify:
+      enabled: true
+    app-flow:
+      enabled: true
+    app-registry:
+      enabled: true
+    app-runner:
+      enabled: true
+    audit-manager:
+      enabled: true
+    b2bi:
+      enabled: true
+    backup-search:
+      enabled: true
+    bedrock-data-automation:
+      enabled: true
+    chatbot:
+      enabled: true
+    code-connections:
+      enabled: true
+    databrew:
+      enabled: true
+    dataexchange:
+      enabled: true
+    datazone:
+      enabled: true
+    deadline:
+      enabled: true
+    devopsguru:
+      enabled: true
+    fsx:
+      enabled: true
+    forecast:
+      enabled: true
+    ivs:
+      enabled: true
+    imagebuilder:
+      enabled: true
+    internetmonitor:
+      enabled: true
+    iotfleetwise:
+      enabled: true
+    iotmanagedintegrations:
+      enabled: true
+    iotwireless:
+      enabled: true
+    iotsitewise:
+      enabled: true
+    ivschat:
+      enabled: true
+    healthlake:
+      enabled: true
+    greengrassv2:
+      enabled: true
+    grafana:
+      enabled: true
+    glacier:
+      enabled: true
+    airflow-serverless:
+      enabled: true
+    notifications:
+      enabled: true
+    notifications-contacts:
+      enabled: true
+    osis:
+      enabled: true
+    rolesanywhere:
+      enabled: true
+    repostspace:
+      enabled: true
+    socialmessaging:
+      enabled: true
+    synthetics:
+      enabled: true
+    vpc-lattice:
+      enabled: true
+    xray:
+      enabled: true
+    sdb:
+      enabled: true
+    signer:
+      enabled: true
+    shield:
+      enabled: true
+    securitylake:
+      enabled: true
+    schemas:
+      enabled: true
+    ssm-incidents:
+      enabled: true
+    ssm-contacts:
+      enabled: true
+    s3files:
+      enabled: true
+    route53profiles:
+      enabled: true
+    rbin:
+      enabled: true
+    qbusiness:
+      enabled: true
+    qapps:
+      enabled: true
+    pinpoint-sms-voice-v2:
+      enabled: true
+    personalize:
+      enabled: true
+    opensearch-serverless:
+      enabled: true
+    omics:
+      enabled: true
+    observability-admin:
+      enabled: true
+    neptune-graph:
+      enabled: true
+    medical-imaging:
+      enabled: true
+    media-tailor:
+      enabled: true
+    media-package-v2:
+      enabled: true
+    media-live:
+      enabled: true
+    media-convert:
+      enabled: true
+    media-connect:
+      enabled: true
+    mail-manager:
+      enabled: true
+    license-manager:
+      enabled: true
+    lexv2:
+      enabled: true
+    kinesis-video:
+      enabled: true
+    keyspaces:
+      enabled: true
+    kendra:
+      enabled: true
+    fms:
+      enabled: true
+    entityresolution:
+      enabled: true
+    emr-containers:
+      enabled: true
+    ecr-public:
+      enabled: true
+    docdb-elastic:
+      enabled: true
+    ds:
+      enabled: true
+    dax:
       enabled: true
     rekognition:
       enabled: true

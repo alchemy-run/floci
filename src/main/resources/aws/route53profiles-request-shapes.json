@@ -1,0 +1,269 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_route53profiles_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateProfile": "AssociateProfileRequest",
+    "AssociateResourceToProfile": "AssociateResourceToProfileRequest",
+    "CreateProfile": "CreateProfileRequest",
+    "DeleteProfile": "DeleteProfileRequest",
+    "DisassociateProfile": "DisassociateProfileRequest",
+    "DisassociateResourceFromProfile": "DisassociateResourceFromProfileRequest",
+    "GetProfile": "GetProfileRequest",
+    "GetProfileAssociation": "GetProfileAssociationRequest",
+    "GetProfileResourceAssociation": "GetProfileResourceAssociationRequest",
+    "ListProfileAssociations": "ListProfileAssociationsRequest",
+    "ListProfileResourceAssociations": "ListProfileResourceAssociationsRequest",
+    "ListProfiles": "ListProfilesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateProfileResourceAssociation": "UpdateProfileResourceAssociationRequest"
+  },
+  "shapes": {
+    "Arn": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "AssociateProfileRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "ProfileId",
+        "ResourceId"
+      ],
+      "members": {
+        "Name": "Name",
+        "ProfileId": "ResourceId",
+        "ResourceId": "ResourceId",
+        "Tags": "TagList"
+      }
+    },
+    "AssociateResourceToProfileRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "ProfileId",
+        "ResourceArn"
+      ],
+      "members": {
+        "Name": "Name",
+        "ProfileId": "ResourceId",
+        "ResourceArn": "Arn",
+        "ResourceProperties": "ResourceProperties"
+      }
+    },
+    "CreateProfileRequest": {
+      "type": "structure",
+      "required": [
+        "ClientToken",
+        "Name"
+      ],
+      "members": {
+        "ClientToken": "CreatorRequestId",
+        "Name": "Name",
+        "Tags": "TagList"
+      }
+    },
+    "CreatorRequestId": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "DeleteProfileRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileId"
+      ],
+      "members": {
+        "ProfileId": "ResourceId"
+      }
+    },
+    "DisassociateProfileRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileId",
+        "ResourceId"
+      ],
+      "members": {
+        "ProfileId": "ResourceId",
+        "ResourceId": "ResourceId"
+      }
+    },
+    "DisassociateResourceFromProfileRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileId",
+        "ResourceArn"
+      ],
+      "members": {
+        "ProfileId": "ResourceId",
+        "ResourceArn": "Arn"
+      }
+    },
+    "GetProfileAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileAssociationId"
+      ],
+      "members": {
+        "ProfileAssociationId": "ResourceId"
+      }
+    },
+    "GetProfileRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileId"
+      ],
+      "members": {
+        "ProfileId": "ResourceId"
+      }
+    },
+    "GetProfileResourceAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileResourceAssociationId"
+      ],
+      "members": {
+        "ProfileResourceAssociationId": "ResourceId"
+      }
+    },
+    "ListProfileAssociationsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken",
+        "ProfileId": "ResourceId",
+        "ResourceId": "ResourceId"
+      }
+    },
+    "ListProfileResourceAssociationsRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileId"
+      ],
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken",
+        "ProfileId": "ResourceId",
+        "ResourceType": "String"
+      }
+    },
+    "ListProfilesRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "Arn"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "Name": {
+      "type": "string",
+      "min": 0,
+      "max": 64,
+      "pattern": "^(?!^[0-9]+$)([a-zA-Z0-9\\-_' ']+)$"
+    },
+    "NextToken": {
+      "type": "string"
+    },
+    "ResourceId": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "ResourceProperties": {
+      "type": "string"
+    },
+    "String": {
+      "type": "string"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 0,
+      "max": 200,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "Arn",
+        "Tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "Arn",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateProfileResourceAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "ProfileResourceAssociationId"
+      ],
+      "members": {
+        "Name": "Name",
+        "ProfileResourceAssociationId": "ResourceId",
+        "ResourceProperties": "ResourceProperties"
+      }
+    }
+  }
+}

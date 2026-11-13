@@ -340,6 +340,25 @@ public class CertificateGenerator {
         return String.join(":", hex.split("(?<=\\G..)"));
     }
 
+    /** A new key pair of {@code keyAlgorithm}. */
+    public KeyPair newKeyPair(KeyAlgorithm keyAlgorithm) {
+        try {
+            return generateKeyPair(keyAlgorithm);
+        } catch (Exception e) {
+            throw new CertificateMaterialException("Key generation failed: " + e.getMessage(), e);
+        }
+    }
+
+    /** The material of a certificate another CA signed for {@code key}, as this generator reports its own. */
+    public GeneratedCertificate describeIssued(X509Certificate cert, PrivateKey key) {
+        try {
+            return toGenerated(cert, key, cert.getSubjectX500Principal().getName(),
+                    cert.getIssuerX500Principal().getName());
+        } catch (Exception e) {
+            throw new CertificateMaterialException("Certificate material could not be read: " + e.getMessage(), e);
+        }
+    }
+
     private KeyPair generateKeyPair(KeyAlgorithm keyAlgorithm) throws Exception {
         KeyPairGenerator keyGen;
         if ("EC".equals(keyAlgorithm.getAlgorithm())) {

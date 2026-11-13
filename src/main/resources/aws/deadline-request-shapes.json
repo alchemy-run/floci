@@ -1,0 +1,3930 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_deadline_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateMemberToFarm": "AssociateMemberToFarmRequest",
+    "AssociateMemberToFleet": "AssociateMemberToFleetRequest",
+    "AssociateMemberToJob": "AssociateMemberToJobRequest",
+    "AssociateMemberToQueue": "AssociateMemberToQueueRequest",
+    "AssumeFleetRoleForRead": "AssumeFleetRoleForReadRequest",
+    "AssumeFleetRoleForWorker": "AssumeFleetRoleForWorkerRequest",
+    "AssumeQueueRoleForRead": "AssumeQueueRoleForReadRequest",
+    "AssumeQueueRoleForUser": "AssumeQueueRoleForUserRequest",
+    "AssumeQueueRoleForWorker": "AssumeQueueRoleForWorkerRequest",
+    "BatchGetJob": "BatchGetJobRequest",
+    "BatchGetJobEntity": "BatchGetJobEntityRequest",
+    "BatchGetSession": "BatchGetSessionRequest",
+    "BatchGetSessionAction": "BatchGetSessionActionRequest",
+    "BatchGetStep": "BatchGetStepRequest",
+    "BatchGetTask": "BatchGetTaskRequest",
+    "BatchGetWorker": "BatchGetWorkerRequest",
+    "BatchUpdateJob": "BatchUpdateJobRequest",
+    "BatchUpdateTask": "BatchUpdateTaskRequest",
+    "CopyJobTemplate": "CopyJobTemplateRequest",
+    "CreateBudget": "CreateBudgetRequest",
+    "CreateFarm": "CreateFarmRequest",
+    "CreateFleet": "CreateFleetRequest",
+    "CreateJob": "CreateJobRequest",
+    "CreateLicenseEndpoint": "CreateLicenseEndpointRequest",
+    "CreateLimit": "CreateLimitRequest",
+    "CreateMonitor": "CreateMonitorRequest",
+    "CreateQueue": "CreateQueueRequest",
+    "CreateQueueEnvironment": "CreateQueueEnvironmentRequest",
+    "CreateQueueFleetAssociation": "CreateQueueFleetAssociationRequest",
+    "CreateQueueLimitAssociation": "CreateQueueLimitAssociationRequest",
+    "CreateStorageProfile": "CreateStorageProfileRequest",
+    "CreateWorker": "CreateWorkerRequest",
+    "DeleteBudget": "DeleteBudgetRequest",
+    "DeleteFarm": "DeleteFarmRequest",
+    "DeleteFleet": "DeleteFleetRequest",
+    "DeleteLicenseEndpoint": "DeleteLicenseEndpointRequest",
+    "DeleteLimit": "DeleteLimitRequest",
+    "DeleteMeteredProduct": "DeleteMeteredProductRequest",
+    "DeleteMonitor": "DeleteMonitorRequest",
+    "DeleteQueue": "DeleteQueueRequest",
+    "DeleteQueueEnvironment": "DeleteQueueEnvironmentRequest",
+    "DeleteQueueFleetAssociation": "DeleteQueueFleetAssociationRequest",
+    "DeleteQueueLimitAssociation": "DeleteQueueLimitAssociationRequest",
+    "DeleteStorageProfile": "DeleteStorageProfileRequest",
+    "DeleteVolume": "DeleteVolumeRequest",
+    "DeleteWorker": "DeleteWorkerRequest",
+    "DisassociateMemberFromFarm": "DisassociateMemberFromFarmRequest",
+    "DisassociateMemberFromFleet": "DisassociateMemberFromFleetRequest",
+    "DisassociateMemberFromJob": "DisassociateMemberFromJobRequest",
+    "DisassociateMemberFromQueue": "DisassociateMemberFromQueueRequest",
+    "GetBudget": "GetBudgetRequest",
+    "GetFarm": "GetFarmRequest",
+    "GetFleet": "GetFleetRequest",
+    "GetJob": "GetJobRequest",
+    "GetLicenseEndpoint": "GetLicenseEndpointRequest",
+    "GetLimit": "GetLimitRequest",
+    "GetMonitor": "GetMonitorRequest",
+    "GetMonitorSettings": "GetMonitorSettingsRequest",
+    "GetQueue": "GetQueueRequest",
+    "GetQueueEnvironment": "GetQueueEnvironmentRequest",
+    "GetQueueFleetAssociation": "GetQueueFleetAssociationRequest",
+    "GetQueueLimitAssociation": "GetQueueLimitAssociationRequest",
+    "GetSession": "GetSessionRequest",
+    "GetSessionAction": "GetSessionActionRequest",
+    "GetSessionsStatisticsAggregation": "GetSessionsStatisticsAggregationRequest",
+    "GetStep": "GetStepRequest",
+    "GetStorageProfile": "GetStorageProfileRequest",
+    "GetStorageProfileForQueue": "GetStorageProfileForQueueRequest",
+    "GetTask": "GetTaskRequest",
+    "GetVolume": "GetVolumeRequest",
+    "GetWorker": "GetWorkerRequest",
+    "ListAvailableMeteredProducts": "ListAvailableMeteredProductsRequest",
+    "ListBudgets": "ListBudgetsRequest",
+    "ListFarmMembers": "ListFarmMembersRequest",
+    "ListFarms": "ListFarmsRequest",
+    "ListFleetMembers": "ListFleetMembersRequest",
+    "ListFleets": "ListFleetsRequest",
+    "ListJobMembers": "ListJobMembersRequest",
+    "ListJobParameterDefinitions": "ListJobParameterDefinitionsRequest",
+    "ListJobs": "ListJobsRequest",
+    "ListLicenseEndpoints": "ListLicenseEndpointsRequest",
+    "ListLimits": "ListLimitsRequest",
+    "ListMemberships": "ListMembershipsRequest",
+    "ListMeteredProducts": "ListMeteredProductsRequest",
+    "ListMonitors": "ListMonitorsRequest",
+    "ListQueueEnvironments": "ListQueueEnvironmentsRequest",
+    "ListQueueFleetAssociations": "ListQueueFleetAssociationsRequest",
+    "ListQueueLimitAssociations": "ListQueueLimitAssociationsRequest",
+    "ListQueueMembers": "ListQueueMembersRequest",
+    "ListQueues": "ListQueuesRequest",
+    "ListSessionActions": "ListSessionActionsRequest",
+    "ListSessions": "ListSessionsRequest",
+    "ListSessionsForWorker": "ListSessionsForWorkerRequest",
+    "ListStepConsumers": "ListStepConsumersRequest",
+    "ListStepDependencies": "ListStepDependenciesRequest",
+    "ListSteps": "ListStepsRequest",
+    "ListStorageProfiles": "ListStorageProfilesRequest",
+    "ListStorageProfilesForQueue": "ListStorageProfilesForQueueRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTasks": "ListTasksRequest",
+    "ListVolumes": "ListVolumesRequest",
+    "ListWorkers": "ListWorkersRequest",
+    "PutMeteredProduct": "PutMeteredProductRequest",
+    "SearchJobs": "SearchJobsRequest",
+    "SearchSteps": "SearchStepsRequest",
+    "SearchTasks": "SearchTasksRequest",
+    "SearchWorkers": "SearchWorkersRequest",
+    "StartSessionsStatisticsAggregation": "StartSessionsStatisticsAggregationRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateBudget": "UpdateBudgetRequest",
+    "UpdateFarm": "UpdateFarmRequest",
+    "UpdateFleet": "UpdateFleetRequest",
+    "UpdateJob": "UpdateJobRequest",
+    "UpdateLimit": "UpdateLimitRequest",
+    "UpdateMonitor": "UpdateMonitorRequest",
+    "UpdateMonitorSettings": "UpdateMonitorSettingsRequest",
+    "UpdateQueue": "UpdateQueueRequest",
+    "UpdateQueueEnvironment": "UpdateQueueEnvironmentRequest",
+    "UpdateQueueFleetAssociation": "UpdateQueueFleetAssociationRequest",
+    "UpdateQueueLimitAssociation": "UpdateQueueLimitAssociationRequest",
+    "UpdateSession": "UpdateSessionRequest",
+    "UpdateStep": "UpdateStepRequest",
+    "UpdateStorageProfile": "UpdateStorageProfileRequest",
+    "UpdateTask": "UpdateTaskRequest",
+    "UpdateWorker": "UpdateWorkerRequest",
+    "UpdateWorkerSchedule": "UpdateWorkerScheduleRequest"
+  },
+  "shapes": {
+    "AcceleratorCapabilities": {
+      "type": "structure",
+      "required": [
+        "selections"
+      ],
+      "members": {
+        "selections": "AcceleratorSelections",
+        "count": "AcceleratorCountRange"
+      }
+    },
+    "AcceleratorCountRange": {
+      "type": "structure",
+      "required": [
+        "min"
+      ],
+      "members": {
+        "min": "MinZeroMaxInteger",
+        "max": "MinZeroMaxInteger"
+      }
+    },
+    "AcceleratorName": {
+      "type": "string",
+      "enum": [
+        "t4",
+        "a10g",
+        "l4",
+        "l40s",
+        "rtx-pro-server-6000"
+      ]
+    },
+    "AcceleratorRuntime": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "AcceleratorSelection": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "AcceleratorName",
+        "runtime": "AcceleratorRuntime"
+      }
+    },
+    "AcceleratorSelections": {
+      "type": "list",
+      "member": "AcceleratorSelection"
+    },
+    "AcceleratorTotalMemoryMiBRange": {
+      "type": "structure",
+      "required": [
+        "min"
+      ],
+      "members": {
+        "min": "MinZeroMaxInteger",
+        "max": "MinZeroMaxInteger"
+      }
+    },
+    "AcceleratorType": {
+      "type": "string",
+      "enum": [
+        "gpu"
+      ]
+    },
+    "AcceleratorTypes": {
+      "type": "list",
+      "member": "AcceleratorType"
+    },
+    "AggregationId": {
+      "type": "string",
+      "pattern": "[0-9a-f]{32}"
+    },
+    "AllowedStorageProfileIds": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "StorageProfileId"
+    },
+    "AmountCapabilityName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "([a-zA-Z][a-zA-Z0-9]{0,63}:)?amount(\\.[a-zA-Z][a-zA-Z0-9]{0,63})+"
+    },
+    "AmountRequirementName": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "AssociateMemberToFarmRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "principalType",
+        "identityStoreId",
+        "membershipLevel",
+        "principalId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "principalType": "PrincipalType",
+        "identityStoreId": "IdentityStoreId",
+        "membershipLevel": "MembershipLevel",
+        "principalId": "IdentityCenterPrincipalId",
+        "identityCenterRegion": "Region"
+      }
+    },
+    "AssociateMemberToFleetRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "principalType",
+        "identityStoreId",
+        "membershipLevel",
+        "principalId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "principalType": "PrincipalType",
+        "identityStoreId": "IdentityStoreId",
+        "membershipLevel": "MembershipLevel",
+        "principalId": "IdentityCenterPrincipalId",
+        "identityCenterRegion": "Region"
+      }
+    },
+    "AssociateMemberToJobRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "principalType",
+        "identityStoreId",
+        "membershipLevel",
+        "principalId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "principalType": "PrincipalType",
+        "identityStoreId": "IdentityStoreId",
+        "membershipLevel": "MembershipLevel",
+        "principalId": "IdentityCenterPrincipalId",
+        "identityCenterRegion": "Region"
+      }
+    },
+    "AssociateMemberToQueueRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "principalType",
+        "identityStoreId",
+        "membershipLevel",
+        "principalId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "principalType": "PrincipalType",
+        "identityStoreId": "IdentityStoreId",
+        "membershipLevel": "MembershipLevel",
+        "principalId": "IdentityCenterPrincipalId",
+        "identityCenterRegion": "Region"
+      }
+    },
+    "AssumeFleetRoleForReadRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId"
+      }
+    },
+    "AssumeFleetRoleForWorkerRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "workerId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "workerId": "WorkerId"
+      }
+    },
+    "AssumeQueueRoleForReadRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId"
+      }
+    },
+    "AssumeQueueRoleForUserRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId"
+      }
+    },
+    "AssumeQueueRoleForWorkerRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "workerId",
+        "queueId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "workerId": "WorkerId",
+        "queueId": "QueueId"
+      }
+    },
+    "Attachments": {
+      "type": "structure",
+      "required": [
+        "manifests"
+      ],
+      "members": {
+        "manifests": "ManifestPropertiesList",
+        "fileSystem": "JobAttachmentsFileSystem"
+      }
+    },
+    "AttributeCapabilityName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "([a-zA-Z][a-zA-Z0-9]{0,63}:)?attr(\\.[a-zA-Z][a-zA-Z0-9]{0,63})+"
+    },
+    "AttributeCapabilityValue": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z_]([a-zA-Z0-9_\\-]{0,99})"
+    },
+    "AttributeCapabilityValuesList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "AttributeCapabilityValue"
+    },
+    "AutoScalingMode": {
+      "type": "string",
+      "enum": [
+        "NO_SCALING",
+        "EVENT_BASED_AUTO_SCALING"
+      ]
+    },
+    "BatchGetJobEntityRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "workerId",
+        "identifiers"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "workerId": "WorkerId",
+        "identifiers": "JobEntityIdentifiers"
+      }
+    },
+    "BatchGetJobIdentifier": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId"
+      }
+    },
+    "BatchGetJobIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "BatchGetJobIdentifier"
+    },
+    "BatchGetJobRequest": {
+      "type": "structure",
+      "required": [
+        "identifiers"
+      ],
+      "members": {
+        "identifiers": "BatchGetJobIdentifiers"
+      }
+    },
+    "BatchGetSessionActionIdentifier": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "sessionActionId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "sessionActionId": "SessionActionId"
+      }
+    },
+    "BatchGetSessionActionIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "BatchGetSessionActionIdentifier"
+    },
+    "BatchGetSessionActionRequest": {
+      "type": "structure",
+      "required": [
+        "identifiers"
+      ],
+      "members": {
+        "identifiers": "BatchGetSessionActionIdentifiers"
+      }
+    },
+    "BatchGetSessionIdentifier": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "sessionId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "sessionId": "SessionId"
+      }
+    },
+    "BatchGetSessionIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "BatchGetSessionIdentifier"
+    },
+    "BatchGetSessionRequest": {
+      "type": "structure",
+      "required": [
+        "identifiers"
+      ],
+      "members": {
+        "identifiers": "BatchGetSessionIdentifiers"
+      }
+    },
+    "BatchGetStepIdentifier": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "stepId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "stepId": "StepId"
+      }
+    },
+    "BatchGetStepIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "BatchGetStepIdentifier"
+    },
+    "BatchGetStepRequest": {
+      "type": "structure",
+      "required": [
+        "identifiers"
+      ],
+      "members": {
+        "identifiers": "BatchGetStepIdentifiers"
+      }
+    },
+    "BatchGetTaskIdentifier": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "stepId",
+        "taskId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "stepId": "StepId",
+        "taskId": "TaskId"
+      }
+    },
+    "BatchGetTaskIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "BatchGetTaskIdentifier"
+    },
+    "BatchGetTaskRequest": {
+      "type": "structure",
+      "required": [
+        "identifiers"
+      ],
+      "members": {
+        "identifiers": "BatchGetTaskIdentifiers"
+      }
+    },
+    "BatchGetWorkerIdentifier": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "workerId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "workerId": "WorkerId"
+      }
+    },
+    "BatchGetWorkerIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "BatchGetWorkerIdentifier"
+    },
+    "BatchGetWorkerRequest": {
+      "type": "structure",
+      "required": [
+        "identifiers"
+      ],
+      "members": {
+        "identifiers": "BatchGetWorkerIdentifiers"
+      }
+    },
+    "BatchUpdateJobItem": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "targetTaskRunStatus": "JobTargetTaskRunStatus",
+        "priority": "JobPriority",
+        "maxFailedTasksCount": "MaxFailedTasksCount",
+        "maxRetriesPerTask": "MaxRetriesPerTask",
+        "lifecycleStatus": "UpdateJobLifecycleStatus",
+        "maxWorkerCount": "MaxWorkerCount",
+        "name": "JobName",
+        "description": "JobDescriptionOverride"
+      }
+    },
+    "BatchUpdateJobItems": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "BatchUpdateJobItem"
+    },
+    "BatchUpdateJobRequest": {
+      "type": "structure",
+      "required": [
+        "jobs"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "jobs": "BatchUpdateJobItems"
+      }
+    },
+    "BatchUpdateTaskItem": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "stepId",
+        "taskId",
+        "targetRunStatus"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "stepId": "StepId",
+        "taskId": "TaskId",
+        "targetRunStatus": "TaskTargetRunStatus"
+      }
+    },
+    "BatchUpdateTaskItems": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "BatchUpdateTaskItem"
+    },
+    "BatchUpdateTaskRequest": {
+      "type": "structure",
+      "required": [
+        "tasks"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "tasks": "BatchUpdateTaskItems"
+      }
+    },
+    "BooleanString": {
+      "type": "string",
+      "min": 1,
+      "max": 5,
+      "pattern": "([Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|[Yy][Ee][Ss]|[Nn][Oo]|[Oo][Nn]|[Oo][Ff][Ff]|[01])"
+    },
+    "BooleanStringList": {
+      "type": "list",
+      "min": 0,
+      "max": 512,
+      "member": "BooleanString"
+    },
+    "BudgetActionToAdd": {
+      "type": "structure",
+      "required": [
+        "type",
+        "thresholdPercentage"
+      ],
+      "members": {
+        "type": "BudgetActionType",
+        "thresholdPercentage": "ThresholdPercentage",
+        "description": "Description"
+      }
+    },
+    "BudgetActionToRemove": {
+      "type": "structure",
+      "required": [
+        "type",
+        "thresholdPercentage"
+      ],
+      "members": {
+        "type": "BudgetActionType",
+        "thresholdPercentage": "ThresholdPercentage"
+      }
+    },
+    "BudgetActionType": {
+      "type": "string",
+      "enum": [
+        "STOP_SCHEDULING_AND_COMPLETE_TASKS",
+        "STOP_SCHEDULING_AND_CANCEL_TASKS"
+      ]
+    },
+    "BudgetActionsToAdd": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "BudgetActionToAdd"
+    },
+    "BudgetActionsToRemove": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "BudgetActionToRemove"
+    },
+    "BudgetId": {
+      "type": "string",
+      "pattern": "budget-[0-9a-f]{32}"
+    },
+    "BudgetSchedule": {
+      "type": "structure",
+      "members": {
+        "fixed": "FixedBudgetSchedule"
+      }
+    },
+    "BudgetStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "INACTIVE"
+      ]
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "ComparisonOperator": {
+      "type": "string",
+      "enum": [
+        "EQUAL",
+        "NOT_EQUAL",
+        "GREATER_THAN_EQUAL_TO",
+        "GREATER_THAN",
+        "LESS_THAN_EQUAL_TO",
+        "LESS_THAN",
+        "ANY_EQUALS",
+        "ALL_NOT_EQUALS"
+      ]
+    },
+    "CompletedStatus": {
+      "type": "string",
+      "enum": [
+        "SUCCEEDED",
+        "FAILED",
+        "INTERRUPTED",
+        "CANCELED",
+        "NEVER_ATTEMPTED"
+      ]
+    },
+    "ConsumedUsageLimit": {
+      "type": "float",
+      "min": 0.01
+    },
+    "CopyJobTemplateRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "targetS3Location"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "targetS3Location": "S3Location"
+      }
+    },
+    "CostScaleFactor": {
+      "type": "float",
+      "min": 0,
+      "max": 100
+    },
+    "CpuArchitectureType": {
+      "type": "string",
+      "enum": [
+        "x86_64",
+        "arm64"
+      ]
+    },
+    "CreateBudgetRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "displayName",
+        "usageTrackingResource",
+        "approximateDollarLimit",
+        "actions",
+        "schedule"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "displayName": "ResourceName",
+        "description": "Description",
+        "clientToken": "ClientToken",
+        "usageTrackingResource": "UsageTrackingResource",
+        "approximateDollarLimit": "ConsumedUsageLimit",
+        "actions": "BudgetActionsToAdd",
+        "schedule": "BudgetSchedule",
+        "tags": "Tags"
+      }
+    },
+    "CreateFarmRequest": {
+      "type": "structure",
+      "required": [
+        "displayName"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "displayName": "ResourceName",
+        "description": "Description",
+        "kmsKeyArn": "KmsKeyArn",
+        "costScaleFactor": "CostScaleFactor",
+        "tags": "Tags"
+      }
+    },
+    "CreateFleetRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "displayName",
+        "roleArn",
+        "maxWorkerCount",
+        "configuration"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "clientToken": "ClientToken",
+        "displayName": "ResourceName",
+        "description": "Description",
+        "roleArn": "IamRoleArn",
+        "minWorkerCount": "MinZeroMaxInteger",
+        "maxWorkerCount": "MinZeroMaxInteger",
+        "configuration": "FleetConfiguration",
+        "tags": "Tags",
+        "hostConfiguration": "HostConfiguration"
+      }
+    },
+    "CreateJobRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "priority"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "clientToken": "ClientToken",
+        "template": "JobTemplate",
+        "templateType": "JobTemplateType",
+        "priority": "JobPriority",
+        "parameters": "JobParameters",
+        "attachments": "Attachments",
+        "storageProfileId": "StorageProfileId",
+        "targetTaskRunStatus": "CreateJobTargetTaskRunStatus",
+        "maxFailedTasksCount": "MaxFailedTasksCount",
+        "maxRetriesPerTask": "MaxRetriesPerTask",
+        "maxWorkerCount": "MaxWorkerCount",
+        "sourceJobId": "JobId",
+        "nameOverride": "JobName",
+        "descriptionOverride": "JobDescriptionOverride",
+        "tags": "Tags"
+      }
+    },
+    "CreateJobTargetTaskRunStatus": {
+      "type": "string",
+      "enum": [
+        "READY",
+        "SUSPENDED"
+      ]
+    },
+    "CreateLicenseEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "vpcId",
+        "subnetIds",
+        "securityGroupIds"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "vpcId": "VpcId",
+        "subnetIds": "CreateLicenseEndpointRequestSubnetIdsList",
+        "securityGroupIds": "CreateLicenseEndpointRequestSecurityGroupIdsList",
+        "tags": "Tags"
+      }
+    },
+    "CreateLicenseEndpointRequestSecurityGroupIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "SecurityGroupId"
+    },
+    "CreateLicenseEndpointRequestSubnetIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "SubnetId"
+    },
+    "CreateLimitRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "displayName",
+        "amountRequirementName",
+        "maxCount"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "clientToken": "ClientToken",
+        "displayName": "ResourceName",
+        "amountRequirementName": "AmountRequirementName",
+        "maxCount": "MaxCount",
+        "description": "Description"
+      }
+    },
+    "CreateMonitorRequest": {
+      "type": "structure",
+      "required": [
+        "displayName",
+        "identityCenterInstanceArn",
+        "subdomain",
+        "roleArn"
+      ],
+      "members": {
+        "clientToken": "ClientToken",
+        "displayName": "ResourceName",
+        "identityCenterInstanceArn": "IdentityCenterInstanceArn",
+        "identityCenterRegion": "Region",
+        "subdomain": "Subdomain",
+        "roleArn": "IamRoleArn",
+        "tags": "Tags"
+      }
+    },
+    "CreateQueueEnvironmentRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "priority",
+        "templateType",
+        "template"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "clientToken": "ClientToken",
+        "priority": "Priority",
+        "templateType": "EnvironmentTemplateType",
+        "template": "EnvironmentTemplate"
+      }
+    },
+    "CreateQueueFleetAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "fleetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "fleetId": "FleetId"
+      }
+    },
+    "CreateQueueLimitAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "limitId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "limitId": "LimitId"
+      }
+    },
+    "CreateQueueRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "displayName"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "clientToken": "ClientToken",
+        "displayName": "ResourceName",
+        "description": "Description",
+        "defaultBudgetAction": "DefaultQueueBudgetAction",
+        "jobAttachmentSettings": "JobAttachmentSettings",
+        "roleArn": "IamRoleArn",
+        "jobRunAsUser": "JobRunAsUser",
+        "requiredFileSystemLocationNames": "RequiredFileSystemLocationNames",
+        "allowedStorageProfileIds": "AllowedStorageProfileIds",
+        "tags": "Tags",
+        "schedulingConfiguration": "SchedulingConfiguration"
+      }
+    },
+    "CreateStorageProfileRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "displayName",
+        "osFamily"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "clientToken": "ClientToken",
+        "displayName": "ResourceName",
+        "osFamily": "StorageProfileOperatingSystemFamily",
+        "fileSystemLocations": "FileSystemLocationsList"
+      }
+    },
+    "CreateWorkerRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "hostProperties": "HostPropertiesRequest",
+        "clientToken": "ClientToken",
+        "tags": "Tags"
+      }
+    },
+    "CustomFleetAmountCapabilities": {
+      "type": "list",
+      "min": 1,
+      "max": 15,
+      "member": "FleetAmountCapability"
+    },
+    "CustomFleetAttributeCapabilities": {
+      "type": "list",
+      "min": 1,
+      "max": 15,
+      "member": "FleetAttributeCapability"
+    },
+    "CustomerManagedAutoScalingConfiguration": {
+      "type": "structure",
+      "members": {
+        "standbyWorkerCount": "MinZeroMaxInteger",
+        "workerIdleDurationSeconds": "MinZeroMaxInteger",
+        "scaleOutWorkersPerMinute": "MinOneMaxInteger"
+      }
+    },
+    "CustomerManagedFleetConfiguration": {
+      "type": "structure",
+      "required": [
+        "mode",
+        "workerCapabilities"
+      ],
+      "members": {
+        "mode": "AutoScalingMode",
+        "autoScalingConfiguration": "CustomerManagedAutoScalingConfiguration",
+        "workerCapabilities": "CustomerManagedWorkerCapabilities",
+        "storageProfileId": "StorageProfileId",
+        "tagPropagationMode": "TagPropagationMode"
+      }
+    },
+    "CustomerManagedFleetOperatingSystemFamily": {
+      "type": "string",
+      "enum": [
+        "WINDOWS",
+        "LINUX",
+        "MACOS"
+      ]
+    },
+    "CustomerManagedWorkerCapabilities": {
+      "type": "structure",
+      "required": [
+        "vCpuCount",
+        "memoryMiB",
+        "osFamily",
+        "cpuArchitectureType"
+      ],
+      "members": {
+        "vCpuCount": "VCpuCountRange",
+        "memoryMiB": "MemoryMiBRange",
+        "acceleratorTypes": "AcceleratorTypes",
+        "acceleratorCount": "AcceleratorCountRange",
+        "acceleratorTotalMemoryMiB": "AcceleratorTotalMemoryMiBRange",
+        "osFamily": "CustomerManagedFleetOperatingSystemFamily",
+        "cpuArchitectureType": "CpuArchitectureType",
+        "customAmounts": "CustomFleetAmountCapabilities",
+        "customAttributes": "CustomFleetAttributeCapabilities"
+      }
+    },
+    "DateTimeFilterExpression": {
+      "type": "structure",
+      "required": [
+        "name",
+        "operator",
+        "dateTime"
+      ],
+      "members": {
+        "name": "String",
+        "operator": "ComparisonOperator",
+        "dateTime": "SyntheticTimestamp_date_time"
+      }
+    },
+    "DefaultQueueBudgetAction": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "STOP_SCHEDULING_AND_COMPLETE_TASKS",
+        "STOP_SCHEDULING_AND_CANCEL_TASKS"
+      ]
+    },
+    "DeleteBudgetRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "budgetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "budgetId": "BudgetId"
+      }
+    },
+    "DeleteFarmRequest": {
+      "type": "structure",
+      "required": [
+        "farmId"
+      ],
+      "members": {
+        "farmId": "FarmId"
+      }
+    },
+    "DeleteFleetRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "clientToken": "ClientToken"
+      }
+    },
+    "DeleteLicenseEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "licenseEndpointId"
+      ],
+      "members": {
+        "licenseEndpointId": "LicenseEndpointId"
+      }
+    },
+    "DeleteLimitRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "limitId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "limitId": "LimitId"
+      }
+    },
+    "DeleteMeteredProductRequest": {
+      "type": "structure",
+      "required": [
+        "licenseEndpointId",
+        "productId"
+      ],
+      "members": {
+        "licenseEndpointId": "LicenseEndpointId",
+        "productId": "MeteredProductId"
+      }
+    },
+    "DeleteMonitorRequest": {
+      "type": "structure",
+      "required": [
+        "monitorId"
+      ],
+      "members": {
+        "monitorId": "MonitorId"
+      }
+    },
+    "DeleteQueueEnvironmentRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "queueEnvironmentId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "queueEnvironmentId": "QueueEnvironmentId"
+      }
+    },
+    "DeleteQueueFleetAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "fleetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "fleetId": "FleetId"
+      }
+    },
+    "DeleteQueueLimitAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "limitId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "limitId": "LimitId"
+      }
+    },
+    "DeleteQueueRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId"
+      }
+    },
+    "DeleteStorageProfileRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "storageProfileId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "storageProfileId": "StorageProfileId"
+      }
+    },
+    "DeleteVolumeRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "volumeId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "volumeId": "VolumeId"
+      }
+    },
+    "DeleteWorkerRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "workerId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "workerId": "WorkerId"
+      }
+    },
+    "Description": {
+      "type": "string",
+      "min": 0,
+      "max": 100
+    },
+    "DisassociateMemberFromFarmRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "principalId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "principalId": "IdentityCenterPrincipalId"
+      }
+    },
+    "DisassociateMemberFromFleetRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "principalId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "principalId": "IdentityCenterPrincipalId"
+      }
+    },
+    "DisassociateMemberFromJobRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "principalId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "principalId": "IdentityCenterPrincipalId"
+      }
+    },
+    "DisassociateMemberFromQueueRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "principalId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "principalId": "IdentityCenterPrincipalId"
+      }
+    },
+    "EbsIops": {
+      "type": "integer",
+      "min": 3000,
+      "max": 16000
+    },
+    "EbsThroughputMiB": {
+      "type": "integer",
+      "min": 125,
+      "max": 1000
+    },
+    "Ec2EbsVolume": {
+      "type": "structure",
+      "members": {
+        "sizeGiB": "Integer",
+        "iops": "EbsIops",
+        "throughputMiB": "EbsThroughputMiB"
+      }
+    },
+    "Ec2MarketType": {
+      "type": "string",
+      "enum": [
+        "on-demand",
+        "spot",
+        "wait-and-save"
+      ]
+    },
+    "EndsAt": {
+      "type": "timestamp"
+    },
+    "EnvironmentDetailsIdentifiers": {
+      "type": "structure",
+      "required": [
+        "jobId",
+        "environmentId"
+      ],
+      "members": {
+        "jobId": "JobId",
+        "environmentId": "EnvironmentId"
+      }
+    },
+    "EnvironmentId": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "(STEP:step-[0-9a-f]{32}:.*)|(JOB:job-[0-9a-f]{32}:.*)"
+    },
+    "EnvironmentTemplate": {
+      "type": "string",
+      "min": 1,
+      "max": 15000
+    },
+    "EnvironmentTemplateType": {
+      "type": "string",
+      "enum": [
+        "JSON",
+        "YAML"
+      ]
+    },
+    "FarmId": {
+      "type": "string",
+      "pattern": "farm-[0-9a-f]{32}"
+    },
+    "FieldSortExpression": {
+      "type": "structure",
+      "required": [
+        "sortOrder",
+        "name"
+      ],
+      "members": {
+        "sortOrder": "SortOrder",
+        "name": "String"
+      }
+    },
+    "FileSystemLocation": {
+      "type": "structure",
+      "required": [
+        "name",
+        "path",
+        "type"
+      ],
+      "members": {
+        "name": "FileSystemLocationName",
+        "path": "PathString",
+        "type": "FileSystemLocationType"
+      }
+    },
+    "FileSystemLocationName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[0-9A-Za-z ]*"
+    },
+    "FileSystemLocationType": {
+      "type": "string",
+      "enum": [
+        "SHARED",
+        "LOCAL"
+      ]
+    },
+    "FileSystemLocationsList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "FileSystemLocation"
+    },
+    "FixedBudgetSchedule": {
+      "type": "structure",
+      "required": [
+        "startTime",
+        "endTime"
+      ],
+      "members": {
+        "startTime": "StartsAt",
+        "endTime": "EndsAt"
+      }
+    },
+    "FleetAmountCapability": {
+      "type": "structure",
+      "required": [
+        "name",
+        "min"
+      ],
+      "members": {
+        "name": "AmountCapabilityName",
+        "min": "Float",
+        "max": "Float"
+      }
+    },
+    "FleetAttributeCapability": {
+      "type": "structure",
+      "required": [
+        "name",
+        "values"
+      ],
+      "members": {
+        "name": "AttributeCapabilityName",
+        "values": "AttributeCapabilityValuesList"
+      }
+    },
+    "FleetConfiguration": {
+      "type": "structure",
+      "members": {
+        "customerManaged": "CustomerManagedFleetConfiguration",
+        "serviceManagedEc2": "ServiceManagedEc2FleetConfiguration"
+      }
+    },
+    "FleetId": {
+      "type": "string",
+      "pattern": "fleet-[0-9a-f]{32}"
+    },
+    "FleetSoftwareAddOn": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "FleetSoftwareAddOnName"
+      }
+    },
+    "FleetSoftwareAddOnName": {
+      "type": "string",
+      "enum": [
+        "docker"
+      ]
+    },
+    "FleetSoftwareAddOns": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "FleetSoftwareAddOn"
+    },
+    "FleetStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "CREATE_IN_PROGRESS",
+        "UPDATE_IN_PROGRESS",
+        "CREATE_FAILED",
+        "UPDATE_FAILED",
+        "SUSPENDED"
+      ]
+    },
+    "Float": {
+      "type": "float"
+    },
+    "FloatString": {
+      "type": "string",
+      "min": 1,
+      "max": 26,
+      "pattern": "[-]?(0|[1-9][0-9]*)([.][0-9]+)?([eE][+-]?[0-9]+)?"
+    },
+    "FloatStringList": {
+      "type": "list",
+      "min": 0,
+      "max": 512,
+      "member": "FloatString"
+    },
+    "GetBudgetRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "budgetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "budgetId": "BudgetId"
+      }
+    },
+    "GetFarmRequest": {
+      "type": "structure",
+      "required": [
+        "farmId"
+      ],
+      "members": {
+        "farmId": "FarmId"
+      }
+    },
+    "GetFleetRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId"
+      }
+    },
+    "GetJobRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId"
+      }
+    },
+    "GetLicenseEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "licenseEndpointId"
+      ],
+      "members": {
+        "licenseEndpointId": "LicenseEndpointId"
+      }
+    },
+    "GetLimitRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "limitId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "limitId": "LimitId"
+      }
+    },
+    "GetMonitorRequest": {
+      "type": "structure",
+      "required": [
+        "monitorId"
+      ],
+      "members": {
+        "monitorId": "MonitorId"
+      }
+    },
+    "GetMonitorSettingsRequest": {
+      "type": "structure",
+      "required": [
+        "monitorId"
+      ],
+      "members": {
+        "monitorId": "MonitorId"
+      }
+    },
+    "GetQueueEnvironmentRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "queueEnvironmentId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "queueEnvironmentId": "QueueEnvironmentId"
+      }
+    },
+    "GetQueueFleetAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "fleetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "fleetId": "FleetId"
+      }
+    },
+    "GetQueueLimitAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "limitId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "limitId": "LimitId"
+      }
+    },
+    "GetQueueRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId"
+      }
+    },
+    "GetSessionActionRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "sessionActionId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "sessionActionId": "SessionActionId"
+      }
+    },
+    "GetSessionRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "sessionId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "sessionId": "SessionId"
+      }
+    },
+    "GetSessionsStatisticsAggregationRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "aggregationId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "aggregationId": "AggregationId"
+      }
+    },
+    "GetStepRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "stepId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "stepId": "StepId"
+      }
+    },
+    "GetStorageProfileForQueueRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "storageProfileId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "storageProfileId": "StorageProfileId"
+      }
+    },
+    "GetStorageProfileRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "storageProfileId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "storageProfileId": "StorageProfileId"
+      }
+    },
+    "GetTaskRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "stepId",
+        "taskId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "stepId": "StepId",
+        "taskId": "TaskId"
+      }
+    },
+    "GetVolumeRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "volumeId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "volumeId": "VolumeId"
+      }
+    },
+    "GetWorkerRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "workerId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "workerId": "WorkerId"
+      }
+    },
+    "HostConfiguration": {
+      "type": "structure",
+      "required": [
+        "scriptBody"
+      ],
+      "members": {
+        "scriptBody": "HostConfigurationScript",
+        "scriptTimeoutSeconds": "HostConfigurationScriptTimeoutSeconds"
+      }
+    },
+    "HostConfigurationScript": {
+      "type": "string",
+      "min": 0,
+      "max": 15000
+    },
+    "HostConfigurationScriptTimeoutSeconds": {
+      "type": "integer",
+      "min": 300,
+      "max": 3600
+    },
+    "HostName": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9_\\.\\-]{0,255}"
+    },
+    "HostPropertiesRequest": {
+      "type": "structure",
+      "members": {
+        "ipAddresses": "IpAddresses",
+        "hostName": "HostName"
+      }
+    },
+    "IamRoleArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):iam::\\d{12}:role(/[!-.0-~]+)*/[\\w+=,.@-]+"
+    },
+    "IdentityCenterInstanceArn": {
+      "type": "string",
+      "pattern": "arn:(aws|aws-us-gov|aws-cn|aws-iso|aws-iso-b):sso:::instance/(sso)?ins-[a-zA-Z0-9-.]{16}"
+    },
+    "IdentityCenterPrincipalId": {
+      "type": "string",
+      "min": 1,
+      "max": 47,
+      "pattern": "([0-9a-f]{10}-|)[A-Fa-f0-9]{8}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{4}-[A-Fa-f0-9]{12}"
+    },
+    "IdentityStoreId": {
+      "type": "string",
+      "min": 1,
+      "max": 36,
+      "pattern": "d-[0-9a-f]{10}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    },
+    "InstanceType": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "InstanceTypes": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "InstanceType"
+    },
+    "IntString": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "pattern": "[-]?(0|[1-9][0-9]*)"
+    },
+    "IntStringList": {
+      "type": "list",
+      "min": 0,
+      "max": 512,
+      "member": "IntString"
+    },
+    "IntStringListList": {
+      "type": "list",
+      "min": 0,
+      "max": 512,
+      "member": "NestedIntStringList"
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "IpAddresses": {
+      "type": "structure",
+      "members": {
+        "ipV4Addresses": "IpV4Addresses",
+        "ipV6Addresses": "IpV6Addresses"
+      }
+    },
+    "IpV4Address": {
+      "type": "string",
+      "pattern": "(?:[0-9]{1,3}\\.){3}[0-9]{1,3}"
+    },
+    "IpV4Addresses": {
+      "type": "list",
+      "member": "IpV4Address"
+    },
+    "IpV6Address": {
+      "type": "string",
+      "pattern": "(?:[A-F0-9]{1,4}:){7}[A-F0-9]{1,4}"
+    },
+    "IpV6Addresses": {
+      "type": "list",
+      "member": "IpV6Address"
+    },
+    "JobAttachmentDetailsIdentifiers": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "JobId"
+      }
+    },
+    "JobAttachmentSettings": {
+      "type": "structure",
+      "required": [
+        "s3BucketName",
+        "rootPrefix"
+      ],
+      "members": {
+        "s3BucketName": "S3BucketName",
+        "rootPrefix": "S3Prefix"
+      }
+    },
+    "JobAttachmentsFileSystem": {
+      "type": "string",
+      "enum": [
+        "COPIED",
+        "VIRTUAL"
+      ]
+    },
+    "JobDescriptionOverride": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "JobDetailsIdentifiers": {
+      "type": "structure",
+      "required": [
+        "jobId"
+      ],
+      "members": {
+        "jobId": "JobId"
+      }
+    },
+    "JobEntityIdentifiers": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "JobEntityIdentifiersUnion"
+    },
+    "JobEntityIdentifiersUnion": {
+      "type": "structure",
+      "members": {
+        "jobDetails": "JobDetailsIdentifiers",
+        "jobAttachmentDetails": "JobAttachmentDetailsIdentifiers",
+        "stepDetails": "StepDetailsIdentifiers",
+        "environmentDetails": "EnvironmentDetailsIdentifiers"
+      }
+    },
+    "JobId": {
+      "type": "string",
+      "pattern": "job-[0-9a-f]{32}"
+    },
+    "JobName": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "JobParameter": {
+      "type": "structure",
+      "members": {
+        "int": "IntString",
+        "float": "FloatString",
+        "string": "ParameterString",
+        "path": "PathString",
+        "bool": "BooleanString",
+        "rangeExpr": "RangeExprString",
+        "stringList": "ParameterStringList",
+        "pathList": "PathStringList",
+        "intList": "IntStringList",
+        "floatList": "FloatStringList",
+        "boolList": "BooleanStringList",
+        "intListList": "IntStringListList"
+      }
+    },
+    "JobParameters": {
+      "type": "map",
+      "min": 0,
+      "max": 200,
+      "key": "JobParametersKeyString",
+      "value": "JobParameter"
+    },
+    "JobParametersKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "JobPriority": {
+      "type": "integer",
+      "min": 0,
+      "max": 100
+    },
+    "JobRunAsUser": {
+      "type": "structure",
+      "required": [
+        "runAs"
+      ],
+      "members": {
+        "posix": "PosixUser",
+        "windows": "WindowsUser",
+        "runAs": "RunAs"
+      }
+    },
+    "JobTargetTaskRunStatus": {
+      "type": "string",
+      "enum": [
+        "READY",
+        "FAILED",
+        "SUCCEEDED",
+        "CANCELED",
+        "SUSPENDED",
+        "PENDING"
+      ]
+    },
+    "JobTemplate": {
+      "type": "string",
+      "min": 1,
+      "max": 1000000
+    },
+    "JobTemplateType": {
+      "type": "string",
+      "enum": [
+        "JSON",
+        "YAML"
+      ]
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):kms:[a-z]{2}((-gov)|(-iso(b?)))?-[a-z]+-\\d{1}:\\d{12}:key/[\\w-]{1,120}"
+    },
+    "LicenseEndpointId": {
+      "type": "string",
+      "pattern": "le-[0-9a-f]{32}"
+    },
+    "LimitId": {
+      "type": "string",
+      "pattern": "limit-[0-9a-f]{32}"
+    },
+    "ListAvailableMeteredProductsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListBudgetsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "status": "BudgetStatus"
+      }
+    },
+    "ListFarmMembersRequest": {
+      "type": "structure",
+      "required": [
+        "farmId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListFarmsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "principalId": "IdentityCenterPrincipalId"
+      }
+    },
+    "ListFleetMembersRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListFleetsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "principalId": "IdentityCenterPrincipalId",
+        "displayName": "ResourceName",
+        "status": "FleetStatus"
+      }
+    },
+    "ListJobMembersRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListJobParameterDefinitionsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListJobsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "principalId": "IdentityCenterPrincipalId"
+      }
+    },
+    "ListLicenseEndpointsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListLimitsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListMembershipsRequest": {
+      "type": "structure",
+      "required": [
+        "principalId"
+      ],
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "principalId": "IdentityCenterPrincipalId",
+        "identityStoreId": "IdentityStoreId",
+        "identityCenterRegion": "Region",
+        "resourceTypes": "MembershipResourceTypes"
+      }
+    },
+    "ListMeteredProductsRequest": {
+      "type": "structure",
+      "required": [
+        "licenseEndpointId"
+      ],
+      "members": {
+        "licenseEndpointId": "LicenseEndpointId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListMonitorsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListQueueEnvironmentsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListQueueFleetAssociationsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "queueId": "QueueId",
+        "fleetId": "FleetId"
+      }
+    },
+    "ListQueueLimitAssociationsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "queueId": "QueueId",
+        "limitId": "LimitId"
+      }
+    },
+    "ListQueueMembersRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListQueuesRequest": {
+      "type": "structure",
+      "required": [
+        "farmId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "principalId": "IdentityCenterPrincipalId",
+        "status": "QueueStatus"
+      }
+    },
+    "ListSessionActionsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "sessionId": "SessionId",
+        "taskId": "TaskId"
+      }
+    },
+    "ListSessionsForWorkerRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "workerId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "workerId": "WorkerId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListSessionsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListStepConsumersRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "stepId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "stepId": "StepId",
+        "nextToken": "NextToken",
+        "maxResults": "ListStepConsumersRequestMaxResultsInteger"
+      }
+    },
+    "ListStepConsumersRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "ListStepDependenciesRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "stepId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "stepId": "StepId",
+        "nextToken": "NextToken",
+        "maxResults": "ListStepDependenciesRequestMaxResultsInteger"
+      }
+    },
+    "ListStepDependenciesRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "ListStepsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListStorageProfilesForQueueRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListStorageProfilesRequest": {
+      "type": "structure",
+      "required": [
+        "farmId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "String"
+      }
+    },
+    "ListTasksRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "stepId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "stepId": "StepId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListVolumesRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListWorkersRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "LogicalOperator": {
+      "type": "string",
+      "enum": [
+        "AND",
+        "OR"
+      ]
+    },
+    "ManifestProperties": {
+      "type": "structure",
+      "required": [
+        "rootPath",
+        "rootPathFormat"
+      ],
+      "members": {
+        "fileSystemLocationName": "FileSystemLocationName",
+        "rootPath": "ManifestPropertiesRootPathString",
+        "rootPathFormat": "PathFormat",
+        "outputRelativeDirectories": "OutputRelativeDirectoriesList",
+        "inputManifestPath": "ManifestPropertiesInputManifestPathString",
+        "inputManifestHash": "ManifestPropertiesInputManifestHashString"
+      }
+    },
+    "ManifestPropertiesInputManifestHashString": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "ManifestPropertiesInputManifestPathString": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "ManifestPropertiesList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "ManifestProperties"
+    },
+    "ManifestPropertiesRootPathString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "MaxCount": {
+      "type": "integer",
+      "min": -1,
+      "max": 2147483647
+    },
+    "MaxFailedTasksCount": {
+      "type": "integer",
+      "min": 0,
+      "max": 2147483647
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxRetriesPerTask": {
+      "type": "integer",
+      "min": 0,
+      "max": 2147483647
+    },
+    "MaxWorkerCount": {
+      "type": "integer",
+      "min": -1,
+      "max": 2147483647
+    },
+    "MembershipLevel": {
+      "type": "string",
+      "enum": [
+        "VIEWER",
+        "CONTRIBUTOR",
+        "OWNER",
+        "MANAGER"
+      ]
+    },
+    "MembershipResourceType": {
+      "type": "string",
+      "enum": [
+        "FARM",
+        "QUEUE",
+        "FLEET",
+        "JOB"
+      ]
+    },
+    "MembershipResourceTypes": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "MembershipResourceType"
+    },
+    "MemoryAmountMiB": {
+      "type": "integer",
+      "min": 512,
+      "max": 2147483647
+    },
+    "MemoryMiBRange": {
+      "type": "structure",
+      "required": [
+        "min"
+      ],
+      "members": {
+        "min": "MemoryAmountMiB",
+        "max": "MemoryAmountMiB"
+      }
+    },
+    "MeteredProductId": {
+      "type": "string",
+      "pattern": "[0-9a-z]{1,32}-[.0-9a-z]{1,32}"
+    },
+    "MinOneMaxInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 2147483647
+    },
+    "MinOneMaxTenThousand": {
+      "type": "integer",
+      "min": 1,
+      "max": 10000
+    },
+    "MinZeroMaxInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 2147483647
+    },
+    "MonitorId": {
+      "type": "string",
+      "pattern": "monitor-[0-9a-f]{32}"
+    },
+    "MountPath": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "NestedIntStringList": {
+      "type": "list",
+      "min": 0,
+      "max": 64,
+      "member": "IntString"
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 0,
+      "max": 4096
+    },
+    "OutputRelativeDirectoriesList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "OutputRelativeDirectoriesListMemberString"
+    },
+    "OutputRelativeDirectoriesListMemberString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "ParameterFilterExpression": {
+      "type": "structure",
+      "required": [
+        "name",
+        "operator",
+        "value"
+      ],
+      "members": {
+        "name": "String",
+        "operator": "ComparisonOperator",
+        "value": "ParameterValue"
+      }
+    },
+    "ParameterSortExpression": {
+      "type": "structure",
+      "required": [
+        "sortOrder",
+        "name"
+      ],
+      "members": {
+        "sortOrder": "SortOrder",
+        "name": "String"
+      }
+    },
+    "ParameterString": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "ParameterStringList": {
+      "type": "list",
+      "min": 0,
+      "max": 64,
+      "member": "ParameterString"
+    },
+    "ParameterValue": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "PathFormat": {
+      "type": "string",
+      "enum": [
+        "windows",
+        "posix"
+      ]
+    },
+    "PathString": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "PathStringList": {
+      "type": "list",
+      "min": 0,
+      "max": 64,
+      "member": "PathString"
+    },
+    "Period": {
+      "type": "string",
+      "enum": [
+        "HOURLY",
+        "DAILY",
+        "WEEKLY",
+        "MONTHLY"
+      ]
+    },
+    "PersistentVolumeConfiguration": {
+      "type": "structure",
+      "required": [
+        "mountPath"
+      ],
+      "members": {
+        "sizeGiB": "PersistentVolumeSizeGiB",
+        "iops": "PersistentVolumeIops",
+        "throughputMiB": "PersistentVolumeThroughputMiB",
+        "mountPath": "MountPath",
+        "lastUsedTtlHours": "PersistentVolumeTtlHours"
+      }
+    },
+    "PersistentVolumeIops": {
+      "type": "integer",
+      "min": 100,
+      "max": 80000
+    },
+    "PersistentVolumeSizeGiB": {
+      "type": "integer",
+      "min": 1,
+      "max": 65536
+    },
+    "PersistentVolumeThroughputMiB": {
+      "type": "integer",
+      "min": 125,
+      "max": 2000
+    },
+    "PersistentVolumeTtlHours": {
+      "type": "integer",
+      "min": 1,
+      "max": 8760
+    },
+    "PosixUser": {
+      "type": "structure",
+      "required": [
+        "user",
+        "group"
+      ],
+      "members": {
+        "user": "PosixUserUserString",
+        "group": "PosixUserGroupString"
+      }
+    },
+    "PosixUserGroupString": {
+      "type": "string",
+      "min": 0,
+      "max": 31,
+      "pattern": "(?:[a-z][a-z0-9-]{0,30})?"
+    },
+    "PosixUserUserString": {
+      "type": "string",
+      "min": 0,
+      "max": 31,
+      "pattern": "(?:[a-z][a-z0-9-]{0,30})?"
+    },
+    "PrincipalType": {
+      "type": "string",
+      "enum": [
+        "USER",
+        "GROUP"
+      ]
+    },
+    "Priority": {
+      "type": "integer",
+      "min": 0,
+      "max": 10000
+    },
+    "PriorityBalancedSchedulingConfiguration": {
+      "type": "structure",
+      "members": {
+        "renderingTaskBuffer": "SchedulingRenderingTaskBuffer"
+      }
+    },
+    "PriorityFifoSchedulingConfiguration": {
+      "type": "structure",
+      "members": {}
+    },
+    "ProcessExitCode": {
+      "type": "integer",
+      "min": -2147483648,
+      "max": 2147483647
+    },
+    "PutMeteredProductRequest": {
+      "type": "structure",
+      "required": [
+        "licenseEndpointId",
+        "productId"
+      ],
+      "members": {
+        "licenseEndpointId": "LicenseEndpointId",
+        "productId": "MeteredProductId"
+      }
+    },
+    "QueueEnvironmentId": {
+      "type": "string",
+      "pattern": "queueenv-[0-9a-f]{32}"
+    },
+    "QueueId": {
+      "type": "string",
+      "pattern": "queue-[0-9a-f]{32}"
+    },
+    "QueueStatus": {
+      "type": "string",
+      "enum": [
+        "IDLE",
+        "SCHEDULING",
+        "SCHEDULING_BLOCKED"
+      ]
+    },
+    "RangeExprString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "Region": {
+      "type": "string",
+      "min": 1,
+      "max": 25,
+      "pattern": "[a-z0-9-]+"
+    },
+    "RequiredFileSystemLocationNames": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "FileSystemLocationName"
+    },
+    "ResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "RunAs": {
+      "type": "string",
+      "enum": [
+        "QUEUE_CONFIGURED_USER",
+        "WORKER_AGENT_USER"
+      ]
+    },
+    "S3BucketName": {
+      "type": "string",
+      "min": 1,
+      "max": 255
+    },
+    "S3Key": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "S3Location": {
+      "type": "structure",
+      "required": [
+        "bucketName",
+        "key"
+      ],
+      "members": {
+        "bucketName": "S3BucketName",
+        "key": "S3Key"
+      }
+    },
+    "S3Prefix": {
+      "type": "string",
+      "min": 1,
+      "max": 63,
+      "pattern": "[a-zA-Z0-9-_/]+"
+    },
+    "SchedulingConfiguration": {
+      "type": "structure",
+      "members": {
+        "priorityFifo": "PriorityFifoSchedulingConfiguration",
+        "priorityBalanced": "PriorityBalancedSchedulingConfiguration",
+        "weightedBalanced": "WeightedBalancedSchedulingConfiguration"
+      }
+    },
+    "SchedulingErrorWeight": {
+      "type": "double",
+      "min": -10000,
+      "max": 10000
+    },
+    "SchedulingMaxPriorityOverride": {
+      "type": "structure",
+      "members": {
+        "alwaysScheduleFirst": "SchedulingMaxPriorityOverrideAlwaysScheduleFirst"
+      }
+    },
+    "SchedulingMaxPriorityOverrideAlwaysScheduleFirst": {
+      "type": "structure",
+      "members": {}
+    },
+    "SchedulingMinPriorityOverride": {
+      "type": "structure",
+      "members": {
+        "alwaysScheduleLast": "SchedulingMinPriorityOverrideAlwaysScheduleLast"
+      }
+    },
+    "SchedulingMinPriorityOverrideAlwaysScheduleLast": {
+      "type": "structure",
+      "members": {}
+    },
+    "SchedulingPriorityWeight": {
+      "type": "double",
+      "min": 0,
+      "max": 10000
+    },
+    "SchedulingRenderingTaskBuffer": {
+      "type": "integer",
+      "min": 0,
+      "max": 1000
+    },
+    "SchedulingRenderingTaskWeight": {
+      "type": "double",
+      "min": -10000,
+      "max": 10000
+    },
+    "SchedulingSubmissionTimeWeight": {
+      "type": "double",
+      "min": 0,
+      "max": 10000
+    },
+    "SearchFilterExpression": {
+      "type": "structure",
+      "members": {
+        "dateTimeFilter": "DateTimeFilterExpression",
+        "parameterFilter": "ParameterFilterExpression",
+        "searchTermFilter": "SearchTermFilterExpression",
+        "stringFilter": "StringFilterExpression",
+        "stringListFilter": "StringListFilterExpression",
+        "groupFilter": "SearchGroupedFilterExpressions"
+      }
+    },
+    "SearchFilterExpressions": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "SearchFilterExpression"
+    },
+    "SearchGroupedFilterExpressions": {
+      "type": "structure",
+      "required": [
+        "filters",
+        "operator"
+      ],
+      "members": {
+        "filters": "SearchFilterExpressions",
+        "operator": "LogicalOperator"
+      }
+    },
+    "SearchJobsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "itemOffset",
+        "queueIds"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "filterExpressions": "SearchGroupedFilterExpressions",
+        "sortExpressions": "SearchSortExpressions",
+        "itemOffset": "SearchJobsRequestItemOffsetInteger",
+        "pageSize": "SearchJobsRequestPageSizeInteger",
+        "queueIds": "SearchJobsRequestQueueIdsList"
+      }
+    },
+    "SearchJobsRequestItemOffsetInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 10000
+    },
+    "SearchJobsRequestPageSizeInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "SearchJobsRequestQueueIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "QueueId"
+    },
+    "SearchSortExpression": {
+      "type": "structure",
+      "members": {
+        "userJobsFirst": "UserJobsFirst",
+        "fieldSort": "FieldSortExpression",
+        "parameterSort": "ParameterSortExpression"
+      }
+    },
+    "SearchSortExpressions": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "SearchSortExpression"
+    },
+    "SearchStepsRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "itemOffset",
+        "queueIds"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "filterExpressions": "SearchGroupedFilterExpressions",
+        "sortExpressions": "SearchSortExpressions",
+        "itemOffset": "SearchStepsRequestItemOffsetInteger",
+        "pageSize": "SearchStepsRequestPageSizeInteger",
+        "queueIds": "SearchStepsRequestQueueIdsList",
+        "jobId": "JobId"
+      }
+    },
+    "SearchStepsRequestItemOffsetInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 10000
+    },
+    "SearchStepsRequestPageSizeInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "SearchStepsRequestQueueIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "QueueId"
+    },
+    "SearchTasksRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "itemOffset",
+        "queueIds"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "filterExpressions": "SearchGroupedFilterExpressions",
+        "sortExpressions": "SearchSortExpressions",
+        "itemOffset": "SearchTasksRequestItemOffsetInteger",
+        "pageSize": "SearchTasksRequestPageSizeInteger",
+        "queueIds": "SearchTasksRequestQueueIdsList",
+        "jobId": "JobId"
+      }
+    },
+    "SearchTasksRequestItemOffsetInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 10000
+    },
+    "SearchTasksRequestPageSizeInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "SearchTasksRequestQueueIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "QueueId"
+    },
+    "SearchTerm": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "SearchTermFilterExpression": {
+      "type": "structure",
+      "required": [
+        "searchTerm"
+      ],
+      "members": {
+        "searchTerm": "SearchTerm",
+        "matchType": "SearchTermMatchingType"
+      }
+    },
+    "SearchTermMatchingType": {
+      "type": "string",
+      "enum": [
+        "FUZZY_MATCH",
+        "CONTAINS"
+      ]
+    },
+    "SearchWorkersRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "itemOffset",
+        "fleetIds"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "filterExpressions": "SearchGroupedFilterExpressions",
+        "sortExpressions": "SearchSortExpressions",
+        "itemOffset": "SearchWorkersRequestItemOffsetInteger",
+        "pageSize": "SearchWorkersRequestPageSizeInteger",
+        "fleetIds": "SearchWorkersRequestFleetIdsList"
+      }
+    },
+    "SearchWorkersRequestFleetIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "FleetId"
+    },
+    "SearchWorkersRequestItemOffsetInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 10000
+    },
+    "SearchWorkersRequestPageSizeInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "SecurityGroupId": {
+      "type": "string",
+      "pattern": "sg-[\\w]{1,120}"
+    },
+    "ServiceManagedEc2AutoScalingConfiguration": {
+      "type": "structure",
+      "members": {
+        "standbyWorkerCount": "MinZeroMaxInteger",
+        "workerIdleDurationSeconds": "ServiceManagedEc2WorkerIdleDurationSeconds",
+        "scaleOutWorkersPerMinute": "MinOneMaxInteger"
+      }
+    },
+    "ServiceManagedEc2FleetConfiguration": {
+      "type": "structure",
+      "required": [
+        "instanceCapabilities",
+        "instanceMarketOptions"
+      ],
+      "members": {
+        "instanceCapabilities": "ServiceManagedEc2InstanceCapabilities",
+        "instanceMarketOptions": "ServiceManagedEc2InstanceMarketOptions",
+        "vpcConfiguration": "VpcConfiguration",
+        "storageProfileId": "StorageProfileId",
+        "persistentVolumeConfiguration": "PersistentVolumeConfiguration",
+        "autoScalingConfiguration": "ServiceManagedEc2AutoScalingConfiguration"
+      }
+    },
+    "ServiceManagedEc2InstanceCapabilities": {
+      "type": "structure",
+      "required": [
+        "vCpuCount",
+        "memoryMiB",
+        "osFamily",
+        "cpuArchitectureType"
+      ],
+      "members": {
+        "vCpuCount": "VCpuCountRange",
+        "memoryMiB": "MemoryMiBRange",
+        "osFamily": "ServiceManagedFleetOperatingSystemFamily",
+        "cpuArchitectureType": "CpuArchitectureType",
+        "rootEbsVolume": "Ec2EbsVolume",
+        "acceleratorCapabilities": "AcceleratorCapabilities",
+        "allowedInstanceTypes": "InstanceTypes",
+        "excludedInstanceTypes": "InstanceTypes",
+        "customAmounts": "CustomFleetAmountCapabilities",
+        "customAttributes": "CustomFleetAttributeCapabilities",
+        "softwareAddOns": "FleetSoftwareAddOns"
+      }
+    },
+    "ServiceManagedEc2InstanceMarketOptions": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "Ec2MarketType"
+      }
+    },
+    "ServiceManagedEc2WorkerIdleDurationSeconds": {
+      "type": "integer",
+      "min": 0,
+      "max": 86400
+    },
+    "ServiceManagedFleetOperatingSystemFamily": {
+      "type": "string",
+      "enum": [
+        "WINDOWS",
+        "LINUX"
+      ]
+    },
+    "SessionActionId": {
+      "type": "string",
+      "pattern": "sessionaction-[0-9a-f]{32}-(0|([1-9][0-9]{0,9}))"
+    },
+    "SessionActionProgressMessage": {
+      "type": "string",
+      "min": 0,
+      "max": 4096
+    },
+    "SessionActionProgressPercent": {
+      "type": "float",
+      "min": 0,
+      "max": 100
+    },
+    "SessionId": {
+      "type": "string",
+      "pattern": "session-[0-9a-f]{32}"
+    },
+    "SessionLifecycleTargetStatus": {
+      "type": "string",
+      "enum": [
+        "ENDED"
+      ]
+    },
+    "SessionsStatisticsResources": {
+      "type": "structure",
+      "members": {
+        "queueIds": "SessionsStatisticsResourcesQueueIdsList",
+        "fleetIds": "SessionsStatisticsResourcesFleetIdsList"
+      }
+    },
+    "SessionsStatisticsResourcesFleetIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "FleetId"
+    },
+    "SessionsStatisticsResourcesQueueIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "QueueId"
+    },
+    "SettingKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z][a-zA-Z0-9_.:-]*"
+    },
+    "SettingValue": {
+      "type": "string",
+      "min": 0,
+      "max": 8192
+    },
+    "SettingsMap": {
+      "type": "map",
+      "min": 0,
+      "max": 64,
+      "key": "SettingKey",
+      "value": "SettingValue"
+    },
+    "SortOrder": {
+      "type": "string",
+      "enum": [
+        "ASCENDING",
+        "DESCENDING"
+      ]
+    },
+    "StartSessionsStatisticsAggregationRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "resourceIds",
+        "startTime",
+        "endTime",
+        "groupBy",
+        "statistics"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "resourceIds": "SessionsStatisticsResources",
+        "startTime": "SyntheticTimestamp_date_time",
+        "endTime": "SyntheticTimestamp_date_time",
+        "timezone": "Timezone",
+        "period": "Period",
+        "groupBy": "UsageGroupBy",
+        "statistics": "UsageStatistics"
+      }
+    },
+    "StartsAt": {
+      "type": "timestamp"
+    },
+    "StepDetailsIdentifiers": {
+      "type": "structure",
+      "required": [
+        "jobId",
+        "stepId"
+      ],
+      "members": {
+        "jobId": "JobId",
+        "stepId": "StepId"
+      }
+    },
+    "StepId": {
+      "type": "string",
+      "pattern": "step-[0-9a-f]{32}"
+    },
+    "StepTargetTaskRunStatus": {
+      "type": "string",
+      "enum": [
+        "READY",
+        "FAILED",
+        "SUCCEEDED",
+        "CANCELED",
+        "SUSPENDED",
+        "PENDING"
+      ]
+    },
+    "StorageProfileId": {
+      "type": "string",
+      "pattern": "sp-[0-9a-f]{32}"
+    },
+    "StorageProfileOperatingSystemFamily": {
+      "type": "string",
+      "enum": [
+        "WINDOWS",
+        "LINUX",
+        "MACOS"
+      ]
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringFilter": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "StringFilterExpression": {
+      "type": "structure",
+      "required": [
+        "name",
+        "operator",
+        "value"
+      ],
+      "members": {
+        "name": "String",
+        "operator": "ComparisonOperator",
+        "value": "StringFilter"
+      }
+    },
+    "StringFilterList": {
+      "type": "list",
+      "min": 1,
+      "max": 16,
+      "member": "StringFilter"
+    },
+    "StringList": {
+      "type": "list",
+      "member": "String"
+    },
+    "StringListFilterExpression": {
+      "type": "structure",
+      "required": [
+        "name",
+        "operator",
+        "values"
+      ],
+      "members": {
+        "name": "String",
+        "operator": "ComparisonOperator",
+        "values": "StringFilterList"
+      }
+    },
+    "Subdomain": {
+      "type": "string",
+      "pattern": "[a-z0-9-]{1,100}"
+    },
+    "SubnetId": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "subnet-[\\w]{1,120}"
+    },
+    "SyntheticTimestamp_date_time": {
+      "type": "timestamp"
+    },
+    "TagPropagationMode": {
+      "type": "string",
+      "enum": [
+        "NO_PROPAGATION",
+        "PROPAGATE_TAGS_TO_WORKERS_AT_LAUNCH"
+      ]
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "String",
+        "tags": "Tags"
+      }
+    },
+    "Tags": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "TaskId": {
+      "type": "string",
+      "pattern": "task-[0-9a-f]{32}-(0|([1-9][0-9]{0,9}))"
+    },
+    "TaskRunManifestPropertiesListRequest": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "TaskRunManifestPropertiesRequest"
+    },
+    "TaskRunManifestPropertiesRequest": {
+      "type": "structure",
+      "members": {
+        "outputManifestPath": "TaskRunManifestPropertiesRequestOutputManifestPathString",
+        "outputManifestHash": "TaskRunManifestPropertiesRequestOutputManifestHashString"
+      }
+    },
+    "TaskRunManifestPropertiesRequestOutputManifestHashString": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "TaskRunManifestPropertiesRequestOutputManifestPathString": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "TaskTargetRunStatus": {
+      "type": "string",
+      "enum": [
+        "READY",
+        "FAILED",
+        "SUCCEEDED",
+        "CANCELED",
+        "SUSPENDED",
+        "PENDING"
+      ]
+    },
+    "ThresholdPercentage": {
+      "type": "float",
+      "min": 0,
+      "max": 100
+    },
+    "Timezone": {
+      "type": "string",
+      "min": 9,
+      "max": 9,
+      "pattern": "UTC[-+][01][0-9]:(30|00)"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "String",
+        "tagKeys": "StringList"
+      }
+    },
+    "UpdateBudgetRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "budgetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "budgetId": "BudgetId",
+        "clientToken": "ClientToken",
+        "displayName": "ResourceName",
+        "description": "Description",
+        "status": "BudgetStatus",
+        "approximateDollarLimit": "ConsumedUsageLimit",
+        "actionsToAdd": "BudgetActionsToAdd",
+        "actionsToRemove": "BudgetActionsToRemove",
+        "schedule": "BudgetSchedule"
+      }
+    },
+    "UpdateFarmRequest": {
+      "type": "structure",
+      "required": [
+        "farmId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "displayName": "ResourceName",
+        "description": "Description",
+        "costScaleFactor": "CostScaleFactor"
+      }
+    },
+    "UpdateFleetRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "clientToken": "ClientToken",
+        "displayName": "ResourceName",
+        "description": "Description",
+        "roleArn": "IamRoleArn",
+        "minWorkerCount": "MinZeroMaxInteger",
+        "maxWorkerCount": "MinZeroMaxInteger",
+        "configuration": "FleetConfiguration",
+        "hostConfiguration": "HostConfiguration"
+      }
+    },
+    "UpdateJobLifecycleStatus": {
+      "type": "string",
+      "enum": [
+        "ARCHIVED"
+      ]
+    },
+    "UpdateJobRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "clientToken": "ClientToken",
+        "targetTaskRunStatus": "JobTargetTaskRunStatus",
+        "priority": "JobPriority",
+        "maxFailedTasksCount": "MaxFailedTasksCount",
+        "maxRetriesPerTask": "MaxRetriesPerTask",
+        "lifecycleStatus": "UpdateJobLifecycleStatus",
+        "maxWorkerCount": "MaxWorkerCount",
+        "name": "JobName",
+        "description": "JobDescriptionOverride"
+      }
+    },
+    "UpdateLimitRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "limitId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "limitId": "LimitId",
+        "displayName": "ResourceName",
+        "description": "Description",
+        "maxCount": "MaxCount"
+      }
+    },
+    "UpdateMonitorRequest": {
+      "type": "structure",
+      "required": [
+        "monitorId"
+      ],
+      "members": {
+        "monitorId": "MonitorId",
+        "subdomain": "Subdomain",
+        "displayName": "ResourceName",
+        "roleArn": "IamRoleArn"
+      }
+    },
+    "UpdateMonitorSettingsRequest": {
+      "type": "structure",
+      "required": [
+        "monitorId",
+        "settings"
+      ],
+      "members": {
+        "monitorId": "MonitorId",
+        "settings": "SettingsMap"
+      }
+    },
+    "UpdateQueueEnvironmentRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "queueEnvironmentId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "queueEnvironmentId": "QueueEnvironmentId",
+        "clientToken": "ClientToken",
+        "priority": "Priority",
+        "templateType": "EnvironmentTemplateType",
+        "template": "EnvironmentTemplate"
+      }
+    },
+    "UpdateQueueFleetAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "fleetId",
+        "status"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "fleetId": "FleetId",
+        "status": "UpdateQueueFleetAssociationStatus"
+      }
+    },
+    "UpdateQueueFleetAssociationStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "STOP_SCHEDULING_AND_COMPLETE_TASKS",
+        "STOP_SCHEDULING_AND_CANCEL_TASKS"
+      ]
+    },
+    "UpdateQueueLimitAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "limitId",
+        "status"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "limitId": "LimitId",
+        "status": "UpdateQueueLimitAssociationStatus"
+      }
+    },
+    "UpdateQueueLimitAssociationStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "STOP_LIMIT_USAGE_AND_COMPLETE_TASKS",
+        "STOP_LIMIT_USAGE_AND_CANCEL_TASKS"
+      ]
+    },
+    "UpdateQueueRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "clientToken": "ClientToken",
+        "displayName": "ResourceName",
+        "description": "Description",
+        "defaultBudgetAction": "DefaultQueueBudgetAction",
+        "jobAttachmentSettings": "JobAttachmentSettings",
+        "roleArn": "IamRoleArn",
+        "jobRunAsUser": "JobRunAsUser",
+        "requiredFileSystemLocationNamesToAdd": "RequiredFileSystemLocationNames",
+        "requiredFileSystemLocationNamesToRemove": "RequiredFileSystemLocationNames",
+        "allowedStorageProfileIdsToAdd": "AllowedStorageProfileIds",
+        "allowedStorageProfileIdsToRemove": "AllowedStorageProfileIds",
+        "schedulingConfiguration": "SchedulingConfiguration"
+      }
+    },
+    "UpdateSessionRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "sessionId",
+        "targetLifecycleStatus"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "sessionId": "SessionId",
+        "clientToken": "ClientToken",
+        "targetLifecycleStatus": "SessionLifecycleTargetStatus"
+      }
+    },
+    "UpdateStepRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "stepId",
+        "targetTaskRunStatus"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "stepId": "StepId",
+        "clientToken": "ClientToken",
+        "targetTaskRunStatus": "StepTargetTaskRunStatus"
+      }
+    },
+    "UpdateStorageProfileRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "storageProfileId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "storageProfileId": "StorageProfileId",
+        "clientToken": "ClientToken",
+        "displayName": "ResourceName",
+        "osFamily": "StorageProfileOperatingSystemFamily",
+        "fileSystemLocationsToAdd": "FileSystemLocationsList",
+        "fileSystemLocationsToRemove": "FileSystemLocationsList"
+      }
+    },
+    "UpdateTaskRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "queueId",
+        "jobId",
+        "stepId",
+        "taskId",
+        "targetRunStatus"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "queueId": "QueueId",
+        "jobId": "JobId",
+        "stepId": "StepId",
+        "taskId": "TaskId",
+        "clientToken": "ClientToken",
+        "targetRunStatus": "TaskTargetRunStatus"
+      }
+    },
+    "UpdateWorkerRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "workerId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "workerId": "WorkerId",
+        "status": "UpdatedWorkerStatus",
+        "capabilities": "WorkerCapabilities",
+        "hostProperties": "HostPropertiesRequest"
+      }
+    },
+    "UpdateWorkerScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "farmId",
+        "fleetId",
+        "workerId"
+      ],
+      "members": {
+        "farmId": "FarmId",
+        "fleetId": "FleetId",
+        "workerId": "WorkerId",
+        "updatedSessionActions": "UpdatedSessionActions"
+      }
+    },
+    "UpdatedSessionActionInfo": {
+      "type": "structure",
+      "members": {
+        "completedStatus": "CompletedStatus",
+        "processExitCode": "ProcessExitCode",
+        "progressMessage": "SessionActionProgressMessage",
+        "startedAt": "SyntheticTimestamp_date_time",
+        "endedAt": "SyntheticTimestamp_date_time",
+        "updatedAt": "SyntheticTimestamp_date_time",
+        "progressPercent": "SessionActionProgressPercent",
+        "manifests": "TaskRunManifestPropertiesListRequest"
+      }
+    },
+    "UpdatedSessionActions": {
+      "type": "map",
+      "key": "SessionActionId",
+      "value": "UpdatedSessionActionInfo"
+    },
+    "UpdatedWorkerStatus": {
+      "type": "string",
+      "enum": [
+        "STARTED",
+        "STOPPING",
+        "STOPPED"
+      ]
+    },
+    "UsageGroupBy": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "UsageGroupByField"
+    },
+    "UsageGroupByField": {
+      "type": "string",
+      "enum": [
+        "QUEUE_ID",
+        "FLEET_ID",
+        "JOB_ID",
+        "USER_ID",
+        "USAGE_TYPE",
+        "INSTANCE_TYPE",
+        "LICENSE_PRODUCT"
+      ]
+    },
+    "UsageStatistic": {
+      "type": "string",
+      "enum": [
+        "SUM",
+        "MIN",
+        "MAX",
+        "AVG"
+      ]
+    },
+    "UsageStatistics": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "UsageStatistic"
+    },
+    "UsageTrackingResource": {
+      "type": "structure",
+      "members": {
+        "queueId": "QueueId"
+      }
+    },
+    "UserJobsFirst": {
+      "type": "structure",
+      "required": [
+        "userIdentityId"
+      ],
+      "members": {
+        "userIdentityId": "String"
+      }
+    },
+    "VCpuCountRange": {
+      "type": "structure",
+      "required": [
+        "min"
+      ],
+      "members": {
+        "min": "MinOneMaxTenThousand",
+        "max": "MinOneMaxTenThousand"
+      }
+    },
+    "VolumeId": {
+      "type": "string",
+      "pattern": "volume-[0-9a-f]{32}"
+    },
+    "VpcConfiguration": {
+      "type": "structure",
+      "members": {
+        "resourceConfigurationArns": "VpcResourceConfigurationArns"
+      }
+    },
+    "VpcId": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "vpc-[\\w]{1,120}"
+    },
+    "VpcResourceConfigurationArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "VpcResourceConfigurationArns": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "VpcResourceConfigurationArn"
+    },
+    "WeightedBalancedSchedulingConfiguration": {
+      "type": "structure",
+      "members": {
+        "priorityWeight": "SchedulingPriorityWeight",
+        "errorWeight": "SchedulingErrorWeight",
+        "submissionTimeWeight": "SchedulingSubmissionTimeWeight",
+        "renderingTaskWeight": "SchedulingRenderingTaskWeight",
+        "renderingTaskBuffer": "SchedulingRenderingTaskBuffer",
+        "maxPriorityOverride": "SchedulingMaxPriorityOverride",
+        "minPriorityOverride": "SchedulingMinPriorityOverride"
+      }
+    },
+    "WindowsUser": {
+      "type": "structure",
+      "required": [
+        "user",
+        "passwordArn"
+      ],
+      "members": {
+        "user": "WindowsUserUserString",
+        "passwordArn": "WindowsUserPasswordArnString"
+      }
+    },
+    "WindowsUserPasswordArnString": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:(aws[a-zA-Z-]*):secretsmanager:[a-z]{2}((-gov)|(-iso(b?)))?-[a-z]+-\\d{1}:\\d{12}:secret:[a-zA-Z0-9-/_+=.@]{1,2028}"
+    },
+    "WindowsUserUserString": {
+      "type": "string",
+      "min": 0,
+      "max": 111,
+      "pattern": "[^\"'/\\[\\]:;|=,+*?<>\\s]*"
+    },
+    "WorkerAmountCapability": {
+      "type": "structure",
+      "required": [
+        "name",
+        "value"
+      ],
+      "members": {
+        "name": "AmountCapabilityName",
+        "value": "Float"
+      }
+    },
+    "WorkerAmountCapabilityList": {
+      "type": "list",
+      "min": 2,
+      "max": 17,
+      "member": "WorkerAmountCapability"
+    },
+    "WorkerAttributeCapability": {
+      "type": "structure",
+      "required": [
+        "name",
+        "values"
+      ],
+      "members": {
+        "name": "AttributeCapabilityName",
+        "values": "AttributeCapabilityValuesList"
+      }
+    },
+    "WorkerAttributeCapabilityList": {
+      "type": "list",
+      "min": 2,
+      "max": 17,
+      "member": "WorkerAttributeCapability"
+    },
+    "WorkerCapabilities": {
+      "type": "structure",
+      "required": [
+        "amounts",
+        "attributes"
+      ],
+      "members": {
+        "amounts": "WorkerAmountCapabilityList",
+        "attributes": "WorkerAttributeCapabilityList"
+      }
+    },
+    "WorkerId": {
+      "type": "string",
+      "pattern": "worker-[0-9a-f]{32}"
+    }
+  }
+}

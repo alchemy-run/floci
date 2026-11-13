@@ -1,14 +1,20 @@
 package io.floci.aws.services.comprehend;
+
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.aws.core.common.AwsErrorResponse;
-import io.floci.aws.core.common.AwsException;
+import io.floci.aws.services.comprehend.ComprehendJobService.Family;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
+
 /**
  * JSON 1.1 handler for Amazon Comprehend API operations.
- * Dispatches X-Amz-Target: Comprehend_20171127.* actions to {@link ComprehendService}.
+ * Dispatches X-Amz-Target: Comprehend_20171127.* actions: real-time analysis
+ * to {@link ComprehendService}, and the asynchronous jobs of every family and
+ * their tags to {@link ComprehendJobService}. Custom models (document
+ * classifiers, entity recognizers, flywheels, endpoints) are not emulated.
  *
  * @see <a href="https://docs.aws.amazon.com/comprehend/latest/APIReference/Welcome.html">Comprehend API Reference</a>
  */
@@ -16,53 +22,64 @@ import org.jboss.logging.Logger;
 public class ComprehendJsonHandler {
     private static final Logger LOG = Logger.getLogger(ComprehendJsonHandler.class);
     private final ComprehendService comprehendService;
+    private final ComprehendJobService jobs;
+
     @Inject
-    public ComprehendJsonHandler(ComprehendService comprehendService) {
+    public ComprehendJsonHandler(ComprehendService comprehendService, ComprehendJobService jobs) {
         this.comprehendService = comprehendService;
+        this.jobs = jobs;
     }
-    /**
-     * Dispatches Comprehend actions received via the AwsJson11Controller.
-     * Only the sync Detect and ContainsPiiEntities actions are implemented; the
-     * async job and model-training surface (DocumentClassifier, EntityRecognizer,
-     * Flywheel, Dataset, Endpoint) is out of scope.
-     */
+
     public Response handle(String action, JsonNode request, String region) {
         LOG.debugv("Comprehend action: {0}", action);
-        return switch (action) {
-            case "DetectSentiment" -> comprehendService.detectSentiment(
-                    getStringField(request, "Text"), getStringField(request, "LanguageCode"));
-            case "DetectKeyPhrases" -> comprehendService.detectKeyPhrases(
-                    getStringField(request, "Text"), getStringField(request, "LanguageCode"));
-            case "DetectDominantLanguage" -> comprehendService.detectDominantLanguage(
-                    getStringField(request, "Text"));
-            case "DetectPiiEntities" -> comprehendService.detectPiiEntities(
-                    getStringField(request, "Text"), getStringField(request, "LanguageCode"));
-            case "ContainsPiiEntities" -> comprehendService.containsPiiEntities(
-                    getStringField(request, "Text"), getStringField(request, "LanguageCode"));
-            default -> Response.status(400)
+        ObjectNode result = switch (action) {
+            case "DetectDominantLanguage" -> comprehendService.detectDominantLanguage(request);
+            case "DetectEntities" -> comprehendService.detectEntities(request);
+            case "DetectKeyPhrases" -> comprehendService.detectKeyPhrases(request);
+            case "DetectPiiEntities" -> comprehendService.detectPiiEntities(request);
+            case "ContainsPiiEntities" -> comprehendService.containsPiiEntities(request);
+            case "DetectSentiment" -> comprehendService.detectSentiment(request);
+            case "DetectSyntax" -> comprehendService.detectSyntax(request);
+            case "DetectTargetedSentiment" -> comprehendService.detectTargetedSentiment(request);
+            case "DetectToxicContent" -> comprehendService.detectToxicContent(request);
+            case "ClassifyDocument" -> comprehendService.classifyDocument(request);
+            case "BatchDetectDominantLanguage" -> comprehendService.batchDetectDominantLanguage(request);
+            case "BatchDetectEntities" -> comprehendService.batchDetectEntities(request);
+            case "BatchDetectKeyPhrases" -> comprehendService.batchDetectKeyPhrases(request);
+            case "BatchDetectSentiment" -> comprehendService.batchDetectSentiment(request);
+            case "BatchDetectSyntax" -> comprehendService.batchDetectSyntax(request);
+            case "BatchDetectTargetedSentiment" -> comprehendService.batchDetectTargetedSentiment(request);
+            case "TagResource" -> jobs.tagResource(request);
+            case "UntagResource" -> jobs.untagResource(request);
+            case "ListTagsForResource" -> jobs.listTagsForResource(request);
+            case "StartDocumentClassificationJob", "StartDominantLanguageDetectionJob",
+                    "StartEntitiesDetectionJob", "StartEventsDetectionJob", "StartKeyPhrasesDetectionJob",
+                    "StartPiiEntitiesDetectionJob", "StartSentimentDetectionJob",
+                    "StartTargetedSentimentDetectionJob", "StartTopicsDetectionJob"
+                    -> jobs.start(Family.of(action), request, region);
+            case "DescribeDocumentClassificationJob", "DescribeDominantLanguageDetectionJob",
+                    "DescribeEntitiesDetectionJob", "DescribeEventsDetectionJob",
+                    "DescribeKeyPhrasesDetectionJob", "DescribePiiEntitiesDetectionJob",
+                    "DescribeSentimentDetectionJob", "DescribeTargetedSentimentDetectionJob",
+                    "DescribeTopicsDetectionJob"
+                    -> jobs.describe(Family.of(action), request);
+            case "ListDocumentClassificationJobs", "ListDominantLanguageDetectionJobs",
+                    "ListEntitiesDetectionJobs", "ListEventsDetectionJobs", "ListKeyPhrasesDetectionJobs",
+                    "ListPiiEntitiesDetectionJobs", "ListSentimentDetectionJobs",
+                    "ListTargetedSentimentDetectionJobs", "ListTopicsDetectionJobs"
+                    -> jobs.list(Family.of(action), request, region);
+            case "StopDominantLanguageDetectionJob", "StopEntitiesDetectionJob", "StopEventsDetectionJob",
+                    "StopKeyPhrasesDetectionJob", "StopPiiEntitiesDetectionJob", "StopSentimentDetectionJob",
+                    "StopTargetedSentimentDetectionJob"
+                    -> jobs.stop(Family.of(action), request);
+            default -> null;
+        };
+        if (result == null) {
+            return Response.status(400)
                     .entity(new AwsErrorResponse("UnknownOperationException",
                             "Unknown operation: Comprehend_20171127." + action))
                     .build();
-        };
-    }
-    /**
-     * Extracts a string-typed field. A present-but-wrong-typed value (e.g. a number
-     * or boolean where the modeled shape is a string) is a shape/marshalling
-     * mismatch caught at the protocol layer, before any operation-specific business
-     * validation runs — matching {@code JsonErrorResponseUtils.createSerializationErrorResponse()}'s
-     * treatment of a malformed JSON body. It must not be silently coerced via
-     * {@code asText()}, nor conflated with a missing field (a modeled business error
-     * specific to each operation, handled downstream in {@link ComprehendService}).
-     */
-    private String getStringField(JsonNode node, String field) {
-        JsonNode value = node == null ? null : node.get(field);
-        if (value == null || value.isNull()) {
-            return null;
         }
-        if (!value.isTextual()) {
-            throw new AwsException("SerializationException",
-                    "Unable to unmarshal request; the value for '" + field + "' is not a string.", 400);
-        }
-        return value.asText();
+        return Response.ok(result).build();
     }
 }

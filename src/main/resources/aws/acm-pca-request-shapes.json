@@ -1,0 +1,932 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_acmpca_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateCertificateAuthority": "CreateCertificateAuthorityRequest",
+    "CreateCertificateAuthorityAuditReport": "CreateCertificateAuthorityAuditReportRequest",
+    "CreatePermission": "CreatePermissionRequest",
+    "DeleteCertificateAuthority": "DeleteCertificateAuthorityRequest",
+    "DeletePermission": "DeletePermissionRequest",
+    "DeletePolicy": "DeletePolicyRequest",
+    "DescribeCertificateAuthority": "DescribeCertificateAuthorityRequest",
+    "DescribeCertificateAuthorityAuditReport": "DescribeCertificateAuthorityAuditReportRequest",
+    "GetCertificate": "GetCertificateRequest",
+    "GetCertificateAuthorityCertificate": "GetCertificateAuthorityCertificateRequest",
+    "GetCertificateAuthorityCsr": "GetCertificateAuthorityCsrRequest",
+    "GetPolicy": "GetPolicyRequest",
+    "ImportCertificateAuthorityCertificate": "ImportCertificateAuthorityCertificateRequest",
+    "IssueCertificate": "IssueCertificateRequest",
+    "ListCertificateAuthorities": "ListCertificateAuthoritiesRequest",
+    "ListPermissions": "ListPermissionsRequest",
+    "ListTags": "ListTagsRequest",
+    "PutPolicy": "PutPolicyRequest",
+    "RestoreCertificateAuthority": "RestoreCertificateAuthorityRequest",
+    "RevokeCertificate": "RevokeCertificateRequest",
+    "TagCertificateAuthority": "TagCertificateAuthorityRequest",
+    "UntagCertificateAuthority": "UntagCertificateAuthorityRequest",
+    "UpdateCertificateAuthority": "UpdateCertificateAuthorityRequest"
+  },
+  "shapes": {
+    "ASN1PrintableString64": {
+      "type": "string",
+      "min": 0,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9'()+-.?:/= ]*"
+    },
+    "ASN1Subject": {
+      "type": "structure",
+      "members": {
+        "Country": "CountryCodeString",
+        "Organization": "String64",
+        "OrganizationalUnit": "String64",
+        "DistinguishedNameQualifier": "ASN1PrintableString64",
+        "State": "String128",
+        "CommonName": "String64",
+        "SerialNumber": "ASN1PrintableString64",
+        "Locality": "String128",
+        "Title": "String64",
+        "Surname": "String40",
+        "GivenName": "String16",
+        "Initials": "String5",
+        "Pseudonym": "String128",
+        "GenerationQualifier": "String3",
+        "CustomAttributes": "CustomAttributeList"
+      }
+    },
+    "AWSPolicy": {
+      "type": "string",
+      "min": 1,
+      "max": 81920,
+      "pattern": "[\\u0009\\u000A\\u000D\\u0020-\\u00FF]+"
+    },
+    "AccessDescription": {
+      "type": "structure",
+      "required": [
+        "AccessMethod",
+        "AccessLocation"
+      ],
+      "members": {
+        "AccessMethod": "AccessMethod",
+        "AccessLocation": "GeneralName"
+      }
+    },
+    "AccessDescriptionList": {
+      "type": "list",
+      "member": "AccessDescription"
+    },
+    "AccessMethod": {
+      "type": "structure",
+      "members": {
+        "CustomObjectIdentifier": "CustomObjectIdentifier",
+        "AccessMethodType": "AccessMethodType"
+      }
+    },
+    "AccessMethodType": {
+      "type": "string",
+      "enum": [
+        "CA_REPOSITORY",
+        "RESOURCE_PKI_MANIFEST",
+        "RESOURCE_PKI_NOTIFY"
+      ]
+    },
+    "AccountId": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "[0-9]+"
+    },
+    "ActionList": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "ActionType"
+    },
+    "ActionType": {
+      "type": "string",
+      "enum": [
+        "IssueCertificate",
+        "GetCertificate",
+        "ListPermissions"
+      ]
+    },
+    "ApiPassthrough": {
+      "type": "structure",
+      "members": {
+        "Extensions": "Extensions",
+        "Subject": "ASN1Subject"
+      }
+    },
+    "Arn": {
+      "type": "string",
+      "min": 5,
+      "max": 200,
+      "pattern": "arn:[\\w+=/,.@-]+:acm-pca:[\\w+=/,.@-]*:[0-9]*:[\\w+=,.@-]+(/[\\w+=,.@-]+)*"
+    },
+    "AuditReportId": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": "[a-z0-9]{8}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{12}"
+    },
+    "AuditReportResponseFormat": {
+      "type": "string",
+      "enum": [
+        "JSON",
+        "CSV"
+      ]
+    },
+    "Base64String1To4096": {
+      "type": "string",
+      "min": 1,
+      "max": 4096,
+      "pattern": "(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CertificateAuthorityConfiguration": {
+      "type": "structure",
+      "required": [
+        "KeyAlgorithm",
+        "SigningAlgorithm",
+        "Subject"
+      ],
+      "members": {
+        "KeyAlgorithm": "KeyAlgorithm",
+        "SigningAlgorithm": "SigningAlgorithm",
+        "Subject": "ASN1Subject",
+        "CsrExtensions": "CsrExtensions"
+      }
+    },
+    "CertificateAuthorityStatus": {
+      "type": "string",
+      "enum": [
+        "CREATING",
+        "PENDING_CERTIFICATE",
+        "ACTIVE",
+        "DELETED",
+        "DISABLED",
+        "EXPIRED",
+        "FAILED"
+      ]
+    },
+    "CertificateAuthorityType": {
+      "type": "string",
+      "enum": [
+        "ROOT",
+        "SUBORDINATE"
+      ]
+    },
+    "CertificateAuthorityUsageMode": {
+      "type": "string",
+      "enum": [
+        "GENERAL_PURPOSE",
+        "SHORT_LIVED_CERTIFICATE"
+      ]
+    },
+    "CertificateBodyBlob": {
+      "type": "blob",
+      "min": 1,
+      "max": 32768
+    },
+    "CertificateChainBlob": {
+      "type": "blob",
+      "min": 0,
+      "max": 2097152
+    },
+    "CertificatePolicyList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "PolicyInformation"
+    },
+    "CnameString": {
+      "type": "string",
+      "min": 0,
+      "max": 253,
+      "pattern": "[-a-zA-Z0-9;/?:@&=+$,%_.!~*()']*"
+    },
+    "CountryCodeString": {
+      "type": "string",
+      "min": 2,
+      "max": 2,
+      "pattern": "[A-Za-z]{2}"
+    },
+    "CreateCertificateAuthorityAuditReportRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn",
+        "S3BucketName",
+        "AuditReportResponseFormat"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn",
+        "S3BucketName": "S3BucketName",
+        "AuditReportResponseFormat": "AuditReportResponseFormat"
+      }
+    },
+    "CreateCertificateAuthorityRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityConfiguration",
+        "CertificateAuthorityType"
+      ],
+      "members": {
+        "CertificateAuthorityConfiguration": "CertificateAuthorityConfiguration",
+        "RevocationConfiguration": "RevocationConfiguration",
+        "CertificateAuthorityType": "CertificateAuthorityType",
+        "IdempotencyToken": "IdempotencyToken",
+        "KeyStorageSecurityStandard": "KeyStorageSecurityStandard",
+        "Tags": "TagList",
+        "UsageMode": "CertificateAuthorityUsageMode"
+      }
+    },
+    "CreatePermissionRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn",
+        "Principal",
+        "Actions"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn",
+        "Principal": "Principal",
+        "SourceAccount": "AccountId",
+        "Actions": "ActionList"
+      }
+    },
+    "CrlConfiguration": {
+      "type": "structure",
+      "required": [
+        "Enabled"
+      ],
+      "members": {
+        "Enabled": "Boolean",
+        "ExpirationInDays": "Integer1To5000",
+        "CustomCname": "CnameString",
+        "S3BucketName": "S3BucketName3To255",
+        "S3ObjectAcl": "S3ObjectAcl",
+        "CrlDistributionPointExtensionConfiguration": "CrlDistributionPointExtensionConfiguration",
+        "CrlType": "CrlType",
+        "CustomPath": "CrlPathString"
+      }
+    },
+    "CrlDistributionPointExtensionConfiguration": {
+      "type": "structure",
+      "required": [
+        "OmitExtension"
+      ],
+      "members": {
+        "OmitExtension": "Boolean"
+      }
+    },
+    "CrlPathString": {
+      "type": "string",
+      "min": 0,
+      "max": 253,
+      "pattern": "(/|[-a-zA-Z0-9;?:@&=+$,%_.!~*()']+(/[-a-zA-Z0-9;?:@&=+$,%_.!~*()']+)*)"
+    },
+    "CrlType": {
+      "type": "string",
+      "enum": [
+        "COMPLETE",
+        "PARTITIONED"
+      ]
+    },
+    "CsrBlob": {
+      "type": "blob",
+      "min": 1,
+      "max": 32768
+    },
+    "CsrExtensions": {
+      "type": "structure",
+      "members": {
+        "KeyUsage": "KeyUsage",
+        "SubjectInformationAccess": "AccessDescriptionList"
+      }
+    },
+    "CustomAttribute": {
+      "type": "structure",
+      "required": [
+        "ObjectIdentifier",
+        "Value"
+      ],
+      "members": {
+        "ObjectIdentifier": "CustomObjectIdentifier",
+        "Value": "String1To256"
+      }
+    },
+    "CustomAttributeList": {
+      "type": "list",
+      "min": 1,
+      "max": 150,
+      "member": "CustomAttribute"
+    },
+    "CustomExtension": {
+      "type": "structure",
+      "required": [
+        "ObjectIdentifier",
+        "Value"
+      ],
+      "members": {
+        "ObjectIdentifier": "CustomObjectIdentifier",
+        "Value": "Base64String1To4096",
+        "Critical": "Boolean"
+      }
+    },
+    "CustomExtensionList": {
+      "type": "list",
+      "min": 1,
+      "max": 150,
+      "member": "CustomExtension"
+    },
+    "CustomObjectIdentifier": {
+      "type": "string",
+      "min": 0,
+      "max": 64,
+      "pattern": "([0-2])\\.([0-9]|([0-3][0-9]))((\\.([0-9]+)){0,126})"
+    },
+    "DeleteCertificateAuthorityRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn",
+        "PermanentDeletionTimeInDays": "PermanentDeletionTimeInDays"
+      }
+    },
+    "DeletePermissionRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn",
+        "Principal"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn",
+        "Principal": "Principal",
+        "SourceAccount": "AccountId"
+      }
+    },
+    "DeletePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "Arn"
+      }
+    },
+    "DescribeCertificateAuthorityAuditReportRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn",
+        "AuditReportId"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn",
+        "AuditReportId": "AuditReportId"
+      }
+    },
+    "DescribeCertificateAuthorityRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn"
+      }
+    },
+    "EdiPartyName": {
+      "type": "structure",
+      "required": [
+        "PartyName"
+      ],
+      "members": {
+        "PartyName": "String256",
+        "NameAssigner": "String256"
+      }
+    },
+    "ExtendedKeyUsage": {
+      "type": "structure",
+      "members": {
+        "ExtendedKeyUsageType": "ExtendedKeyUsageType",
+        "ExtendedKeyUsageObjectIdentifier": "CustomObjectIdentifier"
+      }
+    },
+    "ExtendedKeyUsageList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "ExtendedKeyUsage"
+    },
+    "ExtendedKeyUsageType": {
+      "type": "string",
+      "enum": [
+        "SERVER_AUTH",
+        "CLIENT_AUTH",
+        "CODE_SIGNING",
+        "EMAIL_PROTECTION",
+        "TIME_STAMPING",
+        "OCSP_SIGNING",
+        "SMART_CARD_LOGIN",
+        "DOCUMENT_SIGNING",
+        "CERTIFICATE_TRANSPARENCY"
+      ]
+    },
+    "Extensions": {
+      "type": "structure",
+      "members": {
+        "CertificatePolicies": "CertificatePolicyList",
+        "ExtendedKeyUsage": "ExtendedKeyUsageList",
+        "KeyUsage": "KeyUsage",
+        "SubjectAlternativeNames": "GeneralNameList",
+        "CustomExtensions": "CustomExtensionList"
+      }
+    },
+    "GeneralName": {
+      "type": "structure",
+      "members": {
+        "OtherName": "OtherName",
+        "Rfc822Name": "String256",
+        "DnsName": "String253",
+        "DirectoryName": "ASN1Subject",
+        "EdiPartyName": "EdiPartyName",
+        "UniformResourceIdentifier": "String253",
+        "IpAddress": "String39",
+        "RegisteredId": "CustomObjectIdentifier"
+      }
+    },
+    "GeneralNameList": {
+      "type": "list",
+      "min": 1,
+      "max": 150,
+      "member": "GeneralName"
+    },
+    "GetCertificateAuthorityCertificateRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn"
+      }
+    },
+    "GetCertificateAuthorityCsrRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn"
+      }
+    },
+    "GetCertificateRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn",
+        "CertificateArn"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn",
+        "CertificateArn": "Arn"
+      }
+    },
+    "GetPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "Arn"
+      }
+    },
+    "IdempotencyToken": {
+      "type": "string",
+      "min": 1,
+      "max": 36,
+      "pattern": "[\\u0009\\u000A\\u000D\\u0020-\\u00FF]*"
+    },
+    "ImportCertificateAuthorityCertificateRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn",
+        "Certificate"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn",
+        "Certificate": "CertificateBodyBlob",
+        "CertificateChain": "CertificateChainBlob"
+      }
+    },
+    "Integer1To5000": {
+      "type": "integer",
+      "min": 1,
+      "max": 5000
+    },
+    "IssueCertificateRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn",
+        "Csr",
+        "SigningAlgorithm",
+        "Validity"
+      ],
+      "members": {
+        "ApiPassthrough": "ApiPassthrough",
+        "CertificateAuthorityArn": "Arn",
+        "Csr": "CsrBlob",
+        "SigningAlgorithm": "SigningAlgorithm",
+        "TemplateArn": "Arn",
+        "Validity": "Validity",
+        "ValidityNotBefore": "Validity",
+        "IdempotencyToken": "IdempotencyToken"
+      }
+    },
+    "KeyAlgorithm": {
+      "type": "string",
+      "enum": [
+        "RSA_2048",
+        "RSA_3072",
+        "RSA_4096",
+        "EC_prime256v1",
+        "EC_secp384r1",
+        "EC_secp521r1",
+        "ML_DSA_44",
+        "ML_DSA_65",
+        "ML_DSA_87",
+        "SM2"
+      ]
+    },
+    "KeyStorageSecurityStandard": {
+      "type": "string",
+      "enum": [
+        "FIPS_140_2_LEVEL_2_OR_HIGHER",
+        "FIPS_140_2_LEVEL_3_OR_HIGHER",
+        "CCPC_LEVEL_1_OR_HIGHER"
+      ]
+    },
+    "KeyUsage": {
+      "type": "structure",
+      "members": {
+        "DigitalSignature": "Boolean",
+        "NonRepudiation": "Boolean",
+        "KeyEncipherment": "Boolean",
+        "DataEncipherment": "Boolean",
+        "KeyAgreement": "Boolean",
+        "KeyCertSign": "Boolean",
+        "CRLSign": "Boolean",
+        "EncipherOnly": "Boolean",
+        "DecipherOnly": "Boolean"
+      }
+    },
+    "ListCertificateAuthoritiesRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken",
+        "ResourceOwner": "ResourceOwner"
+      }
+    },
+    "ListPermissionsRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn"
+      ],
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken",
+        "CertificateAuthorityArn": "Arn"
+      }
+    },
+    "ListTagsRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn"
+      ],
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken",
+        "CertificateAuthorityArn": "Arn"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 43739
+    },
+    "OcspConfiguration": {
+      "type": "structure",
+      "required": [
+        "Enabled"
+      ],
+      "members": {
+        "Enabled": "Boolean",
+        "OcspCustomCname": "CnameString"
+      }
+    },
+    "OtherName": {
+      "type": "structure",
+      "required": [
+        "TypeId",
+        "Value"
+      ],
+      "members": {
+        "TypeId": "CustomObjectIdentifier",
+        "Value": "String256"
+      }
+    },
+    "PermanentDeletionTimeInDays": {
+      "type": "integer",
+      "min": 7,
+      "max": 30
+    },
+    "PolicyInformation": {
+      "type": "structure",
+      "required": [
+        "CertPolicyId"
+      ],
+      "members": {
+        "CertPolicyId": "CustomObjectIdentifier",
+        "PolicyQualifiers": "PolicyQualifierInfoList"
+      }
+    },
+    "PolicyQualifierId": {
+      "type": "string",
+      "enum": [
+        "CPS"
+      ]
+    },
+    "PolicyQualifierInfo": {
+      "type": "structure",
+      "required": [
+        "PolicyQualifierId",
+        "Qualifier"
+      ],
+      "members": {
+        "PolicyQualifierId": "PolicyQualifierId",
+        "Qualifier": "Qualifier"
+      }
+    },
+    "PolicyQualifierInfoList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "PolicyQualifierInfo"
+    },
+    "PositiveLong": {
+      "type": "long",
+      "min": 1
+    },
+    "Principal": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[^*]+"
+    },
+    "PutPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Policy"
+      ],
+      "members": {
+        "ResourceArn": "Arn",
+        "Policy": "AWSPolicy"
+      }
+    },
+    "Qualifier": {
+      "type": "structure",
+      "required": [
+        "CpsUri"
+      ],
+      "members": {
+        "CpsUri": "String256"
+      }
+    },
+    "ResourceOwner": {
+      "type": "string",
+      "enum": [
+        "SELF",
+        "OTHER_ACCOUNTS"
+      ]
+    },
+    "RestoreCertificateAuthorityRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn"
+      }
+    },
+    "RevocationConfiguration": {
+      "type": "structure",
+      "members": {
+        "CrlConfiguration": "CrlConfiguration",
+        "OcspConfiguration": "OcspConfiguration"
+      }
+    },
+    "RevocationReason": {
+      "type": "string",
+      "enum": [
+        "UNSPECIFIED",
+        "KEY_COMPROMISE",
+        "CERTIFICATE_AUTHORITY_COMPROMISE",
+        "AFFILIATION_CHANGED",
+        "SUPERSEDED",
+        "CESSATION_OF_OPERATION",
+        "PRIVILEGE_WITHDRAWN",
+        "A_A_COMPROMISE"
+      ]
+    },
+    "RevokeCertificateRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn",
+        "CertificateSerial",
+        "RevocationReason"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn",
+        "CertificateSerial": "String128",
+        "RevocationReason": "RevocationReason"
+      }
+    },
+    "S3BucketName": {
+      "type": "string",
+      "min": 3,
+      "max": 63
+    },
+    "S3BucketName3To255": {
+      "type": "string",
+      "min": 3,
+      "max": 255,
+      "pattern": "[-a-zA-Z0-9._/]+"
+    },
+    "S3ObjectAcl": {
+      "type": "string",
+      "enum": [
+        "PUBLIC_READ",
+        "BUCKET_OWNER_FULL_CONTROL"
+      ]
+    },
+    "SigningAlgorithm": {
+      "type": "string",
+      "enum": [
+        "SHA256WITHECDSA",
+        "SHA384WITHECDSA",
+        "SHA512WITHECDSA",
+        "SHA256WITHRSA",
+        "SHA384WITHRSA",
+        "SHA512WITHRSA",
+        "SHA256WITHRSA_PSS",
+        "SHA384WITHRSA_PSS",
+        "SHA512WITHRSA_PSS",
+        "SM3WITHSM2",
+        "ML_DSA_44",
+        "ML_DSA_65",
+        "ML_DSA_87"
+      ]
+    },
+    "String128": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "String16": {
+      "type": "string",
+      "min": 0,
+      "max": 16
+    },
+    "String1To256": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "String253": {
+      "type": "string",
+      "min": 0,
+      "max": 253
+    },
+    "String256": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "String3": {
+      "type": "string",
+      "min": 0,
+      "max": 3
+    },
+    "String39": {
+      "type": "string",
+      "min": 0,
+      "max": 39
+    },
+    "String40": {
+      "type": "string",
+      "min": 0,
+      "max": 40
+    },
+    "String5": {
+      "type": "string",
+      "min": 0,
+      "max": 5
+    },
+    "String64": {
+      "type": "string",
+      "min": 0,
+      "max": 64
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagCertificateAuthorityRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn",
+        "Tags"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn",
+        "Tags": "TagList"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "Tag"
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)"
+    },
+    "UntagCertificateAuthorityRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn",
+        "Tags"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn",
+        "Tags": "TagList"
+      }
+    },
+    "UpdateCertificateAuthorityRequest": {
+      "type": "structure",
+      "required": [
+        "CertificateAuthorityArn"
+      ],
+      "members": {
+        "CertificateAuthorityArn": "Arn",
+        "RevocationConfiguration": "RevocationConfiguration",
+        "Status": "CertificateAuthorityStatus"
+      }
+    },
+    "Validity": {
+      "type": "structure",
+      "required": [
+        "Value",
+        "Type"
+      ],
+      "members": {
+        "Value": "PositiveLong",
+        "Type": "ValidityPeriodType"
+      }
+    },
+    "ValidityPeriodType": {
+      "type": "string",
+      "enum": [
+        "END_DATE",
+        "ABSOLUTE",
+        "DAYS",
+        "MONTHS",
+        "YEARS"
+      ]
+    }
+  }
+}

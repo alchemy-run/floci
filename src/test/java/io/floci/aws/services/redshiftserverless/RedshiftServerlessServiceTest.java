@@ -45,6 +45,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.clearInvocations;
@@ -98,7 +100,7 @@ class RedshiftServerlessServiceTest {
                         + invocation.getArgument(2, String.class));
         nextPort = 7100;
         endpoints = mock(RedshiftServerlessEndpoints.class);
-        when(endpoints.allocate()).thenAnswer(invocation -> new Endpoint("localhost", nextPort++));
+        doAnswer(invocation -> { Workgroup w = invocation.getArgument(0); int port = nextPort++; w.setProxyPort(port); w.setEndpoint(new Endpoint("localhost", port)); return null; }).when(endpoints).allocate(any(), any(), any());
         runtime = mock(RedshiftServerlessRuntime.class);
         doAnswer(invocation -> {
             invocation.getArgument(6, Runnable.class).run();
@@ -106,7 +108,7 @@ class RedshiftServerlessServiceTest {
         }).when(runtime).restoreSnapshot(any(), any(), any(), any(), any(), any(), any());
         when(runtime.generatePassword()).thenReturn("Generated123");
         when(runtime.start(any(String.class), any(String.class), any(String.class), any(String.class),
-                any(String.class), any(String.class), any(Endpoint.class), anyBoolean(), any()))
+                any(String.class), any(String.class), any(Endpoint.class), anyInt(), anyBoolean(), anyBoolean(), any()))
                 .thenReturn(new RedshiftServerlessRuntime.Backend("127.0.0.1", 55432));
         EmulatorConfig config = mock(EmulatorConfig.class, Mockito.RETURNS_DEEP_STUBS);
         when(config.storage().persistentPath()).thenReturn(dumpDir.toString());
@@ -686,7 +688,7 @@ class RedshiftServerlessServiceTest {
         Workgroup deleted = service.deleteWorkgroup("del-wg", REGION);
 
         assertEquals("DELETING", deleted.getStatus());
-        verify(endpoints).release(created.getEndpoint());
+        verify(endpoints).release(argThat(w -> created.getWorkgroupName().equals(w.getWorkgroupName())));
         assertThrows(AwsException.class, () -> service.getWorkgroup("del-wg", REGION));
         createWorkgroup("del-wg-again", "del-wg-ns");
     }
@@ -748,7 +750,7 @@ class RedshiftServerlessServiceTest {
         service.clear();
 
         assertTrue(service.listWorkgroups(REGION, null, null).items().isEmpty());
-        verify(endpoints).release(created.getEndpoint());
+        verify(endpoints).release(argThat(w -> created.getWorkgroupName().equals(w.getWorkgroupName())));
     }
 
     @Test
@@ -758,7 +760,7 @@ class RedshiftServerlessServiceTest {
         Workgroup workgroup = createWorkgroup("rt-wg", "rt-ns");
 
         verify(runtime).start(eq(ACCOUNT_ID), eq(REGION), eq("rt-wg"), eq("root"), eq("Secret123"),
-                eq("analytics"), eq(workgroup.getEndpoint()), eq(false), any());
+                eq("analytics"), eq(workgroup.getEndpoint()), anyInt(), anyBoolean(), eq(false), any());
         Workgroup stored = service.getWorkgroup("rt-wg", REGION);
         assertEquals("127.0.0.1", stored.getRuntimeHost());
         assertEquals(55432, stored.getRuntimePort());
@@ -772,7 +774,7 @@ class RedshiftServerlessServiceTest {
         createWorkgroup("gen-wg", "gen-ns");
 
         verify(runtime).start(eq(ACCOUNT_ID), eq(REGION), eq("gen-wg"), eq("admin"), eq("Generated123"),
-                eq("dev"), any(Endpoint.class), eq(false), any());
+                eq("dev"), any(Endpoint.class), anyInt(), anyBoolean(), eq(false), any());
         assertEquals("Generated123", store.get(REGION + "::gen-ns").orElseThrow().getAdminUserPassword());
     }
 
@@ -783,7 +785,7 @@ class RedshiftServerlessServiceTest {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Supplier<Optional<RedshiftServerlessRuntime.AdminCredentials>>> supplier =
                 ArgumentCaptor.forClass(Supplier.class);
-        verify(runtime).start(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), supplier.capture());
+        verify(runtime).start(any(), any(), any(), any(), any(), any(), any(), anyInt(), anyBoolean(), anyBoolean(), supplier.capture());
 
         assertEquals(new RedshiftServerlessRuntime.AdminCredentials("root", "Secret123"),
                 supplier.getValue().get().orElseThrow());
@@ -797,13 +799,13 @@ class RedshiftServerlessServiceTest {
     void aRuntimeThatFailsToStartLeavesNoWorkgroupAndReleasesTheEndpoint() {
         create("fail-ns");
         when(runtime.start(any(String.class), any(String.class), any(String.class), any(String.class),
-                any(String.class), any(String.class), any(Endpoint.class), anyBoolean(), any()))
+                any(String.class), any(String.class), any(Endpoint.class), anyInt(), anyBoolean(), anyBoolean(), any()))
                 .thenThrow(new AwsException("InternalFailure", "Failed to start container", 500));
 
         assertThrows(AwsException.class, () -> createWorkgroup("fail-wg", "fail-ns"));
 
         assertTrue(service.listWorkgroups(REGION, null, null).items().isEmpty());
-        verify(endpoints).release(any(Endpoint.class));
+        verify(endpoints).release(any(Workgroup.class));
     }
 
     @Test
@@ -815,7 +817,7 @@ class RedshiftServerlessServiceTest {
         assertThrows(IllegalStateException.class, () -> createWorkgroup("persist-wg", "persist-ns"));
 
         verify(runtime).stop(ACCOUNT_ID, REGION, "persist-wg");
-        verify(endpoints).release(any(Endpoint.class));
+        verify(endpoints).release(any(Workgroup.class));
     }
 
     @Test
@@ -828,7 +830,7 @@ class RedshiftServerlessServiceTest {
 
         assertEquals("InternalServerException", failure.getErrorCode());
         assertEquals("stop-wg", service.getWorkgroup("stop-wg", REGION).getWorkgroupName());
-        verify(endpoints, never()).release(any(Endpoint.class));
+        verify(endpoints, never()).release(any(Workgroup.class));
     }
 
     @Test
@@ -925,7 +927,7 @@ class RedshiftServerlessServiceTest {
 
         service.clear();
 
-        verify(endpoints, never()).release(created.getEndpoint());
+        verify(endpoints, never()).release(argThat(w -> created.getWorkgroupName().equals(w.getWorkgroupName())));
     }
 
     @Test
@@ -992,12 +994,12 @@ class RedshiftServerlessServiceTest {
         service.createNamespace("rec-bad-ns", "root", "Secret123", null, null, null, null, null, Map.of(), REGION);
         createWorkgroup("rec-wg", "rec-ns");
         createWorkgroup("rec-bad-wg", "rec-bad-ns");
-        when(endpoints.restore(any(Endpoint.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        doAnswer(invocation -> null).when(endpoints).restore(any(), any(), any());
         when(runtime.start(any(String.class), any(String.class), eq("rec-bad-wg"), any(String.class),
-                any(String.class), any(String.class), any(Endpoint.class), eq(true), any()))
+                any(String.class), any(String.class), any(Endpoint.class), anyInt(), anyBoolean(), eq(true), any()))
                 .thenThrow(new AwsException("InternalFailure", "no container", 500));
         when(runtime.start(any(String.class), any(String.class), eq("rec-wg"), any(String.class),
-                any(String.class), any(String.class), any(Endpoint.class), eq(true), any()))
+                any(String.class), any(String.class), any(Endpoint.class), anyInt(), anyBoolean(), eq(true), any()))
                 .thenReturn(new RedshiftServerlessRuntime.Backend("10.0.0.9", 6000));
 
         service.onStart(null);

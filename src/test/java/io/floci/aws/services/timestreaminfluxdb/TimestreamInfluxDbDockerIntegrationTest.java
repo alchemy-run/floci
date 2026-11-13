@@ -1,6 +1,7 @@
 package io.floci.aws.services.timestreaminfluxdb;
 
 import com.github.dockerjava.api.DockerClient;
+import io.floci.aws.testing.Ec2Defaults;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -69,8 +70,8 @@ class TimestreamInfluxDbDockerIntegrationTest {
         String sourceId = call("CreateDbInstance", """
                 {"name":"docker-source","username":"%s","password":"%s","organization":"acme","bucket":"metrics",
                  "dbInstanceType":"db.influx.medium","allocatedStorage":20,
-                 "vpcSubnetIds":["subnet-default-us-east-1-a"],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
-                """.formatted(USERNAME, PASSWORD)).statusCode(200).extract().path("id");
+                 "vpcSubnetIds":["%s"],"vpcSecurityGroupIds":["%s"]}
+                """.formatted(USERNAME, PASSWORD, Ec2Defaults.SUBNET_A, Ec2Defaults.SECURITY_GROUP)).statusCode(200).extract().path("id");
         String restoredId = null;
         try {
             Map<String, Object> source = awaitInstance(sourceId, "AVAILABLE");

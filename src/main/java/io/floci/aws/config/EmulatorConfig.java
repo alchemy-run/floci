@@ -849,6 +849,141 @@ public interface EmulatorConfig {
         TransferServiceConfig transfer();
         TextractServiceConfig textract();
         ComprehendServiceConfig comprehend();
+        ComprehendMedicalServiceConfig comprehendMedical();
+        PollyServiceConfig polly();
+        LocationServiceConfig location();
+        Route53DomainsServiceConfig route53Domains();
+        AcmPcaServiceConfig acmPca();
+        AiOpsServiceConfig aiOps();
+        AmplifyServiceConfig amplify();
+        AppFlowServiceConfig appFlow();
+        AppRegistryServiceConfig appRegistry();
+        AppRunnerServiceConfig appRunner();
+        AuditManagerServiceConfig auditManager();
+        B2biServiceConfig b2bi();
+        BackupSearchServiceConfig backupSearch();
+        BedrockDataAutomationServiceConfig bedrockDataAutomation();
+        ChatbotServiceConfig chatbot();
+        CodeConnectionsServiceConfig codeConnections();
+        DaxServiceConfig dax();
+        DataBrewServiceConfig databrew();
+        DataExchangeServiceConfig dataexchange();
+        DataZoneServiceConfig datazone();
+        DeadlineServiceConfig deadline();
+        DevOpsGuruServiceConfig devopsguru();
+        DocDbElasticServiceConfig docdbElastic();
+        EcrPublicServiceConfig ecrPublic();
+        EmrContainersServiceConfig emrContainers();
+        EntityResolutionServiceConfig entityresolution();
+        FmsServiceConfig fms();
+
+        ForecastServiceConfig forecast();
+        FsxServiceConfig fsx();
+
+        GlacierServiceConfig glacier();
+
+        KendraServiceConfig kendra();
+
+        KeyspacesServiceConfig keyspaces();
+
+        KinesisVideoServiceConfig kinesisVideo();
+
+        LexV2ServiceConfig lexv2();
+
+        LicenseManagerServiceConfig licenseManager();
+
+        AirflowServerlessServiceConfig airflowServerless();
+
+        MailManagerServiceConfig mailManager();
+
+        MediaConnectServiceConfig mediaConnect();
+
+        MediaConvertServiceConfig mediaConvert();
+
+        MediaLiveServiceConfig mediaLive();
+
+        MediaPackageV2ServiceConfig mediaPackageV2();
+
+        MediaTailorServiceConfig mediaTailor();
+
+        MedicalImagingServiceConfig medicalImaging();
+
+        NeptuneGraphServiceConfig neptuneGraph();
+
+        NotificationsServiceConfig notifications();
+
+        NotificationsContactsServiceConfig notificationsContacts();
+
+        OsisServiceConfig osis();
+
+        ObservabilityAdminServiceConfig observabilityAdmin();
+
+        OmicsServiceConfig omics();
+
+        OpenSearchServerlessServiceConfig opensearchServerless();
+
+        PersonalizeServiceConfig personalize();
+
+        PinpointSmsVoiceV2ServiceConfig pinpointSmsVoiceV2();
+
+        QBusinessServiceConfig qbusiness();
+
+        QAppsServiceConfig qapps();
+
+        RbinServiceConfig rbin();
+
+        RePostSpaceServiceConfig repostspace();
+
+        RolesAnywhereServiceConfig rolesanywhere();
+
+        Route53ProfilesServiceConfig route53profiles();
+
+        S3FilesServiceConfig s3files();
+
+        SchemasServiceConfig schemas();
+
+        SecurityLakeServiceConfig securitylake();
+
+        ShieldServiceConfig shield();
+
+        SignerServiceConfig signer();
+
+        SimpleDbServiceConfig sdb();
+
+        SocialMessagingServiceConfig socialmessaging();
+
+        SyntheticsServiceConfig synthetics();
+
+        VpcLatticeServiceConfig vpcLattice();
+
+        XRayServiceConfig xray();
+
+        SsmIncidentsServiceConfig ssmIncidents();
+
+        SsmContactsServiceConfig ssmContacts();
+
+        GrafanaServiceConfig grafana();
+
+        GreengrassV2ServiceConfig greengrassv2();
+
+        HealthLakeServiceConfig healthlake();
+
+        IvsServiceConfig ivs();
+
+        IvsChatServiceConfig ivschat();
+
+        ImageBuilderServiceConfig imagebuilder();
+
+        InternetMonitorServiceConfig internetmonitor();
+
+        IotFleetWiseServiceConfig iotfleetwise();
+
+        IotMiServiceConfig iotmanagedintegrations();
+
+        IotSiteWiseServiceConfig iotsitewise();
+
+        IotWirelessServiceConfig iotwireless();
+        DirectoryServiceConfig ds();
         RekognitionServiceConfig rekognition();
         PricingServiceConfig pricing();
         DuckConfig duck();
@@ -2054,6 +2189,13 @@ public interface EmulatorConfig {
         @WithDefault("true")
         boolean enabled();
 
+        /**
+         * Domain of AWS-shaped workgroup endpoints, {@code <workgroup>.<account>.<region>.<domain>} on
+         * the workgroup's port, routed to its proxy by TLS server name. Unset, a workgroup's endpoint
+         * is its proxy's own host and port.
+         */
+        Optional<String> endpointDomain();
+
         @WithDefault("true")
         boolean snapshotExpirationEnabled();
 
@@ -2071,6 +2213,14 @@ public interface EmulatorConfig {
 
         @WithDefault("60")
         int scheduledActionSweepIntervalSeconds();
+
+        /** Whether running workgroups get automatic recovery points. */
+        @WithDefault("true")
+        boolean recoveryPointsEnabled();
+
+        /** How often a running workgroup's namespace gets a recovery point; AWS takes one every 30 minutes. */
+        @WithDefault("1800")
+        int recoveryPointIntervalSeconds();
     }
 
     interface NeptuneServiceConfig {
@@ -2478,6 +2628,10 @@ public interface EmulatorConfig {
 
         @WithDefault("floci/floci-duck:latest")
         String defaultImage();
+
+        /** How long a started floci-duck container has to answer its health check. */
+        @WithDefault("120")
+        int startupTimeoutSeconds();
     }
 
     interface GlueServiceConfig {
@@ -2792,6 +2946,1241 @@ public interface EmulatorConfig {
     interface ComprehendServiceConfig {
         @WithDefault("true")
         boolean enabled();
+    }
+
+    interface ComprehendMedicalServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface PollyServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface LocationServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface Route53DomainsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AcmPcaServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AiOpsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AmplifyServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppFlowServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppRegistryServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AppRunnerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface AuditManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface B2biServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface BackupSearchServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface BedrockDataAutomationServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ChatbotServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface CodeConnectionsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DataBrewServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a job run spends STARTING and RUNNING before it executes. */
+        @WithDefault("5000")
+        long runStartupMillis();
+
+        /** How long a project session stays INITIALIZING before it is READY. */
+        @WithDefault("2000")
+        long sessionStartupMillis();
+    }
+
+    interface DataExchangeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a started job stays IN_PROGRESS before it completes. */
+        @WithDefault("1000")
+        long jobMillis();
+    }
+
+    interface DataZoneServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a domain, environment, data source or run stays in its transitional state before it settles. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface DeadlineServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a fleet, job update, license endpoint or statistics aggregation stays in progress. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface DevOpsGuruServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a cost estimation stays ONGOING. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface FsxServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a file system, volume, backup or other FSx resource stays in a transitional lifecycle state. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface NotificationsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long event rules, hubs and configurations stay in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface QBusinessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long applications, indices, data sources and documents take to become ready, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long presigned document, upload and export links last, in seconds. */
+        @WithDefault("300")
+        long presignedUrlSeconds();
+
+        /** The Bedrock model creator mode, extended knowledge and generated answers use. */
+        @WithDefault("amazon.nova-lite-v1:0")
+        String model();
+
+        /** Whether retrieval answers are written by {@link #model()}; otherwise they're the sentences that answer. */
+        @WithDefault("false")
+        boolean generateAnswers();
+    }
+
+    interface RolesAnywhereServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface RePostSpaceServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface XRayServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long asynchronous changes (encryption, the segment destination, trace retrievals) take, in ms. */
+        @WithDefault("1000")
+        long transitionMillis();
+
+        /** The UDP port of the X-Ray daemon that traced Lambda functions send their subsegments to; 0 disables it. */
+        @WithDefault("2000")
+        int daemonPort();
+
+        /** How often insights are evaluated, in milliseconds. */
+        @WithDefault("60000")
+        long insightsIntervalMillis();
+    }
+
+    interface VpcLatticeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long VPC Lattice's asynchronous creates and deletes take, in milliseconds. */
+        @WithDefault("1000")
+        long transitionMillis();
+    }
+
+    interface SyntheticsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a canary's asynchronous state changes (create, update, start, stop, delete) take, in ms. */
+        @WithDefault("1000")
+        long transitionMillis();
+    }
+
+    interface SocialMessagingServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long Meta takes to review a marketing template, in milliseconds. */
+        @WithDefault("2000")
+        long reviewMillis();
+    }
+
+    interface SimpleDbServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SignerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface ShieldServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface SecurityLakeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a data lake takes to finish setting up, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface SchemasServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a code binding takes to generate, in milliseconds. */
+        @WithDefault("2000")
+        long codeBindingMillis();
+    }
+
+    interface SsmIncidentsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long the replication set takes to create, update and delete, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface SsmContactsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface S3FilesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long file systems, access points and mount targets take to create and delete, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface Route53ProfilesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long profiles and their associations take to create, update and delete, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface RbinServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a new or changed retention rule stays pending, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface QAppsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface PinpointSmsVoiceV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long phone numbers, pools, Notify configurations and registration reviews take, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long after a send its delivery events go out, in milliseconds. */
+        @WithDefault("200")
+        long deliveryMillis();
+
+        /** {@code PRODUCTION}, or {@code SANDBOX}: send only to verified destination numbers and the account's own. */
+        @WithDefault("PRODUCTION")
+        String accountTier();
+
+        /** The monthly spend limit of each kind of message, and the most an override may set, in US dollars. */
+        @WithDefault("10000")
+        long monthlySpendLimit();
+
+        /** Whether a number its end user opted out of (with STOP) stays opted out until they opt back in. */
+        @WithDefault("false")
+        boolean endUserOptOutsLocked();
+    }
+
+    interface PersonalizeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long datasets, solutions, campaigns and jobs stay pending before they move on, in milliseconds. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The fewest interactions a solution version or recommender trains on, as Personalize requires. */
+        @WithDefault("1000")
+        int minTrainingInteractions();
+    }
+
+    interface OpenSearchServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** What collections run on: {@code opensearch} (a container per collection), or {@code none}. */
+        @WithDefault("opensearch")
+        String engine();
+
+        /** The OpenSearch image collections run on. */
+        @WithDefault("opensearchproject/opensearch:2.19.5")
+        String image();
+
+        /** The Java heap of a collection's OpenSearch, in MiB. */
+        @WithDefault("512")
+        int heapMb();
+
+        /** How long a collection's OpenSearch may take to start. */
+        @WithDefault("180")
+        int readySeconds();
+
+        /** How often ingestion streams poll their queue. */
+        @WithDefault("5")
+        int streamPollSeconds();
+
+        /** How long collections, endpoints and jobs stay in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface OmicsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** What runs workflows: {@code docker} (each language's engine in a container), or {@code none}. */
+        @WithDefault("docker")
+        String engine();
+
+        /** The Cromwell image WDL runs on. */
+        @WithDefault("broadinstitute/cromwell:87")
+        String wdlImage();
+
+        /** The Nextflow image Nextflow runs on. */
+        @WithDefault("nextflow/nextflow:24.10.4")
+        String nextflowImage();
+
+        /** The cwltool image CWL runs on. */
+        @WithDefault("quay.io/commonwl/cwltool:3.1.20241217163858")
+        String cwlImage();
+
+        /** The Java heap of a run's engine, in MiB. */
+        @WithDefault("1024")
+        int engineHeapMb();
+
+        /** How long a run outside a run group may take, in minutes. */
+        @WithDefault("120")
+        int runTimeoutMinutes();
+
+        /** How long a read set goes unread before it's archived. */
+        @WithDefault("30")
+        int archiveAfterDays();
+
+        /** How many reference stores a Region holds. */
+        @WithDefault("5")
+        int maxReferenceStores();
+
+        /** How long stores, workflows and jobs stay in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface ObservabilityAdminServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How often running telemetry evaluation applies telemetry rules to resources. */
+        @WithDefault("60")
+        int evaluationIntervalSeconds();
+
+        /** How often telemetry pipelines with an S3 source poll their queue. */
+        @WithDefault("5")
+        int pipelinePollSeconds();
+
+        /** How long evaluation, pipelines and rules stay in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface OsisServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** What runs pipelines: {@code data-prepper}, or {@code none} to keep only their metadata. */
+        @WithDefault("data-prepper")
+        String engine();
+
+        /** The Data Prepper image pipelines run on. */
+        @WithDefault("opensearchproject/data-prepper:2.12.2")
+        String image();
+
+        /** How long a pipeline's Data Prepper may take to start. */
+        @WithDefault("300")
+        int readySeconds();
+
+        /** The Java heap each pipeline's Data Prepper runs with, in MiB. */
+        @WithDefault("512")
+        int heapMb();
+
+        /** How long pipeline endpoints, stops and deletions stay in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface NotificationsContactsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long an activation code is valid. */
+        @WithDefault("1800")
+        int activationCodeSeconds();
+    }
+
+    interface NeptuneGraphServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a graph, snapshot, endpoint or task stays in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /**
+         * What runs graphs' openCypher: {@code neo4j}, a Neo4j container per graph, or {@code none}, for graphs that
+         * only keep their metadata.
+         */
+        @WithDefault("neo4j")
+        String queryEngine();
+
+        /** The Neo4j image graphs run on. */
+        @WithDefault("neo4j:5-community")
+        String image();
+
+        /** The Docker network graph containers join, overriding {@code floci.services.docker-network}. */
+        Optional<String> dockerNetwork();
+
+        /** How long a graph's container may take to answer queries. */
+        @WithDefault("120")
+        int readySeconds();
+    }
+
+    interface MedicalImagingServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a data store, import job or image set stays in a transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The image HealthImaging's frame codecs (OpenJPH, OpenJPEG, DCMTK) are installed into. */
+        @WithDefault("debian:trixie-slim")
+        String codecImage();
+    }
+
+    interface MediaTailorServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a request to an origin, ad decision server or beacon may take. */
+        @WithDefault("10000")
+        long requestTimeoutMillis();
+
+        /** How long a manifest request waits for its ads to be transcoded before it plays without them. */
+        @WithDefault("30000")
+        long transcodeWaitMillis();
+
+        /** How long a session lasts after its last request. */
+        @WithDefault("600")
+        int sessionIdleSeconds();
+    }
+
+    interface MediaPackageV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a harvest job waits after its window ends before it runs. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long ingested content is kept at least, beyond any origin endpoint's startover window. */
+        @WithDefault("120")
+        int minimumRetentionSeconds();
+
+        @WithDefault("3")
+        int maxChannelGroups();
+    }
+
+    interface MediaLiveServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a channel, multiplex or other MediaLive resource takes to change state. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The address push inputs' destinations give. */
+        @WithDefault("127.0.0.1")
+        String ingestIp();
+
+        /** The address channels' egress endpoints give. */
+        @WithDefault("127.0.0.1")
+        String egressIp();
+
+        /** The first host port push inputs take: a running channel's encoder publishes it. */
+        @WithDefault("21000")
+        int ingestPortStart();
+
+        @WithDefault("100")
+        int ingestPortCount();
+
+        /** The Docker network channels' encoders join; the services' network when unset. */
+        Optional<String> dockerNetwork();
+    }
+
+    interface MediaConvertServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a jobs query takes, four times over. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The concurrent jobs a new on-demand queue (and the Default queue) runs. */
+        @WithDefault("20")
+        int concurrentJobs();
+
+        /** How many jobs transcode at once across every queue: ffmpeg runs in one container. */
+        @WithDefault("2")
+        int maxRunningJobs();
+
+        @WithDefault("10")
+        int maxQueues();
+    }
+
+    interface MediaConnectServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a flow, bridge, gateway or router resource takes to start, stop, change or delete. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The address sources' IngestIp gives: where to send a flow's content. */
+        @WithDefault("127.0.0.1")
+        String ingestIp();
+
+        /** The address flows' EgressIp and listener outputs' ListenerAddress give. */
+        @WithDefault("127.0.0.1")
+        String egressIp();
+
+        /** The address active flows' and router inputs' UDP listeners bind to. */
+        @WithDefault("0.0.0.0")
+        String bindHost();
+
+        /** The first UDP port a source takes when its own IngestPort is in use. */
+        @WithDefault("20000")
+        int udpPortStart();
+
+        @WithDefault("100")
+        int udpPortCount();
+
+        @WithDefault("20")
+        int maxFlows();
+    }
+
+    interface MailManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long an ingress point stays PROVISIONING, or an import job, search or export runs. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The host name ingress points' ARecord gives for SMTP clients. */
+        @WithDefault("localhost.floci.io")
+        String smtpHostname();
+
+        /** The address ingress points' SMTP listeners bind to. */
+        @WithDefault("0.0.0.0")
+        String smtpBindHost();
+
+        /** The first port an ingress point's SMTP listener takes. */
+        @WithDefault("2525")
+        int smtpPortStart();
+
+        /** How many ports, from {@link #smtpPortStart()}, ingress points' SMTP listeners may take. */
+        @WithDefault("50")
+        int smtpPortCount();
+
+        @WithDefault("100000")
+        int maxAddressListMembers();
+    }
+
+    interface AirflowServerlessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a deleted workflow stays DELETING. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The Apache Airflow image runs execute in. */
+        @WithDefault("apache/airflow:3.1.3-python3.12")
+        String airflowImage();
+
+        /** The Docker network the Airflow runtime joins; the services' network when unset. */
+        Optional<String> dockerNetwork();
+
+        /** How long a run may take before it times out. */
+        @WithDefault("60")
+        int maxRunMinutes();
+
+        @WithDefault("1000")
+        int maxWorkflows();
+
+        @WithDefault("20")
+        int maxConcurrentRuns();
+    }
+
+    interface LicenseManagerServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a license takes to become available, or a conversion task to finish. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        @WithDefault("1000")
+        int maxLicenseConfigurations();
+    }
+
+    interface LexV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a bot, version, alias, export, import or test run takes to settle into its next status. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long a locale build takes. */
+        @WithDefault("3000")
+        long buildMillis();
+
+        @WithDefault("10000")
+        int maxBots();
+
+        @WithDefault("100")
+        int maxAliasesPerBot();
+
+        @WithDefault("1000")
+        int maxIntentsPerLocale();
+    }
+
+    interface KinesisVideoServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a stream or signaling channel takes to finish creating, updating or deleting. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long GetMedia waits for a new fragment before it ends with a continuation token. */
+        @WithDefault("3000")
+        long getMediaIdleMillis();
+
+        @WithDefault("10000")
+        int maxStreams();
+
+        @WithDefault("10000")
+        int maxChannels();
+
+        /** The image with ffmpeg that clips, HLS and DASH segments and images are transcoded in. */
+        @WithDefault("bluenviron/mediamtx:1.21.3-ffmpeg")
+        String ffmpegImage();
+    }
+
+    interface KeyspacesServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a keyspace, table, type or stream takes to finish creating, updating, restoring or deleting. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** The account's keyspace quota. */
+        @WithDefault("256")
+        int maxKeyspaces();
+
+        /** The account's table quota. */
+        @WithDefault("256")
+        int maxTables();
+
+        /**
+         * The CQL endpoint's port, as Keyspaces serves CQL on 9142 (with TLS while {@code floci.tls.enabled} is true);
+         * {@code 0} disables it.
+         */
+        @WithDefault("9142")
+        int cqlPort();
+
+        @WithDefault("0.0.0.0")
+        String cqlHost();
+    }
+
+    interface KendraServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long an index, data source, FAQ or other Kendra resource takes to finish creating, updating or deleting. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** How long a put document is PROCESSING before it is INDEXED and searchable. */
+        @WithDefault("1000")
+        long documentProcessingMillis();
+
+        /** How often scheduled data source syncs are checked. */
+        @WithDefault("30")
+        long syncSweepIntervalSeconds();
+
+        /**
+         * Whether the account is an existing Amazon Kendra customer. Kendra is closed to new customers; with false,
+         * CreateIndex is refused as AWS refuses a new customer.
+         */
+        @WithDefault("true")
+        boolean existingCustomer();
+    }
+
+    interface ForecastServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long each step of a Forecast job's status takes. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /**
+         * Whether the account is an existing Amazon Forecast customer. Forecast is closed to new customers; with
+         * false, every create is refused as AWS refuses a new customer.
+         */
+        @WithDefault("true")
+        boolean existingCustomer();
+    }
+
+    interface ImageBuilderServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * Where AWSTOE, the component executor builds run, is downloaded from: {@code {region}} and {@code {arch}}
+         * (amd64 or arm64) are filled in. Floci downloads it once per architecture.
+         */
+        @WithDefault("https://awstoe-{region}.s3.{region}.amazonaws.com/latest/linux/{arch}/awstoe") // partition-literal: AWS's public AWSTOE download
+        String awstoeUrl();
+
+        /** How often enabled lifecycle policies are evaluated; Image Builder evaluates them daily. */
+        @WithDefault("3600")
+        long lifecycleIntervalSeconds();
+    }
+
+    interface IotWirelessServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** Downlink messages a device's queue holds. */
+        @WithDefault("100")
+        int maxQueuedMessages();
+    }
+
+    interface IotSiteWiseServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long asset models, assets and portals stay CREATING, UPDATING or DELETING. */
+        @WithDefault("1000")
+        long transitionMillis();
+
+        /** How often metric windows that have ended are computed. */
+        @WithDefault("1000")
+        long metricTickMillis();
+
+        /** How often data is replicated to the cold tier, in seconds; SiteWise replicates every six hours. */
+        @WithDefault("21600")
+        long coldTierExportSeconds();
+
+        /** Asset models in each account and Region. */
+        @WithDefault("1000")
+        int maxAssetModels();
+
+        /** Assets in each account and Region. */
+        @WithDefault("100000")
+        int maxAssets();
+
+        /** Properties of each asset model. */
+        @WithDefault("1000")
+        int maxPropertiesPerModel();
+
+        /** Bulk import jobs PENDING or RUNNING at once. */
+        @WithDefault("10")
+        int maxActiveBulkImportJobs();
+
+        /** The Bedrock model the SiteWise Assistant converses with. */
+        @WithDefault("anthropic.claude-3-5-sonnet-20240620-v1:0")
+        String assistantModelId();
+
+        /** The fewest samples of every input anomaly detection training needs. */
+        @WithDefault("10")
+        int minTrainingSamples();
+
+        /** Starts floci-duck, which runs ExecuteQuery, when SiteWise resources are first created. */
+        @WithDefault("true")
+        boolean prestartQueryEngine();
+    }
+
+    interface IotMiServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a deleted managed thing stays DELETE_IN_PROGRESS. */
+        @WithDefault("2000")
+        long deletionMillis();
+
+        /** How long a cloud discovery waits for the connector's DEVICE_DISCOVERY event before it TIMED_OUT. */
+        @WithDefault("300")
+        long discoveryTimeoutSeconds();
+
+        /** Managed things in each account and Region. */
+        @WithDefault("10000")
+        int maxManagedThings();
+
+        /** Credential lockers in each account and Region. */
+        @WithDefault("100")
+        int maxCredentialLockers();
+    }
+
+    interface IotFleetWiseServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * Whether the account is an existing IoT FleetWise customer. AWS closed the service to new customers, so
+         * when false every operation is refused with AccessDeniedException as on a new account.
+         */
+        @WithDefault("true")
+        boolean existingCustomer();
+
+        /** How long a created campaign stays CREATING before it waits for approval. */
+        @WithDefault("1000")
+        long campaignCreationMillis();
+
+        /** How long a campaign's processed data is gathered before it is written to S3; IoT FleetWise uses ~10 minutes. */
+        @WithDefault("600")
+        long s3FlushSeconds();
+
+        /** Campaigns in each account and Region. */
+        @WithDefault("20")
+        int maxCampaigns();
+
+        /** Vehicle models in each account and Region. */
+        @WithDefault("150")
+        int maxModelManifests();
+
+        /** Decoder manifests for each vehicle model. */
+        @WithDefault("100")
+        int maxDecoderManifestsPerModel();
+
+        /** Vehicles in each fleet. */
+        @WithDefault("2000")
+        int maxVehiclesPerFleet();
+    }
+
+    interface InternetMonitorServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * The length of a measurement window: Floci aggregates a monitor's traffic over each window, publishes its
+         * measurements and evaluates health events when it closes. Internet Monitor uses five minutes.
+         */
+        @WithDefault("300")
+        long measurementSeconds();
+
+        /** How long a created, updated, activated or deactivated monitor stays {@code PENDING}. */
+        @WithDefault("1000")
+        long pendingMillis();
+
+        /**
+         * The round-trip time above which a request counts against a city-network's performance score, standing in
+         * for the baseline Internet Monitor learns from each city-network's history.
+         */
+        @WithDefault("1000")
+        long performanceThresholdMillis();
+
+        /** The client location every viewer is reported in: Floci has no IP geolocation database. */
+        ClientLocationConfig clientLocation();
+
+        interface ClientLocationConfig {
+            @WithDefault("Local")
+            String city();
+
+            @WithDefault("Local")
+            String metro();
+
+            @WithDefault("Local")
+            String subdivision();
+
+            @WithDefault("LO")
+            String subdivisionCode();
+
+            @WithDefault("Local")
+            String country();
+
+            @WithDefault("ZZ")
+            String countryCode();
+
+            @WithDefault("0")
+            double latitude();
+
+            @WithDefault("0")
+            double longitude();
+
+            /** The viewers' network; 64512 is the first private-use ASN. */
+            @WithDefault("Floci local network")
+            String asName();
+
+            @WithDefault("64512")
+            long asNumber();
+        }
+    }
+
+    interface IvsChatServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /**
+         * How long a room's log records gather before they are written to an S3 destination as one
+         * object (IVS Chat delivers to S3 about every five minutes; CloudWatch Logs and Firehose get each
+         * record as it happens). Zero writes every record as its own object.
+         */
+        @WithDefault("10000")
+        long s3FlushMillis();
+
+        /** How long a chat token can be used to connect, from when it is created. */
+        @WithDefault("60")
+        int tokenMinutes();
+    }
+
+    interface IvsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** When true, channels are never live: no media server is started. */
+        @WithDefault("false")
+        boolean mock();
+
+        /** The MediaMTX image of the media server channels are broadcast to (with ffmpeg, for recordings). */
+        @WithDefault("bluenviron/mediamtx:1.21.3-ffmpeg")
+        String image();
+
+        /** The host port broadcasters publish RTMP to: a channel's ingest endpoint. */
+        @WithDefault("1935")
+        int rtmpPort();
+
+        /** The host UDP port broadcasters publish SRT to: a channel's SRT endpoint. */
+        @WithDefault("9000")
+        int srtPort();
+
+        /** The host port stage publishers send RTMPS to: a stage's {@code rtmps} endpoint. */
+        @WithDefault("1937")
+        int rtmpsPort();
+
+        /**
+         * The UDP port WHIP publishers send a stage their WebRTC media on, the same on the host and in the media
+         * server, as its ICE candidates name it.
+         */
+        @WithDefault("8189")
+        int webrtcPort();
+
+        /** How long a composition runs with no publisher on its stage before it stops itself. */
+        @WithDefault("60")
+        int compositionIdleSeconds();
+
+        /** Lowest host port the media server's API and HLS are published on, for floci to reach. */
+        @WithDefault("13200")
+        int hostPortBase();
+
+        /** Highest host port the media server's API and HLS are published on. */
+        @WithDefault("13299")
+        int hostPortMax();
+
+        /** Seconds to wait for a started media server to answer. */
+        @WithDefault("60")
+        int readinessTimeoutSeconds();
+
+        /** How often floci reads the media server's streams. */
+        @WithDefault("1000")
+        long pollMillis();
+
+        /** How long a new recording configuration reports CREATING. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /**
+         * The country viewers play from, for playback restriction policies' allowed countries. Unset, countries
+         * are not restricted.
+         */
+        Optional<String> viewerCountry();
+
+        /** Docker network to attach the media server to. Empty uses the default network. */
+        Optional<String> dockerNetwork();
+    }
+
+    interface HealthLakeServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** When true, data stores keep their resources in floci, without a backing FHIR server container. */
+        @WithDefault("false")
+        boolean mock();
+
+        /** The HAPI FHIR R4 image a data store's FHIR server runs. */
+        @WithDefault("hapiproject/hapi:v8.12.0-2")
+        String image();
+
+        /** Lowest host port a data store's FHIR server (container port 8080) is published on. */
+        @WithDefault("13100")
+        int hostPortBase();
+
+        /** Highest host port a data store's FHIR server is published on. */
+        @WithDefault("13199")
+        int hostPortMax();
+
+        /** Seconds to wait for a started FHIR server to serve its capability statement. */
+        @WithDefault("180")
+        int readinessTimeoutSeconds();
+
+        /** How long a job, or a data store without a FHIR server, takes to move on from its first status. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** Docker network to attach FHIR server containers to. Empty uses the default network. */
+        Optional<String> dockerNetwork();
+    }
+
+    interface GreengrassV2ServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a new component version stays REQUESTED before it settles. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface GrafanaServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** When true, workspaces become ACTIVE without a backing Grafana container. */
+        @WithDefault("false")
+        boolean mock();
+
+        /** The repository of the Grafana images workspaces run, tagged with the release of their version. */
+        @WithDefault("grafana/grafana")
+        String imageRepository();
+
+        /** Lowest host port a workspace's Grafana (container port 3000) is published on. */
+        @WithDefault("13000")
+        int hostPortBase();
+
+        /** Highest host port a workspace's Grafana is published on. */
+        @WithDefault("13099")
+        int hostPortMax();
+
+        /** Seconds to wait for a started Grafana to answer its health check. */
+        @WithDefault("120")
+        int readinessTimeoutSeconds();
+
+        /** How long a workspace without a Grafana container takes to settle after a change. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /**
+         * The Grafana organization role anonymous visitors to a workspace endpoint get (Viewer, Editor or Admin).
+         * Unset, a workspace's Grafana takes only its credentials.
+         */
+        Optional<String> anonymousRole();
+
+        /** Docker network to attach Grafana containers to. Empty uses the default network. */
+        Optional<String> dockerNetwork();
+    }
+
+    interface GlacierServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a job takes to finish, whatever its tier. */
+        @WithDefault("2000")
+        long jobMillis();
+
+        /** How long after a vault's archives last change its inventory is taken. */
+        @WithDefault("0")
+        long inventoryMillis();
+
+        /**
+         * Whether the account is an existing Amazon Glacier customer. The vault API is closed to new accounts;
+         * with false, every call is refused as AWS refuses a new account.
+         */
+        @WithDefault("true")
+        boolean existingCustomer();
+    }
+
+    interface FmsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long an organization stays ONBOARDING after its default administrator is designated. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface EntityResolutionServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a matching or ID mapping job stays QUEUED, and then RUNNING. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface EmrContainersServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a job run stays in each state it passes through in the immediate runner mode. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /**
+         * {@code immediate} follows the job run states without running anything; {@code docker} runs each
+         * {@code spark-submit} job run's driver in a container of the release's EMR image, as EMR Serverless does.
+         */
+        @WithDefault("immediate")
+        String runnerMode();
+
+        /** The image a {@code docker} job run uses, {@code %s} standing for its release; the EMR image if omitted. */
+        Optional<String> imageTemplate();
+
+        Optional<String> dockerNetwork();
+    }
+
+    interface EcrPublicServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface DocDbElasticServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a cluster or snapshot stays creating, updating, stopping, starting or deleting. */
+        @WithDefault("2000")
+        long transitionMillis();
+    }
+
+    interface DirectoryServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a directory, trust, snapshot or update stays in its transitional state. */
+        @WithDefault("2000")
+        long transitionMillis();
+
+        /** Whether accounts may still create Simple AD directories; AWS closed it to new customers. */
+        @WithDefault("false")
+        boolean simpleAdOpen();
+    }
+
+    interface DaxServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+
+        /** How long a cluster, node or resize stays in its transitional state before it settles. */
+        @WithDefault("2000")
+        long transitionMillis();
     }
 
     interface RekognitionServiceConfig {

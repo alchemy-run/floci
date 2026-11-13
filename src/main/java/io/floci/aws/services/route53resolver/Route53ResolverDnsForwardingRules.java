@@ -55,7 +55,7 @@ public class Route53ResolverDnsForwardingRules implements DnsForwardingRuleSourc
         return List.copyOf(rules);
     }
 
-    private static Optional<DnsForwardingRule> forwardingRuleFor(ObjectNode rule) {
+    public static Optional<DnsForwardingRule> forwardingRuleFor(ObjectNode rule) {
         String domainName = text(rule, "DomainName");
         if (domainName == null || domainName.isBlank()) {
             return Optional.empty();

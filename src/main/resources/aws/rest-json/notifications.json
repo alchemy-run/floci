@@ -1,0 +1,878 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "notifications",
+ "apiVersion": "2018-05-10",
+ "operations": {
+  "AssociateChannel": {
+   "method": "POST",
+   "requestUri": "/channels/associate/{arn}",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AssociateManagedNotificationAccountContact": {
+   "method": "PUT",
+   "requestUri": "/contacts/associate-managed-notification/{contactIdentifier}",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "contactIdentifier": {
+      "location": "uri",
+      "name": "contactIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AssociateManagedNotificationAdditionalChannel": {
+   "method": "PUT",
+   "requestUri": "/channels/associate-managed-notification/{channelArn}",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "channelArn": {
+      "location": "uri",
+      "name": "channelArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AssociateOrganizationalUnit": {
+   "method": "POST",
+   "requestUri": "/organizational-units/associate/{organizationalUnitId}",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "organizationalUnitId": {
+      "location": "uri",
+      "name": "organizationalUnitId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateEventRule": {
+   "method": "POST",
+   "requestUri": "/event-rules",
+   "responseCode": 201,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateNotificationConfiguration": {
+   "method": "POST",
+   "requestUri": "/notification-configurations",
+   "responseCode": 201,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteEventRule": {
+   "method": "DELETE",
+   "requestUri": "/event-rules/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteNotificationConfiguration": {
+   "method": "DELETE",
+   "requestUri": "/notification-configurations/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeregisterNotificationHub": {
+   "method": "DELETE",
+   "requestUri": "/notification-hubs/{notificationHubRegion}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "notificationHubRegion": {
+      "location": "uri",
+      "name": "notificationHubRegion"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisableNotificationsAccessForOrganization": {
+   "method": "DELETE",
+   "requestUri": "/organization/access",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateChannel": {
+   "method": "POST",
+   "requestUri": "/channels/disassociate/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateManagedNotificationAccountContact": {
+   "method": "PUT",
+   "requestUri": "/contacts/disassociate-managed-notification/{contactIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "contactIdentifier": {
+      "location": "uri",
+      "name": "contactIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateManagedNotificationAdditionalChannel": {
+   "method": "PUT",
+   "requestUri": "/channels/disassociate-managed-notification/{channelArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "channelArn": {
+      "location": "uri",
+      "name": "channelArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateOrganizationalUnit": {
+   "method": "POST",
+   "requestUri": "/organizational-units/disassociate/{organizationalUnitId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "organizationalUnitId": {
+      "location": "uri",
+      "name": "organizationalUnitId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "EnableNotificationsAccessForOrganization": {
+   "method": "POST",
+   "requestUri": "/organization/access",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetEventRule": {
+   "method": "GET",
+   "requestUri": "/event-rules/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "GetManagedNotificationChildEvent": {
+   "method": "GET",
+   "requestUri": "/managed-notification-child-events/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     },
+     "locale": {
+      "location": "querystring",
+      "name": "locale"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "content.startTime",
+     "content.endTime"
+    ]
+   }
+  },
+  "GetManagedNotificationConfiguration": {
+   "method": "GET",
+   "requestUri": "/managed-notification-configurations/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetManagedNotificationEvent": {
+   "method": "GET",
+   "requestUri": "/managed-notification-events/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     },
+     "locale": {
+      "location": "querystring",
+      "name": "locale"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "content.startTime",
+     "content.endTime"
+    ]
+   }
+  },
+  "GetNotificationConfiguration": {
+   "method": "GET",
+   "requestUri": "/notification-configurations/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime"
+    ]
+   }
+  },
+  "GetNotificationEvent": {
+   "method": "GET",
+   "requestUri": "/notification-events/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     },
+     "locale": {
+      "location": "querystring",
+      "name": "locale"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "content.sourceEventMetadata.eventOccurrenceTime",
+     "content.startTime",
+     "content.endTime"
+    ]
+   }
+  },
+  "GetNotificationsAccessForOrganization": {
+   "method": "GET",
+   "requestUri": "/organization/access",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListChannels": {
+   "method": "GET",
+   "requestUri": "/channels",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "notificationConfigurationArn": {
+      "location": "querystring",
+      "name": "notificationConfigurationArn"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListEventRules": {
+   "method": "GET",
+   "requestUri": "/event-rules",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "notificationConfigurationArn": {
+      "location": "querystring",
+      "name": "notificationConfigurationArn"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "eventRules[].creationTime"
+    ]
+   }
+  },
+  "ListManagedNotificationChannelAssociations": {
+   "method": "GET",
+   "requestUri": "/channels/list-managed-notification-channel-associations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "managedNotificationConfigurationArn": {
+      "location": "querystring",
+      "name": "managedNotificationConfigurationArn"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListManagedNotificationChildEvents": {
+   "method": "GET",
+   "requestUri": "/list-managed-notification-child-events/{aggregateManagedNotificationEventArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "aggregateManagedNotificationEventArn": {
+      "location": "uri",
+      "name": "aggregateManagedNotificationEventArn"
+     },
+     "startTime": {
+      "location": "querystring",
+      "name": "startTime",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "endTime": {
+      "location": "querystring",
+      "name": "endTime",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "locale": {
+      "location": "querystring",
+      "name": "locale"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "relatedAccount": {
+      "location": "querystring",
+      "name": "relatedAccount"
+     },
+     "organizationalUnitId": {
+      "location": "querystring",
+      "name": "organizationalUnitId"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "managedNotificationChildEvents[].creationTime"
+    ]
+   }
+  },
+  "ListManagedNotificationConfigurations": {
+   "method": "GET",
+   "requestUri": "/managed-notification-configurations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "channelIdentifier": {
+      "location": "querystring",
+      "name": "channelIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListManagedNotificationEvents": {
+   "method": "GET",
+   "requestUri": "/managed-notification-events",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "startTime": {
+      "location": "querystring",
+      "name": "startTime",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "endTime": {
+      "location": "querystring",
+      "name": "endTime",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "locale": {
+      "location": "querystring",
+      "name": "locale"
+     },
+     "source": {
+      "location": "querystring",
+      "name": "source"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "organizationalUnitId": {
+      "location": "querystring",
+      "name": "organizationalUnitId"
+     },
+     "relatedAccount": {
+      "location": "querystring",
+      "name": "relatedAccount"
+     },
+     "includeSensitiveEvents": {
+      "location": "querystring",
+      "name": "includeSensitiveEvents",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "managedNotificationEvents[].creationTime"
+    ]
+   }
+  },
+  "ListMemberAccounts": {
+   "method": "GET",
+   "requestUri": "/list-member-accounts",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "notificationConfigurationArn": {
+      "location": "querystring",
+      "name": "notificationConfigurationArn"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "memberAccount": {
+      "location": "querystring",
+      "name": "memberAccount"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "organizationalUnitId": {
+      "location": "querystring",
+      "name": "organizationalUnitId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListNotificationConfigurations": {
+   "method": "GET",
+   "requestUri": "/notification-configurations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "eventRuleSource": {
+      "location": "querystring",
+      "name": "eventRuleSource"
+     },
+     "channelArn": {
+      "location": "querystring",
+      "name": "channelArn"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "subtype": {
+      "location": "querystring",
+      "name": "subtype"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "notificationConfigurations[].creationTime"
+    ]
+   }
+  },
+  "ListNotificationEvents": {
+   "method": "GET",
+   "requestUri": "/notification-events",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "startTime": {
+      "location": "querystring",
+      "name": "startTime",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "endTime": {
+      "location": "querystring",
+      "name": "endTime",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "locale": {
+      "location": "querystring",
+      "name": "locale"
+     },
+     "source": {
+      "location": "querystring",
+      "name": "source"
+     },
+     "includeChildEvents": {
+      "location": "querystring",
+      "name": "includeChildEvents",
+      "type": "boolean"
+     },
+     "aggregateNotificationEventArn": {
+      "location": "querystring",
+      "name": "aggregateNotificationEventArn"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "organizationalUnitId": {
+      "location": "querystring",
+      "name": "organizationalUnitId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "notificationEvents[].creationTime"
+    ]
+   }
+  },
+  "ListNotificationHubs": {
+   "method": "GET",
+   "requestUri": "/notification-hubs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "notificationHubs[].creationTime",
+     "notificationHubs[].lastActivationTime"
+    ]
+   }
+  },
+  "ListOrganizationalUnits": {
+   "method": "GET",
+   "requestUri": "/organizational-units",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "notificationConfigurationArn": {
+      "location": "querystring",
+      "name": "notificationConfigurationArn"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RegisterNotificationHub": {
+   "method": "POST",
+   "requestUri": "/notification-hubs",
+   "responseCode": 201,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "creationTime",
+     "lastActivationTime"
+    ]
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateEventRule": {
+   "method": "PUT",
+   "requestUri": "/event-rules/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateManagedNotificationChannelAssociation": {
+   "method": "PUT",
+   "requestUri": "/channels/update-managed-notification-channel-association",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateNotificationConfiguration": {
+   "method": "PUT",
+   "requestUri": "/notification-configurations/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

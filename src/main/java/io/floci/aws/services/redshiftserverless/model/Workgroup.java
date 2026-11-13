@@ -28,6 +28,8 @@ public class Workgroup {
     private String status;
     private Endpoint endpoint;
     private int port;
+    /** The port the workgroup's proxy listens on; 0 for a workgroup stored before it was recorded. */
+    private int proxyPort;
     private String ipAddressType;
     private String trackName;
     private String pendingTrackName;
@@ -64,6 +66,7 @@ public class Workgroup {
         this.status = other.status;
         this.endpoint = other.endpoint;
         this.port = other.port;
+        this.proxyPort = other.proxyPort;
         this.ipAddressType = other.ipAddressType;
         this.trackName = other.trackName;
         this.pendingTrackName = other.pendingTrackName;
@@ -177,6 +180,19 @@ public class Workgroup {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public int getProxyPort() {
+        return proxyPort;
+    }
+
+    public void setProxyPort(int proxyPort) {
+        this.proxyPort = proxyPort;
+    }
+
+    /** The proxy's port, falling back to the endpoint's for a workgroup stored before it was recorded. */
+    public int proxyListenPort() {
+        return proxyPort > 0 ? proxyPort : endpoint == null ? 0 : endpoint.getPort();
     }
 
     public Endpoint getEndpoint() {

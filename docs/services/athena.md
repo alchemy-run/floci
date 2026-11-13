@@ -107,6 +107,7 @@ For every other table, the DuckDB read function is chosen from the Glue table's 
 | `FLOCI_SERVICES_ATHENA_MOCK` | `false` | Set to `true` to disable DuckDB execution: queries immediately succeed with empty results |
 | `FLOCI_SERVICES_DUCK_DEFAULT_IMAGE` | `floci/floci-duck:latest` | DuckDB sidecar image pulled on first use |
 | `FLOCI_SERVICES_DUCK_URL` | *(unset)* | Point to an existing floci-duck instance and skip container management |
+| `FLOCI_SERVICES_DUCK_STARTUP_TIMEOUT_SECONDS` | `120` | How long a started floci-duck container has to answer its health check |
 
 ## Example: simple query
 

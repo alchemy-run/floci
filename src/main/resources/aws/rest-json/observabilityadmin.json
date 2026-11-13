@@ -1,0 +1,505 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "observabilityadmin",
+ "apiVersion": "2018-05-10",
+ "operations": {
+  "CreateCentralizationRuleForOrganization": {
+   "method": "POST",
+   "requestUri": "/CreateCentralizationRuleForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateDatasetIntegration": {
+   "method": "POST",
+   "requestUri": "/CreateDatasetIntegration",
+   "responseCode": 201,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateS3TableIntegration": {
+   "method": "POST",
+   "requestUri": "/CreateS3TableIntegration",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateTelemetryPipeline": {
+   "method": "POST",
+   "requestUri": "/CreateTelemetryPipeline",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateTelemetryRule": {
+   "method": "POST",
+   "requestUri": "/CreateTelemetryRule",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateTelemetryRuleForOrganization": {
+   "method": "POST",
+   "requestUri": "/CreateTelemetryRuleForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteCentralizationRuleForOrganization": {
+   "method": "POST",
+   "requestUri": "/DeleteCentralizationRuleForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDatasetIntegration": {
+   "method": "POST",
+   "requestUri": "/DeleteDatasetIntegration",
+   "responseCode": 204,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteS3TableIntegration": {
+   "method": "POST",
+   "requestUri": "/DeleteS3TableIntegration",
+   "responseCode": 204,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteTelemetryPipeline": {
+   "method": "POST",
+   "requestUri": "/DeleteTelemetryPipeline",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteTelemetryRule": {
+   "method": "POST",
+   "requestUri": "/DeleteTelemetryRule",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteTelemetryRuleForOrganization": {
+   "method": "POST",
+   "requestUri": "/DeleteTelemetryRuleForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetCentralizationRuleForOrganization": {
+   "method": "POST",
+   "requestUri": "/GetCentralizationRuleForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDatasetIntegration": {
+   "method": "POST",
+   "requestUri": "/GetDatasetIntegration",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetS3TableIntegration": {
+   "method": "POST",
+   "requestUri": "/GetS3TableIntegration",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTelemetryEnrichmentStatus": {
+   "method": "POST",
+   "requestUri": "/GetTelemetryEnrichmentStatus",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTelemetryEvaluationStatus": {
+   "method": "POST",
+   "requestUri": "/GetTelemetryEvaluationStatus",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTelemetryEvaluationStatusForOrganization": {
+   "method": "POST",
+   "requestUri": "/GetTelemetryEvaluationStatusForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTelemetryPipeline": {
+   "method": "POST",
+   "requestUri": "/GetTelemetryPipeline",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTelemetryRule": {
+   "method": "POST",
+   "requestUri": "/GetTelemetryRule",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTelemetryRuleForOrganization": {
+   "method": "POST",
+   "requestUri": "/GetTelemetryRuleForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListCentralizationRulesForOrganization": {
+   "method": "POST",
+   "requestUri": "/ListCentralizationRulesForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListDatasetIntegrations": {
+   "method": "POST",
+   "requestUri": "/ListDatasetIntegrations",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListResourceTelemetry": {
+   "method": "POST",
+   "requestUri": "/ListResourceTelemetry",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListResourceTelemetryForOrganization": {
+   "method": "POST",
+   "requestUri": "/ListResourceTelemetryForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListS3TableIntegrations": {
+   "method": "POST",
+   "requestUri": "/ListS3TableIntegrations",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "POST",
+   "requestUri": "/ListTagsForResource",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTelemetryPipelines": {
+   "method": "POST",
+   "requestUri": "/ListTelemetryPipelines",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTelemetryRules": {
+   "method": "POST",
+   "requestUri": "/ListTelemetryRules",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTelemetryRulesForOrganization": {
+   "method": "POST",
+   "requestUri": "/ListTelemetryRulesForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartTelemetryEnrichment": {
+   "method": "POST",
+   "requestUri": "/StartTelemetryEnrichment",
+   "responseCode": 202,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartTelemetryEvaluation": {
+   "method": "POST",
+   "requestUri": "/StartTelemetryEvaluation",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartTelemetryEvaluationForOrganization": {
+   "method": "POST",
+   "requestUri": "/StartTelemetryEvaluationForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StopTelemetryEnrichment": {
+   "method": "POST",
+   "requestUri": "/StopTelemetryEnrichment",
+   "responseCode": 202,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StopTelemetryEvaluation": {
+   "method": "POST",
+   "requestUri": "/StopTelemetryEvaluation",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StopTelemetryEvaluationForOrganization": {
+   "method": "POST",
+   "requestUri": "/StopTelemetryEvaluationForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/TagResource",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TestTelemetryPipeline": {
+   "method": "POST",
+   "requestUri": "/TestTelemetryPipeline",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "POST",
+   "requestUri": "/UntagResource",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateCentralizationRuleForOrganization": {
+   "method": "POST",
+   "requestUri": "/UpdateCentralizationRuleForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateDatasetIntegration": {
+   "method": "POST",
+   "requestUri": "/UpdateDatasetIntegration",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateTelemetryPipeline": {
+   "method": "POST",
+   "requestUri": "/UpdateTelemetryPipeline",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateTelemetryRule": {
+   "method": "POST",
+   "requestUri": "/UpdateTelemetryRule",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateTelemetryRuleForOrganization": {
+   "method": "POST",
+   "requestUri": "/UpdateTelemetryRuleForOrganization",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ValidateTelemetryPipelineConfiguration": {
+   "method": "POST",
+   "requestUri": "/ValidateTelemetryPipelineConfiguration",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

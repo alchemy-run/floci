@@ -1,0 +1,475 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_rolesanywhere_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateProfile": "CreateProfileRequest",
+    "CreateTrustAnchor": "CreateTrustAnchorRequest",
+    "DeleteAttributeMapping": "DeleteAttributeMappingRequest",
+    "DeleteCrl": "ScalarCrlRequest",
+    "DeleteProfile": "ScalarProfileRequest",
+    "DeleteTrustAnchor": "ScalarTrustAnchorRequest",
+    "DisableCrl": "ScalarCrlRequest",
+    "DisableProfile": "ScalarProfileRequest",
+    "DisableTrustAnchor": "ScalarTrustAnchorRequest",
+    "EnableCrl": "ScalarCrlRequest",
+    "EnableProfile": "ScalarProfileRequest",
+    "EnableTrustAnchor": "ScalarTrustAnchorRequest",
+    "GetCrl": "ScalarCrlRequest",
+    "GetProfile": "ScalarProfileRequest",
+    "GetSubject": "ScalarSubjectRequest",
+    "GetTrustAnchor": "ScalarTrustAnchorRequest",
+    "ImportCrl": "ImportCrlRequest",
+    "ListCrls": "ListRequest",
+    "ListProfiles": "ListRequest",
+    "ListSubjects": "ListRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTrustAnchors": "ListRequest",
+    "PutAttributeMapping": "PutAttributeMappingRequest",
+    "PutNotificationSettings": "PutNotificationSettingsRequest",
+    "ResetNotificationSettings": "ResetNotificationSettingsRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateCrl": "UpdateCrlRequest",
+    "UpdateProfile": "UpdateProfileRequest",
+    "UpdateTrustAnchor": "UpdateTrustAnchorRequest"
+  },
+  "shapes": {
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CertificateField": {
+      "type": "string",
+      "enum": [
+        "x509Subject",
+        "x509Issuer",
+        "x509SAN"
+      ]
+    },
+    "CreateProfileRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "roleArns"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "requireInstanceProperties": "Boolean",
+        "sessionPolicy": "String",
+        "roleArns": "RoleArnList",
+        "managedPolicyArns": "ManagedPolicyList",
+        "durationSeconds": "CreateProfileRequestDurationSecondsInteger",
+        "enabled": "Boolean",
+        "tags": "TagList",
+        "acceptRoleSessionName": "Boolean"
+      }
+    },
+    "CreateProfileRequestDurationSecondsInteger": {
+      "type": "integer",
+      "min": 900,
+      "max": 43200
+    },
+    "CreateTrustAnchorRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "source"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "source": "Source",
+        "enabled": "Boolean",
+        "tags": "TagList",
+        "notificationSettings": "NotificationSettings"
+      }
+    },
+    "DeleteAttributeMappingRequest": {
+      "type": "structure",
+      "required": [
+        "profileId",
+        "certificateField"
+      ],
+      "members": {
+        "profileId": "Uuid",
+        "certificateField": "CertificateField",
+        "specifiers": "SpecifierList"
+      }
+    },
+    "ImportCrlRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "crlData",
+        "trustAnchorArn"
+      ],
+      "members": {
+        "name": "ResourceName",
+        "crlData": "ImportCrlRequestCrlDataBlob",
+        "enabled": "Boolean",
+        "tags": "TagList",
+        "trustAnchorArn": "TrustAnchorArn"
+      }
+    },
+    "ImportCrlRequestCrlDataBlob": {
+      "type": "blob",
+      "min": 1,
+      "max": 300000
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "ListRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "ListRequestNextTokenString",
+        "pageSize": "Integer"
+      }
+    },
+    "ListRequestNextTokenString": {
+      "type": "string",
+      "min": 1,
+      "max": 10000
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName"
+      }
+    },
+    "ManagedPolicyList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "ManagedPolicyListMemberString"
+    },
+    "ManagedPolicyListMemberString": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "MappingRule": {
+      "type": "structure",
+      "required": [
+        "specifier"
+      ],
+      "members": {
+        "specifier": "MappingRuleSpecifierString"
+      }
+    },
+    "MappingRuleSpecifierString": {
+      "type": "string",
+      "min": 0,
+      "max": 60
+    },
+    "MappingRules": {
+      "type": "list",
+      "member": "MappingRule"
+    },
+    "NotificationChannel": {
+      "type": "string",
+      "enum": [
+        "ALL"
+      ]
+    },
+    "NotificationEvent": {
+      "type": "string",
+      "enum": [
+        "CA_CERTIFICATE_EXPIRY",
+        "END_ENTITY_CERTIFICATE_EXPIRY"
+      ]
+    },
+    "NotificationSetting": {
+      "type": "structure",
+      "required": [
+        "enabled",
+        "event"
+      ],
+      "members": {
+        "enabled": "Boolean",
+        "event": "NotificationEvent",
+        "threshold": "NotificationSettingThresholdInteger",
+        "channel": "NotificationChannel"
+      }
+    },
+    "NotificationSettingKey": {
+      "type": "structure",
+      "required": [
+        "event"
+      ],
+      "members": {
+        "event": "NotificationEvent",
+        "channel": "NotificationChannel"
+      }
+    },
+    "NotificationSettingKeys": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "NotificationSettingKey"
+    },
+    "NotificationSettingThresholdInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 360
+    },
+    "NotificationSettings": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "NotificationSetting"
+    },
+    "PutAttributeMappingRequest": {
+      "type": "structure",
+      "required": [
+        "profileId",
+        "certificateField",
+        "mappingRules"
+      ],
+      "members": {
+        "profileId": "Uuid",
+        "certificateField": "CertificateField",
+        "mappingRules": "MappingRules"
+      }
+    },
+    "PutNotificationSettingsRequest": {
+      "type": "structure",
+      "required": [
+        "trustAnchorId",
+        "notificationSettings"
+      ],
+      "members": {
+        "trustAnchorId": "Uuid",
+        "notificationSettings": "NotificationSettings"
+      }
+    },
+    "ResetNotificationSettingsRequest": {
+      "type": "structure",
+      "required": [
+        "trustAnchorId",
+        "notificationSettingKeys"
+      ],
+      "members": {
+        "trustAnchorId": "Uuid",
+        "notificationSettingKeys": "NotificationSettingKeys"
+      }
+    },
+    "ResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[ a-zA-Z0-9-_]*"
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:aws(-[^:]+)?:iam(:.*){2}(:role.*)"
+    },
+    "RoleArnList": {
+      "type": "list",
+      "min": 0,
+      "max": 250,
+      "member": "RoleArn"
+    },
+    "ScalarCrlRequest": {
+      "type": "structure",
+      "required": [
+        "crlId"
+      ],
+      "members": {
+        "crlId": "Uuid"
+      }
+    },
+    "ScalarProfileRequest": {
+      "type": "structure",
+      "required": [
+        "profileId"
+      ],
+      "members": {
+        "profileId": "Uuid"
+      }
+    },
+    "ScalarSubjectRequest": {
+      "type": "structure",
+      "required": [
+        "subjectId"
+      ],
+      "members": {
+        "subjectId": "Uuid"
+      }
+    },
+    "ScalarTrustAnchorRequest": {
+      "type": "structure",
+      "required": [
+        "trustAnchorId"
+      ],
+      "members": {
+        "trustAnchorId": "Uuid"
+      }
+    },
+    "Source": {
+      "type": "structure",
+      "members": {
+        "sourceType": "TrustAnchorType",
+        "sourceData": "SourceData"
+      }
+    },
+    "SourceData": {
+      "type": "structure",
+      "members": {
+        "x509CertificateData": "SourceDataX509CertificateDataString",
+        "acmPcaArn": "String"
+      }
+    },
+    "SourceDataX509CertificateDataString": {
+      "type": "string",
+      "min": 1,
+      "max": 204800
+    },
+    "SpecifierList": {
+      "type": "list",
+      "member": "String"
+    },
+    "String": {
+      "type": "string"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "key",
+        "value"
+      ],
+      "members": {
+        "key": "TagKey",
+        "value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[ a-zA-Z0-9_.:/=+@-]*"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName",
+        "tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[ a-zA-Z0-9_.:/=+@-]*"
+    },
+    "TrustAnchorArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:aws(-[^:]+)?:rolesanywhere(:.*){2}(:trust-anchor.*)"
+    },
+    "TrustAnchorType": {
+      "type": "string",
+      "enum": [
+        "AWS_ACM_PCA",
+        "CERTIFICATE_BUNDLE",
+        "SELF_SIGNED_REPOSITORY"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateCrlRequest": {
+      "type": "structure",
+      "required": [
+        "crlId"
+      ],
+      "members": {
+        "crlId": "Uuid",
+        "name": "ResourceName",
+        "crlData": "UpdateCrlRequestCrlDataBlob"
+      }
+    },
+    "UpdateCrlRequestCrlDataBlob": {
+      "type": "blob",
+      "min": 1,
+      "max": 300000
+    },
+    "UpdateProfileRequest": {
+      "type": "structure",
+      "required": [
+        "profileId"
+      ],
+      "members": {
+        "profileId": "Uuid",
+        "name": "ResourceName",
+        "sessionPolicy": "UpdateProfileRequestSessionPolicyString",
+        "roleArns": "RoleArnList",
+        "managedPolicyArns": "ManagedPolicyList",
+        "durationSeconds": "UpdateProfileRequestDurationSecondsInteger",
+        "acceptRoleSessionName": "Boolean"
+      }
+    },
+    "UpdateProfileRequestDurationSecondsInteger": {
+      "type": "integer",
+      "min": 900,
+      "max": 43200
+    },
+    "UpdateProfileRequestSessionPolicyString": {
+      "type": "string",
+      "min": 1,
+      "max": 100000
+    },
+    "UpdateTrustAnchorRequest": {
+      "type": "structure",
+      "required": [
+        "trustAnchorId"
+      ],
+      "members": {
+        "trustAnchorId": "Uuid",
+        "name": "ResourceName",
+        "source": "Source"
+      }
+    },
+    "Uuid": {
+      "type": "string",
+      "min": 36,
+      "max": 36,
+      "pattern": ".*[a-f0-9]{8}-([a-z0-9]{4}-){3}[a-z0-9]{12}.*"
+    }
+  }
+}

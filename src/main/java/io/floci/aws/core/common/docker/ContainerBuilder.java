@@ -177,6 +177,7 @@ public class ContainerBuilder {
         private final Map<Integer, Integer> portBindings = new HashMap<>();
         private final List<Integer> loopbackPortBindings = new ArrayList<>();
         private final Map<Integer, String> portBindingHostIps = new HashMap<>();
+        private final Map<Integer, Integer> udpPortBindings = new HashMap<>();
         private final List<Integer> exposedPorts = new ArrayList<>();
         private String networkMode;
         private final List<Mount> mounts = new ArrayList<>();
@@ -338,6 +339,12 @@ public class ContainerBuilder {
         public Builder withPortBinding(int containerPort, int hostPort) {
             this.portBindings.put(containerPort, hostPort);
             this.exposedPorts.add(containerPort);
+            return this;
+        }
+
+        /** Publishes a UDP container port on a host port: SRT and other datagram listeners. */
+        public Builder withUdpPortBinding(int containerPort, int hostPort) {
+            this.udpPortBindings.put(containerPort, hostPort);
             return this;
         }
 
@@ -841,7 +848,8 @@ public class ContainerBuilder {
                     init,
                     new LinuxOptions(List.copyOf(capAdd), List.copyOf(capDrop), List.copyOf(devices),
                             shmSizeBytes, Map.copyOf(tmpfs), memorySwapBytes, memorySwappiness),
-                    javaTrustStore
+                    javaTrustStore,
+                    Map.copyOf(udpPortBindings)
             );
         }
     }

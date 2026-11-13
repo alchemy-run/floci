@@ -49,6 +49,11 @@ services:
     doc: docs/services/bedrock.md
     sources:
       - { path: services/bedrock/BedrockController.java, mode: rest }
+  - service: bedrock-agent
+    doc: docs/services/bedrock-agent.md
+    sources:
+      - { path: services/bedrockagent/BedrockAgentController.java, mode: rest }
+      - { path: services/bedrockagent/BedrockAgentRuntimeController.java, mode: rest }
   - service: bedrock-agentcore-control
     doc: docs/services/bedrock-agentcore.md
     sources:
@@ -157,6 +162,409 @@ services:
     doc: docs/services/comprehend.md
     sources:
       - { path: services/comprehend/ComprehendJsonHandler.java, mode: switch }
+  - service: location
+    doc: docs/services/location.md
+    sources:
+      - { path: services/location/LocationController.java, mode: rest }
+      - { path: services/location/GeoMapsController.java, mode: rest }
+      - { path: services/location/GeoPlacesController.java, mode: rest }
+      - { path: services/location/GeoRoutesController.java, mode: rest }
+  - service: s3control
+    doc: docs/services/s3control.md
+    sources:
+      - { path: services/s3/S3ControlDispatcher.java, mode: switch }
+      - { path: services/s3/S3ControlController.java, mode: rest }
+    exclude_actions:
+      - GetOperation
+      - PutOperation
+      - PostOperation
+      - PatchOperation
+      - DeleteOperation
+  - service: amplify
+    doc: docs/services/amplify.md
+    sources:
+      - { path: services/amplify/AmplifyController.java, mode: rest }
+      - { path: core/common/SharedTagsController.java, mode: rest }
+    rename_actions:
+      ListTags: ListTagsForResource
+      TagResourcePost: TagResource
+    exclude_actions:
+      - ListTagsByQuery
+      - TagResourceByBody
+      - TagResourcePut
+      - UntagResourceByQuery
+  - service: appflow
+    doc: docs/services/appflow.md
+    sources:
+      - { path: services/appflow/AppFlowController.java, mode: rest }
+      - { path: core/common/SharedTagsController.java, mode: rest }
+    rename_actions:
+      ListTags: ListTagsForResource
+      TagResourcePost: TagResource
+    exclude_actions:
+      - ListTagsByQuery
+      - TagResourceByBody
+      - TagResourcePut
+      - UntagResourceByQuery
+  - service: appregistry
+    doc: docs/services/appregistry.md
+    sources:
+      - { path: services/appregistry/AppRegistryController.java, mode: rest }
+      - { path: core/common/SharedTagsController.java, mode: rest }
+    rename_actions:
+      ListTags: ListTagsForResource
+      TagResourcePost: TagResource
+    exclude_actions:
+      - ListTagsByQuery
+      - TagResourceByBody
+      - TagResourcePut
+      - UntagResourceByQuery
+  - service: apprunner
+    doc: docs/services/apprunner.md
+    sources:
+      - { path: services/apprunner/AppRunnerJsonHandler.java, mode: switch }
+  - service: codeconnections
+    doc: docs/services/codeconnections.md
+    sources:
+      - { path: services/codeconnections/CodeConnectionsJsonHandler.java, mode: switch }
+  - service: databrew
+    doc: docs/services/databrew.md
+    sources:
+      - { path: services/databrew/DataBrewController.java, mode: rest }
+  - service: dataexchange
+    doc: docs/services/dataexchange.md
+    sources:
+      - { path: services/dataexchange/DataExchangeController.java, mode: rest }
+  - service: datazone
+    doc: docs/services/datazone.md
+    sources:
+      - { path: services/datazone/DataZoneController.java, mode: switch }
+  - service: deadline
+    doc: docs/services/deadline.md
+    sources:
+      - { path: services/deadline/DeadlineController.java, mode: switch }
+  - service: devopsguru
+    doc: docs/services/devopsguru.md
+    sources:
+      - { path: services/devopsguru/DevOpsGuruController.java, mode: switch }
+  - service: docdbelastic
+    doc: docs/services/docdbelastic.md
+    sources:
+      - { path: services/docdbelastic/DocDbElasticController.java, mode: switch }
+  - service: ds
+    doc: docs/services/ds.md
+    sources:
+      - { path: services/directoryservice/DirectoryJsonHandler.java, mode: switch }
+  - service: ecrpublic
+    doc: docs/services/ecrpublic.md
+    sources:
+      - { path: services/ecrpublic/EcrPublicJsonHandler.java, mode: switch }
+  - service: emrcontainers
+    doc: docs/services/emrcontainers.md
+    sources:
+      - { path: services/emrcontainers/EmrContainersController.java, mode: switch }
+  - service: entityresolution
+    doc: docs/services/entityresolution.md
+    sources:
+      - { path: services/entityresolution/EntityResolutionController.java, mode: switch }
+  - service: fms
+    doc: docs/services/fms.md
+    sources:
+      - { path: services/fms/FmsJsonHandler.java, mode: switch }
+  - service: forecast
+    doc: docs/services/forecast.md
+    sources:
+      - { path: services/forecast/ForecastJsonHandler.java, mode: switch }
+  - service: airflowserverless
+    doc: docs/services/airflowserverless.md
+    sources:
+      - { path: services/airflowserverless/AirflowServerlessJsonHandler.java, mode: switch }
+  - service: notifications
+    doc: docs/services/notifications.md
+    sources:
+      - { path: services/notifications/NotificationsController.java, mode: switch }
+  - service: notifications-contacts
+    doc: docs/services/notificationscontacts.md
+    sources:
+      - { path: services/notificationscontacts/NotificationsContactsController.java, mode: switch }
+  - service: aoss
+    doc: docs/services/opensearchserverless.md
+    sources:
+      - { path: services/opensearchserverless/AossJsonHandler.java, mode: switch }
+  - service: social-messaging
+    doc: docs/services/socialmessaging.md
+    sources:
+      - { path: services/socialmessaging/SocialMessagingService.java, mode: switch }
+  - service: synthetics
+    doc: docs/services/synthetics.md
+    sources:
+      - { path: services/synthetics/SyntheticsService.java, mode: switch }
+  - service: vpc-lattice
+    doc: docs/services/vpclattice.md
+    sources:
+      - { path: services/vpclattice/VpcLatticeService.java, mode: switch }
+  - service: xray
+    doc: docs/services/xray.md
+    sources:
+      - { path: services/xray/XRayService.java, mode: switch }
+  - service: sdb
+    doc: docs/services/sdb.md
+    sources:
+      - { path: services/sdb/SimpleDbQueryHandler.java, mode: switch }
+  - service: signer
+    doc: docs/services/signer.md
+    sources:
+      - { path: services/signer/SignerService.java, mode: switch }
+  - service: shield
+    doc: docs/services/shield.md
+    sources:
+      - { path: services/shield/ShieldService.java, mode: switch }
+  - service: securitylake
+    doc: docs/services/securitylake.md
+    sources:
+      - { path: services/securitylake/SecurityLakeService.java, mode: switch }
+  - service: schemas
+    doc: docs/services/schemas.md
+    sources:
+      - { path: services/schemas/SchemasService.java, mode: switch }
+  - service: ssm-incidents
+    doc: docs/services/ssm-incidents.md
+    sources:
+      - { path: services/ssmincidents/SsmIncidentsService.java, mode: switch }
+  - service: ssm-contacts
+    doc: docs/services/ssm-contacts.md
+    sources:
+      - { path: services/ssmcontacts/SsmContactsService.java, mode: switch }
+  - service: s3files
+    doc: docs/services/s3files.md
+    sources:
+      - { path: services/s3files/S3FilesService.java, mode: switch }
+  - service: route53profiles
+    doc: docs/services/route53profiles.md
+    sources:
+      - { path: services/route53profiles/Route53ProfilesService.java, mode: switch }
+  - service: rolesanywhere
+    doc: docs/services/rolesanywhere.md
+    sources:
+      - { path: services/rolesanywhere/RolesAnywhereService.java, mode: switch }
+  - service: repostspace
+    doc: docs/services/repostspace.md
+    sources:
+      - { path: services/repostspace/RePostSpaceService.java, mode: switch }
+  - service: rbin
+    doc: docs/services/rbin.md
+    sources:
+      - { path: services/rbin/RbinService.java, mode: switch }
+  - service: qbusiness
+    doc: docs/services/qbusiness.md
+    sources:
+      - { path: services/qbusiness/QBusinessController.java, mode: switch }
+  - service: qapps
+    doc: docs/services/qapps.md
+    sources:
+      - { path: services/qbusiness/QAppsService.java, mode: switch }
+  - service: sms-voice
+    doc: docs/services/pinpointsmsvoicev2.md
+    sources:
+      - { path: services/pinpointsmsvoicev2/SmsVoiceJsonHandler.java, mode: switch }
+  - service: personalize
+    doc: docs/services/personalize.md
+    sources:
+      - { path: services/personalize/PersonalizeJsonHandler.java, mode: switch }
+      - { path: services/personalize/PersonalizeController.java, mode: switch }
+  - service: omics
+    doc: docs/services/omics.md
+    sources:
+      - { path: services/omics/OmicsController.java, mode: switch }
+  - service: observabilityadmin
+    doc: docs/services/observabilityadmin.md
+    sources:
+      - { path: services/observabilityadmin/ObservabilityAdminController.java, mode: switch }
+  - service: osis
+    doc: docs/services/osis.md
+    sources:
+      - { path: services/osis/OsisController.java, mode: switch }
+  - service: neptune-graph
+    doc: docs/services/neptunegraph.md
+    sources:
+      - { path: services/neptunegraph/NeptuneGraphController.java, mode: switch }
+  - service: medical-imaging
+    doc: docs/services/medicalimaging.md
+    sources:
+      - { path: services/medicalimaging/MedicalImagingController.java, mode: switch }
+  - service: mediatailor
+    doc: docs/services/mediatailor.md
+    sources:
+      - { path: services/mediatailor/MediaTailorController.java, mode: switch }
+  - service: mediapackagev2
+    doc: docs/services/mediapackagev2.md
+    sources:
+      - { path: services/mediapackagev2/MediaPackageController.java, mode: switch }
+  - service: medialive
+    doc: docs/services/medialive.md
+    sources:
+      - { path: services/medialive/MediaLiveController.java, mode: switch }
+  - service: mediaconvert
+    doc: docs/services/mediaconvert.md
+    sources:
+      - { path: services/mediaconvert/MediaConvertController.java, mode: switch }
+  - service: mediaconnect
+    doc: docs/services/mediaconnect.md
+    sources:
+      - { path: services/mediaconnect/MediaConnectController.java, mode: switch }
+  - service: mailmanager
+    doc: docs/services/mailmanager.md
+    sources:
+      - { path: services/mailmanager/MailManagerJsonHandler.java, mode: switch }
+  - service: licensemanager
+    doc: docs/services/licensemanager.md
+    sources:
+      - { path: services/licensemanager/LicenseManagerJsonHandler.java, mode: switch }
+  - service: lexv2
+    doc: docs/services/lexv2.md
+    sources:
+      - { path: services/lexv2/LexModelsController.java, mode: rest }
+      - { path: services/lexv2/LexRuntimeController.java, mode: rest }
+  - service: kinesisvideo
+    doc: docs/services/kinesisvideo.md
+    sources:
+      - { path: services/kinesisvideo/KvsController.java, mode: switch }
+  - service: keyspaces
+    doc: docs/services/keyspaces.md
+    sources:
+      - { path: services/keyspaces/KeyspacesJsonHandler.java, mode: switch }
+  - service: kendra
+    doc: docs/services/kendra.md
+    sources:
+      - { path: services/kendra/KendraJsonHandler.java, mode: switch }
+  - service: fsx
+    doc: docs/services/fsx.md
+    sources:
+      - { path: services/fsx/FsxJsonHandler.java, mode: switch }
+  - service: imagebuilder
+    doc: docs/services/imagebuilder.md
+    sources:
+      - { path: services/imagebuilder/ImageBuilderController.java, mode: rest }
+  - service: internetmonitor
+    doc: docs/services/internetmonitor.md
+    sources:
+      - { path: services/internetmonitor/InternetMonitorController.java, mode: rest }
+  - service: ivschat
+    doc: docs/services/ivschat.md
+    sources:
+      - { path: services/ivschat/IvsChatController.java, mode: rest }
+  - service: ivs
+    doc: docs/services/ivs.md
+    sources:
+      - { path: services/ivs/IvsController.java, mode: rest }
+      - { path: services/ivs/IvsRealtimeController.java, mode: rest }
+  - service: iotmanagedintegrations
+    doc: docs/services/iotmanagedintegrations.md
+    sources:
+      - { path: services/iotmanagedintegrations/IotMiController.java, mode: rest }
+  - service: iotwireless
+    doc: docs/services/iotwireless.md
+    sources:
+      - { path: services/iotwireless/WirelessController.java, mode: rest }
+  - service: iotsitewise
+    doc: docs/services/iotsitewise.md
+    sources:
+      - { path: services/iotsitewise/SiteWiseController.java, mode: rest }
+  - service: iotfleetwise
+    doc: docs/services/iotfleetwise.md
+    sources:
+      - { path: services/iotfleetwise/IotFleetWiseJsonHandler.java, mode: switch }
+  - service: healthlake
+    doc: docs/services/healthlake.md
+    sources:
+      - { path: services/healthlake/HealthLakeJsonHandler.java, mode: switch }
+  - service: greengrassv2
+    doc: docs/services/greengrassv2.md
+    sources:
+      - { path: services/greengrassv2/GreengrassV2Controller.java, mode: rest }
+  - service: grafana
+    doc: docs/services/grafana.md
+    sources:
+      - { path: services/grafana/GrafanaController.java, mode: rest }
+  - service: glacier
+    doc: docs/services/glacier.md
+    sources:
+      - { path: services/glacier/GlacierController.java, mode: rest }
+      - { path: services/glacier/GlacierController.java, mode: switch }
+    exclude_actions:
+      - VaultTags
+  - service: dax
+    doc: docs/services/dax.md
+    sources:
+      - { path: services/dax/DaxJsonHandler.java, mode: switch }
+  - service: chatbot
+    doc: docs/services/chatbot.md
+    sources:
+      - { path: services/chatbot/ChatbotController.java, mode: rest }
+  - service: bedrock-data-automation
+    doc: docs/services/bedrock-data-automation.md
+    sources:
+      - { path: services/bedrockdataautomation/BdaController.java, mode: switch }
+      - { path: services/bedrockdataautomation/BdaRuntimeJsonHandler.java, mode: switch }
+  - service: backupsearch
+    doc: docs/services/backupsearch.md
+    sources:
+      - { path: services/backupsearch/BackupSearchController.java, mode: rest }
+      - { path: core/common/SharedTagsController.java, mode: rest }
+    rename_actions:
+      ListTags: ListTagsForResource
+      TagResourcePost: TagResource
+    exclude_actions:
+      - ListTagsByQuery
+      - TagResourceByBody
+      - TagResourcePut
+      - UntagResourceByQuery
+  - service: b2bi
+    doc: docs/services/b2bi.md
+    sources:
+      - { path: services/b2bi/B2biJsonHandler.java, mode: switch }
+  - service: auditmanager
+    doc: docs/services/auditmanager.md
+    sources:
+      - { path: services/auditmanager/AuditManagerController.java, mode: rest }
+      - { path: core/common/SharedTagsController.java, mode: rest }
+    rename_actions:
+      ListTags: ListTagsForResource
+      TagResourcePost: TagResource
+    exclude_actions:
+      - ListTagsByQuery
+      - TagResourceByBody
+      - TagResourcePut
+      - UntagResourceByQuery
+  - service: aiops
+    doc: docs/services/aiops.md
+    sources:
+      - { path: services/aiops/AiOpsController.java, mode: rest }
+      - { path: core/common/SharedTagsController.java, mode: rest }
+    rename_actions:
+      ListTags: ListTagsForResource
+      TagResourcePost: TagResource
+    exclude_actions:
+      - ListTagsByQuery
+      - TagResourceByBody
+      - TagResourcePut
+      - UntagResourceByQuery
+  - service: acmpca
+    doc: docs/services/acmpca.md
+    sources:
+      - { path: services/acmpca/AcmPcaJsonHandler.java, mode: switch }
+  - service: route53domains
+    doc: docs/services/route53domains.md
+    sources:
+      - { path: services/route53domains/Route53DomainsJsonHandler.java, mode: switch }
+  - service: polly
+    doc: docs/services/polly.md
+    sources:
+      - { path: services/polly/PollyController.java, mode: rest }
+  - service: comprehendmedical
+    doc: docs/services/comprehendmedical.md
+    sources:
+      - { path: services/comprehendmedical/ComprehendMedicalJsonHandler.java, mode: switch }
   - service: controlcatalog
     doc: docs/services/controlcatalog.md
     sources:
@@ -227,6 +635,7 @@ services:
     doc: docs/services/dsql.md
     sources:
       - { path: services/dsql/DsqlController.java, mode: rest }
+      - { path: services/dsql/DsqlStreamController.java, mode: rest }
   - service: efs
     doc: docs/services/efs.md
     sources:

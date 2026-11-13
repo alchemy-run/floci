@@ -1,0 +1,622 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "emrcontainers",
+ "apiVersion": "2020-10-01",
+ "operations": {
+  "CancelJobRun": {
+   "method": "DELETE",
+   "requestUri": "/virtualclusters/{virtualClusterId}/jobruns/{jobRunId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "jobRunId"
+     },
+     "virtualClusterId": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateJobTemplate": {
+   "method": "POST",
+   "requestUri": "/jobtemplates",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt"
+    ]
+   }
+  },
+  "CreateManagedEndpoint": {
+   "method": "POST",
+   "requestUri": "/virtualclusters/{virtualClusterId}/endpoints",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "virtualClusterId": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateSecurityConfiguration": {
+   "method": "POST",
+   "requestUri": "/securityconfigurations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateVirtualCluster": {
+   "method": "POST",
+   "requestUri": "/virtualclusters",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteJobTemplate": {
+   "method": "DELETE",
+   "requestUri": "/jobtemplates/{templateId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "templateId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteManagedEndpoint": {
+   "method": "DELETE",
+   "requestUri": "/virtualclusters/{virtualClusterId}/endpoints/{endpointId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "endpointId"
+     },
+     "virtualClusterId": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSecurityConfiguration": {
+   "method": "DELETE",
+   "requestUri": "/securityconfigurations/{securityConfigurationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "securityConfigurationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteVirtualCluster": {
+   "method": "DELETE",
+   "requestUri": "/virtualclusters/{virtualClusterId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeJobRun": {
+   "method": "GET",
+   "requestUri": "/virtualclusters/{virtualClusterId}/jobruns/{jobRunId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "jobRunId"
+     },
+     "virtualClusterId": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "jobRun.createdAt",
+     "jobRun.finishedAt"
+    ]
+   }
+  },
+  "DescribeJobTemplate": {
+   "method": "GET",
+   "requestUri": "/jobtemplates/{templateId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "templateId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "jobTemplate.createdAt"
+    ]
+   }
+  },
+  "DescribeManagedEndpoint": {
+   "method": "GET",
+   "requestUri": "/virtualclusters/{virtualClusterId}/endpoints/{endpointId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "endpointId"
+     },
+     "virtualClusterId": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "endpoint.createdAt"
+    ]
+   }
+  },
+  "DescribeSecurityConfiguration": {
+   "method": "GET",
+   "requestUri": "/securityconfigurations/{securityConfigurationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "securityConfigurationId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "securityConfiguration.createdAt"
+    ]
+   }
+  },
+  "DescribeVirtualCluster": {
+   "method": "GET",
+   "requestUri": "/virtualclusters/{virtualClusterId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "virtualCluster.createdAt"
+    ]
+   }
+  },
+  "GetManagedEndpointSessionCredentials": {
+   "method": "POST",
+   "requestUri": "/virtualclusters/{virtualClusterId}/endpoints/{endpointId}/credentials",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "endpointIdentifier": {
+      "location": "uri",
+      "name": "endpointId"
+     },
+     "virtualClusterIdentifier": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "expiresAt"
+    ]
+   }
+  },
+  "ListJobRuns": {
+   "method": "GET",
+   "requestUri": "/virtualclusters/{virtualClusterId}/jobruns",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "virtualClusterId": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     },
+     "createdBefore": {
+      "location": "querystring",
+      "name": "createdBefore",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "createdAfter": {
+      "location": "querystring",
+      "name": "createdAfter",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "states": {
+      "location": "querystring",
+      "name": "states",
+      "type": "list"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "jobRuns[].createdAt",
+     "jobRuns[].finishedAt"
+    ]
+   }
+  },
+  "ListJobTemplates": {
+   "method": "GET",
+   "requestUri": "/jobtemplates",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "createdAfter": {
+      "location": "querystring",
+      "name": "createdAfter",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "createdBefore": {
+      "location": "querystring",
+      "name": "createdBefore",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "templates[].createdAt"
+    ]
+   }
+  },
+  "ListManagedEndpoints": {
+   "method": "GET",
+   "requestUri": "/virtualclusters/{virtualClusterId}/endpoints",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "virtualClusterId": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     },
+     "createdBefore": {
+      "location": "querystring",
+      "name": "createdBefore",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "createdAfter": {
+      "location": "querystring",
+      "name": "createdAfter",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "types": {
+      "location": "querystring",
+      "name": "types",
+      "type": "list"
+     },
+     "states": {
+      "location": "querystring",
+      "name": "states",
+      "type": "list"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "endpoints[].createdAt"
+    ]
+   }
+  },
+  "ListSecurityConfigurations": {
+   "method": "GET",
+   "requestUri": "/securityconfigurations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "createdAfter": {
+      "location": "querystring",
+      "name": "createdAfter",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "createdBefore": {
+      "location": "querystring",
+      "name": "createdBefore",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "securityConfigurations[].createdAt"
+    ]
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListVirtualClusters": {
+   "method": "GET",
+   "requestUri": "/virtualclusters",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "containerProviderId": {
+      "location": "querystring",
+      "name": "containerProviderId"
+     },
+     "containerProviderType": {
+      "location": "querystring",
+      "name": "containerProviderType"
+     },
+     "createdAfter": {
+      "location": "querystring",
+      "name": "createdAfter",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "createdBefore": {
+      "location": "querystring",
+      "name": "createdBefore",
+      "type": "timestamp",
+      "format": "iso8601"
+     },
+     "states": {
+      "location": "querystring",
+      "name": "states",
+      "type": "list"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "eksAccessEntryIntegrated": {
+      "location": "querystring",
+      "name": "eksAccessEntryIntegrated",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "virtualClusters[].createdAt"
+    ]
+   }
+  },
+  "StartJobRun": {
+   "method": "POST",
+   "requestUri": "/virtualclusters/{virtualClusterId}/jobruns",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "virtualClusterId": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateVirtualCluster": {
+   "method": "PATCH",
+   "requestUri": "/virtualclusters/{virtualClusterId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "id": {
+      "location": "uri",
+      "name": "virtualClusterId"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "virtualCluster.createdAt"
+    ]
+   }
+  }
+ }
+}

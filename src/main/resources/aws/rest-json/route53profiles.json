@@ -1,0 +1,300 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "route53profiles",
+ "apiVersion": "2018-05-10",
+ "operations": {
+  "AssociateProfile": {
+   "method": "POST",
+   "requestUri": "/profileassociation",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AssociateResourceToProfile": {
+   "method": "POST",
+   "requestUri": "/profileresourceassociation",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateProfile": {
+   "method": "POST",
+   "requestUri": "/profile",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ClientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteProfile": {
+   "method": "DELETE",
+   "requestUri": "/profile/{ProfileId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ProfileId": {
+      "location": "uri",
+      "name": "ProfileId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateProfile": {
+   "method": "DELETE",
+   "requestUri": "/profileassociation/Profileid/{ProfileId}/resourceid/{ResourceId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ProfileId": {
+      "location": "uri",
+      "name": "ProfileId"
+     },
+     "ResourceId": {
+      "location": "uri",
+      "name": "ResourceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateResourceFromProfile": {
+   "method": "DELETE",
+   "requestUri": "/profileresourceassociation/profileid/{ProfileId}/resourcearn/{ResourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ProfileId": {
+      "location": "uri",
+      "name": "ProfileId"
+     },
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetProfile": {
+   "method": "GET",
+   "requestUri": "/profile/{ProfileId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ProfileId": {
+      "location": "uri",
+      "name": "ProfileId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetProfileAssociation": {
+   "method": "GET",
+   "requestUri": "/profileassociation/{ProfileAssociationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ProfileAssociationId": {
+      "location": "uri",
+      "name": "ProfileAssociationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetProfileResourceAssociation": {
+   "method": "GET",
+   "requestUri": "/profileresourceassociation/{ProfileResourceAssociationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ProfileResourceAssociationId": {
+      "location": "uri",
+      "name": "ProfileResourceAssociationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListProfileAssociations": {
+   "method": "GET",
+   "requestUri": "/profileassociations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "ProfileId": {
+      "location": "querystring",
+      "name": "profileId"
+     },
+     "ResourceId": {
+      "location": "querystring",
+      "name": "resourceId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListProfileResourceAssociations": {
+   "method": "GET",
+   "requestUri": "/profileresourceassociations/profileid/{ProfileId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "ProfileId": {
+      "location": "uri",
+      "name": "ProfileId"
+     },
+     "ResourceType": {
+      "location": "querystring",
+      "name": "resourceType"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListProfiles": {
+   "method": "GET",
+   "requestUri": "/profiles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     },
+     "TagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateProfileResourceAssociation": {
+   "method": "PATCH",
+   "requestUri": "/profileresourceassociation/{ProfileResourceAssociationId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ProfileResourceAssociationId": {
+      "location": "uri",
+      "name": "ProfileResourceAssociationId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

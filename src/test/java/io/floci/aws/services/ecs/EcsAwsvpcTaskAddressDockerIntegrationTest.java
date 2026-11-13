@@ -14,6 +14,7 @@ import io.floci.aws.services.ecs.model.NetworkMode;
 import io.floci.aws.services.ecs.model.PortMapping;
 import io.floci.aws.services.ecs.model.TaskDefinition;
 import io.floci.aws.testing.DockerAvailability;
+import io.floci.aws.testing.Ec2Defaults;
 import io.floci.aws.testing.TestImages;
 import io.quarkus.test.junit.QuarkusTest;
 import io.quarkus.test.junit.QuarkusTestProfile;
@@ -41,7 +42,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class EcsAwsvpcTaskAddressDockerIntegrationTest {
 
     private static final String REGION = "us-east-1";
-    private static final String SUBNET = "subnet-default-us-east-1-a";
+    private static final String SUBNET = Ec2Defaults.SUBNET_A;
     private static final int PORT = 8080;
 
     /**

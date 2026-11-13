@@ -1,5 +1,6 @@
 package io.floci.aws.services.ec2;
 
+import io.floci.aws.testing.Ec2Defaults;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.ValidatableResponse;
 import org.junit.jupiter.api.Test;
@@ -82,7 +83,7 @@ class Ec2DescribeVpcsUnknownFilterIntegrationTest {
             .statusCode(200).body(not(containsString(vpcId)));
 
         // And the matching value still finds it.
-        describeVpcs("dhcp-options-id", "dopt-default")
+        describeVpcs("dhcp-options-id", Ec2Defaults.DHCP_OPTIONS)
             .statusCode(200).body(containsString(vpcId));
     }
 }

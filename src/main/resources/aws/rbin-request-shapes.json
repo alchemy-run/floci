@@ -1,0 +1,290 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_rbin_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateRule": "CreateRuleRequest",
+    "DeleteRule": "DeleteRuleRequest",
+    "GetRule": "GetRuleRequest",
+    "ListRules": "ListRulesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "LockRule": "LockRuleRequest",
+    "TagResource": "TagResourceRequest",
+    "UnlockRule": "UnlockRuleRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateRule": "UpdateRuleRequest"
+  },
+  "shapes": {
+    "CreateRuleRequest": {
+      "type": "structure",
+      "required": [
+        "RetentionPeriod",
+        "ResourceType"
+      ],
+      "members": {
+        "RetentionPeriod": "RetentionPeriod",
+        "Description": "Description",
+        "Tags": "TagList",
+        "ResourceType": "ResourceType",
+        "ResourceTags": "ResourceTags",
+        "LockConfiguration": "LockConfiguration",
+        "ExcludeResourceTags": "ExcludeResourceTags"
+      }
+    },
+    "DeleteRuleRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "RuleIdentifier"
+      }
+    },
+    "Description": {
+      "type": "string",
+      "pattern": "^[\\S ]{0,255}$"
+    },
+    "ExcludeResourceTags": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "ResourceTag"
+    },
+    "GetRuleRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "RuleIdentifier"
+      }
+    },
+    "ListRulesRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceType"
+      ],
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken",
+        "ResourceType": "ResourceType",
+        "ResourceTags": "ResourceTags",
+        "LockState": "LockState",
+        "ExcludeResourceTags": "ExcludeResourceTags"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "RuleArn"
+      }
+    },
+    "LockConfiguration": {
+      "type": "structure",
+      "required": [
+        "UnlockDelay"
+      ],
+      "members": {
+        "UnlockDelay": "UnlockDelay"
+      }
+    },
+    "LockRuleRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier",
+        "LockConfiguration"
+      ],
+      "members": {
+        "Identifier": "RuleIdentifier",
+        "LockConfiguration": "LockConfiguration"
+      }
+    },
+    "LockState": {
+      "type": "string",
+      "enum": [
+        "locked",
+        "pending_unlock",
+        "unlocked"
+      ]
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "NextToken": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9+/=]{1,2048}$"
+    },
+    "ResourceTag": {
+      "type": "structure",
+      "required": [
+        "ResourceTagKey"
+      ],
+      "members": {
+        "ResourceTagKey": "ResourceTagKey",
+        "ResourceTagValue": "ResourceTagValue"
+      }
+    },
+    "ResourceTagKey": {
+      "type": "string",
+      "pattern": "^[\\S\\s]{1,128}$"
+    },
+    "ResourceTagValue": {
+      "type": "string",
+      "pattern": "^[\\S\\s]{0,256}$"
+    },
+    "ResourceTags": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "ResourceTag"
+    },
+    "ResourceType": {
+      "type": "string",
+      "enum": [
+        "EBS_SNAPSHOT",
+        "EC2_IMAGE",
+        "EBS_VOLUME"
+      ]
+    },
+    "RetentionPeriod": {
+      "type": "structure",
+      "required": [
+        "RetentionPeriodValue",
+        "RetentionPeriodUnit"
+      ],
+      "members": {
+        "RetentionPeriodValue": "RetentionPeriodValue",
+        "RetentionPeriodUnit": "RetentionPeriodUnit"
+      }
+    },
+    "RetentionPeriodUnit": {
+      "type": "string",
+      "enum": [
+        "DAYS"
+      ]
+    },
+    "RetentionPeriodValue": {
+      "type": "integer",
+      "min": 1,
+      "max": 3650
+    },
+    "RuleArn": {
+      "type": "string",
+      "min": 0,
+      "max": 1011,
+      "pattern": "^arn:\\S+:rbin:[a-z\\-0-9]{0,63}:[0-9]{12}:rule/[0-9a-zA-Z]{11}{0,1011}$"
+    },
+    "RuleIdentifier": {
+      "type": "string",
+      "pattern": "[0-9a-zA-Z]{11}"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "RuleArn",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "UnlockDelay": {
+      "type": "structure",
+      "required": [
+        "UnlockDelayValue",
+        "UnlockDelayUnit"
+      ],
+      "members": {
+        "UnlockDelayValue": "UnlockDelayValue",
+        "UnlockDelayUnit": "UnlockDelayUnit"
+      }
+    },
+    "UnlockDelayUnit": {
+      "type": "string",
+      "enum": [
+        "DAYS"
+      ]
+    },
+    "UnlockDelayValue": {
+      "type": "integer",
+      "min": 7,
+      "max": 30
+    },
+    "UnlockRuleRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "RuleIdentifier"
+      }
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "RuleArn",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateRuleRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "RuleIdentifier",
+        "RetentionPeriod": "RetentionPeriod",
+        "Description": "Description",
+        "ResourceType": "ResourceType",
+        "ResourceTags": "ResourceTags",
+        "ExcludeResourceTags": "ExcludeResourceTags"
+      }
+    }
+  }
+}

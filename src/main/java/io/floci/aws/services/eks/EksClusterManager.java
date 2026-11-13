@@ -295,7 +295,7 @@ public class EksClusterManager {
         cluster.setHostPort(hostPort);
 
         // Remove any stale container
-        lifecycleManager.removeIfExists(containerName);
+        lifecycleManager.removeIfExists(containerName, true);
 
         // k3s v1.34+ removed support for --kube-apiserver-arg=storage-backend and
         // --kube-apiserver-arg=etcd-servers. k3s now manages kine (embedded SQLite)
@@ -415,7 +415,7 @@ public class EksClusterManager {
         try {
             info = lifecycleManager.startCreated(containerId, spec);
         } catch (Exception e) {
-            lifecycleManager.removeIfExists(containerName);
+            lifecycleManager.removeIfExists(containerName, true);
             throw e;
         }
 
@@ -646,7 +646,9 @@ public class EksClusterManager {
             LOG.infov("Leaving k3s container for cluster {0} running", cluster.getName());
             return;
         }
-        lifecycleManager.stopAndRemove(cluster.getContainerId(), logStream);
+        // k3s's image declares /var/lib/kubelet, /var/lib/cni and /var/log as volumes; the cluster's state is in
+        // its named volume, so the anonymous ones go with the container.
+        lifecycleManager.stopAndRemove(cluster.getContainerId(), logStream, 5, true);
         ContainerStorageHelper.removeNamedVolume(config, lifecycleManager, clusterResourceName(cluster));
         LOG.infov("Stopped k3s container for cluster {0}", cluster.getName());
     }

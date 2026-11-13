@@ -48,43 +48,51 @@ public class PricingRateLookup {
     public Map<String, Double> ratesFor(String serviceCode, String regionCode) {
         Map<String, Double> result = new HashMap<>();
         try {
-            ObjectNode response = pricing.getProducts(
-                    serviceCode,
-                    List.of(new PricingService.FilterSpec("TERM_MATCH", "regionCode", regionCode)),
-                    null,
-                    null,
-                    1000);
-            JsonNode priceList = response.path("PriceList");
-            if (!priceList.isArray()) {
-                return result;
-            }
-            for (JsonNode entry : priceList) {
-                JsonNode product;
-                try {
-                    product = objectMapper.readTree(entry.asText());
-                } catch (Exception e) {
-                    continue;
-                }
-                String usageType = product.path("product").path("attributes").path("usagetype").asText(null);
-                if (usageType == null || usageType.isEmpty()) {
-                    // Fallback for user-supplied snapshots that don't include
-                    // a usagetype attribute. The bundled fixtures populate it
-                    // directly, so this path applies only to externally provided
-                    // snapshots via FLOCI_SERVICES_PRICING_SNAPSHOT_PATH.
-                    usageType = synthesizeUsageType(product, serviceCode);
-                }
-                if (usageType == null) {
-                    continue;
-                }
-                double rate = extractOnDemandRate(product.path("terms"));
-                if (rate > 0) {
-                    result.merge(usageType, rate, Double::max);
-                }
-            }
+            String token = null;
+            do {
+                // GetProducts pages at most 100 products, as AWS does.
+                ObjectNode response = pricing.getProducts(
+                        serviceCode,
+                        List.of(new PricingService.FilterSpec("TERM_MATCH", "regionCode", regionCode)),
+                        null,
+                        token,
+                        100);
+                collectRates(response.path("PriceList"), serviceCode, result);
+                token = response.path("NextToken").asText(null);
+            } while (token != null && !token.isEmpty());
         } catch (Exception e) {
             LOG.warnv(e, "Pricing rate lookup failed for {0}/{1}", serviceCode, regionCode);
         }
         return result;
+    }
+
+    private void collectRates(JsonNode priceList, String serviceCode, Map<String, Double> result) {
+        if (!priceList.isArray()) {
+            return;
+        }
+        for (JsonNode entry : priceList) {
+            JsonNode product;
+            try {
+                product = objectMapper.readTree(entry.asText());
+            } catch (Exception e) {
+                continue;
+            }
+            String usageType = product.path("product").path("attributes").path("usagetype").asText(null);
+            if (usageType == null || usageType.isEmpty()) {
+                // Fallback for user-supplied snapshots that don't include
+                // a usagetype attribute. The bundled fixtures populate it
+                // directly, so this path applies only to externally provided
+                // snapshots via FLOCI_SERVICES_PRICING_SNAPSHOT_PATH.
+                usageType = synthesizeUsageType(product, serviceCode);
+            }
+            if (usageType == null) {
+                continue;
+            }
+            double rate = extractOnDemandRate(product.path("terms"));
+            if (rate > 0) {
+                result.merge(usageType, rate, Double::max);
+            }
+        }
     }
 
     /**

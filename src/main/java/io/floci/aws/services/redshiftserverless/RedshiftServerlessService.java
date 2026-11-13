@@ -12,6 +12,7 @@ import io.floci.aws.core.storage.AccountAwareStorageBackend;
 import io.floci.aws.core.storage.StorageFactory;
 import io.floci.aws.services.redshift.SnapshotDumpCopier;
 import io.floci.aws.services.redshift.TempCredential;
+import io.floci.aws.services.redshift.container.RedshiftContainerManager;
 import io.floci.aws.services.redshift.model.Endpoint;
 import io.floci.aws.services.redshiftserverless.RedshiftServerlessSnapshotCopyService.CopyRule;
 import io.floci.aws.services.redshiftserverless.model.ConfigParameter;
@@ -33,6 +34,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -153,7 +155,7 @@ public class RedshiftServerlessService implements Resettable {
     void onStart(@Observes @Priority(Interceptor.Priority.APPLICATION + 600) StartupEvent event) {
         for (AccountAwareStorageBackend.AccountEntry<Workgroup> entry : workgroups.scanAllAccountEntries(key -> true)) {
             Workgroup workgroup = new Workgroup(entry.value());
-            workgroup.setEndpoint(endpoints.restore(workgroup.getEndpoint()));
+            endpoints.restore(workgroup, entry.accountId(), regionOf(entry.key()));
             recoverRuntime(entry.accountId(), regionOf(entry.key()), workgroup);
             workgroups.putForAccount(entry.accountId(), entry.key(), workgroup);
         }
@@ -197,7 +199,8 @@ public class RedshiftServerlessService implements Resettable {
                 ? workgroup.getMasterUsername() : adminUserOf(namespace);
         RedshiftServerlessRuntime.Backend backend = runtime.start(accountId, region, workgroup.getWorkgroupName(),
                 masterUsername, namespace.getAdminUserPassword(), namespace.getDbName(), workgroup.getEndpoint(),
-                adopt, adminSupplier(accountId, region, namespace.getNamespaceName()));
+                workgroup.proxyListenPort(), endpoints.routed(), adopt,
+                adminSupplier(accountId, region, namespace.getNamespaceName()));
         workgroup.setMasterUsername(masterUsername);
         workgroup.setRuntimeHost(backend.host());
         workgroup.setRuntimePort(backend.port());
@@ -507,6 +510,37 @@ public class RedshiftServerlessService implements Resettable {
     public synchronized RedshiftServerlessSnapshot createSnapshot(String snapshotName, String namespaceName,
                                                                   Integer retentionPeriod,
                                                                   Map<String, String> tags, String region) {
+        RedshiftServerlessSnapshot snapshot = newSnapshot(snapshotName, namespaceName, retentionPeriod, tags, region);
+        dumpDatabase(snapshot, getNamespace(namespaceName, region), region);
+        snapshots.put(storageKey(region, snapshotName), snapshot);
+        return snapshot;
+    }
+
+    /**
+     * Creates a snapshot of {@code namespaceName} whose data is a copy of {@code dump}, as
+     * {@code ConvertRecoveryPointToSnapshot} does; a {@code null} dump makes a metadata-only snapshot.
+     */
+    synchronized RedshiftServerlessSnapshot createSnapshotFromDump(String snapshotName, String namespaceName,
+                                                                   Integer retentionPeriod, Map<String, String> tags,
+                                                                   Path dump, String region) {
+        RedshiftServerlessSnapshot snapshot = newSnapshot(snapshotName, namespaceName, retentionPeriod, tags, region);
+        if (dump != null) {
+            Path file = dumpFileOf(snapshotName, region);
+            try {
+                Files.createDirectories(file.getParent());
+                Files.copy(dump, file, StandardCopyOption.REPLACE_EXISTING);
+            } catch (IOException e) {
+                throw new AwsException("InternalServerException",
+                        "Failed to create snapshot " + snapshotName + ": " + e.getMessage(), 500);
+            }
+            snapshot.setSqlDump(file.toString());
+        }
+        snapshots.put(storageKey(region, snapshotName), snapshot);
+        return snapshot;
+    }
+
+    private RedshiftServerlessSnapshot newSnapshot(String snapshotName, String namespaceName, Integer retentionPeriod,
+                                                   Map<String, String> tags, String region) {
         validateSnapshotName(snapshotName);
         Integer retentionDays = validateRetentionPeriod(retentionPeriod);
         Namespace namespace = getNamespace(namespaceName, region);
@@ -529,8 +563,6 @@ public class RedshiftServerlessService implements Resettable {
         snapshot.setKmsKeyId(namespace.getKmsKeyId());
         snapshot.setRetentionPeriod(retentionDays);
         snapshot.setTags(tags);
-        dumpDatabase(snapshot, namespace, region);
-        snapshots.put(key, snapshot);
         return snapshot;
     }
 
@@ -1086,7 +1118,7 @@ public class RedshiftServerlessService implements Resettable {
         workgroup.setStatus("AVAILABLE");
         workgroup.setCreationDate(Instant.now());
         workgroup.setTags(tags == null ? new LinkedHashMap<>() : new LinkedHashMap<>(tags));
-        workgroup.setEndpoint(endpoints.allocate());
+        endpoints.allocate(workgroup, workgroups.accountId(), region);
         try {
             startRuntime(workgroups.accountId(), region, workgroup, ensureAdminPassword(namespace, region), false);
             workgroups.put(key, workgroup);
@@ -1100,7 +1132,7 @@ public class RedshiftServerlessService implements Resettable {
                         workgroupName);
                 e.addSuppressed(stopFailure);
             }
-            endpoints.release(workgroup.getEndpoint());
+            endpoints.release(workgroup);
             throw e;
         }
         return workgroup;
@@ -1151,8 +1183,13 @@ public class RedshiftServerlessService implements Resettable {
         if (settings.subnetIds() != null) {
             updated.setSubnetIds(copyOf(settings.subnetIds()));
         }
-        if (settings.port() != null) {
+        if (settings.port() != null && settings.port() != updated.getPort()) {
             updated.setPort(settings.port());
+            if (endpoints.routed()) {
+                updated.setEndpoint(endpoints.advertised(updated, workgroups.accountId(), region));
+                runtime.route(workgroups.accountId(), region, workgroupName, updated.getEndpoint(),
+                        updated.proxyListenPort());
+            }
         }
         if (settings.ipAddressType() != null) {
             updated.setIpAddressType(settings.ipAddressType());
@@ -1183,7 +1220,7 @@ public class RedshiftServerlessService implements Resettable {
                     "Failed to stop workgroup " + workgroupName + "; it was not deleted", 500);
         }
         workgroups.delete(storageKey(region, workgroupName));
-        endpoints.release(deleted.getEndpoint());
+        endpoints.release(deleted);
         deleted.setStatus("DELETING");
         return deleted;
     }
@@ -1385,12 +1422,98 @@ public class RedshiftServerlessService implements Resettable {
                 .findFirst();
     }
 
+    // ── Hooks for recovery points and table restores ─────────────────────
+
+    /** Every workgroup of every account, for the recovery point sweep. */
+    List<AccountAwareStorageBackend.AccountEntry<Workgroup>> workgroupsInAllAccounts() {
+        return workgroups.scanAllAccountEntries(key -> true);
+    }
+
+    static String regionOfKey(String storageKey) {
+        return regionOf(storageKey);
+    }
+
+    static boolean isLive(Workgroup workgroup) {
+        return hasLiveRuntime(workgroup);
+    }
+
+    /** The account's directory of recovery point dumps in {@code region}. */
+    Path recoveryPointDir(String accountId, String region) {
+        return dumpDir(accountId, region).resolve("recovery-points");
+    }
+
+    /** Dumps the workgroup's database to {@code file}, for a recovery point. */
+    void dumpWorkgroup(String accountId, String region, Workgroup workgroup, Namespace namespace, Path file) {
+        runtime.takeSnapshot(accountId, region, workgroup.getWorkgroupName(), workgroup.getMasterUsername(),
+                namespace.getDbName(), file);
+    }
+
+    /** The database a namespace's workgroup serves. */
+    static String databaseOf(Namespace namespace) {
+        String dbName = namespace.getDbName();
+        return dbName == null || dbName.isBlank() ? "dev" : dbName;
+    }
+
+    /** The workgroup, checked to belong to the namespace, as every restore requires. */
+    Workgroup workgroupOfNamespace(String namespaceName, String workgroupName, String region) {
+        Namespace namespace = getNamespace(namespaceName, region);
+        Workgroup workgroup = getWorkgroup(workgroupName, region);
+        if (!namespace.getNamespaceName().equals(workgroup.getNamespaceName())) {
+            throw ServerlessSupport.validation("The workgroup " + workgroupName + " does not belong to the namespace "
+                    + namespaceName + ".");
+        }
+        return workgroup;
+    }
+
+    /**
+     * Replaces the namespace's data with {@code dump}, as {@code RestoreFromRecoveryPoint} does. The
+     * admin credentials are left as they are. With no dump or no live database, only the status is
+     * reported {@code AVAILABLE}.
+     */
+    synchronized Namespace restoreDump(String namespaceName, String workgroupName, Path dump, String region) {
+        Workgroup workgroup = workgroupOfNamespace(namespaceName, workgroupName, region);
+        Namespace namespace = getNamespace(namespaceName, region);
+        Runnable markAvailable = () -> {
+            Namespace restored = new Namespace(getNamespace(namespaceName, region));
+            restored.setStatus("AVAILABLE");
+            namespaces.put(storageKey(region, namespaceName), restored);
+        };
+        if (dump != null && hasLiveRuntime(workgroup)) {
+            runtime.restoreSnapshot(workgroups.accountId(), region, workgroupName, workgroup.getMasterUsername(),
+                    namespace.getDbName(), dump, markAvailable);
+        } else {
+            markAvailable.run();
+        }
+        return getNamespace(namespaceName, region);
+    }
+
+    /** The dump of an available snapshot, or empty for a metadata-only one. */
+    Optional<Path> snapshotDump(RedshiftServerlessSnapshot snapshot, String region) {
+        requireAvailableSnapshot(snapshot);
+        if (snapshot.getSqlDump() == null) {
+            return Optional.empty();
+        }
+        return Optional.of(trustedDump(snapshot, region).filter(Files::exists).orElseThrow(() -> new AwsException(
+                "InternalServerException", "The data of snapshot " + snapshot.getSnapshotName()
+                        + " is no longer available.", 500)));
+    }
+
+    /** Restores one table of {@code dump} into the workgroup's live database. */
+    void restoreTable(Workgroup workgroup, Path dump, RedshiftContainerManager.TableRestore restore, String region) {
+        if (!hasLiveRuntime(workgroup)) {
+            throw ServerlessSupport.validation("The workgroup " + workgroup.getWorkgroupName()
+                    + " has no running database to restore the table into.");
+        }
+        runtime.restoreTable(workgroups.accountId(), region, workgroup.getWorkgroupName(),
+                workgroup.getMasterUsername(), dump, restore);
+    }
+
     @Override
     public void clear() {
         for (AccountAwareStorageBackend.AccountEntry<Workgroup> entry : workgroups.scanAllAccountEntries(key -> true)) {
             try {
                 runtime.stop(entry.accountId(), regionOf(entry.key()), entry.value().getWorkgroupName());
-                endpoints.release(entry.value().getEndpoint());
+                endpoints.release(entry.value());
             } catch (RuntimeException e) {
                 // The listener may still be bound, so the endpoint stays reserved rather than being
                 // handed to a later cluster or workgroup whose proxy could not bind it.

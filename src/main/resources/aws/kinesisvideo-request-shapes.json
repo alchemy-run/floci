@@ -1,0 +1,828 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_kinesisvideo_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateSignalingChannel": "CreateSignalingChannelInput",
+    "CreateStream": "CreateStreamInput",
+    "DeleteEdgeConfiguration": "DeleteEdgeConfigurationInput",
+    "DeleteSignalingChannel": "DeleteSignalingChannelInput",
+    "DeleteStream": "DeleteStreamInput",
+    "DescribeEdgeConfiguration": "DescribeEdgeConfigurationInput",
+    "DescribeImageGenerationConfiguration": "DescribeImageGenerationConfigurationInput",
+    "DescribeMappedResourceConfiguration": "DescribeMappedResourceConfigurationInput",
+    "DescribeMediaStorageConfiguration": "DescribeMediaStorageConfigurationInput",
+    "DescribeNotificationConfiguration": "DescribeNotificationConfigurationInput",
+    "DescribeSignalingChannel": "DescribeSignalingChannelInput",
+    "DescribeStream": "DescribeStreamInput",
+    "DescribeStreamStorageConfiguration": "DescribeStreamStorageConfigurationInput",
+    "GetDataEndpoint": "GetDataEndpointInput",
+    "GetSignalingChannelEndpoint": "GetSignalingChannelEndpointInput",
+    "ListEdgeAgentConfigurations": "ListEdgeAgentConfigurationsInput",
+    "ListSignalingChannels": "ListSignalingChannelsInput",
+    "ListStreams": "ListStreamsInput",
+    "ListTagsForResource": "ListTagsForResourceInput",
+    "ListTagsForStream": "ListTagsForStreamInput",
+    "StartEdgeConfigurationUpdate": "StartEdgeConfigurationUpdateInput",
+    "TagResource": "TagResourceInput",
+    "TagStream": "TagStreamInput",
+    "UntagResource": "UntagResourceInput",
+    "UntagStream": "UntagStreamInput",
+    "UpdateDataRetention": "UpdateDataRetentionInput",
+    "UpdateImageGenerationConfiguration": "UpdateImageGenerationConfigurationInput",
+    "UpdateMediaStorageConfiguration": "UpdateMediaStorageConfigurationInput",
+    "UpdateNotificationConfiguration": "UpdateNotificationConfigurationInput",
+    "UpdateSignalingChannel": "UpdateSignalingChannelInput",
+    "UpdateStream": "UpdateStreamInput",
+    "UpdateStreamStorageConfiguration": "UpdateStreamStorageConfigurationInput"
+  },
+  "shapes": {
+    "APIName": {
+      "type": "string",
+      "enum": [
+        "PUT_MEDIA",
+        "GET_MEDIA",
+        "LIST_FRAGMENTS",
+        "GET_MEDIA_FOR_FRAGMENT_LIST",
+        "GET_HLS_STREAMING_SESSION_URL",
+        "GET_DASH_STREAMING_SESSION_URL",
+        "GET_CLIP",
+        "GET_IMAGES"
+      ]
+    },
+    "ChannelName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "ChannelNameCondition": {
+      "type": "structure",
+      "members": {
+        "ComparisonOperator": "ComparisonOperator",
+        "ComparisonValue": "ChannelName"
+      }
+    },
+    "ChannelProtocol": {
+      "type": "string",
+      "enum": [
+        "WSS",
+        "HTTPS",
+        "WEBRTC"
+      ]
+    },
+    "ChannelRole": {
+      "type": "string",
+      "enum": [
+        "MASTER",
+        "VIEWER"
+      ]
+    },
+    "ChannelType": {
+      "type": "string",
+      "enum": [
+        "SINGLE_MASTER",
+        "FULL_MESH"
+      ]
+    },
+    "ComparisonOperator": {
+      "type": "string",
+      "enum": [
+        "BEGINS_WITH"
+      ]
+    },
+    "ConfigurationStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "CreateSignalingChannelInput": {
+      "type": "structure",
+      "required": [
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelName": "ChannelName",
+        "ChannelType": "ChannelType",
+        "SingleMasterConfiguration": "SingleMasterConfiguration",
+        "Tags": "TagOnCreateList"
+      }
+    },
+    "CreateStreamInput": {
+      "type": "structure",
+      "required": [
+        "StreamName"
+      ],
+      "members": {
+        "DeviceName": "DeviceName",
+        "StreamName": "StreamName",
+        "MediaType": "MediaType",
+        "KmsKeyId": "KmsKeyId",
+        "DataRetentionInHours": "DataRetentionInHours",
+        "Tags": "ResourceTags",
+        "StreamStorageConfiguration": "StreamStorageConfiguration"
+      }
+    },
+    "DataRetentionChangeInHours": {
+      "type": "integer",
+      "min": 1
+    },
+    "DataRetentionInHours": {
+      "type": "integer",
+      "min": 0
+    },
+    "DefaultStorageTier": {
+      "type": "string",
+      "enum": [
+        "HOT",
+        "WARM"
+      ]
+    },
+    "DeleteAfterUpload": {
+      "type": "boolean"
+    },
+    "DeleteEdgeConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN"
+      }
+    },
+    "DeleteSignalingChannelInput": {
+      "type": "structure",
+      "required": [
+        "ChannelARN"
+      ],
+      "members": {
+        "ChannelARN": "ResourceARN",
+        "CurrentVersion": "Version"
+      }
+    },
+    "DeleteStreamInput": {
+      "type": "structure",
+      "required": [
+        "StreamARN"
+      ],
+      "members": {
+        "StreamARN": "ResourceARN",
+        "CurrentVersion": "Version"
+      }
+    },
+    "DeletionConfig": {
+      "type": "structure",
+      "members": {
+        "EdgeRetentionInHours": "EdgeRetentionInHours",
+        "LocalSizeConfig": "LocalSizeConfig",
+        "DeleteAfterUpload": "DeleteAfterUpload"
+      }
+    },
+    "DescribeEdgeConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN"
+      }
+    },
+    "DescribeImageGenerationConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN"
+      }
+    },
+    "DescribeMappedResourceConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "MaxResults": "MappedResourceConfigurationListLimit",
+        "NextToken": "NextToken"
+      }
+    },
+    "DescribeMediaStorageConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "ChannelName": "ChannelName",
+        "ChannelARN": "ResourceARN"
+      }
+    },
+    "DescribeNotificationConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN"
+      }
+    },
+    "DescribeSignalingChannelInput": {
+      "type": "structure",
+      "members": {
+        "ChannelName": "ChannelName",
+        "ChannelARN": "ResourceARN"
+      }
+    },
+    "DescribeStreamInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN"
+      }
+    },
+    "DescribeStreamStorageConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN"
+      }
+    },
+    "DestinationRegion": {
+      "type": "string",
+      "min": 9,
+      "max": 14,
+      "pattern": "^[a-z]+(-[a-z]+)?-[a-z]+-[0-9]$"
+    },
+    "DestinationUri": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^[a-zA-Z_0-9]+:(//)?([^/]+)/?([^*]*)$"
+    },
+    "DeviceName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "DurationInSeconds": {
+      "type": "integer",
+      "min": 60,
+      "max": 3600
+    },
+    "EdgeConfig": {
+      "type": "structure",
+      "required": [
+        "HubDeviceArn",
+        "RecorderConfig"
+      ],
+      "members": {
+        "HubDeviceArn": "HubDeviceArn",
+        "RecorderConfig": "RecorderConfig",
+        "UploaderConfig": "UploaderConfig",
+        "DeletionConfig": "DeletionConfig"
+      }
+    },
+    "EdgeRetentionInHours": {
+      "type": "integer",
+      "min": 1,
+      "max": 720
+    },
+    "Format": {
+      "type": "string",
+      "enum": [
+        "JPEG",
+        "PNG"
+      ]
+    },
+    "FormatConfig": {
+      "type": "map",
+      "min": 1,
+      "max": 1,
+      "key": "FormatConfigKey",
+      "value": "FormatConfigValue"
+    },
+    "FormatConfigKey": {
+      "type": "string",
+      "enum": [
+        "JPEGQuality"
+      ]
+    },
+    "FormatConfigValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "^[a-zA-Z_0-9]+"
+    },
+    "GetDataEndpointInput": {
+      "type": "structure",
+      "required": [
+        "APIName"
+      ],
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "APIName": "APIName"
+      }
+    },
+    "GetSignalingChannelEndpointInput": {
+      "type": "structure",
+      "required": [
+        "ChannelARN"
+      ],
+      "members": {
+        "ChannelARN": "ResourceARN",
+        "SingleMasterChannelEndpointConfiguration": "SingleMasterChannelEndpointConfiguration"
+      }
+    },
+    "HeightPixels": {
+      "type": "integer",
+      "min": 1,
+      "max": 2160
+    },
+    "HubDeviceArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "arn:[a-z\\d-]+:iot:[a-z0-9-]+:[0-9]+:thing/[a-zA-Z0-9_.-]+"
+    },
+    "ImageGenerationConfiguration": {
+      "type": "structure",
+      "required": [
+        "Status",
+        "ImageSelectorType",
+        "DestinationConfig",
+        "SamplingInterval",
+        "Format"
+      ],
+      "members": {
+        "Status": "ConfigurationStatus",
+        "ImageSelectorType": "ImageSelectorType",
+        "DestinationConfig": "ImageGenerationDestinationConfig",
+        "SamplingInterval": "SamplingInterval",
+        "Format": "Format",
+        "FormatConfig": "FormatConfig",
+        "WidthPixels": "WidthPixels",
+        "HeightPixels": "HeightPixels"
+      }
+    },
+    "ImageGenerationDestinationConfig": {
+      "type": "structure",
+      "required": [
+        "Uri",
+        "DestinationRegion"
+      ],
+      "members": {
+        "Uri": "DestinationUri",
+        "DestinationRegion": "DestinationRegion"
+      }
+    },
+    "ImageSelectorType": {
+      "type": "string",
+      "enum": [
+        "SERVER_TIMESTAMP",
+        "PRODUCER_TIMESTAMP"
+      ]
+    },
+    "KmsKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": ".+"
+    },
+    "ListEdgeAgentConfigurationsInput": {
+      "type": "structure",
+      "required": [
+        "HubDeviceArn"
+      ],
+      "members": {
+        "HubDeviceArn": "HubDeviceArn",
+        "MaxResults": "ListEdgeAgentConfigurationsInputLimit",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListEdgeAgentConfigurationsInputLimit": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "ListOfProtocols": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "ChannelProtocol"
+    },
+    "ListSignalingChannelsInput": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "ListStreamsInputLimit",
+        "NextToken": "NextToken",
+        "ChannelNameCondition": "ChannelNameCondition"
+      }
+    },
+    "ListStreamsInput": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "ListStreamsInputLimit",
+        "NextToken": "NextToken",
+        "StreamNameCondition": "StreamNameCondition"
+      }
+    },
+    "ListStreamsInputLimit": {
+      "type": "integer",
+      "min": 1,
+      "max": 10000
+    },
+    "ListTagsForResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceARN"
+      ],
+      "members": {
+        "NextToken": "NextToken",
+        "ResourceARN": "ResourceARN"
+      }
+    },
+    "ListTagsForStreamInput": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "StreamARN": "ResourceARN",
+        "StreamName": "StreamName"
+      }
+    },
+    "LocalSizeConfig": {
+      "type": "structure",
+      "members": {
+        "MaxLocalMediaSizeInMB": "MaxLocalMediaSizeInMB",
+        "StrategyOnFullSize": "StrategyOnFullSize"
+      }
+    },
+    "MappedResourceConfigurationListLimit": {
+      "type": "integer",
+      "min": 1,
+      "max": 1
+    },
+    "MaxLocalMediaSizeInMB": {
+      "type": "integer",
+      "min": 64,
+      "max": 2000000
+    },
+    "MediaSourceConfig": {
+      "type": "structure",
+      "required": [
+        "MediaUriSecretArn",
+        "MediaUriType"
+      ],
+      "members": {
+        "MediaUriSecretArn": "MediaUriSecretArn",
+        "MediaUriType": "MediaUriType"
+      }
+    },
+    "MediaStorageConfiguration": {
+      "type": "structure",
+      "required": [
+        "Status"
+      ],
+      "members": {
+        "StreamARN": "ResourceARN",
+        "Status": "MediaStorageConfigurationStatus"
+      }
+    },
+    "MediaStorageConfigurationStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "MediaType": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\w\\-\\.\\+]+/[\\w\\-\\.\\+]+(,[\\w\\-\\.\\+]+/[\\w\\-\\.\\+]+)*"
+    },
+    "MediaUriSecretArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:[a-z\\d-]+:secretsmanager:[a-z0-9-]+:[0-9]+:secret:[a-zA-Z0-9_.-]+"
+    },
+    "MediaUriType": {
+      "type": "string",
+      "enum": [
+        "RTSP_URI",
+        "FILE_URI"
+      ]
+    },
+    "MessageTtlSeconds": {
+      "type": "integer",
+      "min": 5,
+      "max": 120
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 0,
+      "max": 1024,
+      "pattern": "[a-zA-Z0-9+/=]*"
+    },
+    "NotificationConfiguration": {
+      "type": "structure",
+      "required": [
+        "Status",
+        "DestinationConfig"
+      ],
+      "members": {
+        "Status": "ConfigurationStatus",
+        "DestinationConfig": "NotificationDestinationConfig"
+      }
+    },
+    "NotificationDestinationConfig": {
+      "type": "structure",
+      "required": [
+        "Uri"
+      ],
+      "members": {
+        "Uri": "DestinationUri"
+      }
+    },
+    "RecorderConfig": {
+      "type": "structure",
+      "required": [
+        "MediaSourceConfig"
+      ],
+      "members": {
+        "MediaSourceConfig": "MediaSourceConfig",
+        "ScheduleConfig": "ScheduleConfig"
+      }
+    },
+    "ResourceARN": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "arn:[a-z\\d-]+:kinesisvideo:[a-z0-9-]+:[0-9]+:[a-z]+/[a-zA-Z0-9_.-]+/[0-9]+"
+    },
+    "ResourceTags": {
+      "type": "map",
+      "min": 1,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "SamplingInterval": {
+      "type": "integer"
+    },
+    "ScheduleConfig": {
+      "type": "structure",
+      "required": [
+        "ScheduleExpression",
+        "DurationInSeconds"
+      ],
+      "members": {
+        "ScheduleExpression": "ScheduleExpression",
+        "DurationInSeconds": "DurationInSeconds"
+      }
+    },
+    "ScheduleExpression": {
+      "type": "string",
+      "min": 11,
+      "max": 100,
+      "pattern": "[^\\n]{11,100}"
+    },
+    "SingleMasterChannelEndpointConfiguration": {
+      "type": "structure",
+      "members": {
+        "Protocols": "ListOfProtocols",
+        "Role": "ChannelRole"
+      }
+    },
+    "SingleMasterConfiguration": {
+      "type": "structure",
+      "members": {
+        "MessageTtlSeconds": "MessageTtlSeconds"
+      }
+    },
+    "StartEdgeConfigurationUpdateInput": {
+      "type": "structure",
+      "required": [
+        "EdgeConfig"
+      ],
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "EdgeConfig": "EdgeConfig"
+      }
+    },
+    "StrategyOnFullSize": {
+      "type": "string",
+      "enum": [
+        "DELETE_OLDEST_MEDIA",
+        "DENY_NEW_MEDIA"
+      ]
+    },
+    "StreamName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "StreamNameCondition": {
+      "type": "structure",
+      "members": {
+        "ComparisonOperator": "ComparisonOperator",
+        "ComparisonValue": "StreamName"
+      }
+    },
+    "StreamStorageConfiguration": {
+      "type": "structure",
+      "required": [
+        "DefaultStorageTier"
+      ],
+      "members": {
+        "DefaultStorageTier": "DefaultStorageTier"
+      }
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "Tag"
+    },
+    "TagOnCreateList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "Tag"
+    },
+    "TagResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "Tags"
+      ],
+      "members": {
+        "ResourceARN": "ResourceARN",
+        "Tags": "TagList"
+      }
+    },
+    "TagStreamInput": {
+      "type": "structure",
+      "required": [
+        "Tags"
+      ],
+      "members": {
+        "StreamARN": "ResourceARN",
+        "StreamName": "StreamName",
+        "Tags": "ResourceTags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*"
+    },
+    "UntagResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceARN",
+        "TagKeyList"
+      ],
+      "members": {
+        "ResourceARN": "ResourceARN",
+        "TagKeyList": "TagKeyList"
+      }
+    },
+    "UntagStreamInput": {
+      "type": "structure",
+      "required": [
+        "TagKeyList"
+      ],
+      "members": {
+        "StreamARN": "ResourceARN",
+        "StreamName": "StreamName",
+        "TagKeyList": "TagKeyList"
+      }
+    },
+    "UpdateDataRetentionInput": {
+      "type": "structure",
+      "required": [
+        "CurrentVersion",
+        "Operation",
+        "DataRetentionChangeInHours"
+      ],
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "CurrentVersion": "Version",
+        "Operation": "UpdateDataRetentionOperation",
+        "DataRetentionChangeInHours": "DataRetentionChangeInHours"
+      }
+    },
+    "UpdateDataRetentionOperation": {
+      "type": "string",
+      "enum": [
+        "INCREASE_DATA_RETENTION",
+        "DECREASE_DATA_RETENTION"
+      ]
+    },
+    "UpdateImageGenerationConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "ImageGenerationConfiguration": "ImageGenerationConfiguration"
+      }
+    },
+    "UpdateMediaStorageConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "ChannelARN",
+        "MediaStorageConfiguration"
+      ],
+      "members": {
+        "ChannelARN": "ResourceARN",
+        "MediaStorageConfiguration": "MediaStorageConfiguration"
+      }
+    },
+    "UpdateNotificationConfigurationInput": {
+      "type": "structure",
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "NotificationConfiguration": "NotificationConfiguration"
+      }
+    },
+    "UpdateSignalingChannelInput": {
+      "type": "structure",
+      "required": [
+        "ChannelARN",
+        "CurrentVersion"
+      ],
+      "members": {
+        "ChannelARN": "ResourceARN",
+        "CurrentVersion": "Version",
+        "SingleMasterConfiguration": "SingleMasterConfiguration"
+      }
+    },
+    "UpdateStreamInput": {
+      "type": "structure",
+      "required": [
+        "CurrentVersion"
+      ],
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "CurrentVersion": "Version",
+        "DeviceName": "DeviceName",
+        "MediaType": "MediaType"
+      }
+    },
+    "UpdateStreamStorageConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "CurrentVersion",
+        "StreamStorageConfiguration"
+      ],
+      "members": {
+        "StreamName": "StreamName",
+        "StreamARN": "ResourceARN",
+        "CurrentVersion": "Version",
+        "StreamStorageConfiguration": "StreamStorageConfiguration"
+      }
+    },
+    "UploaderConfig": {
+      "type": "structure",
+      "required": [
+        "ScheduleConfig"
+      ],
+      "members": {
+        "ScheduleConfig": "ScheduleConfig"
+      }
+    },
+    "Version": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9]+"
+    },
+    "WidthPixels": {
+      "type": "integer",
+      "min": 1,
+      "max": 3840
+    }
+  }
+}

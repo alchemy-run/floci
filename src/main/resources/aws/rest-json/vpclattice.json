@@ -1,0 +1,1505 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "vpclattice",
+ "apiVersion": "2022-11-30",
+ "operations": {
+  "BatchUpdateRule": {
+   "method": "PATCH",
+   "requestUri": "/services/{serviceIdentifier}/listeners/{listenerIdentifier}/rules",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     },
+     "listenerIdentifier": {
+      "location": "uri",
+      "name": "listenerIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateAccessLogSubscription": {
+   "method": "POST",
+   "requestUri": "/accesslogsubscriptions",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateListener": {
+   "method": "POST",
+   "requestUri": "/services/{serviceIdentifier}/listeners",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateResourceConfiguration": {
+   "method": "POST",
+   "requestUri": "/resourceconfigurations",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt"
+    ]
+   }
+  },
+  "CreateResourceGateway": {
+   "method": "POST",
+   "requestUri": "/resourcegateways",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateRule": {
+   "method": "POST",
+   "requestUri": "/services/{serviceIdentifier}/listeners/{listenerIdentifier}/rules",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     },
+     "listenerIdentifier": {
+      "location": "uri",
+      "name": "listenerIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateService": {
+   "method": "POST",
+   "requestUri": "/services",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateServiceNetwork": {
+   "method": "POST",
+   "requestUri": "/servicenetworks",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateServiceNetworkResourceAssociation": {
+   "method": "POST",
+   "requestUri": "/servicenetworkresourceassociations",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateServiceNetworkServiceAssociation": {
+   "method": "POST",
+   "requestUri": "/servicenetworkserviceassociations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateServiceNetworkVpcAssociation": {
+   "method": "POST",
+   "requestUri": "/servicenetworkvpcassociations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateTargetGroup": {
+   "method": "POST",
+   "requestUri": "/targetgroups",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteAccessLogSubscription": {
+   "method": "DELETE",
+   "requestUri": "/accesslogsubscriptions/{accessLogSubscriptionIdentifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "accessLogSubscriptionIdentifier": {
+      "location": "uri",
+      "name": "accessLogSubscriptionIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteAuthPolicy": {
+   "method": "DELETE",
+   "requestUri": "/authpolicy/{resourceIdentifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "resourceIdentifier": {
+      "location": "uri",
+      "name": "resourceIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDomainVerification": {
+   "method": "DELETE",
+   "requestUri": "/domainverifications/{domainVerificationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainVerificationIdentifier": {
+      "location": "uri",
+      "name": "domainVerificationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteListener": {
+   "method": "DELETE",
+   "requestUri": "/services/{serviceIdentifier}/listeners/{listenerIdentifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     },
+     "listenerIdentifier": {
+      "location": "uri",
+      "name": "listenerIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteResourceConfiguration": {
+   "method": "DELETE",
+   "requestUri": "/resourceconfigurations/{resourceConfigurationIdentifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "resourceConfigurationIdentifier": {
+      "location": "uri",
+      "name": "resourceConfigurationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteResourceEndpointAssociation": {
+   "method": "DELETE",
+   "requestUri": "/resourceendpointassociations/{resourceEndpointAssociationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceEndpointAssociationIdentifier": {
+      "location": "uri",
+      "name": "resourceEndpointAssociationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteResourceGateway": {
+   "method": "DELETE",
+   "requestUri": "/resourcegateways/{resourceGatewayIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceGatewayIdentifier": {
+      "location": "uri",
+      "name": "resourceGatewayIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteResourcePolicy": {
+   "method": "DELETE",
+   "requestUri": "/resourcepolicy/{resourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteRule": {
+   "method": "DELETE",
+   "requestUri": "/services/{serviceIdentifier}/listeners/{listenerIdentifier}/rules/{ruleIdentifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     },
+     "listenerIdentifier": {
+      "location": "uri",
+      "name": "listenerIdentifier"
+     },
+     "ruleIdentifier": {
+      "location": "uri",
+      "name": "ruleIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteService": {
+   "method": "DELETE",
+   "requestUri": "/services/{serviceIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteServiceNetwork": {
+   "method": "DELETE",
+   "requestUri": "/servicenetworks/{serviceNetworkIdentifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "serviceNetworkIdentifier": {
+      "location": "uri",
+      "name": "serviceNetworkIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteServiceNetworkResourceAssociation": {
+   "method": "DELETE",
+   "requestUri": "/servicenetworkresourceassociations/{serviceNetworkResourceAssociationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkResourceAssociationIdentifier": {
+      "location": "uri",
+      "name": "serviceNetworkResourceAssociationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteServiceNetworkServiceAssociation": {
+   "method": "DELETE",
+   "requestUri": "/servicenetworkserviceassociations/{serviceNetworkServiceAssociationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkServiceAssociationIdentifier": {
+      "location": "uri",
+      "name": "serviceNetworkServiceAssociationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteServiceNetworkVpcAssociation": {
+   "method": "DELETE",
+   "requestUri": "/servicenetworkvpcassociations/{serviceNetworkVpcAssociationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkVpcAssociationIdentifier": {
+      "location": "uri",
+      "name": "serviceNetworkVpcAssociationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteTargetGroup": {
+   "method": "DELETE",
+   "requestUri": "/targetgroups/{targetGroupIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "targetGroupIdentifier": {
+      "location": "uri",
+      "name": "targetGroupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeregisterTargets": {
+   "method": "POST",
+   "requestUri": "/targetgroups/{targetGroupIdentifier}/deregistertargets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "targetGroupIdentifier": {
+      "location": "uri",
+      "name": "targetGroupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetAccessLogSubscription": {
+   "method": "GET",
+   "requestUri": "/accesslogsubscriptions/{accessLogSubscriptionIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "accessLogSubscriptionIdentifier": {
+      "location": "uri",
+      "name": "accessLogSubscriptionIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetAuthPolicy": {
+   "method": "GET",
+   "requestUri": "/authpolicy/{resourceIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceIdentifier": {
+      "location": "uri",
+      "name": "resourceIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetDomainVerification": {
+   "method": "GET",
+   "requestUri": "/domainverifications/{domainVerificationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainVerificationIdentifier": {
+      "location": "uri",
+      "name": "domainVerificationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastVerifiedTime"
+    ]
+   }
+  },
+  "GetListener": {
+   "method": "GET",
+   "requestUri": "/services/{serviceIdentifier}/listeners/{listenerIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     },
+     "listenerIdentifier": {
+      "location": "uri",
+      "name": "listenerIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetResourceConfiguration": {
+   "method": "GET",
+   "requestUri": "/resourceconfigurations/{resourceConfigurationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceConfigurationIdentifier": {
+      "location": "uri",
+      "name": "resourceConfigurationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetResourceGateway": {
+   "method": "GET",
+   "requestUri": "/resourcegateways/{resourceGatewayIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceGatewayIdentifier": {
+      "location": "uri",
+      "name": "resourceGatewayIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetResourcePolicy": {
+   "method": "GET",
+   "requestUri": "/resourcepolicy/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetRule": {
+   "method": "GET",
+   "requestUri": "/services/{serviceIdentifier}/listeners/{listenerIdentifier}/rules/{ruleIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     },
+     "listenerIdentifier": {
+      "location": "uri",
+      "name": "listenerIdentifier"
+     },
+     "ruleIdentifier": {
+      "location": "uri",
+      "name": "ruleIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetService": {
+   "method": "GET",
+   "requestUri": "/services/{serviceIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetServiceNetwork": {
+   "method": "GET",
+   "requestUri": "/servicenetworks/{serviceNetworkIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkIdentifier": {
+      "location": "uri",
+      "name": "serviceNetworkIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetServiceNetworkResourceAssociation": {
+   "method": "GET",
+   "requestUri": "/servicenetworkresourceassociations/{serviceNetworkResourceAssociationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkResourceAssociationIdentifier": {
+      "location": "uri",
+      "name": "serviceNetworkResourceAssociationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetServiceNetworkServiceAssociation": {
+   "method": "GET",
+   "requestUri": "/servicenetworkserviceassociations/{serviceNetworkServiceAssociationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkServiceAssociationIdentifier": {
+      "location": "uri",
+      "name": "serviceNetworkServiceAssociationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt"
+    ]
+   }
+  },
+  "GetServiceNetworkVpcAssociation": {
+   "method": "GET",
+   "requestUri": "/servicenetworkvpcassociations/{serviceNetworkVpcAssociationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkVpcAssociationIdentifier": {
+      "location": "uri",
+      "name": "serviceNetworkVpcAssociationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetTargetGroup": {
+   "method": "GET",
+   "requestUri": "/targetgroups/{targetGroupIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "targetGroupIdentifier": {
+      "location": "uri",
+      "name": "targetGroupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "ListAccessLogSubscriptions": {
+   "method": "GET",
+   "requestUri": "/accesslogsubscriptions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceIdentifier": {
+      "location": "querystring",
+      "name": "resourceIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastUpdatedAt"
+    ]
+   }
+  },
+  "ListDomainVerifications": {
+   "method": "GET",
+   "requestUri": "/domainverifications",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastVerifiedTime"
+    ]
+   }
+  },
+  "ListListeners": {
+   "method": "GET",
+   "requestUri": "/services/{serviceIdentifier}/listeners",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastUpdatedAt"
+    ]
+   }
+  },
+  "ListResourceConfigurations": {
+   "method": "GET",
+   "requestUri": "/resourceconfigurations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceGatewayIdentifier": {
+      "location": "querystring",
+      "name": "resourceGatewayIdentifier"
+     },
+     "resourceConfigurationGroupIdentifier": {
+      "location": "querystring",
+      "name": "resourceConfigurationGroupIdentifier"
+     },
+     "domainVerificationIdentifier": {
+      "location": "querystring",
+      "name": "domainVerificationIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastUpdatedAt"
+    ]
+   }
+  },
+  "ListResourceEndpointAssociations": {
+   "method": "GET",
+   "requestUri": "/resourceendpointassociations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceConfigurationIdentifier": {
+      "location": "querystring",
+      "name": "resourceConfigurationIdentifier"
+     },
+     "resourceEndpointAssociationIdentifier": {
+      "location": "querystring",
+      "name": "resourceEndpointAssociationIdentifier"
+     },
+     "vpcEndpointId": {
+      "location": "querystring",
+      "name": "vpcEndpointId"
+     },
+     "vpcEndpointOwner": {
+      "location": "querystring",
+      "name": "vpcEndpointOwner"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt"
+    ]
+   }
+  },
+  "ListResourceGateways": {
+   "method": "GET",
+   "requestUri": "/resourcegateways",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastUpdatedAt"
+    ]
+   }
+  },
+  "ListRules": {
+   "method": "GET",
+   "requestUri": "/services/{serviceIdentifier}/listeners/{listenerIdentifier}/rules",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     },
+     "listenerIdentifier": {
+      "location": "uri",
+      "name": "listenerIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastUpdatedAt"
+    ]
+   }
+  },
+  "ListServiceNetworkResourceAssociations": {
+   "method": "GET",
+   "requestUri": "/servicenetworkresourceassociations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkIdentifier": {
+      "location": "querystring",
+      "name": "serviceNetworkIdentifier"
+     },
+     "resourceConfigurationIdentifier": {
+      "location": "querystring",
+      "name": "resourceConfigurationIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "includeChildren": {
+      "location": "querystring",
+      "name": "includeChildren",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt"
+    ]
+   }
+  },
+  "ListServiceNetworkServiceAssociations": {
+   "method": "GET",
+   "requestUri": "/servicenetworkserviceassociations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkIdentifier": {
+      "location": "querystring",
+      "name": "serviceNetworkIdentifier"
+     },
+     "serviceIdentifier": {
+      "location": "querystring",
+      "name": "serviceIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt"
+    ]
+   }
+  },
+  "ListServiceNetworkVpcAssociations": {
+   "method": "GET",
+   "requestUri": "/servicenetworkvpcassociations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkIdentifier": {
+      "location": "querystring",
+      "name": "serviceNetworkIdentifier"
+     },
+     "vpcIdentifier": {
+      "location": "querystring",
+      "name": "vpcIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastUpdatedAt"
+    ]
+   }
+  },
+  "ListServiceNetworkVpcEndpointAssociations": {
+   "method": "GET",
+   "requestUri": "/servicenetworkvpcendpointassociations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkIdentifier": {
+      "location": "querystring",
+      "name": "serviceNetworkIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt"
+    ]
+   }
+  },
+  "ListServiceNetworks": {
+   "method": "GET",
+   "requestUri": "/servicenetworks",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastUpdatedAt"
+    ]
+   }
+  },
+  "ListServices": {
+   "method": "GET",
+   "requestUri": "/services",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastUpdatedAt"
+    ]
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTargetGroups": {
+   "method": "GET",
+   "requestUri": "/targetgroups",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "vpcIdentifier": {
+      "location": "querystring",
+      "name": "vpcIdentifier"
+     },
+     "targetGroupType": {
+      "location": "querystring",
+      "name": "targetGroupType"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastUpdatedAt"
+    ]
+   }
+  },
+  "ListTargets": {
+   "method": "POST",
+   "requestUri": "/targetgroups/{targetGroupIdentifier}/listtargets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "targetGroupIdentifier": {
+      "location": "uri",
+      "name": "targetGroupIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutAuthPolicy": {
+   "method": "PUT",
+   "requestUri": "/authpolicy/{resourceIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceIdentifier": {
+      "location": "uri",
+      "name": "resourceIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutResourcePolicy": {
+   "method": "PUT",
+   "requestUri": "/resourcepolicy/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RegisterTargets": {
+   "method": "POST",
+   "requestUri": "/targetgroups/{targetGroupIdentifier}/registertargets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "targetGroupIdentifier": {
+      "location": "uri",
+      "name": "targetGroupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartDomainVerification": {
+   "method": "POST",
+   "requestUri": "/domainverifications",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateAccessLogSubscription": {
+   "method": "PATCH",
+   "requestUri": "/accesslogsubscriptions/{accessLogSubscriptionIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "accessLogSubscriptionIdentifier": {
+      "location": "uri",
+      "name": "accessLogSubscriptionIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateListener": {
+   "method": "PATCH",
+   "requestUri": "/services/{serviceIdentifier}/listeners/{listenerIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     },
+     "listenerIdentifier": {
+      "location": "uri",
+      "name": "listenerIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateResourceConfiguration": {
+   "method": "PATCH",
+   "requestUri": "/resourceconfigurations/{resourceConfigurationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceConfigurationIdentifier": {
+      "location": "uri",
+      "name": "resourceConfigurationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateResourceGateway": {
+   "method": "PATCH",
+   "requestUri": "/resourcegateways/{resourceGatewayIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceGatewayIdentifier": {
+      "location": "uri",
+      "name": "resourceGatewayIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateRule": {
+   "method": "PATCH",
+   "requestUri": "/services/{serviceIdentifier}/listeners/{listenerIdentifier}/rules/{ruleIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     },
+     "listenerIdentifier": {
+      "location": "uri",
+      "name": "listenerIdentifier"
+     },
+     "ruleIdentifier": {
+      "location": "uri",
+      "name": "ruleIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateService": {
+   "method": "PATCH",
+   "requestUri": "/services/{serviceIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceIdentifier": {
+      "location": "uri",
+      "name": "serviceIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateServiceNetwork": {
+   "method": "PATCH",
+   "requestUri": "/servicenetworks/{serviceNetworkIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkIdentifier": {
+      "location": "uri",
+      "name": "serviceNetworkIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateServiceNetworkVpcAssociation": {
+   "method": "PATCH",
+   "requestUri": "/servicenetworkvpcassociations/{serviceNetworkVpcAssociationIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "serviceNetworkVpcAssociationIdentifier": {
+      "location": "uri",
+      "name": "serviceNetworkVpcAssociationIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateTargetGroup": {
+   "method": "PATCH",
+   "requestUri": "/targetgroups/{targetGroupIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "targetGroupIdentifier": {
+      "location": "uri",
+      "name": "targetGroupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

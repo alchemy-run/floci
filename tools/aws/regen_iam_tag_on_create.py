@@ -95,7 +95,7 @@ OUTPUT = REPO_ROOT / "src/main/resources/aws/iam-tag-on-create.json"
 NAMESPACES = (
     "access-analyzer", "acm", "application-autoscaling", "athena", "autoscaling", "bcm-data-exports",
     "bcm-pricing-calculator", "budgets", "ce", "cloudformation", "cloudhsm", "cloudtrail", "cloudwatch",
-    "codedeploy", "codepipeline", "cognito-identity", "cognito-idp", "comprehend", "config", "cur", "datasync",
+    "codedeploy", "codepipeline", "cognito-identity", "cognito-idp", "comprehend", "config", "cur", "databrew", "dataexchange", "datasync", "datazone", "deadline", "devops-guru", "docdb-elastic", "ds", "ecr-public", "emr-containers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrass", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "cassandra", "kinesisvideo", "lex", "license-manager", "airflow-serverless", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medical-imaging", "neptune-graph", "notifications", "notifications-contacts", "osis", "observabilityadmin", "omics", "aoss", "personalize", "sms-voice", "qbusiness", "qapps", "rbin", "repostspace", "rolesanywhere", "route53profiles", "s3files", "ssm-contacts", "ssm-incidents", "schemas", "securitylake", "shield", "signer", "sdb", "social-messaging", "synthetics", "vpc-lattice", "xray", "ivs", "ivschat", "dax",
     "dms", "dsql", "dynamodb", "ec2", "ecr", "ecs", "eks", "elasticache", "elasticloadbalancing",
     "elasticmapreduce", "events", "firehose", "globalaccelerator", "glue", "iam", "kinesis", "kinesisanalytics",
     "kms", "lambda", "lightsail", "logs", "memorydb", "network-firewall", "organizations", "payment-cryptography",
@@ -108,7 +108,15 @@ _NO_ROUTES = "REST routes no rule maps yet"
 # Namespaces Floci serves whose operations list a tagging action but are not read here yet, each with
 # why. `TagOnCreateNamespacesIntegrationTest` fails for a namespace Floci serves that is in neither list.
 NOT_COVERED = {
+    "codeconnections": "not read yet: its JSON operations name connections, hosts and repository links by ARN or ID",
+    "chatbot": "REST routes no rule maps yet",
+    "backup-search": "REST routes no rule maps yet",
+    "b2bi": "not read yet: its Create* operations take Tags",
+    "apprunner": "not read yet: its Create* operations take Tags",
+    "auditmanager": "REST routes no rule maps yet",
     "timestream": "the Alchemy fork's Timestream service; its requests are not read yet",
+    "acm-pca": "not read yet: CreateCertificateAuthority tags on creation; a later batch",
+    "geo": _NO_ROUTES, "polly": _NO_ROUTES, "aiops": _NO_ROUTES, "amplify": _NO_ROUTES, "appflow": _NO_ROUTES,
     "airflow": _NO_ROUTES, "app-integrations": _NO_ROUTES, "appconfig": _NO_ROUTES, "appsync": _NO_ROUTES,
     "aps": _NO_ROUTES, "aws-marketplace": _NO_ROUTES, "backup": _NO_ROUTES,
     "batch": _NO_ROUTES, "bedrock": _NO_ROUTES, "bedrock-agentcore": _NO_ROUTES,
@@ -150,12 +158,45 @@ BY_HAND = {
 NO_TAGS = "no member of the request carries tags"
 # Operations the reference lists with a tagging action whose request carries no tags this file reads.
 NOT_READ = {
+    "omics:StartReadSetImportJob": "its tags are per source item, set on the read sets the job creates",
+    "omics:StartReferenceImportJob": "its tags are per source item, set on the references the job creates",
+    "cassandra:UpdateKeyspace": NO_TAGS,
     "cloudformation:ExecuteChangeSet": NO_TAGS,
+    "dataexchange:StartJob": "it tags the assets an import creates with the CreateJob request's AssetConfiguration, "
+                             "not with members of its own request",
     "dynamodb:UpdateTable": NO_TAGS,
     "ec2:RequestSpotFleet": "its tags are in spotFleetRequestConfig, deeper than the members this file reads",
     "ecr:BatchGetImage": NO_TAGS,
+    "iotfleetwise:BatchCreateVehicle": "its tags are per vehicle in vehicles[].tags, deeper than the members this "
+                                       "file reads",
     "ecs:CreateGateway": NO_TAGS,
+    "fsx:DeleteFileSystem": "its tags are the FinalBackupTags of the per-type configuration, deeper than the "
+                            "members this file reads",
+    "fsx:DeleteVolume": "its tags are the FinalBackupTags of the per-type configuration, deeper than the members "
+                        "this file reads",
     "iam:AcquireRole": NO_TAGS,
+    "medialive:UpdateChannel": NO_TAGS,
+    "social-messaging:AssociateWhatsAppBusinessAccount": "its tags are on the account and its phone numbers in "
+                                                         "setupFinalization.waba.tags and "
+                                                         "setupFinalization.phoneNumbers[].tags, deeper than the "
+                                                         "members this reads",
+    "mediaconnect:AddFlowMediaStreams": "its tags are per media stream in mediaStreams[].mediaStreamTags, deeper "
+                                        "than the members this file reads",
+    "mediaconnect:AddFlowOutputs": "its tags are per output in outputs[].outputTags, deeper than the members this "
+                                   "file reads",
+    "mediaconnect:AddFlowSources": "its tags are per source in sources[].sourceTags, deeper than the members this "
+                                   "file reads",
+    "mediaconnect:AddFlowVpcInterfaces": "its tags are per VPC interface in vpcInterfaces[].vpcInterfaceTags, "
+                                         "deeper than the members this file reads",
+    "mediaconnect:GrantFlowEntitlements": "its tags are per entitlement in entitlements[].entitlementTags, deeper "
+                                          "than the members this file reads",
+    "mediaconnect:RegisterDestinationEndpoint": "endpoint registration is newer than botocore's MediaConnect "
+                                                "model, which has no operation of this name, and Floci does not "
+                                                "serve it",
+    "mediaconnect:RegisterSourceEndpoint": "endpoint registration is newer than botocore's MediaConnect model, "
+                                           "which has no operation of this name, and Floci does not serve it",
+    "ivs:CreateFailoverSlateConfiguration": "failover slates are newer than botocore's IVS model, which has no "
+                                            "operation of this name to read, and Floci does not serve them",
     "rds:CreateDBCapacityReservation": NO_TAGS,
     "rds:DeleteDBCluster": NO_TAGS,
     "rds:DeleteDBInstance": NO_TAGS,

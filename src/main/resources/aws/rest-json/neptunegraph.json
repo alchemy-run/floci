@@ -1,0 +1,1616 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "neptunegraph",
+ "apiVersion": "2023-11-29",
+ "operations": {
+  "CancelExportTask": {
+   "method": "DELETE",
+   "requestUri": "/exporttasks/{taskIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "taskIdentifier": {
+      "location": "uri",
+      "name": "taskIdentifier"
+     }
+    },
+    "shape": "CancelExportTaskInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "CancelExportTaskOutput"
+   }
+  },
+  "CancelImportTask": {
+   "method": "DELETE",
+   "requestUri": "/importtasks/{taskIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "taskIdentifier": {
+      "location": "uri",
+      "name": "taskIdentifier"
+     }
+    },
+    "shape": "CancelImportTaskInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "CancelImportTaskOutput"
+   }
+  },
+  "CancelQuery": {
+   "method": "DELETE",
+   "requestUri": "/queries/{queryId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "header",
+      "name": "graphIdentifier"
+     },
+     "queryId": {
+      "location": "uri",
+      "name": "queryId"
+     }
+    },
+    "shape": "CancelQueryInput"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateGraph": {
+   "method": "POST",
+   "requestUri": "/graphs",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "CreateGraphInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateGraphOutput"
+   }
+  },
+  "CreateGraphSnapshot": {
+   "method": "POST",
+   "requestUri": "/snapshots",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "CreateGraphSnapshotInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateGraphSnapshotOutput"
+   }
+  },
+  "CreateGraphUsingImportTask": {
+   "method": "POST",
+   "requestUri": "/importtasks",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "CreateGraphUsingImportTaskInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateGraphUsingImportTaskOutput"
+   }
+  },
+  "CreatePrivateGraphEndpoint": {
+   "method": "POST",
+   "requestUri": "/graphs/{graphIdentifier}/endpoints/",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "uri",
+      "name": "graphIdentifier"
+     }
+    },
+    "shape": "CreatePrivateGraphEndpointInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreatePrivateGraphEndpointOutput"
+   }
+  },
+  "DeleteGraph": {
+   "method": "DELETE",
+   "requestUri": "/graphs/{graphIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "uri",
+      "name": "graphIdentifier"
+     },
+     "skipSnapshot": {
+      "location": "querystring",
+      "name": "skipSnapshot",
+      "type": "boolean"
+     }
+    },
+    "shape": "DeleteGraphInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteGraphOutput"
+   }
+  },
+  "DeleteGraphSnapshot": {
+   "method": "DELETE",
+   "requestUri": "/snapshots/{snapshotIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "snapshotIdentifier": {
+      "location": "uri",
+      "name": "snapshotIdentifier"
+     }
+    },
+    "shape": "DeleteGraphSnapshotInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteGraphSnapshotOutput"
+   }
+  },
+  "DeletePrivateGraphEndpoint": {
+   "method": "DELETE",
+   "requestUri": "/graphs/{graphIdentifier}/endpoints/{vpcId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "uri",
+      "name": "graphIdentifier"
+     },
+     "vpcId": {
+      "location": "uri",
+      "name": "vpcId"
+     }
+    },
+    "shape": "DeletePrivateGraphEndpointInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeletePrivateGraphEndpointOutput"
+   }
+  },
+  "ExecuteQuery": {
+   "method": "POST",
+   "requestUri": "/queries",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "header",
+      "name": "graphIdentifier"
+     }
+    },
+    "shape": "ExecuteQueryInput"
+   },
+   "output": {
+    "members": {
+     "payload": {
+      "location": "payload",
+      "type": "blob"
+     }
+    },
+    "shape": "ExecuteQueryOutput"
+   }
+  },
+  "GetExportTask": {
+   "method": "GET",
+   "requestUri": "/exporttasks/{taskIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "taskIdentifier": {
+      "location": "uri",
+      "name": "taskIdentifier"
+     }
+    },
+    "shape": "GetExportTaskInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetExportTaskOutput"
+   }
+  },
+  "GetGraph": {
+   "method": "GET",
+   "requestUri": "/graphs/{graphIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "uri",
+      "name": "graphIdentifier"
+     }
+    },
+    "shape": "GetGraphInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetGraphOutput"
+   }
+  },
+  "GetGraphSnapshot": {
+   "method": "GET",
+   "requestUri": "/snapshots/{snapshotIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "snapshotIdentifier": {
+      "location": "uri",
+      "name": "snapshotIdentifier"
+     }
+    },
+    "shape": "GetGraphSnapshotInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetGraphSnapshotOutput"
+   }
+  },
+  "GetGraphSummary": {
+   "method": "GET",
+   "requestUri": "/summary",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "header",
+      "name": "graphIdentifier"
+     },
+     "mode": {
+      "location": "querystring",
+      "name": "mode"
+     }
+    },
+    "shape": "GetGraphSummaryInput"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "lastStatisticsComputationTime"
+    ],
+    "shape": "GetGraphSummaryOutput"
+   }
+  },
+  "GetImportTask": {
+   "method": "GET",
+   "requestUri": "/importtasks/{taskIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "taskIdentifier": {
+      "location": "uri",
+      "name": "taskIdentifier"
+     }
+    },
+    "shape": "GetImportTaskInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetImportTaskOutput"
+   }
+  },
+  "GetPrivateGraphEndpoint": {
+   "method": "GET",
+   "requestUri": "/graphs/{graphIdentifier}/endpoints/{vpcId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "uri",
+      "name": "graphIdentifier"
+     },
+     "vpcId": {
+      "location": "uri",
+      "name": "vpcId"
+     }
+    },
+    "shape": "GetPrivateGraphEndpointInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetPrivateGraphEndpointOutput"
+   }
+  },
+  "GetQuery": {
+   "method": "GET",
+   "requestUri": "/queries/{queryId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "header",
+      "name": "graphIdentifier"
+     },
+     "queryId": {
+      "location": "uri",
+      "name": "queryId"
+     }
+    },
+    "shape": "GetQueryInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetQueryOutput"
+   }
+  },
+  "ListExportTasks": {
+   "method": "GET",
+   "requestUri": "/exporttasks",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "querystring",
+      "name": "graphIdentifier"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    },
+    "shape": "ListExportTasksInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListExportTasksOutput"
+   }
+  },
+  "ListGraphSnapshots": {
+   "method": "GET",
+   "requestUri": "/snapshots",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "querystring",
+      "name": "graphIdentifier"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    },
+    "shape": "ListGraphSnapshotsInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListGraphSnapshotsOutput"
+   }
+  },
+  "ListGraphs": {
+   "method": "GET",
+   "requestUri": "/graphs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    },
+    "shape": "ListGraphsInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListGraphsOutput"
+   }
+  },
+  "ListImportTasks": {
+   "method": "GET",
+   "requestUri": "/importtasks",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "querystring",
+      "name": "graphIdentifier"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    },
+    "shape": "ListImportTasksInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListImportTasksOutput"
+   }
+  },
+  "ListPrivateGraphEndpoints": {
+   "method": "GET",
+   "requestUri": "/graphs/{graphIdentifier}/endpoints/",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "uri",
+      "name": "graphIdentifier"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    },
+    "shape": "ListPrivateGraphEndpointsInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListPrivateGraphEndpointsOutput"
+   }
+  },
+  "ListQueries": {
+   "method": "GET",
+   "requestUri": "/queries",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "header",
+      "name": "graphIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "state": {
+      "location": "querystring",
+      "name": "state"
+     }
+    },
+    "shape": "ListQueriesInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListQueriesOutput"
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    },
+    "shape": "ListTagsForResourceInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListTagsForResourceOutput"
+   }
+  },
+  "ResetGraph": {
+   "method": "PUT",
+   "requestUri": "/graphs/{graphIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "uri",
+      "name": "graphIdentifier"
+     }
+    },
+    "shape": "ResetGraphInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "ResetGraphOutput"
+   }
+  },
+  "RestoreGraphFromSnapshot": {
+   "method": "POST",
+   "requestUri": "/snapshots/{snapshotIdentifier}/restore",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "snapshotIdentifier": {
+      "location": "uri",
+      "name": "snapshotIdentifier"
+     }
+    },
+    "shape": "RestoreGraphFromSnapshotInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "RestoreGraphFromSnapshotOutput"
+   }
+  },
+  "StartExportTask": {
+   "method": "POST",
+   "requestUri": "/exporttasks",
+   "responseCode": 201,
+   "input": {
+    "members": {},
+    "shape": "StartExportTaskInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "StartExportTaskOutput"
+   }
+  },
+  "StartGraph": {
+   "method": "POST",
+   "requestUri": "/graphs/{graphIdentifier}/start",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "uri",
+      "name": "graphIdentifier"
+     }
+    },
+    "shape": "StartGraphInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "StartGraphOutput"
+   }
+  },
+  "StartImportTask": {
+   "method": "POST",
+   "requestUri": "/graphs/{graphIdentifier}/importtasks",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "uri",
+      "name": "graphIdentifier"
+     }
+    },
+    "shape": "StartImportTaskInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "StartImportTaskOutput"
+   }
+  },
+  "StopGraph": {
+   "method": "POST",
+   "requestUri": "/graphs/{graphIdentifier}/stop",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "uri",
+      "name": "graphIdentifier"
+     }
+    },
+    "shape": "StopGraphInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "StopGraphOutput"
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    },
+    "shape": "TagResourceInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "TagResourceOutput"
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    },
+    "shape": "UntagResourceInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "UntagResourceOutput"
+   }
+  },
+  "UpdateGraph": {
+   "method": "PATCH",
+   "requestUri": "/graphs/{graphIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "graphIdentifier": {
+      "location": "uri",
+      "name": "graphIdentifier"
+     }
+    },
+    "shape": "UpdateGraphInput"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateGraphOutput"
+   }
+  }
+ },
+ "shapes": {
+  "AccessDeniedException": {
+   "members": {
+    "message": {}
+   }
+  },
+  "CancelExportTaskInput": {
+   "members": {}
+  },
+  "CancelExportTaskOutput": {
+   "members": {
+    "graphId": {},
+    "roleArn": {},
+    "taskId": {},
+    "status": {},
+    "format": {},
+    "destination": {},
+    "kmsKeyIdentifier": {},
+    "parquetType": {},
+    "statusReason": {}
+   }
+  },
+  "CancelImportTaskInput": {
+   "members": {}
+  },
+  "CancelImportTaskOutput": {
+   "members": {
+    "graphId": {},
+    "taskId": {},
+    "source": {},
+    "format": {},
+    "parquetType": {},
+    "roleArn": {},
+    "status": {}
+   }
+  },
+  "CancelQueryInput": {
+   "members": {}
+  },
+  "ConflictException": {
+   "members": {
+    "message": {},
+    "reason": {}
+   }
+  },
+  "CreateGraphInput": {
+   "members": {
+    "graphName": {},
+    "tags": {
+     "shape": "TagMap"
+    },
+    "publicConnectivity": {},
+    "kmsKeyIdentifier": {},
+    "vectorSearchConfiguration": {
+     "shape": "VectorSearchConfiguration"
+    },
+    "replicaCount": {},
+    "deletionProtection": {},
+    "provisionedMemory": {}
+   }
+  },
+  "CreateGraphOutput": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "status": {},
+    "statusReason": {},
+    "createTime": {},
+    "provisionedMemory": {},
+    "endpoint": {},
+    "publicConnectivity": {},
+    "vectorSearchConfiguration": {
+     "shape": "VectorSearchConfiguration"
+    },
+    "replicaCount": {},
+    "kmsKeyIdentifier": {},
+    "sourceSnapshotId": {},
+    "deletionProtection": {},
+    "buildNumber": {}
+   }
+  },
+  "CreateGraphSnapshotInput": {
+   "members": {
+    "graphIdentifier": {},
+    "snapshotName": {},
+    "tags": {
+     "shape": "TagMap"
+    }
+   }
+  },
+  "CreateGraphSnapshotOutput": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "sourceGraphId": {},
+    "snapshotCreateTime": {},
+    "status": {},
+    "kmsKeyIdentifier": {}
+   }
+  },
+  "CreateGraphUsingImportTaskInput": {
+   "members": {
+    "graphName": {},
+    "tags": {
+     "shape": "TagMap"
+    },
+    "publicConnectivity": {},
+    "kmsKeyIdentifier": {},
+    "vectorSearchConfiguration": {
+     "shape": "VectorSearchConfiguration"
+    },
+    "replicaCount": {},
+    "deletionProtection": {},
+    "importOptions": {
+     "shape": "ImportOptions"
+    },
+    "maxProvisionedMemory": {},
+    "minProvisionedMemory": {},
+    "failOnError": {},
+    "source": {},
+    "format": {},
+    "parquetType": {},
+    "blankNodeHandling": {},
+    "roleArn": {}
+   }
+  },
+  "CreateGraphUsingImportTaskOutput": {
+   "members": {
+    "graphId": {},
+    "taskId": {},
+    "source": {},
+    "format": {},
+    "parquetType": {},
+    "roleArn": {},
+    "status": {},
+    "importOptions": {
+     "shape": "ImportOptions"
+    }
+   }
+  },
+  "CreatePrivateGraphEndpointInput": {
+   "members": {
+    "vpcId": {},
+    "subnetIds": {
+     "shape": "SubnetIds"
+    },
+    "vpcSecurityGroupIds": {
+     "shape": "SecurityGroupIds"
+    }
+   }
+  },
+  "CreatePrivateGraphEndpointOutput": {
+   "members": {
+    "vpcId": {},
+    "subnetIds": {
+     "shape": "SubnetIds"
+    },
+    "status": {},
+    "vpcEndpointId": {}
+   }
+  },
+  "DeleteGraphInput": {
+   "members": {}
+  },
+  "DeleteGraphOutput": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "status": {},
+    "statusReason": {},
+    "createTime": {},
+    "provisionedMemory": {},
+    "endpoint": {},
+    "publicConnectivity": {},
+    "vectorSearchConfiguration": {
+     "shape": "VectorSearchConfiguration"
+    },
+    "replicaCount": {},
+    "kmsKeyIdentifier": {},
+    "sourceSnapshotId": {},
+    "deletionProtection": {},
+    "buildNumber": {}
+   }
+  },
+  "DeleteGraphSnapshotInput": {
+   "members": {}
+  },
+  "DeleteGraphSnapshotOutput": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "sourceGraphId": {},
+    "snapshotCreateTime": {},
+    "status": {},
+    "kmsKeyIdentifier": {}
+   }
+  },
+  "DeletePrivateGraphEndpointInput": {
+   "members": {}
+  },
+  "DeletePrivateGraphEndpointOutput": {
+   "members": {
+    "vpcId": {},
+    "subnetIds": {
+     "shape": "SubnetIds"
+    },
+    "status": {},
+    "vpcEndpointId": {}
+   }
+  },
+  "Document": {
+   "members": {}
+  },
+  "DocumentValuedMap": {
+   "map": "Document"
+  },
+  "EdgeLabels": {
+   "list": "String"
+  },
+  "EdgeProperties": {
+   "list": "String"
+  },
+  "EdgeStructure": {
+   "members": {
+    "count": {},
+    "edgeProperties": {
+     "shape": "EdgeProperties"
+    }
+   }
+  },
+  "EdgeStructures": {
+   "list": "EdgeStructure"
+  },
+  "ExecuteQueryInput": {
+   "members": {
+    "queryString": {
+     "name": "query"
+    },
+    "language": {},
+    "parameters": {
+     "shape": "DocumentValuedMap"
+    },
+    "planCache": {},
+    "explainMode": {
+     "name": "explain"
+    },
+    "queryTimeoutMilliseconds": {}
+   }
+  },
+  "ExecuteQueryOutput": {
+   "members": {
+    "payload": {}
+   }
+  },
+  "ExportFilter": {
+   "members": {
+    "vertexFilter": {
+     "shape": "ExportFilterPerLabelMap"
+    },
+    "edgeFilter": {
+     "shape": "ExportFilterPerLabelMap"
+    }
+   }
+  },
+  "ExportFilterElement": {
+   "members": {
+    "properties": {
+     "shape": "ExportFilterPropertyMap"
+    }
+   }
+  },
+  "ExportFilterPerLabelMap": {
+   "map": "ExportFilterElement"
+  },
+  "ExportFilterPropertyAttributes": {
+   "members": {
+    "outputType": {},
+    "sourcePropertyName": {},
+    "multiValueHandling": {}
+   }
+  },
+  "ExportFilterPropertyMap": {
+   "map": "ExportFilterPropertyAttributes"
+  },
+  "ExportTaskDetails": {
+   "members": {
+    "startTime": {},
+    "timeElapsedSeconds": {},
+    "progressPercentage": {},
+    "numVerticesWritten": {},
+    "numEdgesWritten": {}
+   }
+  },
+  "ExportTaskSummary": {
+   "members": {
+    "graphId": {},
+    "roleArn": {},
+    "taskId": {},
+    "status": {},
+    "format": {},
+    "destination": {},
+    "kmsKeyIdentifier": {},
+    "parquetType": {},
+    "statusReason": {}
+   }
+  },
+  "ExportTaskSummaryList": {
+   "list": "ExportTaskSummary"
+  },
+  "GetExportTaskInput": {
+   "members": {}
+  },
+  "GetExportTaskOutput": {
+   "members": {
+    "graphId": {},
+    "roleArn": {},
+    "taskId": {},
+    "status": {},
+    "format": {},
+    "destination": {},
+    "kmsKeyIdentifier": {},
+    "parquetType": {},
+    "statusReason": {},
+    "exportTaskDetails": {
+     "shape": "ExportTaskDetails"
+    },
+    "exportFilter": {
+     "shape": "ExportFilter"
+    }
+   }
+  },
+  "GetGraphInput": {
+   "members": {}
+  },
+  "GetGraphOutput": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "status": {},
+    "statusReason": {},
+    "createTime": {},
+    "provisionedMemory": {},
+    "endpoint": {},
+    "publicConnectivity": {},
+    "vectorSearchConfiguration": {
+     "shape": "VectorSearchConfiguration"
+    },
+    "replicaCount": {},
+    "kmsKeyIdentifier": {},
+    "sourceSnapshotId": {},
+    "deletionProtection": {},
+    "buildNumber": {}
+   }
+  },
+  "GetGraphSnapshotInput": {
+   "members": {}
+  },
+  "GetGraphSnapshotOutput": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "sourceGraphId": {},
+    "snapshotCreateTime": {},
+    "status": {},
+    "kmsKeyIdentifier": {}
+   }
+  },
+  "GetGraphSummaryInput": {
+   "members": {}
+  },
+  "GetGraphSummaryOutput": {
+   "members": {
+    "version": {},
+    "lastStatisticsComputationTime": {},
+    "graphSummary": {
+     "shape": "GraphDataSummary"
+    }
+   }
+  },
+  "GetImportTaskInput": {
+   "members": {}
+  },
+  "GetImportTaskOutput": {
+   "members": {
+    "graphId": {},
+    "taskId": {},
+    "source": {},
+    "format": {},
+    "parquetType": {},
+    "roleArn": {},
+    "status": {},
+    "importOptions": {
+     "shape": "ImportOptions"
+    },
+    "importTaskDetails": {
+     "shape": "ImportTaskDetails"
+    },
+    "attemptNumber": {},
+    "statusReason": {}
+   }
+  },
+  "GetPrivateGraphEndpointInput": {
+   "members": {}
+  },
+  "GetPrivateGraphEndpointOutput": {
+   "members": {
+    "vpcId": {},
+    "subnetIds": {
+     "shape": "SubnetIds"
+    },
+    "status": {},
+    "vpcEndpointId": {}
+   }
+  },
+  "GetQueryInput": {
+   "members": {}
+  },
+  "GetQueryOutput": {
+   "members": {
+    "id": {},
+    "queryString": {},
+    "waited": {},
+    "elapsed": {},
+    "state": {}
+   }
+  },
+  "GraphDataSummary": {
+   "members": {
+    "numNodes": {},
+    "numEdges": {},
+    "numNodeLabels": {},
+    "numEdgeLabels": {},
+    "nodeLabels": {
+     "shape": "NodeLabels"
+    },
+    "edgeLabels": {
+     "shape": "EdgeLabels"
+    },
+    "numNodeProperties": {},
+    "numEdgeProperties": {},
+    "nodeProperties": {
+     "shape": "LongValuedMapList"
+    },
+    "edgeProperties": {
+     "shape": "LongValuedMapList"
+    },
+    "totalNodePropertyValues": {},
+    "totalEdgePropertyValues": {},
+    "nodeStructures": {
+     "shape": "NodeStructures"
+    },
+    "edgeStructures": {
+     "shape": "EdgeStructures"
+    }
+   }
+  },
+  "GraphSnapshotSummary": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "sourceGraphId": {},
+    "snapshotCreateTime": {},
+    "status": {},
+    "kmsKeyIdentifier": {}
+   }
+  },
+  "GraphSnapshotSummaryList": {
+   "list": "GraphSnapshotSummary"
+  },
+  "GraphSummary": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "status": {},
+    "provisionedMemory": {},
+    "publicConnectivity": {},
+    "endpoint": {},
+    "replicaCount": {},
+    "kmsKeyIdentifier": {},
+    "deletionProtection": {}
+   }
+  },
+  "GraphSummaryList": {
+   "list": "GraphSummary"
+  },
+  "ImportOptions": {
+   "members": {
+    "neptune": {
+     "shape": "NeptuneImportOptions"
+    }
+   }
+  },
+  "ImportTaskDetails": {
+   "members": {
+    "status": {},
+    "startTime": {},
+    "timeElapsedSeconds": {},
+    "progressPercentage": {},
+    "errorCount": {},
+    "errorDetails": {},
+    "statementCount": {},
+    "dictionaryEntryCount": {}
+   }
+  },
+  "ImportTaskSummary": {
+   "members": {
+    "graphId": {},
+    "taskId": {},
+    "source": {},
+    "format": {},
+    "parquetType": {},
+    "roleArn": {},
+    "status": {}
+   }
+  },
+  "ImportTaskSummaryList": {
+   "list": "ImportTaskSummary"
+  },
+  "InternalServerException": {
+   "members": {
+    "message": {}
+   }
+  },
+  "ListExportTasksInput": {
+   "members": {}
+  },
+  "ListExportTasksOutput": {
+   "members": {
+    "tasks": {
+     "shape": "ExportTaskSummaryList"
+    },
+    "nextToken": {}
+   }
+  },
+  "ListGraphSnapshotsInput": {
+   "members": {}
+  },
+  "ListGraphSnapshotsOutput": {
+   "members": {
+    "graphSnapshots": {
+     "shape": "GraphSnapshotSummaryList"
+    },
+    "nextToken": {}
+   }
+  },
+  "ListGraphsInput": {
+   "members": {}
+  },
+  "ListGraphsOutput": {
+   "members": {
+    "graphs": {
+     "shape": "GraphSummaryList"
+    },
+    "nextToken": {}
+   }
+  },
+  "ListImportTasksInput": {
+   "members": {}
+  },
+  "ListImportTasksOutput": {
+   "members": {
+    "tasks": {
+     "shape": "ImportTaskSummaryList"
+    },
+    "nextToken": {}
+   }
+  },
+  "ListPrivateGraphEndpointsInput": {
+   "members": {}
+  },
+  "ListPrivateGraphEndpointsOutput": {
+   "members": {
+    "privateGraphEndpoints": {
+     "shape": "PrivateGraphEndpointSummaryList"
+    },
+    "nextToken": {}
+   }
+  },
+  "ListQueriesInput": {
+   "members": {}
+  },
+  "ListQueriesOutput": {
+   "members": {
+    "queries": {
+     "shape": "QuerySummaryList"
+    }
+   }
+  },
+  "ListTagsForResourceInput": {
+   "members": {}
+  },
+  "ListTagsForResourceOutput": {
+   "members": {
+    "tags": {
+     "shape": "TagMap"
+    }
+   }
+  },
+  "LongValuedMap": {
+   "map": "Long"
+  },
+  "LongValuedMapList": {
+   "list": "LongValuedMap"
+  },
+  "NeptuneImportOptions": {
+   "members": {
+    "s3ExportPath": {},
+    "s3ExportKmsKeyId": {},
+    "preserveDefaultVertexLabels": {},
+    "preserveEdgeIds": {}
+   }
+  },
+  "NodeLabels": {
+   "list": "String"
+  },
+  "NodeProperties": {
+   "list": "String"
+  },
+  "NodeStructure": {
+   "members": {
+    "count": {},
+    "nodeProperties": {
+     "shape": "NodeProperties"
+    },
+    "distinctOutgoingEdgeLabels": {
+     "shape": "OutgoingEdgeLabels"
+    }
+   }
+  },
+  "NodeStructures": {
+   "list": "NodeStructure"
+  },
+  "OutgoingEdgeLabels": {
+   "list": "String"
+  },
+  "PrivateGraphEndpointSummary": {
+   "members": {
+    "vpcId": {},
+    "subnetIds": {
+     "shape": "SubnetIds"
+    },
+    "status": {},
+    "vpcEndpointId": {}
+   }
+  },
+  "PrivateGraphEndpointSummaryList": {
+   "list": "PrivateGraphEndpointSummary"
+  },
+  "QuerySummary": {
+   "members": {
+    "id": {},
+    "queryString": {},
+    "waited": {},
+    "elapsed": {},
+    "state": {}
+   }
+  },
+  "QuerySummaryList": {
+   "list": "QuerySummary"
+  },
+  "ResetGraphInput": {
+   "members": {
+    "skipSnapshot": {}
+   }
+  },
+  "ResetGraphOutput": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "status": {},
+    "statusReason": {},
+    "createTime": {},
+    "provisionedMemory": {},
+    "endpoint": {},
+    "publicConnectivity": {},
+    "vectorSearchConfiguration": {
+     "shape": "VectorSearchConfiguration"
+    },
+    "replicaCount": {},
+    "kmsKeyIdentifier": {},
+    "sourceSnapshotId": {},
+    "deletionProtection": {},
+    "buildNumber": {}
+   }
+  },
+  "ResourceNotFoundException": {
+   "members": {
+    "message": {}
+   }
+  },
+  "RestoreGraphFromSnapshotInput": {
+   "members": {
+    "graphName": {},
+    "provisionedMemory": {},
+    "deletionProtection": {},
+    "tags": {
+     "shape": "TagMap"
+    },
+    "replicaCount": {},
+    "publicConnectivity": {}
+   }
+  },
+  "RestoreGraphFromSnapshotOutput": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "status": {},
+    "statusReason": {},
+    "createTime": {},
+    "provisionedMemory": {},
+    "endpoint": {},
+    "publicConnectivity": {},
+    "vectorSearchConfiguration": {
+     "shape": "VectorSearchConfiguration"
+    },
+    "replicaCount": {},
+    "kmsKeyIdentifier": {},
+    "sourceSnapshotId": {},
+    "deletionProtection": {},
+    "buildNumber": {}
+   }
+  },
+  "SecurityGroupIds": {
+   "list": "SecurityGroupId"
+  },
+  "ServiceQuotaExceededException": {
+   "members": {
+    "message": {},
+    "resourceId": {},
+    "resourceType": {},
+    "serviceCode": {},
+    "quotaCode": {}
+   }
+  },
+  "StartExportTaskInput": {
+   "members": {
+    "graphIdentifier": {},
+    "roleArn": {},
+    "format": {},
+    "destination": {},
+    "kmsKeyIdentifier": {},
+    "parquetType": {},
+    "exportFilter": {
+     "shape": "ExportFilter"
+    },
+    "tags": {
+     "shape": "TagMap"
+    }
+   }
+  },
+  "StartExportTaskOutput": {
+   "members": {
+    "graphId": {},
+    "roleArn": {},
+    "taskId": {},
+    "status": {},
+    "format": {},
+    "destination": {},
+    "kmsKeyIdentifier": {},
+    "parquetType": {},
+    "statusReason": {},
+    "exportFilter": {
+     "shape": "ExportFilter"
+    }
+   }
+  },
+  "StartGraphInput": {
+   "members": {}
+  },
+  "StartGraphOutput": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "status": {},
+    "statusReason": {},
+    "createTime": {},
+    "provisionedMemory": {},
+    "endpoint": {},
+    "publicConnectivity": {},
+    "vectorSearchConfiguration": {
+     "shape": "VectorSearchConfiguration"
+    },
+    "replicaCount": {},
+    "kmsKeyIdentifier": {},
+    "sourceSnapshotId": {},
+    "deletionProtection": {},
+    "buildNumber": {}
+   }
+  },
+  "StartImportTaskInput": {
+   "members": {
+    "importOptions": {
+     "shape": "ImportOptions"
+    },
+    "failOnError": {},
+    "source": {},
+    "format": {},
+    "parquetType": {},
+    "blankNodeHandling": {},
+    "roleArn": {}
+   }
+  },
+  "StartImportTaskOutput": {
+   "members": {
+    "graphId": {},
+    "taskId": {},
+    "source": {},
+    "format": {},
+    "parquetType": {},
+    "roleArn": {},
+    "status": {},
+    "importOptions": {
+     "shape": "ImportOptions"
+    }
+   }
+  },
+  "StopGraphInput": {
+   "members": {}
+  },
+  "StopGraphOutput": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "status": {},
+    "statusReason": {},
+    "createTime": {},
+    "provisionedMemory": {},
+    "endpoint": {},
+    "publicConnectivity": {},
+    "vectorSearchConfiguration": {
+     "shape": "VectorSearchConfiguration"
+    },
+    "replicaCount": {},
+    "kmsKeyIdentifier": {},
+    "sourceSnapshotId": {},
+    "deletionProtection": {},
+    "buildNumber": {}
+   }
+  },
+  "SubnetIds": {
+   "list": "SubnetId"
+  },
+  "TagKeyList": {
+   "list": "TagKey"
+  },
+  "TagMap": {
+   "map": "TagValue"
+  },
+  "TagResourceInput": {
+   "members": {
+    "tags": {
+     "shape": "TagMap"
+    }
+   }
+  },
+  "TagResourceOutput": {
+   "members": {}
+  },
+  "ThrottlingException": {
+   "members": {
+    "message": {}
+   }
+  },
+  "UnprocessableException": {
+   "members": {
+    "message": {},
+    "reason": {}
+   }
+  },
+  "UntagResourceInput": {
+   "members": {}
+  },
+  "UntagResourceOutput": {
+   "members": {}
+  },
+  "UpdateGraphInput": {
+   "members": {
+    "publicConnectivity": {},
+    "provisionedMemory": {},
+    "deletionProtection": {}
+   }
+  },
+  "UpdateGraphOutput": {
+   "members": {
+    "id": {},
+    "name": {},
+    "arn": {},
+    "status": {},
+    "statusReason": {},
+    "createTime": {},
+    "provisionedMemory": {},
+    "endpoint": {},
+    "publicConnectivity": {},
+    "vectorSearchConfiguration": {
+     "shape": "VectorSearchConfiguration"
+    },
+    "replicaCount": {},
+    "kmsKeyIdentifier": {},
+    "sourceSnapshotId": {},
+    "deletionProtection": {},
+    "buildNumber": {}
+   }
+  },
+  "ValidationException": {
+   "members": {
+    "message": {},
+    "reason": {}
+   }
+  },
+  "VectorSearchConfiguration": {
+   "members": {
+    "dimension": {}
+   }
+  }
+ }
+}

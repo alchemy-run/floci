@@ -1,0 +1,2424 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_iotmanagedintegrations_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateAccountAssociation": "CreateAccountAssociationRequest",
+    "CreateCloudConnector": "CreateCloudConnectorRequest",
+    "CreateConnectorDestination": "CreateConnectorDestinationRequest",
+    "CreateCredentialLocker": "CreateCredentialLockerRequest",
+    "CreateDestination": "CreateDestinationRequest",
+    "CreateEventLogConfiguration": "CreateEventLogConfigurationRequest",
+    "CreateManagedThing": "CreateManagedThingRequest",
+    "CreateNotificationConfiguration": "CreateNotificationConfigurationRequest",
+    "CreateOtaTask": "CreateOtaTaskRequest",
+    "CreateOtaTaskConfiguration": "CreateOtaTaskConfigurationRequest",
+    "CreateProvisioningProfile": "CreateProvisioningProfileRequest",
+    "DeleteAccountAssociation": "DeleteAccountAssociationRequest",
+    "DeleteCloudConnector": "DeleteCloudConnectorRequest",
+    "DeleteConnectorDestination": "DeleteConnectorDestinationRequest",
+    "DeleteCredentialLocker": "DeleteCredentialLockerRequest",
+    "DeleteDestination": "DeleteDestinationRequest",
+    "DeleteEventLogConfiguration": "DeleteEventLogConfigurationRequest",
+    "DeleteManagedThing": "DeleteManagedThingRequest",
+    "DeleteNotificationConfiguration": "DeleteNotificationConfigurationRequest",
+    "DeleteOtaTask": "DeleteOtaTaskRequest",
+    "DeleteOtaTaskConfiguration": "DeleteOtaTaskConfigurationRequest",
+    "DeleteProvisioningProfile": "DeleteProvisioningProfileRequest",
+    "DeregisterAccountAssociation": "DeregisterAccountAssociationRequest",
+    "GetAccountAssociation": "GetAccountAssociationRequest",
+    "GetCloudConnector": "GetCloudConnectorRequest",
+    "GetConnectorDestination": "GetConnectorDestinationRequest",
+    "GetCredentialLocker": "GetCredentialLockerRequest",
+    "GetCustomEndpoint": "GetCustomEndpointRequest",
+    "GetDefaultEncryptionConfiguration": "GetDefaultEncryptionConfigurationRequest",
+    "GetDestination": "GetDestinationRequest",
+    "GetDeviceDiscovery": "GetDeviceDiscoveryRequest",
+    "GetEventLogConfiguration": "GetEventLogConfigurationRequest",
+    "GetHubConfiguration": "GetHubConfigurationRequest",
+    "GetManagedThing": "GetManagedThingRequest",
+    "GetManagedThingCapabilities": "GetManagedThingCapabilitiesRequest",
+    "GetManagedThingCertificate": "GetManagedThingCertificateRequest",
+    "GetManagedThingConnectivityData": "GetManagedThingConnectivityDataRequest",
+    "GetManagedThingMetaData": "GetManagedThingMetaDataRequest",
+    "GetManagedThingState": "GetManagedThingStateRequest",
+    "GetNotificationConfiguration": "GetNotificationConfigurationRequest",
+    "GetOtaTask": "GetOtaTaskRequest",
+    "GetOtaTaskConfiguration": "GetOtaTaskConfigurationRequest",
+    "GetProvisioningProfile": "GetProvisioningProfileRequest",
+    "GetRuntimeLogConfiguration": "GetRuntimeLogConfigurationRequest",
+    "GetSchemaVersion": "GetSchemaVersionRequest",
+    "ListAccountAssociations": "ListAccountAssociationsRequest",
+    "ListCloudConnectors": "ListCloudConnectorsRequest",
+    "ListConnectorDestinations": "ListConnectorDestinationsRequest",
+    "ListCredentialLockers": "ListCredentialLockersRequest",
+    "ListDestinations": "ListDestinationsRequest",
+    "ListDeviceDiscoveries": "ListDeviceDiscoveriesRequest",
+    "ListDiscoveredDevices": "ListDiscoveredDevicesRequest",
+    "ListEventLogConfigurations": "ListEventLogConfigurationsRequest",
+    "ListManagedThingAccountAssociations": "ListManagedThingAccountAssociationsRequest",
+    "ListManagedThingSchemas": "ListManagedThingSchemasRequest",
+    "ListManagedThings": "ListManagedThingsRequest",
+    "ListNotificationConfigurations": "ListNotificationConfigurationsRequest",
+    "ListOtaTaskConfigurations": "ListOtaTaskConfigurationsRequest",
+    "ListOtaTaskExecutions": "ListOtaTaskExecutionsRequest",
+    "ListOtaTasks": "ListOtaTasksRequest",
+    "ListProvisioningProfiles": "ListProvisioningProfilesRequest",
+    "ListSchemaVersions": "ListSchemaVersionsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutDefaultEncryptionConfiguration": "PutDefaultEncryptionConfigurationRequest",
+    "PutHubConfiguration": "PutHubConfigurationRequest",
+    "PutRuntimeLogConfiguration": "PutRuntimeLogConfigurationRequest",
+    "RegisterAccountAssociation": "RegisterAccountAssociationRequest",
+    "RegisterCustomEndpoint": "RegisterCustomEndpointRequest",
+    "ResetRuntimeLogConfiguration": "ResetRuntimeLogConfigurationRequest",
+    "SendConnectorEvent": "SendConnectorEventRequest",
+    "SendManagedThingCommand": "SendManagedThingCommandRequest",
+    "StartAccountAssociationRefresh": "StartAccountAssociationRefreshRequest",
+    "StartDeviceDiscovery": "StartDeviceDiscoveryRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateAccountAssociation": "UpdateAccountAssociationRequest",
+    "UpdateCloudConnector": "UpdateCloudConnectorRequest",
+    "UpdateConnectorDestination": "UpdateConnectorDestinationRequest",
+    "UpdateDestination": "UpdateDestinationRequest",
+    "UpdateEventLogConfiguration": "UpdateEventLogConfigurationRequest",
+    "UpdateManagedThing": "UpdateManagedThingRequest",
+    "UpdateNotificationConfiguration": "UpdateNotificationConfigurationRequest",
+    "UpdateOtaTask": "UpdateOtaTaskRequest"
+  },
+  "shapes": {
+    "AbortConfigCriteria": {
+      "type": "structure",
+      "members": {
+        "Action": "AbortCriteriaAction",
+        "FailureType": "AbortCriteriaFailureType",
+        "MinNumberOfExecutedThings": "MinNumberOfExecutedThings",
+        "ThresholdPercentage": "ThresholdPercentage"
+      }
+    },
+    "AbortConfigCriteriaList": {
+      "type": "list",
+      "member": "AbortConfigCriteria"
+    },
+    "AbortCriteriaAction": {
+      "type": "string",
+      "enum": [
+        "CANCEL"
+      ]
+    },
+    "AbortCriteriaFailureType": {
+      "type": "string",
+      "enum": [
+        "FAILED",
+        "REJECTED",
+        "TIMED_OUT",
+        "ALL"
+      ]
+    },
+    "AccountAssociationDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 4096,
+      "pattern": "[A-Za-z0-9-_ ]+"
+    },
+    "AccountAssociationId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[0-9a-zA-Z]+"
+    },
+    "AccountAssociationName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[A-Za-z0-9-_ ]+"
+    },
+    "ActionName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[/a-zA-Z0-9\\._ -]+"
+    },
+    "ActionReference": {
+      "type": "string",
+      "pattern": "[a-zA-Z.]+"
+    },
+    "ActionTraceId": {
+      "type": "string",
+      "min": 16,
+      "max": 20,
+      "pattern": "[a-zA-Z0-9]+=(?:_[0-9]+)?"
+    },
+    "AttributeName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": ".*[a-zA-Z0-9_.,@/:#-]+.*"
+    },
+    "AttributeValue": {
+      "type": "string",
+      "min": 0,
+      "max": 800,
+      "pattern": ".*[a-zA-Z0-9_.,@/:#-]*.*"
+    },
+    "AuthConfig": {
+      "type": "structure",
+      "members": {
+        "oAuth": "OAuthConfig",
+        "GeneralAuthorization": "AuthMaterials"
+      }
+    },
+    "AuthConfigUpdate": {
+      "type": "structure",
+      "members": {
+        "oAuthUpdate": "OAuthUpdate",
+        "GeneralAuthorizationUpdate": "GeneralAuthorizationUpdate"
+      }
+    },
+    "AuthMaterial": {
+      "type": "structure",
+      "required": [
+        "SecretsManager",
+        "AuthMaterialName"
+      ],
+      "members": {
+        "SecretsManager": "SecretsManager",
+        "AuthMaterialName": "AuthMaterialName"
+      }
+    },
+    "AuthMaterialName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[a-zA-Z0-9=_+/-]+"
+    },
+    "AuthMaterialString": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "[0-9A-Za-z!#$%&()*\\+\\-;<=>?@^_`{|}~\\/: {},\\\\\"]+"
+    },
+    "AuthMaterialType": {
+      "type": "string",
+      "enum": [
+        "CUSTOM_PROTOCOL_QR_BAR_CODE",
+        "WIFI_SETUP_QR_BAR_CODE",
+        "ZWAVE_QR_BAR_CODE",
+        "ZIGBEE_QR_BAR_CODE",
+        "DISCOVERED_DEVICE",
+        "PRE_ONBOARDED_CLOUD"
+      ]
+    },
+    "AuthMaterials": {
+      "type": "list",
+      "min": 0,
+      "max": 3,
+      "member": "AuthMaterial"
+    },
+    "AuthType": {
+      "type": "string",
+      "enum": [
+        "OAUTH"
+      ]
+    },
+    "AuthUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "https?:\\/\\/(www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}([-a-zA-Z0-9()@:%_\\+.~#?&\\/=]*)"
+    },
+    "BaseRatePerMinute": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "Brand": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[A-Za-z0-9-_ ]+"
+    },
+    "CaCertificate": {
+      "type": "string",
+      "pattern": "-----BEGIN CERTIFICATE-----.*(.|\\n)*-----END CERTIFICATE-----\\n?"
+    },
+    "Capabilities": {
+      "type": "string",
+      "min": 1,
+      "max": 65535,
+      "pattern": "[a-zA-Z0-9\\s'\\x{0022},.:\\\\\\/{$}\\[\\]=_\\-\\+]+"
+    },
+    "CapabilityAction": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "CapabilityActionName",
+        "ref": "ActionReference",
+        "actionTraceId": "ActionTraceId",
+        "parameters": "CapabilityProperties"
+      }
+    },
+    "CapabilityActionName": {
+      "type": "string",
+      "pattern": "[/a-zA-Z]+"
+    },
+    "CapabilityActions": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "CapabilityAction"
+    },
+    "CapabilityId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9./]+(@\\d+\\.\\d+)?"
+    },
+    "CapabilityName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[/a-zA-Z0-9\\._ -]+"
+    },
+    "CapabilityProperties": {
+      "type": "document"
+    },
+    "CapabilityReport": {
+      "type": "structure",
+      "required": [
+        "version",
+        "endpoints"
+      ],
+      "members": {
+        "version": "CapabilityReportVersion",
+        "nodeId": "NodeId",
+        "endpoints": "CapabilityReportEndpoints"
+      }
+    },
+    "CapabilityReportActions": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "ActionName"
+    },
+    "CapabilityReportCapabilities": {
+      "type": "list",
+      "min": 0,
+      "max": 40,
+      "member": "CapabilityReportCapability"
+    },
+    "CapabilityReportCapability": {
+      "type": "structure",
+      "required": [
+        "id",
+        "name",
+        "version",
+        "properties",
+        "actions",
+        "events"
+      ],
+      "members": {
+        "id": "SchemaVersionedId",
+        "name": "CapabilityName",
+        "version": "CapabilityVersion",
+        "properties": "CapabilityReportProperties",
+        "actions": "CapabilityReportActions",
+        "events": "CapabilityReportEvents"
+      }
+    },
+    "CapabilityReportEndpoint": {
+      "type": "structure",
+      "required": [
+        "id",
+        "deviceTypes",
+        "capabilities"
+      ],
+      "members": {
+        "id": "EndpointId",
+        "deviceTypes": "DeviceTypes",
+        "capabilities": "CapabilityReportCapabilities"
+      }
+    },
+    "CapabilityReportEndpoints": {
+      "type": "list",
+      "min": 0,
+      "max": 40,
+      "member": "CapabilityReportEndpoint"
+    },
+    "CapabilityReportEvents": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "EventName"
+    },
+    "CapabilityReportProperties": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "PropertyName"
+    },
+    "CapabilityReportVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 10,
+      "pattern": "1\\.0\\.0"
+    },
+    "CapabilitySchemaItem": {
+      "type": "structure",
+      "required": [
+        "Format",
+        "CapabilityId",
+        "ExtrinsicId",
+        "ExtrinsicVersion",
+        "Schema"
+      ],
+      "members": {
+        "Format": "SchemaVersionFormat",
+        "CapabilityId": "SchemaVersionedId",
+        "ExtrinsicId": "ExtrinsicSchemaId",
+        "ExtrinsicVersion": "MatterCapabilityReportClusterRevisionId",
+        "Schema": "ValidationSchema"
+      }
+    },
+    "CapabilitySchemas": {
+      "type": "list",
+      "min": 0,
+      "max": 40,
+      "member": "CapabilitySchemaItem"
+    },
+    "CapabilityVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "(0|[1-9][0-9]*)"
+    },
+    "ClaimCertificate": {
+      "type": "string"
+    },
+    "Classification": {
+      "type": "string",
+      "min": 1,
+      "max": 64
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9=_-]+"
+    },
+    "CloudConnectorDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[0-9A-Za-z_\\- ]+"
+    },
+    "CloudConnectorId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9-_]+"
+    },
+    "CloudConnectorType": {
+      "type": "string",
+      "enum": [
+        "LISTED",
+        "UNLISTED"
+      ]
+    },
+    "ClusterId": {
+      "type": "string",
+      "min": 1,
+      "max": 24,
+      "pattern": "0[xX][0-9a-fA-F]+$|^[0-9]+"
+    },
+    "CommandCapabilities": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "CommandCapability"
+    },
+    "CommandCapability": {
+      "type": "structure",
+      "required": [
+        "id",
+        "name",
+        "version",
+        "actions"
+      ],
+      "members": {
+        "id": "SchemaVersionedId",
+        "name": "CapabilityName",
+        "version": "CapabilityVersion",
+        "actions": "CapabilityActions"
+      }
+    },
+    "CommandEndpoint": {
+      "type": "structure",
+      "required": [
+        "endpointId",
+        "capabilities"
+      ],
+      "members": {
+        "endpointId": "EndpointId",
+        "capabilities": "CommandCapabilities"
+      }
+    },
+    "CommandEndpoints": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "CommandEndpoint"
+    },
+    "ConnectorAssociationId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[0-9a-zA-Z]+"
+    },
+    "ConnectorDestinationDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[0-9A-Za-z_\\- ]+"
+    },
+    "ConnectorDestinationId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9-_]+"
+    },
+    "ConnectorDestinationName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[A-Za-z0-9-_ ]+"
+    },
+    "ConnectorDeviceId": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_.,@-]+"
+    },
+    "ConnectorDeviceIdList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "ConnectorDeviceId"
+    },
+    "ConnectorDeviceName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\p{L}\\p{N} ._-]+"
+    },
+    "ConnectorEventMessage": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\sa-zA-Z0-9_.,@-]+"
+    },
+    "ConnectorEventOperation": {
+      "type": "string",
+      "enum": [
+        "DEVICE_COMMAND_RESPONSE",
+        "DEVICE_DISCOVERY",
+        "DEVICE_EVENT",
+        "DEVICE_COMMAND_REQUEST"
+      ]
+    },
+    "ConnectorEventOperationVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 6,
+      "pattern": "[0-9.]+"
+    },
+    "ConnectorEventStatusCode": {
+      "type": "integer",
+      "min": 100,
+      "max": 550
+    },
+    "ConnectorId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9-_]+"
+    },
+    "ConnectorPolicyId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9-_]+"
+    },
+    "CreateAccountAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "ConnectorDestinationId"
+      ],
+      "members": {
+        "ClientToken": "ClientToken",
+        "ConnectorDestinationId": "ConnectorDestinationId",
+        "Name": "AccountAssociationName",
+        "Description": "AccountAssociationDescription",
+        "Tags": "TagsMap",
+        "GeneralAuthorization": "GeneralAuthorizationName"
+      }
+    },
+    "CreateCloudConnectorRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "EndpointConfig"
+      ],
+      "members": {
+        "Name": "DisplayName",
+        "EndpointConfig": "EndpointConfig",
+        "Description": "CloudConnectorDescription",
+        "EndpointType": "EndpointType",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateConnectorDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "CloudConnectorId",
+        "AuthConfig"
+      ],
+      "members": {
+        "Name": "ConnectorDestinationName",
+        "Description": "ConnectorDestinationDescription",
+        "CloudConnectorId": "CloudConnectorId",
+        "AuthType": "AuthType",
+        "AuthConfig": "AuthConfig",
+        "SecretsManager": "SecretsManager",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateCredentialLockerRequest": {
+      "type": "structure",
+      "members": {
+        "Name": "CredentialLockerName",
+        "ClientToken": "ClientToken",
+        "Tags": "TagsMap"
+      }
+    },
+    "CreateDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "DeliveryDestinationArn",
+        "DeliveryDestinationType",
+        "Name",
+        "RoleArn"
+      ],
+      "members": {
+        "DeliveryDestinationArn": "DeliveryDestinationArn",
+        "DeliveryDestinationType": "DeliveryDestinationType",
+        "Name": "DestinationName",
+        "RoleArn": "DeliveryDestinationRoleArn",
+        "ClientToken": "ClientToken",
+        "Description": "DestinationDescription",
+        "Tags": "TagsMap"
+      }
+    },
+    "CreateEventLogConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceType",
+        "EventLogLevel"
+      ],
+      "members": {
+        "ResourceType": "SmartHomeResourceType",
+        "ResourceId": "SmartHomeResourceId",
+        "EventLogLevel": "LogLevel",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateManagedThingRequest": {
+      "type": "structure",
+      "required": [
+        "Role",
+        "AuthenticationMaterial",
+        "AuthenticationMaterialType"
+      ],
+      "members": {
+        "Role": "Role",
+        "Owner": "Owner",
+        "CredentialLockerId": "CredentialLockerId",
+        "AuthenticationMaterial": "AuthMaterialString",
+        "AuthenticationMaterialType": "AuthMaterialType",
+        "WiFiSimpleSetupConfiguration": "WiFiSimpleSetupConfiguration",
+        "SerialNumber": "SerialNumber",
+        "Brand": "Brand",
+        "Model": "Model",
+        "Name": "Name",
+        "CapabilityReport": "CapabilityReport",
+        "CapabilitySchemas": "CapabilitySchemas",
+        "Capabilities": "Capabilities",
+        "ClientToken": "ClientToken",
+        "Classification": "Classification",
+        "Tags": "TagsMap",
+        "MetaData": "MetaData"
+      }
+    },
+    "CreateNotificationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "EventType",
+        "DestinationName"
+      ],
+      "members": {
+        "EventType": "EventType",
+        "DestinationName": "DestinationName",
+        "ClientToken": "ClientToken",
+        "Tags": "TagsMap"
+      }
+    },
+    "CreateOtaTaskConfigurationRequest": {
+      "type": "structure",
+      "members": {
+        "Description": "OtaDescription",
+        "Name": "OtaTaskConfigurationName",
+        "PushConfig": "PushConfig",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateOtaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "S3Url",
+        "OtaType"
+      ],
+      "members": {
+        "Description": "OtaDescription",
+        "S3Url": "S3Url",
+        "Protocol": "OtaProtocol",
+        "Target": "Target",
+        "TaskConfigurationId": "OtaTaskConfigurationId",
+        "OtaMechanism": "OtaMechanism",
+        "OtaType": "OtaType",
+        "OtaTargetQueryString": "OtaTargetQueryString",
+        "ClientToken": "ClientToken",
+        "OtaSchedulingConfig": "OtaTaskSchedulingConfig",
+        "OtaTaskExecutionRetryConfig": "OtaTaskExecutionRetryConfig",
+        "Tags": "TagsMap"
+      }
+    },
+    "CreateProvisioningProfileRequest": {
+      "type": "structure",
+      "required": [
+        "ProvisioningType"
+      ],
+      "members": {
+        "ProvisioningType": "ProvisioningType",
+        "CaCertificate": "CaCertificate",
+        "ClaimCertificate": "ClaimCertificate",
+        "Name": "ProvisioningProfileName",
+        "ClientToken": "ClientToken",
+        "Tags": "TagsMap"
+      }
+    },
+    "CredentialLockerId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9]*"
+    },
+    "CredentialLockerName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[A-Za-z0-9-_ ]+"
+    },
+    "CustomProtocolDetail": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "CustomProtocolDetailKey",
+      "value": "CustomProtocolDetailValue"
+    },
+    "CustomProtocolDetailKey": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9 _.-]+"
+    },
+    "CustomProtocolDetailValue": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "[a-zA-Z0-9 _.{}:\"-]+"
+    },
+    "DeleteAccountAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "AccountAssociationId"
+      ],
+      "members": {
+        "AccountAssociationId": "AccountAssociationId"
+      }
+    },
+    "DeleteCloudConnectorRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "CloudConnectorId"
+      }
+    },
+    "DeleteConnectorDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ConnectorDestinationId"
+      }
+    },
+    "DeleteCredentialLockerRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "CredentialLockerId"
+      }
+    },
+    "DeleteDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "DestinationName"
+      }
+    },
+    "DeleteEventLogConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "LogConfigurationId"
+      }
+    },
+    "DeleteLocalStoreAfterUpload": {
+      "type": "boolean"
+    },
+    "DeleteManagedThingRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ManagedThingId",
+        "Force": "Boolean"
+      }
+    },
+    "DeleteNotificationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "EventType"
+      ],
+      "members": {
+        "EventType": "EventType"
+      }
+    },
+    "DeleteOtaTaskConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "OtaTaskConfigurationId"
+      }
+    },
+    "DeleteOtaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "OtaTaskId"
+      }
+    },
+    "DeleteProvisioningProfileRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ProvisioningProfileId"
+      }
+    },
+    "DeliveryDestinationArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:aws[a-z0-9-]*:[0-9a-zA-Z]+:[0-9a-zA-Z-]+:[0-9]+:[0-9a-zA-Z]+/[0-9a-zA-Z._-]+"
+    },
+    "DeliveryDestinationRoleArn": {
+      "type": "string"
+    },
+    "DeliveryDestinationType": {
+      "type": "string",
+      "enum": [
+        "KINESIS"
+      ]
+    },
+    "DeregisterAccountAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "ManagedThingId",
+        "AccountAssociationId"
+      ],
+      "members": {
+        "ManagedThingId": "ManagedThingId",
+        "AccountAssociationId": "AccountAssociationId"
+      }
+    },
+    "DestinationDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[0-9A-Za-z_\\- ]+"
+    },
+    "DestinationName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}\\p{N} ._-]+"
+    },
+    "Device": {
+      "type": "structure",
+      "required": [
+        "ConnectorDeviceId",
+        "CapabilityReport"
+      ],
+      "members": {
+        "ConnectorDeviceId": "ConnectorDeviceId",
+        "ConnectorDeviceName": "ConnectorDeviceName",
+        "CapabilityReport": "MatterCapabilityReport",
+        "CapabilitySchemas": "CapabilitySchemas",
+        "DeviceMetadata": "DeviceMetadata"
+      }
+    },
+    "DeviceDiscoveryId": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[A-Za-z0-9]+"
+    },
+    "DeviceDiscoveryStatus": {
+      "type": "string",
+      "enum": [
+        "RUNNING",
+        "SUCCEEDED",
+        "FAILED",
+        "TIMED_OUT"
+      ]
+    },
+    "DeviceMetadata": {
+      "type": "document"
+    },
+    "DeviceType": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9=_. ,@\\+\\-/]+"
+    },
+    "DeviceTypes": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "DeviceType"
+    },
+    "Devices": {
+      "type": "list",
+      "member": "Device"
+    },
+    "DiscoveryAuthMaterialString": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[0-9A-Za-z_\\-\\+=\\/:; ]+"
+    },
+    "DiscoveryAuthMaterialType": {
+      "type": "string",
+      "enum": [
+        "ZWAVE_INSTALL_CODE"
+      ]
+    },
+    "DiscoveryType": {
+      "type": "string",
+      "enum": [
+        "ZWAVE",
+        "ZIGBEE",
+        "CLOUD",
+        "CUSTOM",
+        "CONTROLLER_CAPABILITY_REDISCOVERY"
+      ]
+    },
+    "DisplayName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[A-Za-z0-9-_ ]+"
+    },
+    "DurationInMinutes": {
+      "type": "integer",
+      "min": 1,
+      "max": 1430
+    },
+    "EnableAsProvisionee": {
+      "type": "boolean"
+    },
+    "EnableAsProvisioner": {
+      "type": "boolean"
+    },
+    "EncryptionType": {
+      "type": "string",
+      "enum": [
+        "MANAGED_INTEGRATIONS_DEFAULT_ENCRYPTION",
+        "CUSTOMER_KEY_ENCRYPTION"
+      ]
+    },
+    "EndTime": {
+      "type": "string"
+    },
+    "EndpointConfig": {
+      "type": "structure",
+      "members": {
+        "lambda": "LambdaConfig"
+      }
+    },
+    "EndpointId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[0-9a-zA-Z]+"
+    },
+    "EndpointSemanticTag": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[0-9a-zA-Z._-]+"
+    },
+    "EndpointType": {
+      "type": "string",
+      "enum": [
+        "LAMBDA"
+      ]
+    },
+    "EventName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[/a-zA-Z0-9\\._ -]+"
+    },
+    "EventType": {
+      "type": "string",
+      "enum": [
+        "DEVICE_COMMAND",
+        "DEVICE_COMMAND_REQUEST",
+        "DEVICE_DISCOVERY_STATUS",
+        "DEVICE_EVENT",
+        "DEVICE_LIFE_CYCLE",
+        "DEVICE_STATE",
+        "DEVICE_OTA",
+        "DEVICE_WSS",
+        "CONNECTOR_ASSOCIATION",
+        "ACCOUNT_ASSOCIATION",
+        "CONNECTOR_ERROR_REPORT"
+      ]
+    },
+    "ExponentialRolloutRate": {
+      "type": "structure",
+      "members": {
+        "BaseRatePerMinute": "BaseRatePerMinute",
+        "IncrementFactor": "IncrementFactor",
+        "RateIncreaseCriteria": "RolloutRateIncreaseCriteria"
+      }
+    },
+    "ExtrinsicSchemaId": {
+      "type": "string",
+      "min": 1,
+      "max": 10,
+      "pattern": "0[xX][0-9a-fA-F]+$|^[0-9]+"
+    },
+    "GeneralAuthorizationName": {
+      "type": "structure",
+      "members": {
+        "AuthMaterialName": "AuthMaterialName"
+      }
+    },
+    "GeneralAuthorizationUpdate": {
+      "type": "structure",
+      "members": {
+        "AuthMaterialsToAdd": "AuthMaterials",
+        "AuthMaterialsToUpdate": "AuthMaterials"
+      }
+    },
+    "GetAccountAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "AccountAssociationId"
+      ],
+      "members": {
+        "AccountAssociationId": "AccountAssociationId"
+      }
+    },
+    "GetCloudConnectorRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "CloudConnectorId"
+      }
+    },
+    "GetConnectorDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ConnectorDestinationId"
+      }
+    },
+    "GetCredentialLockerRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "CredentialLockerId"
+      }
+    },
+    "GetCustomEndpointRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetDefaultEncryptionConfigurationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "DestinationName"
+      }
+    },
+    "GetDeviceDiscoveryRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "DeviceDiscoveryId"
+      }
+    },
+    "GetEventLogConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "LogConfigurationId"
+      }
+    },
+    "GetHubConfigurationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetManagedThingCapabilitiesRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ManagedThingId"
+      }
+    },
+    "GetManagedThingCertificateRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ManagedThingId"
+      }
+    },
+    "GetManagedThingConnectivityDataRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ManagedThingId"
+      }
+    },
+    "GetManagedThingMetaDataRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ManagedThingId"
+      }
+    },
+    "GetManagedThingRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ManagedThingId"
+      }
+    },
+    "GetManagedThingStateRequest": {
+      "type": "structure",
+      "required": [
+        "ManagedThingId"
+      ],
+      "members": {
+        "ManagedThingId": "ManagedThingId"
+      }
+    },
+    "GetNotificationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "EventType"
+      ],
+      "members": {
+        "EventType": "EventType"
+      }
+    },
+    "GetOtaTaskConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "OtaTaskConfigurationId"
+      }
+    },
+    "GetOtaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "OtaTaskId"
+      }
+    },
+    "GetProvisioningProfileRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ProvisioningProfileId"
+      }
+    },
+    "GetRuntimeLogConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ManagedThingId"
+      ],
+      "members": {
+        "ManagedThingId": "ManagedThingId"
+      }
+    },
+    "GetSchemaVersionRequest": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "SchemaVersionedId"
+      ],
+      "members": {
+        "Type": "SchemaVersionType",
+        "SchemaVersionedId": "SchemaVersionedId",
+        "Format": "SchemaVersionFormat"
+      }
+    },
+    "HubNetworkMode": {
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "NETWORK_WIDE_EXCLUSION"
+      ]
+    },
+    "HubTokenTimerExpirySettingInSeconds": {
+      "type": "long",
+      "min": 1
+    },
+    "InProgressTimeoutInMinutes": {
+      "type": "long",
+      "min": 1,
+      "max": 10080
+    },
+    "IncrementFactor": {
+      "type": "double",
+      "min": 1.1,
+      "max": 5
+    },
+    "IoTManagedIntegrationsResourceARN": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "arn:aws[a-z0-9-]*:iotmanagedintegrations:[0-9a-zA-Z-]+:[0-9]+:(managed-thing|provisioning-profile|ota-task|credential-locker|account-association)/[0-9a-zA-Z]+"
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "arn:aws[a-z0-9-]*:kms:[0-9a-zA-Z-]+:[0-9]+:key/[0-9a-zA-Z-]+"
+    },
+    "LambdaArn": {
+      "type": "string",
+      "pattern": "(arn:aws[a-z0-9-]*:lambda:[0-9a-zA-Z-]+:[0-9]+:function:)?([a-zA-Z0-9-_]+(:(\\$LATEST|[a-zA-Z0-9-_]+))?)"
+    },
+    "LambdaConfig": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "LambdaArn"
+      }
+    },
+    "ListAccountAssociationsRequest": {
+      "type": "structure",
+      "members": {
+        "ConnectorDestinationId": "ConnectorDestinationId",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListCloudConnectorsRequest": {
+      "type": "structure",
+      "members": {
+        "Type": "CloudConnectorType",
+        "LambdaArn": "LambdaArn",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListConnectorDestinationsRequest": {
+      "type": "structure",
+      "members": {
+        "CloudConnectorId": "CloudConnectorId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListCredentialLockersRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListDestinationsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListDeviceDiscoveriesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "TypeFilter": "DiscoveryType",
+        "StatusFilter": "DeviceDiscoveryStatus"
+      }
+    },
+    "ListDiscoveredDevicesRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "DeviceDiscoveryId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListEventLogConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListManagedThingAccountAssociationsRequest": {
+      "type": "structure",
+      "members": {
+        "ManagedThingId": "ManagedThingId",
+        "AccountAssociationId": "AccountAssociationId",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListManagedThingSchemasRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ManagedThingId",
+        "EndpointIdFilter": "EndpointId",
+        "CapabilityIdFilter": "CapabilityId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListManagedThingsRequest": {
+      "type": "structure",
+      "members": {
+        "OwnerFilter": "Owner",
+        "CredentialLockerFilter": "CredentialLockerId",
+        "RoleFilter": "Role",
+        "ParentControllerIdentifierFilter": "ParentControllerId",
+        "ConnectorPolicyIdFilter": "ConnectorPolicyId",
+        "ConnectorDestinationIdFilter": "ConnectorDestinationId",
+        "ConnectorDeviceIdFilter": "ConnectorDeviceId",
+        "SerialNumberFilter": "SerialNumber",
+        "ProvisioningStatusFilter": "ProvisioningStatus",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListNotificationConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListOtaTaskConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListOtaTaskExecutionsRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "OtaTaskId",
+        "NextToken": "OtaNextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListOtaTasksRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "OtaNextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListProvisioningProfilesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListSchemaVersionsRequest": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "Type": "SchemaVersionType",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken",
+        "SchemaId": "SchemaId",
+        "Namespace": "SchemaVersionNamespaceName",
+        "Visibility": "SchemaVersionVisibility",
+        "SemanticVersion": "SchemaVersionVersion"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "IoTManagedIntegrationsResourceARN"
+      }
+    },
+    "LocalStoreFileRotationMaxBytes": {
+      "type": "integer"
+    },
+    "LocalStoreFileRotationMaxFiles": {
+      "type": "integer"
+    },
+    "LocalStoreLocation": {
+      "type": "string"
+    },
+    "LogConfigurationId": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[A-Za-z0-9]+"
+    },
+    "LogLevel": {
+      "type": "string",
+      "enum": [
+        "DEBUG",
+        "ERROR",
+        "INFO",
+        "WARN"
+      ]
+    },
+    "ManagedThingId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9:_-]*"
+    },
+    "MatterAttributeId": {
+      "type": "string",
+      "min": 1,
+      "max": 24,
+      "pattern": "0[xX][0-9a-fA-F]+$|^[0-9]+"
+    },
+    "MatterAttributes": {
+      "type": "document"
+    },
+    "MatterCapabilityReport": {
+      "type": "structure",
+      "required": [
+        "version",
+        "endpoints"
+      ],
+      "members": {
+        "version": "CapabilityReportVersion",
+        "nodeId": "NodeId",
+        "endpoints": "MatterCapabilityReportEndpoints"
+      }
+    },
+    "MatterCapabilityReportAttribute": {
+      "type": "structure",
+      "members": {
+        "id": "MatterAttributeId",
+        "name": "ActionName",
+        "value": "MatterCapabilityReportAttributeValue"
+      }
+    },
+    "MatterCapabilityReportAttributeValue": {
+      "type": "document"
+    },
+    "MatterCapabilityReportAttributes": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "MatterCapabilityReportAttribute"
+    },
+    "MatterCapabilityReportCluster": {
+      "type": "structure",
+      "required": [
+        "id",
+        "revision"
+      ],
+      "members": {
+        "id": "ClusterId",
+        "revision": "MatterCapabilityReportClusterRevisionId",
+        "publicId": "SchemaVersionedId",
+        "name": "CapabilityName",
+        "specVersion": "SpecVersion",
+        "attributes": "MatterCapabilityReportAttributes",
+        "commands": "MatterCapabilityReportCommands",
+        "events": "MatterCapabilityReportEvents",
+        "featureMap": "MatterCapabilityReportFeatureMap",
+        "generatedCommands": "MatterCapabilityReportGeneratedCommands",
+        "fabricIndex": "MatterCapabilityReportFabricIndex"
+      }
+    },
+    "MatterCapabilityReportClusterRevisionId": {
+      "type": "integer",
+      "min": 1,
+      "max": 10
+    },
+    "MatterCapabilityReportClusters": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "MatterCapabilityReportCluster"
+    },
+    "MatterCapabilityReportCommands": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "MatterCommandId"
+    },
+    "MatterCapabilityReportEndpoint": {
+      "type": "structure",
+      "required": [
+        "id",
+        "deviceTypes",
+        "clusters"
+      ],
+      "members": {
+        "id": "EndpointId",
+        "deviceTypes": "DeviceTypes",
+        "clusters": "MatterCapabilityReportClusters",
+        "parts": "MatterCapabilityReportEndpointParts",
+        "semanticTags": "MatterCapabilityReportEndpointSemanticTags",
+        "clientClusters": "MatterCapabilityReportEndpointClientClusters"
+      }
+    },
+    "MatterCapabilityReportEndpointClientClusters": {
+      "type": "list",
+      "min": 0,
+      "max": 32,
+      "member": "ClusterId"
+    },
+    "MatterCapabilityReportEndpointParts": {
+      "type": "list",
+      "min": 0,
+      "max": 32,
+      "member": "EndpointId"
+    },
+    "MatterCapabilityReportEndpointSemanticTags": {
+      "type": "list",
+      "min": 0,
+      "max": 32,
+      "member": "EndpointSemanticTag"
+    },
+    "MatterCapabilityReportEndpoints": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "MatterCapabilityReportEndpoint"
+    },
+    "MatterCapabilityReportEvents": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "MatterEventId"
+    },
+    "MatterCapabilityReportFabricIndex": {
+      "type": "integer",
+      "min": 0,
+      "max": 4096
+    },
+    "MatterCapabilityReportFeatureMap": {
+      "type": "long",
+      "min": 0,
+      "max": 4294967295
+    },
+    "MatterCapabilityReportGeneratedCommands": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "MatterCommandId"
+    },
+    "MatterCluster": {
+      "type": "structure",
+      "members": {
+        "id": "ClusterId",
+        "attributes": "MatterAttributes",
+        "commands": "MatterCommands",
+        "events": "MatterEvents"
+      }
+    },
+    "MatterClusters": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "MatterCluster"
+    },
+    "MatterCommandId": {
+      "type": "string",
+      "min": 1,
+      "max": 24,
+      "pattern": "0[xX][0-9a-fA-F]+$|^[0-9]+"
+    },
+    "MatterCommands": {
+      "type": "map",
+      "min": 1,
+      "max": 5,
+      "key": "MatterCommandId",
+      "value": "MatterFields"
+    },
+    "MatterEndpoint": {
+      "type": "structure",
+      "members": {
+        "id": "EndpointId",
+        "clusters": "MatterClusters"
+      }
+    },
+    "MatterEventId": {
+      "type": "string",
+      "min": 1,
+      "max": 24,
+      "pattern": "0[xX][0-9a-fA-F]+$|^[0-9]+"
+    },
+    "MatterEvents": {
+      "type": "map",
+      "min": 1,
+      "max": 5,
+      "key": "MatterEventId",
+      "value": "MatterFields"
+    },
+    "MatterFields": {
+      "type": "document"
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "MaximumPerMinute": {
+      "type": "integer",
+      "min": 1
+    },
+    "MetaData": {
+      "type": "map",
+      "min": 1,
+      "max": 50,
+      "key": "AttributeName",
+      "value": "AttributeValue"
+    },
+    "MinNumberOfExecutedThings": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MinNumberOfRetries": {
+      "type": "integer",
+      "min": 0,
+      "max": 10
+    },
+    "Model": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[A-Za-z0-9-_ ]+"
+    },
+    "Name": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[\\p{L}\\p{N} ._-]+"
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 65535,
+      "pattern": "[a-zA-Z0-9=_-]+"
+    },
+    "NodeId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9=_.,@\\+\\-/]+"
+    },
+    "NumberOfNotifiedThings": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "NumberOfSucceededThings": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "OAuthConfig": {
+      "type": "structure",
+      "required": [
+        "authUrl",
+        "tokenUrl",
+        "tokenEndpointAuthenticationScheme"
+      ],
+      "members": {
+        "authUrl": "AuthUrl",
+        "tokenUrl": "TokenUrl",
+        "scope": "String",
+        "tokenEndpointAuthenticationScheme": "TokenEndpointAuthenticationScheme",
+        "oAuthCompleteRedirectUrl": "String",
+        "proactiveRefreshTokenRenewal": "ProactiveRefreshTokenRenewal"
+      }
+    },
+    "OAuthUpdate": {
+      "type": "structure",
+      "members": {
+        "oAuthCompleteRedirectUrl": "String",
+        "proactiveRefreshTokenRenewal": "ProactiveRefreshTokenRenewal"
+      }
+    },
+    "OtaDescription": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[0-9A-Za-z_\\- ]+"
+    },
+    "OtaMechanism": {
+      "type": "string",
+      "enum": [
+        "PUSH"
+      ]
+    },
+    "OtaNextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 65535,
+      "pattern": "[a-zA-Z0-9=_+/-]+"
+    },
+    "OtaProtocol": {
+      "type": "string",
+      "enum": [
+        "HTTP"
+      ]
+    },
+    "OtaTargetQueryString": {
+      "type": "string"
+    },
+    "OtaTaskAbortConfig": {
+      "type": "structure",
+      "members": {
+        "AbortConfigCriteriaList": "AbortConfigCriteriaList"
+      }
+    },
+    "OtaTaskConfigurationId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9]*"
+    },
+    "OtaTaskConfigurationName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[A-Za-z0-9-_ ]+"
+    },
+    "OtaTaskExecutionRetryConfig": {
+      "type": "structure",
+      "members": {
+        "RetryConfigCriteria": "RetryConfigCriteriaList"
+      }
+    },
+    "OtaTaskExecutionRolloutConfig": {
+      "type": "structure",
+      "members": {
+        "ExponentialRolloutRate": "ExponentialRolloutRate",
+        "MaximumPerMinute": "MaximumPerMinute"
+      }
+    },
+    "OtaTaskId": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[A-Za-z0-9]+"
+    },
+    "OtaTaskSchedulingConfig": {
+      "type": "structure",
+      "members": {
+        "EndBehavior": "SchedulingConfigEndBehavior",
+        "EndTime": "EndTime",
+        "MaintenanceWindows": "ScheduleMaintenanceWindowList",
+        "StartTime": "ScheduleStartTime"
+      }
+    },
+    "OtaTaskTimeoutConfig": {
+      "type": "structure",
+      "members": {
+        "InProgressTimeoutInMinutes": "InProgressTimeoutInMinutes"
+      }
+    },
+    "OtaType": {
+      "type": "string",
+      "enum": [
+        "ONE_TIME",
+        "CONTINUOUS"
+      ]
+    },
+    "Owner": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9_.,@-]+"
+    },
+    "ParentControllerId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9]+"
+    },
+    "ProactiveRefreshTokenRenewal": {
+      "type": "structure",
+      "members": {
+        "enabled": "Boolean",
+        "DaysBeforeRenewal": "ProactiveRefreshTokenRenewalDaysBeforeRenewalInteger"
+      }
+    },
+    "ProactiveRefreshTokenRenewalDaysBeforeRenewalInteger": {
+      "type": "integer",
+      "min": 30
+    },
+    "PropertyName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[/a-zA-Z0-9\\._ -]+"
+    },
+    "ProtocolType": {
+      "type": "string",
+      "enum": [
+        "ZWAVE",
+        "ZIGBEE",
+        "CUSTOM"
+      ]
+    },
+    "ProvisioningProfileId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[A-Za-z0-9-_]+"
+    },
+    "ProvisioningProfileName": {
+      "type": "string",
+      "min": 1,
+      "max": 36,
+      "pattern": "[0-9A-Za-z_-]+"
+    },
+    "ProvisioningStatus": {
+      "type": "string",
+      "enum": [
+        "UNASSOCIATED",
+        "PRE_ASSOCIATED",
+        "DISCOVERED",
+        "ACTIVATED",
+        "DELETION_FAILED",
+        "DELETE_IN_PROGRESS",
+        "ISOLATED",
+        "DELETED"
+      ]
+    },
+    "ProvisioningType": {
+      "type": "string",
+      "enum": [
+        "FLEET_PROVISIONING",
+        "JITR"
+      ]
+    },
+    "PushConfig": {
+      "type": "structure",
+      "members": {
+        "AbortConfig": "OtaTaskAbortConfig",
+        "RolloutConfig": "OtaTaskExecutionRolloutConfig",
+        "TimeoutConfig": "OtaTaskTimeoutConfig"
+      }
+    },
+    "PutDefaultEncryptionConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "encryptionType"
+      ],
+      "members": {
+        "encryptionType": "EncryptionType",
+        "kmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "PutHubConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "HubTokenTimerExpirySettingInSeconds"
+      ],
+      "members": {
+        "HubTokenTimerExpirySettingInSeconds": "HubTokenTimerExpirySettingInSeconds"
+      }
+    },
+    "PutRuntimeLogConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ManagedThingId",
+        "RuntimeLogConfigurations"
+      ],
+      "members": {
+        "ManagedThingId": "ManagedThingId",
+        "RuntimeLogConfigurations": "RuntimeLogConfigurations"
+      }
+    },
+    "RegisterAccountAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "ManagedThingId",
+        "AccountAssociationId",
+        "DeviceDiscoveryId"
+      ],
+      "members": {
+        "ManagedThingId": "ManagedThingId",
+        "AccountAssociationId": "AccountAssociationId",
+        "DeviceDiscoveryId": "DeviceDiscoveryId"
+      }
+    },
+    "RegisterCustomEndpointRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "ResetRuntimeLogConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ManagedThingId"
+      ],
+      "members": {
+        "ManagedThingId": "ManagedThingId"
+      }
+    },
+    "RetryConfigCriteria": {
+      "type": "structure",
+      "members": {
+        "FailureType": "RetryCriteriaFailureType",
+        "MinNumberOfRetries": "MinNumberOfRetries"
+      }
+    },
+    "RetryConfigCriteriaList": {
+      "type": "list",
+      "member": "RetryConfigCriteria"
+    },
+    "RetryCriteriaFailureType": {
+      "type": "string",
+      "enum": [
+        "FAILED",
+        "TIMED_OUT",
+        "ALL"
+      ]
+    },
+    "Role": {
+      "type": "string",
+      "enum": [
+        "CONTROLLER",
+        "DEVICE"
+      ]
+    },
+    "RolloutRateIncreaseCriteria": {
+      "type": "structure",
+      "members": {
+        "numberOfNotifiedThings": "NumberOfNotifiedThings",
+        "numberOfSucceededThings": "NumberOfSucceededThings"
+      }
+    },
+    "RuntimeLogConfigurations": {
+      "type": "structure",
+      "members": {
+        "LogLevel": "LogLevel",
+        "LogFlushLevel": "LogLevel",
+        "LocalStoreLocation": "LocalStoreLocation",
+        "LocalStoreFileRotationMaxFiles": "LocalStoreFileRotationMaxFiles",
+        "LocalStoreFileRotationMaxBytes": "LocalStoreFileRotationMaxBytes",
+        "UploadLog": "UploadLog",
+        "UploadPeriodMinutes": "UploadPeriodMinutes",
+        "DeleteLocalStoreAfterUpload": "DeleteLocalStoreAfterUpload"
+      }
+    },
+    "S3Url": {
+      "type": "string",
+      "min": 1,
+      "max": 1000
+    },
+    "ScheduleMaintenanceWindow": {
+      "type": "structure",
+      "members": {
+        "DurationInMinutes": "DurationInMinutes",
+        "StartTime": "StartTime"
+      }
+    },
+    "ScheduleMaintenanceWindowList": {
+      "type": "list",
+      "member": "ScheduleMaintenanceWindow"
+    },
+    "ScheduleStartTime": {
+      "type": "string"
+    },
+    "SchedulingConfigEndBehavior": {
+      "type": "string",
+      "enum": [
+        "STOP_ROLLOUT",
+        "CANCEL",
+        "FORCE_CANCEL"
+      ]
+    },
+    "SchemaId": {
+      "type": "string",
+      "min": 3,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9.]+"
+    },
+    "SchemaVersionFormat": {
+      "type": "string",
+      "enum": [
+        "AWS",
+        "ZCL",
+        "CONNECTOR"
+      ]
+    },
+    "SchemaVersionNamespaceName": {
+      "type": "string",
+      "min": 3,
+      "max": 12,
+      "pattern": "[a-z0-9]+"
+    },
+    "SchemaVersionType": {
+      "type": "string",
+      "enum": [
+        "capability",
+        "definition"
+      ]
+    },
+    "SchemaVersionVersion": {
+      "type": "string",
+      "min": 3,
+      "max": 12,
+      "pattern": "(\\d+\\.\\d+(\\.\\d+)?|\\$latest)"
+    },
+    "SchemaVersionVisibility": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "PRIVATE"
+      ]
+    },
+    "SchemaVersionedId": {
+      "type": "string",
+      "min": 7,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9.]+@(\\d+\\.\\d+(\\.\\d+)?|\\$latest)"
+    },
+    "SecretsManager": {
+      "type": "structure",
+      "required": [
+        "arn",
+        "versionId"
+      ],
+      "members": {
+        "arn": "SecretsManagerArn",
+        "versionId": "SecretsManagerVersionId"
+      }
+    },
+    "SecretsManagerArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:aws[a-z0-9-]*:secretsmanager:[0-9a-zA-Z-]{1,32}:\\d{12}:secret:[A-Za-z0-9/_+=.@-]{8,520}"
+    },
+    "SecretsManagerVersionId": {
+      "type": "string",
+      "min": 32,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9-_]+"
+    },
+    "SendConnectorEventRequest": {
+      "type": "structure",
+      "required": [
+        "ConnectorId",
+        "Operation"
+      ],
+      "members": {
+        "ConnectorId": "ConnectorId",
+        "UserId": "ThirdPartyUserId",
+        "Operation": "ConnectorEventOperation",
+        "OperationVersion": "ConnectorEventOperationVersion",
+        "StatusCode": "ConnectorEventStatusCode",
+        "Message": "ConnectorEventMessage",
+        "DeviceDiscoveryId": "DeviceDiscoveryId",
+        "ConnectorDeviceId": "ConnectorDeviceId",
+        "TraceId": "TraceId",
+        "Devices": "Devices",
+        "MatterEndpoint": "MatterEndpoint"
+      }
+    },
+    "SendManagedThingCommandRequest": {
+      "type": "structure",
+      "required": [
+        "ManagedThingId",
+        "Endpoints"
+      ],
+      "members": {
+        "ManagedThingId": "ManagedThingId",
+        "Endpoints": "CommandEndpoints",
+        "ConnectorAssociationId": "ConnectorAssociationId",
+        "AccountAssociationId": "AccountAssociationId"
+      }
+    },
+    "SerialNumber": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[A-Za-z0-9-_ ]+"
+    },
+    "SmartHomeResourceId": {
+      "type": "string",
+      "min": 1,
+      "max": 200,
+      "pattern": "[a-zA-Z0-9+*]*"
+    },
+    "SmartHomeResourceType": {
+      "type": "string",
+      "pattern": "[*]$|^(managed-thing|credential-locker|provisioning-profile|ota-task|account-association)"
+    },
+    "SpecVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "\\d+\\.\\d+"
+    },
+    "StartAccountAssociationRefreshRequest": {
+      "type": "structure",
+      "required": [
+        "AccountAssociationId"
+      ],
+      "members": {
+        "AccountAssociationId": "AccountAssociationId"
+      }
+    },
+    "StartDeviceDiscoveryRequest": {
+      "type": "structure",
+      "required": [
+        "DiscoveryType"
+      ],
+      "members": {
+        "DiscoveryType": "DiscoveryType",
+        "CustomProtocolDetail": "CustomProtocolDetail",
+        "ControllerIdentifier": "ManagedThingId",
+        "ConnectorAssociationIdentifier": "ConnectorAssociationId",
+        "AccountAssociationId": "AccountAssociationId",
+        "AuthenticationMaterial": "DiscoveryAuthMaterialString",
+        "AuthenticationMaterialType": "DiscoveryAuthMaterialType",
+        "ClientToken": "ClientToken",
+        "Tags": "TagsMap",
+        "ConnectorDeviceIdList": "ConnectorDeviceIdList",
+        "Protocol": "ProtocolType",
+        "EndDeviceIdentifier": "ManagedThingId"
+      }
+    },
+    "StartTime": {
+      "type": "string"
+    },
+    "String": {
+      "type": "string"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "IoTManagedIntegrationsResourceARN",
+        "Tags": "TagsMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TagsMap": {
+      "type": "map",
+      "min": 1,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "Target": {
+      "type": "list",
+      "member": "String"
+    },
+    "ThirdPartyUserId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9_.,@-]+"
+    },
+    "ThresholdPercentage": {
+      "type": "double",
+      "max": 100
+    },
+    "TimeoutInMinutes": {
+      "type": "integer",
+      "min": 5,
+      "max": 15
+    },
+    "TokenEndpointAuthenticationScheme": {
+      "type": "string",
+      "enum": [
+        "HTTP_BASIC",
+        "REQUEST_BODY_CREDENTIALS"
+      ]
+    },
+    "TokenUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "https?:\\/\\/(www\\.)?[-a-zA-Z0-9@:%._\\+~#=]{1,256}\\.[a-zA-Z0-9()]{1,6}([-a-zA-Z0-9()@:%_\\+.~#?&\\/=]*)"
+    },
+    "TraceId": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9:=_-]+"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "IoTManagedIntegrationsResourceARN",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateAccountAssociationRequest": {
+      "type": "structure",
+      "required": [
+        "AccountAssociationId"
+      ],
+      "members": {
+        "AccountAssociationId": "AccountAssociationId",
+        "Name": "AccountAssociationName",
+        "Description": "AccountAssociationDescription"
+      }
+    },
+    "UpdateCloudConnectorRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "CloudConnectorId",
+        "Name": "DisplayName",
+        "Description": "CloudConnectorDescription"
+      }
+    },
+    "UpdateConnectorDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ConnectorDestinationId",
+        "Description": "ConnectorDestinationDescription",
+        "Name": "ConnectorDestinationName",
+        "AuthType": "AuthType",
+        "AuthConfig": "AuthConfigUpdate",
+        "SecretsManager": "SecretsManager"
+      }
+    },
+    "UpdateDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "DestinationName",
+        "DeliveryDestinationArn": "DeliveryDestinationArn",
+        "DeliveryDestinationType": "DeliveryDestinationType",
+        "RoleArn": "DeliveryDestinationRoleArn",
+        "Description": "DestinationDescription"
+      }
+    },
+    "UpdateEventLogConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "EventLogLevel"
+      ],
+      "members": {
+        "Id": "LogConfigurationId",
+        "EventLogLevel": "LogLevel"
+      }
+    },
+    "UpdateManagedThingRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "ManagedThingId",
+        "Owner": "Owner",
+        "CredentialLockerId": "CredentialLockerId",
+        "SerialNumber": "SerialNumber",
+        "WiFiSimpleSetupConfiguration": "WiFiSimpleSetupConfiguration",
+        "Brand": "Brand",
+        "Model": "Model",
+        "Name": "Name",
+        "CapabilityReport": "CapabilityReport",
+        "CapabilitySchemas": "CapabilitySchemas",
+        "Capabilities": "Capabilities",
+        "Classification": "Classification",
+        "HubNetworkMode": "HubNetworkMode",
+        "MetaData": "MetaData"
+      }
+    },
+    "UpdateNotificationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "EventType",
+        "DestinationName"
+      ],
+      "members": {
+        "EventType": "EventType",
+        "DestinationName": "DestinationName"
+      }
+    },
+    "UpdateOtaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "OtaTaskId",
+        "Description": "OtaDescription",
+        "TaskConfigurationId": "OtaTaskConfigurationId"
+      }
+    },
+    "UploadLog": {
+      "type": "boolean"
+    },
+    "UploadPeriodMinutes": {
+      "type": "integer"
+    },
+    "ValidationSchema": {
+      "type": "document"
+    },
+    "WiFiSimpleSetupConfiguration": {
+      "type": "structure",
+      "members": {
+        "EnableAsProvisioner": "EnableAsProvisioner",
+        "EnableAsProvisionee": "EnableAsProvisionee",
+        "TimeoutInMinutes": "TimeoutInMinutes"
+      }
+    }
+  }
+}

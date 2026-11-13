@@ -1,0 +1,157 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_notificationscontacts_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "ActivateEmailContact": "ActivateEmailContactRequest",
+    "CreateEmailContact": "CreateEmailContactRequest",
+    "DeleteEmailContact": "DeleteEmailContactRequest",
+    "GetEmailContact": "GetEmailContactRequest",
+    "ListEmailContacts": "ListEmailContactsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "SendActivationCode": "SendActivationCodeRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest"
+  },
+  "shapes": {
+    "ActivateEmailContactRequest": {
+      "type": "structure",
+      "required": [
+        "arn",
+        "code"
+      ],
+      "members": {
+        "arn": "EmailContactArn",
+        "code": "Token"
+      }
+    },
+    "CreateEmailContactRequest": {
+      "type": "structure",
+      "required": [
+        "name",
+        "emailAddress"
+      ],
+      "members": {
+        "name": "EmailContactName",
+        "emailAddress": "EmailContactAddress",
+        "tags": "TagMap"
+      }
+    },
+    "DeleteEmailContactRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "EmailContactArn"
+      }
+    },
+    "EmailContactAddress": {
+      "type": "string",
+      "min": 6,
+      "max": 254,
+      "pattern": "(.+)@(.+)"
+    },
+    "EmailContactArn": {
+      "type": "string",
+      "pattern": "arn:aws[a-z0-9-]*:notifications-contacts::[0-9]{12}:emailcontact/[a-z0-9]{27}"
+    },
+    "EmailContactName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": ".*[\\w-.~]+.*"
+    },
+    "GetEmailContactRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "EmailContactArn"
+      }
+    },
+    "ListEmailContactsRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "ListEmailContactsRequestMaxResultsInteger",
+        "nextToken": "String"
+      }
+    },
+    "ListEmailContactsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "EmailContactArn"
+      }
+    },
+    "SendActivationCodeRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "EmailContactArn"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "TagKey": {
+      "type": "string",
+      "pattern": "(?!aws:).{1,128}"
+    },
+    "TagKeys": {
+      "type": "list",
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 0,
+      "max": 200,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "arn",
+        "tags"
+      ],
+      "members": {
+        "arn": "EmailContactArn",
+        "tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "Token": {
+      "type": "string",
+      "min": 7,
+      "max": 7,
+      "pattern": "[a-z0-9]{7}"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "arn",
+        "tagKeys"
+      ],
+      "members": {
+        "arn": "EmailContactArn",
+        "tagKeys": "TagKeys"
+      }
+    }
+  }
+}

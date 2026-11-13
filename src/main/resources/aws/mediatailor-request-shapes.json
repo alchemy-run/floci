@@ -1,0 +1,1682 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_mediatailor_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "ConfigureLogsForChannel": "ConfigureLogsForChannelRequest",
+    "ConfigureLogsForPlaybackConfiguration": "ConfigureLogsForPlaybackConfigurationRequest",
+    "CreateChannel": "CreateChannelRequest",
+    "CreateLiveSource": "CreateLiveSourceRequest",
+    "CreatePrefetchSchedule": "CreatePrefetchScheduleRequest",
+    "CreateProgram": "CreateProgramRequest",
+    "CreateSourceLocation": "CreateSourceLocationRequest",
+    "CreateVodSource": "CreateVodSourceRequest",
+    "DeleteChannel": "DeleteChannelRequest",
+    "DeleteChannelPolicy": "DeleteChannelPolicyRequest",
+    "DeleteFunction": "DeleteFunctionRequest",
+    "DeleteLiveSource": "DeleteLiveSourceRequest",
+    "DeletePlaybackConfiguration": "DeletePlaybackConfigurationRequest",
+    "DeletePrefetchSchedule": "DeletePrefetchScheduleRequest",
+    "DeleteProgram": "DeleteProgramRequest",
+    "DeleteSourceLocation": "DeleteSourceLocationRequest",
+    "DeleteVodSource": "DeleteVodSourceRequest",
+    "DescribeChannel": "DescribeChannelRequest",
+    "DescribeLiveSource": "DescribeLiveSourceRequest",
+    "DescribeProgram": "DescribeProgramRequest",
+    "DescribeSourceLocation": "DescribeSourceLocationRequest",
+    "DescribeVodSource": "DescribeVodSourceRequest",
+    "GetChannelPolicy": "GetChannelPolicyRequest",
+    "GetChannelSchedule": "GetChannelScheduleRequest",
+    "GetFunction": "GetFunctionRequest",
+    "GetPlaybackConfiguration": "GetPlaybackConfigurationRequest",
+    "GetPrefetchSchedule": "GetPrefetchScheduleRequest",
+    "ListAlerts": "ListAlertsRequest",
+    "ListChannels": "ListChannelsRequest",
+    "ListFunctions": "ListFunctionsRequest",
+    "ListLiveSources": "ListLiveSourcesRequest",
+    "ListPlaybackConfigurations": "ListPlaybackConfigurationsRequest",
+    "ListPrefetchSchedules": "ListPrefetchSchedulesRequest",
+    "ListSourceLocations": "ListSourceLocationsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListVodSources": "ListVodSourcesRequest",
+    "PutChannelPolicy": "PutChannelPolicyRequest",
+    "PutFunction": "PutFunctionRequest",
+    "PutPlaybackConfiguration": "PutPlaybackConfigurationRequest",
+    "StartChannel": "StartChannelRequest",
+    "StopChannel": "StopChannelRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateChannel": "UpdateChannelRequest",
+    "UpdateLiveSource": "UpdateLiveSourceRequest",
+    "UpdateProgram": "UpdateProgramRequest",
+    "UpdateSourceLocation": "UpdateSourceLocationRequest",
+    "UpdateVodSource": "UpdateVodSourceRequest"
+  },
+  "shapes": {
+    "AccessConfiguration": {
+      "type": "structure",
+      "members": {
+        "AccessType": "AccessType",
+        "SecretsManagerAccessTokenConfiguration": "SecretsManagerAccessTokenConfiguration"
+      }
+    },
+    "AccessType": {
+      "type": "string",
+      "enum": [
+        "S3_SIGV4",
+        "SECRETS_MANAGER_ACCESS_TOKEN",
+        "AUTODETECT_SIGV4"
+      ]
+    },
+    "AdBreak": {
+      "type": "structure",
+      "required": [
+        "OffsetMillis"
+      ],
+      "members": {
+        "MessageType": "MessageType",
+        "OffsetMillis": "__long",
+        "Slate": "SlateSource",
+        "SpliceInsertMessage": "SpliceInsertMessage",
+        "TimeSignalMessage": "TimeSignalMessage",
+        "AdBreakMetadata": "AdBreakMetadataList"
+      }
+    },
+    "AdBreakMetadataList": {
+      "type": "list",
+      "member": "KeyValuePair"
+    },
+    "AdConditioningConfiguration": {
+      "type": "structure",
+      "required": [
+        "StreamingMediaFileConditioning"
+      ],
+      "members": {
+        "StreamingMediaFileConditioning": "StreamingMediaFileConditioning"
+      }
+    },
+    "AdDecisionServerConfiguration": {
+      "type": "structure",
+      "members": {
+        "HttpRequest": "HttpRequest",
+        "VastResponse": "VastResponse"
+      }
+    },
+    "AdMarkerPassthrough": {
+      "type": "structure",
+      "members": {
+        "Enabled": "__boolean"
+      }
+    },
+    "AdMarkupType": {
+      "type": "string",
+      "enum": [
+        "DATERANGE",
+        "SCTE35_ENHANCED"
+      ]
+    },
+    "AdSequencingMode": {
+      "type": "string",
+      "enum": [
+        "FOLLOW_AD_SEQUENCE",
+        "IGNORE_AD_SEQUENCE",
+        "FOLLOW_AD_SEQUENCE_ONLY_LIVE",
+        "FOLLOW_AD_SEQUENCE_ONLY_VOD"
+      ]
+    },
+    "AdsInteractionExcludeEventType": {
+      "type": "string",
+      "enum": [
+        "AD_MARKER_FOUND",
+        "NON_AD_MARKER_FOUND",
+        "MAKING_ADS_REQUEST",
+        "MODIFIED_TARGET_URL",
+        "VAST_REDIRECT",
+        "EMPTY_VAST_RESPONSE",
+        "EMPTY_VMAP_RESPONSE",
+        "VAST_RESPONSE",
+        "REDIRECTED_VAST_RESPONSE",
+        "FILLED_AVAIL",
+        "FILLED_OVERLAY_AVAIL",
+        "BEACON_FIRED",
+        "WARNING_NO_ADVERTISEMENTS",
+        "WARNING_VPAID_AD_DROPPED",
+        "WARNING_URL_VARIABLE_SUBSTITUTION_FAILED",
+        "ERROR_UNKNOWN",
+        "ERROR_UNKNOWN_HOST",
+        "ERROR_DISALLOWED_HOST",
+        "ERROR_ADS_IO",
+        "ERROR_ADS_TIMEOUT",
+        "ERROR_ADS_RESPONSE_PARSE",
+        "ERROR_ADS_RESPONSE_UNKNOWN_ROOT_ELEMENT",
+        "ERROR_ADS_INVALID_RESPONSE",
+        "ERROR_VAST_REDIRECT_EMPTY_RESPONSE",
+        "ERROR_VAST_REDIRECT_MULTIPLE_VAST",
+        "ERROR_VAST_REDIRECT_FAILED",
+        "ERROR_VAST_MISSING_MEDIAFILES",
+        "ERROR_VAST_MISSING_CREATIVES",
+        "ERROR_VAST_MISSING_OVERLAYS",
+        "ERROR_VAST_MISSING_IMPRESSION",
+        "ERROR_VAST_INVALID_VAST_AD_TAG_URI",
+        "ERROR_VAST_MULTIPLE_TRACKING_EVENTS",
+        "ERROR_VAST_MULTIPLE_LINEAR",
+        "ERROR_VAST_INVALID_MEDIA_FILE",
+        "ERROR_FIRING_BEACON_FAILED",
+        "ERROR_PERSONALIZATION_DISABLED",
+        "VOD_TIME_BASED_AVAIL_PLAN_VAST_RESPONSE_FOR_OFFSET",
+        "VOD_TIME_BASED_AVAIL_PLAN_SUCCESS",
+        "VOD_TIME_BASED_AVAIL_PLAN_WARNING_NO_ADVERTISEMENTS",
+        "INTERSTITIAL_VOD_SUCCESS",
+        "INTERSTITIAL_VOD_FAILURE",
+        "PRE_ADS_REQUEST_HOOK_ERROR",
+        "PRE_ADS_REQUEST_FUNCTION_ERROR",
+        "BEACON_RECEIVED",
+        "POST_ADS_RESPONSE_HOOK_ERROR",
+        "POST_ADS_RESPONSE_FUNCTION_ERROR",
+        "PRE_MANIFEST_INSERTION_HOOK_ERROR",
+        "PRE_MANIFEST_INSERTION_FUNCTION_ERROR"
+      ]
+    },
+    "AdsInteractionLog": {
+      "type": "structure",
+      "members": {
+        "PublishOptInEventTypes": "__adsInteractionPublishOptInEventTypesList",
+        "ExcludeEventTypes": "__adsInteractionExcludeEventTypesList"
+      }
+    },
+    "AdsInteractionPublishOptInEventType": {
+      "type": "string",
+      "enum": [
+        "RAW_ADS_RESPONSE",
+        "RAW_ADS_REQUEST",
+        "RAW_BID_REQUEST",
+        "RAW_BID_RESPONSE",
+        "PRE_ADS_REQUEST_HOOK_SUMMARY",
+        "PRE_ADS_REQUEST_FUNCTION_COMPLETED",
+        "POST_ADS_RESPONSE_HOOK_SUMMARY",
+        "POST_ADS_RESPONSE_FUNCTION_COMPLETED",
+        "PRE_MANIFEST_INSERTION_HOOK_SUMMARY",
+        "PRE_MANIFEST_INSERTION_FUNCTION_COMPLETED"
+      ]
+    },
+    "AdsPersonalizationConcurrency": {
+      "type": "structure",
+      "members": {
+        "MaxConcurrentAdsRequests": "__integer",
+        "EnableVodVastParallelization": "__boolean"
+      }
+    },
+    "AdsPersonalizationTimeouts": {
+      "type": "structure",
+      "members": {
+        "AdsRequestTimeoutMilliseconds": "__integer",
+        "LiveMaximumAdsPersonalizationTimeMilliseconds": "__integer",
+        "VodMaximumAdsPersonalizationTimeMilliseconds": "__integer",
+        "PrefetchAdsRequestTimeoutMilliseconds": "__integer",
+        "PrefetchMaximumAdsPersonalizationTimeMilliseconds": "__integer"
+      }
+    },
+    "AlternateMedia": {
+      "type": "structure",
+      "members": {
+        "SourceLocationName": "__string",
+        "LiveSourceName": "__string",
+        "VodSourceName": "__string",
+        "ClipRange": "ClipRange",
+        "ScheduledStartTimeMillis": "__long",
+        "AdBreaks": "__listOfAdBreak",
+        "DurationMillis": "__long"
+      }
+    },
+    "ApsPublisherId": {
+      "type": "string",
+      "min": 1,
+      "max": 36,
+      "pattern": "[a-z0-9-]+"
+    },
+    "ApsRegion": {
+      "type": "string",
+      "enum": [
+        "AMERICAS",
+        "EUROPE",
+        "ASIA_PACIFIC"
+      ]
+    },
+    "AudienceMedia": {
+      "type": "structure",
+      "members": {
+        "Audience": "__string",
+        "AlternateMedia": "__listOfAlternateMedia"
+      }
+    },
+    "Audiences": {
+      "type": "list",
+      "member": "String"
+    },
+    "AvailMatchingCriteria": {
+      "type": "structure",
+      "required": [
+        "DynamicVariable",
+        "Operator"
+      ],
+      "members": {
+        "DynamicVariable": "__string",
+        "Operator": "Operator"
+      }
+    },
+    "AvailSuppression": {
+      "type": "structure",
+      "members": {
+        "Mode": "Mode",
+        "Value": "__string",
+        "FillPolicy": "FillPolicy"
+      }
+    },
+    "AwsServiceRequestConfiguration": {
+      "type": "structure",
+      "required": [
+        "Runtime",
+        "MethodType",
+        "RequestTimeoutMilliseconds",
+        "Url",
+        "TargetService",
+        "TargetRegion"
+      ],
+      "members": {
+        "Runtime": "RuntimeType",
+        "Output": "__mapOf__string",
+        "MethodType": "MethodType",
+        "RequestTimeoutMilliseconds": "__integer",
+        "Url": "__string",
+        "Body": "__string",
+        "Headers": "__mapOf__string",
+        "Cache": "HttpRequestCacheConfiguration",
+        "TargetService": "AwsTargetService",
+        "TargetRegion": "AwsServiceRequestConfigurationTargetRegionString"
+      }
+    },
+    "AwsServiceRequestConfigurationTargetRegionString": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "AwsTargetService": {
+      "type": "string",
+      "min": 1,
+      "max": 63,
+      "pattern": "[a-z0-9-]+"
+    },
+    "BeaconEventType": {
+      "type": "string",
+      "enum": [
+        "MUTE",
+        "UNMUTE",
+        "PAUSE",
+        "SKIP"
+      ]
+    },
+    "BeaconEventTypeList": {
+      "type": "list",
+      "member": "BeaconEventType"
+    },
+    "BeaconingConfiguration": {
+      "type": "structure",
+      "members": {
+        "ClientSide": "ClientSideBeaconingConfiguration"
+      }
+    },
+    "Bumper": {
+      "type": "structure",
+      "members": {
+        "EndUrl": "__string",
+        "StartUrl": "__string"
+      }
+    },
+    "CdnConfiguration": {
+      "type": "structure",
+      "members": {
+        "AdSegmentUrlPrefix": "__string",
+        "ContentSegmentUrlPrefix": "__string"
+      }
+    },
+    "ClientSideBeaconingConfiguration": {
+      "type": "structure",
+      "required": [
+        "ReportingMode"
+      ],
+      "members": {
+        "ReportingMode": "ClientSideBeaconingMode",
+        "AdditionalEventTypes": "BeaconEventTypeList"
+      }
+    },
+    "ClientSideBeaconingMode": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "INSIGHTS"
+      ]
+    },
+    "ClipRange": {
+      "type": "structure",
+      "members": {
+        "EndOffsetMillis": "__long",
+        "StartOffsetMillis": "__long"
+      }
+    },
+    "CompressionMethod": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "GZIP"
+      ]
+    },
+    "ConcurrentExecutorConfiguration": {
+      "type": "structure",
+      "required": [
+        "Runtime",
+        "Output",
+        "FunctionList",
+        "TimeoutMilliseconds",
+        "MaxConcurrency"
+      ],
+      "members": {
+        "Runtime": "RuntimeType",
+        "Output": "__mapOf__string",
+        "FunctionList": "__listOfFunctionsRef",
+        "TimeoutMilliseconds": "__integer",
+        "MaxConcurrency": "__integer"
+      }
+    },
+    "ConfigurationAliasesRequest": {
+      "type": "map",
+      "key": "__string",
+      "value": "__mapOf__string"
+    },
+    "ConfigureLogsForChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName",
+        "LogTypes"
+      ],
+      "members": {
+        "ChannelName": "__string",
+        "LogTypes": "LogTypes"
+      }
+    },
+    "ConfigureLogsForPlaybackConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "PercentEnabled",
+        "PlaybackConfigurationName"
+      ],
+      "members": {
+        "PercentEnabled": "__integer",
+        "PlaybackConfigurationName": "__string",
+        "EnabledLoggingStrategies": "__listOfLoggingStrategies",
+        "AdsInteractionLog": "AdsInteractionLog",
+        "ManifestServiceInteractionLog": "ManifestServiceInteractionLog"
+      }
+    },
+    "CreateChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName",
+        "Outputs",
+        "PlaybackMode"
+      ],
+      "members": {
+        "ChannelName": "__string",
+        "FillerSlate": "SlateSource",
+        "Outputs": "RequestOutputs",
+        "PlaybackMode": "PlaybackMode",
+        "Tags": "__mapOf__string",
+        "Tier": "Tier",
+        "TimeShiftConfiguration": "TimeShiftConfiguration",
+        "Audiences": "Audiences"
+      }
+    },
+    "CreateLiveSourceRequest": {
+      "type": "structure",
+      "required": [
+        "HttpPackageConfigurations",
+        "LiveSourceName",
+        "SourceLocationName"
+      ],
+      "members": {
+        "HttpPackageConfigurations": "HttpPackageConfigurations",
+        "LiveSourceName": "__string",
+        "SourceLocationName": "__string",
+        "Tags": "__mapOf__string"
+      }
+    },
+    "CreatePrefetchScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "PlaybackConfigurationName"
+      ],
+      "members": {
+        "Consumption": "PrefetchConsumption",
+        "Name": "__string",
+        "PlaybackConfigurationName": "__string",
+        "Retrieval": "PrefetchRetrieval",
+        "RecurringPrefetchConfiguration": "RecurringPrefetchConfiguration",
+        "ScheduleType": "PrefetchScheduleType",
+        "StreamId": "__string",
+        "Tags": "__mapOf__string"
+      }
+    },
+    "CreateProgramRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName",
+        "ProgramName",
+        "ScheduleConfiguration",
+        "SourceLocationName"
+      ],
+      "members": {
+        "AdBreaks": "__listOfAdBreak",
+        "ChannelName": "__string",
+        "LiveSourceName": "__string",
+        "ProgramName": "__string",
+        "ScheduleConfiguration": "ScheduleConfiguration",
+        "SourceLocationName": "__string",
+        "VodSourceName": "__string",
+        "AudienceMedia": "__listOfAudienceMedia",
+        "Tags": "__mapOf__string"
+      }
+    },
+    "CreateSourceLocationRequest": {
+      "type": "structure",
+      "required": [
+        "HttpConfiguration",
+        "SourceLocationName"
+      ],
+      "members": {
+        "AccessConfiguration": "AccessConfiguration",
+        "DefaultSegmentDeliveryConfiguration": "DefaultSegmentDeliveryConfiguration",
+        "HttpConfiguration": "HttpConfiguration",
+        "SegmentDeliveryConfigurations": "__listOfSegmentDeliveryConfiguration",
+        "SourceLocationName": "__string",
+        "Tags": "__mapOf__string"
+      }
+    },
+    "CreateVodSourceRequest": {
+      "type": "structure",
+      "required": [
+        "HttpPackageConfigurations",
+        "SourceLocationName",
+        "VodSourceName"
+      ],
+      "members": {
+        "HttpPackageConfigurations": "HttpPackageConfigurations",
+        "SourceLocationName": "__string",
+        "Tags": "__mapOf__string",
+        "VodSourceName": "__string"
+      }
+    },
+    "CustomOutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "Runtime"
+      ],
+      "members": {
+        "Runtime": "RuntimeType",
+        "Output": "__mapOf__string"
+      }
+    },
+    "DashConfigurationForPut": {
+      "type": "structure",
+      "members": {
+        "MpdLocation": "__string",
+        "OriginManifestType": "OriginManifestType"
+      }
+    },
+    "DashPlaylistSettings": {
+      "type": "structure",
+      "members": {
+        "ManifestWindowSeconds": "__integer",
+        "MinBufferTimeSeconds": "__integer",
+        "MinUpdatePeriodSeconds": "__integer",
+        "SuggestedPresentationDelaySeconds": "__integer"
+      }
+    },
+    "DefaultSegmentDeliveryConfiguration": {
+      "type": "structure",
+      "members": {
+        "BaseUrl": "__string"
+      }
+    },
+    "DeleteChannelPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelName": "__string"
+      }
+    },
+    "DeleteChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelName": "__string"
+      }
+    },
+    "DeleteFunctionRequest": {
+      "type": "structure",
+      "required": [
+        "FunctionId"
+      ],
+      "members": {
+        "FunctionId": "__string"
+      }
+    },
+    "DeleteLiveSourceRequest": {
+      "type": "structure",
+      "required": [
+        "LiveSourceName",
+        "SourceLocationName"
+      ],
+      "members": {
+        "LiveSourceName": "__string",
+        "SourceLocationName": "__string"
+      }
+    },
+    "DeletePlaybackConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "__string"
+      }
+    },
+    "DeletePrefetchScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "PlaybackConfigurationName"
+      ],
+      "members": {
+        "Name": "__string",
+        "PlaybackConfigurationName": "__string"
+      }
+    },
+    "DeleteProgramRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName",
+        "ProgramName"
+      ],
+      "members": {
+        "ChannelName": "__string",
+        "ProgramName": "__string"
+      }
+    },
+    "DeleteSourceLocationRequest": {
+      "type": "structure",
+      "required": [
+        "SourceLocationName"
+      ],
+      "members": {
+        "SourceLocationName": "__string"
+      }
+    },
+    "DeleteVodSourceRequest": {
+      "type": "structure",
+      "required": [
+        "SourceLocationName",
+        "VodSourceName"
+      ],
+      "members": {
+        "SourceLocationName": "__string",
+        "VodSourceName": "__string"
+      }
+    },
+    "DescribeChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelName": "__string"
+      }
+    },
+    "DescribeLiveSourceRequest": {
+      "type": "structure",
+      "required": [
+        "LiveSourceName",
+        "SourceLocationName"
+      ],
+      "members": {
+        "LiveSourceName": "__string",
+        "SourceLocationName": "__string"
+      }
+    },
+    "DescribeProgramRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName",
+        "ProgramName"
+      ],
+      "members": {
+        "ChannelName": "__string",
+        "ProgramName": "__string"
+      }
+    },
+    "DescribeSourceLocationRequest": {
+      "type": "structure",
+      "required": [
+        "SourceLocationName"
+      ],
+      "members": {
+        "SourceLocationName": "__string"
+      }
+    },
+    "DescribeVodSourceRequest": {
+      "type": "structure",
+      "required": [
+        "SourceLocationName",
+        "VodSourceName"
+      ],
+      "members": {
+        "SourceLocationName": "__string",
+        "VodSourceName": "__string"
+      }
+    },
+    "EventName": {
+      "type": "string",
+      "enum": [
+        "PRE_SESSION_INITIALIZATION",
+        "PRE_ADS_REQUEST",
+        "POST_ADS_RESPONSE",
+        "PRE_MANIFEST_INSERTION"
+      ]
+    },
+    "FillPolicy": {
+      "type": "string",
+      "enum": [
+        "FULL_AVAIL_ONLY",
+        "PARTIAL_AVAIL"
+      ]
+    },
+    "FunctionMapping": {
+      "type": "map",
+      "key": "EventName",
+      "value": "__string"
+    },
+    "FunctionRef": {
+      "type": "structure",
+      "members": {
+        "RunCondition": "__string",
+        "FunctionId": "__string",
+        "Alias": "__string"
+      }
+    },
+    "FunctionType": {
+      "type": "string",
+      "enum": [
+        "HTTP_REQUEST",
+        "AWS_SERVICE_REQUEST",
+        "CUSTOM_OUTPUT",
+        "CONCURRENT_EXECUTOR",
+        "SEQUENTIAL_EXECUTOR",
+        "VAST_REQUEST"
+      ]
+    },
+    "GetChannelPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelName": "__string"
+      }
+    },
+    "GetChannelScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelName": "__string",
+        "DurationMinutes": "__string",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "Audience": "__string"
+      }
+    },
+    "GetFunctionRequest": {
+      "type": "structure",
+      "required": [
+        "FunctionId"
+      ],
+      "members": {
+        "FunctionId": "__string"
+      }
+    },
+    "GetPlaybackConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "__string"
+      }
+    },
+    "GetPrefetchScheduleRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "PlaybackConfigurationName"
+      ],
+      "members": {
+        "Name": "__string",
+        "PlaybackConfigurationName": "__string"
+      }
+    },
+    "HlsPlaylistSettings": {
+      "type": "structure",
+      "members": {
+        "ManifestWindowSeconds": "__integer",
+        "AdMarkupType": "adMarkupTypes"
+      }
+    },
+    "HttpConfiguration": {
+      "type": "structure",
+      "required": [
+        "BaseUrl"
+      ],
+      "members": {
+        "BaseUrl": "__string"
+      }
+    },
+    "HttpPackageConfiguration": {
+      "type": "structure",
+      "required": [
+        "Path",
+        "SourceGroup",
+        "Type"
+      ],
+      "members": {
+        "Path": "__string",
+        "SourceGroup": "__string",
+        "Type": "Type"
+      }
+    },
+    "HttpPackageConfigurations": {
+      "type": "list",
+      "member": "HttpPackageConfiguration"
+    },
+    "HttpRequest": {
+      "type": "structure",
+      "members": {
+        "Method": "Method",
+        "Body": "__string",
+        "Headers": "StringMap",
+        "CompressRequest": "CompressionMethod"
+      }
+    },
+    "HttpRequestCacheConfiguration": {
+      "type": "structure",
+      "required": [
+        "TtlMinimumSeconds",
+        "TtlMaximumSeconds"
+      ],
+      "members": {
+        "TtlMinimumSeconds": "__integerMin1",
+        "TtlMaximumSeconds": "__integerMin1",
+        "Key": "__string"
+      }
+    },
+    "HttpRequestConfiguration": {
+      "type": "structure",
+      "required": [
+        "Runtime",
+        "MethodType",
+        "RequestTimeoutMilliseconds",
+        "Url"
+      ],
+      "members": {
+        "Runtime": "RuntimeType",
+        "Output": "__mapOf__string",
+        "MethodType": "MethodType",
+        "RequestTimeoutMilliseconds": "__integer",
+        "Url": "__string",
+        "Body": "__string",
+        "Headers": "__mapOf__string",
+        "Cache": "HttpRequestCacheConfiguration"
+      }
+    },
+    "InsertionMode": {
+      "type": "string",
+      "enum": [
+        "STITCHED_ONLY",
+        "PLAYER_SELECT"
+      ]
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "KeyValuePair": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "String",
+        "Value": "String"
+      }
+    },
+    "ListAlertsRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "ResourceArn": "__string"
+      }
+    },
+    "ListChannelsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListFunctionsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListLiveSourcesRequest": {
+      "type": "structure",
+      "required": [
+        "SourceLocationName"
+      ],
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "SourceLocationName": "__string"
+      }
+    },
+    "ListPlaybackConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListPrefetchScheduleType": {
+      "type": "string",
+      "enum": [
+        "SINGLE",
+        "RECURRING",
+        "ALL"
+      ]
+    },
+    "ListPrefetchSchedulesRequest": {
+      "type": "structure",
+      "required": [
+        "PlaybackConfigurationName"
+      ],
+      "members": {
+        "MaxResults": "__integerMin1Max100",
+        "NextToken": "__string",
+        "PlaybackConfigurationName": "__string",
+        "ScheduleType": "ListPrefetchScheduleType",
+        "StreamId": "__string"
+      }
+    },
+    "ListSourceLocationsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "__string"
+      }
+    },
+    "ListVodSourcesRequest": {
+      "type": "structure",
+      "required": [
+        "SourceLocationName"
+      ],
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "SourceLocationName": "__string"
+      }
+    },
+    "LivePreRollConfiguration": {
+      "type": "structure",
+      "members": {
+        "AdDecisionServerUrl": "__string",
+        "MaxDurationSeconds": "__integer",
+        "AdDecisionServerConfiguration": "PreRollAdDecisionServerConfiguration"
+      }
+    },
+    "LogType": {
+      "type": "string",
+      "enum": [
+        "AS_RUN"
+      ]
+    },
+    "LogTypes": {
+      "type": "list",
+      "member": "LogType"
+    },
+    "LoggingStrategy": {
+      "type": "string",
+      "enum": [
+        "VENDED_LOGS",
+        "LEGACY_CLOUDWATCH"
+      ]
+    },
+    "ManifestProcessingRules": {
+      "type": "structure",
+      "members": {
+        "AdMarkerPassthrough": "AdMarkerPassthrough"
+      }
+    },
+    "ManifestServiceExcludeEventType": {
+      "type": "string",
+      "enum": [
+        "GENERATED_MANIFEST",
+        "ORIGIN_MANIFEST",
+        "SESSION_INITIALIZED",
+        "TRACKING_RESPONSE",
+        "CONFIG_SYNTAX_ERROR",
+        "CONFIG_SECURITY_ERROR",
+        "UNKNOWN_HOST",
+        "TIMEOUT_ERROR",
+        "CONNECTION_ERROR",
+        "IO_ERROR",
+        "UNKNOWN_ERROR",
+        "HOST_DISALLOWED",
+        "PARSING_ERROR",
+        "MANIFEST_ERROR",
+        "NO_MASTER_OR_MEDIA_PLAYLIST",
+        "NO_MASTER_PLAYLIST",
+        "NO_MEDIA_PLAYLIST",
+        "INCOMPATIBLE_HLS_VERSION",
+        "SCTE35_PARSING_ERROR",
+        "INVALID_SINGLE_PERIOD_DASH_MANIFEST",
+        "UNSUPPORTED_SINGLE_PERIOD_DASH_MANIFEST",
+        "LAST_PERIOD_MISSING_AUDIO",
+        "LAST_PERIOD_MISSING_AUDIO_WARNING",
+        "ERROR_ORIGIN_PREFIX_INTERPOLATION",
+        "ERROR_ADS_INTERPOLATION",
+        "ERROR_LIVE_PRE_ROLL_ADS_INTERPOLATION",
+        "ERROR_CDN_AD_SEGMENT_INTERPOLATION",
+        "ERROR_CDN_CONTENT_SEGMENT_INTERPOLATION",
+        "ERROR_SLATE_AD_URL_INTERPOLATION",
+        "ERROR_PROFILE_NAME_INTERPOLATION",
+        "ERROR_BUMPER_START_INTERPOLATION",
+        "ERROR_BUMPER_END_INTERPOLATION",
+        "PRE_SESSION_INIT_HOOK_ERROR",
+        "PRE_SESSION_INIT_FUNCTION_ERROR"
+      ]
+    },
+    "ManifestServiceInteractionLog": {
+      "type": "structure",
+      "members": {
+        "PublishOptInEventTypes": "__manifestServicePublishOptInEventTypesList",
+        "ExcludeEventTypes": "__manifestServiceExcludeEventTypesList"
+      }
+    },
+    "ManifestServicePublishOptInEventType": {
+      "type": "string",
+      "enum": [
+        "PRE_SESSION_INIT_HOOK_SUMMARY",
+        "PRE_SESSION_INIT_FUNCTION_COMPLETED"
+      ]
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MessageType": {
+      "type": "string",
+      "enum": [
+        "SPLICE_INSERT",
+        "TIME_SIGNAL"
+      ]
+    },
+    "Method": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST"
+      ]
+    },
+    "MethodType": {
+      "type": "string",
+      "enum": [
+        "GET",
+        "POST"
+      ]
+    },
+    "MinimumUnfilledDurationSeconds": {
+      "type": "integer",
+      "min": 6,
+      "max": 3600
+    },
+    "Mode": {
+      "type": "string",
+      "enum": [
+        "OFF",
+        "BEHIND_LIVE_EDGE",
+        "AFTER_LIVE_EDGE"
+      ]
+    },
+    "OpenRtbTemplateString": {
+      "type": "string",
+      "min": 1,
+      "max": 102400
+    },
+    "Operator": {
+      "type": "string",
+      "enum": [
+        "EQUALS"
+      ]
+    },
+    "OriginManifestType": {
+      "type": "string",
+      "enum": [
+        "SINGLE_PERIOD",
+        "MULTI_PERIOD"
+      ]
+    },
+    "PlaybackMode": {
+      "type": "string",
+      "enum": [
+        "LOOP",
+        "LINEAR"
+      ]
+    },
+    "PreRollAdDecisionServerConfiguration": {
+      "type": "structure",
+      "members": {
+        "VastResponse": "PreRollVastResponse"
+      }
+    },
+    "PreRollAdSequencingMode": {
+      "type": "string",
+      "enum": [
+        "FOLLOW_AD_SEQUENCE",
+        "IGNORE_AD_SEQUENCE"
+      ]
+    },
+    "PreRollVastResponse": {
+      "type": "structure",
+      "members": {
+        "AdSequencingMode": "PreRollAdSequencingMode"
+      }
+    },
+    "PrefetchConsumption": {
+      "type": "structure",
+      "required": [
+        "EndTime"
+      ],
+      "members": {
+        "AvailMatchingCriteria": "__listOfAvailMatchingCriteria",
+        "EndTime": "__timestampUnix",
+        "StartTime": "__timestampUnix"
+      }
+    },
+    "PrefetchRetrieval": {
+      "type": "structure",
+      "required": [
+        "EndTime"
+      ],
+      "members": {
+        "DynamicVariables": "__mapOf__string",
+        "EndTime": "__timestampUnix",
+        "StartTime": "__timestampUnix",
+        "TrafficShapingType": "TrafficShapingType",
+        "TrafficShapingRetrievalWindow": "TrafficShapingRetrievalWindow",
+        "TrafficShapingTpsConfiguration": "TrafficShapingTpsConfiguration"
+      }
+    },
+    "PrefetchScheduleType": {
+      "type": "string",
+      "enum": [
+        "SINGLE",
+        "RECURRING"
+      ]
+    },
+    "PutChannelPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName",
+        "Policy"
+      ],
+      "members": {
+        "ChannelName": "__string",
+        "Policy": "__string"
+      }
+    },
+    "PutFunctionRequest": {
+      "type": "structure",
+      "required": [
+        "FunctionId",
+        "FunctionType"
+      ],
+      "members": {
+        "FunctionId": "__string",
+        "FunctionType": "FunctionType",
+        "Description": "__string",
+        "HttpRequestConfiguration": "HttpRequestConfiguration",
+        "AwsServiceRequestConfiguration": "AwsServiceRequestConfiguration",
+        "CustomOutputConfiguration": "CustomOutputConfiguration",
+        "ConcurrentExecutorConfiguration": "ConcurrentExecutorConfiguration",
+        "SequentialExecutorConfiguration": "SequentialExecutorConfiguration",
+        "VastRequestConfiguration": "VastRequestConfiguration",
+        "Tags": "__mapOf__string"
+      }
+    },
+    "PutPlaybackConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "AdDecisionServerUrl": "__string",
+        "AvailSuppression": "AvailSuppression",
+        "Bumper": "Bumper",
+        "CdnConfiguration": "CdnConfiguration",
+        "ConfigurationAliases": "ConfigurationAliasesRequest",
+        "DashConfiguration": "DashConfigurationForPut",
+        "InsertionMode": "InsertionMode",
+        "LivePreRollConfiguration": "LivePreRollConfiguration",
+        "ManifestProcessingRules": "ManifestProcessingRules",
+        "Name": "__string",
+        "PersonalizationThresholdSeconds": "__integerMin1",
+        "SlateAdUrl": "__string",
+        "Tags": "__mapOf__string",
+        "TranscodeProfileName": "__string",
+        "VideoContentSourceUrl": "__string",
+        "AdConditioningConfiguration": "AdConditioningConfiguration",
+        "AdDecisionServerConfiguration": "AdDecisionServerConfiguration",
+        "YieldOptimizationConfiguration": "YieldOptimizationConfiguration",
+        "FunctionMapping": "FunctionMapping",
+        "AdsPersonalizationTimeouts": "AdsPersonalizationTimeouts",
+        "AdsPersonalizationConcurrency": "AdsPersonalizationConcurrency",
+        "BeaconingConfiguration": "BeaconingConfiguration"
+      }
+    },
+    "RecurringConsumption": {
+      "type": "structure",
+      "members": {
+        "RetrievedAdExpirationSeconds": "__integer",
+        "AvailMatchingCriteria": "__listOfAvailMatchingCriteria"
+      }
+    },
+    "RecurringPrefetchConfiguration": {
+      "type": "structure",
+      "required": [
+        "EndTime",
+        "RecurringConsumption",
+        "RecurringRetrieval"
+      ],
+      "members": {
+        "StartTime": "__timestampUnix",
+        "EndTime": "__timestampUnix",
+        "RecurringConsumption": "RecurringConsumption",
+        "RecurringRetrieval": "RecurringRetrieval"
+      }
+    },
+    "RecurringRetrieval": {
+      "type": "structure",
+      "members": {
+        "DynamicVariables": "__mapOf__string",
+        "DelayAfterAvailEndSeconds": "__integer",
+        "TrafficShapingType": "TrafficShapingType",
+        "TrafficShapingRetrievalWindow": "TrafficShapingRetrievalWindow",
+        "TrafficShapingTpsConfiguration": "TrafficShapingTpsConfiguration"
+      }
+    },
+    "RelativePosition": {
+      "type": "string",
+      "enum": [
+        "BEFORE_PROGRAM",
+        "AFTER_PROGRAM"
+      ]
+    },
+    "RequestOutputItem": {
+      "type": "structure",
+      "required": [
+        "ManifestName",
+        "SourceGroup"
+      ],
+      "members": {
+        "DashPlaylistSettings": "DashPlaylistSettings",
+        "HlsPlaylistSettings": "HlsPlaylistSettings",
+        "ManifestName": "__string",
+        "SourceGroup": "__string"
+      }
+    },
+    "RequestOutputs": {
+      "type": "list",
+      "member": "RequestOutputItem"
+    },
+    "RuntimeType": {
+      "type": "string",
+      "enum": [
+        "JSONATA"
+      ]
+    },
+    "ScheduleConfiguration": {
+      "type": "structure",
+      "required": [
+        "Transition"
+      ],
+      "members": {
+        "Transition": "Transition",
+        "ClipRange": "ClipRange"
+      }
+    },
+    "SecretsManagerAccessTokenConfiguration": {
+      "type": "structure",
+      "members": {
+        "HeaderName": "__string",
+        "SecretArn": "__string",
+        "SecretStringKey": "__string"
+      }
+    },
+    "SegmentDeliveryConfiguration": {
+      "type": "structure",
+      "members": {
+        "BaseUrl": "__string",
+        "Name": "__string"
+      }
+    },
+    "SegmentationDescriptor": {
+      "type": "structure",
+      "members": {
+        "SegmentationEventId": "Integer",
+        "SegmentationUpidType": "Integer",
+        "SegmentationUpid": "String",
+        "SegmentationTypeId": "Integer",
+        "SegmentNum": "Integer",
+        "SegmentsExpected": "Integer",
+        "SubSegmentNum": "Integer",
+        "SubSegmentsExpected": "Integer"
+      }
+    },
+    "SegmentationDescriptorList": {
+      "type": "list",
+      "member": "SegmentationDescriptor"
+    },
+    "SequentialExecutorConfiguration": {
+      "type": "structure",
+      "required": [
+        "Runtime",
+        "FunctionList",
+        "TimeoutMilliseconds"
+      ],
+      "members": {
+        "Runtime": "RuntimeType",
+        "Output": "__mapOf__string",
+        "FunctionList": "__listOfFunctionsRef",
+        "TimeoutMilliseconds": "__integer"
+      }
+    },
+    "SlateSource": {
+      "type": "structure",
+      "members": {
+        "SourceLocationName": "__string",
+        "VodSourceName": "__string"
+      }
+    },
+    "SpliceInsertMessage": {
+      "type": "structure",
+      "members": {
+        "AvailNum": "__integer",
+        "AvailsExpected": "__integer",
+        "SpliceEventId": "__integer",
+        "UniqueProgramId": "__integer"
+      }
+    },
+    "StartChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelName": "__string"
+      }
+    },
+    "StopChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelName": "__string"
+      }
+    },
+    "StreamingMediaFileConditioning": {
+      "type": "string",
+      "enum": [
+        "TRANSCODE",
+        "NONE"
+      ]
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringMap": {
+      "type": "map",
+      "key": "__string",
+      "value": "__string"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "__string",
+        "Tags": "__mapOf__string"
+      }
+    },
+    "Tier": {
+      "type": "string",
+      "enum": [
+        "BASIC",
+        "STANDARD"
+      ]
+    },
+    "TimeShiftConfiguration": {
+      "type": "structure",
+      "required": [
+        "MaxTimeDelaySeconds"
+      ],
+      "members": {
+        "MaxTimeDelaySeconds": "__integer"
+      }
+    },
+    "TimeSignalMessage": {
+      "type": "structure",
+      "members": {
+        "SegmentationDescriptors": "SegmentationDescriptorList"
+      }
+    },
+    "TrafficShapingRetrievalWindow": {
+      "type": "structure",
+      "members": {
+        "RetrievalWindowDurationSeconds": "__integer"
+      }
+    },
+    "TrafficShapingTpsConfiguration": {
+      "type": "structure",
+      "members": {
+        "PeakTps": "__integer",
+        "PeakConcurrentUsers": "__integer"
+      }
+    },
+    "TrafficShapingType": {
+      "type": "string",
+      "enum": [
+        "RETRIEVAL_WINDOW",
+        "TPS"
+      ]
+    },
+    "Transition": {
+      "type": "structure",
+      "required": [
+        "RelativePosition",
+        "Type"
+      ],
+      "members": {
+        "DurationMillis": "__long",
+        "RelativePosition": "RelativePosition",
+        "RelativeProgram": "__string",
+        "ScheduledStartTimeMillis": "__long",
+        "Type": "__string"
+      }
+    },
+    "Type": {
+      "type": "string",
+      "enum": [
+        "DASH",
+        "HLS"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "__string",
+        "TagKeys": "__listOf__string"
+      }
+    },
+    "UpdateChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName",
+        "Outputs"
+      ],
+      "members": {
+        "ChannelName": "__string",
+        "FillerSlate": "SlateSource",
+        "Outputs": "RequestOutputs",
+        "TimeShiftConfiguration": "TimeShiftConfiguration",
+        "Audiences": "Audiences"
+      }
+    },
+    "UpdateLiveSourceRequest": {
+      "type": "structure",
+      "required": [
+        "HttpPackageConfigurations",
+        "LiveSourceName",
+        "SourceLocationName"
+      ],
+      "members": {
+        "HttpPackageConfigurations": "HttpPackageConfigurations",
+        "LiveSourceName": "__string",
+        "SourceLocationName": "__string"
+      }
+    },
+    "UpdateProgramRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelName",
+        "ProgramName",
+        "ScheduleConfiguration"
+      ],
+      "members": {
+        "AdBreaks": "__listOfAdBreak",
+        "ChannelName": "__string",
+        "ProgramName": "__string",
+        "ScheduleConfiguration": "UpdateProgramScheduleConfiguration",
+        "AudienceMedia": "__listOfAudienceMedia"
+      }
+    },
+    "UpdateProgramScheduleConfiguration": {
+      "type": "structure",
+      "members": {
+        "Transition": "UpdateProgramTransition",
+        "ClipRange": "ClipRange"
+      }
+    },
+    "UpdateProgramTransition": {
+      "type": "structure",
+      "members": {
+        "ScheduledStartTimeMillis": "__long",
+        "DurationMillis": "__long"
+      }
+    },
+    "UpdateSourceLocationRequest": {
+      "type": "structure",
+      "required": [
+        "HttpConfiguration",
+        "SourceLocationName"
+      ],
+      "members": {
+        "AccessConfiguration": "AccessConfiguration",
+        "DefaultSegmentDeliveryConfiguration": "DefaultSegmentDeliveryConfiguration",
+        "HttpConfiguration": "HttpConfiguration",
+        "SegmentDeliveryConfigurations": "__listOfSegmentDeliveryConfiguration",
+        "SourceLocationName": "__string"
+      }
+    },
+    "UpdateVodSourceRequest": {
+      "type": "structure",
+      "required": [
+        "HttpPackageConfigurations",
+        "SourceLocationName",
+        "VodSourceName"
+      ],
+      "members": {
+        "HttpPackageConfigurations": "HttpPackageConfigurations",
+        "SourceLocationName": "__string",
+        "VodSourceName": "__string"
+      }
+    },
+    "VastRequestConfiguration": {
+      "type": "structure",
+      "required": [
+        "Runtime",
+        "MethodType",
+        "RequestTimeoutMilliseconds",
+        "Url"
+      ],
+      "members": {
+        "Runtime": "RuntimeType",
+        "Output": "__mapOf__string",
+        "MethodType": "MethodType",
+        "RequestTimeoutMilliseconds": "__integer",
+        "Url": "__string",
+        "Body": "__string",
+        "Headers": "__mapOf__string",
+        "Cache": "HttpRequestCacheConfiguration"
+      }
+    },
+    "VastResponse": {
+      "type": "structure",
+      "members": {
+        "AdSequencingMode": "AdSequencingMode"
+      }
+    },
+    "YieldOptimizationConfiguration": {
+      "type": "structure",
+      "required": [
+        "MinimumUnfilledDuration",
+        "PublisherId",
+        "Region",
+        "OpenRtbTemplate"
+      ],
+      "members": {
+        "MinimumUnfilledDuration": "MinimumUnfilledDurationSeconds",
+        "PublisherId": "ApsPublisherId",
+        "Region": "ApsRegion",
+        "OpenRtbTemplate": "OpenRtbTemplateString"
+      }
+    },
+    "__adsInteractionExcludeEventTypesList": {
+      "type": "list",
+      "member": "AdsInteractionExcludeEventType"
+    },
+    "__adsInteractionPublishOptInEventTypesList": {
+      "type": "list",
+      "member": "AdsInteractionPublishOptInEventType"
+    },
+    "__boolean": {
+      "type": "boolean"
+    },
+    "__integer": {
+      "type": "integer"
+    },
+    "__integerMin1": {
+      "type": "integer",
+      "min": 1
+    },
+    "__integerMin1Max100": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "__listOfAdBreak": {
+      "type": "list",
+      "member": "AdBreak"
+    },
+    "__listOfAlternateMedia": {
+      "type": "list",
+      "member": "AlternateMedia"
+    },
+    "__listOfAudienceMedia": {
+      "type": "list",
+      "member": "AudienceMedia"
+    },
+    "__listOfAvailMatchingCriteria": {
+      "type": "list",
+      "member": "AvailMatchingCriteria"
+    },
+    "__listOfFunctionsRef": {
+      "type": "list",
+      "member": "FunctionRef"
+    },
+    "__listOfLoggingStrategies": {
+      "type": "list",
+      "member": "LoggingStrategy"
+    },
+    "__listOfSegmentDeliveryConfiguration": {
+      "type": "list",
+      "member": "SegmentDeliveryConfiguration"
+    },
+    "__listOf__string": {
+      "type": "list",
+      "member": "__string"
+    },
+    "__long": {
+      "type": "long"
+    },
+    "__manifestServiceExcludeEventTypesList": {
+      "type": "list",
+      "member": "ManifestServiceExcludeEventType"
+    },
+    "__manifestServicePublishOptInEventTypesList": {
+      "type": "list",
+      "member": "ManifestServicePublishOptInEventType"
+    },
+    "__mapOf__string": {
+      "type": "map",
+      "key": "__string",
+      "value": "__string"
+    },
+    "__string": {
+      "type": "string"
+    },
+    "__timestampUnix": {
+      "type": "timestamp"
+    },
+    "adMarkupTypes": {
+      "type": "list",
+      "member": "AdMarkupType"
+    }
+  }
+}

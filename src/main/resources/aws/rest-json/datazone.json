@@ -1,0 +1,5037 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "datazone",
+ "apiVersion": "2018-05-10",
+ "operations": {
+  "AcceptPredictions": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets/{identifier}/accept-predictions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "revision": {
+      "location": "querystring",
+      "name": "revision"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AcceptSubscriptionRequest": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-requests/{identifier}/accept",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AddEntityOwner": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/entities/{entityType}/{entityIdentifier}/addOwner",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AddPolicyGrant": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/policies/managed/{entityType}/{entityIdentifier}/addGrant",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AssociateEnvironmentRole": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/roles/{environmentRoleArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     },
+     "environmentRoleArn": {
+      "location": "uri",
+      "name": "environmentRoleArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "AssociateGovernedTerms": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/entities/{entityType}/{entityIdentifier}/associate-governed-terms",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchGetAttributesMetadata": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/entities/{entityType}/{entityIdentifier}/attributes-metadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "entityRevision": {
+      "location": "querystring",
+      "name": "entityRevision"
+     },
+     "attributeIdentifiers": {
+      "location": "querystring",
+      "name": "attributeIdentifier",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchPutAttributesMetadata": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/entities/{entityType}/{entityIdentifier}/attributes-metadata",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CancelMetadataGenerationRun": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/metadata-generation-runs/{identifier}/cancel",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CancelSubscription": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscriptions/{identifier}/cancel",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateAccountPool": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/account-pools",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "CreateAsset": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateAssetFilter": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets/{assetIdentifier}/filters",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "assetIdentifier": {
+      "location": "uri",
+      "name": "assetIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateAssetRevision": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets/{identifier}/revisions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateAssetType": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/asset-types",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateConnection": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/connections",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     },
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "props.sparkEmrProperties.credentialsExpiration"
+    ]
+   }
+  },
+  "CreateDataProduct": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-products",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateDataProductRevision": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-products/{identifier}/revisions",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateDataSource": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-sources",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "lastRunAt",
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "CreateDesignation": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/designations",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "CreateDomain": {
+   "method": "POST",
+   "requestUri": "/v2/domains",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateDomainUnit": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/domain-units",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateEnvironment": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "CreateEnvironmentAction": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/actions",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateEnvironmentBlueprint": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-blueprints",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "CreateEnvironmentProfile": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-profiles",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "CreateFormType": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/form-types",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateGlossary": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/glossaries",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateGlossaryTerm": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/glossary-terms",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateGroupProfile": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/group-profiles",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateListingChangeSet": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/listings/change-set",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateNotebook": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebooks",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateProject": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/projects",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "CreateProjectMembership": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/projects/{projectIdentifier}/createMembership",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "projectIdentifier": {
+      "location": "uri",
+      "name": "projectIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateProjectProfile": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/project-profiles",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "CreateRule": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/rules",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateSubscriptionGrant": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-grants",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateSubscriptionRequest": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-requests",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateSubscriptionTarget": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/subscription-targets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateUserProfile": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/user-profiles",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteAccountPool": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/account-pools/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteAsset": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteAssetFilter": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets/{assetIdentifier}/filters/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "assetIdentifier": {
+      "location": "uri",
+      "name": "assetIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteAssetType": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/asset-types/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteConnection": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/connections/{identifier}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDataExportConfiguration": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-export-configuration",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDataProduct": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-products/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDataSource": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-sources/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "clientToken": {
+      "location": "querystring",
+      "name": "clientToken",
+      "idempotencyToken": true
+     },
+     "retainPermissionsOnRevokeFailure": {
+      "location": "querystring",
+      "name": "retainPermissionsOnRevokeFailure",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "lastRunAt",
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "DeleteDesignation": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/designations/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDomain": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{identifier}",
+   "responseCode": 202,
+   "input": {
+    "members": {
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "clientToken": {
+      "location": "querystring",
+      "name": "clientToken",
+      "idempotencyToken": true
+     },
+     "skipDeletionCheck": {
+      "location": "querystring",
+      "name": "skipDeletionCheck",
+      "type": "boolean"
+     },
+     "cascadeDelete": {
+      "location": "querystring",
+      "name": "cascadeDelete",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDomainUnit": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/domain-units/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteEnvironment": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteEnvironmentAction": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/actions/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteEnvironmentBlueprint": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-blueprints/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteEnvironmentBlueprintConfiguration": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-blueprint-configurations/{environmentBlueprintIdentifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentBlueprintIdentifier": {
+      "location": "uri",
+      "name": "environmentBlueprintIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteEnvironmentProfile": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-profiles/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteFormType": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/form-types/{formTypeIdentifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "formTypeIdentifier": {
+      "location": "uri",
+      "name": "formTypeIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteGlossary": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/glossaries/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteGlossaryTerm": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/glossary-terms/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteLineageEvent": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/lineage/events/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteListing": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/listings/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteNotebook": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebooks/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteProject": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/projects/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "skipDeletionCheck": {
+      "location": "querystring",
+      "name": "skipDeletionCheck",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteProjectMembership": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/projects/{projectIdentifier}/deleteMembership",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "projectIdentifier": {
+      "location": "uri",
+      "name": "projectIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteProjectProfile": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/project-profiles/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteRule": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/rules/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSubscriptionGrant": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-grants/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSubscriptionRequest": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-requests/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSubscriptionTarget": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/subscription-targets/{identifier}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteTimeSeriesDataPoints": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/entities/{entityType}/{entityIdentifier}/time-series-data-points",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "formName": {
+      "location": "querystring",
+      "name": "formName"
+     },
+     "clientToken": {
+      "location": "querystring",
+      "name": "clientToken",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateEnvironmentRole": {
+   "method": "DELETE",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/roles/{environmentRoleArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     },
+     "environmentRoleArn": {
+      "location": "uri",
+      "name": "environmentRoleArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DisassociateGovernedTerms": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/entities/{entityType}/{entityIdentifier}/disassociate-governed-terms",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetAccountPool": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/account-pools/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetAsset": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "revision": {
+      "location": "querystring",
+      "name": "revision"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetAssetFilter": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets/{assetIdentifier}/filters/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "assetIdentifier": {
+      "location": "uri",
+      "name": "assetIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetAssetType": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/asset-types/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "revision": {
+      "location": "querystring",
+      "name": "revision"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetConnection": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/connections/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "withSecret": {
+      "location": "querystring",
+      "name": "withSecret",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "connectionCredentials.expiration",
+     "props.sparkEmrProperties.credentialsExpiration"
+    ]
+   }
+  },
+  "GetDataExportConfiguration": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-export-configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDataProduct": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-products/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "revision": {
+      "location": "querystring",
+      "name": "revision"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDataSource": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-sources/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "lastRunAt",
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetDataSourceRun": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-source-runs/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt",
+     "startedAt",
+     "stoppedAt"
+    ]
+   }
+  },
+  "GetDesignation": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/designations/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetDomain": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDomainUnit": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/domain-units/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetEnvironment": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetEnvironmentAction": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/actions/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetEnvironmentBlueprint": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-blueprints/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetEnvironmentBlueprintConfiguration": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-blueprint-configurations/{environmentBlueprintIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentBlueprintIdentifier": {
+      "location": "uri",
+      "name": "environmentBlueprintIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetEnvironmentCredentials": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/credentials",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "expiration"
+    ]
+   }
+  },
+  "GetEnvironmentProfile": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-profiles/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "GetFormType": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/form-types/{formTypeIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "formTypeIdentifier": {
+      "location": "uri",
+      "name": "formTypeIdentifier"
+     },
+     "revision": {
+      "location": "querystring",
+      "name": "revision"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetGlossary": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/glossaries/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetGlossaryTerm": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/glossary-terms/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetGroupProfile": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/group-profiles/{groupIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "groupIdentifier": {
+      "location": "uri",
+      "name": "groupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetIamPortalLoginUrl": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/get-portal-login-url",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetJobRun": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/jobRuns/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetLineageEvent": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/lineage/events/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {
+     "domainId": {
+      "location": "header",
+      "name": "Domain-Id"
+     },
+     "id": {
+      "location": "header",
+      "name": "Id"
+     },
+     "event": {
+      "location": "payload",
+      "type": "blob"
+     },
+     "createdBy": {
+      "location": "header",
+      "name": "Created-By"
+     },
+     "processingStatus": {
+      "location": "header",
+      "name": "Processing-Status"
+     },
+     "eventTime": {
+      "location": "header",
+      "name": "Event-Time",
+      "type": "timestamp"
+     },
+     "createdAt": {
+      "location": "header",
+      "name": "Created-At",
+      "type": "timestamp"
+     }
+    }
+   }
+  },
+  "GetLineageNode": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/lineage/nodes/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "eventTimestamp": {
+      "location": "querystring",
+      "name": "timestamp",
+      "type": "timestamp"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetListing": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/listings/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "listingRevision": {
+      "location": "querystring",
+      "name": "listingRevision"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetMetadataGenerationRun": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/metadata-generation-runs/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "type": {
+      "location": "querystring",
+      "name": "type"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetNotebook": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebooks/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetNotebookExport": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebook-exports/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetNotebookRun": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebook-runs/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetProject": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/projects/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetProjectProfile": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/project-profiles/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "GetRule": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/rules/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "revision": {
+      "location": "querystring",
+      "name": "revision"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetSubscription": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscriptions/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetSubscriptionGrant": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-grants/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetSubscriptionRequestDetails": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-requests/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetSubscriptionTarget": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/subscription-targets/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTimeSeriesDataPoint": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/entities/{entityType}/{entityIdentifier}/time-series-data-points/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "formName": {
+      "location": "querystring",
+      "name": "formName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetUserProfile": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/user-profiles/{userIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "userIdentifier": {
+      "location": "uri",
+      "name": "userIdentifier"
+     },
+     "type": {
+      "location": "querystring",
+      "name": "type"
+     },
+     "sessionName": {
+      "location": "querystring",
+      "name": "sessionName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListAccountPools": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/account-pools",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "sortBy": {
+      "location": "querystring",
+      "name": "sortBy"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListAccountsInAccountPool": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/account-pools/{identifier}/accounts",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListAssetFilters": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets/{assetIdentifier}/filters",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "assetIdentifier": {
+      "location": "uri",
+      "name": "assetIdentifier"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListAssetRevisions": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets/{identifier}/revisions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListConnections": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/connections",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "sortBy": {
+      "location": "querystring",
+      "name": "sortBy"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "environmentIdentifier": {
+      "location": "querystring",
+      "name": "environmentIdentifier"
+     },
+     "projectIdentifier": {
+      "location": "querystring",
+      "name": "projectIdentifier"
+     },
+     "type": {
+      "location": "querystring",
+      "name": "type"
+     },
+     "scope": {
+      "location": "querystring",
+      "name": "scope"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].props.sparkEmrProperties.credentialsExpiration"
+    ]
+   }
+  },
+  "ListDataProductRevisions": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-products/{identifier}/revisions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListDataSourceRunActivities": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-source-runs/{identifier}/activities",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
+   }
+  },
+  "ListDataSourceRuns": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-sources/{dataSourceIdentifier}/runs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "dataSourceIdentifier": {
+      "location": "uri",
+      "name": "dataSourceIdentifier"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt",
+     "items[].startedAt",
+     "items[].stoppedAt"
+    ]
+   }
+  },
+  "ListDataSources": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-sources",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "projectIdentifier": {
+      "location": "querystring",
+      "name": "projectIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "querystring",
+      "name": "environmentIdentifier"
+     },
+     "connectionIdentifier": {
+      "location": "querystring",
+      "name": "connectionIdentifier"
+     },
+     "type": {
+      "location": "querystring",
+      "name": "type"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].lastRunAt",
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
+   }
+  },
+  "ListDesignations": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/designations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
+   }
+  },
+  "ListDomainUnitsForParent": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/domain-units",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "parentDomainUnitIdentifier": {
+      "location": "querystring",
+      "name": "parentDomainUnitIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListDomains": {
+   "method": "GET",
+   "requestUri": "/v2/domains",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListEntityOwners": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/entities/{entityType}/{entityIdentifier}/owners",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListEnvironmentActions": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/actions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListEnvironmentBlueprintConfigurations": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-blueprint-configurations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
+   }
+  },
+  "ListEnvironmentBlueprints": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-blueprints",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "managed": {
+      "location": "querystring",
+      "name": "managed",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
+   }
+  },
+  "ListEnvironmentProfiles": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-profiles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "awsAccountId": {
+      "location": "querystring",
+      "name": "awsAccountId"
+     },
+     "awsAccountRegion": {
+      "location": "querystring",
+      "name": "awsAccountRegion"
+     },
+     "environmentBlueprintIdentifier": {
+      "location": "querystring",
+      "name": "environmentBlueprintIdentifier"
+     },
+     "projectIdentifier": {
+      "location": "querystring",
+      "name": "projectIdentifier"
+     },
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
+   }
+  },
+  "ListEnvironments": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "awsAccountId": {
+      "location": "querystring",
+      "name": "awsAccountId"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "awsAccountRegion": {
+      "location": "querystring",
+      "name": "awsAccountRegion"
+     },
+     "projectIdentifier": {
+      "location": "querystring",
+      "name": "projectIdentifier"
+     },
+     "environmentProfileIdentifier": {
+      "location": "querystring",
+      "name": "environmentProfileIdentifier"
+     },
+     "environmentBlueprintIdentifier": {
+      "location": "querystring",
+      "name": "environmentBlueprintIdentifier"
+     },
+     "provider": {
+      "location": "querystring",
+      "name": "provider"
+     },
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
+   }
+  },
+  "ListJobRuns": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/jobs/{jobIdentifier}/runs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "jobIdentifier": {
+      "location": "uri",
+      "name": "jobIdentifier"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListLineageEvents": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/lineage/events",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "timestampAfter": {
+      "location": "querystring",
+      "name": "timestampAfter",
+      "type": "timestamp"
+     },
+     "timestampBefore": {
+      "location": "querystring",
+      "name": "timestampBefore",
+      "type": "timestamp"
+     },
+     "processingStatus": {
+      "location": "querystring",
+      "name": "processingStatus"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListLineageNodeHistory": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/lineage/nodes/{identifier}/history",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "direction": {
+      "location": "querystring",
+      "name": "direction"
+     },
+     "eventTimestampGTE": {
+      "location": "querystring",
+      "name": "timestampGTE",
+      "type": "timestamp"
+     },
+     "eventTimestampLTE": {
+      "location": "querystring",
+      "name": "timestampLTE",
+      "type": "timestamp"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListMetadataGenerationRuns": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/metadata-generation-runs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "type": {
+      "location": "querystring",
+      "name": "type"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "targetIdentifier": {
+      "location": "querystring",
+      "name": "targetIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListNotebookRuns": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebook-runs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "owningProjectIdentifier": {
+      "location": "querystring",
+      "name": "owningProjectIdentifier"
+     },
+     "notebookIdentifier": {
+      "location": "querystring",
+      "name": "notebookIdentifier"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "scheduleIdentifier": {
+      "location": "querystring",
+      "name": "scheduleIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListNotebooks": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebooks",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "owningProjectIdentifier": {
+      "location": "querystring",
+      "name": "owningProjectIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "sortBy": {
+      "location": "querystring",
+      "name": "sortBy"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "type": {
+      "location": "querystring",
+      "name": "type"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListNotifications": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/notifications",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "type": {
+      "location": "querystring",
+      "name": "type"
+     },
+     "afterTimestamp": {
+      "location": "querystring",
+      "name": "afterTimestamp",
+      "type": "timestamp"
+     },
+     "beforeTimestamp": {
+      "location": "querystring",
+      "name": "beforeTimestamp",
+      "type": "timestamp"
+     },
+     "subjects": {
+      "location": "querystring",
+      "name": "subjects",
+      "type": "list"
+     },
+     "taskStatus": {
+      "location": "querystring",
+      "name": "taskStatus"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListPolicyGrants": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/policies/managed/{entityType}/{entityIdentifier}/grants",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "policyType": {
+      "location": "querystring",
+      "name": "policyType"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListProjectMemberships": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/projects/{projectIdentifier}/memberships",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "projectIdentifier": {
+      "location": "uri",
+      "name": "projectIdentifier"
+     },
+     "sortBy": {
+      "location": "querystring",
+      "name": "sortBy"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListProjectProfiles": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/project-profiles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "sortBy": {
+      "location": "querystring",
+      "name": "sortBy"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].lastUpdatedAt"
+    ]
+   }
+  },
+  "ListProjects": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/projects",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "userIdentifier": {
+      "location": "querystring",
+      "name": "userIdentifier"
+     },
+     "groupIdentifier": {
+      "location": "querystring",
+      "name": "groupIdentifier"
+     },
+     "name": {
+      "location": "querystring",
+      "name": "name"
+     },
+     "projectCategory": {
+      "location": "querystring",
+      "name": "projectCategory"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "items[].createdAt",
+     "items[].updatedAt"
+    ]
+   }
+  },
+  "ListRules": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/list-rules/{targetType}/{targetIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "targetType": {
+      "location": "uri",
+      "name": "targetType"
+     },
+     "targetIdentifier": {
+      "location": "uri",
+      "name": "targetIdentifier"
+     },
+     "ruleType": {
+      "location": "querystring",
+      "name": "ruleType"
+     },
+     "action": {
+      "location": "querystring",
+      "name": "ruleAction"
+     },
+     "projectIds": {
+      "location": "querystring",
+      "name": "projectIds",
+      "type": "list"
+     },
+     "assetTypes": {
+      "location": "querystring",
+      "name": "assetTypes",
+      "type": "list"
+     },
+     "dataProduct": {
+      "location": "querystring",
+      "name": "dataProduct",
+      "type": "boolean"
+     },
+     "includeCascaded": {
+      "location": "querystring",
+      "name": "includeCascaded",
+      "type": "boolean"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListSubscriptionGrants": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-grants",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentId": {
+      "location": "querystring",
+      "name": "environmentId"
+     },
+     "subscriptionTargetId": {
+      "location": "querystring",
+      "name": "subscriptionTargetId"
+     },
+     "subscribedListingId": {
+      "location": "querystring",
+      "name": "subscribedListingId"
+     },
+     "subscriptionId": {
+      "location": "querystring",
+      "name": "subscriptionId"
+     },
+     "owningProjectId": {
+      "location": "querystring",
+      "name": "owningProjectId"
+     },
+     "owningIamPrincipalArn": {
+      "location": "querystring",
+      "name": "owningIamPrincipalArn"
+     },
+     "owningUserId": {
+      "location": "querystring",
+      "name": "owningUserId"
+     },
+     "owningGroupId": {
+      "location": "querystring",
+      "name": "owningGroupId"
+     },
+     "sortBy": {
+      "location": "querystring",
+      "name": "sortBy"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListSubscriptionRequests": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-requests",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "subscribedListingId": {
+      "location": "querystring",
+      "name": "subscribedListingId"
+     },
+     "owningProjectId": {
+      "location": "querystring",
+      "name": "owningProjectId"
+     },
+     "owningIamPrincipalArn": {
+      "location": "querystring",
+      "name": "owningIamPrincipalArn"
+     },
+     "approverProjectId": {
+      "location": "querystring",
+      "name": "approverProjectId"
+     },
+     "owningUserId": {
+      "location": "querystring",
+      "name": "owningUserId"
+     },
+     "owningGroupId": {
+      "location": "querystring",
+      "name": "owningGroupId"
+     },
+     "sortBy": {
+      "location": "querystring",
+      "name": "sortBy"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListSubscriptionTargets": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/subscription-targets",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     },
+     "sortBy": {
+      "location": "querystring",
+      "name": "sortBy"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListSubscriptions": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscriptions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "subscriptionRequestIdentifier": {
+      "location": "querystring",
+      "name": "subscriptionRequestIdentifier"
+     },
+     "status": {
+      "location": "querystring",
+      "name": "status"
+     },
+     "subscribedListingId": {
+      "location": "querystring",
+      "name": "subscribedListingId"
+     },
+     "owningProjectId": {
+      "location": "querystring",
+      "name": "owningProjectId"
+     },
+     "owningIamPrincipalArn": {
+      "location": "querystring",
+      "name": "owningIamPrincipalArn"
+     },
+     "owningUserId": {
+      "location": "querystring",
+      "name": "owningUserId"
+     },
+     "owningGroupId": {
+      "location": "querystring",
+      "name": "owningGroupId"
+     },
+     "approverProjectId": {
+      "location": "querystring",
+      "name": "approverProjectId"
+     },
+     "sortBy": {
+      "location": "querystring",
+      "name": "sortBy"
+     },
+     "sortOrder": {
+      "location": "querystring",
+      "name": "sortOrder"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTimeSeriesDataPoints": {
+   "method": "GET",
+   "requestUri": "/v2/domains/{domainIdentifier}/entities/{entityType}/{entityIdentifier}/time-series-data-points",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "formName": {
+      "location": "querystring",
+      "name": "formName"
+     },
+     "startedAt": {
+      "location": "querystring",
+      "name": "startedAt",
+      "type": "timestamp"
+     },
+     "endedAt": {
+      "location": "querystring",
+      "name": "endedAt",
+      "type": "timestamp"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PostLineageEvent": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/lineage/events",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "event": {
+      "location": "payload",
+      "type": "blob"
+     },
+     "clientToken": {
+      "location": "header",
+      "name": "Client-Token",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PostTimeSeriesDataPoints": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/entities/{entityType}/{entityIdentifier}/time-series-data-points",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "forms[].timestamp"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutDataExportConfiguration": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-export-configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutEnvironmentBlueprintConfiguration": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-blueprint-configurations/{environmentBlueprintIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentBlueprintIdentifier": {
+      "location": "uri",
+      "name": "environmentBlueprintIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "QueryGraph": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/graph/query",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RejectPredictions": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets/{identifier}/reject-predictions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "revision": {
+      "location": "querystring",
+      "name": "revision"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RejectSubscriptionRequest": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-requests/{identifier}/reject",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RemoveEntityOwner": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/entities/{entityType}/{entityIdentifier}/removeOwner",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RemovePolicyGrant": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/policies/managed/{entityType}/{entityIdentifier}/removeGrant",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "entityType": {
+      "location": "uri",
+      "name": "entityType"
+     },
+     "entityIdentifier": {
+      "location": "uri",
+      "name": "entityIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RevokeSubscription": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscriptions/{identifier}/revoke",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "Search": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/search",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SearchGroupProfiles": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/search-group-profiles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SearchListings": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/listings/search",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SearchTypes": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/types-search",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SearchUserProfiles": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/search-user-profiles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartDataSourceRun": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-sources/{dataSourceIdentifier}/runs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "dataSourceIdentifier": {
+      "location": "uri",
+      "name": "dataSourceIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt",
+     "startedAt",
+     "stoppedAt"
+    ]
+   }
+  },
+  "StartMetadataGenerationRun": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/metadata-generation-runs",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartNotebookExport": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebook-exports",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartNotebookImport": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebook-imports",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartNotebookRun": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebook-runs",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartNotebookSync": {
+   "method": "POST",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebook-syncs",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "gitMetadata.committedAt"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StopNotebookRun": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebook-runs/{identifier}/stop",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateAccountPool": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/account-pools/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "UpdateAssetFilter": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/assets/{assetIdentifier}/filters/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "assetIdentifier": {
+      "location": "uri",
+      "name": "assetIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateConnection": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/connections/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "props.sparkEmrProperties.credentialsExpiration"
+    ]
+   }
+  },
+  "UpdateDataSource": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/data-sources/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "lastRunAt",
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "UpdateDesignation": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/designations/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "UpdateDomain": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "clientToken": {
+      "location": "querystring",
+      "name": "clientToken",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateDomainUnit": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/domain-units/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateEnvironment": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "UpdateEnvironmentAction": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/actions/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateEnvironmentBlueprint": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-blueprints/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "UpdateEnvironmentProfile": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/environment-profiles/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "updatedAt"
+    ]
+   }
+  },
+  "UpdateGlossary": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/glossaries/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateGlossaryTerm": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/glossary-terms/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateGroupProfile": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/group-profiles/{groupIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "groupIdentifier": {
+      "location": "uri",
+      "name": "groupIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateNotebook": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/notebooks/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateProject": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/projects/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "UpdateProjectProfile": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/project-profiles/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "createdAt",
+     "lastUpdatedAt"
+    ]
+   }
+  },
+  "UpdateRootDomainUnitOwner": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/root-domain-unit-owner",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateRule": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/rules/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateSubscriptionGrantStatus": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-grants/{identifier}/status/{assetIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     },
+     "assetIdentifier": {
+      "location": "uri",
+      "name": "assetIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateSubscriptionRequest": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/subscription-requests/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateSubscriptionTarget": {
+   "method": "PATCH",
+   "requestUri": "/v2/domains/{domainIdentifier}/environments/{environmentIdentifier}/subscription-targets/{identifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "environmentIdentifier": {
+      "location": "uri",
+      "name": "environmentIdentifier"
+     },
+     "identifier": {
+      "location": "uri",
+      "name": "identifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateUserProfile": {
+   "method": "PUT",
+   "requestUri": "/v2/domains/{domainIdentifier}/user-profiles/{userIdentifier}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "domainIdentifier": {
+      "location": "uri",
+      "name": "domainIdentifier"
+     },
+     "userIdentifier": {
+      "location": "uri",
+      "name": "userIdentifier"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

@@ -3,16 +3,22 @@ package io.floci.aws.core.common;
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.services.accessanalyzer.AccessAnalyzerController;
 import io.floci.aws.services.account.AccountController;
+import io.floci.aws.services.aiops.AiOpsController;
 import io.floci.aws.services.amazonmq.AmazonMqController;
+import io.floci.aws.services.amplify.AmplifyController;
 import io.floci.aws.services.apigateway.ApiGatewayController;
 import io.floci.aws.services.appconfig.AppConfigController;
 import io.floci.aws.services.appconfig.AppConfigDataController;
+import io.floci.aws.services.appflow.AppFlowController;
 import io.floci.aws.services.appintegrations.AppIntegrationsController;
+import io.floci.aws.services.appregistry.AppRegistryController;
 import io.floci.aws.services.appsync.AppSyncController;
 import io.floci.aws.services.appsync.graphql.AppSyncExecutionController;
 import io.floci.aws.services.aps.ApsController;
 import io.floci.aws.services.aps.ApsDataPlaneController;
+import io.floci.aws.services.auditmanager.AuditManagerController;
 import io.floci.aws.services.backup.BackupController;
+import io.floci.aws.services.backupsearch.BackupSearchController;
 import io.floci.aws.services.batch.BatchController;
 import io.floci.aws.services.bedrock.BedrockController;
 import io.floci.aws.services.bedrockagentcore.BedrockAgentCoreController;
@@ -24,7 +30,9 @@ import io.floci.aws.services.bedrockagentcorecontrol.BedrockAgentCoreIdentityCon
 import io.floci.aws.services.bedrockagentcorecontrol.BedrockAgentCoreMemoryController;
 import io.floci.aws.services.bedrockagentcorecontrol.BedrockAgentCoreResourcePolicyController;
 import io.floci.aws.services.bedrockagentcorecontrol.BedrockAgentCoreToolsController;
+import io.floci.aws.services.bedrockdataautomation.BdaController;
 import io.floci.aws.services.bedrockruntime.BedrockRuntimeController;
+import io.floci.aws.services.chatbot.ChatbotController;
 import io.floci.aws.services.cloudfront.CloudFrontController;
 import io.floci.aws.services.cloudfront.CloudFrontKvsDataPlaneController;
 import io.floci.aws.services.cloudfront.CloudFrontServingController;
@@ -59,6 +67,10 @@ import io.floci.aws.services.lambda.microvm.MicrovmEndpointProxyController;
 import io.floci.aws.services.lambdamicrovms.LambdaMicrovmsController;
 import io.floci.aws.services.lambdamicrovms.LambdaNetworkConnectorsController;
 import io.floci.aws.services.lambdaweb.LambdaWebController;
+import io.floci.aws.services.location.GeoMapsController;
+import io.floci.aws.services.location.GeoPlacesController;
+import io.floci.aws.services.location.GeoRoutesController;
+import io.floci.aws.services.location.LocationController;
 import io.floci.aws.services.macie2.MacieController;
 import io.floci.aws.services.marketplace.MarketplaceCatalogController;
 import io.floci.aws.services.marketplace.MarketplaceDeploymentController;
@@ -70,22 +82,34 @@ import io.floci.aws.services.oam.OamController;
 import io.floci.aws.services.opensearch.ElasticsearchController;
 import io.floci.aws.services.opensearch.OpenSearchController;
 import io.floci.aws.services.paymentcryptography.PaymentCryptographyCryptoController;
+import io.floci.aws.services.personalize.PersonalizeController;
 import io.floci.aws.services.pipes.PipesController;
+import io.floci.aws.services.polly.PollyController;
+import io.floci.aws.services.qbusiness.QAppsController;
+import io.floci.aws.services.qbusiness.QBusinessController;
 import io.floci.aws.services.quicksight.QuickSightController;
 import io.floci.aws.services.quicksight.QuickSightEmbedController;
 import io.floci.aws.services.ram.RamController;
+import io.floci.aws.services.rbin.RbinController;
 import io.floci.aws.services.rdsdata.RdsDataController;
+import io.floci.aws.services.repostspace.RePostSpaceController;
 import io.floci.aws.services.resourceexplorer2.ResourceExplorer2Controller;
 import io.floci.aws.services.resourcegroups.ResourceGroupsController;
+import io.floci.aws.services.rolesanywhere.RolesAnywhereController;
 import io.floci.aws.services.route53.Route53Controller;
+import io.floci.aws.services.route53profiles.Route53ProfilesController;
 import io.floci.aws.services.rum.RumController;
 import io.floci.aws.services.s3.S3Controller;
+import io.floci.aws.services.s3files.S3FilesController;
 import io.floci.aws.services.s3tables.S3TablesController;
 import io.floci.aws.services.s3vectors.S3VectorsController;
 import io.floci.aws.services.sagemaker.SageMakerFeatureStoreRuntimeController;
 import io.floci.aws.services.sagemaker.SageMakerRuntimeController;
 import io.floci.aws.services.scheduler.SchedulerController;
+import io.floci.aws.services.schemas.SchemasController;
+import io.floci.aws.services.sdb.SimpleDbQueryHandler;
 import io.floci.aws.services.securityhub.SecurityHubController;
+import io.floci.aws.services.securitylake.SecurityLakeController;
 import io.floci.aws.services.ses.SesAccountController;
 import io.floci.aws.services.ses.SesConfigurationSetController;
 import io.floci.aws.services.ses.SesContactController;
@@ -103,10 +127,16 @@ import io.floci.aws.services.ses.SesSuppressionController;
 import io.floci.aws.services.ses.SesTagController;
 import io.floci.aws.services.ses.SesTemplateController;
 import io.floci.aws.services.ses.SesTenantController;
+import io.floci.aws.services.signer.SignerController;
 import io.floci.aws.services.signin.SigninController;
+import io.floci.aws.services.socialmessaging.SocialMessagingController;
+import io.floci.aws.services.ssmincidents.SsmIncidentsController;
 import io.floci.aws.services.ssooidc.SsoOidcController;
 import io.floci.aws.services.ssoportal.SsoPortalController;
 import io.floci.aws.services.swf.model.SwfConstants;
+import io.floci.aws.services.synthetics.SyntheticsController;
+import io.floci.aws.services.vpclattice.VpcLatticeController;
+import io.floci.aws.services.xray.XRayController;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -142,7 +172,10 @@ public class ResolvedServiceCatalog {
                     "monitoring", "cloudwatch",
                     "awsssoportal", "sso",
                     "eventsv2", "events",
-                    "payment-cryptography-data", "payment-cryptography");
+                    "payment-cryptography-data", "payment-cryptography",
+                    // Mail Manager signs for ses and its actions are ses:; its descriptor leaves the ses
+                    // scope to SES so requests route by target prefix.
+                    "mailmanager", "ses");
 
     private final ServiceCatalog catalog;
 
@@ -434,6 +467,250 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("AmazonEC2ContainerRegistry_V20150921."), Set.of("ecr"), Set.of(), Set.of()),
+                descriptor("ecr-public", "ecr-public", config.services().ecrPublic().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("SpencerFrontendService."), Set.of("ecr-public"), Set.of(), Set.of()),
+                descriptor("fms", "fms", config.services().fms().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWSFMS_20180101."), Set.of("fms"), Set.of(), Set.of()),
+                descriptor("forecastquery", "forecast", config.services().forecast().enabled(), false,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AmazonForecastRuntime."), Set.of("forecast"), Set.of(), Set.of()),
+                descriptor("forecast", "forecast", config.services().forecast().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AmazonForecast."), Set.of("forecast"), Set.of(), Set.of()),
+                descriptor("lexv2", "lexv2", config.services().lexv2().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("lex"), Set.of(), Set.of()),
+                descriptor("kinesisvideo", "kinesisvideo", config.services().kinesisVideo().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("kinesisvideo"), Set.of(), Set.of()),
+                descriptor("keyspaces", "keyspaces", config.services().keyspaces().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON, ServiceProtocol.CBOR),
+                        Set.of("KeyspacesService."), Set.of("cassandra"), Set.of("KeyspacesService"), Set.of()),
+                descriptor("keyspacesstreams", "keyspaces", config.services().keyspaces().enabled(), false,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("KeyspacesStreams."), Set.of("cassandra"), Set.of(), Set.of()),
+                descriptor("airflow-serverless", "airflow-serverless", config.services().airflowServerless().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AmazonMWAAServerless."), Set.of("airflow-serverless"), Set.of(), Set.of()),
+                descriptor("notifications", "notifications", config.services().notifications().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("notifications"), Set.of(), Set.of()),
+                descriptor("notifications-contacts", "notifications-contacts",
+                        config.services().notificationsContacts().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("notifications-contacts"), Set.of(), Set.of()),
+                descriptor("aoss", "aoss", config.services().opensearchServerless().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("OpenSearchServerless."), Set.of("aoss"), Set.of(), Set.of()),
+                descriptor("social-messaging", "socialmessaging", config.services().socialmessaging().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("social-messaging"), Set.of(), Set.of(SocialMessagingController.class)),
+                descriptor("synthetics", "synthetics", config.services().synthetics().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("synthetics"), Set.of(), Set.of(SyntheticsController.class)),
+                descriptor("vpc-lattice", "vpclattice", config.services().vpcLattice().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("vpc-lattice"), Set.of(), Set.of(VpcLatticeController.class)),
+                descriptor("xray", "xray", config.services().xray().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("xray"), Set.of(), Set.of(XRayController.class)),
+                descriptor("sdb", "sdb", config.services().sdb().enabled(),
+                        true, null, null, 5000L, SimpleDbQueryHandler.NS, ServiceProtocol.QUERY,
+                        protocols(ServiceProtocol.QUERY),
+                        Set.of(), Set.of("sdb"), Set.of(), Set.of()),
+                descriptor("signer", "signer", config.services().signer().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("signer"), Set.of(), Set.of(SignerController.class)),
+                descriptor("shield", "shield", config.services().shield().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWSShield_20160616."), Set.of("shield"), Set.of(), Set.of()),
+                descriptor("securitylake", "securitylake", config.services().securitylake().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("securitylake"), Set.of(), Set.of(SecurityLakeController.class)),
+                descriptor("schemas", "schemas", config.services().schemas().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("schemas"), Set.of(), Set.of(SchemasController.class)),
+                descriptor("ssm-incidents", "ssmincidents", config.services().ssmIncidents().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("ssm-incidents"), Set.of(), Set.of(SsmIncidentsController.class)),
+                descriptor("ssm-contacts", "ssmcontacts", config.services().ssmContacts().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("SSMContacts."), Set.of("ssm-contacts"), Set.of(), Set.of()),
+                descriptor("s3files", "s3files", config.services().s3files().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("s3files"), Set.of(), Set.of(S3FilesController.class)),
+                descriptor("route53profiles", "route53profiles", config.services().route53profiles().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("route53profiles"), Set.of(), Set.of(Route53ProfilesController.class)),
+                descriptor("rolesanywhere", "rolesanywhere", config.services().rolesanywhere().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("rolesanywhere"), Set.of(), Set.of(RolesAnywhereController.class)),
+                descriptor("repostspace", "repostspace", config.services().repostspace().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("repostspace"), Set.of(), Set.of(RePostSpaceController.class)),
+                descriptor("rbin", "rbin", config.services().rbin().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("rbin"), Set.of(), Set.of(RbinController.class)),
+                descriptor("qbusiness", "qbusiness", config.services().qbusiness().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("qbusiness"), Set.of(), Set.of(QBusinessController.class)),
+                descriptor("qapps", "qapps", config.services().qapps().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("qapps"), Set.of(), Set.of(QAppsController.class)),
+                descriptor("sms-voice", "pinpointsmsvoicev2", config.services().pinpointSmsVoiceV2().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("PinpointSMSVoiceV2."), Set.of("sms-voice"), Set.of(), Set.of()),
+                descriptor("personalize", "personalize", config.services().personalize().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON, ServiceProtocol.REST_JSON),
+                        Set.of("AmazonPersonalize."), Set.of("personalize"), Set.of(),
+                        Set.of(PersonalizeController.class)),
+                descriptor("omics", "omics", config.services().omics().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("omics"), Set.of(), Set.of()),
+                descriptor("observabilityadmin", "observabilityadmin",
+                        config.services().observabilityAdmin().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("observabilityadmin"), Set.of(), Set.of()),
+                descriptor("osis", "osis", config.services().osis().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("osis"), Set.of(), Set.of()),
+                descriptor("neptune-graph", "neptune-graph", config.services().neptuneGraph().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("neptune-graph"), Set.of(), Set.of()),
+                descriptor("medical-imaging", "medical-imaging", config.services().medicalImaging().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("medical-imaging"), Set.of(), Set.of()),
+                descriptor("mediatailor", "mediatailor", config.services().mediaTailor().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("mediatailor"), Set.of(), Set.of()),
+                descriptor("mediapackagev2", "mediapackagev2", config.services().mediaPackageV2().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("mediapackagev2"), Set.of(), Set.of()),
+                descriptor("medialive", "medialive", config.services().mediaLive().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("medialive"), Set.of(), Set.of()),
+                descriptor("mediaconvert", "mediaconvert", config.services().mediaConvert().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("mediaconvert"), Set.of(), Set.of()),
+                descriptor("mediaconnect", "mediaconnect", config.services().mediaConnect().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("mediaconnect"), Set.of(), Set.of()),
+                descriptor("mailmanager", "mailmanager", config.services().mailManager().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON, ServiceProtocol.CBOR),
+                        Set.of("MailManagerSvc."), Set.of(), Set.of("MailManagerSvc"), Set.of()),
+                descriptor("license-manager", "license-manager", config.services().licenseManager().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWSLicenseManager."), Set.of("license-manager"), Set.of(), Set.of()),
+                descriptor("kendra", "kendra", config.services().kendra().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWSKendraFrontendService."), Set.of("kendra"), Set.of(), Set.of()),
+                descriptor("fsx", "fsx", config.services().fsx().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AWSSimbaAPIService_v20180301."), Set.of("fsx"), Set.of(), Set.of()),
+                descriptor("emr-containers", "emr-containers", config.services().emrContainers().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("emr-containers"), Set.of(), Set.of()),
+                descriptor("ivs", "ivs", config.services().ivs().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("ivs"), Set.of(), Set.of()),
+                descriptor("imagebuilder", "imagebuilder", config.services().imagebuilder().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("imagebuilder"), Set.of(), Set.of()),
+                descriptor("iotmanagedintegrations", "iotmanagedintegrations",
+                        config.services().iotmanagedintegrations().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("iotmanagedintegrations"), Set.of(), Set.of()),
+                descriptor("iotwireless", "iotwireless", config.services().iotwireless().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("iotwireless"), Set.of(), Set.of()),
+                descriptor("iotsitewise", "iotsitewise", config.services().iotsitewise().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("iotsitewise"), Set.of(), Set.of()),
+                descriptor("iotfleetwise", "iotfleetwise", config.services().iotfleetwise().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("IoTAutobahnControlPlane."), Set.of("iotfleetwise"), Set.of(), Set.of()),
+                descriptor("internetmonitor", "internetmonitor", config.services().internetmonitor().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("internetmonitor"), Set.of(), Set.of()),
+                descriptor("ivschat", "ivschat", config.services().ivschat().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("ivschat"), Set.of(), Set.of()),
+                descriptor("healthlake", "healthlake", config.services().healthlake().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("HealthLake."), Set.of("healthlake"), Set.of(), Set.of()),
+                descriptor("greengrass", "greengrassv2", config.services().greengrassv2().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("greengrass"), Set.of(), Set.of()),
+                descriptor("grafana", "grafana", config.services().grafana().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("grafana"), Set.of(), Set.of()),
+                descriptor("glacier", "glacier", config.services().glacier().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("glacier"), Set.of(), Set.of()),
+                descriptor("entityresolution", "entityresolution", config.services().entityresolution().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("entityresolution"), Set.of(), Set.of()),
                 descriptor("resource-groups", "resource-groups", config.services().resourceGroups().enabled(), true,
                         "resource-groups", storageMode(config.storage().services().resourceGroups().mode(), config.storage().mode()),
                         config.storage().services().resourceGroups().flushIntervalMs(), null, ServiceProtocol.REST_JSON,
@@ -661,6 +938,123 @@ public class ResolvedServiceCatalog {
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),
                         Set.of("Comprehend_20171127."), Set.of("comprehend"), Set.of(), Set.of()),
+                descriptor("geo", "location", config.services().location().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("geo"), Set.of(), Set.of(LocationController.class)),
+                descriptor("geo-maps", "location", config.services().location().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("geo-maps"), Set.of(), Set.of(GeoMapsController.class)),
+                descriptor("geo-places", "location", config.services().location().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("geo-places"), Set.of(), Set.of(GeoPlacesController.class)),
+                descriptor("geo-routes", "location", config.services().location().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("geo-routes"), Set.of(), Set.of(GeoRoutesController.class)),
+                descriptor("polly", "polly", config.services().polly().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("polly"), Set.of(), Set.of(PollyController.class)),
+                descriptor("apprunner", "apprunner", config.services().appRunner().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AppRunner."), Set.of("apprunner"), Set.of(), Set.of()),
+                descriptor("codeconnections", "codeconnections", config.services().codeConnections().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("com.amazonaws.codeconnections.CodeConnections_20231201.", "CodeConnections_20231201."),
+                        Set.of("codeconnections"),
+                        Set.of("CodeConnections_20231201"), Set.of()),
+                descriptor("databrew", "databrew", config.services().databrew().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("databrew"), Set.of(), Set.of()),
+                descriptor("dataexchange", "dataexchange", config.services().dataexchange().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("dataexchange"), Set.of(), Set.of()),
+                descriptor("datazone", "datazone", config.services().datazone().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("datazone"), Set.of(), Set.of()),
+                descriptor("deadline", "deadline", config.services().deadline().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("deadline"), Set.of(), Set.of()),
+                descriptor("devopsguru", "devops-guru", config.services().devopsguru().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("devops-guru"), Set.of(), Set.of()),
+                descriptor("docdb-elastic", "docdb-elastic", config.services().docdbElastic().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("docdb-elastic"), Set.of(), Set.of()),
+                descriptor("ds", "ds", config.services().ds().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("DirectoryService_20150416."), Set.of("ds"), Set.of(), Set.of()),
+                descriptor("dax", "dax", config.services().dax().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AmazonDAXV3."), Set.of("dax"), Set.of(), Set.of()),
+                descriptor("chatbot", "chatbot", config.services().chatbot().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("chatbot"), Set.of(), Set.of(ChatbotController.class)),
+                descriptor("bedrock-data-automation", "bedrock-data-automation",
+                        config.services().bedrockDataAutomation().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        // Signs as "bedrock", which bedrock-runtime claims; routes resolve by resource class.
+                        Set.of(), Set.of(), Set.of(), Set.of(BdaController.class)),
+                descriptor("bedrock-data-automation-runtime", "bedrock-data-automation-runtime",
+                        config.services().bedrockDataAutomation().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("AmazonBedrockKeystoneRuntimeService."), Set.of(), Set.of(), Set.of()),
+                descriptor("backup-search", "backupsearch", config.services().backupSearch().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("backup-search"), Set.of(), Set.of(BackupSearchController.class)),
+                descriptor("b2bi", "b2bi", config.services().b2bi().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("B2BI."), Set.of("b2bi"), Set.of(), Set.of()),
+                descriptor("auditmanager", "auditmanager", config.services().auditManager().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("auditmanager"), Set.of(), Set.of(AuditManagerController.class)),
+                descriptor("servicecatalog-appregistry", "appregistry", config.services().appRegistry().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of(), Set.of(), Set.of(AppRegistryController.class)),
+                descriptor("appflow", "appflow", config.services().appFlow().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("appflow"), Set.of(), Set.of(AppFlowController.class)),
+                descriptor("amplify", "amplify", config.services().amplify().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("amplify"), Set.of(), Set.of(AmplifyController.class)),
+                descriptor("aiops", "aiops", config.services().aiOps().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("aiops"), Set.of(), Set.of(AiOpsController.class)),
+                descriptor("acm-pca", "acm-pca", config.services().acmPca().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("ACMPrivateCA."), Set.of("acm-pca"), Set.of(), Set.of()),
+                descriptor("route53domains", "route53domains", config.services().route53Domains().enabled(), true,
+                        null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("Route53Domains_v20140515."), Set.of("route53domains"), Set.of(), Set.of()),
+                descriptor("comprehendmedical", "comprehendmedical", config.services().comprehendMedical().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.JSON,
+                        protocols(ServiceProtocol.JSON),
+                        Set.of("ComprehendMedical_20181030."), Set.of("comprehendmedical"), Set.of(), Set.of()),
                 descriptor("rekognition", "rekognition", config.services().rekognition().enabled(), true,
                         null, null, 5000L, null, ServiceProtocol.JSON,
                         protocols(ServiceProtocol.JSON),

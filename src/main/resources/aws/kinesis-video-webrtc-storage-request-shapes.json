@@ -1,0 +1,42 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_kinesisvideo_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "JoinStorageSession": "JoinStorageSessionInput",
+    "JoinStorageSessionAsViewer": "JoinStorageSessionAsViewerInput"
+  },
+  "shapes": {
+    "ChannelArn": {
+      "type": "string",
+      "pattern": "^arn:(aws[a-zA-Z-]*):kinesisvideo:[a-z0-9-]+:[0-9]+:[a-z]+/[a-zA-Z0-9_.-]+/[0-9]+$"
+    },
+    "ClientId": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "^[a-zA-Z0-9_.-]+$"
+    },
+    "JoinStorageSessionAsViewerInput": {
+      "type": "structure",
+      "required": [
+        "channelArn",
+        "clientId"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "clientId": "ClientId"
+      }
+    },
+    "JoinStorageSessionInput": {
+      "type": "structure",
+      "required": [
+        "channelArn"
+      ],
+      "members": {
+        "channelArn": "ChannelArn"
+      }
+    }
+  }
+}

@@ -1,0 +1,1092 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_dataexchange_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AcceptDataGrant": "AcceptDataGrantRequest",
+    "CancelJob": "CancelJobRequest",
+    "CreateDataGrant": "CreateDataGrantRequest",
+    "CreateDataSet": "CreateDataSetRequest",
+    "CreateEventAction": "CreateEventActionRequest",
+    "CreateJob": "CreateJobRequest",
+    "CreateRevision": "CreateRevisionRequest",
+    "DeleteAsset": "DeleteAssetRequest",
+    "DeleteDataGrant": "DeleteDataGrantRequest",
+    "DeleteDataSet": "DeleteDataSetRequest",
+    "DeleteEventAction": "DeleteEventActionRequest",
+    "DeleteRevision": "DeleteRevisionRequest",
+    "GetAsset": "GetAssetRequest",
+    "GetDataGrant": "GetDataGrantRequest",
+    "GetDataSet": "GetDataSetRequest",
+    "GetEventAction": "GetEventActionRequest",
+    "GetJob": "GetJobRequest",
+    "GetReceivedDataGrant": "GetReceivedDataGrantRequest",
+    "GetRevision": "GetRevisionRequest",
+    "ListDataGrants": "ListDataGrantsRequest",
+    "ListDataSetRevisions": "ListDataSetRevisionsRequest",
+    "ListDataSets": "ListDataSetsRequest",
+    "ListEventActions": "ListEventActionsRequest",
+    "ListJobs": "ListJobsRequest",
+    "ListReceivedDataGrants": "ListReceivedDataGrantsRequest",
+    "ListRevisionAssets": "ListRevisionAssetsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "RevokeRevision": "RevokeRevisionRequest",
+    "SendApiAsset": "SendApiAssetRequest",
+    "SendDataSetNotification": "SendDataSetNotificationRequest",
+    "StartJob": "StartJobRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateAsset": "UpdateAssetRequest",
+    "UpdateDataSet": "UpdateDataSetRequest",
+    "UpdateEventAction": "UpdateEventActionRequest",
+    "UpdateRevision": "UpdateRevisionRequest"
+  },
+  "shapes": {
+    "AcceptDataGrantRequest": {
+      "type": "structure",
+      "required": [
+        "DataGrantArn"
+      ],
+      "members": {
+        "DataGrantArn": "DataGrantArn"
+      }
+    },
+    "AcceptanceStateFilterValue": {
+      "type": "string",
+      "enum": [
+        "PENDING_RECEIVER_ACCEPTANCE",
+        "ACCEPTED"
+      ]
+    },
+    "AcceptanceStateFilterValues": {
+      "type": "list",
+      "member": "AcceptanceStateFilterValue"
+    },
+    "Action": {
+      "type": "structure",
+      "members": {
+        "ExportRevisionToS3": "AutoExportRevisionToS3RequestDetails"
+      }
+    },
+    "ApiDescription": {
+      "type": "string"
+    },
+    "AssetConfiguration": {
+      "type": "structure",
+      "members": {
+        "Tags": "ListOfTag"
+      }
+    },
+    "AssetDestinationEntry": {
+      "type": "structure",
+      "required": [
+        "AssetId",
+        "Bucket"
+      ],
+      "members": {
+        "AssetId": "Id",
+        "Bucket": "__string",
+        "Key": "__string"
+      }
+    },
+    "AssetName": {
+      "type": "string"
+    },
+    "AssetSourceEntry": {
+      "type": "structure",
+      "required": [
+        "Bucket",
+        "Key"
+      ],
+      "members": {
+        "Bucket": "__string",
+        "Key": "__string"
+      }
+    },
+    "AssetType": {
+      "type": "string",
+      "enum": [
+        "S3_SNAPSHOT",
+        "REDSHIFT_DATA_SHARE",
+        "API_GATEWAY_API",
+        "S3_DATA_ACCESS",
+        "LAKE_FORMATION_DATA_PERMISSION"
+      ]
+    },
+    "AutoExportRevisionDestinationEntry": {
+      "type": "structure",
+      "required": [
+        "Bucket"
+      ],
+      "members": {
+        "Bucket": "__string",
+        "KeyPattern": "__string"
+      }
+    },
+    "AutoExportRevisionToS3RequestDetails": {
+      "type": "structure",
+      "required": [
+        "RevisionDestination"
+      ],
+      "members": {
+        "Encryption": "ExportServerSideEncryption",
+        "RevisionDestination": "AutoExportRevisionDestinationEntry"
+      }
+    },
+    "AwsAccountId": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": ".*/^[\\d]{12}$/.*"
+    },
+    "CancelJobRequest": {
+      "type": "structure",
+      "required": [
+        "JobId"
+      ],
+      "members": {
+        "JobId": "Id"
+      }
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[\\x21-\\x7E]{1,64}"
+    },
+    "CreateDataGrantRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "GrantDistributionScope",
+        "ReceiverPrincipal",
+        "SourceDataSetId"
+      ],
+      "members": {
+        "Name": "DataGrantName",
+        "GrantDistributionScope": "GrantDistributionScope",
+        "ReceiverPrincipal": "ReceiverPrincipal",
+        "SourceDataSetId": "Id",
+        "EndsAt": "Timestamp",
+        "Description": "Description",
+        "Tags": "MapOf__string"
+      }
+    },
+    "CreateDataSetRequest": {
+      "type": "structure",
+      "required": [
+        "AssetType",
+        "Description",
+        "Name"
+      ],
+      "members": {
+        "AssetType": "AssetType",
+        "Description": "Description",
+        "Name": "Name",
+        "Tags": "MapOf__string"
+      }
+    },
+    "CreateEventActionRequest": {
+      "type": "structure",
+      "required": [
+        "Action",
+        "Event"
+      ],
+      "members": {
+        "Action": "Action",
+        "Event": "Event",
+        "Tags": "MapOf__string"
+      }
+    },
+    "CreateJobRequest": {
+      "type": "structure",
+      "required": [
+        "Details",
+        "Type"
+      ],
+      "members": {
+        "AssetConfiguration": "AssetConfiguration",
+        "Details": "RequestDetails",
+        "Type": "Type"
+      }
+    },
+    "CreateRevisionRequest": {
+      "type": "structure",
+      "required": [
+        "DataSetId"
+      ],
+      "members": {
+        "Comment": "__stringMin0Max16384",
+        "DataSetId": "Id",
+        "Tags": "MapOf__string"
+      }
+    },
+    "CreateS3DataAccessFromS3BucketRequestDetails": {
+      "type": "structure",
+      "required": [
+        "AssetSource",
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "AssetSource": "S3DataAccessAssetSourceEntry",
+        "DataSetId": "Id",
+        "RevisionId": "Id"
+      }
+    },
+    "DataGrantArn": {
+      "type": "string",
+      "pattern": "arn:aws[a-z0-9-]*:dataexchange:[\\-a-z0-9]*:(\\d{12}):data-grants\\/[a-zA-Z0-9]{30,40}"
+    },
+    "DataGrantId": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9]{30,40}$|^arn:aws[a-z0-9-]*:dataexchange:[\\-a-z0-9]*:(\\d{12}):data-grants\\/[a-zA-Z0-9]{30,40}"
+    },
+    "DataGrantName": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "DataUpdateRequestDetails": {
+      "type": "structure",
+      "members": {
+        "DataUpdatedAt": "Timestamp"
+      }
+    },
+    "DatabaseLFTagPolicyAndPermissions": {
+      "type": "structure",
+      "required": [
+        "Expression",
+        "Permissions"
+      ],
+      "members": {
+        "Expression": "ListOfLFTags",
+        "Permissions": "ListOfDatabaseLFTagPolicyPermissions"
+      }
+    },
+    "DatabaseLFTagPolicyPermission": {
+      "type": "string",
+      "enum": [
+        "DESCRIBE"
+      ]
+    },
+    "DeleteAssetRequest": {
+      "type": "structure",
+      "required": [
+        "AssetId",
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "AssetId": "Id",
+        "DataSetId": "Id",
+        "RevisionId": "Id"
+      }
+    },
+    "DeleteDataGrantRequest": {
+      "type": "structure",
+      "required": [
+        "DataGrantId"
+      ],
+      "members": {
+        "DataGrantId": "DataGrantId"
+      }
+    },
+    "DeleteDataSetRequest": {
+      "type": "structure",
+      "required": [
+        "DataSetId"
+      ],
+      "members": {
+        "DataSetId": "Id"
+      }
+    },
+    "DeleteEventActionRequest": {
+      "type": "structure",
+      "required": [
+        "EventActionId"
+      ],
+      "members": {
+        "EventActionId": "__string"
+      }
+    },
+    "DeleteRevisionRequest": {
+      "type": "structure",
+      "required": [
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "DataSetId": "Id",
+        "RevisionId": "Id"
+      }
+    },
+    "DeprecationRequestDetails": {
+      "type": "structure",
+      "required": [
+        "DeprecationAt"
+      ],
+      "members": {
+        "DeprecationAt": "Timestamp"
+      }
+    },
+    "Description": {
+      "type": "string"
+    },
+    "Event": {
+      "type": "structure",
+      "members": {
+        "RevisionPublished": "RevisionPublished"
+      }
+    },
+    "ExportAssetToSignedUrlRequestDetails": {
+      "type": "structure",
+      "required": [
+        "AssetId",
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "AssetId": "Id",
+        "DataSetId": "Id",
+        "RevisionId": "Id"
+      }
+    },
+    "ExportAssetsToS3RequestDetails": {
+      "type": "structure",
+      "required": [
+        "AssetDestinations",
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "AssetDestinations": "ListOfAssetDestinationEntry",
+        "DataSetId": "Id",
+        "Encryption": "ExportServerSideEncryption",
+        "RevisionId": "Id"
+      }
+    },
+    "ExportRevisionsToS3RequestDetails": {
+      "type": "structure",
+      "required": [
+        "DataSetId",
+        "RevisionDestinations"
+      ],
+      "members": {
+        "DataSetId": "Id",
+        "Encryption": "ExportServerSideEncryption",
+        "RevisionDestinations": "ListOfRevisionDestinationEntry"
+      }
+    },
+    "ExportServerSideEncryption": {
+      "type": "structure",
+      "required": [
+        "Type"
+      ],
+      "members": {
+        "KmsKeyArn": "__string",
+        "Type": "ServerSideEncryptionTypes"
+      }
+    },
+    "GetAssetRequest": {
+      "type": "structure",
+      "required": [
+        "AssetId",
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "AssetId": "Id",
+        "DataSetId": "Id",
+        "RevisionId": "Id"
+      }
+    },
+    "GetDataGrantRequest": {
+      "type": "structure",
+      "required": [
+        "DataGrantId"
+      ],
+      "members": {
+        "DataGrantId": "DataGrantId"
+      }
+    },
+    "GetDataSetRequest": {
+      "type": "structure",
+      "required": [
+        "DataSetId"
+      ],
+      "members": {
+        "DataSetId": "Id"
+      }
+    },
+    "GetEventActionRequest": {
+      "type": "structure",
+      "required": [
+        "EventActionId"
+      ],
+      "members": {
+        "EventActionId": "__string"
+      }
+    },
+    "GetJobRequest": {
+      "type": "structure",
+      "required": [
+        "JobId"
+      ],
+      "members": {
+        "JobId": "Id"
+      }
+    },
+    "GetReceivedDataGrantRequest": {
+      "type": "structure",
+      "required": [
+        "DataGrantArn"
+      ],
+      "members": {
+        "DataGrantArn": "DataGrantArn"
+      }
+    },
+    "GetRevisionRequest": {
+      "type": "structure",
+      "required": [
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "DataSetId": "Id",
+        "RevisionId": "Id"
+      }
+    },
+    "GrantDistributionScope": {
+      "type": "string",
+      "enum": [
+        "AWS_ORGANIZATION",
+        "NONE"
+      ]
+    },
+    "Id": {
+      "type": "string",
+      "pattern": "[a-zA-Z0-9]{30,40}"
+    },
+    "ImportAssetFromApiGatewayApiRequestDetails": {
+      "type": "structure",
+      "required": [
+        "ApiId",
+        "ApiName",
+        "ApiSpecificationMd5Hash",
+        "DataSetId",
+        "ProtocolType",
+        "RevisionId",
+        "Stage"
+      ],
+      "members": {
+        "ApiDescription": "ApiDescription",
+        "ApiId": "__string",
+        "ApiKey": "__string",
+        "ApiName": "__string",
+        "ApiSpecificationMd5Hash": "__stringMin24Max24PatternAZaZ094AZaZ092AZaZ093",
+        "DataSetId": "Id",
+        "ProtocolType": "ProtocolType",
+        "RevisionId": "Id",
+        "Stage": "__string"
+      }
+    },
+    "ImportAssetFromSignedUrlRequestDetails": {
+      "type": "structure",
+      "required": [
+        "AssetName",
+        "DataSetId",
+        "Md5Hash",
+        "RevisionId"
+      ],
+      "members": {
+        "AssetName": "AssetName",
+        "DataSetId": "Id",
+        "Md5Hash": "__stringMin24Max24PatternAZaZ094AZaZ092AZaZ093",
+        "RevisionId": "Id"
+      }
+    },
+    "ImportAssetsFromLakeFormationTagPolicyRequestDetails": {
+      "type": "structure",
+      "required": [
+        "CatalogId",
+        "RoleArn",
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "CatalogId": "AwsAccountId",
+        "Database": "DatabaseLFTagPolicyAndPermissions",
+        "Table": "TableLFTagPolicyAndPermissions",
+        "RoleArn": "RoleArn",
+        "DataSetId": "Id",
+        "RevisionId": "Id"
+      }
+    },
+    "ImportAssetsFromRedshiftDataSharesRequestDetails": {
+      "type": "structure",
+      "required": [
+        "AssetSources",
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "AssetSources": "ListOfRedshiftDataShareAssetSourceEntry",
+        "DataSetId": "Id",
+        "RevisionId": "Id"
+      }
+    },
+    "ImportAssetsFromS3RequestDetails": {
+      "type": "structure",
+      "required": [
+        "AssetSources",
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "AssetSources": "ListOfAssetSourceEntry",
+        "DataSetId": "Id",
+        "RevisionId": "Id"
+      }
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "KmsKeyToGrant": {
+      "type": "structure",
+      "required": [
+        "KmsKeyArn"
+      ],
+      "members": {
+        "KmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "LFTag": {
+      "type": "structure",
+      "required": [
+        "TagKey",
+        "TagValues"
+      ],
+      "members": {
+        "TagKey": "String",
+        "TagValues": "ListOfLFTagValues"
+      }
+    },
+    "LakeFormationTagPolicyDetails": {
+      "type": "structure",
+      "members": {
+        "Database": "__string",
+        "Table": "__string"
+      }
+    },
+    "ListDataGrantsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListDataSetRevisionsRequest": {
+      "type": "structure",
+      "required": [
+        "DataSetId"
+      ],
+      "members": {
+        "DataSetId": "Id",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListDataSetsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "Origin": "__string"
+      }
+    },
+    "ListEventActionsRequest": {
+      "type": "structure",
+      "members": {
+        "EventSourceId": "__string",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string"
+      }
+    },
+    "ListJobsRequest": {
+      "type": "structure",
+      "members": {
+        "DataSetId": "__string",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "RevisionId": "__string"
+      }
+    },
+    "ListOfAssetDestinationEntry": {
+      "type": "list",
+      "member": "AssetDestinationEntry"
+    },
+    "ListOfAssetSourceEntry": {
+      "type": "list",
+      "member": "AssetSourceEntry"
+    },
+    "ListOfDatabaseLFTagPolicyPermissions": {
+      "type": "list",
+      "member": "DatabaseLFTagPolicyPermission"
+    },
+    "ListOfKmsKeysToGrant": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "KmsKeyToGrant"
+    },
+    "ListOfLFTagValues": {
+      "type": "list",
+      "member": "String"
+    },
+    "ListOfLFTags": {
+      "type": "list",
+      "member": "LFTag"
+    },
+    "ListOfLakeFormationTagPolicies": {
+      "type": "list",
+      "member": "LakeFormationTagPolicyDetails"
+    },
+    "ListOfRedshiftDataShareAssetSourceEntry": {
+      "type": "list",
+      "member": "RedshiftDataShareAssetSourceEntry"
+    },
+    "ListOfRedshiftDataShares": {
+      "type": "list",
+      "member": "RedshiftDataShareDetails"
+    },
+    "ListOfRevisionDestinationEntry": {
+      "type": "list",
+      "member": "RevisionDestinationEntry"
+    },
+    "ListOfS3DataAccesses": {
+      "type": "list",
+      "member": "S3DataAccessDetails"
+    },
+    "ListOfSchemaChangeDetails": {
+      "type": "list",
+      "member": "SchemaChangeDetails"
+    },
+    "ListOfTableTagPolicyLFPermissions": {
+      "type": "list",
+      "member": "TableTagPolicyLFPermission"
+    },
+    "ListOfTag": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "Tag"
+    },
+    "ListOf__string": {
+      "type": "list",
+      "member": "__string"
+    },
+    "ListReceivedDataGrantsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "AcceptanceState": "AcceptanceStateFilterValues"
+      }
+    },
+    "ListRevisionAssetsRequest": {
+      "type": "structure",
+      "required": [
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "DataSetId": "Id",
+        "MaxResults": "MaxResults",
+        "NextToken": "__string",
+        "RevisionId": "Id"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "__string"
+      }
+    },
+    "MapOf__string": {
+      "type": "map",
+      "key": "__string",
+      "value": "__string"
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 200
+    },
+    "Name": {
+      "type": "string"
+    },
+    "NotificationDetails": {
+      "type": "structure",
+      "members": {
+        "DataUpdate": "DataUpdateRequestDetails",
+        "Deprecation": "DeprecationRequestDetails",
+        "SchemaChange": "SchemaChangeRequestDetails"
+      }
+    },
+    "NotificationType": {
+      "type": "string",
+      "enum": [
+        "DATA_DELAY",
+        "DATA_UPDATE",
+        "DEPRECATION",
+        "SCHEMA_CHANGE"
+      ]
+    },
+    "ProtocolType": {
+      "type": "string",
+      "enum": [
+        "REST"
+      ]
+    },
+    "ReceiverPrincipal": {
+      "type": "string",
+      "pattern": "\\d{12}"
+    },
+    "RedshiftDataShareAssetSourceEntry": {
+      "type": "structure",
+      "required": [
+        "DataShareArn"
+      ],
+      "members": {
+        "DataShareArn": "__string"
+      }
+    },
+    "RedshiftDataShareDetails": {
+      "type": "structure",
+      "required": [
+        "Arn",
+        "Database"
+      ],
+      "members": {
+        "Arn": "__string",
+        "Database": "__string",
+        "Function": "__string",
+        "Table": "__string",
+        "Schema": "__string",
+        "View": "__string"
+      }
+    },
+    "RequestDetails": {
+      "type": "structure",
+      "members": {
+        "ExportAssetToSignedUrl": "ExportAssetToSignedUrlRequestDetails",
+        "ExportAssetsToS3": "ExportAssetsToS3RequestDetails",
+        "ExportRevisionsToS3": "ExportRevisionsToS3RequestDetails",
+        "ImportAssetFromSignedUrl": "ImportAssetFromSignedUrlRequestDetails",
+        "ImportAssetsFromS3": "ImportAssetsFromS3RequestDetails",
+        "ImportAssetsFromRedshiftDataShares": "ImportAssetsFromRedshiftDataSharesRequestDetails",
+        "ImportAssetFromApiGatewayApi": "ImportAssetFromApiGatewayApiRequestDetails",
+        "CreateS3DataAccessFromS3Bucket": "CreateS3DataAccessFromS3BucketRequestDetails",
+        "ImportAssetsFromLakeFormationTagPolicy": "ImportAssetsFromLakeFormationTagPolicyRequestDetails"
+      }
+    },
+    "RevisionDestinationEntry": {
+      "type": "structure",
+      "required": [
+        "Bucket",
+        "RevisionId"
+      ],
+      "members": {
+        "Bucket": "__string",
+        "KeyPattern": "__string",
+        "RevisionId": "Id"
+      }
+    },
+    "RevisionPublished": {
+      "type": "structure",
+      "required": [
+        "DataSetId"
+      ],
+      "members": {
+        "DataSetId": "Id"
+      }
+    },
+    "RevokeRevisionRequest": {
+      "type": "structure",
+      "required": [
+        "DataSetId",
+        "RevisionId",
+        "RevocationComment"
+      ],
+      "members": {
+        "DataSetId": "Id",
+        "RevisionId": "Id",
+        "RevocationComment": "__stringMin10Max512"
+      }
+    },
+    "RoleArn": {
+      "type": "string",
+      "pattern": "arn:aws[a-z0-9-]*:iam::(\\d{12}):role\\/.+"
+    },
+    "S3DataAccessAssetSourceEntry": {
+      "type": "structure",
+      "required": [
+        "Bucket"
+      ],
+      "members": {
+        "Bucket": "__string",
+        "KeyPrefixes": "ListOf__string",
+        "Keys": "ListOf__string",
+        "KmsKeysToGrant": "ListOfKmsKeysToGrant"
+      }
+    },
+    "S3DataAccessDetails": {
+      "type": "structure",
+      "members": {
+        "KeyPrefixes": "ListOf__string",
+        "Keys": "ListOf__string"
+      }
+    },
+    "SchemaChangeDetails": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Type"
+      ],
+      "members": {
+        "Name": "__string",
+        "Type": "SchemaChangeType",
+        "Description": "__string"
+      }
+    },
+    "SchemaChangeRequestDetails": {
+      "type": "structure",
+      "required": [
+        "SchemaChangeAt"
+      ],
+      "members": {
+        "Changes": "ListOfSchemaChangeDetails",
+        "SchemaChangeAt": "Timestamp"
+      }
+    },
+    "SchemaChangeType": {
+      "type": "string",
+      "enum": [
+        "ADD",
+        "REMOVE",
+        "MODIFY"
+      ]
+    },
+    "ScopeDetails": {
+      "type": "structure",
+      "members": {
+        "LakeFormationTagPolicies": "ListOfLakeFormationTagPolicies",
+        "RedshiftDataShares": "ListOfRedshiftDataShares",
+        "S3DataAccesses": "ListOfS3DataAccesses"
+      }
+    },
+    "SendApiAssetRequest": {
+      "type": "structure",
+      "required": [
+        "AssetId",
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "Body": "__string",
+        "QueryStringParameters": "MapOf__string",
+        "AssetId": "__string",
+        "DataSetId": "__string",
+        "RequestHeaders": "MapOf__string",
+        "Method": "__string",
+        "Path": "__string",
+        "RevisionId": "__string"
+      }
+    },
+    "SendDataSetNotificationRequest": {
+      "type": "structure",
+      "required": [
+        "DataSetId",
+        "Type"
+      ],
+      "members": {
+        "Scope": "ScopeDetails",
+        "ClientToken": "ClientToken",
+        "Comment": "__stringMin0Max4096",
+        "DataSetId": "Id",
+        "Details": "NotificationDetails",
+        "Type": "NotificationType"
+      }
+    },
+    "ServerSideEncryptionTypes": {
+      "type": "string",
+      "enum": [
+        "aws:kms",
+        "AES256"
+      ]
+    },
+    "StartJobRequest": {
+      "type": "structure",
+      "required": [
+        "JobId"
+      ],
+      "members": {
+        "JobId": "Id"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "TableLFTagPolicyAndPermissions": {
+      "type": "structure",
+      "required": [
+        "Expression",
+        "Permissions"
+      ],
+      "members": {
+        "Expression": "ListOfLFTags",
+        "Permissions": "ListOfTableTagPolicyLFPermissions"
+      }
+    },
+    "TableTagPolicyLFPermission": {
+      "type": "string",
+      "enum": [
+        "DESCRIBE",
+        "SELECT"
+      ]
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "__string",
+        "Value": "__string"
+      }
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "__string",
+        "Tags": "MapOf__string"
+      }
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "Type": {
+      "type": "string",
+      "enum": [
+        "IMPORT_ASSETS_FROM_S3",
+        "IMPORT_ASSET_FROM_SIGNED_URL",
+        "EXPORT_ASSETS_TO_S3",
+        "EXPORT_ASSET_TO_SIGNED_URL",
+        "EXPORT_REVISIONS_TO_S3",
+        "IMPORT_ASSETS_FROM_REDSHIFT_DATA_SHARES",
+        "IMPORT_ASSET_FROM_API_GATEWAY_API",
+        "CREATE_S3_DATA_ACCESS_FROM_S3_BUCKET",
+        "IMPORT_ASSETS_FROM_LAKE_FORMATION_TAG_POLICY"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "__string",
+        "TagKeys": "ListOf__string"
+      }
+    },
+    "UpdateAssetRequest": {
+      "type": "structure",
+      "required": [
+        "AssetId",
+        "DataSetId",
+        "Name",
+        "RevisionId"
+      ],
+      "members": {
+        "AssetId": "Id",
+        "DataSetId": "Id",
+        "Name": "AssetName",
+        "RevisionId": "Id"
+      }
+    },
+    "UpdateDataSetRequest": {
+      "type": "structure",
+      "required": [
+        "DataSetId"
+      ],
+      "members": {
+        "DataSetId": "Id",
+        "Description": "Description",
+        "Name": "Name"
+      }
+    },
+    "UpdateEventActionRequest": {
+      "type": "structure",
+      "required": [
+        "EventActionId"
+      ],
+      "members": {
+        "Action": "Action",
+        "EventActionId": "__string"
+      }
+    },
+    "UpdateRevisionRequest": {
+      "type": "structure",
+      "required": [
+        "DataSetId",
+        "RevisionId"
+      ],
+      "members": {
+        "Comment": "__stringMin0Max16384",
+        "DataSetId": "Id",
+        "Finalized": "__boolean",
+        "RevisionId": "Id"
+      }
+    },
+    "__boolean": {
+      "type": "boolean"
+    },
+    "__string": {
+      "type": "string"
+    },
+    "__stringMin0Max16384": {
+      "type": "string",
+      "min": 0,
+      "max": 16384
+    },
+    "__stringMin0Max4096": {
+      "type": "string",
+      "min": 0,
+      "max": 4096
+    },
+    "__stringMin10Max512": {
+      "type": "string",
+      "min": 10,
+      "max": 512
+    },
+    "__stringMin24Max24PatternAZaZ094AZaZ092AZaZ093": {
+      "type": "string",
+      "min": 24,
+      "max": 24,
+      "pattern": "(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?"
+    }
+  }
+}

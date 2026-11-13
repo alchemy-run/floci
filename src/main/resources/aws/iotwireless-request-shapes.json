@@ -1,0 +1,3393 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_iotwireless_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateAwsAccountWithPartnerAccount": "AssociateAwsAccountWithPartnerAccountRequest",
+    "AssociateMulticastGroupWithFuotaTask": "AssociateMulticastGroupWithFuotaTaskRequest",
+    "AssociateWirelessDeviceWithFuotaTask": "AssociateWirelessDeviceWithFuotaTaskRequest",
+    "AssociateWirelessDeviceWithMulticastGroup": "AssociateWirelessDeviceWithMulticastGroupRequest",
+    "AssociateWirelessDeviceWithThing": "AssociateWirelessDeviceWithThingRequest",
+    "AssociateWirelessGatewayWithCertificate": "AssociateWirelessGatewayWithCertificateRequest",
+    "AssociateWirelessGatewayWithThing": "AssociateWirelessGatewayWithThingRequest",
+    "CancelMulticastGroupSession": "CancelMulticastGroupSessionRequest",
+    "CreateDestination": "CreateDestinationRequest",
+    "CreateDeviceProfile": "CreateDeviceProfileRequest",
+    "CreateFuotaTask": "CreateFuotaTaskRequest",
+    "CreateMulticastGroup": "CreateMulticastGroupRequest",
+    "CreateNetworkAnalyzerConfiguration": "CreateNetworkAnalyzerConfigurationRequest",
+    "CreateServiceProfile": "CreateServiceProfileRequest",
+    "CreateWirelessDevice": "CreateWirelessDeviceRequest",
+    "CreateWirelessGateway": "CreateWirelessGatewayRequest",
+    "CreateWirelessGatewayTask": "CreateWirelessGatewayTaskRequest",
+    "CreateWirelessGatewayTaskDefinition": "CreateWirelessGatewayTaskDefinitionRequest",
+    "DeleteDestination": "DeleteDestinationRequest",
+    "DeleteDeviceProfile": "DeleteDeviceProfileRequest",
+    "DeleteFuotaTask": "DeleteFuotaTaskRequest",
+    "DeleteMulticastGroup": "DeleteMulticastGroupRequest",
+    "DeleteNetworkAnalyzerConfiguration": "DeleteNetworkAnalyzerConfigurationRequest",
+    "DeleteQueuedMessages": "DeleteQueuedMessagesRequest",
+    "DeleteServiceProfile": "DeleteServiceProfileRequest",
+    "DeleteWirelessDevice": "DeleteWirelessDeviceRequest",
+    "DeleteWirelessDeviceImportTask": "DeleteWirelessDeviceImportTaskRequest",
+    "DeleteWirelessGateway": "DeleteWirelessGatewayRequest",
+    "DeleteWirelessGatewayTask": "DeleteWirelessGatewayTaskRequest",
+    "DeleteWirelessGatewayTaskDefinition": "DeleteWirelessGatewayTaskDefinitionRequest",
+    "DeregisterWirelessDevice": "DeregisterWirelessDeviceRequest",
+    "DisassociateAwsAccountFromPartnerAccount": "DisassociateAwsAccountFromPartnerAccountRequest",
+    "DisassociateMulticastGroupFromFuotaTask": "DisassociateMulticastGroupFromFuotaTaskRequest",
+    "DisassociateWirelessDeviceFromFuotaTask": "DisassociateWirelessDeviceFromFuotaTaskRequest",
+    "DisassociateWirelessDeviceFromMulticastGroup": "DisassociateWirelessDeviceFromMulticastGroupRequest",
+    "DisassociateWirelessDeviceFromThing": "DisassociateWirelessDeviceFromThingRequest",
+    "DisassociateWirelessGatewayFromCertificate": "DisassociateWirelessGatewayFromCertificateRequest",
+    "DisassociateWirelessGatewayFromThing": "DisassociateWirelessGatewayFromThingRequest",
+    "GetDestination": "GetDestinationRequest",
+    "GetDeviceProfile": "GetDeviceProfileRequest",
+    "GetEventConfigurationByResourceTypes": "GetEventConfigurationByResourceTypesRequest",
+    "GetFuotaTask": "GetFuotaTaskRequest",
+    "GetLogLevelsByResourceTypes": "GetLogLevelsByResourceTypesRequest",
+    "GetMetricConfiguration": "GetMetricConfigurationRequest",
+    "GetMetrics": "GetMetricsRequest",
+    "GetMulticastGroup": "GetMulticastGroupRequest",
+    "GetMulticastGroupSession": "GetMulticastGroupSessionRequest",
+    "GetNetworkAnalyzerConfiguration": "GetNetworkAnalyzerConfigurationRequest",
+    "GetPartnerAccount": "GetPartnerAccountRequest",
+    "GetPosition": "GetPositionRequest",
+    "GetPositionConfiguration": "GetPositionConfigurationRequest",
+    "GetPositionEstimate": "GetPositionEstimateRequest",
+    "GetResourceEventConfiguration": "GetResourceEventConfigurationRequest",
+    "GetResourceLogLevel": "GetResourceLogLevelRequest",
+    "GetResourcePosition": "GetResourcePositionRequest",
+    "GetServiceEndpoint": "GetServiceEndpointRequest",
+    "GetServiceProfile": "GetServiceProfileRequest",
+    "GetWirelessDevice": "GetWirelessDeviceRequest",
+    "GetWirelessDeviceImportTask": "GetWirelessDeviceImportTaskRequest",
+    "GetWirelessDeviceStatistics": "GetWirelessDeviceStatisticsRequest",
+    "GetWirelessGateway": "GetWirelessGatewayRequest",
+    "GetWirelessGatewayCertificate": "GetWirelessGatewayCertificateRequest",
+    "GetWirelessGatewayFirmwareInformation": "GetWirelessGatewayFirmwareInformationRequest",
+    "GetWirelessGatewayStatistics": "GetWirelessGatewayStatisticsRequest",
+    "GetWirelessGatewayTask": "GetWirelessGatewayTaskRequest",
+    "GetWirelessGatewayTaskDefinition": "GetWirelessGatewayTaskDefinitionRequest",
+    "ListDestinations": "ListDestinationsRequest",
+    "ListDeviceProfiles": "ListDeviceProfilesRequest",
+    "ListDevicesForWirelessDeviceImportTask": "ListDevicesForWirelessDeviceImportTaskRequest",
+    "ListEventConfigurations": "ListEventConfigurationsRequest",
+    "ListFuotaTasks": "ListFuotaTasksRequest",
+    "ListMulticastGroups": "ListMulticastGroupsRequest",
+    "ListMulticastGroupsByFuotaTask": "ListMulticastGroupsByFuotaTaskRequest",
+    "ListNetworkAnalyzerConfigurations": "ListNetworkAnalyzerConfigurationsRequest",
+    "ListPartnerAccounts": "ListPartnerAccountsRequest",
+    "ListPositionConfigurations": "ListPositionConfigurationsRequest",
+    "ListQueuedMessages": "ListQueuedMessagesRequest",
+    "ListServiceProfiles": "ListServiceProfilesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListWirelessDeviceImportTasks": "ListWirelessDeviceImportTasksRequest",
+    "ListWirelessDevices": "ListWirelessDevicesRequest",
+    "ListWirelessGatewayTaskDefinitions": "ListWirelessGatewayTaskDefinitionsRequest",
+    "ListWirelessGateways": "ListWirelessGatewaysRequest",
+    "PutPositionConfiguration": "PutPositionConfigurationRequest",
+    "PutResourceLogLevel": "PutResourceLogLevelRequest",
+    "ResetAllResourceLogLevels": "ResetAllResourceLogLevelsRequest",
+    "ResetResourceLogLevel": "ResetResourceLogLevelRequest",
+    "SendDataToMulticastGroup": "SendDataToMulticastGroupRequest",
+    "SendDataToWirelessDevice": "SendDataToWirelessDeviceRequest",
+    "StartBulkAssociateWirelessDeviceWithMulticastGroup": "StartBulkAssociateWirelessDeviceWithMulticastGroupRequest",
+    "StartBulkDisassociateWirelessDeviceFromMulticastGroup": "StartBulkDisassociateWirelessDeviceFromMulticastGroupRequest",
+    "StartFuotaTask": "StartFuotaTaskRequest",
+    "StartMulticastGroupSession": "StartMulticastGroupSessionRequest",
+    "StartSingleWirelessDeviceImportTask": "StartSingleWirelessDeviceImportTaskRequest",
+    "StartWirelessDeviceImportTask": "StartWirelessDeviceImportTaskRequest",
+    "TagResource": "TagResourceRequest",
+    "TestWirelessDevice": "TestWirelessDeviceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateDestination": "UpdateDestinationRequest",
+    "UpdateEventConfigurationByResourceTypes": "UpdateEventConfigurationByResourceTypesRequest",
+    "UpdateFuotaTask": "UpdateFuotaTaskRequest",
+    "UpdateLogLevelsByResourceTypes": "UpdateLogLevelsByResourceTypesRequest",
+    "UpdateMetricConfiguration": "UpdateMetricConfigurationRequest",
+    "UpdateMulticastGroup": "UpdateMulticastGroupRequest",
+    "UpdateNetworkAnalyzerConfiguration": "UpdateNetworkAnalyzerConfigurationRequest",
+    "UpdatePartnerAccount": "UpdatePartnerAccountRequest",
+    "UpdatePosition": "UpdatePositionRequest",
+    "UpdateResourceEventConfiguration": "UpdateResourceEventConfigurationRequest",
+    "UpdateResourcePosition": "UpdateResourcePositionRequest",
+    "UpdateWirelessDevice": "UpdateWirelessDeviceRequest",
+    "UpdateWirelessDeviceImportTask": "UpdateWirelessDeviceImportTaskRequest",
+    "UpdateWirelessGateway": "UpdateWirelessGatewayRequest"
+  },
+  "shapes": {
+    "AbpV1_0_x": {
+      "type": "structure",
+      "members": {
+        "DevAddr": "DevAddr",
+        "SessionKeys": "SessionKeysAbpV1_0_x",
+        "FCntStart": "FCntStart"
+      }
+    },
+    "AbpV1_1": {
+      "type": "structure",
+      "members": {
+        "DevAddr": "DevAddr",
+        "SessionKeys": "SessionKeysAbpV1_1",
+        "FCntStart": "FCntStart"
+      }
+    },
+    "AckModeRetryDurationSecs": {
+      "type": "integer",
+      "min": 0,
+      "max": 604800
+    },
+    "AddGwMetadata": {
+      "type": "boolean"
+    },
+    "AdvancedConfiguration": {
+      "type": "structure",
+      "members": {
+        "WiFiCellular": "WiFiCellular"
+      }
+    },
+    "AggregationPeriod": {
+      "type": "string",
+      "enum": [
+        "OneHour",
+        "OneDay",
+        "OneWeek"
+      ]
+    },
+    "AmazonId": {
+      "type": "string",
+      "max": 2048
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011
+    },
+    "AppEui": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{16}"
+    },
+    "AppKey": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{32}"
+    },
+    "AppSKey": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{32}"
+    },
+    "AppServerPrivateKey": {
+      "type": "string",
+      "min": 1,
+      "max": 4096,
+      "pattern": "[a-fA-F0-9]{64}"
+    },
+    "ApplicationConfig": {
+      "type": "structure",
+      "members": {
+        "FPort": "FPort",
+        "Type": "ApplicationConfigType",
+        "DestinationName": "DestinationName"
+      }
+    },
+    "ApplicationConfigType": {
+      "type": "string",
+      "enum": [
+        "SemtechGeolocation"
+      ]
+    },
+    "Applications": {
+      "type": "list",
+      "member": "ApplicationConfig"
+    },
+    "AssistPosition": {
+      "type": "list",
+      "min": 2,
+      "max": 2,
+      "member": "Coordinate"
+    },
+    "AssociateAwsAccountWithPartnerAccountRequest": {
+      "type": "structure",
+      "required": [
+        "Sidewalk"
+      ],
+      "members": {
+        "Sidewalk": "SidewalkAccountInfo",
+        "ClientRequestToken": "ClientRequestToken",
+        "Tags": "TagList"
+      }
+    },
+    "AssociateMulticastGroupWithFuotaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "MulticastGroupId"
+      ],
+      "members": {
+        "Id": "FuotaTaskId",
+        "MulticastGroupId": "MulticastGroupId"
+      }
+    },
+    "AssociateWirelessDeviceWithFuotaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "WirelessDeviceId"
+      ],
+      "members": {
+        "Id": "FuotaTaskId",
+        "WirelessDeviceId": "WirelessDeviceId"
+      }
+    },
+    "AssociateWirelessDeviceWithMulticastGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "WirelessDeviceId"
+      ],
+      "members": {
+        "Id": "MulticastGroupId",
+        "WirelessDeviceId": "WirelessDeviceId"
+      }
+    },
+    "AssociateWirelessDeviceWithThingRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "ThingArn"
+      ],
+      "members": {
+        "Id": "WirelessDeviceId",
+        "ThingArn": "ThingArn"
+      }
+    },
+    "AssociateWirelessGatewayWithCertificateRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "IotCertificateId"
+      ],
+      "members": {
+        "Id": "WirelessGatewayId",
+        "IotCertificateId": "IotCertificateId"
+      }
+    },
+    "AssociateWirelessGatewayWithThingRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "ThingArn"
+      ],
+      "members": {
+        "Id": "WirelessGatewayId",
+        "ThingArn": "ThingArn"
+      }
+    },
+    "AutoCreateTasks": {
+      "type": "boolean"
+    },
+    "BCCH": {
+      "type": "integer",
+      "min": 0,
+      "max": 1023
+    },
+    "BSIC": {
+      "type": "integer",
+      "min": 0,
+      "max": 63
+    },
+    "BaseLat": {
+      "type": "float",
+      "min": -90,
+      "max": 90
+    },
+    "BaseLng": {
+      "type": "float",
+      "min": -180,
+      "max": 180
+    },
+    "BaseStationId": {
+      "type": "integer",
+      "min": 0,
+      "max": 65535
+    },
+    "Beaconing": {
+      "type": "structure",
+      "members": {
+        "DataRate": "BeaconingDataRate",
+        "Frequencies": "BeaconingFrequencies"
+      }
+    },
+    "BeaconingDataRate": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "BeaconingFrequencies": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "BeaconingFrequency"
+    },
+    "BeaconingFrequency": {
+      "type": "integer",
+      "min": 100000000,
+      "max": 1000000000
+    },
+    "CancelMulticastGroupSessionRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "MulticastGroupId"
+      }
+    },
+    "CaptureTimeAccuracy": {
+      "type": "float"
+    },
+    "CdmaChannel": {
+      "type": "integer",
+      "min": 0,
+      "max": 4095
+    },
+    "CdmaList": {
+      "type": "list",
+      "min": 1,
+      "max": 16,
+      "member": "CdmaObj"
+    },
+    "CdmaLocalId": {
+      "type": "structure",
+      "required": [
+        "PnOffset",
+        "CdmaChannel"
+      ],
+      "members": {
+        "PnOffset": "PnOffset",
+        "CdmaChannel": "CdmaChannel"
+      }
+    },
+    "CdmaNmrList": {
+      "type": "list",
+      "min": 1,
+      "max": 32,
+      "member": "CdmaNmrObj"
+    },
+    "CdmaNmrObj": {
+      "type": "structure",
+      "required": [
+        "PnOffset",
+        "CdmaChannel"
+      ],
+      "members": {
+        "PnOffset": "PnOffset",
+        "CdmaChannel": "CdmaChannel",
+        "PilotPower": "PilotPower",
+        "BaseStationId": "BaseStationId"
+      }
+    },
+    "CdmaObj": {
+      "type": "structure",
+      "required": [
+        "SystemId",
+        "NetworkId",
+        "BaseStationId"
+      ],
+      "members": {
+        "SystemId": "SystemId",
+        "NetworkId": "NetworkId",
+        "BaseStationId": "BaseStationId",
+        "RegistrationZone": "RegistrationZone",
+        "CdmaLocalId": "CdmaLocalId",
+        "PilotPower": "PilotPower",
+        "BaseLat": "BaseLat",
+        "BaseLng": "BaseLng",
+        "CdmaNmr": "CdmaNmrList"
+      }
+    },
+    "CellParams": {
+      "type": "integer",
+      "min": 0,
+      "max": 127
+    },
+    "CellTowers": {
+      "type": "structure",
+      "members": {
+        "Gsm": "GsmList",
+        "Wcdma": "WcdmaList",
+        "Tdscdma": "TdscdmaList",
+        "Lte": "LteList",
+        "Cdma": "CdmaList"
+      }
+    },
+    "ClassBTimeout": {
+      "type": "integer",
+      "min": 0,
+      "max": 1000
+    },
+    "ClassCTimeout": {
+      "type": "integer",
+      "min": 0,
+      "max": 1000
+    },
+    "ClientRequestToken": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[a-zA-Z0-9-_]+$"
+    },
+    "ConfidencePercent": {
+      "type": "integer",
+      "min": 50,
+      "max": 99
+    },
+    "ConnectionStatusEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "LoRaWAN": "LoRaWANConnectionStatusEventNotificationConfigurations",
+        "WirelessGatewayIdEventTopic": "EventNotificationTopicStatus"
+      }
+    },
+    "ConnectionStatusResourceTypeEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "LoRaWAN": "LoRaWANConnectionStatusResourceTypeEventConfiguration"
+      }
+    },
+    "Coordinate": {
+      "type": "float"
+    },
+    "Crc": {
+      "type": "long",
+      "min": 1,
+      "max": 4294967295
+    },
+    "CreateDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "ExpressionType",
+        "Expression",
+        "RoleArn"
+      ],
+      "members": {
+        "Name": "DestinationName",
+        "ExpressionType": "ExpressionType",
+        "Expression": "Expression",
+        "Description": "Description",
+        "RoleArn": "RoleArn",
+        "Tags": "TagList",
+        "ClientRequestToken": "ClientRequestToken"
+      }
+    },
+    "CreateDeviceProfileRequest": {
+      "type": "structure",
+      "members": {
+        "Name": "DeviceProfileName",
+        "LoRaWAN": "LoRaWANDeviceProfile",
+        "Tags": "TagList",
+        "ClientRequestToken": "ClientRequestToken",
+        "Sidewalk": "SidewalkCreateDeviceProfile"
+      }
+    },
+    "CreateFuotaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "FirmwareUpdateImage",
+        "FirmwareUpdateRole"
+      ],
+      "members": {
+        "Name": "FuotaTaskName",
+        "Description": "Description",
+        "ClientRequestToken": "ClientRequestToken",
+        "LoRaWAN": "LoRaWANFuotaTask",
+        "FirmwareUpdateImage": "FirmwareUpdateImage",
+        "FirmwareUpdateRole": "FirmwareUpdateRole",
+        "Tags": "TagList",
+        "RedundancyPercent": "RedundancyPercent",
+        "FragmentSizeBytes": "FragmentSizeBytes",
+        "FragmentIntervalMS": "FragmentIntervalMS",
+        "Descriptor": "FileDescriptor"
+      }
+    },
+    "CreateMulticastGroupRequest": {
+      "type": "structure",
+      "required": [
+        "LoRaWAN"
+      ],
+      "members": {
+        "Name": "MulticastGroupName",
+        "Description": "Description",
+        "ClientRequestToken": "ClientRequestToken",
+        "LoRaWAN": "LoRaWANMulticast",
+        "Tags": "TagList"
+      }
+    },
+    "CreateNetworkAnalyzerConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "NetworkAnalyzerConfigurationName",
+        "TraceContent": "TraceContent",
+        "WirelessDevices": "WirelessDeviceList",
+        "WirelessGateways": "WirelessGatewayList",
+        "Description": "Description",
+        "Tags": "TagList",
+        "ClientRequestToken": "ClientRequestToken",
+        "MulticastGroups": "NetworkAnalyzerMulticastGroupList"
+      }
+    },
+    "CreateServiceProfileRequest": {
+      "type": "structure",
+      "members": {
+        "Name": "ServiceProfileName",
+        "LoRaWAN": "LoRaWANServiceProfile",
+        "Tags": "TagList",
+        "ClientRequestToken": "ClientRequestToken"
+      }
+    },
+    "CreateWirelessDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "DestinationName"
+      ],
+      "members": {
+        "Type": "WirelessDeviceType",
+        "Name": "WirelessDeviceName",
+        "Description": "Description",
+        "DestinationName": "DestinationName",
+        "ClientRequestToken": "ClientRequestToken",
+        "LoRaWAN": "LoRaWANDevice",
+        "Tags": "TagList",
+        "Positioning": "PositioningConfigStatus",
+        "Sidewalk": "SidewalkCreateWirelessDevice"
+      }
+    },
+    "CreateWirelessGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "LoRaWAN"
+      ],
+      "members": {
+        "Name": "WirelessGatewayName",
+        "Description": "Description",
+        "LoRaWAN": "LoRaWANGateway",
+        "Tags": "TagList",
+        "ClientRequestToken": "ClientRequestToken"
+      }
+    },
+    "CreateWirelessGatewayTaskDefinitionRequest": {
+      "type": "structure",
+      "required": [
+        "AutoCreateTasks"
+      ],
+      "members": {
+        "AutoCreateTasks": "AutoCreateTasks",
+        "Name": "WirelessGatewayTaskName",
+        "Update": "UpdateWirelessGatewayTaskCreate",
+        "ClientRequestToken": "ClientRequestToken",
+        "Tags": "TagList"
+      }
+    },
+    "CreateWirelessGatewayTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "WirelessGatewayTaskDefinitionId"
+      ],
+      "members": {
+        "Id": "WirelessGatewayId",
+        "WirelessGatewayTaskDefinitionId": "WirelessGatewayTaskDefinitionId"
+      }
+    },
+    "CreationDate": {
+      "type": "timestamp"
+    },
+    "DefaultSessionParametersMulticast": {
+      "type": "structure",
+      "members": {
+        "DlDr": "DlDr",
+        "DlFreq": "DlFreq"
+      }
+    },
+    "DeleteDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "DestinationName"
+      }
+    },
+    "DeleteDeviceProfileRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "DeviceProfileId"
+      }
+    },
+    "DeleteFuotaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "FuotaTaskId"
+      }
+    },
+    "DeleteMulticastGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "MulticastGroupId"
+      }
+    },
+    "DeleteNetworkAnalyzerConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationName"
+      ],
+      "members": {
+        "ConfigurationName": "NetworkAnalyzerConfigurationName"
+      }
+    },
+    "DeleteQueuedMessagesRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "MessageId"
+      ],
+      "members": {
+        "Id": "WirelessDeviceId",
+        "MessageId": "MessageId",
+        "WirelessDeviceType": "WirelessDeviceType"
+      }
+    },
+    "DeleteServiceProfileRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "ServiceProfileId"
+      }
+    },
+    "DeleteWirelessDeviceImportTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "ImportTaskId"
+      }
+    },
+    "DeleteWirelessDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessDeviceId"
+      }
+    },
+    "DeleteWirelessGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessGatewayId"
+      }
+    },
+    "DeleteWirelessGatewayTaskDefinitionRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessGatewayTaskDefinitionId"
+      }
+    },
+    "DeleteWirelessGatewayTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessGatewayId"
+      }
+    },
+    "DeregisterWirelessDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier"
+      ],
+      "members": {
+        "Identifier": "Identifier",
+        "WirelessDeviceType": "WirelessDeviceType"
+      }
+    },
+    "Description": {
+      "type": "string",
+      "max": 2048
+    },
+    "DestinationName": {
+      "type": "string",
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]+"
+    },
+    "DevAddr": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{8}"
+    },
+    "DevEui": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{16}"
+    },
+    "DeviceCreationFile": {
+      "type": "string",
+      "max": 1024
+    },
+    "DeviceName": {
+      "type": "string"
+    },
+    "DeviceProfileId": {
+      "type": "string",
+      "max": 256
+    },
+    "DeviceProfileName": {
+      "type": "string",
+      "max": 256
+    },
+    "DeviceProfileType": {
+      "type": "string",
+      "enum": [
+        "Sidewalk",
+        "LoRaWAN"
+      ]
+    },
+    "DeviceRegistrationStateEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "Sidewalk": "SidewalkEventNotificationConfigurations",
+        "WirelessDeviceIdEventTopic": "EventNotificationTopicStatus"
+      }
+    },
+    "DeviceRegistrationStateResourceTypeEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "Sidewalk": "SidewalkResourceTypeEventConfiguration"
+      }
+    },
+    "Dimension": {
+      "type": "structure",
+      "members": {
+        "name": "DimensionName",
+        "value": "DimensionValue"
+      }
+    },
+    "DimensionName": {
+      "type": "string",
+      "max": 256,
+      "enum": [
+        "DeviceId",
+        "GatewayId"
+      ]
+    },
+    "DimensionValue": {
+      "type": "string",
+      "max": 256
+    },
+    "Dimensions": {
+      "type": "list",
+      "member": "Dimension"
+    },
+    "DisassociateAwsAccountFromPartnerAccountRequest": {
+      "type": "structure",
+      "required": [
+        "PartnerAccountId",
+        "PartnerType"
+      ],
+      "members": {
+        "PartnerAccountId": "PartnerAccountId",
+        "PartnerType": "PartnerType"
+      }
+    },
+    "DisassociateMulticastGroupFromFuotaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "MulticastGroupId"
+      ],
+      "members": {
+        "Id": "FuotaTaskId",
+        "MulticastGroupId": "MulticastGroupId"
+      }
+    },
+    "DisassociateWirelessDeviceFromFuotaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "WirelessDeviceId"
+      ],
+      "members": {
+        "Id": "FuotaTaskId",
+        "WirelessDeviceId": "WirelessDeviceId"
+      }
+    },
+    "DisassociateWirelessDeviceFromMulticastGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "WirelessDeviceId"
+      ],
+      "members": {
+        "Id": "MulticastGroupId",
+        "WirelessDeviceId": "WirelessDeviceId"
+      }
+    },
+    "DisassociateWirelessDeviceFromThingRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessDeviceId"
+      }
+    },
+    "DisassociateWirelessGatewayFromCertificateRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessGatewayId"
+      }
+    },
+    "DisassociateWirelessGatewayFromThingRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessGatewayId"
+      }
+    },
+    "DlClass": {
+      "type": "string",
+      "max": 256,
+      "enum": [
+        "ClassB",
+        "ClassC"
+      ]
+    },
+    "DlDr": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "DlFreq": {
+      "type": "integer",
+      "min": 100000000,
+      "max": 1000000000
+    },
+    "DownlinkFrequency": {
+      "type": "integer",
+      "min": 100000000,
+      "max": 1000000000
+    },
+    "DownlinkMode": {
+      "type": "string",
+      "enum": [
+        "SEQUENTIAL",
+        "CONCURRENT",
+        "USING_UPLINK_GATEWAY"
+      ]
+    },
+    "DrMaxBox": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "DrMinBox": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "EARFCN": {
+      "type": "integer",
+      "min": 0,
+      "max": 262143
+    },
+    "EutranCid": {
+      "type": "integer",
+      "min": 0,
+      "max": 268435455
+    },
+    "EventNotificationPartnerType": {
+      "type": "string",
+      "enum": [
+        "Sidewalk"
+      ]
+    },
+    "EventNotificationResourceType": {
+      "type": "string",
+      "enum": [
+        "SidewalkAccount",
+        "WirelessDevice",
+        "WirelessGateway"
+      ]
+    },
+    "EventNotificationTopicStatus": {
+      "type": "string",
+      "enum": [
+        "Enabled",
+        "Disabled"
+      ]
+    },
+    "Expression": {
+      "type": "string",
+      "max": 2048
+    },
+    "ExpressionType": {
+      "type": "string",
+      "enum": [
+        "RuleName",
+        "MqttTopic"
+      ]
+    },
+    "FCntStart": {
+      "type": "integer",
+      "min": 0,
+      "max": 65535
+    },
+    "FNwkSIntKey": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{32}"
+    },
+    "FPort": {
+      "type": "integer",
+      "min": 1,
+      "max": 223
+    },
+    "FPorts": {
+      "type": "structure",
+      "members": {
+        "Fuota": "FPort",
+        "Multicast": "FPort",
+        "ClockSync": "FPort",
+        "Positioning": "Positioning",
+        "Applications": "Applications"
+      }
+    },
+    "FactoryPresetFreqsList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "PresetFreq"
+    },
+    "FileDescriptor": {
+      "type": "string",
+      "max": 332,
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+    },
+    "FirmwareUpdateImage": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "FirmwareUpdateRole": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "FragmentIntervalMS": {
+      "type": "integer",
+      "min": 1
+    },
+    "FragmentSizeBytes": {
+      "type": "integer",
+      "min": 1
+    },
+    "FuotaTaskEvent": {
+      "type": "string",
+      "enum": [
+        "Fuota"
+      ]
+    },
+    "FuotaTaskEventLogOption": {
+      "type": "structure",
+      "required": [
+        "Event",
+        "LogLevel"
+      ],
+      "members": {
+        "Event": "FuotaTaskEvent",
+        "LogLevel": "LogLevel"
+      }
+    },
+    "FuotaTaskEventLogOptionList": {
+      "type": "list",
+      "member": "FuotaTaskEventLogOption"
+    },
+    "FuotaTaskId": {
+      "type": "string",
+      "max": 256
+    },
+    "FuotaTaskLogOption": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "LogLevel"
+      ],
+      "members": {
+        "Type": "FuotaTaskType",
+        "LogLevel": "LogLevel",
+        "Events": "FuotaTaskEventLogOptionList"
+      }
+    },
+    "FuotaTaskLogOptionList": {
+      "type": "list",
+      "member": "FuotaTaskLogOption"
+    },
+    "FuotaTaskName": {
+      "type": "string",
+      "max": 256
+    },
+    "FuotaTaskType": {
+      "type": "string",
+      "enum": [
+        "LoRaWAN"
+      ]
+    },
+    "GPST": {
+      "type": "float"
+    },
+    "GatewayEui": {
+      "type": "string",
+      "pattern": "^(([0-9A-Fa-f]{2}-){7}|([0-9A-Fa-f]{2}:){7}|([0-9A-Fa-f]{2}\\s){7}|([0-9A-Fa-f]{2}){7})([0-9A-Fa-f]{2})$"
+    },
+    "GatewayList": {
+      "type": "list",
+      "member": "GatewayListItem"
+    },
+    "GatewayListItem": {
+      "type": "structure",
+      "required": [
+        "GatewayId",
+        "DownlinkFrequency"
+      ],
+      "members": {
+        "GatewayId": "WirelessGatewayId",
+        "DownlinkFrequency": "DownlinkFrequency"
+      }
+    },
+    "GatewayListMulticast": {
+      "type": "list",
+      "max": 20,
+      "member": "WirelessGatewayId"
+    },
+    "GatewayMaxEirp": {
+      "type": "float",
+      "min": 0,
+      "max": 30
+    },
+    "GenAppKey": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{32}"
+    },
+    "GeoJsonPayload": {
+      "type": "blob"
+    },
+    "GeranCid": {
+      "type": "integer",
+      "min": 0,
+      "max": 65535
+    },
+    "GetDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "DestinationName"
+      }
+    },
+    "GetDeviceProfileRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "DeviceProfileId"
+      }
+    },
+    "GetEventConfigurationByResourceTypesRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetFuotaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "FuotaTaskId"
+      }
+    },
+    "GetLogLevelsByResourceTypesRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetMetricConfigurationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetMetricsRequest": {
+      "type": "structure",
+      "members": {
+        "SummaryMetricQueries": "SummaryMetricQueries"
+      }
+    },
+    "GetMulticastGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "MulticastGroupId"
+      }
+    },
+    "GetMulticastGroupSessionRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "MulticastGroupId"
+      }
+    },
+    "GetNetworkAnalyzerConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationName"
+      ],
+      "members": {
+        "ConfigurationName": "NetworkAnalyzerConfigurationName"
+      }
+    },
+    "GetPartnerAccountRequest": {
+      "type": "structure",
+      "required": [
+        "PartnerAccountId",
+        "PartnerType"
+      ],
+      "members": {
+        "PartnerAccountId": "PartnerAccountId",
+        "PartnerType": "PartnerType"
+      }
+    },
+    "GetPositionConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceIdentifier",
+        "ResourceType"
+      ],
+      "members": {
+        "ResourceIdentifier": "PositionResourceIdentifier",
+        "ResourceType": "PositionResourceType"
+      }
+    },
+    "GetPositionEstimateRequest": {
+      "type": "structure",
+      "members": {
+        "WiFiAccessPoints": "WiFiAccessPoints",
+        "CellTowers": "CellTowers",
+        "Ip": "Ip",
+        "Gnss": "Gnss",
+        "GnssMultiFrame": "GnssMultiFrame",
+        "Timestamp": "CreationDate",
+        "AdvancedConfiguration": "AdvancedConfiguration"
+      }
+    },
+    "GetPositionRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceIdentifier",
+        "ResourceType"
+      ],
+      "members": {
+        "ResourceIdentifier": "PositionResourceIdentifier",
+        "ResourceType": "PositionResourceType"
+      }
+    },
+    "GetResourceEventConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier",
+        "IdentifierType"
+      ],
+      "members": {
+        "Identifier": "Identifier",
+        "IdentifierType": "IdentifierType",
+        "PartnerType": "EventNotificationPartnerType"
+      }
+    },
+    "GetResourceLogLevelRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceIdentifier",
+        "ResourceType"
+      ],
+      "members": {
+        "ResourceIdentifier": "ResourceIdentifier",
+        "ResourceType": "ResourceType"
+      }
+    },
+    "GetResourcePositionRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceIdentifier",
+        "ResourceType"
+      ],
+      "members": {
+        "ResourceIdentifier": "PositionResourceIdentifier",
+        "ResourceType": "PositionResourceType"
+      }
+    },
+    "GetServiceEndpointRequest": {
+      "type": "structure",
+      "members": {
+        "ServiceType": "WirelessGatewayServiceType"
+      }
+    },
+    "GetServiceProfileRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "ServiceProfileId"
+      }
+    },
+    "GetWirelessDeviceImportTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "ImportTaskId"
+      }
+    },
+    "GetWirelessDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier",
+        "IdentifierType"
+      ],
+      "members": {
+        "Identifier": "Identifier",
+        "IdentifierType": "WirelessDeviceIdType"
+      }
+    },
+    "GetWirelessDeviceStatisticsRequest": {
+      "type": "structure",
+      "required": [
+        "WirelessDeviceId"
+      ],
+      "members": {
+        "WirelessDeviceId": "WirelessDeviceId"
+      }
+    },
+    "GetWirelessGatewayCertificateRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessGatewayId"
+      }
+    },
+    "GetWirelessGatewayFirmwareInformationRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessGatewayId"
+      }
+    },
+    "GetWirelessGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier",
+        "IdentifierType"
+      ],
+      "members": {
+        "Identifier": "Identifier",
+        "IdentifierType": "WirelessGatewayIdType"
+      }
+    },
+    "GetWirelessGatewayStatisticsRequest": {
+      "type": "structure",
+      "required": [
+        "WirelessGatewayId"
+      ],
+      "members": {
+        "WirelessGatewayId": "WirelessGatewayId"
+      }
+    },
+    "GetWirelessGatewayTaskDefinitionRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessGatewayTaskDefinitionId"
+      }
+    },
+    "GetWirelessGatewayTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessGatewayId"
+      }
+    },
+    "GlobalIdentity": {
+      "type": "structure",
+      "required": [
+        "Lac",
+        "GeranCid"
+      ],
+      "members": {
+        "Lac": "LAC",
+        "GeranCid": "GeranCid"
+      }
+    },
+    "Gnss": {
+      "type": "structure",
+      "required": [
+        "Payload"
+      ],
+      "members": {
+        "Payload": "GnssNav",
+        "CaptureTime": "GPST",
+        "CaptureTimeAccuracy": "CaptureTimeAccuracy",
+        "AssistPosition": "AssistPosition",
+        "AssistAltitude": "Coordinate",
+        "Use2DSolver": "Use2DSolver"
+      }
+    },
+    "GnssCapture": {
+      "type": "structure",
+      "required": [
+        "Payload"
+      ],
+      "members": {
+        "Payload": "GnssNav",
+        "CaptureTime": "GPST"
+      }
+    },
+    "GnssCaptures": {
+      "type": "list",
+      "min": 2,
+      "max": 32,
+      "member": "GnssCapture"
+    },
+    "GnssMultiFrame": {
+      "type": "structure",
+      "required": [
+        "Captures"
+      ],
+      "members": {
+        "Captures": "GnssCaptures",
+        "CaptureTimeAccuracy": "CaptureTimeAccuracy",
+        "AssistPosition": "AssistPosition",
+        "AssistAltitude": "Coordinate",
+        "Use2DSolver": "Use2DSolver"
+      }
+    },
+    "GnssNav": {
+      "type": "string",
+      "max": 2048
+    },
+    "GsmList": {
+      "type": "list",
+      "min": 1,
+      "max": 16,
+      "member": "GsmObj"
+    },
+    "GsmLocalId": {
+      "type": "structure",
+      "required": [
+        "Bsic",
+        "Bcch"
+      ],
+      "members": {
+        "Bsic": "BSIC",
+        "Bcch": "BCCH"
+      }
+    },
+    "GsmNmrList": {
+      "type": "list",
+      "min": 1,
+      "max": 32,
+      "member": "GsmNmrObj"
+    },
+    "GsmNmrObj": {
+      "type": "structure",
+      "required": [
+        "Bsic",
+        "Bcch"
+      ],
+      "members": {
+        "Bsic": "BSIC",
+        "Bcch": "BCCH",
+        "RxLevel": "RxLevel",
+        "GlobalIdentity": "GlobalIdentity"
+      }
+    },
+    "GsmObj": {
+      "type": "structure",
+      "required": [
+        "Mcc",
+        "Mnc",
+        "Lac",
+        "GeranCid"
+      ],
+      "members": {
+        "Mcc": "MCC",
+        "Mnc": "MNC",
+        "Lac": "LAC",
+        "GeranCid": "GeranCid",
+        "GsmLocalId": "GsmLocalId",
+        "GsmTimingAdvance": "GsmTimingAdvance",
+        "RxLevel": "RxLevel",
+        "GsmNmr": "GsmNmrList"
+      }
+    },
+    "GsmTimingAdvance": {
+      "type": "integer",
+      "min": 0,
+      "max": 63
+    },
+    "IPAddress": {
+      "type": "string"
+    },
+    "Identifier": {
+      "type": "string",
+      "max": 256
+    },
+    "IdentifierType": {
+      "type": "string",
+      "enum": [
+        "PartnerAccountId",
+        "DevEui",
+        "GatewayEui",
+        "WirelessDeviceId",
+        "WirelessGatewayId"
+      ]
+    },
+    "ImportTaskId": {
+      "type": "string",
+      "max": 256
+    },
+    "IotCertificateId": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "Ip": {
+      "type": "structure",
+      "required": [
+        "IpAddress"
+      ],
+      "members": {
+        "IpAddress": "IPAddress"
+      }
+    },
+    "JoinEui": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{16}"
+    },
+    "JoinEuiFilters": {
+      "type": "list",
+      "min": 0,
+      "max": 3,
+      "member": "JoinEuiRange"
+    },
+    "JoinEuiRange": {
+      "type": "list",
+      "min": 2,
+      "max": 2,
+      "member": "JoinEui"
+    },
+    "JoinEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "LoRaWAN": "LoRaWANJoinEventNotificationConfigurations",
+        "WirelessDeviceIdEventTopic": "EventNotificationTopicStatus"
+      }
+    },
+    "JoinResourceTypeEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "LoRaWAN": "LoRaWANJoinResourceTypeEventConfiguration"
+      }
+    },
+    "LAC": {
+      "type": "integer",
+      "min": 1,
+      "max": 65535
+    },
+    "ListDestinationsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListDeviceProfilesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "DeviceProfileType": "DeviceProfileType"
+      }
+    },
+    "ListDevicesForWirelessDeviceImportTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "ImportTaskId",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken",
+        "Status": "OnboardStatus"
+      }
+    },
+    "ListEventConfigurationsRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceType"
+      ],
+      "members": {
+        "ResourceType": "EventNotificationResourceType",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListFuotaTasksRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListMulticastGroupsByFuotaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "FuotaTaskId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListMulticastGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListNetworkAnalyzerConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListPartnerAccountsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListPositionConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "ResourceType": "PositionResourceType",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListQueuedMessagesRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessDeviceId",
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "WirelessDeviceType": "WirelessDeviceType"
+      }
+    },
+    "ListServiceProfilesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName"
+      }
+    },
+    "ListWirelessDeviceImportTasksRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListWirelessDevicesRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken",
+        "DestinationName": "DestinationName",
+        "DeviceProfileId": "DeviceProfileId",
+        "ServiceProfileId": "ServiceProfileId",
+        "WirelessDeviceType": "WirelessDeviceType",
+        "FuotaTaskId": "FuotaTaskId",
+        "MulticastGroupId": "MulticastGroupId"
+      }
+    },
+    "ListWirelessGatewayTaskDefinitionsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken",
+        "TaskDefinitionType": "WirelessGatewayTaskDefinitionType"
+      }
+    },
+    "ListWirelessGatewaysRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "LoRaWANConnectionStatusEventNotificationConfigurations": {
+      "type": "structure",
+      "members": {
+        "GatewayEuiEventTopic": "EventNotificationTopicStatus"
+      }
+    },
+    "LoRaWANConnectionStatusResourceTypeEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "WirelessGatewayEventTopic": "EventNotificationTopicStatus"
+      }
+    },
+    "LoRaWANDevice": {
+      "type": "structure",
+      "members": {
+        "DevEui": "DevEui",
+        "DeviceProfileId": "DeviceProfileId",
+        "ServiceProfileId": "ServiceProfileId",
+        "OtaaV1_1": "OtaaV1_1",
+        "OtaaV1_0_x": "OtaaV1_0_x",
+        "AbpV1_1": "AbpV1_1",
+        "AbpV1_0_x": "AbpV1_0_x",
+        "FPorts": "FPorts"
+      }
+    },
+    "LoRaWANDeviceProfile": {
+      "type": "structure",
+      "members": {
+        "SupportsClassB": "SupportsClassB",
+        "ClassBTimeout": "ClassBTimeout",
+        "PingSlotPeriod": "PingSlotPeriod",
+        "PingSlotDr": "PingSlotDr",
+        "PingSlotFreq": "PingSlotFreq",
+        "SupportsClassC": "SupportsClassC",
+        "ClassCTimeout": "ClassCTimeout",
+        "MacVersion": "MacVersion",
+        "RegParamsRevision": "RegParamsRevision",
+        "RxDelay1": "RxDelay1",
+        "RxDrOffset1": "RxDrOffset1",
+        "RxDataRate2": "RxDataRate2",
+        "RxFreq2": "RxFreq2",
+        "FactoryPresetFreqsList": "FactoryPresetFreqsList",
+        "MaxEirp": "MaxEirp",
+        "MaxDutyCycle": "MaxDutyCycle",
+        "RfRegion": "RfRegion",
+        "SupportsJoin": "SupportsJoin",
+        "Supports32BitFCnt": "Supports32BitFCnt"
+      }
+    },
+    "LoRaWANFuotaTask": {
+      "type": "structure",
+      "members": {
+        "RfRegion": "SupportedRfRegion"
+      }
+    },
+    "LoRaWANGateway": {
+      "type": "structure",
+      "members": {
+        "GatewayEui": "GatewayEui",
+        "RfRegion": "RfRegion",
+        "JoinEuiFilters": "JoinEuiFilters",
+        "NetIdFilters": "NetIdFilters",
+        "SubBands": "SubBands",
+        "Beaconing": "Beaconing",
+        "MaxEirp": "GatewayMaxEirp"
+      }
+    },
+    "LoRaWANGatewayVersion": {
+      "type": "structure",
+      "members": {
+        "PackageVersion": "PackageVersion",
+        "Model": "Model",
+        "Station": "Station"
+      }
+    },
+    "LoRaWANJoinEventNotificationConfigurations": {
+      "type": "structure",
+      "members": {
+        "DevEuiEventTopic": "EventNotificationTopicStatus"
+      }
+    },
+    "LoRaWANJoinResourceTypeEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "WirelessDeviceEventTopic": "EventNotificationTopicStatus"
+      }
+    },
+    "LoRaWANMulticast": {
+      "type": "structure",
+      "members": {
+        "RfRegion": "SupportedRfRegion",
+        "DlClass": "DlClass",
+        "ParticipatingGateways": "ParticipatingGatewaysMulticast",
+        "DefaultSessionParameters": "DefaultSessionParametersMulticast"
+      }
+    },
+    "LoRaWANMulticastMetadata": {
+      "type": "structure",
+      "members": {
+        "FPort": "FPort"
+      }
+    },
+    "LoRaWANMulticastSession": {
+      "type": "structure",
+      "members": {
+        "DlDr": "DlDr",
+        "DlFreq": "DlFreq",
+        "SessionStartTime": "SessionStartTimeTimestamp",
+        "SessionTimeout": "SessionTimeout",
+        "PingSlotPeriod": "PingSlotPeriod"
+      }
+    },
+    "LoRaWANSendDataToDevice": {
+      "type": "structure",
+      "members": {
+        "FPort": "FPort",
+        "ParticipatingGateways": "ParticipatingGateways"
+      }
+    },
+    "LoRaWANServiceProfile": {
+      "type": "structure",
+      "members": {
+        "AddGwMetadata": "AddGwMetadata",
+        "DrMin": "DrMinBox",
+        "DrMax": "DrMaxBox",
+        "PrAllowed": "PrAllowed",
+        "RaAllowed": "RaAllowed",
+        "TxPowerIndexMin": "TxPowerIndexMin",
+        "TxPowerIndexMax": "TxPowerIndexMax",
+        "NbTransMin": "NbTransMin",
+        "NbTransMax": "NbTransMax"
+      }
+    },
+    "LoRaWANStartFuotaTask": {
+      "type": "structure",
+      "members": {
+        "StartTime": "StartTime"
+      }
+    },
+    "LoRaWANUpdateDevice": {
+      "type": "structure",
+      "members": {
+        "DeviceProfileId": "DeviceProfileId",
+        "ServiceProfileId": "ServiceProfileId",
+        "AbpV1_1": "UpdateAbpV1_1",
+        "AbpV1_0_x": "UpdateAbpV1_0_x",
+        "FPorts": "UpdateFPorts"
+      }
+    },
+    "LoRaWANUpdateGatewayTaskCreate": {
+      "type": "structure",
+      "members": {
+        "UpdateSignature": "UpdateSignature",
+        "SigKeyCrc": "Crc",
+        "CurrentVersion": "LoRaWANGatewayVersion",
+        "UpdateVersion": "LoRaWANGatewayVersion"
+      }
+    },
+    "LogLevel": {
+      "type": "string",
+      "enum": [
+        "INFO",
+        "ERROR",
+        "DISABLED"
+      ]
+    },
+    "LteList": {
+      "type": "list",
+      "min": 1,
+      "max": 16,
+      "member": "LteObj"
+    },
+    "LteLocalId": {
+      "type": "structure",
+      "required": [
+        "Pci",
+        "Earfcn"
+      ],
+      "members": {
+        "Pci": "PCI",
+        "Earfcn": "EARFCN"
+      }
+    },
+    "LteNmrList": {
+      "type": "list",
+      "min": 1,
+      "max": 32,
+      "member": "LteNmrObj"
+    },
+    "LteNmrObj": {
+      "type": "structure",
+      "required": [
+        "Pci",
+        "Earfcn"
+      ],
+      "members": {
+        "Pci": "PCI",
+        "Earfcn": "EARFCN",
+        "EutranCid": "EutranCid",
+        "Rsrp": "RSRP",
+        "Rsrq": "RSRQ"
+      }
+    },
+    "LteObj": {
+      "type": "structure",
+      "required": [
+        "Mcc",
+        "Mnc",
+        "EutranCid"
+      ],
+      "members": {
+        "Mcc": "MCC",
+        "Mnc": "MNC",
+        "EutranCid": "EutranCid",
+        "Tac": "TAC",
+        "LteLocalId": "LteLocalId",
+        "LteTimingAdvance": "LteTimingAdvance",
+        "Rsrp": "RSRP",
+        "Rsrq": "RSRQ",
+        "NrCapable": "NRCapable",
+        "LteNmr": "LteNmrList"
+      }
+    },
+    "LteTimingAdvance": {
+      "type": "integer",
+      "min": 0,
+      "max": 1282
+    },
+    "MCC": {
+      "type": "integer",
+      "min": 200,
+      "max": 999
+    },
+    "MNC": {
+      "type": "integer",
+      "min": 0,
+      "max": 999
+    },
+    "MacAddress": {
+      "type": "string",
+      "min": 12,
+      "max": 17,
+      "pattern": "^([0-9A-Fa-f]{2}[:-]?){5}([0-9A-Fa-f]{2})$"
+    },
+    "MacVersion": {
+      "type": "string",
+      "max": 64
+    },
+    "MaxDutyCycle": {
+      "type": "integer",
+      "min": 0,
+      "max": 100
+    },
+    "MaxEirp": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 0,
+      "max": 250
+    },
+    "MessageDeliveryStatusEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "Sidewalk": "SidewalkEventNotificationConfigurations",
+        "WirelessDeviceIdEventTopic": "EventNotificationTopicStatus"
+      }
+    },
+    "MessageDeliveryStatusResourceTypeEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "Sidewalk": "SidewalkResourceTypeEventConfiguration"
+      }
+    },
+    "MessageId": {
+      "type": "string"
+    },
+    "MessageType": {
+      "type": "string",
+      "enum": [
+        "CUSTOM_COMMAND_ID_NOTIFY",
+        "CUSTOM_COMMAND_ID_GET",
+        "CUSTOM_COMMAND_ID_SET",
+        "CUSTOM_COMMAND_ID_RESP"
+      ]
+    },
+    "MetricName": {
+      "type": "string",
+      "max": 256,
+      "enum": [
+        "DeviceRSSI",
+        "DeviceSNR",
+        "DeviceRoamingRSSI",
+        "DeviceRoamingSNR",
+        "DeviceUplinkCount",
+        "DeviceDownlinkCount",
+        "DeviceUplinkLostCount",
+        "DeviceUplinkLostRate",
+        "DeviceJoinRequestCount",
+        "DeviceJoinAcceptCount",
+        "DeviceRoamingUplinkCount",
+        "DeviceRoamingDownlinkCount",
+        "GatewayUpTime",
+        "GatewayDownTime",
+        "GatewayRSSI",
+        "GatewaySNR",
+        "GatewayUplinkCount",
+        "GatewayDownlinkCount",
+        "GatewayJoinRequestCount",
+        "GatewayJoinAcceptCount",
+        "AwsAccountUplinkCount",
+        "AwsAccountDownlinkCount",
+        "AwsAccountUplinkLostCount",
+        "AwsAccountUplinkLostRate",
+        "AwsAccountJoinRequestCount",
+        "AwsAccountJoinAcceptCount",
+        "AwsAccountRoamingUplinkCount",
+        "AwsAccountRoamingDownlinkCount",
+        "AwsAccountDeviceCount",
+        "AwsAccountGatewayCount",
+        "AwsAccountActiveDeviceCount",
+        "AwsAccountActiveGatewayCount"
+      ]
+    },
+    "MetricQueryEndTimestamp": {
+      "type": "timestamp"
+    },
+    "MetricQueryId": {
+      "type": "string",
+      "max": 256
+    },
+    "MetricQueryStartTimestamp": {
+      "type": "timestamp"
+    },
+    "Model": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "MulticastFrameInfo": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "MulticastGroupId": {
+      "type": "string",
+      "max": 256
+    },
+    "MulticastGroupName": {
+      "type": "string",
+      "max": 256
+    },
+    "MulticastWirelessMetadata": {
+      "type": "structure",
+      "members": {
+        "LoRaWAN": "LoRaWANMulticastMetadata"
+      }
+    },
+    "NRCapable": {
+      "type": "boolean"
+    },
+    "NbTransMax": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "NbTransMin": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "NetId": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{6}"
+    },
+    "NetIdFilters": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "NetId"
+    },
+    "NetworkAnalyzerConfigurationName": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "[a-zA-Z0-9-_]+"
+    },
+    "NetworkAnalyzerMulticastGroupList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "MulticastGroupId"
+    },
+    "NetworkId": {
+      "type": "integer",
+      "min": 0,
+      "max": 65535
+    },
+    "NextToken": {
+      "type": "string",
+      "max": 4096
+    },
+    "NwkKey": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{32}"
+    },
+    "NwkSEncKey": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{32}"
+    },
+    "NwkSKey": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{32}"
+    },
+    "OnboardStatus": {
+      "type": "string",
+      "enum": [
+        "INITIALIZED",
+        "PENDING",
+        "ONBOARDED",
+        "FAILED"
+      ]
+    },
+    "OtaaV1_0_x": {
+      "type": "structure",
+      "members": {
+        "AppKey": "AppKey",
+        "AppEui": "AppEui",
+        "JoinEui": "JoinEui",
+        "GenAppKey": "GenAppKey"
+      }
+    },
+    "OtaaV1_1": {
+      "type": "structure",
+      "members": {
+        "AppKey": "AppKey",
+        "NwkKey": "NwkKey",
+        "JoinEui": "JoinEui"
+      }
+    },
+    "PCI": {
+      "type": "integer",
+      "min": 0,
+      "max": 503
+    },
+    "PSC": {
+      "type": "integer",
+      "min": 0,
+      "max": 511
+    },
+    "PackageVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 32
+    },
+    "ParticipatingGateways": {
+      "type": "structure",
+      "required": [
+        "DownlinkMode",
+        "GatewayList",
+        "TransmissionInterval"
+      ],
+      "members": {
+        "DownlinkMode": "DownlinkMode",
+        "GatewayList": "GatewayList",
+        "TransmissionInterval": "TransmissionInterval"
+      }
+    },
+    "ParticipatingGatewaysMulticast": {
+      "type": "structure",
+      "members": {
+        "GatewayList": "GatewayListMulticast",
+        "TransmissionInterval": "TransmissionIntervalMulticast"
+      }
+    },
+    "PartnerAccountId": {
+      "type": "string",
+      "max": 256
+    },
+    "PartnerType": {
+      "type": "string",
+      "enum": [
+        "Sidewalk"
+      ]
+    },
+    "PathLoss": {
+      "type": "integer",
+      "min": 46,
+      "max": 158
+    },
+    "PayloadData": {
+      "type": "string",
+      "max": 2048,
+      "pattern": "^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$"
+    },
+    "PilotPower": {
+      "type": "integer",
+      "min": -142,
+      "max": -49
+    },
+    "PingSlotDr": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "PingSlotFreq": {
+      "type": "integer",
+      "min": 1000000,
+      "max": 16700000
+    },
+    "PingSlotPeriod": {
+      "type": "integer",
+      "min": 32,
+      "max": 4096
+    },
+    "PnOffset": {
+      "type": "integer",
+      "min": 0,
+      "max": 511
+    },
+    "PositionConfigurationFec": {
+      "type": "string",
+      "enum": [
+        "ROSE",
+        "NONE"
+      ]
+    },
+    "PositionConfigurationStatus": {
+      "type": "string",
+      "enum": [
+        "Enabled",
+        "Disabled"
+      ]
+    },
+    "PositionCoordinate": {
+      "type": "list",
+      "member": "PositionCoordinateValue"
+    },
+    "PositionCoordinateValue": {
+      "type": "float"
+    },
+    "PositionResourceIdentifier": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"
+    },
+    "PositionResourceType": {
+      "type": "string",
+      "enum": [
+        "WirelessDevice",
+        "WirelessGateway"
+      ]
+    },
+    "PositionSolverConfigurations": {
+      "type": "structure",
+      "members": {
+        "SemtechGnss": "SemtechGnssConfiguration"
+      }
+    },
+    "Positioning": {
+      "type": "structure",
+      "members": {
+        "ClockSync": "FPort",
+        "Stream": "FPort",
+        "Gnss": "FPort"
+      }
+    },
+    "PositioningConfigStatus": {
+      "type": "string",
+      "enum": [
+        "Enabled",
+        "Disabled"
+      ]
+    },
+    "PrAllowed": {
+      "type": "boolean"
+    },
+    "PresetFreq": {
+      "type": "integer",
+      "min": 1000000,
+      "max": 16700000
+    },
+    "ProximityEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "Sidewalk": "SidewalkEventNotificationConfigurations",
+        "WirelessDeviceIdEventTopic": "EventNotificationTopicStatus"
+      }
+    },
+    "ProximityResourceTypeEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "Sidewalk": "SidewalkResourceTypeEventConfiguration"
+      }
+    },
+    "PutPositionConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceIdentifier",
+        "ResourceType"
+      ],
+      "members": {
+        "ResourceIdentifier": "PositionResourceIdentifier",
+        "ResourceType": "PositionResourceType",
+        "Solvers": "PositionSolverConfigurations",
+        "Destination": "DestinationName"
+      }
+    },
+    "PutResourceLogLevelRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceIdentifier",
+        "ResourceType",
+        "LogLevel"
+      ],
+      "members": {
+        "ResourceIdentifier": "ResourceIdentifier",
+        "ResourceType": "ResourceType",
+        "LogLevel": "LogLevel"
+      }
+    },
+    "QueryString": {
+      "type": "string",
+      "max": 4096
+    },
+    "RSCP": {
+      "type": "integer",
+      "min": -120,
+      "max": -25
+    },
+    "RSRP": {
+      "type": "integer",
+      "min": -140,
+      "max": -44
+    },
+    "RSRQ": {
+      "type": "float",
+      "min": -19.5,
+      "max": -3
+    },
+    "RSS": {
+      "type": "integer",
+      "min": -128,
+      "max": 0
+    },
+    "RaAllowed": {
+      "type": "boolean"
+    },
+    "RedundancyPercent": {
+      "type": "integer",
+      "min": 0,
+      "max": 100
+    },
+    "RegParamsRevision": {
+      "type": "string",
+      "max": 64
+    },
+    "RegistrationZone": {
+      "type": "integer",
+      "min": 0,
+      "max": 4095
+    },
+    "ResetAllResourceLogLevelsRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "ResetResourceLogLevelRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceIdentifier",
+        "ResourceType"
+      ],
+      "members": {
+        "ResourceIdentifier": "ResourceIdentifier",
+        "ResourceType": "ResourceType"
+      }
+    },
+    "ResourceIdentifier": {
+      "type": "string",
+      "max": 256
+    },
+    "ResourceType": {
+      "type": "string"
+    },
+    "RfRegion": {
+      "type": "string",
+      "max": 64
+    },
+    "Role": {
+      "type": "string",
+      "max": 2048
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048
+    },
+    "RxDataRate2": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "RxDelay1": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "RxDrOffset1": {
+      "type": "integer",
+      "min": 0,
+      "max": 7
+    },
+    "RxFreq2": {
+      "type": "integer",
+      "min": 1000000,
+      "max": 16700000
+    },
+    "RxLevel": {
+      "type": "integer",
+      "min": -110,
+      "max": -25
+    },
+    "SNwkSIntKey": {
+      "type": "string",
+      "pattern": "[a-fA-F0-9]{32}"
+    },
+    "SemtechGnssConfiguration": {
+      "type": "structure",
+      "required": [
+        "Status",
+        "Fec"
+      ],
+      "members": {
+        "Status": "PositionConfigurationStatus",
+        "Fec": "PositionConfigurationFec"
+      }
+    },
+    "SendDataToMulticastGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "PayloadData",
+        "WirelessMetadata"
+      ],
+      "members": {
+        "Id": "MulticastGroupId",
+        "PayloadData": "PayloadData",
+        "WirelessMetadata": "MulticastWirelessMetadata"
+      }
+    },
+    "SendDataToWirelessDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "TransmitMode",
+        "PayloadData"
+      ],
+      "members": {
+        "Id": "WirelessDeviceId",
+        "TransmitMode": "TransmitMode",
+        "PayloadData": "PayloadData",
+        "WirelessMetadata": "WirelessMetadata"
+      }
+    },
+    "Seq": {
+      "type": "integer",
+      "min": 0,
+      "max": 16383
+    },
+    "ServiceProfileId": {
+      "type": "string",
+      "max": 256
+    },
+    "ServiceProfileName": {
+      "type": "string",
+      "max": 256
+    },
+    "SessionKeysAbpV1_0_x": {
+      "type": "structure",
+      "members": {
+        "NwkSKey": "NwkSKey",
+        "AppSKey": "AppSKey"
+      }
+    },
+    "SessionKeysAbpV1_1": {
+      "type": "structure",
+      "members": {
+        "FNwkSIntKey": "FNwkSIntKey",
+        "SNwkSIntKey": "SNwkSIntKey",
+        "NwkSEncKey": "NwkSEncKey",
+        "AppSKey": "AppSKey"
+      }
+    },
+    "SessionStartTimeTimestamp": {
+      "type": "timestamp"
+    },
+    "SessionTimeout": {
+      "type": "integer",
+      "min": 60,
+      "max": 172800
+    },
+    "SidewalkAccountInfo": {
+      "type": "structure",
+      "members": {
+        "AmazonId": "AmazonId",
+        "AppServerPrivateKey": "AppServerPrivateKey"
+      }
+    },
+    "SidewalkCreateDeviceProfile": {
+      "type": "structure",
+      "members": {}
+    },
+    "SidewalkCreateWirelessDevice": {
+      "type": "structure",
+      "members": {
+        "DeviceProfileId": "DeviceProfileId",
+        "Positioning": "SidewalkPositioning",
+        "SidewalkManufacturingSn": "SidewalkManufacturingSn"
+      }
+    },
+    "SidewalkEventNotificationConfigurations": {
+      "type": "structure",
+      "members": {
+        "AmazonIdEventTopic": "EventNotificationTopicStatus"
+      }
+    },
+    "SidewalkManufacturingSn": {
+      "type": "string",
+      "max": 64
+    },
+    "SidewalkPositioning": {
+      "type": "structure",
+      "members": {
+        "DestinationName": "DestinationName"
+      }
+    },
+    "SidewalkResourceTypeEventConfiguration": {
+      "type": "structure",
+      "members": {
+        "WirelessDeviceEventTopic": "EventNotificationTopicStatus"
+      }
+    },
+    "SidewalkSendDataToDevice": {
+      "type": "structure",
+      "members": {
+        "Seq": "Seq",
+        "MessageType": "MessageType",
+        "AckModeRetryDurationSecs": "AckModeRetryDurationSecs"
+      }
+    },
+    "SidewalkSingleStartImportInfo": {
+      "type": "structure",
+      "members": {
+        "SidewalkManufacturingSn": "SidewalkManufacturingSn",
+        "Positioning": "SidewalkPositioning"
+      }
+    },
+    "SidewalkStartImportInfo": {
+      "type": "structure",
+      "members": {
+        "DeviceCreationFile": "DeviceCreationFile",
+        "Role": "Role",
+        "Positioning": "SidewalkPositioning"
+      }
+    },
+    "SidewalkUpdateAccount": {
+      "type": "structure",
+      "members": {
+        "AppServerPrivateKey": "AppServerPrivateKey"
+      }
+    },
+    "SidewalkUpdateImportInfo": {
+      "type": "structure",
+      "members": {
+        "DeviceCreationFile": "DeviceCreationFile"
+      }
+    },
+    "SidewalkUpdateWirelessDevice": {
+      "type": "structure",
+      "members": {
+        "Positioning": "SidewalkPositioning"
+      }
+    },
+    "StartBulkAssociateWirelessDeviceWithMulticastGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "MulticastGroupId",
+        "QueryString": "QueryString",
+        "Tags": "TagList"
+      }
+    },
+    "StartBulkDisassociateWirelessDeviceFromMulticastGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "MulticastGroupId",
+        "QueryString": "QueryString",
+        "Tags": "TagList"
+      }
+    },
+    "StartFuotaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "FuotaTaskId",
+        "LoRaWAN": "LoRaWANStartFuotaTask"
+      }
+    },
+    "StartMulticastGroupSessionRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "LoRaWAN"
+      ],
+      "members": {
+        "Id": "MulticastGroupId",
+        "LoRaWAN": "LoRaWANMulticastSession"
+      }
+    },
+    "StartSingleWirelessDeviceImportTaskRequest": {
+      "type": "structure",
+      "required": [
+        "DestinationName",
+        "Sidewalk"
+      ],
+      "members": {
+        "DestinationName": "DestinationName",
+        "ClientRequestToken": "ClientRequestToken",
+        "DeviceName": "DeviceName",
+        "Tags": "TagList",
+        "Positioning": "PositioningConfigStatus",
+        "Sidewalk": "SidewalkSingleStartImportInfo"
+      }
+    },
+    "StartTime": {
+      "type": "timestamp"
+    },
+    "StartWirelessDeviceImportTaskRequest": {
+      "type": "structure",
+      "required": [
+        "DestinationName",
+        "Sidewalk"
+      ],
+      "members": {
+        "DestinationName": "DestinationName",
+        "ClientRequestToken": "ClientRequestToken",
+        "Tags": "TagList",
+        "Positioning": "PositioningConfigStatus",
+        "Sidewalk": "SidewalkStartImportInfo"
+      }
+    },
+    "Station": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "SubBand": {
+      "type": "integer",
+      "min": 1,
+      "max": 8
+    },
+    "SubBands": {
+      "type": "list",
+      "min": 0,
+      "max": 8,
+      "member": "SubBand"
+    },
+    "SummaryMetricConfiguration": {
+      "type": "structure",
+      "members": {
+        "Status": "SummaryMetricConfigurationStatus"
+      }
+    },
+    "SummaryMetricConfigurationStatus": {
+      "type": "string",
+      "enum": [
+        "Enabled",
+        "Disabled"
+      ]
+    },
+    "SummaryMetricQueries": {
+      "type": "list",
+      "member": "SummaryMetricQuery"
+    },
+    "SummaryMetricQuery": {
+      "type": "structure",
+      "members": {
+        "QueryId": "MetricQueryId",
+        "MetricName": "MetricName",
+        "Dimensions": "Dimensions",
+        "AggregationPeriod": "AggregationPeriod",
+        "StartTimestamp": "MetricQueryStartTimestamp",
+        "EndTimestamp": "MetricQueryEndTimestamp"
+      }
+    },
+    "SupportedRfRegion": {
+      "type": "string",
+      "enum": [
+        "EU868",
+        "US915",
+        "AU915",
+        "AS923-1",
+        "AS923-2",
+        "AS923-3",
+        "AS923-4",
+        "EU433",
+        "CN470",
+        "CN779",
+        "RU864",
+        "KR920",
+        "IN865"
+      ]
+    },
+    "Supports32BitFCnt": {
+      "type": "boolean"
+    },
+    "SupportsClassB": {
+      "type": "boolean"
+    },
+    "SupportsClassC": {
+      "type": "boolean"
+    },
+    "SupportsJoin": {
+      "type": "boolean"
+    },
+    "SystemId": {
+      "type": "integer",
+      "min": 1,
+      "max": 32767
+    },
+    "TAC": {
+      "type": "integer",
+      "min": 0,
+      "max": 65535
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TdscdmaList": {
+      "type": "list",
+      "min": 1,
+      "max": 16,
+      "member": "TdscdmaObj"
+    },
+    "TdscdmaLocalId": {
+      "type": "structure",
+      "required": [
+        "Uarfcn",
+        "CellParams"
+      ],
+      "members": {
+        "Uarfcn": "UARFCN",
+        "CellParams": "CellParams"
+      }
+    },
+    "TdscdmaNmrList": {
+      "type": "list",
+      "min": 1,
+      "max": 32,
+      "member": "TdscdmaNmrObj"
+    },
+    "TdscdmaNmrObj": {
+      "type": "structure",
+      "required": [
+        "Uarfcn",
+        "CellParams"
+      ],
+      "members": {
+        "Uarfcn": "UARFCN",
+        "CellParams": "CellParams",
+        "UtranCid": "UtranCid",
+        "Rscp": "RSCP",
+        "PathLoss": "PathLoss"
+      }
+    },
+    "TdscdmaObj": {
+      "type": "structure",
+      "required": [
+        "Mcc",
+        "Mnc",
+        "UtranCid"
+      ],
+      "members": {
+        "Mcc": "MCC",
+        "Mnc": "MNC",
+        "Lac": "LAC",
+        "UtranCid": "UtranCid",
+        "TdscdmaLocalId": "TdscdmaLocalId",
+        "TdscdmaTimingAdvance": "TdscdmaTimingAdvance",
+        "Rscp": "RSCP",
+        "PathLoss": "PathLoss",
+        "TdscdmaNmr": "TdscdmaNmrList"
+      }
+    },
+    "TdscdmaTimingAdvance": {
+      "type": "integer",
+      "min": 0,
+      "max": 1530
+    },
+    "TestWirelessDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessDeviceId"
+      }
+    },
+    "ThingArn": {
+      "type": "string"
+    },
+    "TraceContent": {
+      "type": "structure",
+      "members": {
+        "WirelessDeviceFrameInfo": "WirelessDeviceFrameInfo",
+        "LogLevel": "LogLevel",
+        "MulticastFrameInfo": "MulticastFrameInfo"
+      }
+    },
+    "TransmissionInterval": {
+      "type": "integer",
+      "min": 1,
+      "max": 604800
+    },
+    "TransmissionIntervalMulticast": {
+      "type": "integer",
+      "min": 0,
+      "max": 60000
+    },
+    "TransmitMode": {
+      "type": "integer",
+      "min": 0,
+      "max": 1
+    },
+    "TxPowerIndexMax": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "TxPowerIndexMin": {
+      "type": "integer",
+      "min": 0,
+      "max": 15
+    },
+    "UARFCN": {
+      "type": "integer",
+      "min": 0,
+      "max": 16383
+    },
+    "UARFCNDL": {
+      "type": "integer",
+      "min": 0,
+      "max": 16383
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateAbpV1_0_x": {
+      "type": "structure",
+      "members": {
+        "FCntStart": "FCntStart"
+      }
+    },
+    "UpdateAbpV1_1": {
+      "type": "structure",
+      "members": {
+        "FCntStart": "FCntStart"
+      }
+    },
+    "UpdateDataSource": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "UpdateDestinationRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "DestinationName",
+        "ExpressionType": "ExpressionType",
+        "Expression": "Expression",
+        "Description": "Description",
+        "RoleArn": "RoleArn"
+      }
+    },
+    "UpdateEventConfigurationByResourceTypesRequest": {
+      "type": "structure",
+      "members": {
+        "DeviceRegistrationState": "DeviceRegistrationStateResourceTypeEventConfiguration",
+        "Proximity": "ProximityResourceTypeEventConfiguration",
+        "Join": "JoinResourceTypeEventConfiguration",
+        "ConnectionStatus": "ConnectionStatusResourceTypeEventConfiguration",
+        "MessageDeliveryStatus": "MessageDeliveryStatusResourceTypeEventConfiguration"
+      }
+    },
+    "UpdateFPorts": {
+      "type": "structure",
+      "members": {
+        "Positioning": "Positioning",
+        "Applications": "Applications"
+      }
+    },
+    "UpdateFuotaTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "FuotaTaskId",
+        "Name": "FuotaTaskName",
+        "Description": "Description",
+        "LoRaWAN": "LoRaWANFuotaTask",
+        "FirmwareUpdateImage": "FirmwareUpdateImage",
+        "FirmwareUpdateRole": "FirmwareUpdateRole",
+        "RedundancyPercent": "RedundancyPercent",
+        "FragmentSizeBytes": "FragmentSizeBytes",
+        "FragmentIntervalMS": "FragmentIntervalMS",
+        "Descriptor": "FileDescriptor"
+      }
+    },
+    "UpdateLogLevelsByResourceTypesRequest": {
+      "type": "structure",
+      "members": {
+        "DefaultLogLevel": "LogLevel",
+        "FuotaTaskLogOptions": "FuotaTaskLogOptionList",
+        "WirelessDeviceLogOptions": "WirelessDeviceLogOptionList",
+        "WirelessGatewayLogOptions": "WirelessGatewayLogOptionList"
+      }
+    },
+    "UpdateMetricConfigurationRequest": {
+      "type": "structure",
+      "members": {
+        "SummaryMetric": "SummaryMetricConfiguration"
+      }
+    },
+    "UpdateMulticastGroupRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "MulticastGroupId",
+        "Name": "MulticastGroupName",
+        "Description": "Description",
+        "LoRaWAN": "LoRaWANMulticast"
+      }
+    },
+    "UpdateNetworkAnalyzerConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ConfigurationName"
+      ],
+      "members": {
+        "ConfigurationName": "NetworkAnalyzerConfigurationName",
+        "TraceContent": "TraceContent",
+        "WirelessDevicesToAdd": "WirelessDeviceList",
+        "WirelessDevicesToRemove": "WirelessDeviceList",
+        "WirelessGatewaysToAdd": "WirelessGatewayList",
+        "WirelessGatewaysToRemove": "WirelessGatewayList",
+        "Description": "Description",
+        "MulticastGroupsToAdd": "NetworkAnalyzerMulticastGroupList",
+        "MulticastGroupsToRemove": "NetworkAnalyzerMulticastGroupList"
+      }
+    },
+    "UpdatePartnerAccountRequest": {
+      "type": "structure",
+      "required": [
+        "Sidewalk",
+        "PartnerAccountId",
+        "PartnerType"
+      ],
+      "members": {
+        "Sidewalk": "SidewalkUpdateAccount",
+        "PartnerAccountId": "PartnerAccountId",
+        "PartnerType": "PartnerType"
+      }
+    },
+    "UpdatePositionRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceIdentifier",
+        "ResourceType",
+        "Position"
+      ],
+      "members": {
+        "ResourceIdentifier": "PositionResourceIdentifier",
+        "ResourceType": "PositionResourceType",
+        "Position": "PositionCoordinate"
+      }
+    },
+    "UpdateResourceEventConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "Identifier",
+        "IdentifierType"
+      ],
+      "members": {
+        "Identifier": "Identifier",
+        "IdentifierType": "IdentifierType",
+        "PartnerType": "EventNotificationPartnerType",
+        "DeviceRegistrationState": "DeviceRegistrationStateEventConfiguration",
+        "Proximity": "ProximityEventConfiguration",
+        "Join": "JoinEventConfiguration",
+        "ConnectionStatus": "ConnectionStatusEventConfiguration",
+        "MessageDeliveryStatus": "MessageDeliveryStatusEventConfiguration"
+      }
+    },
+    "UpdateResourcePositionRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceIdentifier",
+        "ResourceType"
+      ],
+      "members": {
+        "ResourceIdentifier": "PositionResourceIdentifier",
+        "ResourceType": "PositionResourceType",
+        "GeoJsonPayload": "GeoJsonPayload"
+      }
+    },
+    "UpdateSignature": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "UpdateWirelessDeviceImportTaskRequest": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "Sidewalk"
+      ],
+      "members": {
+        "Id": "ImportTaskId",
+        "Sidewalk": "SidewalkUpdateImportInfo"
+      }
+    },
+    "UpdateWirelessDeviceRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessDeviceId",
+        "DestinationName": "DestinationName",
+        "Name": "WirelessDeviceName",
+        "Description": "Description",
+        "LoRaWAN": "LoRaWANUpdateDevice",
+        "Positioning": "PositioningConfigStatus",
+        "Sidewalk": "SidewalkUpdateWirelessDevice"
+      }
+    },
+    "UpdateWirelessGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "Id"
+      ],
+      "members": {
+        "Id": "WirelessGatewayId",
+        "Name": "WirelessGatewayName",
+        "Description": "Description",
+        "JoinEuiFilters": "JoinEuiFilters",
+        "NetIdFilters": "NetIdFilters",
+        "MaxEirp": "GatewayMaxEirp"
+      }
+    },
+    "UpdateWirelessGatewayTaskCreate": {
+      "type": "structure",
+      "members": {
+        "UpdateDataSource": "UpdateDataSource",
+        "UpdateDataRole": "UpdateDataSource",
+        "LoRaWAN": "LoRaWANUpdateGatewayTaskCreate"
+      }
+    },
+    "Use2DSolver": {
+      "type": "boolean"
+    },
+    "UtranCid": {
+      "type": "integer",
+      "min": 0,
+      "max": 268435455
+    },
+    "WcdmaList": {
+      "type": "list",
+      "min": 1,
+      "max": 16,
+      "member": "WcdmaObj"
+    },
+    "WcdmaLocalId": {
+      "type": "structure",
+      "required": [
+        "Uarfcndl",
+        "Psc"
+      ],
+      "members": {
+        "Uarfcndl": "UARFCNDL",
+        "Psc": "PSC"
+      }
+    },
+    "WcdmaNmrList": {
+      "type": "list",
+      "min": 1,
+      "max": 32,
+      "member": "WcdmaNmrObj"
+    },
+    "WcdmaNmrObj": {
+      "type": "structure",
+      "required": [
+        "Uarfcndl",
+        "Psc",
+        "UtranCid"
+      ],
+      "members": {
+        "Uarfcndl": "UARFCNDL",
+        "Psc": "PSC",
+        "UtranCid": "UtranCid",
+        "Rscp": "RSCP",
+        "PathLoss": "PathLoss"
+      }
+    },
+    "WcdmaObj": {
+      "type": "structure",
+      "required": [
+        "Mcc",
+        "Mnc",
+        "UtranCid"
+      ],
+      "members": {
+        "Mcc": "MCC",
+        "Mnc": "MNC",
+        "Lac": "LAC",
+        "UtranCid": "UtranCid",
+        "WcdmaLocalId": "WcdmaLocalId",
+        "Rscp": "RSCP",
+        "PathLoss": "PathLoss",
+        "WcdmaNmr": "WcdmaNmrList"
+      }
+    },
+    "WiFiAccessPoint": {
+      "type": "structure",
+      "required": [
+        "MacAddress",
+        "Rss"
+      ],
+      "members": {
+        "MacAddress": "MacAddress",
+        "Rss": "RSS"
+      }
+    },
+    "WiFiAccessPoints": {
+      "type": "list",
+      "member": "WiFiAccessPoint"
+    },
+    "WiFiCellular": {
+      "type": "structure",
+      "members": {
+        "ConfidencePercent": "ConfidencePercent"
+      }
+    },
+    "WirelessDeviceEvent": {
+      "type": "string",
+      "enum": [
+        "Join",
+        "Rejoin",
+        "Uplink_Data",
+        "Downlink_Data",
+        "Registration"
+      ]
+    },
+    "WirelessDeviceEventLogOption": {
+      "type": "structure",
+      "required": [
+        "Event",
+        "LogLevel"
+      ],
+      "members": {
+        "Event": "WirelessDeviceEvent",
+        "LogLevel": "LogLevel"
+      }
+    },
+    "WirelessDeviceEventLogOptionList": {
+      "type": "list",
+      "member": "WirelessDeviceEventLogOption"
+    },
+    "WirelessDeviceFrameInfo": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "WirelessDeviceId": {
+      "type": "string",
+      "max": 256
+    },
+    "WirelessDeviceIdType": {
+      "type": "string",
+      "enum": [
+        "WirelessDeviceId",
+        "DevEui",
+        "ThingName",
+        "SidewalkManufacturingSn"
+      ]
+    },
+    "WirelessDeviceList": {
+      "type": "list",
+      "min": 0,
+      "max": 250,
+      "member": "WirelessDeviceId"
+    },
+    "WirelessDeviceLogOption": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "LogLevel"
+      ],
+      "members": {
+        "Type": "WirelessDeviceType",
+        "LogLevel": "LogLevel",
+        "Events": "WirelessDeviceEventLogOptionList"
+      }
+    },
+    "WirelessDeviceLogOptionList": {
+      "type": "list",
+      "member": "WirelessDeviceLogOption"
+    },
+    "WirelessDeviceName": {
+      "type": "string",
+      "max": 256
+    },
+    "WirelessDeviceType": {
+      "type": "string",
+      "enum": [
+        "Sidewalk",
+        "LoRaWAN"
+      ]
+    },
+    "WirelessGatewayEvent": {
+      "type": "string",
+      "enum": [
+        "CUPS_Request",
+        "Certificate"
+      ]
+    },
+    "WirelessGatewayEventLogOption": {
+      "type": "structure",
+      "required": [
+        "Event",
+        "LogLevel"
+      ],
+      "members": {
+        "Event": "WirelessGatewayEvent",
+        "LogLevel": "LogLevel"
+      }
+    },
+    "WirelessGatewayEventLogOptionList": {
+      "type": "list",
+      "member": "WirelessGatewayEventLogOption"
+    },
+    "WirelessGatewayId": {
+      "type": "string",
+      "max": 256
+    },
+    "WirelessGatewayIdType": {
+      "type": "string",
+      "enum": [
+        "GatewayEui",
+        "WirelessGatewayId",
+        "ThingName"
+      ]
+    },
+    "WirelessGatewayList": {
+      "type": "list",
+      "member": "WirelessGatewayId"
+    },
+    "WirelessGatewayLogOption": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "LogLevel"
+      ],
+      "members": {
+        "Type": "WirelessGatewayType",
+        "LogLevel": "LogLevel",
+        "Events": "WirelessGatewayEventLogOptionList"
+      }
+    },
+    "WirelessGatewayLogOptionList": {
+      "type": "list",
+      "member": "WirelessGatewayLogOption"
+    },
+    "WirelessGatewayName": {
+      "type": "string",
+      "max": 256
+    },
+    "WirelessGatewayServiceType": {
+      "type": "string",
+      "enum": [
+        "CUPS",
+        "LNS"
+      ]
+    },
+    "WirelessGatewayTaskDefinitionId": {
+      "type": "string",
+      "max": 36,
+      "pattern": "[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}"
+    },
+    "WirelessGatewayTaskDefinitionType": {
+      "type": "string",
+      "enum": [
+        "UPDATE"
+      ]
+    },
+    "WirelessGatewayTaskName": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "WirelessGatewayType": {
+      "type": "string",
+      "enum": [
+        "LoRaWAN"
+      ]
+    },
+    "WirelessMetadata": {
+      "type": "structure",
+      "members": {
+        "LoRaWAN": "LoRaWANSendDataToDevice",
+        "Sidewalk": "SidewalkSendDataToDevice"
+      }
+    }
+  }
+}

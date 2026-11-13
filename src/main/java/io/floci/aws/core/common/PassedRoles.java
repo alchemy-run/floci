@@ -274,6 +274,10 @@ final class PassedRoles {
             case "ec2:CreateLaunchTemplate", "ec2:CreateLaunchTemplateVersion" ->
                     fromInstanceProfile(ctx, lookups, "LaunchTemplateData.IamInstanceProfile");
             case "ec2:CreateFlowLogs" -> fromForm(ctx, VPC_FLOW_LOGS, "DeliverLogsPermissionArn");
+            case "imagebuilder:CreateInfrastructureConfiguration", "imagebuilder:UpdateInfrastructureConfiguration" -> {
+                JsonNode body = jsonBody(ctx);
+                yield fromInstanceProfile(lookups, body == null ? null : body.path("instanceProfileName").asText(null));
+            }
             case "iam:AddRoleToInstanceProfile" -> instanceProfileRole(ctx, lookups);
             case "ecs:RegisterTaskDefinition" -> ecsTaskDefinition(jsonBody(ctx), lookups);
             case "ecs:RunTask", "ecs:StartTask" -> ecsTask(jsonBody(ctx), lookups);

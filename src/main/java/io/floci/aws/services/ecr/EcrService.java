@@ -72,6 +72,12 @@ public class EcrService implements ResourceProvider {
             "[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\." + AwsPartitions.dnsSuffixRegex());
 
     private static final Logger LOG = Logger.getLogger(EcrService.class);
+
+    /**
+     * The storage Region ECR Public keeps public repositories' images under: a key no private registry Region
+     * lists, so the repositories backing them stay out of private ECR's views.
+     */
+    public static final String PUBLIC_STORAGE_REGION = "ecr-public";
     private static final Pattern REPO_NAME = Pattern.compile(
             "[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*(/[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*)*");
     private static final Pattern PULL_THROUGH_CACHE_PREFIX = Pattern.compile(
@@ -1866,7 +1872,7 @@ public class EcrService implements ResourceProvider {
     @Override
     public List<ExplorerResource> getResources() {
         List<ExplorerResource> resources = new ArrayList<>();
-        for (Repository repo : repoStore.scan(k -> true)) {
+        for (Repository repo : repoStore.scan(k -> !k.startsWith(PUBLIC_STORAGE_REGION + "::"))) {
             String arn = repo.getRepositoryArn();
             if (arn == null) {
                 continue;

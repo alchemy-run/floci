@@ -18,6 +18,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.TreeMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
@@ -57,6 +58,20 @@ public class EndpointRelays {
      * @return the relay's address on the container network
      */
     public synchronized String start(String hostname, int port, String targetHost, int targetPort) {
+        return start(hostname, Map.of(port, targetPort), targetHost);
+    }
+
+    /**
+     * Starts the relay for {@code hostname} on several ports at once, replacing any it had: connections to each
+     * port on the relay's address are relayed to {@code targetHost} on the port it maps to. An endpoint that
+     * listens on more than one port keeps one address.
+     *
+     * @return the relay's address on the container network
+     */
+    public synchronized String start(String hostname, Map<Integer, Integer> ports, String targetHost) {
+        if (ports.isEmpty()) {
+            throw new IllegalArgumentException("A relay needs at least one port");
+        }
         stop(hostname);
         sourceHelper.ensureImage();
         String network = config.services().lambda().dockerNetwork().orElse(null);
@@ -67,7 +82,7 @@ public class EndpointRelays {
                 .withDockerNetwork(config.services().lambda().dockerNetwork())
                 .withHostDockerInternalOnLinux()
                 .withEntrypoint(List.of("sh", "-c"))
-                .withCmd(List.of(relayScript(port, targetHost, targetPort)))
+                .withCmd(List.of(relayScript(ports, targetHost)))
                 .withLogRotation()
                 .withLabels(ContainerStorageHelper.defaultLabels(config))
                 .withLabels(Map.of(LABEL, hostname))
@@ -77,9 +92,10 @@ public class EndpointRelays {
         try {
             String address = EmbeddedDnsServer.requireBridgeAddress(
                     lifecycleManager.resolveContainerNetworkIp(containerId, network));
-            awaitListener(containerId, port);
-            LOG.infov("Endpoint {0} relays port {1} to {2}:{3} from {4}", hostname, String.valueOf(port),
-                    targetHost, String.valueOf(targetPort), address);
+            for (int port : ports.keySet()) {
+                awaitListener(containerId, port);
+            }
+            LOG.infov("Endpoint {0} relays ports {1} to {2} from {3}", hostname, ports, targetHost, address);
             return address;
         } catch (RuntimeException e) {
             stop(hostname);
@@ -112,6 +128,20 @@ public class EndpointRelays {
         for (String hostname : List.copyOf(relays.keySet())) {
             stop(hostname);
         }
+    }
+
+    /** One socat per port, in the background, and the relay lives as long as they do. */
+    static String relayScript(Map<Integer, Integer> ports, String targetHost) {
+        if (ports.size() == 1) {
+            Map.Entry<Integer, Integer> only = ports.entrySet().iterator().next();
+            return relayScript(only.getKey(), targetHost, only.getValue());
+        }
+        StringBuilder script = new StringBuilder();
+        for (Map.Entry<Integer, Integer> port : new TreeMap<>(ports).entrySet()) {
+            script.append(relayScript(port.getKey(), targetHost, port.getValue()).substring("exec ".length()))
+                    .append(" & ");
+        }
+        return script.append("wait").toString();
     }
 
     static String relayScript(int port, String targetHost, int targetPort) {

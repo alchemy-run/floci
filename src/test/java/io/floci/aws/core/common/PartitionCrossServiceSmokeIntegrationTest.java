@@ -16,12 +16,15 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import java.net.URI;
+import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.Base64;
 import java.util.Map;
 import java.util.Set;
 
 import static io.restassured.RestAssured.given;
+import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -41,7 +44,8 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "amazonmq", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "notifications", "notificationscontacts", "osis", "observabilityadmin", "omics", "opensearchserverless", "personalize", "pinpointsmsvoicev2", "qbusiness", "rbin", "repostspace", "rolesanywhere", "route53profiles", "route53resolver", "s3files", "schemas", "securitylake", "shield", "signer", "socialmessaging", "synthetics", "vpclattice", "xray", "ssmcontacts", "ssmincidents", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
             "configservice", "connect", "controlcatalog", "datasync", "dlm", "dms", "dsql", "dynamodb", "ec2", "ecr",
@@ -1315,6 +1319,1184 @@ class PartitionCrossServiceSmokeIntegrationTest {
      * A service no partition lists (the newer ones {@code endpoints.json} omits) runs everywhere,
      * the same reading strict partition mode applies: silence there is not absence.
      */
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void appRunnerAutoScalingArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "apprunner");
+        String name = "smoke-" + Long.toString(System.nanoTime(), 36);
+        String arn = signed(region, "apprunner").header("X-Amz-Target", "AppRunner.CreateAutoScalingConfiguration")
+                .contentType(JSON_1_0).body("{\"AutoScalingConfigurationName\":\"" + name + "\"}")
+                .post("/").then().statusCode(200).extract().path("AutoScalingConfiguration.AutoScalingConfigurationArn");
+        cleanup.register(() -> signed(region, "apprunner")
+                .header("X-Amz-Target", "AppRunner.DeleteAutoScalingConfiguration").contentType(JSON_1_0)
+                .body("{\"AutoScalingConfigurationArn\":\"" + arn + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void codeConnectionsConnectionArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "codeconnections");
+        String arn = signed(region, "codeconnections")
+                .header("X-Amz-Target", "com.amazonaws.codeconnections.CodeConnections_20231201.CreateConnection")
+                .contentType(JSON_1_0).body("{\"ConnectionName\":\"smoke\",\"ProviderType\":\"GitHub\"}")
+                .post("/").then().statusCode(200).extract().path("ConnectionArn");
+        cleanup.register(() -> signed(region, "codeconnections")
+                .header("X-Amz-Target", "com.amazonaws.codeconnections.CodeConnections_20231201.DeleteConnection")
+                .contentType(JSON_1_0).body("{\"ConnectionArn\":\"" + arn + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void dataBrewRecipeArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "databrew");
+        String name = unique("smoke-recipe", partitionCase);
+        signed(region, "databrew").contentType(JSON).body("{\"Name\":\"" + name + "\",\"Steps\":[]}")
+                .post("/recipes").then().statusCode(200);
+        cleanup.register(() -> signed(region, "databrew").delete("/recipes/" + name + "/recipeVersion/LATEST_WORKING"));
+        String arn = signed(region, "databrew").get("/recipes/" + name).then().statusCode(200).extract()
+                .path("ResourceArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void dataExchangeDataSetArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "dataexchange");
+        String id = signed(region, "dataexchange").contentType(JSON)
+                .body("{\"AssetType\":\"S3_SNAPSHOT\",\"Name\":\"smoke\",\"Description\":\"smoke\"}")
+                .post("/v1/data-sets").then().statusCode(201).extract().path("Id");
+        cleanup.register(() -> signed(region, "dataexchange").delete("/v1/data-sets/" + id));
+        String arn = signed(region, "dataexchange").get("/v1/data-sets/" + id).then().statusCode(200).extract()
+                .path("Arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void dataZoneDomainArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "datazone");
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"datazone.amazonaws.com\"},\"Action\":[\"sts:AssumeRole\",\"sts:TagSession\"]}]}";
+        String roleName = unique("smoke-datazone", partitionCase);
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", roleName)
+                .formParam("AssumeRolePolicyDocument", trust)
+                .post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        cleanup.register(() -> signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteRole").formParam("RoleName", roleName).post("/"));
+        String id = signed(region, "datazone").contentType(JSON)
+                .body("{\"name\":\"" + unique("smoke", partitionCase) + "\",\"domainExecutionRole\":\"" + role
+                        + "\"}")
+                .post("/v2/domains").then().statusCode(201).extract().path("id");
+        cleanup.register(() -> signed(region, "datazone").delete("/v2/domains/" + id));
+        String arn = signed(region, "datazone").get("/v2/domains/" + id).then().statusCode(200).extract()
+                .path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void deadlineFarmArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "deadline");
+        String id = signed(region, "deadline").contentType(JSON)
+                .body("{\"displayName\":\"" + unique("smoke", partitionCase) + "\",\"tags\":{\"smoke\":\"yes\"}}")
+                .post("/2023-10-12/farms").then().statusCode(200).extract().path("farmId");
+        cleanup.register(() -> signed(region, "deadline").delete("/2023-10-12/farms/" + id));
+        String arn = "arn:" + partitionCase.partition() + ":deadline:" + region + ":" + PartitionMatrix.ACCOUNT + ":farm/" + id;
+        String tag = signed(region, "deadline").get("/2023-10-12/tags/" + arn).then().statusCode(200).extract()
+                .path("tags.smoke");
+        assertEquals("yes", tag);
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void devOpsGuruChannelTopic(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "devops-guru");
+        String topic = signed(region, "sns").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateTopic").formParam("Name", unique("smoke-guru", partitionCase))
+                .post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateTopicResponse.CreateTopicResult.TopicArn");
+        cleanup.register(() -> signed(region, "sns").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteTopic").formParam("TopicArn", topic).post("/"));
+        String id = signed(region, "devops-guru").contentType(JSON)
+                .body("{\"Config\":{\"Sns\":{\"TopicArn\":\"" + topic + "\"}}}")
+                .put("/channels").then().statusCode(200).extract().path("Id");
+        cleanup.register(() -> signed(region, "devops-guru").delete("/channels/" + id));
+        PartitionMatrix.assertArnIn(partitionCase, topic);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void docDbElasticClusterArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "docdb-elastic");
+        String arn = "arn:" + partitionCase.partition() + ":docdb-elastic:" + region + ":" + PartitionMatrix.ACCOUNT
+                + ":cluster/00000000-0000-0000-0000-000000000000";
+        signed(region, "docdb-elastic").get("/clusters").then().statusCode(200);
+        String missing = signed(region, "docdb-elastic").urlEncodingEnabled(false).get("/cluster/" + arn).then()
+                .statusCode(404).extract().path("resourceId");
+        assertEquals(arn, missing);
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void ecrPublicRegistryArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "ecr-public");
+        String arn = signed(region, "ecr-public").header("X-Amz-Target", "SpencerFrontendService.DescribeRegistries")
+                .contentType(JSON_1_1).body("{}").post("/").then().statusCode(200).extract()
+                .path("registries[0].registryArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void emrContainersJobTemplateArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "emr-containers");
+        String roleName = unique("smoke-emrc", partitionCase);
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"pods.eks.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", roleName)
+                .formParam("AssumeRolePolicyDocument", trust).post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        cleanup.register(() -> signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteRole").formParam("RoleName", roleName).post("/"));
+        String arn = signed(region, "emr-containers").contentType(JSON).body("{\"name\":\"" + roleName
+                        + "\",\"clientToken\":\"" + roleName + "\",\"jobTemplateData\":{\"executionRoleArn\":\""
+                        + role + "\",\"releaseLabel\":\"emr-7.5.0-latest\",\"jobDriver\":{\"sparkSubmitJobDriver\":"
+                        + "{\"entryPoint\":\"local:///app.py\"}}}}")
+                .post("/jobtemplates").then().statusCode(200).extract().path("arn");
+        String id = arn.substring(arn.lastIndexOf('/') + 1);
+        cleanup.register(() -> signed(region, "emr-containers").delete("/jobtemplates/" + id));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void entityResolutionSchemaMappingArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "entityresolution");
+        String name = unique("smoke-er", partitionCase);
+        String arn = signed(region, "entityresolution").contentType(JSON).body("{\"schemaName\":\"" + name
+                        + "\",\"mappedInputFields\":[{\"fieldName\":\"id\",\"type\":\"UNIQUE_ID\"},"
+                        + "{\"fieldName\":\"email\",\"type\":\"EMAIL_ADDRESS\",\"matchKey\":\"email\"}]}")
+                .post("/schemas").then().statusCode(200).extract().path("schemaArn");
+        cleanup.register(() -> signed(region, "entityresolution").delete("/schemas/" + name));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void firewallManagerRefusesAnAccountWithNoAdministrator(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "fms");
+        String type = signed(region, "fms").header("X-Amz-Target", "AWSFMS_20180101.GetAdminAccount")
+                .contentType(JSON_1_1).body("{}").post("/").then().statusCode(400).extract().path("__type");
+        assertTrue(type.contains("ResourceNotFoundException"), type);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void fsxMissingFileSystem(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "fsx");
+        String type = signed(region, "fsx").header("X-Amz-Target", "AWSSimbaAPIService_v20180301.DescribeFileSystems")
+                .contentType(JSON_1_1).body("{\"FileSystemIds\":[\"fs-00000000000000000\"]}").post("/").then()
+                .statusCode(400).extract().path("__type");
+        assertTrue(type.contains("FileSystemNotFound"), type);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void forecastDatasetGroupArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "forecast");
+        String arn = signed(region, "forecast").header("X-Amz-Target", "AmazonForecast.CreateDatasetGroup")
+                .contentType(JSON_1_1).body("{\"DatasetGroupName\":\"partition_smoke\",\"Domain\":\"CUSTOM\"}")
+                .post("/").then().statusCode(200).extract().path("DatasetGroupArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "forecast").header("X-Amz-Target", "AmazonForecast.DeleteDatasetGroup").contentType(JSON_1_1)
+                .body("{\"DatasetGroupArn\":\"" + arn + "\"}").post("/").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void neptuneGraphArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "neptune-graph");
+        String id = signed(region, "neptune-graph").contentType("application/json")
+                .body("{\"graphName\":\"partition-" + region + "\",\"provisionedMemory\":16,"
+                        + "\"deletionProtection\":false}")
+                .post("/graphs").then().statusCode(201).extract().path("id");
+        cleanup.register(() -> signed(region, "neptune-graph").queryParam("skipSnapshot", true)
+                .delete("/graphs/" + id));
+        String arn = signed(region, "neptune-graph").get("/graphs/" + id).then().statusCode(200).extract().path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void notificationConfigurationArnIsGlobal(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "notifications");
+        String arn = signed(region, "notifications").contentType("application/json")
+                .body("{\"name\":\"" + unique("partition", partitionCase) + "\",\"description\":\"smoke\"}")
+                .post("/notification-configurations").then().statusCode(201).extract().path("arn");
+        cleanup.register(() -> signed(region, "notifications").delete("/notification-configurations/" + arn));
+        PartitionMatrix.assertGlobalArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void notificationsEmailContactArnIsGlobal(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "notifications-contacts");
+        String arn = signed(region, "notifications-contacts").contentType("application/json")
+                .body("{\"name\":\"partition\",\"emailAddress\":\"" + unique("partition", partitionCase)
+                        + "@example.com\"}")
+                .post("/2022-09-19/emailcontacts").then().statusCode(201).extract().path("arn");
+        cleanup.register(() -> signed(region, "notifications-contacts").delete("/emailcontacts/" + arn));
+        PartitionMatrix.assertGlobalArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void openSearchServerlessCollectionArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "aoss");
+        String policy = "{\\\"Rules\\\":[{\\\"ResourceType\\\":\\\"collection\\\",\\\"Resource\\\":"
+                + "[\\\"collection/partition*\\\"]}],\\\"AWSOwnedKey\\\":true}";
+        json10(region, "aoss", "OpenSearchServerless.CreateSecurityPolicy", "{\"type\":\"encryption\",\"name\":"
+                + "\"partition-enc\",\"policy\":\"" + policy + "\"}").post("/").then().statusCode(200);
+        String arn = json10(region, "aoss", "OpenSearchServerless.CreateCollection",
+                "{\"name\":\"partition-c\"}").post("/").then().statusCode(200)
+                .extract().path("createCollectionDetail.arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void rolesAnywhereProfileArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "rolesanywhere");
+        String arn = signed(region, "rolesanywhere").contentType("application/json").body("{\"name\":\"p\","
+                + "\"roleArns\":[]}").post("/profiles").then().statusCode(201).extract().path("profile.profileArn");
+        cleanup.register(() -> signed(region, "rolesanywhere").delete("/profile/"
+                + arn.substring(arn.lastIndexOf('/') + 1)));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void socialMessagingPhoneNumberArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "social-messaging");
+        String arn = signed(region, "social-messaging").contentType("application/json")
+                .body("{\"signupCallback\":{\"accessToken\":\"" + unique("smoke", partitionCase) + "\"}}")
+                .post("/v1/whatsapp/signup").then().statusCode(200).extract().jsonPath()
+                .getString("signupCallbackResult.linkedAccountsWithIncompleteSetup.values()[0]"
+                        + ".unregisteredWhatsAppPhoneNumbers[0].arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void syntheticsGroupArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "synthetics");
+        String name = unique("smoke", partitionCase);
+        String arn = signed(region, "synthetics").contentType("application/json")
+                .body("{\"Name\":\"" + name + "\"}").post("/group").then().statusCode(200)
+                .extract().path("Group.Arn");
+        cleanup.register(() -> signed(region, "synthetics").delete("/group/" + name));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void vpcLatticeServiceNetworkArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "vpc-lattice");
+        String name = unique("smoke", partitionCase).toLowerCase();
+        String arn = signed(region, "vpc-lattice").contentType("application/json")
+                .body("{\"name\":\"" + name + "\"}").post("/servicenetworks").then().statusCode(201)
+                .extract().path("arn");
+        cleanup.register(() -> signed(region, "vpc-lattice").delete("/servicenetworks/"
+                + arn.substring(arn.lastIndexOf('/') + 1)));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void xrayGroupArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "xray");
+        String name = "smoke" + Long.toString(System.nanoTime(), 36);
+        String arn = signed(region, "xray").contentType("application/json")
+                .body("{\"GroupName\":\"" + name + "\"}").post("/CreateGroup").then().statusCode(200)
+                .extract().path("Group.GroupARN");
+        cleanup.register(() -> signed(region, "xray").contentType("application/json")
+                .body("{\"GroupName\":\"" + name + "\"}").post("/DeleteGroup"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void signerProfileArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "signer");
+        String name = unique("smoke", partitionCase).replace("-", "_");
+        String arn = signed(region, "signer").contentType("application/json")
+                .body("{\"platformId\":\"AWSLambda-SHA384-ECDSA\"}").put("/signing-profiles/" + name).then()
+                .statusCode(200).extract().path("profileVersionArn");
+        cleanup.register(() -> signed(region, "signer").delete("/signing-profiles/" + name));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void shieldSubscriptionArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "shield");
+        json11(region, "shield", "AWSShield_20160616.CreateSubscription", "{}").when().post("/");
+        String arn = json11(region, "shield", "AWSShield_20160616.DescribeSubscription", "{}").when().post("/")
+                .then().statusCode(200).extract().jsonPath().getString("Subscription.SubscriptionArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void securityLakeDataLakeArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "securitylake");
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"lambda.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", unique("smoke-securitylake", partitionCase))
+                .formParam("AssumeRolePolicyDocument", trust).post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        String arn = signed(region, "securitylake").contentType("application/json").body("{\"configurations\":"
+                + "[{\"region\":\"" + region + "\"}],\"metaStoreManagerRoleArn\":\"" + role + "\"}")
+                .post("/v1/datalake").then().statusCode(200).extract().path("dataLakes[0].dataLakeArn");
+        cleanup.register(() -> signed(region, "securitylake").contentType("application/json")
+                .body("{\"regions\":[\"" + region + "\"]}").post("/v1/datalake/delete"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void schemasRegistryArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "schemas");
+        String name = unique("smoke", partitionCase).toLowerCase();
+        String arn = signed(region, "schemas").contentType("application/json").body("{}")
+                .post("/v1/registries/name/" + name).then().statusCode(201).extract().path("RegistryArn");
+        cleanup.register(() -> signed(region, "schemas").delete("/v1/registries/name/" + name));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void incidentManagerArns(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "ssm-incidents");
+        String set = signed(region, "ssm-incidents").contentType("application/json")
+                .body("{\"regions\":{\"" + region + "\":{}}}").post("/createReplicationSet").then()
+                .statusCode(201).extract().path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, set);
+        await().atMost(Duration.ofSeconds(10)).until(() -> "ACTIVE".equals(signed(region, "ssm-incidents")
+                .queryParam("arn", set).get("/getReplicationSet").then().extract().path("replicationSet.status")));
+        String contact = signed(region, "ssm-contacts").header("X-Amz-Target", "SSMContacts.CreateContact")
+                .contentType("application/x-amz-json-1.1").body("{\"Alias\":\"" + unique("smoke", partitionCase)
+                        .toLowerCase() + "\",\"Type\":\"PERSONAL\",\"Plan\":{\"Stages\":[]}}").post("/").then()
+                .statusCode(200).extract().path("ContactArn");
+        PartitionMatrix.assertArnIn(partitionCase, contact);
+        signed(region, "ssm-incidents").queryParam("arn", set).post("/deleteReplicationSet").then().statusCode(204);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void s3FilesFileSystemArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "s3files");
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"elasticfilesystem.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+        String roleName = unique("smoke-s3files", partitionCase);
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", roleName)
+                .formParam("AssumeRolePolicyDocument", trust)
+                .post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        String bucket = unique("smoke-s3files", partitionCase).toLowerCase();
+        signed(region, "s3").contentType("application/xml").body("<CreateBucketConfiguration><LocationConstraint>"
+                + region + "</LocationConstraint></CreateBucketConfiguration>").put("/" + bucket).then()
+                .statusCode(200);
+        signed(region, "s3").contentType("application/xml")
+                .body("<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>")
+                .put("/" + bucket + "?versioning").then().statusCode(200);
+        String arn = signed(region, "s3files").contentType("application/json").body("{\"bucket\":\"arn:"
+                + role.split(":")[1] + ":s3:::" + bucket + "\",\"roleArn\":\"" + role + "\"}")
+                .put("/file-systems").then().statusCode(201).extract().path("fileSystemArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void route53ResolverFirewallRuleGroupArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "route53resolver");
+        String arn = json11(region, "route53resolver", "Route53Resolver.CreateFirewallRuleGroup",
+                "{\"CreatorRequestId\":\"" + unique("smoke", partitionCase) + "\",\"Name\":\"smoke\"}")
+                .when().post("/").then().statusCode(200).extract().jsonPath().getString("FirewallRuleGroup.Arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void route53ProfileArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "route53profiles");
+        String arn = signed(region, "route53profiles").contentType("application/json").body("{\"Name\":\"p\","
+                + "\"ClientToken\":\"" + unique("partition", partitionCase) + "\"}").post("/profile").then()
+                .statusCode(200).extract().path("Profile.Arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void rePostSpaceArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "repostspace");
+        String id = signed(region, "repostspace").contentType("application/json").body("{\"name\":\"p\","
+                + "\"subdomain\":\"" + unique("partition", partitionCase).toLowerCase() + "\",\"tier\":\"BASIC\"}")
+                .post("/spaces").then().statusCode(200).extract().path("spaceId");
+        cleanup.register(() -> signed(region, "repostspace").delete("/spaces/" + id));
+        String arn = signed(region, "repostspace").get("/spaces/" + id).then().statusCode(200).extract().path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void recycleBinRuleArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "rbin");
+        String arn = signed(region, "rbin").contentType("application/json").body("{\"ResourceType\":\"EBS_SNAPSHOT\","
+                + "\"RetentionPeriod\":{\"RetentionPeriodValue\":1,\"RetentionPeriodUnit\":\"DAYS\"}}")
+                .post("/rules").then().statusCode(201).extract().path("RuleArn");
+        cleanup.register(() -> signed(region, "rbin").delete("/rules/" + arn.substring(arn.lastIndexOf('/') + 1)));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void qBusinessApplicationAndQAppArns(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "qbusiness");
+        String arn = signed(region, "qbusiness").contentType("application/json").body("{\"displayName\":"
+                + "\"partition\",\"identityType\":\"ANONYMOUS\",\"qAppsConfiguration\":{\"qAppsControlMode\":"
+                + "\"ENABLED\"}}").post("/applications").then().statusCode(200).extract().path("applicationArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        String id = arn.substring(arn.lastIndexOf('/') + 1);
+        cleanup.register(() -> signed(region, "qbusiness").delete("/applications/" + id));
+        await().atMost(Duration.ofSeconds(20)).until(() -> "ACTIVE".equals(signed(region, "qbusiness")
+                .get("/applications/" + id).then().extract().path("status")));
+        String app = signed(region, "qapps").header("instance-id", id).contentType("application/json")
+                .body("{\"title\":\"partition\",\"appDefinition\":{\"cards\":[{\"textInput\":{\"id\":"
+                        + "\"11111111-1111-4111-8111-111111111111\",\"title\":\"Input\",\"type\":\"text-input\"}}]}}")
+                .post("/apps.create").then().statusCode(200).extract().path("appArn");
+        PartitionMatrix.assertArnIn(partitionCase, app);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void smsVoiceConfigurationSetAndOptOutListArns(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "sms-voice");
+        String name = unique("partition", partitionCase);
+        String arn = json10(region, "sms-voice", "PinpointSMSVoiceV2.CreateConfigurationSet",
+                "{\"ConfigurationSetName\":\"" + name + "\"}").post("/").then().statusCode(200).extract()
+                .path("ConfigurationSetArn");
+        cleanup.register(() -> json10(region, "sms-voice", "PinpointSMSVoiceV2.DeleteConfigurationSet",
+                "{\"ConfigurationSetName\":\"" + name + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        String list = json10(region, "sms-voice", "PinpointSMSVoiceV2.DescribeOptOutLists", "{}").post("/").then()
+                .statusCode(200).extract().path("OptOutLists[0].OptOutListArn");
+        PartitionMatrix.assertArnIn(partitionCase, list);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void personalizeDatasetGroupAndRecipeArns(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "personalize");
+        String arn = json11(region, "personalize", "AmazonPersonalize.CreateDatasetGroup",
+                "{\"name\":\"partition\"}").post("/").then().statusCode(200).extract().path("datasetGroupArn");
+        cleanup.register(() -> json11(region, "personalize", "AmazonPersonalize.DeleteDatasetGroup",
+                "{\"datasetGroupArn\":\"" + arn + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        String recipe = json11(region, "personalize", "AmazonPersonalize.ListRecipes", "{}").post("/").then()
+                .statusCode(200).extract().path("recipes[0].recipeArn");
+        PartitionMatrix.assertGlobalArnIn(partitionCase, recipe);
+        String algorithm = json11(region, "personalize", "AmazonPersonalize.DescribeRecipe", "{\"recipeArn\":\""
+                + recipe + "\"}").post("/").then().statusCode(200).extract().path("recipe.algorithmArn");
+        PartitionMatrix.assertGlobalArnIn(partitionCase, algorithm);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void omicsSequenceStoreArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "omics");
+        String id = signed(region, "omics").contentType("application/json").body("{\"name\":\"partition\"}")
+                .post("/sequencestore").then().statusCode(200).extract().path("id");
+        String arn = signed(region, "omics").get("/sequencestore/" + id).then().statusCode(200).extract().path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        String accessPoint = signed(region, "omics").get("/sequencestore/" + id).then().extract()
+                .path("s3Access.s3AccessPointArn");
+        PartitionMatrix.assertArnIn(partitionCase, accessPoint);
+        signed(region, "omics").delete("/sequencestore/" + id).then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void observabilityAdminPipelineArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "observabilityadmin");
+        String body = "pipeline:\\n  source:\\n    cloudwatch_logs:\\n      log_event_metadata:\\n"
+                + "        data_source_name: app\\n  sink:\\n    - cloudwatch_logs:\\n        log_group: '@original'\\n";
+        String arn = signed(region, "observabilityadmin").contentType("application/json")
+                .body("{\"Name\":\"partition\",\"Configuration\":{\"Body\":\"" + body + "\"}}")
+                .post("/CreateTelemetryPipeline").then().statusCode(200).extract().path("Arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        await().atMost(Duration.ofSeconds(30)).until(() -> "ACTIVE".equals(signed(region, "observabilityadmin")
+                .contentType("application/json").body("{\"PipelineIdentifier\":\"partition\"}")
+                .post("/GetTelemetryPipeline").then().extract().path("Pipeline.Status")));
+        signed(region, "observabilityadmin").contentType("application/json")
+                .body("{\"PipelineIdentifier\":\"partition\"}").post("/DeleteTelemetryPipeline").then()
+                .statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void osisPipelineArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "osis");
+        String config = "version: \\\"2\\\"\\nlogs:\\n  source:\\n    http:\\n      path: /logs\\n  sink:\\n"
+                + "    - opensearch:\\n        hosts: [\\\"https://localhost:9200\\\"]\\n";
+        String arn = signed(region, "osis").contentType("application/json")
+                .body("{\"PipelineName\":\"partition\",\"MinUnits\":1,\"MaxUnits\":1,"
+                        + "\"PipelineConfigurationBody\":\"" + config + "\"}")
+                .post("/2022-01-01/osis/createPipeline").then().statusCode(200).extract().path("Pipeline.PipelineArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        await().atMost(Duration.ofSeconds(30)).until(() -> "ACTIVE".equals(signed(region, "osis")
+                .get("/2022-01-01/osis/getPipeline/partition").then().extract().path("Pipeline.Status")));
+        signed(region, "osis").delete("/2022-01-01/osis/deletePipeline/partition").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void medicalImagingDatastoreArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "medical-imaging");
+        String id = signed(region, "medical-imaging").contentType("application/json")
+                .body("{\"datastoreName\":\"partition\",\"clientToken\":\"partition-" + region + "\"}")
+                .post("/datastore").then().statusCode(200).extract().path("datastoreId");
+        String arn = signed(region, "medical-imaging").get("/datastore/" + id).then().statusCode(200).extract()
+                .path("datastoreProperties.datastoreArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void mediaTailorPlaybackConfigurationArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "mediatailor");
+        String arn = signed(region, "mediatailor").contentType("application/json")
+                .body("{\"Name\":\"partition\",\"VideoContentSourceUrl\":\"https://origin.example.com\"}")
+                .put("/playbackConfiguration").then().statusCode(200).extract().path("PlaybackConfigurationArn");
+        cleanup.register(() -> signed(region, "mediatailor").delete("/playbackConfiguration/partition"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void mediaPackageV2ChannelGroupArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "mediapackagev2");
+        String arn = signed(region, "mediapackagev2").contentType("application/json")
+                .body("{\"ChannelGroupName\":\"partition\"}").post("/channelGroup").then().statusCode(200)
+                .extract().path("Arn");
+        cleanup.register(() -> signed(region, "mediapackagev2").delete("/channelGroup/partition"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void mediaLiveInputSecurityGroupArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "medialive");
+        String id = signed(region, "medialive").contentType("application/json")
+                .body("{\"whitelistRules\":[{\"cidr\":\"10.0.0.0/16\"}]}").post("/prod/inputSecurityGroups").then()
+                .statusCode(200).extract().path("securityGroup.id");
+        cleanup.register(() -> signed(region, "medialive").delete("/prod/inputSecurityGroups/" + id));
+        String arn = signed(region, "medialive").get("/prod/inputSecurityGroups/" + id).then().statusCode(200)
+                .extract().path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void mediaConvertQueueArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "mediaconvert");
+        String name = unique("smoke-mcv", partitionCase);
+        String arn = signed(region, "mediaconvert").contentType("application/json")
+                .body("{\"name\":\"" + name + "\"}").post("/2017-08-29/queues").then().statusCode(201)
+                .extract().path("queue.arn");
+        cleanup.register(() -> signed(region, "mediaconvert").delete("/2017-08-29/queues/" + name));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void mediaConnectFlowArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "mediaconnect");
+        String arn = signed(region, "mediaconnect").contentType("application/json")
+                .body("{\"name\":\"" + unique("smoke-mc", partitionCase) + "\"}").post("/v1/flows").then()
+                .statusCode(201).extract().path("flow.flowArn");
+        cleanup.register(() -> signed(region, "mediaconnect").delete("/v1/flows/" + arn));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void mailManagerRuleSetArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "ses");
+        String id = json10(region, "ses", "MailManagerSvc.CreateRuleSet",
+                "{\"RuleSetName\":\"" + unique("smoke-mm", partitionCase) + "\",\"Rules\":[]}")
+                .post("/").then().statusCode(200).extract().path("RuleSetId");
+        cleanup.register(() -> json10(region, "ses", "MailManagerSvc.DeleteRuleSet",
+                "{\"RuleSetId\":\"" + id + "\"}").post("/"));
+        String arn = json10(region, "ses", "MailManagerSvc.GetRuleSet", "{\"RuleSetId\":\"" + id + "\"}")
+                .post("/").then().statusCode(200).extract().path("RuleSetArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void airflowServerlessWorkflowArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "airflow-serverless");
+        String bucket = unique("smoke-mwaas", partitionCase);
+        signed(region, "s3").contentType("application/xml").body("<CreateBucketConfiguration><LocationConstraint>"
+                + region + "</LocationConstraint></CreateBucketConfiguration>").put("/" + bucket).then()
+                .statusCode(200);
+        signed(region, "s3").body("d:\n  tasks:\n    a:\n      operator: airflow.operators.empty.EmptyOperator\n")
+                .put("/" + bucket + "/w.yaml").then().statusCode(200);
+        String arn = json10(region, "airflow-serverless", "AmazonMWAAServerless.CreateWorkflow",
+                "{\"Name\":\"smoke\",\"DefinitionS3Location\":{\"Bucket\":\"" + bucket + "\",\"ObjectKey\":"
+                        + "\"w.yaml\"},\"RoleArn\":\"arn:" + partitionCase.partition() + ":iam::000000000000:role/r\"}")
+                .post("/").then().statusCode(200).extract().path("WorkflowArn");
+        cleanup.register(() -> json10(region, "airflow-serverless", "AmazonMWAAServerless.DeleteWorkflow",
+                "{\"WorkflowArn\":\"" + arn + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void licenseConfigurationArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "license-manager");
+        String arn = json11(region, "license-manager", "AWSLicenseManager.CreateLicenseConfiguration",
+                "{\"Name\":\"" + unique("smoke-lm", partitionCase) + "\",\"LicenseCountingType\":\"vCPU\"}")
+                .post("/").then().statusCode(200).extract().path("LicenseConfigurationArn");
+        cleanup.register(() -> json11(region, "license-manager", "AWSLicenseManager.DeleteLicenseConfiguration",
+                "{\"LicenseConfigurationArn\":\"" + arn + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        assertTrue(arn.contains(":" + region + ":"), arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void lexBotArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "lex");
+        String name = unique("smoke-lex", partitionCase);
+        String botId = signed(region, "lex").contentType(JSON).body("{\"botName\":\"" + name + "\",\"roleArn\":\"arn:"
+                + partitionCase.partition() + ":iam::000000000000:role/lex\",\"dataPrivacy\":{\"childDirected\":false},"
+                + "\"idleSessionTTLInSeconds\":300,\"botTags\":{\"smoke\":\"yes\"}}").put("/bots/").then().statusCode(202)
+                .extract().path("botId");
+        cleanup.register(() -> signed(region, "lex").queryParam("skipResourceInUseCheck", true)
+                .delete("/bots/" + botId + "/"));
+        String arn = "arn:" + partitionCase.partition() + ":lex:" + region + ":000000000000:bot/" + botId;
+        String tag = signed(region, "lex").get("/tags/" + arn.replace(":", "%3A").replace("/", "%2F")).then()
+                .statusCode(200).extract().path("tags.smoke");
+        assertEquals("yes", tag);
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void kinesisVideoStreamArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "kinesisvideo");
+        String name = unique("smoke-kvs", partitionCase);
+        String arn = signed(region, "kinesisvideo").contentType(JSON).body("{\"StreamName\":\"" + name + "\"}")
+                .post("/createStream").then().statusCode(200).extract().path("StreamARN");
+        cleanup.register(() -> signed(region, "kinesisvideo").contentType(JSON).body("{\"StreamARN\":\"" + arn
+                + "\"}").post("/deleteStream"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void keyspacesKeyspaceArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "cassandra");
+        String name = unique("smoke_ks", partitionCase).replace('-', '_');
+        String arn = signed(region, "cassandra").header("X-Amz-Target", "KeyspacesService.CreateKeyspace")
+                .contentType("application/x-amz-json-1.0").body("{\"keyspaceName\":\"" + name + "\"}").post("/")
+                .then().statusCode(200).extract().path("resourceArn");
+        cleanup.register(() -> signed(region, "cassandra").header("X-Amz-Target", "KeyspacesService.DeleteKeyspace")
+                .contentType("application/x-amz-json-1.0").body("{\"keyspaceName\":\"" + name + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void kendraIndexArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "kendra");
+        String roleName = unique("smoke-kendra", partitionCase);
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"kendra.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", roleName)
+                .formParam("AssumeRolePolicyDocument", trust).post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        cleanup.register(() -> signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteRole").formParam("RoleName", roleName).post("/"));
+        String id = signed(region, "kendra").header("X-Amz-Target", "AWSKendraFrontendService.CreateIndex")
+                .contentType(JSON_1_1).body("{\"Name\":\"" + roleName + "\",\"Edition\":\"DEVELOPER_EDITION\","
+                        + "\"RoleArn\":\"" + role + "\"}").post("/").then().statusCode(200).extract().path("Id");
+        cleanup.register(() -> signed(region, "kendra").header("X-Amz-Target", "AWSKendraFrontendService.DeleteIndex")
+                .contentType(JSON_1_1).body("{\"Id\":\"" + id + "\"}").post("/"));
+        String arn = role.substring(0, role.indexOf(":iam:")) + ":kendra:" + region + ":"
+                + role.split(":")[4] + ":index/" + id;
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "kendra").header("X-Amz-Target", "AWSKendraFrontendService.TagResource").contentType(JSON_1_1)
+                .body("{\"ResourceARN\":\"" + arn + "\",\"Tags\":[{\"Key\":\"smoke\",\"Value\":\"yes\"}]}")
+                .post("/").then().statusCode(200);
+        String key = signed(region, "kendra").header("X-Amz-Target", "AWSKendraFrontendService.ListTagsForResource")
+                .contentType(JSON_1_1).body("{\"ResourceARN\":\"" + arn + "\"}").post("/").then().statusCode(200)
+                .extract().path("Tags[0].Key");
+        assertTrue("smoke".equals(key), key);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void glacierVaultArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "glacier");
+        signed(region, "glacier").put("/-/vaults/partition-smoke").then().statusCode(201);
+        String arn = signed(region, "glacier").get("/-/vaults/partition-smoke").then().statusCode(200)
+                .extract().path("VaultARN");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "glacier").delete("/-/vaults/partition-smoke").then().statusCode(204);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void grafanaMissingWorkspace(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "grafana");
+        String type = signed(region, "grafana").get("/workspaces/g-0000000000").then().statusCode(404).extract()
+                .header("x-amzn-ErrorType");
+        assertTrue(type.contains("ResourceNotFoundException"), type);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void greengrassComponentArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "greengrass");
+        String recipe = Base64.getEncoder().encodeToString(("{\"RecipeFormatVersion\":\"2020-01-25\","
+                + "\"ComponentName\":\"com.example.Partition\",\"ComponentVersion\":\"1.0.0\"}")
+                .getBytes(StandardCharsets.UTF_8));
+        String arn = signed(region, "greengrass").contentType("application/json").body("{\"inlineRecipe\":\""
+                + recipe + "\"}").post("/greengrass/v2/createComponentVersion").then().statusCode(201).extract()
+                .path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "greengrass").delete("/greengrass/v2/components/" + arn).then().statusCode(204);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void healthLakeDatastoreArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "healthlake");
+        String arn = signed(region, "healthlake").header("X-Amz-Target", "HealthLake.CreateFHIRDatastore")
+                .contentType("application/x-amz-json-1.0").body("{\"DatastoreTypeVersion\":\"R4\"}").post("/")
+                .then().statusCode(200).extract().path("DatastoreArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void iotManagedIntegrationsCredentialLockerArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "iotmanagedintegrations");
+        String id = signed(region, "iotmanagedintegrations").contentType("application/json").body("{}")
+                .post("/credential-lockers").then().statusCode(200).extract().path("Id");
+        String arn = signed(region, "iotmanagedintegrations").get("/credential-lockers/" + id).then().statusCode(200)
+                .extract().path("Arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void iotWirelessServiceProfileArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "iotwireless");
+        String arn = signed(region, "iotwireless").contentType("application/json").body("{}")
+                .post("/service-profiles").then().statusCode(201).extract().path("Arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void iotSiteWiseGatewayArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "iotsitewise");
+        String arn = signed(region, "iotsitewise").contentType("application/json").body("{\"gatewayName\":\"smoke\","
+                + "\"gatewayPlatform\":{\"siemensIE\":{\"iotCoreThingName\":\"smoke-" + partitionCase.partition()
+                + "\"}}}").post("/20200301/gateways").then().statusCode(201).extract().path("gatewayArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void iotFleetWiseSignalCatalogArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "iotfleetwise");
+        String arn = signed(region, "iotfleetwise").header("X-Amz-Target", "IoTAutobahnControlPlane.CreateSignalCatalog")
+                .contentType("application/x-amz-json-1.0").body("{\"name\":\"smoke\",\"nodes\":[{\"branch\":"
+                        + "{\"fullyQualifiedName\":\"Vehicle\"}}]}").post("/")
+                .then().statusCode(200).extract().path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "iotfleetwise").header("X-Amz-Target", "IoTAutobahnControlPlane.CreateFleet")
+                .contentType("application/x-amz-json-1.0").body("{\"fleetId\":\"smoke\",\"signalCatalogArn\":\""
+                        + arn + "\"}").post("/").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void ivsChannelArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "ivs");
+        String arn = signed(region, "ivs").contentType("application/json").body("{}").post("/CreatePlaybackRestrictionPolicy")
+                .then().statusCode(200).extract().path("playbackRestrictionPolicy.arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "ivs").contentType("application/json").body("{\"arn\":\"" + arn + "\"}")
+                .post("/GetPlaybackRestrictionPolicy").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void ivsRealtimeStageArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "ivs");
+        String arn = signed(region, "ivs").contentType("application/json").body("{}").post("/CreateStage")
+                .then().statusCode(200).extract().path("stage.arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "ivs").contentType("application/json").body("{\"arn\":\"" + arn + "\"}")
+                .post("/GetStage").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void imageBuilderComponentArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "imagebuilder");
+        String arn = signed(region, "imagebuilder").contentType("application/json")
+                .body("{\"name\":\"smoke\",\"semanticVersion\":\"1.0.0\",\"platform\":\"Linux\",\"clientToken\":"
+                        + "\"smoke\",\"data\":\"name: smoke\\nschemaVersion: 1.0\\nphases:\\n  - name: build\\n"
+                        + "    steps:\\n      - name: Hello\\n        action: ExecuteBash\\n        inputs:\\n"
+                        + "          commands: [echo hello]\\n\"}")
+                .put("/CreateComponent").then().statusCode(200).extract().path("componentBuildVersionArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "imagebuilder").queryParam("componentBuildVersionArn", arn).get("/GetComponent")
+                .then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void internetMonitorMonitorArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "internetmonitor");
+        String name = "smoke-" + partitionCase.partition();
+        String arn = signed(region, "internetmonitor").contentType("application/json")
+                .body("{\"MonitorName\":\"" + name + "\",\"MaxCityNetworksToMonitor\":1}")
+                .post("/v20210603/Monitors").then().statusCode(200).extract().path("Arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "internetmonitor").get("/v20210603/Monitors/" + name).then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void ivsChatRoomArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "ivschat");
+        String arn = signed(region, "ivschat").contentType("application/json").body("{}").post("/CreateRoom")
+                .then().statusCode(200).extract().path("arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        signed(region, "ivschat").contentType("application/json").body("{\"identifier\":\"" + arn + "\"}")
+                .post("/GetRoom").then().statusCode(200);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void directoryServiceAccessUrl(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "ds");
+        String limit = signed(region, "ds").header("X-Amz-Target", "DirectoryService_20150416.GetDirectoryLimits")
+                .contentType(JSON_1_1).body("{}").post("/").then().statusCode(200).extract()
+                .path("DirectoryLimits.CloudOnlyMicrosoftADLimit").toString();
+        assertEquals("20", limit);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void daxClusterArnAndEndpoint(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "dax");
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"dax.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+        String roleName = unique("smoke-dax", partitionCase);
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", roleName)
+                .formParam("AssumeRolePolicyDocument", trust)
+                .post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        cleanup.register(() -> signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteRole").formParam("RoleName", roleName).post("/"));
+        String name = "smoke" + Long.toString(System.nanoTime(), 36);
+        String endpoint = signed(region, "dax").header("X-Amz-Target", "AmazonDAXV3.CreateCluster")
+                .contentType(JSON_1_1).body("{\"ClusterName\":\"" + name + "\",\"NodeType\":\"dax.t3.small\","
+                        + "\"ReplicationFactor\":1,\"IamRoleArn\":\"" + role + "\"}")
+                .post("/").then().statusCode(200).extract().path("Cluster.ClusterDiscoveryEndpoint.Address");
+        cleanup.register(() -> signed(region, "dax").header("X-Amz-Target", "AmazonDAXV3.DeleteCluster")
+                .contentType(JSON_1_1).body("{\"ClusterName\":\"" + name + "\"}").post("/"));
+        String arn = signed(region, "dax").header("X-Amz-Target", "AmazonDAXV3.DescribeClusters")
+                .contentType(JSON_1_1).body("{\"ClusterNames\":[\"" + name + "\"]}")
+                .post("/").then().statusCode(200).extract().path("Clusters[0].ClusterArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+        assertTrue(endpoint.endsWith("." + region + "." + AwsRegions.dnsSuffixFor(region)), endpoint);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void chatbotCustomActionArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "chatbot");
+        String name = unique("smoke-action", partitionCase);
+        String arn = signed(region, "chatbot").contentType(JSON).body("{\"ActionName\":\"" + name
+                + "\",\"Definition\":{\"CommandText\":\"aws s3 ls\"}}").post("/create-custom-action").then()
+                .statusCode(200).extract().path("CustomActionArn");
+        cleanup.register(() -> signed(region, "chatbot").contentType(JSON).body("{\"CustomActionArn\":\"" + arn
+                + "\"}").post("/delete-custom-action"));
+        PartitionMatrix.assertGlobalArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void bedrockDataAutomationLibraryArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "bedrock");
+        String name = unique("smoke-library", partitionCase);
+        String arn = signed(region, "bedrock").contentType(JSON).body("{\"libraryName\":\"" + name + "\"}")
+                .put("/data-automation-libraries/").then().statusCode(200).extract().path("libraryArn");
+        cleanup.register(() -> signed(region, "bedrock").urlEncodingEnabled(false)
+                .delete("/data-automation-libraries/" + URLEncoder.encode(arn, StandardCharsets.UTF_8) + "/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void backupSearchJobArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "backup-search");
+        String arn = signed(region, "backup-search").contentType(JSON)
+                .body("{\"SearchScope\":{\"BackupResourceTypes\":[\"S3\"]}}").put("/search-jobs").then()
+                .statusCode(200).extract().path("SearchJobArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void b2biProfileArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "b2bi");
+        String id = signed(region, "b2bi").header("X-Amz-Target", "B2BI.CreateProfile").contentType(JSON_1_0)
+                .body("{\"name\":\"smoke\",\"businessName\":\"Smoke\",\"phone\":\"+15555550100\","
+                        + "\"logging\":\"DISABLED\"}").post("/").then().statusCode(200).extract().path("profileId");
+        cleanup.register(() -> signed(region, "b2bi").header("X-Amz-Target", "B2BI.DeleteProfile")
+                .contentType(JSON_1_0).body("{\"profileId\":\"" + id + "\"}").post("/"));
+        String arn = signed(region, "b2bi").header("X-Amz-Target", "B2BI.GetProfile").contentType(JSON_1_0)
+                .body("{\"profileId\":\"" + id + "\"}").post("/").then().statusCode(200).extract().path("profileArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void auditManagerControlArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "auditmanager");
+        signed(region, "auditmanager").contentType(JSON).body("{}").post("/account/registerAccount").then()
+                .statusCode(200);
+        String name = unique("smoke-control", partitionCase);
+        String id = signed(region, "auditmanager").contentType(JSON).body("{\"name\":\"" + name
+                + "\",\"controlMappingSources\":[{\"sourceName\":\"manual\",\"sourceSetUpOption\":"
+                + "\"Procedural_Controls_Mapping\",\"sourceType\":\"MANUAL\"}]}").post("/controls").then()
+                .statusCode(200).extract().path("control.id");
+        cleanup.register(() -> signed(region, "auditmanager").delete("/controls/" + id));
+        String arn = signed(region, "auditmanager").get("/controls/" + id).then().statusCode(200).extract()
+                .path("control.arn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void appRegistryApplicationArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "servicecatalog");
+        String name = unique("smoke-app", partitionCase);
+        String arn = signed(region, "servicecatalog").contentType(JSON).body("{\"name\":\"" + name + "\"}")
+                .post("/applications").then().statusCode(201).extract().path("application.arn");
+        cleanup.register(() -> signed(region, "servicecatalog").delete("/applications/" + name));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void appFlowConnectorProfileArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "appflow");
+        String name = unique("smoke-profile", partitionCase);
+        String arn = signed(region, "appflow").contentType(JSON)
+                .body("{\"connectorProfileName\":\"" + name + "\",\"connectorType\":\"Salesforce\","
+                        + "\"connectionMode\":\"Public\",\"connectorProfileConfig\":{\"connectorProfileProperties\":"
+                        + "{},\"connectorProfileCredentials\":{\"Salesforce\":{\"accessToken\":\"t\"}}}}")
+                .post("/create-connector-profile").then().statusCode(200).extract().path("connectorProfileArn");
+        cleanup.register(() -> signed(region, "appflow").contentType(JSON)
+                .body("{\"connectorProfileName\":\"" + name + "\"}").post("/delete-connector-profile"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void amplifyAppArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "amplify");
+        String appId = signed(region, "amplify").contentType(JSON).body("{\"name\":\"smoke\"}")
+                .post("/apps").then().statusCode(200).extract().path("app.appId");
+        cleanup.register(() -> signed(region, "amplify").delete("/apps/" + appId));
+        String arn = signed(region, "amplify").get("/apps/" + appId).then().statusCode(200)
+                .extract().path("app.appArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void investigationGroupArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "aiops");
+        String trust = "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Effect\":\"Allow\",\"Principal\":"
+                + "{\"Service\":\"aiops.amazonaws.com\"},\"Action\":\"sts:AssumeRole\"}]}";
+        String roleName = unique("smoke-aiops", partitionCase);
+        String role = signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "CreateRole").formParam("RoleName", roleName)
+                .formParam("AssumeRolePolicyDocument", trust)
+                .post("/").then().statusCode(200).extract().xmlPath()
+                .getString("CreateRoleResponse.CreateRoleResult.Role.Arn");
+        cleanup.register(() -> signed(region, "iam").contentType("application/x-www-form-urlencoded")
+                .formParam("Action", "DeleteRole").formParam("RoleName", roleName).post("/"));
+        String arn = signed(region, "aiops").contentType(JSON)
+                .body("{\"name\":\"smoke\",\"roleArn\":\"" + role + "\"}")
+                .post("/investigationGroups").then().statusCode(201).extract().path("arn");
+        cleanup.register(() -> signed(region, "aiops").delete("/investigationGroups/smoke"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void privateCaArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "acm-pca");
+        String arn = json11(region, "acm-pca", "ACMPrivateCA.CreateCertificateAuthority",
+                "{\"CertificateAuthorityConfiguration\":{\"KeyAlgorithm\":\"EC_prime256v1\",\"SigningAlgorithm\":"
+                        + "\"SHA256WITHECDSA\",\"Subject\":{\"CommonName\":\"smoke.floci.test\"}},"
+                        + "\"CertificateAuthorityType\":\"ROOT\"}")
+                .post("/").then().statusCode(200).extract().path("CertificateAuthorityArn");
+        cleanup.register(() -> json11(region, "acm-pca", "ACMPrivateCA.DeleteCertificateAuthority",
+                "{\"CertificateAuthorityArn\":\"" + arn + "\",\"PermanentDeletionTimeInDays\":7}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void bedrockAgentArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "bedrock");
+        String name = unique("smoke-agent", partitionCase);
+        Response created = signed(region, "bedrock").contentType(JSON)
+                .body("{\"agentName\":\"" + name + "\",\"foundationModel\":\"anthropic.claude-v2\"}")
+                .put("/agents/").then().statusCode(202).extract().response();
+        String id = created.path("agent.agentId");
+        cleanup.register(() -> signed(region, "bedrock").delete("/agents/" + id + "/"));
+        PartitionMatrix.assertArnIn(partitionCase, created.path("agent.agentArn"));
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void comprehendJobArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "comprehend");
+        String role = "arn:" + partitionCase.partition() + ":iam::" + PartitionMatrix.ACCOUNT + ":role/smoke";
+        String arn = json11(region, "comprehend", "Comprehend_20171127.StartSentimentDetectionJob",
+                "{\"InputDataConfig\":{\"S3Uri\":\"s3://smoke-in/docs\"},\"OutputDataConfig\":{\"S3Uri\":"
+                        + "\"s3://smoke-out/\"},\"DataAccessRoleArn\":\"" + role + "\",\"LanguageCode\":\"en\"}")
+                .post("/").then().statusCode(200).extract().path("JobArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void locationMapArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "geo");
+        String name = unique("smoke-map", partitionCase);
+        String arn = signed(region, "geo").contentType(JSON)
+                .body("{\"MapName\":\"" + name + "\",\"Configuration\":{\"Style\":\"VectorEsriStreets\"}}")
+                .post("/maps/v0/maps").then().statusCode(200).extract().path("MapArn");
+        cleanup.register(() -> signed(region, "geo").delete("/maps/v0/maps/" + name));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void pollyLexiconArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "polly");
+        String name = "smoke" + Long.toString(System.nanoTime(), 36).substring(0, 8);
+        String lexicon = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><lexicon version=\"1.0\" "
+                + "xmlns=\"http://www.w3.org/2005/01/pronunciation-lexicon\" alphabet=\"ipa\" xml:lang=\"en-US\">"
+                + "<lexeme><grapheme>IaC</grapheme><alias>infrastructure as code</alias></lexeme></lexicon>";
+        signed(region, "polly").contentType(JSON).body(Map.of("Content", lexicon))
+                .put("/v1/lexicons/" + name).then().statusCode(200);
+        cleanup.register(() -> signed(region, "polly").delete("/v1/lexicons/" + name));
+        String arn = signed(region, "polly").get("/v1/lexicons/" + name).then().statusCode(200)
+                .extract().path("LexiconAttributes.LexiconArn");
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void rekognitionCollectionArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "rekognition");
+        String id = unique("smoke-collection", partitionCase);
+        String arn = json11(region, "rekognition", "RekognitionService.CreateCollection",
+                "{\"CollectionId\":\"" + id + "\"}").post("/").then().statusCode(200).extract().path("CollectionArn");
+        cleanup.register(() -> json11(region, "rekognition", "RekognitionService.DeleteCollection",
+                "{\"CollectionId\":\"" + id + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void textractAdapterArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "textract");
+        String name = unique("smoke-adapter", partitionCase);
+        String id = json11(region, "textract", "Textract.CreateAdapter",
+                "{\"AdapterName\":\"" + name + "\",\"FeatureTypes\":[\"QUERIES\"]}")
+                .post("/").then().statusCode(200).extract().path("AdapterId");
+        cleanup.register(() -> json11(region, "textract", "Textract.DeleteAdapter",
+                "{\"AdapterId\":\"" + id + "\"}").post("/"));
+        // Textract returns no ARN; the adapter's ARN in the case's partition names it.
+        String arn = "arn:" + partitionCase.partition() + ":textract:" + region + ":" + PartitionMatrix.ACCOUNT
+                + ":/adapters/" + id;
+        json11(region, "textract", "Textract.ListTagsForResource", "{\"ResourceARN\":\"" + arn + "\"}")
+                .post("/").then().statusCode(200);
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void transcribeVocabularyFilterArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "transcribe");
+        String name = unique("smoke-filter", partitionCase);
+        json11(region, "transcribe", "Transcribe.CreateVocabularyFilter",
+                "{\"VocabularyFilterName\":\"" + name + "\",\"LanguageCode\":\"en-US\",\"Words\":[\"smoke\"]}")
+                .post("/").then().statusCode(200);
+        cleanup.register(() -> json11(region, "transcribe", "Transcribe.DeleteVocabularyFilter",
+                "{\"VocabularyFilterName\":\"" + name + "\"}").post("/"));
+        String arn = "arn:" + partitionCase.partition() + ":transcribe:" + region + ":" + PartitionMatrix.ACCOUNT
+                + ":vocabulary-filter/" + name;
+        String listed = json11(region, "transcribe", "Transcribe.ListTagsForResource",
+                "{\"ResourceArn\":\"" + arn + "\"}").post("/").then().statusCode(200).extract().path("ResourceArn");
+        PartitionMatrix.assertArnIn(partitionCase, listed);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void translateTerminologyArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "translate");
+        String name = unique("smoke-terms", partitionCase);
+        String file = Base64.getEncoder().encodeToString("en,fr\nhello,bonjour\n".getBytes(StandardCharsets.UTF_8));
+        String arn = json11(region, "translate", "AWSShineFrontendService_20170701.ImportTerminology",
+                "{\"Name\":\"" + name + "\",\"MergeStrategy\":\"OVERWRITE\",\"TerminologyData\":{\"File\":\""
+                        + file + "\",\"Format\":\"CSV\"}}")
+                .post("/").then().statusCode(200).extract().path("TerminologyProperties.Arn");
+        cleanup.register(() -> json11(region, "translate", "AWSShineFrontendService_20170701.DeleteTerminology",
+                "{\"Name\":\"" + name + "\"}").post("/"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
     private static String offered(PartitionCase partitionCase, String signingName) {
         assumeTrue(!AwsPartitions.publishesSomewhere(signingName)
                         || AwsPartitions.byId(partitionCase.partition()).offersSigningName(signingName),

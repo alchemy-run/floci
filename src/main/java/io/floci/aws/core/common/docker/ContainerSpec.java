@@ -83,7 +83,8 @@ public record ContainerSpec(
         Map<Integer, String> portBindingHostIps,
         boolean init,
         LinuxOptions linuxOptions,
-        boolean javaTrustStore
+        boolean javaTrustStore,
+        Map<Integer, Integer> udpPortBindings
 ) {
     private static final Pattern LINK_LOCAL_IPV4 = Pattern.compile("^169\\.254\\.(\\d{1,3})\\.(\\d{1,3})$");
     private static final Set<String> NETWORKS_WITHOUT_ENDPOINT_IPAM = Set.of("bridge", "default", "host", "none");
@@ -92,6 +93,9 @@ public record ContainerSpec(
     public ContainerSpec {
         if (linuxOptions == null) {
             linuxOptions = LinuxOptions.NONE;
+        }
+        if (udpPortBindings == null) {
+            udpPortBindings = Map.of();
         }
         if (linkLocalIps != null && !linkLocalIps.isEmpty()) {
             requireUserDefinedNetwork(networkMode);
@@ -296,6 +300,22 @@ public record ContainerSpec(
     /**
      * Returns true if this spec has any port bindings configured.
      */
+    /** A spec that publishes no UDP ports. */
+    public ContainerSpec(String image, String name, List<String> env, List<String> cmd, List<String> entrypoint,
+                         Long memoryBytes, Map<Integer, Integer> portBindings, List<Integer> loopbackPortBindings,
+                         List<Integer> exposedPorts, String networkMode, List<Mount> mounts, List<Bind> binds,
+                         List<VolumesFrom> volumesFrom, List<String> extraHosts, Map<String, String> labels,
+                         LogConfig logConfig, boolean privileged, String cgroupnsMode, List<String> dnsServers,
+                         String workingDir, String user, List<String> groupAdd, List<DeviceRequest> deviceRequests,
+                         Long nanoCpus, Integer cpuShares, boolean readonlyRootfs, List<String> linkLocalIps,
+                         Map<Integer, String> portBindingHostIps, boolean init, LinuxOptions linuxOptions,
+                         boolean javaTrustStore) {
+        this(image, name, env, cmd, entrypoint, memoryBytes, portBindings, loopbackPortBindings, exposedPorts,
+                networkMode, mounts, binds, volumesFrom, extraHosts, labels, logConfig, privileged, cgroupnsMode,
+                dnsServers, workingDir, user, groupAdd, deviceRequests, nanoCpus, cpuShares, readonlyRootfs,
+                linkLocalIps, portBindingHostIps, init, linuxOptions, javaTrustStore, Map.of());
+    }
+
     public boolean hasPortBindings() {
         return portBindings != null && !portBindings.isEmpty();
     }

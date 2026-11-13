@@ -88,6 +88,7 @@ class AwsQueryActionRoutingParityTest {
             new QueryHandler("autoscaling", HANDLERS_ROOT + "autoscaling/AutoScalingQueryHandler.java"),
             new QueryHandler("elasticbeanstalk",
                     HANDLERS_ROOT + "elasticbeanstalk/ElasticBeanstalkQueryHandler.java"),
+            new QueryHandler("sdb", HANDLERS_ROOT + "sdb/SimpleDbQueryHandler.java"),
             new QueryHandler("redshift", HANDLERS_ROOT + "redshift/RedshiftQueryHandler.java"),
             new QueryHandler("sqs", HANDLERS_ROOT + "sqs/SqsQueryHandler.java"));
 
@@ -111,7 +112,8 @@ class AwsQueryActionRoutingParityTest {
             Map.entry("elasticloadbalancing", "2015-12-01"),
             Map.entry("autoscaling", "2011-01-01"),
             Map.entry("elasticbeanstalk", "2010-12-01"),
-            Map.entry("redshift", "2012-12-01"));
+            Map.entry("redshift", "2012-12-01"),
+            Map.entry("sdb", "2009-04-15"));
 
     /**
      * A {@code case} arm's label list, which may carry several names and may wrap across lines.

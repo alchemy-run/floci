@@ -35,6 +35,7 @@ import java.io.InputStream;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
@@ -74,6 +75,9 @@ public class ResourceArnBuilder {
 
     /** Where an S3 Control tagging route carries the ARN of the resource it acts on. */
     private static final String S3_CONTROL_TAGS_PREFIX = "/v20180820/tags/";
+
+    /** Where every S3 Control route starts. */
+    private static final String S3_CONTROL_PREFIX = "/v20180820/";
 
     /** The segment that starts an API Gateway v2 management path, and is not part of the resource it names. */
     private static final String API_GATEWAY_V2_SEGMENT = "v2";
@@ -199,7 +203,7 @@ public class ResourceArnBuilder {
         String path = "s3".equals(credentialScope) ? ctx.getUriInfo().getPath()
                 : IamActionRegistry.decodedPath(ctx);
         return switch (credentialScope) {
-            case "s3"             -> buildS3Resources(operation, path, region);
+            case "s3"             -> buildS3Resources(operation, path, region, accountId, partition);
             case "lambda"         -> List.of(buildLambdaArn(path, ctx, region, accountId));
             case "sqs"            -> List.of(buildSqsArn(ctx, region, accountId));
             case "sns"            -> List.of(buildSnsArn(ctx, region, accountId));
@@ -265,11 +269,20 @@ public class ResourceArnBuilder {
     }
 
     private String buildResourceGroupArn(ContainerRequestContext ctx, String region, String accountId) {
+        String path = IamActionRegistry.decodedPath(ctx);
+        if (path.contains("/_rg/resources/") && path.endsWith("/tags")) {
+            return path.substring(path.indexOf("/_rg/resources/") + "/_rg/resources/".length(),
+                    path.length() - "/tags".length());
+        }
+        if (path.endsWith("/resources/search") || path.contains("account-settings")
+                || path.contains("/get-tag-sync-task") || path.contains("/cancel-tag-sync-task")
+                || path.contains("/list-tag-sync-tasks")) {
+            return "*";
+        }
         JsonNode body = readJsonBody(ctx);
         if (body == null) {
             return "*";
         }
-        String path = IamActionRegistry.decodedPath(ctx);
         boolean create = path.endsWith("/groups") || path.endsWith("/groups/");
         String group = create ? body.path("Name").asText()
                 : body.path("Group").asText(body.path("GroupName").asText());
@@ -873,7 +886,8 @@ public class ResourceArnBuilder {
      * nothing. Any other operation is the data plane, checked against the bucket or object its
      * path names.
      */
-    private List<String> buildS3Resources(String operation, String path, String region) {
+    private List<String> buildS3Resources(String operation, String path, String region, String accountId,
+                                          String partition) {
         if (operation == null) {
             return List.of(buildS3Arn(path, region));
         }
@@ -882,8 +896,59 @@ public class ResourceArnBuilder {
                     List.of(taggedS3ControlArn(path));
             case "s3:ListAccessPoints", "s3:PutAccountPublicAccessBlock",
                     "s3:GetAccountPublicAccessBlock" -> List.of("*");
-            default -> List.of(buildS3Arn(path, region));
+            default -> path.startsWith(S3_CONTROL_PREFIX)
+                    ? List.of(s3ControlArn(path, region, accountId, partition))
+                    : List.of(buildS3Arn(path, region));
         };
+    }
+
+    /**
+     * The resource an S3 Control route names in its path, as the Service Authorization Reference
+     * gives its resource types: an access point, an Object Lambda access point (in the
+     * {@code s3-object-lambda} namespace), a Multi-Region Access Point (no Region), a Storage Lens
+     * configuration or group, a Batch Operations job, or an Access Grants instance, location or
+     * grant. The create and list routes, and the asynchronous Multi-Region Access Point requests,
+     * name none, and are checked against the wildcard.
+     */
+    private static String s3ControlArn(String path, String region, String accountId, String partition) {
+        String[] segments = path.substring(S3_CONTROL_PREFIX.length()).split("/");
+        String first = segments[0];
+        String second = segments.length > 1 ? segments[1] : null;
+        return switch (first) {
+            case "accesspoint" -> second == null ? "*"
+                    : AwsArnUtils.Arn.of("s3", region, accountId, "accesspoint/" + second).toString();
+            case "accesspointforobjectlambda" -> second == null ? "*"
+                    : AwsArnUtils.Arn.of("s3-object-lambda", region, accountId, "accesspoint/" + second).toString();
+            case "storagelens" -> second == null ? "*"
+                    : AwsArnUtils.Arn.of("s3", region, accountId, "storage-lens/" + second).toString();
+            case "storagelensgroup" -> second == null ? "*"
+                    : AwsArnUtils.Arn.of("s3", region, accountId, "storage-lens-group/" + second).toString();
+            case "jobs" -> second == null ? "*"
+                    : AwsArnUtils.Arn.of("s3", region, accountId, "job/" + second).toString();
+            case "mrap" -> multiRegionAccessPointArn(segments, accountId, partition);
+            case "accessgrantsinstance" -> accessGrantsArn(segments, region, accountId);
+            default -> "*";
+        };
+    }
+
+    private static String multiRegionAccessPointArn(String[] segments, String accountId, String partition) {
+        if (segments.length < 3) {
+            return "*";
+        }
+        String name = String.join("/", Arrays.copyOfRange(segments, 2, segments.length))
+                .replaceAll("/(routes|policy|policystatus)$", "");
+        if (AwsArnUtils.isArn(name)) {
+            return name;
+        }
+        return AwsArnUtils.Arn.global(partition, "s3", accountId, "accesspoint/" + name).toString();
+    }
+
+    private static String accessGrantsArn(String[] segments, String region, String accountId) {
+        String instance = "access-grants/default";
+        if (segments.length > 2 && ("grant".equals(segments[1]) || "location".equals(segments[1]))) {
+            instance += "/" + segments[1] + "/" + segments[2];
+        }
+        return AwsArnUtils.Arn.of("s3", region, accountId, instance).toString();
     }
 
     /**

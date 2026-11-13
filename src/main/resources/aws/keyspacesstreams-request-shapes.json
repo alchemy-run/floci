@@ -1,0 +1,138 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_keyspaces_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "GetRecords": "GetRecordsInput",
+    "GetShardIterator": "GetShardIteratorInput",
+    "GetStream": "GetStreamInput",
+    "ListStreams": "ListStreamsInput"
+  },
+  "shapes": {
+    "GetRecordsInput": {
+      "type": "structure",
+      "required": [
+        "shardIterator"
+      ],
+      "members": {
+        "shardIterator": "ShardIterator",
+        "maxResults": "GetRecordsInputMaxResultsInteger"
+      }
+    },
+    "GetRecordsInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "GetShardIteratorInput": {
+      "type": "structure",
+      "required": [
+        "streamArn",
+        "shardId",
+        "shardIteratorType"
+      ],
+      "members": {
+        "streamArn": "StreamArn",
+        "shardId": "ShardId",
+        "shardIteratorType": "ShardIteratorType",
+        "sequenceNumber": "SequenceNumber"
+      }
+    },
+    "GetStreamInput": {
+      "type": "structure",
+      "required": [
+        "streamArn"
+      ],
+      "members": {
+        "streamArn": "StreamArn",
+        "maxResults": "GetStreamInputMaxResultsInteger",
+        "shardFilter": "ShardFilter",
+        "nextToken": "ShardIdToken"
+      }
+    },
+    "GetStreamInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "KeyspaceName": {
+      "type": "string",
+      "min": 1,
+      "max": 48,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_]{0,47}"
+    },
+    "ListStreamsInput": {
+      "type": "structure",
+      "members": {
+        "keyspaceName": "KeyspaceName",
+        "tableName": "TableName",
+        "maxResults": "ListStreamsInputMaxResultsInteger",
+        "nextToken": "StreamArnToken"
+      }
+    },
+    "ListStreamsInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "SequenceNumber": {
+      "type": "string",
+      "min": 21,
+      "max": 48
+    },
+    "ShardFilter": {
+      "type": "structure",
+      "members": {
+        "type": "ShardFilterType",
+        "shardId": "ShardId"
+      }
+    },
+    "ShardFilterType": {
+      "type": "string",
+      "enum": [
+        "CHILD_SHARDS"
+      ]
+    },
+    "ShardId": {
+      "type": "string",
+      "min": 28,
+      "max": 65
+    },
+    "ShardIdToken": {
+      "type": "string",
+      "min": 80,
+      "max": 3000
+    },
+    "ShardIterator": {
+      "type": "string",
+      "min": 1,
+      "max": 4096
+    },
+    "ShardIteratorType": {
+      "type": "string",
+      "enum": [
+        "TRIM_HORIZON",
+        "LATEST",
+        "AT_SEQUENCE_NUMBER",
+        "AFTER_SEQUENCE_NUMBER"
+      ]
+    },
+    "StreamArn": {
+      "type": "string",
+      "min": 37,
+      "max": 1024
+    },
+    "StreamArnToken": {
+      "type": "string",
+      "min": 80,
+      "max": 3000
+    },
+    "TableName": {
+      "type": "string",
+      "min": 1,
+      "max": 48,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_]{0,47}"
+    }
+  }
+}
