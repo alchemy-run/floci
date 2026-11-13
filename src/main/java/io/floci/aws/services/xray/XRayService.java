@@ -469,7 +469,7 @@ public class XRayService implements Resettable {
     private ObjectNode createGroup(JsonNode in, String region) {
         String name = in.path("GroupName").asText();
         if ("Default".equals(name) || state.get(key(region, "group/" + name)).isPresent()) {
-            throw invalid("Group " + name + " already exists.");
+            throw invalid("Group " + name + " already exists");
         }
         String filter = in.path("FilterExpression").asText(null);
         XRayFilter.compile(filter, groupFilters(region));
@@ -510,7 +510,7 @@ public class XRayService implements Resettable {
                 return group;
             }
         }
-        throw invalid("Group not found: " + (name != null ? name : arn) + ".");
+        throw invalid("Group not found");
     }
 
     List<ObjectNode> groups(String region) {
@@ -644,7 +644,7 @@ public class XRayService implements Resettable {
             throw invalid("RuleName is required.");
         }
         if ("Default".equals(name) || state.get(key(region, "rule/" + name)).isPresent()) {
-            throw invalid("A sampling rule named " + name + " already exists.");
+            throw invalid("Sampling rule already exists");
         }
         if (rule.path("Version").asInt() != 1) {
             throw invalid("Version must be 1.");
@@ -677,7 +677,7 @@ public class XRayService implements Resettable {
                 return record;
             }
         }
-        throw invalid("Sampling rule not found: " + (name != null ? name : arn) + ".");
+        throw invalid("Sampling rule does not exist");
     }
 
     private ObjectNode ruleView(ObjectNode record) {
