@@ -325,6 +325,10 @@ naming different VPCs find nothing.
 | ModifyInstanceAttribute | Updates supported mutable attributes for an instance. `UserData.Value` (base64) needs the instance stopped, as on AWS, and answers `IncorrectInstanceState` otherwise. |
 | ModifyInstanceMetadataOptions | Updates an instance's IMDS options, changing only the fields the request names. An EKS cluster node is refused with `OperationNotPermitted`. |
 
+`RunInstances` records `EnclaveOptions.Enabled` from the request, or else from its launch template,
+and `DescribeInstances` reports it; Auto Scaling launches take it from the group's launch template.
+It is fixed at launch, as on AWS.
+
 `RunInstances` marks the instance `running` immediately so control-plane
 describe/list/wait succeed without waiting for the Docker guest. Guest boot
 (IMDS, userdata, published ports) is best-effort; a failed container no

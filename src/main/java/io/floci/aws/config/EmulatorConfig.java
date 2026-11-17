@@ -4012,6 +4012,16 @@ public interface EmulatorConfig {
         boolean iamAuthWebhook();
 
         /**
+         * When true, the IAM auth webhook also accepts tokens signed with the public
+         * local-development pairs ({@code test}/{@code test} and {@code floci}/{@code floci}),
+         * which then get cluster-admin. Off by default: anyone who can reach the API server
+         * holds those pairs. Turn it on only for an emulator that listens on loopback, such as
+         * one a local development tool manages, so it can reach the clusters it creates.
+         */
+        @WithDefault("false")
+        boolean iamAuthAllowPublicCredentials();
+
+        /**
          * When true (and ECR is enabled), each new k3s cluster gets a generated
          * {@code /etc/rancher/k3s/registries.yaml} that mirrors every ECR repository URI the
          * emulator can mint to the registry container's in-network endpoint, so pods can pull

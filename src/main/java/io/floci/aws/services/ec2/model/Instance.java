@@ -51,6 +51,7 @@ public class Instance {
     private String monitoring = "disabled";
     private boolean sourceDestCheck = true;
     private boolean ebsOptimized = false;
+    private boolean enclaveEnabled = false;
     private boolean enaSupport = true;
     private String iamInstanceProfileArn;
     private String iamInstanceProfileId;
@@ -217,6 +218,10 @@ public class Instance {
 
     public boolean isEbsOptimized() { return ebsOptimized; }
     public void setEbsOptimized(boolean ebsOptimized) { this.ebsOptimized = ebsOptimized; }
+
+    /** Whether the instance launched with Nitro Enclaves enabled, which can't change afterwards. */
+    public boolean isEnclaveEnabled() { return enclaveEnabled; }
+    public void setEnclaveEnabled(boolean enclaveEnabled) { this.enclaveEnabled = enclaveEnabled; }
 
     public boolean isEnaSupport() { return enaSupport; }
     public void setEnaSupport(boolean enaSupport) { this.enaSupport = enaSupport; }

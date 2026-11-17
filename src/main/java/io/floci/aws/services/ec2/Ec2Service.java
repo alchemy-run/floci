@@ -5874,6 +5874,16 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
                 inst.getIamInstanceProfileAssociationTime());
     }
 
+    /**
+     * Records the launch's {@code EnclaveOptions.Enabled}. AWS sets it only at launch: there is
+     * no API that changes it on a running instance, so only launch paths call this.
+     */
+    public void setLaunchEnclaveOptions(String region, String instanceId, boolean enabled) {
+        Instance inst = getRequiredInstance(region, instanceId);
+        inst.setEnclaveEnabled(enabled);
+        instances.put(key(region, instanceId), inst);
+    }
+
     public void modifyInstanceAttribute(String region, String instanceId, String attribute, String value) {
         ensureDefaultResources(region);
         Instance inst = getRequiredInstance(region, instanceId);
@@ -6064,6 +6074,7 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
         copy.setMonitoring(source.getMonitoring());
         copy.setSourceDestCheck(source.isSourceDestCheck());
         copy.setEbsOptimized(source.isEbsOptimized());
+        copy.setEnclaveEnabled(source.isEnclaveEnabled());
         copy.setEnaSupport(source.isEnaSupport());
         copy.setIamInstanceProfileArn(source.getIamInstanceProfileArn());
         copy.setIamInstanceProfileId(source.getIamInstanceProfileId());

@@ -52,6 +52,8 @@ public class EcsTask {
     private String platformFamily;
     /** Set instead of {@link #launchType} when the task was placed through a capacity provider. */
     private String capacityProviderName;
+    /** The task definition's Nitro Sandbox isolation mode, reported as trustedExecutionSummary. */
+    private String isolationMode;
     private String connectivity;
     private Instant connectivityAt;
     private String healthStatus;
@@ -110,6 +112,7 @@ public class EcsTask {
         this.platformVersion = other.platformVersion;
         this.platformFamily = other.platformFamily;
         this.capacityProviderName = other.capacityProviderName;
+        this.isolationMode = other.isolationMode;
         this.connectivity = other.connectivity;
         this.connectivityAt = other.connectivityAt;
         this.healthStatus = other.healthStatus;
@@ -224,6 +227,9 @@ public class EcsTask {
 
     public String getPlatformFamily() { return platformFamily; }
     public void setPlatformFamily(String platformFamily) { this.platformFamily = platformFamily; }
+
+    public String getIsolationMode() { return isolationMode; }
+    public void setIsolationMode(String isolationMode) { this.isolationMode = isolationMode; }
 
     public String getCapacityProviderName() { return capacityProviderName; }
     public void setCapacityProviderName(String capacityProviderName) {
