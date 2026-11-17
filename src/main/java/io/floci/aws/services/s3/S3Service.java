@@ -29,6 +29,7 @@ import io.floci.aws.core.storage.StorageBackend;
 import io.floci.aws.core.storage.StorageFactory;
 import io.floci.aws.core.storage.WriteProfile;
 import io.floci.aws.services.eventbridge.EventBridgeService;
+import io.floci.aws.services.iam.AccessDeniedMessages;
 import io.floci.aws.services.iam.IamPolicyEvaluator;
 import io.floci.aws.services.iam.IamPolicyEvaluator.ResourcePolicyDecision;
 import io.floci.aws.services.iam.IamService;
@@ -1619,6 +1620,13 @@ public class S3Service implements Resettable, ResourceProvider {
                 bucketPolicyContext(caller, requestConditions));
 
         if (decision == ResourcePolicyDecision.EXPLICIT_DENY) {
+            // S3 names a same-account caller's denial; a cross-account one stays "Access Denied".
+            if (sameAccountAsOwner && principalArn != null) {
+                throw new AwsException("AccessDenied", AccessDeniedMessages.notAuthorized(principalArn, action,
+                        "\"" + resourceArn + "\"", AccessDeniedMessages.PolicyType.RESOURCE_BASED_POLICY
+                                .explicitDeny()), 403, Map.of("Resource", key != null ? "/" + bucketName + "/" + key
+                        : "/" + bucketName));
+            }
             throw accessDeniedException(bucketName, key);
         }
         if (decision == ResourcePolicyDecision.ALLOW || decision == ResourcePolicyDecision.ALLOW_DIRECT_IAM_USER
