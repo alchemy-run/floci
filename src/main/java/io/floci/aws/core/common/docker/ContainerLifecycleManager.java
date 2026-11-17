@@ -1543,6 +1543,9 @@ public class ContainerLifecycleManager {
             hostConfig.withTmpFs(linux.tmpfs());
         }
 
+        if (linux.runtime() != null && !linux.runtime().isBlank()) {
+            hostConfig.withRuntime(linux.runtime());
+        }
         if (spec.cgroupnsMode() != null && !spec.cgroupnsMode().isBlank()) {
             hostConfig.withCgroupnsMode(spec.cgroupnsMode());
         }

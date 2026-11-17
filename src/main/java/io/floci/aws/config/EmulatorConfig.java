@@ -2649,6 +2649,14 @@ public interface EmulatorConfig {
         @WithDefault("default")
         ImagePullBehavior imagePullBehavior();
 
+        /**
+         * The OCI runtime, registered with the Docker daemon, that runs the containers of a task
+         * whose task definition sets a Nitro Sandbox isolation mode ({@code ISOLATED_SANDBOX} or
+         * {@code CONFIDENTIAL_SANDBOX}), for example gVisor's {@code runsc} after
+         * {@code runsc install}. Unset, those tasks run on the daemon's default runtime.
+         */
+        Optional<String> sandboxRuntime();
+
         EcsTaskRoleCredentialsConfig taskRoleCredentials();
 
         enum ImagePullBehavior {
@@ -4020,6 +4028,24 @@ public interface EmulatorConfig {
          */
         @WithDefault("false")
         boolean iamAuthAllowPublicCredentials();
+
+        /**
+         * The runtime behind the {@code isolated-sandbox} and {@code confidential-sandbox}
+         * RuntimeClasses on an Auto Mode cluster. {@code runc} runs sandboxed pods as ordinary
+         * containers. {@code gvisor} runs each one on its own gVisor kernel, which isolates it from
+         * the node the way a Nitro Sandbox does; it needs no KVM, and Floci downloads the release
+         * on first use. When gVisor can't be fetched the classes fall back to runc.
+         */
+        @WithDefault("runc")
+        String sandboxRuntime();
+
+        /** The gVisor release {@code sandbox-runtime: gvisor} installs. */
+        @WithDefault("20261026.0")
+        String gvisorVersion();
+
+        /** Where gVisor releases are downloaded from: {@code <url>/<version>/<arch>/gvisor.tar.bz2}. */
+        @WithDefault("https://storage.googleapis.com/gvisor/releases/release")
+        String gvisorReleaseUrl();
 
         /**
          * When true (and ECR is enabled), each new k3s cluster gets a generated
