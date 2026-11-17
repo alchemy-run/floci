@@ -1,0 +1,566 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "applicationsignals",
+ "apiVersion": "2024-04-15",
+ "operations": {
+  "BatchDeleteInstrumentationConfigurations": {
+   "method": "POST",
+   "requestUri": "/batch-delete-instrumentation-configurations",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchGetServiceLevelObjectiveBudgetReport": {
+   "method": "POST",
+   "requestUri": "/budget-report",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "Timestamp"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "BatchUpdateExclusionWindows": {
+   "method": "PATCH",
+   "requestUri": "/exclusion-windows",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "AddExclusionWindows[].StartTime",
+     "RemoveExclusionWindows[].StartTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateInstrumentationConfiguration": {
+   "method": "POST",
+   "requestUri": "/create-instrumentation-configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "ExpiresAt"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateServiceLevelObjective": {
+   "method": "POST",
+   "requestUri": "/slo",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "Goal.Interval.CalendarInterval.StartTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteGroupingConfiguration": {
+   "method": "DELETE",
+   "requestUri": "/grouping-configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteInstrumentationConfiguration": {
+   "method": "POST",
+   "requestUri": "/delete-instrumentation-configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteServiceLevelObjective": {
+   "method": "DELETE",
+   "requestUri": "/slo/{Id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Id": {
+      "location": "uri",
+      "name": "Id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetInstrumentationConfiguration": {
+   "method": "POST",
+   "requestUri": "/get-instrumentation-configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetInstrumentationConfigurationStatus": {
+   "method": "POST",
+   "requestUri": "/get-instrumentation-configuration-status",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StartTime",
+     "EndTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetService": {
+   "method": "POST",
+   "requestUri": "/service",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "StartTime": {
+      "location": "querystring",
+      "name": "StartTime",
+      "type": "timestamp"
+     },
+     "EndTime": {
+      "location": "querystring",
+      "name": "EndTime",
+      "type": "timestamp"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetServiceLevelObjective": {
+   "method": "GET",
+   "requestUri": "/slo/{Id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Id": {
+      "location": "uri",
+      "name": "Id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListAuditFindings": {
+   "method": "POST",
+   "requestUri": "/auditFindings",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "StartTime": {
+      "location": "querystring",
+      "name": "StartTime",
+      "type": "timestamp"
+     },
+     "EndTime": {
+      "location": "querystring",
+      "name": "EndTime",
+      "type": "timestamp"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListEntityEvents": {
+   "method": "POST",
+   "requestUri": "/events",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "MaxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     }
+    },
+    "timestamps": [
+     "StartTime",
+     "EndTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListGroupingAttributeDefinitions": {
+   "method": "POST",
+   "requestUri": "/grouping-attribute-definitions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     },
+     "AwsAccountId": {
+      "location": "querystring",
+      "name": "AwsAccountId"
+     },
+     "IncludeLinkedAccounts": {
+      "location": "querystring",
+      "name": "IncludeLinkedAccounts",
+      "type": "boolean"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListInstrumentationConfigurations": {
+   "method": "POST",
+   "requestUri": "/list-instrumentation-configurations",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "SyncedAt"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListServiceDependencies": {
+   "method": "POST",
+   "requestUri": "/service-dependencies",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "StartTime": {
+      "location": "querystring",
+      "name": "StartTime",
+      "type": "timestamp"
+     },
+     "EndTime": {
+      "location": "querystring",
+      "name": "EndTime",
+      "type": "timestamp"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "MaxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListServiceDependents": {
+   "method": "POST",
+   "requestUri": "/service-dependents",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "StartTime": {
+      "location": "querystring",
+      "name": "StartTime",
+      "type": "timestamp"
+     },
+     "EndTime": {
+      "location": "querystring",
+      "name": "EndTime",
+      "type": "timestamp"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "MaxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListServiceLevelObjectiveExclusionWindows": {
+   "method": "GET",
+   "requestUri": "/slo/{Id}/exclusion-windows",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Id": {
+      "location": "uri",
+      "name": "Id"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "MaxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListServiceLevelObjectives": {
+   "method": "POST",
+   "requestUri": "/slos",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "OperationName": {
+      "location": "querystring",
+      "name": "OperationName"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "MaxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     },
+     "IncludeLinkedAccounts": {
+      "location": "querystring",
+      "name": "IncludeLinkedAccounts",
+      "type": "boolean"
+     },
+     "SloOwnerAwsAccountId": {
+      "location": "querystring",
+      "name": "SloOwnerAwsAccountId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListServiceOperations": {
+   "method": "POST",
+   "requestUri": "/service-operations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "StartTime": {
+      "location": "querystring",
+      "name": "StartTime",
+      "type": "timestamp"
+     },
+     "EndTime": {
+      "location": "querystring",
+      "name": "EndTime",
+      "type": "timestamp"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "MaxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListServiceStates": {
+   "method": "POST",
+   "requestUri": "/service/states",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StartTime",
+     "EndTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListServices": {
+   "method": "GET",
+   "requestUri": "/services",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "StartTime": {
+      "location": "querystring",
+      "name": "StartTime",
+      "type": "timestamp"
+     },
+     "EndTime": {
+      "location": "querystring",
+      "name": "EndTime",
+      "type": "timestamp"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "MaxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     },
+     "IncludeLinkedAccounts": {
+      "location": "querystring",
+      "name": "IncludeLinkedAccounts",
+      "type": "boolean"
+     },
+     "AwsAccountId": {
+      "location": "querystring",
+      "name": "AwsAccountId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "querystring",
+      "name": "ResourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutGroupingConfiguration": {
+   "method": "PUT",
+   "requestUri": "/grouping-configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ReportInstrumentationConfigurationStatus": {
+   "method": "POST",
+   "requestUri": "/report-instrumentation-configuration-status",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "Configurations[].Time"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartDiscovery": {
+   "method": "POST",
+   "requestUri": "/start-discovery",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tag-resource",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "POST",
+   "requestUri": "/untag-resource",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateServiceLevelObjective": {
+   "method": "PATCH",
+   "requestUri": "/slo/{Id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Id": {
+      "location": "uri",
+      "name": "Id"
+     }
+    },
+    "timestamps": [
+     "Goal.Interval.CalendarInterval.StartTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

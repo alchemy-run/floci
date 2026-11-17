@@ -11,6 +11,7 @@ import io.floci.aws.services.appconfig.AppConfigController;
 import io.floci.aws.services.appconfig.AppConfigDataController;
 import io.floci.aws.services.appflow.AppFlowController;
 import io.floci.aws.services.appintegrations.AppIntegrationsController;
+import io.floci.aws.services.applicationsignals.ApplicationSignalsController;
 import io.floci.aws.services.appregistry.AppRegistryController;
 import io.floci.aws.services.appsync.AppSyncController;
 import io.floci.aws.services.appsync.graphql.AppSyncExecutionController;
@@ -532,6 +533,10 @@ public class ResolvedServiceCatalog {
                         true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
                         protocols(ServiceProtocol.REST_JSON),
                         Set.of(), Set.of("xray"), Set.of(), Set.of(XRayController.class)),
+                descriptor("application-signals", "applicationsignals", config.services().applicationSignals().enabled(),
+                        true, null, null, 5000L, null, ServiceProtocol.REST_JSON,
+                        protocols(ServiceProtocol.REST_JSON),
+                        Set.of(), Set.of("application-signals"), Set.of(), Set.of(ApplicationSignalsController.class)),
                 descriptor("sdb", "sdb", config.services().sdb().enabled(),
                         true, null, null, 5000L, SimpleDbQueryHandler.NS, ServiceProtocol.QUERY,
                         protocols(ServiceProtocol.QUERY),

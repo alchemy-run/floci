@@ -307,6 +307,10 @@ services:
     doc: docs/services/xray.md
     sources:
       - { path: services/xray/XRayService.java, mode: switch }
+  - service: application-signals
+    doc: docs/services/applicationsignals.md
+    sources:
+      - { path: services/applicationsignals/ApplicationSignalsService.java, mode: switch }
   - service: sdb
     doc: docs/services/sdb.md
     sources:

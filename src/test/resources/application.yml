@@ -585,6 +585,8 @@ floci:
       transition-millis: 100
       daemon-port: 0
       insights-interval-millis: 1000
+    application-signals:
+      enabled: true
     sdb:
       enabled: true
     signer:

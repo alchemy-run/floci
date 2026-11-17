@@ -1068,6 +1068,8 @@ floci:
       enabled: true
     xray:
       enabled: true
+    application-signals:
+      enabled: true
     sdb:
       enabled: true
     signer:

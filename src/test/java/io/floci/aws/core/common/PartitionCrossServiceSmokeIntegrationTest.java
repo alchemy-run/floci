@@ -44,7 +44,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 class PartitionCrossServiceSmokeIntegrationTest {
 
     static final Set<String> COVERED_PACKAGES = Set.of(
-            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "notifications", "notificationscontacts", "osis", "observabilityadmin", "omics", "opensearchserverless", "personalize", "pinpointsmsvoicev2", "qbusiness", "rbin", "repostspace", "rolesanywhere", "route53profiles", "route53resolver", "s3files", "schemas", "securitylake", "shield", "signer", "socialmessaging", "synthetics", "vpclattice", "xray", "ssmcontacts", "ssmincidents", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
+            "accessanalyzer", "acm", "acmpca", "aiops", "amazonmq", "amplify", "appflow", "appregistry", "apprunner", "auditmanager", "b2bi", "backupsearch", "bedrockdataautomation", "chatbot", "codeconnections", "databrew", "dataexchange", "datazone", "deadline", "devopsguru", "directoryservice", "docdbelastic", "ecrpublic", "emrcontainers", "entityresolution", "fms", "forecast", "fsx", "glacier", "grafana", "greengrassv2", "healthlake", "imagebuilder", "internetmonitor", "iotfleetwise", "iotmanagedintegrations", "iotsitewise", "iotwireless", "kendra", "keyspaces", "kinesisvideo", "lexv2", "licensemanager", "airflowserverless", "mailmanager", "mediaconnect", "mediaconvert", "medialive", "mediapackagev2", "mediatailor", "medicalimaging", "neptunegraph", "notifications", "notificationscontacts", "osis", "observabilityadmin", "omics", "opensearchserverless", "personalize", "pinpointsmsvoicev2", "qbusiness", "rbin", "repostspace", "rolesanywhere", "route53profiles", "route53resolver", "s3files", "schemas", "securitylake", "shield", "signer", "socialmessaging", "synthetics", "vpclattice", "xray", "applicationsignals", "ssmcontacts", "ssmincidents", "ivs", "ivschat", "dax", "bedrockagent", "comprehend", "location", "polly", "rekognition",
             "textract", "transcribe", "translate", "apigateway", "apigatewayv2", "applicationautoscaling", "appsync",
             "aps", "autoscaling", "backup", "batch", "bcmdataexports", "bedrock", "bedrockagentcorecontrol", "ce",
             "cloudfront", "cloudmap", "cloudwatch", "codebuild", "codedeploy", "codepipeline", "cognito",
@@ -1628,6 +1628,21 @@ class PartitionCrossServiceSmokeIntegrationTest {
                 .extract().path("Group.GroupARN");
         cleanup.register(() -> signed(region, "xray").contentType("application/json")
                 .body("{\"GroupName\":\"" + name + "\"}").post("/DeleteGroup"));
+        PartitionMatrix.assertArnIn(partitionCase, arn);
+    }
+
+    @ParameterizedTest
+    @MethodSource(PartitionMatrix.NON_COMMERCIAL_CASES)
+    void applicationSignalsSloArn(PartitionCase partitionCase) {
+        String region = offered(partitionCase, "application-signals");
+        String name = unique("smoke", partitionCase);
+        String arn = signed(region, "application-signals").contentType("application/json")
+                .body("{\"Name\":\"" + name + "\",\"SliConfig\":{\"SliMetricConfig\":{\"MetricDataQueries\":"
+                        + "[{\"Id\":\"m1\",\"MetricStat\":{\"Metric\":{\"Namespace\":\"Smoke\",\"MetricName\":"
+                        + "\"Latency\"},\"Period\":60,\"Stat\":\"Average\"},\"ReturnData\":true}]},"
+                        + "\"MetricThreshold\":1,\"ComparisonOperator\":\"LessThan\"}}").post("/slo").then()
+                .statusCode(200).extract().path("Slo.Arn");
+        cleanup.register(() -> signed(region, "application-signals").delete("/slo/" + name));
         PartitionMatrix.assertArnIn(partitionCase, arn);
     }
 

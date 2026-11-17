@@ -958,6 +958,8 @@ public interface EmulatorConfig {
 
         XRayServiceConfig xray();
 
+        ApplicationSignalsServiceConfig applicationSignals();
+
         SsmIncidentsServiceConfig ssmIncidents();
 
         SsmContactsServiceConfig ssmContacts();
@@ -3128,6 +3130,11 @@ public interface EmulatorConfig {
         /** How long spaces and channels take to create and spaces to delete, in milliseconds. */
         @WithDefault("2000")
         long transitionMillis();
+    }
+
+    interface ApplicationSignalsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
     }
 
     interface XRayServiceConfig {
