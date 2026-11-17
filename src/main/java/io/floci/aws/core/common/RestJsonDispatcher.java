@@ -21,6 +21,7 @@ import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
@@ -178,11 +179,38 @@ public final class RestJsonDispatcher {
                         || (pass == 1 && earlierLabelIsArn(matcher))) {
                     continue;
                 }
-                ObjectNode input = input(route, matcher, query, headers, body);
-                return Optional.of(new Call(route.operation(), input));
+                // A final label spanning an ARN's slash must not swallow a literal another route names:
+                // GET /slo/{arn}/exclusion-windows lists exclusion windows; it doesn't get SLO "{arn}/exclusion-windows".
+                Optional<Route> literal = pass == 1 ? moreLiteralSpanning(route, method, rawPath, query)
+                        : Optional.empty();
+                Route chosen = literal.orElse(route);
+                Matcher chosenMatcher = literal.isPresent() ? chosen.spanning().matcher(rawPath) : matcher;
+                if (literal.isPresent() && !chosenMatcher.matches()) {
+                    continue;
+                }
+                ObjectNode input = input(chosen, chosenMatcher, query, headers, body);
+                return Optional.of(new Call(chosen.operation(), input));
             }
         }
         return Optional.empty();
+    }
+
+    /** A route of the method whose spanning pattern matches with more literal segments than {@code route} has. */
+    private Optional<Route> moreLiteralSpanning(Route route, String method, String rawPath,
+                                                MultivaluedMap<String, String> query) {
+        long literals = literals(route);
+        for (Route other : routes) {
+            if (other != route && other.spanning() != null && literals(other) > literals
+                    && other.binding().path("method").asText().equalsIgnoreCase(method)
+                    && other.spanning().matcher(rawPath).matches() && queryMatches(other.queryLiterals(), query)) {
+                return Optional.of(other);
+            }
+        }
+        return Optional.empty();
+    }
+
+    private static long literals(Route route) {
+        return Arrays.stream(route.ranks()).filter(rank -> rank == 3).count();
     }
 
     /** Dispatches a request to {@code handler}, answering with the operation's response. */

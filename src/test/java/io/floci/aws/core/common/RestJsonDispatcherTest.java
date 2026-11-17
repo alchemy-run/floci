@@ -81,6 +81,19 @@ class RestJsonDispatcherTest {
     }
 
     @Test
+    void aSpanningFinalLabelLeavesLiteralsToTheRouteThatNamesThem() {
+        RestJsonDispatcher signals = new RestJsonDispatcher(mapper, "applicationsignals");
+        String slo = "arn:aws:application-signals:us-east-1:000000000000:slo/checkout-latency";
+        RestJsonDispatcher.Call windows = signals.match("GET", "/slo/" + slo + "/exclusion-windows", null, null,
+                null).orElseThrow();
+        assertEquals("ListServiceLevelObjectiveExclusionWindows", windows.operation());
+        assertEquals(slo, windows.input().get("Id").asText());
+        RestJsonDispatcher.Call get = signals.match("GET", "/slo/" + slo, null, null, null).orElseThrow();
+        assertEquals("GetServiceLevelObjective", get.operation());
+        assertEquals(slo, get.input().get("Id").asText());
+    }
+
+    @Test
     void idempotencyTokensAreFilledAndBlobPayloadsEncoded() {
         RestJsonDispatcher.Call asset = match("POST", "/v2/domains/dzd_1/assets", null, "{\"name\":\"a\"}");
         assertTrue(asset.input().hasNonNull("clientToken"));
