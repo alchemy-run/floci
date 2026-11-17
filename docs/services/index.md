@@ -200,7 +200,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [Elastic Beanstalk](elastic-beanstalk.md) | `POST /` with `Action=` or `Operation=` param | Query | 14 |
 | [CodeBuild](codebuild.md) | `POST /` + `X-Amz-Target: CodeBuild_20161006.*` | JSON 1.1 | 44 |
 | [AWS Batch](batch.md) | `/v1/...` | REST JSON | [See actions](batch.md) |
-| [CodeDeploy](codedeploy.md) | `POST /` + `X-Amz-Target: CodeDeploy_20141006.*` | JSON 1.1 | 39 |
+| [CodeDeploy](codedeploy.md) | `POST /` + `X-Amz-Target: CodeDeploy_20141006.*` | JSON 1.1 | 40 |
 | [CodePipeline](codepipeline.md) | `POST /` + `X-Amz-Target: CodePipeline_20150709.*` | JSON 1.1 | 44 |
 | [AWS Network Firewall](network-firewall.md) | `POST /` + `X-Amz-Target: NetworkFirewall_20201112.*` | JSON 1.0 | 40 |
 | [AWS Service Catalog](service-catalog.md) | `POST /` + `X-Amz-Target: AWS242ServiceCatalogService.*` | JSON 1.1 | 89 |
