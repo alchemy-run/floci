@@ -1084,6 +1084,8 @@ floci:
       enabled: true
     ssm-contacts:
       enabled: true
+    frauddetector:
+      enabled: true
     s3files:
       enabled: true
     route53profiles:

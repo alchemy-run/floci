@@ -339,6 +339,10 @@ services:
     doc: docs/services/ssm-contacts.md
     sources:
       - { path: services/ssmcontacts/SsmContactsService.java, mode: switch }
+  - service: frauddetector
+    doc: docs/services/frauddetector.md
+    sources:
+      - { path: services/frauddetector/FraudDetectorService.java, mode: switch }
   - service: s3files
     doc: docs/services/s3files.md
     sources:

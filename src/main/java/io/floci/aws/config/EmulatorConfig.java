@@ -964,6 +964,8 @@ public interface EmulatorConfig {
 
         SsmContactsServiceConfig ssmContacts();
 
+        FraudDetectorServiceConfig frauddetector();
+
         GrafanaServiceConfig grafana();
 
         GreengrassV2ServiceConfig greengrassv2();
@@ -3224,6 +3226,11 @@ public interface EmulatorConfig {
     }
 
     interface SsmContactsServiceConfig {
+        @WithDefault("true")
+        boolean enabled();
+    }
+
+    interface FraudDetectorServiceConfig {
         @WithDefault("true")
         boolean enabled();
     }

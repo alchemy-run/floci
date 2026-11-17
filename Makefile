@@ -338,6 +338,7 @@ aws-data-sync-botocore: ## Regenerate only the AWS data derived from botocore, s
 	$(PYTHON) tools/aws/regen_rolesanywhere_shapes.py
 	$(PYTHON) tools/aws/regen_route53profiles_shapes.py
 	$(PYTHON) tools/aws/regen_s3files_shapes.py
+	$(PYTHON) tools/aws/regen_frauddetector_shapes.py
 	$(PYTHON) tools/aws/regen_incidentmanager_shapes.py
 	$(PYTHON) tools/aws/regen_schemas_shapes.py
 	$(PYTHON) tools/aws/regen_securitylake_shapes.py
@@ -693,6 +694,10 @@ aws-data-check-botocore: ## The AWS data derived from botocore must match a fres
 	}
 	@$(PYTHON) tools/aws/regen_schemas_shapes.py --check || { \
 		echo "error: EventBridge schema registry request shapes are out of date; run 'make aws-data-sync'."; \
+		exit 1; \
+	}
+	@$(PYTHON) tools/aws/regen_frauddetector_shapes.py --check || { \
+		echo "error: Fraud Detector request shapes are out of date; run 'make aws-data-sync'."; \
 		exit 1; \
 	}
 	@$(PYTHON) tools/aws/regen_incidentmanager_shapes.py --check || { \

@@ -604,6 +604,8 @@ floci:
       transition-millis: 200
     ssm-contacts:
       enabled: true
+    frauddetector:
+      enabled: true
     s3files:
       enabled: true
       transition-millis: 200

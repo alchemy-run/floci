@@ -169,6 +169,7 @@ For services extended by this fork, follow the service-page link for the combine
 | [X-Ray](xray.md) | `/TraceSegments`, `/TraceSummaries`, ... (signed `xray`); traces with filter expressions, service graphs, sampling, traced Lambda invocations, a UDP daemon, insights | REST JSON | 38 |
 | [Application Signals](applicationsignals.md) | `/slo/...`, `/services`, ... (signed `application-signals`); services discovered from X-Ray traces, SLOs evaluated against CloudWatch metrics, instrumentation configurations | REST JSON | 30 |
 | [SSM Contacts](ssm-contacts.md) | `POST /` + `X-Amz-Target: SSMContacts.*`; channels activated by code, pages delivered through SES and SNS, rotation shifts | JSON 1.1 | 39 |
+| [Fraud Detector](frauddetector.md) | `POST /` + `X-Amz-Target: AWSHawksNestServiceFacade.*`; DETECTORPL rules, predictions audited and published to EventBridge, models trained on labeled events, batch jobs over S3 | JSON 1.1 | 73 |
 | [HealthOmics](omics.md) | `/referencestore`, `/sequencestore`, `/workflow`, `/run`, ... (signed `omics`); runs on Cromwell, Nextflow and cwltool | REST JSON | 107 |
 | [CloudWatch Observability Admin](observabilityadmin.md) | `POST /<Operation>` (signed `observabilityadmin`); telemetry rules configure resources, pipelines run processors | REST JSON | 45 |
 | [OpenSearch Ingestion](osis.md) | `/2022-01-01/osis/*` (signed `osis`); pipelines run on Data Prepper, ingest on per-pipeline hosts | REST JSON | 22 |
