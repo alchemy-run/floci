@@ -6,8 +6,10 @@ import io.floci.aws.config.ContainerCaBundle;
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.PublicKeys;
 import io.floci.aws.core.common.SsrfProtection;
+import io.floci.aws.services.cognito.CognitoService;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.apache.hc.client5.http.DnsResolver;
 import org.apache.hc.client5.http.SystemDefaultDnsResolver;
@@ -54,6 +56,9 @@ import java.util.concurrent.ConcurrentHashMap;
  * CA bundle Floci gives every container it launches, so a JWT authorizer on a Floci pool verifies
  * its tokens as API Gateway verifies a Cognito pool's on AWS.
  *
+ * <p>A Cognito pool's issuer is an {@code amazonaws.com} URL. When that pool is one Floci hosts, its key is
+ * read from Floci's Cognito, as API Gateway reaches Cognito inside AWS; any other issuer is fetched.
+ *
  * <p>Per-issuer JWKS are cached (see {@link #CACHE_TTL}) so repeat requests to the same route
  * don't refetch the discovery document and key set on every call.
  *
@@ -74,6 +79,10 @@ public class JwtSignatureVerifier implements AutoCloseable {
     private final CloseableHttpClient httpClient;
     private final boolean allowPrivateNetworkTargets;
     private final Map<String, CachedJwks> jwksCache = new ConcurrentHashMap<>();
+
+    /** Floci's Cognito, for the issuers of the pools it hosts; absent when constructed outside CDI. */
+    @Inject
+    Instance<CognitoService> cognito;
 
     @Inject
     public JwtSignatureVerifier(ObjectMapper objectMapper, EmulatorConfig config) {
@@ -188,6 +197,10 @@ public class JwtSignatureVerifier implements AutoCloseable {
     }
 
     private RSAPublicKey resolveKey(String issuer, String kid) throws JwtVerificationException {
+        Optional<Map<String, RSAPublicKey>> hosted = hostedPoolKeys(issuer);
+        if (hosted.isPresent()) {
+            return hosted.get().get(kid);
+        }
         CachedJwks cached = jwksCache.get(issuer);
         if (cached != null && !cached.isExpired()) {
             RSAPublicKey key = cached.keysByKid().get(kid);
@@ -201,6 +214,28 @@ public class JwtSignatureVerifier implements AutoCloseable {
         Map<String, RSAPublicKey> fetched = fetchJwks(issuer);
         jwksCache.put(issuer, new CachedJwks(fetched, Instant.now()));
         return fetched.get(kid);
+    }
+
+    /** The signing key of the Cognito pool the issuer names, when Floci hosts that pool. */
+    private Optional<Map<String, RSAPublicKey>> hostedPoolKeys(String issuer) {
+        if (cognito == null || !cognito.isResolvable()) {
+            return Optional.empty();
+        }
+        String trimmed = issuer.replaceAll("/+$", "");
+        String poolId = trimmed.substring(trimmed.lastIndexOf('/') + 1);
+        if (!poolId.contains("_")) {
+            return Optional.empty();
+        }
+        try {
+            CognitoService service = cognito.get();
+            if (!trimmed.equals(service.getIssuer(poolId))) {
+                return Optional.empty();
+            }
+            return Optional.of(service.signingKeys(poolId));
+        } catch (RuntimeException e) {
+            // Not a pool Floci hosts: the issuer is fetched like any other.
+            return Optional.empty();
+        }
     }
 
     Map<String, RSAPublicKey> fetchJwks(String issuer) throws JwtVerificationException {
