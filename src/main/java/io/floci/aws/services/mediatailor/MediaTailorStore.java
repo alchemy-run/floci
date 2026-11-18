@@ -9,6 +9,7 @@ import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.Resettable;
+import io.floci.aws.core.common.WildcardHosts;
 import io.floci.aws.core.storage.AccountAwareStorageBackend;
 import io.floci.aws.core.storage.StorageFactory;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -100,9 +101,7 @@ public class MediaTailorStore implements Resettable {
 
     /** Whether Floci is reached on localhost, so the wildcard DNS name of a host reaches it too. */
     private boolean wildcard() {
-        URI base = URI.create(endpoint());
-        return List.of("localhost", "127.0.0.1", "[::1]").contains(base.getHost())
-                && (base.getPath().isEmpty() || "/".equals(base.getPath()));
+        return WildcardHosts.available(endpoint());
     }
 
     /**

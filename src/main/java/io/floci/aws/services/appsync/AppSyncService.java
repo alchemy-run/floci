@@ -9,6 +9,7 @@ import io.floci.aws.core.common.Base64Url;
 import io.floci.aws.core.common.CloudFrontEdgeDomain;
 import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.core.common.RequestContext;
+import io.floci.aws.core.common.WildcardHosts;
 import io.floci.aws.core.common.dns.EmbeddedDnsServer;
 import io.floci.aws.core.storage.AccountAwareStorageBackend;
 import io.floci.aws.core.storage.StorageBackend;
@@ -1493,8 +1494,7 @@ public class AppSyncService {
 
     private Map<String, String> graphqlApiUris(String apiId, String region) {
         URI endpoint = URI.create(baseUrl);
-        if (List.of("localhost", "127.0.0.1", "[::1]").contains(endpoint.getHost())
-                && (endpoint.getPath().isEmpty() || "/".equals(endpoint.getPath()))) {
+        if (WildcardHosts.available(endpoint)) {
             // Use Floci's wildcard DNS without assuming a TLS listener on port 443.
             String host = apiId + ".appsync-api." + region + "." + EmbeddedDnsServer.DEFAULT_SUFFIX;
             String port = endpoint.getPort() < 0 ? "" : ":" + endpoint.getPort();

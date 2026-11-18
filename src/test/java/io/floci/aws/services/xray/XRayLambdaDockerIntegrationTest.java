@@ -120,10 +120,12 @@ class XRayLambdaDockerIntegrationTest {
             xray("/Traces", "{\"TraceIds\":[\"" + root + "\"]}")
                     .body("Traces[0].Segments.Document", hasItem(containsString("\"origin\":\"AWS::Lambda\"")))
                     .body("Traces[0].Segments.Document", hasItem(containsString("\"Invocation\"")));
-            xray("/TraceSummaries", "{" + window + ",\"FilterExpression\":\"service(\\\"xray-failing\\\") { fault }\"}")
+            // The failing function's segments reach the daemon on their own schedule, like the traced one's.
+            await().atMost(Duration.ofSeconds(20)).untilAsserted(() -> xray("/TraceSummaries", "{" + window
+                    + ",\"FilterExpression\":\"service(\\\"xray-failing\\\") { fault }\"}")
                     .statusCode(200).body("TraceSummaries[0].HasFault", equalTo(true))
                     .body("TraceSummaries[0].FaultRootCauses.Services.flatten().EntityPath.flatten().Exceptions"
-                            + ".flatten().Name", hasItem("PaymentError"));
+                            + ".flatten().Name", hasItem("PaymentError")));
             List<String> names = xray("/ServiceGraph", "{" + window + "}").extract().path("Services.Name");
             assertTrue(names.contains("xray-traced"), names.toString());
             assertFalse(names.isEmpty());

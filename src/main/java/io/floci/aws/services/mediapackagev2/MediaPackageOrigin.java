@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsException;
+import io.floci.aws.core.common.WildcardHosts;
 import io.floci.aws.services.kinesisvideo.KvsTranscoder;
 import io.floci.aws.services.s3.S3Service;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -93,9 +94,7 @@ public class MediaPackageOrigin {
 
     /** Whether Floci is reached on localhost, so the wildcard DNS name of a host reaches it too. */
     private boolean wildcard() {
-        URI endpoint = URI.create(base());
-        return List.of("localhost", "127.0.0.1", "[::1]").contains(endpoint.getHost())
-                && (endpoint.getPath().isEmpty() || "/".equals(endpoint.getPath()));
+        return WildcardHosts.available(base());
     }
 
     private String hostUrl(String host) {

@@ -9,6 +9,7 @@ import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.RequestScopes;
 import io.floci.aws.core.common.ServicePrincipals;
+import io.floci.aws.core.common.WildcardHosts;
 import io.floci.aws.core.storage.AccountAwareStorageBackend;
 import io.floci.aws.services.ec2.Ec2Service;
 import io.floci.aws.services.ec2.model.Subnet;
@@ -325,8 +326,7 @@ public class OsisService {
     private String ingestUrl(String region, String label) {
         String base = store.endpoint();
         URI uri = URI.create(base);
-        boolean local = List.of("localhost", "127.0.0.1", "[::1]").contains(uri.getHost())
-                && (uri.getPath() == null || uri.getPath().isEmpty() || "/".equals(uri.getPath()));
+        boolean local = WildcardHosts.available(uri);
         if (local) {
             return uri.getScheme() + "://" + label + "." + region + ".osis." + OsisStore.DNS_SUFFIX
                     + (uri.getPort() < 0 ? "" : ":" + uri.getPort());
