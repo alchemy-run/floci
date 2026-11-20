@@ -432,6 +432,12 @@ public class EcsContainerManager {
                             linkLocalAddresses.allocate(taskRoleEndpoint.network(), task.getTaskArn()));
                 }
 
+                // A Nitro Sandbox task runs on the sandbox runtime when one is configured, so it
+                // does not share the host kernel with other tasks.
+                if (task.getIsolationMode() != null) {
+                    config.services().ecs().sandboxRuntime().ifPresent(specBuilder::withRuntime);
+                }
+
                 boolean awsFirelens = isAwsFirelens(def);
                 if (awsFirelens) {
                     specBuilder.withLogConfig(awsFirelensLogConfig(def, taskId, firelensSocketAddress));

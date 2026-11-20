@@ -439,6 +439,9 @@ public class EcsResponseWriter {
         if (t.getLaunchType() != null) {
             n.put("launchType", t.getLaunchType().name());
         }
+        if (t.getIsolationMode() != null) {
+            n.putObject("trustedExecutionSummary").put("isolationMode", t.getIsolationMode());
+        }
         if (t.getPlatformVersion() != null) { n.put("platformVersion", t.getPlatformVersion()); }
         if (t.getPlatformFamily() != null) { n.put("platformFamily", t.getPlatformFamily()); }
         if (t.getCpu() != null) { n.put("cpu", t.getCpu()); }
@@ -897,6 +900,10 @@ public class EcsResponseWriter {
         // what it registered. Dropping it reads as drift in Terraform's aws_ecs_capacity_provider.
         if (cp.getAutoScalingGroupProvider() != null) {
             n.set("autoScalingGroupProvider", objectMapper.valueToTree(cp.getAutoScalingGroupProvider()));
+        }
+        if (cp.getCluster() != null) { n.put("cluster", cp.getCluster()); }
+        if (cp.getManagedInstancesProvider() != null) {
+            n.set("managedInstancesProvider", objectMapper.valueToTree(cp.getManagedInstancesProvider()));
         }
         if (includeTags && cp.getTags() != null && !cp.getTags().isEmpty()) {
             n.set("tags", tagsNode(cp.getTags()));

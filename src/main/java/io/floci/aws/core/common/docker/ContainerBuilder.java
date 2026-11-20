@@ -189,6 +189,7 @@ public class ContainerBuilder {
         private LogConfig logConfig;
         private boolean privileged;
         private String cgroupnsMode;
+        private String runtime;
         private String user;
         private final List<String> groupAdd = new ArrayList<>();
         private final List<String> dnsServers = new ArrayList<>();
@@ -567,6 +568,12 @@ public class ContainerBuilder {
             return this;
         }
 
+        /** Runs the container with an OCI runtime registered with the daemon, such as gVisor's runsc. */
+        public Builder withRuntime(String runtime) {
+            this.runtime = runtime;
+            return this;
+        }
+
         public Builder withCgroupnsMode(String cgroupnsMode) {
             this.cgroupnsMode = cgroupnsMode;
             return this;
@@ -847,7 +854,7 @@ public class ContainerBuilder {
                     Map.copyOf(portBindingHostIps),
                     init,
                     new LinuxOptions(List.copyOf(capAdd), List.copyOf(capDrop), List.copyOf(devices),
-                            shmSizeBytes, Map.copyOf(tmpfs), memorySwapBytes, memorySwappiness),
+                            shmSizeBytes, Map.copyOf(tmpfs), memorySwapBytes, memorySwappiness, runtime),
                     javaTrustStore,
                     Map.copyOf(udpPortBindings)
             );

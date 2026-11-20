@@ -978,9 +978,11 @@ public class EcsJsonHandler {
 
     private Response handleCreateCapacityProvider(JsonNode req, String region) {
         String name = req.path("name").asText();
-        Map<String, Object> asgProvider = parseRawObject(req.path("autoScalingGroupProvider"));
+        Map<String, Object> asgProvider = optionalRawObject(req, "autoScalingGroupProvider");
+        Map<String, Object> managedInstancesProvider = optionalRawObject(req, "managedInstancesProvider");
         Map<String, String> tags = parseTagMap(req.path("tags"));
-        CapacityProvider cp = service.createCapacityProvider(name, asgProvider, tags, region);
+        CapacityProvider cp = service.createCapacityProvider(name, optionalText(req, "cluster"),
+                asgProvider, managedInstancesProvider, tags, region);
         ObjectNode resp = objectMapper.createObjectNode();
         resp.set("capacityProvider", writer.capacityProviderNode(cp));
         return Response.ok(resp).build();
@@ -988,8 +990,9 @@ public class EcsJsonHandler {
 
     private Response handleUpdateCapacityProvider(JsonNode req, String region) {
         String name = req.path("name").asText();
-        Map<String, Object> asgProvider = parseRawObject(req.path("autoScalingGroupProvider"));
-        CapacityProvider cp = service.updateCapacityProvider(name, asgProvider);
+        CapacityProvider cp = service.updateCapacityProvider(name, optionalText(req, "cluster"),
+                optionalRawObject(req, "autoScalingGroupProvider"),
+                optionalRawObject(req, "managedInstancesProvider"), region);
         ObjectNode resp = objectMapper.createObjectNode();
         resp.set("capacityProvider", writer.capacityProviderNode(cp));
         return Response.ok(resp).build();
@@ -997,17 +1000,25 @@ public class EcsJsonHandler {
 
     private Response handleDeleteCapacityProvider(JsonNode req, String region) {
         String nameOrArn = req.path("capacityProvider").asText();
-        CapacityProvider cp = service.deleteCapacityProvider(nameOrArn);
+        CapacityProvider cp = service.deleteCapacityProvider(nameOrArn, optionalText(req, "cluster"), region);
         ObjectNode resp = objectMapper.createObjectNode();
         resp.set("capacityProvider", writer.capacityProviderNode(cp));
         return Response.ok(resp).build();
+    }
+
+    private Map<String, Object> optionalRawObject(JsonNode req, String field) {
+        return req.hasNonNull(field) && req.path(field).isObject() ? parseRawObject(req.path(field)) : null;
+    }
+
+    private static String optionalText(JsonNode req, String field) {
+        return req.hasNonNull(field) && !req.path(field).asText().isBlank() ? req.path(field).asText() : null;
     }
 
     private Response handleDescribeCapacityProviders(JsonNode req, String region) {
         List<String> providers = req.has("capacityProviders") ? jsonArrayToList(req.path("capacityProviders")) : null;
         boolean includeTags = jsonArrayToList(req.path("include")).contains("TAGS");
         EcsService.DescribeCapacityProvidersResult result =
-                service.describeCapacityProvidersDetailed(providers, region);
+                service.describeCapacityProvidersDetailed(providers, optionalText(req, "cluster"), region);
         ObjectNode resp = objectMapper.createObjectNode();
         ArrayNode arr = objectMapper.createArrayNode();
         result.capacityProviders().forEach(cp -> arr.add(writer.capacityProviderNode(cp, includeTags)));

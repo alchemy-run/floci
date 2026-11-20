@@ -988,6 +988,18 @@ public class Ec2QueryHandler {
             }
         }
 
+        // EnclaveOptions are fixed at launch; the request's value wins over a launch template's.
+        Boolean enclaveEnabled = boolParam(p, "EnclaveOptions.Enabled");
+        if (enclaveEnabled == null && launchTemplateData != null && launchTemplateData.getEnclaveOptions() != null) {
+            enclaveEnabled = launchTemplateData.getEnclaveOptions().getEnabled();
+        }
+        if (Boolean.TRUE.equals(enclaveEnabled)) {
+            for (Instance inst : res.getInstances()) {
+                service.setLaunchEnclaveOptions(region, inst.getInstanceId(), true);
+                inst.setEnclaveEnabled(true);
+            }
+        }
+
         if (!networkInterfaceTags.isEmpty()) {
             List<String> eniIds = new ArrayList<>();
             for (Instance inst : res.getInstances()) {
@@ -5696,7 +5708,7 @@ public class Ec2QueryHandler {
                 .elem("autoRecovery", "default")
                 .end("maintenanceOptions")
                 .start("enclaveOptions")
-                .elem("enabled", "false")
+                .elem("enabled", String.valueOf(inst.isEnclaveEnabled()))
                 .end("enclaveOptions")
                 .start("hibernationOptions")
                 .elem("configured", "false")
@@ -7598,7 +7610,7 @@ public class Ec2QueryHandler {
                 .elem("autoRecovery", "default")
                 .end("maintenanceOptions")
                 .start("enclaveOptions")
-                .elem("enabled", "false")
+                .elem("enabled", String.valueOf(inst.isEnclaveEnabled()))
                 .end("enclaveOptions")
                 .start("hibernationOptions")
                 .elem("configured", "false")
