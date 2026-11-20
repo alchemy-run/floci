@@ -33,9 +33,12 @@ public final class VendoredPatterns {
     private VendoredPatterns() {
     }
 
-    /** {@code pattern} compiled as the model means it. */
+    /**
+     * {@code pattern} compiled as the model means it. A model's {@code .} is any character, a line
+     * break among them: AWS accepts a value of several lines against {@code .*}.
+     */
     public static Pattern compile(String pattern) {
-        return Pattern.compile(rewrite(pattern));
+        return Pattern.compile(rewrite(pattern), Pattern.DOTALL);
     }
 
     /**
