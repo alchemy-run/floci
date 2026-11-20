@@ -1978,6 +1978,7 @@ public class Ec2ContainerManager {
     }
 
     private void executeUserData(String containerId, String instanceId, String userData, String region) {
+        writeSharedAwsConfig(containerId, instanceId);
         String logGroup = "/aws/ec2/" + instanceId;
         String logStream = logStreamer != null ? logStreamer.generateLogStreamName("user-data") : null;
 
@@ -1990,6 +1991,45 @@ public class Ec2ContainerManager {
         UserDataPipeline.executeUserData(
                 dockerClient, containerId, "EC2 instance " + instanceId, userData,
                 userDataExecutionTimeout, lineConsumer, activeUserDataCallbacks);
+    }
+
+    /**
+     * Writes the guest's AWS environment ({@link #localAwsEnvironment}) into root's shared AWS config
+     * and credentials files, so a command run with a cleared environment ({@code env -i}, a systemd
+     * unit) still reaches Floci rather than AWS. A guest's own files are left as they are.
+     */
+    private void writeSharedAwsConfig(String containerId, String instanceId) {
+        // Best effort, and never in the way of the user data that follows: a guest whose own
+        // environment is intact still reaches Floci without the files.
+        try {
+            ContainerExec.Result result = execInContainerForResult(containerId, sharedAwsConfigCommand(), 30);
+            if (result.exitCode() != 0) {
+                LOG.warnv("Could not write the shared AWS config for EC2 instance {0}: {1}",
+                        instanceId, result.summary());
+            }
+        } catch (RuntimeException e) {
+            LOG.warnv("Could not write the shared AWS config for EC2 instance {0}: {1}", instanceId, e.getMessage());
+        }
+    }
+
+    /** The guest command {@link #writeSharedAwsConfig} runs, reading the container's own AWS environment. */
+    static String[] sharedAwsConfigCommand() {
+        return new String[] {"sh", "-c",
+                "d=\"${HOME:-/root}/.aws\"; mkdir -p \"$d\" || exit 1;"
+                + "if [ ! -e \"$d/config\" ]; then {"
+                + " echo '[default]';"
+                + " if [ -n \"$AWS_REGION\" ]; then echo \"region = $AWS_REGION\"; fi;"
+                + " if [ -n \"$AWS_ENDPOINT_URL\" ]; then echo \"endpoint_url = $AWS_ENDPOINT_URL\"; fi;"
+                + " if [ -n \"$AWS_EC2_METADATA_SERVICE_ENDPOINT\" ]; then"
+                + " echo \"ec2_metadata_service_endpoint = $AWS_EC2_METADATA_SERVICE_ENDPOINT\"; fi;"
+                + " if [ -n \"$AWS_CA_BUNDLE\" ]; then echo \"ca_bundle = $AWS_CA_BUNDLE\"; fi;"
+                + " } > \"$d/config\" || exit 1; fi;"
+                + "if [ -n \"$AWS_ACCESS_KEY_ID\" ] && [ ! -e \"$d/credentials\" ]; then {"
+                + " echo '[default]';"
+                + " echo \"aws_access_key_id = $AWS_ACCESS_KEY_ID\";"
+                + " echo \"aws_secret_access_key = $AWS_SECRET_ACCESS_KEY\";"
+                + " if [ -n \"$AWS_SESSION_TOKEN\" ]; then echo \"aws_session_token = $AWS_SESSION_TOKEN\"; fi;"
+                + " } > \"$d/credentials\" || exit 1; fi"};
     }
 
     private void closeActiveUserDataCallbacks() {
