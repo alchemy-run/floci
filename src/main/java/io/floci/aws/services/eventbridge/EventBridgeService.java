@@ -1326,6 +1326,15 @@ public class EventBridgeService implements ResourceProvider, StoredResourceArns 
             if (matchesSingleElement(element, actual)) {
                 return true;
             }
+            // A field holding an array in the event matches when any of its values does. Whether the
+            // field exists is a question about the field, which the line above has answered.
+            if (actual != null && actual.isArray() && !(element.isObject() && element.has("exists"))) {
+                for (JsonNode value : actual) {
+                    if (matchesSingleElement(element, value)) {
+                        return true;
+                    }
+                }
+            }
         }
         return false;
     }
