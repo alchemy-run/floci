@@ -6680,21 +6680,23 @@ public class Ec2Service implements ContainerTeardown, ResourceProvider, Resettab
             return;
         }
         String regionPrefix = region + "::";
+        // A regional NAT gateway has no subnet, and Set.of refuses contains(null).
+        Predicate<String> inSubnets = subnetId -> subnetId != null && subnetIds.contains(subnetId);
         boolean occupied = instances.scan(k -> k.startsWith(regionPrefix)).stream()
-                        .anyMatch(instance -> subnetIds.contains(instance.getSubnetId())
+                        .anyMatch(instance -> inSubnets.test(instance.getSubnetId())
                                 && (instance.getState() == null
                                         || !"terminated".equals(instance.getState().getName())))
                 || natGateways.scan(k -> k.startsWith(regionPrefix)).stream()
-                        .anyMatch(natGateway -> subnetIds.contains(natGateway.getSubnetId())
+                        .anyMatch(natGateway -> inSubnets.test(natGateway.getSubnetId())
                                 && !"deleted".equals(natGateway.getState())
                                 && !"failed".equals(natGateway.getState()))
                 || networkInterfaces.scan(k -> k.startsWith(regionPrefix)).stream()
-                        .anyMatch(ni -> subnetIds.contains(ni.getSubnetId()))
+                        .anyMatch(ni -> inSubnets.test(ni.getSubnetId()))
                 || vpcEndpoints.scan(k -> k.startsWith(regionPrefix)).stream()
                         .anyMatch(endpoint -> !"deleted".equals(endpoint.getState())
-                                && nullToEmpty(endpoint.getSubnetIds()).stream().anyMatch(subnetIds::contains))
+                                && nullToEmpty(endpoint.getSubnetIds()).stream().anyMatch(inSubnets))
                 || instanceConnectEndpoints.scan(k -> k.startsWith(regionPrefix)).stream()
-                        .anyMatch(endpoint -> subnetIds.contains(endpoint.getSubnetId()));
+                        .anyMatch(endpoint -> inSubnets.test(endpoint.getSubnetId()));
         if (occupied) {
             throw new AwsException("DependencyViolation", message, 400);
         }
