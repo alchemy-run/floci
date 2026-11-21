@@ -10,6 +10,7 @@ import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.AwsRegions;
 import io.floci.aws.core.common.BackupWindows;
+import io.floci.aws.core.common.DeferredRemovals;
 import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.core.common.RequestScopes;
 import io.floci.aws.core.common.Resettable;
@@ -222,6 +223,9 @@ public class RdsService implements Resettable, ResourceProvider {
     private final Ec2Service ec2Service;
     private final RegionResolver regionResolver;
     private final EmulatorConfig config;
+    /** Absent when a test builds the service directly, which removes a deleted resource at once. */
+    @Inject
+    DeferredRemovals deferredRemovals;
     private final SecretsManagerService secretsManagerService;
     private final KmsService kmsService;
     private final DockerHostResolver dockerHostResolver;
@@ -5465,6 +5469,9 @@ public class RdsService implements Resettable, ResourceProvider {
                 .orElseThrow(() ->
                 new AwsException("DBInstanceNotFound", "DB instance " + id + " not found.", 404));
 
+        if (deletePending("rds-instance:" + effectiveRegion + ":" + id)) {
+            throw new AwsException("InvalidDBInstanceState", "Instance " + id + " is already being deleted.", 400);
+        }
         if (instance.isDeletionProtection()) {
             throw new AwsException("InvalidParameterCombination",
                     "Cannot delete protected DB Instance, please disable deletion protection and try again.", 400);
@@ -5484,7 +5491,29 @@ public class RdsService implements Resettable, ResourceProvider {
         instance.setStatus(DbInstanceStatus.DELETING);
         putInstanceForScope(currentAccountId(), effectiveRegion, id, instance);
         detachReadReplicaLinksBeforeDelete(instance);
+        // DescribeDBInstances answers deleting until the instance is gone.
+        afterDeleting("rds-instance:" + effectiveRegion + ":" + id, () -> {
+            synchronized (this) {
+                removeDbInstance(id, effectiveRegion, instance, clusterId, retained);
+            }
+        });
+    }
 
+    private void afterDeleting(String key, Runnable removal) {
+        if (deferredRemovals == null) {
+            removal.run();
+        } else {
+            deferredRemovals.afterDeleting(key, removal);
+        }
+    }
+
+    /** Whether a delete of {@code key} is under way: the resource reads as deleting until it is gone. */
+    private boolean deletePending(String key) {
+        return deferredRemovals != null && deferredRemovals.isPending(key);
+    }
+
+    private void removeDbInstance(String id, String effectiveRegion, DbInstance instance, String clusterId,
+                                  DbInstanceAutomatedBackup retained) {
         boolean mock = config.services().rds().mock();
         if (!mock || instance.isBackendCleanupRequired()) {
             proxyManager.stopProxy(rdsResourceRelayKey(instance.getDbInstanceArn(), id));
@@ -6426,6 +6455,10 @@ public class RdsService implements Resettable, ResourceProvider {
                 new AwsException("DBClusterNotFoundFault",
                         "DB cluster " + id + " not found.", 404));
 
+        // A second delete of a cluster already deleting is accepted and changes nothing.
+        if (deletePending("rds-cluster:" + effectiveRegion + ":" + id)) {
+            return;
+        }
         if (!cluster.getDbClusterMembers().isEmpty()) {
             throw new AwsException("InvalidDBClusterStateFault",
                     "DB cluster " + id + " still has DB instances.", 400);
@@ -6448,7 +6481,16 @@ public class RdsService implements Resettable, ResourceProvider {
 
         cluster.setStatus(DbInstanceStatus.DELETING);
         putClusterForScope(currentAccountId(), effectiveRegion, id, cluster);
+        // DescribeDBClusters answers deleting until the cluster is gone.
+        afterDeleting("rds-cluster:" + effectiveRegion + ":" + id, () -> {
+            synchronized (this) {
+                removeDbCluster(id, effectiveRegion, cluster, retained);
+            }
+        });
+    }
 
+    private void removeDbCluster(String id, String effectiveRegion, DbCluster cluster,
+                                 DbClusterAutomatedBackup retained) {
         if (!config.services().rds().mock() || cluster.isBackendCleanupRequired()) {
             proxyManager.stopProxy(rdsResourceRelayKey(cluster.getDbClusterArn(), id));
             if (cluster.isBackendCleanupRequired()
@@ -12488,11 +12530,22 @@ public class RdsService implements Resettable, ResourceProvider {
     public synchronized DbClusterEndpoint deleteDbClusterEndpoint(String region, String endpointId) {
         String effectiveRegion = effectiveRegion(region);
         DbClusterEndpoint endpoint = requireClusterEndpoint(effectiveRegion, endpointId);
-        clusterEndpoints.delete(clusterEndpointKey(effectiveRegion, endpoint.getDbClusterEndpointIdentifier()));
-        DbClusterEndpoint deleted = currentView(endpoint,
+        String key = clusterEndpointKey(effectiveRegion, endpoint.getDbClusterEndpointIdentifier());
+        if (deletePending("rds-cluster-endpoint:" + key)) {
+            throw new AwsException("InvalidDBClusterEndpointStateFault",
+                    "The DB cluster endpoint " + endpoint.getDbClusterEndpointIdentifier()
+                            + " is already being deleted.", 400);
+        }
+        // DescribeDBClusterEndpoints answers deleting until the endpoint is gone.
+        endpoint.setStatus("deleting");
+        clusterEndpoints.put(key, endpoint);
+        afterDeleting("rds-cluster-endpoint:" + key, () -> {
+            synchronized (this) {
+                clusterEndpoints.delete(key);
+            }
+        });
+        return currentView(endpoint,
                 findClusterForScope(currentAccountId(), effectiveRegion, endpoint.getDbClusterIdentifier()));
-        deleted.setStatus("deleting");
-        return deleted;
     }
 
     /**

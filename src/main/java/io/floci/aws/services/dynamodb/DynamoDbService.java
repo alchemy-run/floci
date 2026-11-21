@@ -14,6 +14,7 @@ import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.AwsRegions;
+import io.floci.aws.core.common.DeferredRemovals;
 import io.floci.aws.core.common.Digests;
 import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.core.common.RequestScopes;
@@ -170,6 +171,9 @@ public class DynamoDbService {
                                     CompletableFuture<Map<String, DynamoDbWriteCapacity.Cost>> replayCapacity) {}
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
+    /** Absent when a test builds the service directly, which removes a deleted table at once. */
+    @Inject
+    DeferredRemovals deferredRemovals;
     private DynamoDbStreamService streamService;
     private KinesisStreamingForwarder kinesisForwarder;
     private S3Service s3Service;
@@ -1001,6 +1005,11 @@ public class DynamoDbService {
         String storageKey = regionKey(region, canonicalTableName);
         TableDefinition table = tableStore.get(storageKey)
                 .orElseThrow(() -> resourceNotFoundException(canonicalTableName));
+        if (deletePending("dynamodb-table:" + storageKey)) {
+            throw new AwsException("ResourceInUseException",
+                    "Attempt to change a resource which is still in use: Table is being deleted: "
+                    + canonicalTableName, 400);
+        }
         requireNotCreating(table);
         settleVectorIndexes(storageKey, table);
         if (table.getVectorIndexes().stream().anyMatch(v -> "CREATING".equals(v.getIndexStatus()))) {
@@ -1014,6 +1023,27 @@ public class DynamoDbService {
         // A write still in flight on this table object stops recording once the flag is off.
         table.setPointInTimeRecoveryEnabled(false);
         pointInTimeRecovery.drop(regionResolver.getAccountId(), storageKey);
+        // DescribeTable answers DELETING until the table is gone.
+        table.setTableStatus("DELETING");
+        tableStore.put(storageKey, table);
+        afterDeleting("dynamodb-table:" + storageKey,
+                () -> removeTable(storageKey, table, canonicalTableName, region));
+    }
+
+    private void afterDeleting(String key, Runnable removal) {
+        if (deferredRemovals == null) {
+            removal.run();
+        } else {
+            deferredRemovals.afterDeleting(key, removal);
+        }
+    }
+
+    /** Whether a delete of {@code key} is under way: the resource reads as deleting until it is gone. */
+    private boolean deletePending(String key) {
+        return deferredRemovals != null && deferredRemovals.isPending(key);
+    }
+
+    private void removeTable(String storageKey, TableDefinition table, String canonicalTableName, String region) {
         tableStore.delete(storageKey);
         itemsByTable.remove(scopedItemsKey(storageKey));
         itemLocks.remove(scopedItemsKey(storageKey));

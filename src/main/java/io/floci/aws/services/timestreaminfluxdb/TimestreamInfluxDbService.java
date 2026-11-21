@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsException;
+import io.floci.aws.core.common.DeferredRemovals;
 import io.floci.aws.core.common.PaginatedResult;
 import io.floci.aws.core.common.Pagination;
 import io.floci.aws.core.common.RegionResolver;
@@ -89,6 +90,9 @@ public class TimestreamInfluxDbService implements Resettable {
     private final AccountAwareStorageBackend<DbParameterGroup> parameterGroups;
     private final AccountAwareStorageBackend<DbBackup> backups;
     private final RegionResolver regionResolver;
+    /** Absent when a test builds the service directly, which removes a deleted instance at once. */
+    @Inject
+    DeferredRemovals deferredRemovals;
     private final SecretsManagerService secretsManagerService;
     private final ObjectMapper objectMapper;
     private final TimestreamInfluxDbContainerManager containerManager;
@@ -313,9 +317,32 @@ public class TimestreamInfluxDbService implements Resettable {
                     + " belongs to DB cluster " + instance.getDbClusterId()
                     + "; nodes can't be removed individually, delete the DB cluster instead.");
         }
-        removeDataPlane(instance.getId(), instance.getContainerId());
-        instances.delete(key(region, instance.getId()));
+        if (deletePending("influxdb-instance:" + key(region, instance.getId()))) {
+            throw conflict(DB_INSTANCE, instance.getId(), "DB instance " + instance.getId() + " is already being deleted.");
+        }
+        // GetDbInstance answers DELETING until the instance is gone.
+        instance.setStatus("DELETING");
+        instances.put(key(region, instance.getId()), instance);
+        afterDeleting("influxdb-instance:" + key(region, instance.getId()), () -> {
+            synchronized (this) {
+                removeDataPlane(instance.getId(), instance.getContainerId());
+                instances.delete(key(region, instance.getId()));
+            }
+        });
         return new Reported<>(instance, "DELETING");
+    }
+
+    private void afterDeleting(String key, Runnable removal) {
+        if (deferredRemovals == null) {
+            removal.run();
+        } else {
+            deferredRemovals.afterDeleting(key, removal);
+        }
+    }
+
+    /** Whether a delete of {@code key} is under way: the resource reads as deleting until it is gone. */
+    private boolean deletePending(String key) {
+        return deferredRemovals != null && deferredRemovals.isPending(key);
     }
 
     public synchronized Reported<DbCluster> createDbCluster(JsonNode request, String region) {

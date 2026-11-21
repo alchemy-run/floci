@@ -3,6 +3,7 @@ package io.floci.aws.services.elasticache;
 import com.fasterxml.jackson.core.type.TypeReference;
 import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsException;
+import io.floci.aws.core.common.DeferredRemovals;
 import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.core.common.dns.ContainerEndpoints;
 import io.floci.aws.core.common.docker.ContainerDetector;
@@ -43,6 +44,9 @@ public class ElastiCacheMemcachedService {
     private final EmulatorConfig config;
     private final DockerHostResolver dockerHostResolver;
     private final ContainerDetector containerDetector;
+    /** Absent when a test builds the service directly, which removes a deleted cluster at once. */
+    @Inject
+    DeferredRemovals deferredRemovals;
     private final RegionResolver regionResolver;
     private final ContainerEndpoints containerEndpoints;
     private final ConcurrentHashMap<String, Object> clusterLocks = new ConcurrentHashMap<>();
@@ -455,24 +459,49 @@ public class ElastiCacheMemcachedService {
         // otherwise write the cluster back after this removed it
         synchronized (lockFor(clusterId)) {
             CacheCluster cluster = getCacheCluster(clusterId);
-
-            cluster.setCacheClusterStatus(CacheClusterStatus.DELETING);
-            clusters.put(clusterId, cluster);
-
-            unrouteEndpoint(cluster);
-            proxyManager.stopProxy(clusterId);
-            if (cluster.getContainerId() != null) {
-                containerManager.stop(new ElastiCacheContainerHandle(
-                        cluster.getContainerId(), clusterId,
-                        cluster.getContainerHost(), cluster.getContainerPort()));
+            if (deletePending("memcached:" + regionResolver.getRegion() + ":" + clusterId)) {
+                throw new AwsException("InvalidCacheClusterState",
+                        "Cache cluster " + clusterId + " is not in a valid state to be deleted.", 400);
             }
 
-            elasticacheService.releaseProxyPort(cluster.getProxyPort());
-
-            clusters.delete(clusterId);
-            LOG.infov("Memcached cluster {0} deleted", clusterId);
+            // DescribeCacheClusters answers deleting until the cluster is gone.
+            cluster.setCacheClusterStatus(CacheClusterStatus.DELETING);
+            clusters.put(clusterId, cluster);
+            afterDeleting("memcached:" + regionResolver.getRegion() + ":" + clusterId, () -> {
+                synchronized (lockFor(clusterId)) {
+                    removeCacheCluster(clusterId, cluster);
+                }
+            });
             return cluster;
         }
+    }
+
+    private void afterDeleting(String key, Runnable removal) {
+        if (deferredRemovals == null) {
+            removal.run();
+        } else {
+            deferredRemovals.afterDeleting(key, removal);
+        }
+    }
+
+    /** Whether a delete of {@code key} is under way: the resource reads as deleting until it is gone. */
+    private boolean deletePending(String key) {
+        return deferredRemovals != null && deferredRemovals.isPending(key);
+    }
+
+    private void removeCacheCluster(String clusterId, CacheCluster cluster) {
+        unrouteEndpoint(cluster);
+        proxyManager.stopProxy(clusterId);
+        if (cluster.getContainerId() != null) {
+            containerManager.stop(new ElastiCacheContainerHandle(
+                    cluster.getContainerId(), clusterId,
+                    cluster.getContainerHost(), cluster.getContainerPort()));
+        }
+
+        elasticacheService.releaseProxyPort(cluster.getProxyPort());
+
+        clusters.delete(clusterId);
+        LOG.infov("Memcached cluster {0} deleted", clusterId);
     }
 
     public CacheCluster saveCacheCluster(CacheCluster cluster) {

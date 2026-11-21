@@ -777,6 +777,14 @@ public interface EmulatorConfig {
          *  Per-service dockerNetwork settings override this value when present. */
         Optional<String> dockerNetwork();
 
+        /**
+         * How long a resource AWS deletes in the background (an RDS, DocumentDB or Neptune cluster or
+         * instance, an RDS cluster endpoint, an ElastiCache cache cluster, a DynamoDB table, a Timestream
+         * for InfluxDB instance) reads back in its deleting state before it is gone. 0 removes it at once.
+         */
+        @WithDefault("8000")
+        long asyncDeleteMillis();
+
         SsmServiceConfig ssm();
         SqsServiceConfig sqs();
         S3ServiceConfig s3();

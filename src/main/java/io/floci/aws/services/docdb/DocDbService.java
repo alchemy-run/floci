@@ -7,6 +7,7 @@ import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.BackupWindows;
+import io.floci.aws.core.common.DeferredRemovals;
 import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.core.common.dns.EmbeddedDnsServer;
 import io.floci.aws.core.storage.StorageBackend;
@@ -73,6 +74,9 @@ public class DocDbService {
     // DocumentDB subnet groups and cluster parameter groups are the RDS records reached through
     // the rds scope; security groups are EC2's; a KMS key is resolved to its ARN as on AWS
     private final RdsService rdsService;
+    /** Absent when a test builds the service directly, which removes a deleted resource at once. */
+    @Inject
+    DeferredRemovals deferredRemovals;
     private final Ec2Service ec2Service;
     private final KmsService kmsService;
     /**
@@ -812,6 +816,10 @@ public class DocDbService {
                     new AwsException("DBClusterNotFoundFault",
                             "DocDB cluster " + id + " not found.", 404));
 
+            // A second delete of a cluster already deleting is accepted and changes nothing.
+            if (deletePending("docdb-cluster:" + key(region, id))) {
+                return;
+            }
             if (cluster.isDeletionProtection()) {
                 throw new AwsException("InvalidParameterCombination",
                         "Cannot delete protected Cluster, please disable deletion protection and try again.", 400);
@@ -823,20 +831,37 @@ public class DocDbService {
 
             cluster.setStatus("deleting");
             clusters.put(key(region, id), cluster);
+            // DescribeDBClusters answers deleting until the cluster is gone.
+            afterDeleting("docdb-cluster:" + key(region, id), () -> {
+                synchronized (lockFor("cluster:" + key(region, id))) {
+                    proxyManager.release(cluster.getDbClusterArn());
+                    if (cluster.getContainerId() != null) {
+                        containerManager.stop(new DocDbContainerHandle(
+                                cluster.getContainerId(), id,
+                                cluster.getContainerHost(), cluster.getContainerPort()));
+                    }
+                    // AWS deletes the master user secret it manages along with the cluster
+                    detachManagedMasterUserSecret(cluster, region);
 
-            proxyManager.release(cluster.getDbClusterArn());
-            if (cluster.getContainerId() != null) {
-                containerManager.stop(new DocDbContainerHandle(
-                        cluster.getContainerId(), id,
-                        cluster.getContainerHost(), cluster.getContainerPort()));
-            }
-            // AWS deletes the master user secret it manages along with the cluster
-            detachManagedMasterUserSecret(cluster, region);
-
-            clusters.delete(key(region, id));
-            writeLocks.remove("cluster:" + key(region, id));
-            LOG.infov("DocDB cluster {0} deleted", id);
+                    clusters.delete(key(region, id));
+                    writeLocks.remove("cluster:" + key(region, id));
+                    LOG.infov("DocDB cluster {0} deleted", id);
+                }
+            });
         }
+    }
+
+    private void afterDeleting(String key, Runnable removal) {
+        if (deferredRemovals == null) {
+            removal.run();
+        } else {
+            deferredRemovals.afterDeleting(key, removal);
+        }
+    }
+
+    /** Whether a delete of {@code key} is under way: the resource reads as deleting until it is gone. */
+    private boolean deletePending(String key) {
+        return deferredRemovals != null && deferredRemovals.isPending(key);
     }
 
     // ── Instances ─────────────────────────────────────────────────────────────
@@ -974,7 +999,18 @@ public class DocDbService {
             DocDbInstance instance = findInstance(region, id).orElseThrow(() ->
                     new AwsException("DBInstanceNotFound",
                             "DocDB instance " + id + " not found.", 404));
+            if (deletePending("docdb-instance:" + key(region, id))) {
+                throw new AwsException("InvalidDBInstanceState", "Instance " + id + " is already being deleted.", 400);
+            }
+            // DescribeDBInstances answers deleting, and the cluster keeps it as a member, until it is gone.
+            instance.setStatus("deleting");
+            instances.put(key(region, id), instance);
+            afterDeleting("docdb-instance:" + key(region, id), () -> removeInstance(region, id, instance));
+        }
+    }
 
+    private void removeInstance(String region, String id, DocDbInstance instance) {
+        synchronized (lockFor("instance:" + key(region, id))) {
             String clusterId = instance.getDbClusterIdentifier();
             synchronized (lockFor("cluster:" + key(region, clusterId))) {
                 DocDbCluster cluster = findCluster(region, clusterId).orElse(null);

@@ -129,6 +129,7 @@ floci:
     resource-namespace: ""
 
   services:
+    async-delete-millis: 0
     ssm:
       enabled: true
       max-parameter-history: 5

@@ -426,6 +426,9 @@ floci:
     #     value: dev
 
   services:
+    # How long a DB cluster/instance, cache cluster or table reads back as deleting before it is gone. 0 = at once.
+    # Env: FLOCI_SERVICES_ASYNC_DELETE_MILLIS
+    async-delete-millis: 8000
     ssm:
       enabled: true
       max-parameter-history: 5
