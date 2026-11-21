@@ -16,12 +16,14 @@ import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.Signature;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.Base64;
 
 import static io.floci.aws.services.ivs.IvsIntegrationTest.ivs;
 import static io.floci.aws.services.ivs.IvsIntegrationTest.p384;
 import static io.floci.aws.services.ivs.IvsIntegrationTest.publicKeyPem;
 import static io.restassured.RestAssured.given;
+import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.endsWith;
@@ -216,8 +218,10 @@ class IvsRealtimeIntegrationTest {
         ivs("DeleteEncoderConfiguration", "{\"arn\":\"" + encoder + "\"}").statusCode(409);
         ivs("DeleteStorageConfiguration", "{\"arn\":\"" + storage + "\"}").statusCode(409);
         ivs("StopComposition", "{\"arn\":\"" + compositionArn + "\"}").statusCode(200);
-        ivs("GetComposition", "{\"arn\":\"" + compositionArn + "\"}").statusCode(200)
-                .body("composition.state", equalTo("STOPPED")).body("composition.endTime", containsString("T"));
+        // A composition reads STOPPING until its output has stopped, as on AWS.
+        await().atMost(Duration.ofSeconds(15)).untilAsserted(() ->
+                ivs("GetComposition", "{\"arn\":\"" + compositionArn + "\"}").statusCode(200)
+                        .body("composition.state", equalTo("STOPPED")).body("composition.endTime", containsString("T")));
         ivs("DeleteEncoderConfiguration", "{\"arn\":\"" + encoder + "\"}").statusCode(200);
 
         // Tags: Real-Time's resources and IVS's share the tag routes.
