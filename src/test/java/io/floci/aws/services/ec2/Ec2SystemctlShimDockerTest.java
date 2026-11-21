@@ -55,7 +55,8 @@ class Ec2SystemctlShimDockerTest {
                 "ExecStartPre=/bin/mkdir -p /run/app",
                 "ExecStartPre=/bin/sh -c 'echo GREETING=hello > /run/app/one.env; echo NAME=world > /run/app/two.env'",
                 "ExecStartPre=-/bin/false",
-                "ExecStart=/bin/sh -c 'echo \"$GREETING $NAME\" \"$0\" \"$1\" > /tmp/app; sleep 600' -H fd://",
+                "ExecStart=/bin/sh -c 'echo \"$GREETING $NAME\" \"$0\" \"$1\" > /tmp/app;"
+                        + " [ -e /var/run/app.pid ] && echo taken > /tmp/app; sleep 600' -H fd://",
                 "EOF",
                 "systemctl enable --now app.service");
         assertEquals(0, docker(List.of("exec", container, "sh", "-c", units), 60).exitCode());
