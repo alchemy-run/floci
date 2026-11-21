@@ -80,7 +80,7 @@ public class LexStore implements Resettable {
 
     @Inject
     public LexStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("lexv2", "resources.json", new TypeReference<Map<String, ObjectNode>>() {});
+        this.storage = storageFactory.create("lexv2", "lexv2-resources.json", new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
     }

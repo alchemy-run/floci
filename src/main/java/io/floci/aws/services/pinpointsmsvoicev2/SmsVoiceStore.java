@@ -61,7 +61,7 @@ public class SmsVoiceStore implements Resettable {
 
     @Inject
     public SmsVoiceStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("pinpointsmsvoicev2", "resources.json",
+        this.storage = storageFactory.create("pinpointsmsvoicev2", "pinpointsmsvoicev2-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

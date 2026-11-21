@@ -66,7 +66,7 @@ public class Route53ProfilesService implements Resettable, Route53ResolverFirewa
                                   Provider<Ec2Service> ec2, Provider<Route53Service> route53,
                                   Provider<Route53ResolverService> resolver,
                                   Provider<Route53ResolverFirewallRuleGroups> ruleGroups) {
-        this.profiles = storageFactory.create("route53profiles", "profiles.json",
+        this.profiles = storageFactory.create("route53profiles", "route53profiles-profiles.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.associations = storageFactory.create("route53profiles", "associations.json",
                 new TypeReference<Map<String, ObjectNode>>() {});

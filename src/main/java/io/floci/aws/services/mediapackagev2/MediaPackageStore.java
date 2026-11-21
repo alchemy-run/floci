@@ -49,7 +49,7 @@ public class MediaPackageStore implements Resettable {
 
     @Inject
     public MediaPackageStore(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config) {
-        this.storage = storageFactory.create("mediapackagev2", "resources.json",
+        this.storage = storageFactory.create("mediapackagev2", "mediapackagev2-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;

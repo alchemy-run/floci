@@ -98,7 +98,7 @@ public class GreengrassV2Service implements Resettable, IotTopicListener {
     public GreengrassV2Service(StorageFactory storageFactory, ObjectMapper mapper, EmulatorConfig config,
                                Instance<IotService> iot, Instance<S3Service> s3, Instance<LambdaService> lambda,
                                Instance<EventBridgeService> events, Instance<PreSignedUrlGenerator> presigner) {
-        this.storage = storageFactory.create("greengrassv2", "resources.json",
+        this.storage = storageFactory.create("greengrassv2", "greengrassv2-resources.json",
                 new TypeReference<Map<String, ObjectNode>>() {});
         this.mapper = mapper;
         this.config = config;
