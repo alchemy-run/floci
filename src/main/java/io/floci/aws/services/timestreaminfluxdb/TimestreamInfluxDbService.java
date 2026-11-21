@@ -318,7 +318,9 @@ public class TimestreamInfluxDbService implements Resettable {
                     + "; nodes can't be removed individually, delete the DB cluster instead.");
         }
         if (deletePending("influxdb-instance:" + key(region, instance.getId()))) {
-            throw conflict(DB_INSTANCE, instance.getId(), "DB instance " + instance.getId() + " is already being deleted.");
+            // AWS answers a delete of an instance already deleting as a validation failure.
+            throw new AwsException("ValidationException",
+                    "DB instance " + instance.getId() + " is not in a deletable state.", 400);
         }
         // GetDbInstance answers DELETING until the instance is gone.
         instance.setStatus("DELETING");

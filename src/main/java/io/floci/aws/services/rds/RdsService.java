@@ -5491,6 +5491,11 @@ public class RdsService implements Resettable, ResourceProvider {
         instance.setStatus(DbInstanceStatus.DELETING);
         putInstanceForScope(currentAccountId(), effectiveRegion, id, instance);
         detachReadReplicaLinksBeforeDelete(instance);
+        // A deleting instance takes no connections, so its endpoint stops routing now rather than
+        // once it is gone; another instance on a shared port is then the only one there.
+        if (!config.services().rds().mock() || instance.isBackendCleanupRequired()) {
+            proxyManager.stopProxy(rdsResourceRelayKey(instance.getDbInstanceArn(), id));
+        }
         // DescribeDBInstances answers deleting until the instance is gone.
         afterDeleting("rds-instance:" + effectiveRegion + ":" + id, () -> {
             synchronized (this) {
@@ -5515,9 +5520,6 @@ public class RdsService implements Resettable, ResourceProvider {
     private void removeDbInstance(String id, String effectiveRegion, DbInstance instance, String clusterId,
                                   DbInstanceAutomatedBackup retained) {
         boolean mock = config.services().rds().mock();
-        if (!mock || instance.isBackendCleanupRequired()) {
-            proxyManager.stopProxy(rdsResourceRelayKey(instance.getDbInstanceArn(), id));
-        }
 
         if (clusterId == null || clusterId.isBlank()) {
             // Standalone, so stop its container and clean up its Docker volume. Current mock mode
@@ -6481,6 +6483,10 @@ public class RdsService implements Resettable, ResourceProvider {
 
         cluster.setStatus(DbInstanceStatus.DELETING);
         putClusterForScope(currentAccountId(), effectiveRegion, id, cluster);
+        // A deleting cluster takes no connections, so its endpoint stops routing now.
+        if (!config.services().rds().mock() || cluster.isBackendCleanupRequired()) {
+            proxyManager.stopProxy(rdsResourceRelayKey(cluster.getDbClusterArn(), id));
+        }
         // DescribeDBClusters answers deleting until the cluster is gone.
         afterDeleting("rds-cluster:" + effectiveRegion + ":" + id, () -> {
             synchronized (this) {
@@ -6492,7 +6498,6 @@ public class RdsService implements Resettable, ResourceProvider {
     private void removeDbCluster(String id, String effectiveRegion, DbCluster cluster,
                                  DbClusterAutomatedBackup retained) {
         if (!config.services().rds().mock() || cluster.isBackendCleanupRequired()) {
-            proxyManager.stopProxy(rdsResourceRelayKey(cluster.getDbClusterArn(), id));
             if (cluster.isBackendCleanupRequired()
                     || backendCleanupPossible(cluster.getContainerId(), cluster.getDbClusterArn())) {
                 if (cluster.isBackendCleanupRequired()) {

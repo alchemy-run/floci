@@ -131,7 +131,7 @@ class AsyncDeleteIntegrationTest {
         influx("GetDbInstance", "{\"identifier\":\"" + id + "\"}").statusCode(200)
                 .body("status", equalTo("DELETING"));
         influx("DeleteDbInstance", "{\"identifier\":\"" + id + "\"}").statusCode(400)
-                .body("__type", containsString("ConflictException"));
+                .body("__type", containsString("ValidationException"));
 
         await().atMost(GONE_WITHIN).untilAsserted(() ->
                 influx("GetDbInstance", "{\"identifier\":\"" + id + "\"}")
