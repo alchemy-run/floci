@@ -111,6 +111,8 @@ public class AirflowServerlessRunner implements ContainerTeardown {
                 .withEnv(List.of("AIRFLOW_HOME=" + HOME, "AIRFLOW__CORE__LOAD_EXAMPLES=false",
                         "AIRFLOW__CORE__DAGS_FOLDER=" + HOME + "/no-dags"))
                 .withDockerNetwork(store.config().dockerNetwork())
+                // Reaches Floci at host.docker.internal, which Docker on Linux doesn't define by itself.
+                .withHostDockerInternalOnLinux()
                 .withLogRotation()
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(AirflowServerlessStore.SERVICE,
                         "runtime", "", ""))

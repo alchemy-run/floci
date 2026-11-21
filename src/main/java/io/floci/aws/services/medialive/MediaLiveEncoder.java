@@ -154,6 +154,8 @@ public class MediaLiveEncoder implements ContainerTeardown {
         ContainerBuilder.Builder builder = containers.newContainer(image).withName(name)
                 .withEntrypoint(List.of("sh", "-c", plan.script()))
                 .withDockerNetwork(store.config().dockerNetwork())
+                // Reaches Floci at host.docker.internal, which Docker on Linux doesn't define by itself.
+                .withHostDockerInternalOnLinux()
                 .withLogRotation()
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(MediaLiveStore.SERVICE, "channel", account,
                         channelId));
