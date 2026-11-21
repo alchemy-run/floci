@@ -225,6 +225,13 @@ class IvsRealtimeDockerIntegrationTest {
                 + "\",\"userId\":\"secure\"}").path("ingestConfiguration");
         String whipToken = call("CreateParticipantToken", "{\"stageArn\":\"" + stage + "\",\"userId\":\"whip\","
                 + "\"capabilities\":[\"PUBLISH\"]}").path("participantToken").path("token").asText();
+        // A participant whose token can only subscribe is refused a WHIP publish, and the stage reports its
+        // publish error.
+        String viewerToken = call("CreateParticipantToken", "{\"stageArn\":\"" + stage + "\",\"userId\":\"viewer\","
+                + "\"capabilities\":[\"SUBSCRIBE\"]}").path("participantToken").path("token").asText();
+        given().header("Authorization", "Bearer " + viewerToken).contentType("application/sdp")
+                .body("v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 106\r\na=rtpmap:106 H264/90000\r\n")
+                .post(IvsRealtimeWhip.PATH).then().statusCode(403);
 
         await("the media server", 90, () -> docker.listContainersCmd().withNameFilter(List.of(
                 IvsMediaServer.CONTAINER)).exec().isEmpty() ? null : Boolean.TRUE);
