@@ -13,7 +13,6 @@ arn-literal	src/main/java/io/floci/aws/services/cloudhsmv2/CloudHsmV2JsonHandler
 arn-literal	src/main/java/io/floci/aws/services/cloudtrail/CloudTrailEventService.java	3
 arn-literal	src/main/java/io/floci/aws/services/cloudtrail/CloudTrailService.java	7
 arn-literal	src/main/java/io/floci/aws/services/cloudwatch/logs/CloudWatchLogsCrossAccountService.java	1
-arn-literal	src/main/java/io/floci/aws/services/cloudwatch/logs/CloudWatchLogsService.java	1
 arn-literal	src/main/java/io/floci/aws/services/codeartifact/CodeArtifactController.java	1
 arn-literal	src/main/java/io/floci/aws/services/codeartifact/CodeArtifactEventPublisher.java	1
 arn-literal	src/main/java/io/floci/aws/services/cognito/CognitoService.java	1
