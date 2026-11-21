@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 
@@ -216,5 +218,14 @@ class ContainerReachableUrlsTest {
         assertEquals("wss://127.0.0.1:4566/ws/abc123/test",
                 ContainerReachableUrls.rewriteFunctionEnv(
                         "wss://abc123.execute-api.us-east-1.amazonaws.com/test", 4566));
+    }
+
+    /** App Runner and Batch containers get the same rewrite as Lambda and ECS, entry by entry. */
+    @Test
+    void anEnvironmentListPointsLoopbackUrlsAtTheHost() {
+        assertEquals(List.of("COLLECTOR_URL=http://host.docker.internal:1337", "PORT=8080",
+                        "AWS_ENDPOINT_URL=http://localhost.floci.io:4566", "FLAG"),
+                ContainerReachableUrls.rewriteEnvEntries(List.of("COLLECTOR_URL=http://localhost:1337", "PORT=8080",
+                        "AWS_ENDPOINT_URL=http://localhost:4566", "FLAG"), 4566));
     }
 }

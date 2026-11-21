@@ -10,6 +10,7 @@ import io.floci.aws.core.common.docker.ContainerLifecycleManager;
 import io.floci.aws.core.common.docker.ContainerLifecycleManager.ContainerInfo;
 import io.floci.aws.core.common.docker.ContainerLifecycleManager.EndpointInfo;
 import io.floci.aws.core.common.docker.ContainerLogStreamer;
+import io.floci.aws.core.common.docker.ContainerReachableUrls;
 import io.floci.aws.core.common.docker.ContainerSpec;
 import io.floci.aws.core.common.docker.ContainerStorageHelper;
 import io.floci.aws.core.common.docker.LaunchedContainerAwsEnv;
@@ -163,7 +164,9 @@ public class AppRunnerRuntime {
                 name + "-" + UUID.randomUUID().toString().substring(0, 8));
         ContainerBuilder.Builder builder = containerBuilder.newContainer(imageUri)
                 .withName(containerName)
-                .withEnv(env)
+                // A URL naming the developer's machine (an OTLP collector, a dev server) points at
+                // host.docker.internal, as in Lambda and ECS containers.
+                .withEnv(ContainerReachableUrls.rewriteEnvEntries(env, ContainerReachableUrls.gatewayPort(config.port())))
                 .withMemoryMb((int) memoryMb)
                 .withLoopbackPortBinding(port, 0)
                 .withDockerNetwork(config.services().lambda().dockerNetwork())
