@@ -275,6 +275,9 @@ public class DirectoryService {
         NetworkInterface eni = ec2.get().createNetworkInterface(region, subnet.getSubnetId(),
                 "AWS created network interface for directory " + directoryId, null, null,
                 List.of(meta.path("securityGroupId").asText()), null);
+        // The interface belongs to the directory's domain controller, so it reads in-use, as on AWS, and the
+        // account can't delete it while the directory holds it.
+        ec2.get().holdNetworkInterfaceForService(region, eni.getNetworkInterfaceId());
         meta.withArray("controllers").addObject()
                 .put("DomainControllerId", "dc-" + eni.getNetworkInterfaceId().substring(4, 14))
                 .put("DnsIpAddr", eni.getPrivateIpAddress()).put("VpcId", subnet.getVpcId())
@@ -292,6 +295,7 @@ public class DirectoryService {
             String eni = controller.path("networkInterfaceId").asText(null);
             if (eni != null) {
                 try {
+                    ec2.get().releaseNetworkInterfaceFromService(region, eni);
                     ec2.get().deleteNetworkInterface(region, eni);
                 } catch (AwsException e) {
                     LOG.debugv("Could not delete {0}: {1}", eni, e.getMessage());
@@ -880,6 +884,7 @@ public class DirectoryService {
             String eni = removed.path("networkInterfaceId").asText(null);
             if (eni != null && ec2.isResolvable()) {
                 try {
+                    ec2.get().releaseNetworkInterfaceFromService(region, eni);
                     ec2.get().deleteNetworkInterface(region, eni);
                 } catch (AwsException e) {
                     LOG.debugv("Could not delete {0}: {1}", eni, e.getMessage());

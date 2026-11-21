@@ -17,6 +17,7 @@ import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.hasItem;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.startsWith;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 /**
  * AWS Directory Service over JSON 1.1: Managed Microsoft AD directories placed in a VPC's subnets, their features,
@@ -93,6 +94,11 @@ class DirectoryServiceIntegrationTest {
         assertThat(dns.get(0), startsWith("10.61.1."));
         ds("DescribeDomainControllers", "{\"DirectoryId\":\"" + id + "\"}").statusCode(200)
                 .body("DomainControllers", hasSize(2)).body("DomainControllers[0].Status", equalTo("Active"));
+        // The domain controllers' interfaces are the directory's, in use while it exists, as on AWS.
+        String description = "AWS created network interface for directory " + id;
+        assertEquals("in-use in-use", ec2("DescribeNetworkInterfaces",
+                "DescribeNetworkInterfacesResponse.networkInterfaceSet.item.status.join(' ')",
+                "Filter.1.Name", "description", "Filter.1.Value.1", description));
         ds("ListTagsForResource", "{\"ResourceId\":\"" + id + "\"}").statusCode(200)
                 .body("Tags[0].Key", equalTo("team"));
 
@@ -136,6 +142,9 @@ class DirectoryServiceIntegrationTest {
                 .body("ConditionalForwarders", hasSize(1));
 
         ds("DeleteDirectory", "{\"DirectoryId\":\"" + id + "\"}").statusCode(200);
+        assertEquals("", ec2("DescribeNetworkInterfaces",
+                "DescribeNetworkInterfacesResponse.networkInterfaceSet.item.networkInterfaceId.join(' ')",
+                "Filter.1.Name", "description", "Filter.1.Value.1", description));
         ds("DescribeDirectories", "{\"DirectoryIds\":[\"" + id + "\"]}").statusCode(400)
                 .body("__type", equalTo("EntityDoesNotExistException"));
     }
