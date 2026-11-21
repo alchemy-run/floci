@@ -1,0 +1,573 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_lexv2_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "DeleteSession": "DeleteSessionRequest",
+    "GetSession": "GetSessionRequest",
+    "PutSession": "PutSessionRequest",
+    "RecognizeText": "RecognizeTextRequest",
+    "RecognizeUtterance": "RecognizeUtteranceRequest",
+    "StartConversation": "StartConversationRequest"
+  },
+  "shapes": {
+    "ActiveContext": {
+      "type": "structure",
+      "required": [
+        "name",
+        "timeToLive",
+        "contextAttributes"
+      ],
+      "members": {
+        "name": "ActiveContextName",
+        "timeToLive": "ActiveContextTimeToLive",
+        "contextAttributes": "ActiveContextParametersMap"
+      }
+    },
+    "ActiveContextName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^([A-Za-z0-9]_?)+$"
+    },
+    "ActiveContextParametersMap": {
+      "type": "map",
+      "min": 0,
+      "max": 10,
+      "key": "ParameterName",
+      "value": "Text"
+    },
+    "ActiveContextTimeToLive": {
+      "type": "structure",
+      "required": [
+        "timeToLiveInSeconds",
+        "turnsToLive"
+      ],
+      "members": {
+        "timeToLiveInSeconds": "ActiveContextTimeToLiveInSeconds",
+        "turnsToLive": "ActiveContextTurnsToLive"
+      }
+    },
+    "ActiveContextTimeToLiveInSeconds": {
+      "type": "integer",
+      "min": 5,
+      "max": 86400
+    },
+    "ActiveContextTurnsToLive": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "ActiveContextsList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "ActiveContext"
+    },
+    "AttachmentTitle": {
+      "type": "string",
+      "min": 1,
+      "max": 250
+    },
+    "AttachmentUrl": {
+      "type": "string",
+      "min": 1,
+      "max": 250
+    },
+    "AudioChunk": {
+      "type": "blob"
+    },
+    "AudioInputEvent": {
+      "type": "structure",
+      "required": [
+        "contentType"
+      ],
+      "members": {
+        "audioChunk": "AudioChunk",
+        "contentType": "NonEmptyString",
+        "eventId": "EventId",
+        "clientTimestampMillis": "EpochMillis"
+      }
+    },
+    "BlobStream": {
+      "type": "blob"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BotAliasIdentifier": {
+      "type": "string"
+    },
+    "BotIdentifier": {
+      "type": "string",
+      "min": 10,
+      "max": 10,
+      "pattern": "^[0-9a-zA-Z]+$"
+    },
+    "Button": {
+      "type": "structure",
+      "required": [
+        "text",
+        "value"
+      ],
+      "members": {
+        "text": "ButtonText",
+        "value": "ButtonValue"
+      }
+    },
+    "ButtonText": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "ButtonValue": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "ButtonsList": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "Button"
+    },
+    "ConfigurationEvent": {
+      "type": "structure",
+      "required": [
+        "responseContentType"
+      ],
+      "members": {
+        "requestAttributes": "StringMap",
+        "responseContentType": "NonEmptyString",
+        "sessionState": "SessionState",
+        "welcomeMessages": "Messages",
+        "disablePlayback": "Boolean",
+        "eventId": "EventId",
+        "clientTimestampMillis": "EpochMillis"
+      }
+    },
+    "ConfirmationState": {
+      "type": "string",
+      "enum": [
+        "Confirmed",
+        "Denied",
+        "None"
+      ]
+    },
+    "ConversationMode": {
+      "type": "string",
+      "enum": [
+        "AUDIO",
+        "TEXT"
+      ]
+    },
+    "DTMFInputEvent": {
+      "type": "structure",
+      "required": [
+        "inputCharacter"
+      ],
+      "members": {
+        "inputCharacter": "DTMFRegex",
+        "eventId": "EventId",
+        "clientTimestampMillis": "EpochMillis"
+      }
+    },
+    "DTMFRegex": {
+      "type": "string",
+      "min": 1,
+      "max": 1,
+      "pattern": "^[A-D0-9#*]{1}$"
+    },
+    "DeleteSessionRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAliasId",
+        "sessionId",
+        "localeId"
+      ],
+      "members": {
+        "botId": "BotIdentifier",
+        "botAliasId": "BotAliasIdentifier",
+        "localeId": "LocaleId",
+        "sessionId": "SessionId"
+      }
+    },
+    "DialogAction": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "DialogActionType",
+        "slotToElicit": "NonEmptyString",
+        "slotElicitationStyle": "StyleType",
+        "subSlotToElicit": "ElicitSubSlot"
+      }
+    },
+    "DialogActionType": {
+      "type": "string",
+      "enum": [
+        "Close",
+        "ConfirmIntent",
+        "Delegate",
+        "ElicitIntent",
+        "ElicitSlot",
+        "None"
+      ]
+    },
+    "DisconnectionEvent": {
+      "type": "structure",
+      "members": {
+        "eventId": "EventId",
+        "clientTimestampMillis": "EpochMillis"
+      }
+    },
+    "ElicitSubSlot": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "NonEmptyString",
+        "subSlotToElicit": "ElicitSubSlot"
+      }
+    },
+    "EpochMillis": {
+      "type": "long"
+    },
+    "EventId": {
+      "type": "string",
+      "min": 2,
+      "max": 100,
+      "pattern": "[0-9a-zA-Z._:-]+"
+    },
+    "GetSessionRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAliasId",
+        "localeId",
+        "sessionId"
+      ],
+      "members": {
+        "botId": "BotIdentifier",
+        "botAliasId": "BotAliasIdentifier",
+        "localeId": "LocaleId",
+        "sessionId": "SessionId"
+      }
+    },
+    "ImageResponseCard": {
+      "type": "structure",
+      "required": [
+        "title"
+      ],
+      "members": {
+        "title": "AttachmentTitle",
+        "subtitle": "AttachmentTitle",
+        "imageUrl": "AttachmentUrl",
+        "buttons": "ButtonsList"
+      }
+    },
+    "Intent": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "NonEmptyString",
+        "slots": "Slots",
+        "state": "IntentState",
+        "confirmationState": "ConfirmationState"
+      }
+    },
+    "IntentState": {
+      "type": "string",
+      "enum": [
+        "Failed",
+        "Fulfilled",
+        "InProgress",
+        "ReadyForFulfillment",
+        "Waiting",
+        "FulfillmentInProgress"
+      ]
+    },
+    "LocaleId": {
+      "type": "string",
+      "min": 1
+    },
+    "Message": {
+      "type": "structure",
+      "required": [
+        "contentType"
+      ],
+      "members": {
+        "content": "Text",
+        "contentType": "MessageContentType",
+        "imageResponseCard": "ImageResponseCard"
+      }
+    },
+    "MessageContentType": {
+      "type": "string",
+      "enum": [
+        "CustomPayload",
+        "ImageResponseCard",
+        "PlainText",
+        "SSML"
+      ]
+    },
+    "Messages": {
+      "type": "list",
+      "max": 10,
+      "member": "Message"
+    },
+    "Name": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^([0-9a-zA-Z][_-]?)+$"
+    },
+    "NonEmptyString": {
+      "type": "string",
+      "min": 1
+    },
+    "ParameterName": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "PlaybackCompletionEvent": {
+      "type": "structure",
+      "members": {
+        "eventId": "EventId",
+        "clientTimestampMillis": "EpochMillis"
+      }
+    },
+    "PutSessionRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAliasId",
+        "localeId",
+        "sessionState",
+        "sessionId"
+      ],
+      "members": {
+        "botId": "BotIdentifier",
+        "botAliasId": "BotAliasIdentifier",
+        "localeId": "LocaleId",
+        "sessionId": "SessionId",
+        "messages": "Messages",
+        "sessionState": "SessionState",
+        "requestAttributes": "StringMap",
+        "responseContentType": "NonEmptyString"
+      }
+    },
+    "RecognizeTextRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAliasId",
+        "localeId",
+        "text",
+        "sessionId"
+      ],
+      "members": {
+        "botId": "BotIdentifier",
+        "botAliasId": "BotAliasIdentifier",
+        "localeId": "LocaleId",
+        "sessionId": "SessionId",
+        "text": "Text",
+        "sessionState": "SessionState",
+        "requestAttributes": "StringMap"
+      }
+    },
+    "RecognizeUtteranceRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAliasId",
+        "localeId",
+        "requestContentType",
+        "sessionId"
+      ],
+      "members": {
+        "botId": "BotIdentifier",
+        "botAliasId": "BotAliasIdentifier",
+        "localeId": "LocaleId",
+        "sessionId": "SessionId",
+        "sessionState": "SensitiveNonEmptyString",
+        "requestAttributes": "SensitiveNonEmptyString",
+        "requestContentType": "NonEmptyString",
+        "responseContentType": "NonEmptyString",
+        "inputStream": "BlobStream"
+      }
+    },
+    "RuntimeHintDetails": {
+      "type": "structure",
+      "members": {
+        "runtimeHintValues": "RuntimeHintValuesList",
+        "subSlotHints": "SlotHintsSlotMap"
+      }
+    },
+    "RuntimeHintPhrase": {
+      "type": "string",
+      "min": 1,
+      "max": 140
+    },
+    "RuntimeHintValue": {
+      "type": "structure",
+      "required": [
+        "phrase"
+      ],
+      "members": {
+        "phrase": "RuntimeHintPhrase"
+      }
+    },
+    "RuntimeHintValuesList": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "RuntimeHintValue"
+    },
+    "RuntimeHints": {
+      "type": "structure",
+      "members": {
+        "slotHints": "SlotHintsIntentMap"
+      }
+    },
+    "SensitiveNonEmptyString": {
+      "type": "string"
+    },
+    "SessionId": {
+      "type": "string",
+      "min": 2,
+      "max": 100,
+      "pattern": "[0-9a-zA-Z._:-]+"
+    },
+    "SessionState": {
+      "type": "structure",
+      "members": {
+        "dialogAction": "DialogAction",
+        "intent": "Intent",
+        "activeContexts": "ActiveContextsList",
+        "sessionAttributes": "StringMap",
+        "originatingRequestId": "NonEmptyString",
+        "runtimeHints": "RuntimeHints"
+      }
+    },
+    "Shape": {
+      "type": "string",
+      "enum": [
+        "Scalar",
+        "List",
+        "Composite"
+      ]
+    },
+    "Slot": {
+      "type": "structure",
+      "members": {
+        "value": "Value",
+        "shape": "Shape",
+        "values": "Values",
+        "subSlots": "Slots"
+      }
+    },
+    "SlotHintsIntentMap": {
+      "type": "map",
+      "key": "Name",
+      "value": "SlotHintsSlotMap"
+    },
+    "SlotHintsSlotMap": {
+      "type": "map",
+      "key": "Name",
+      "value": "RuntimeHintDetails"
+    },
+    "Slots": {
+      "type": "map",
+      "key": "NonEmptyString",
+      "value": "Slot"
+    },
+    "StartConversationRequest": {
+      "type": "structure",
+      "required": [
+        "botId",
+        "botAliasId",
+        "localeId",
+        "requestEventStream",
+        "sessionId"
+      ],
+      "members": {
+        "botId": "BotIdentifier",
+        "botAliasId": "BotAliasIdentifier",
+        "localeId": "LocaleId",
+        "sessionId": "SessionId",
+        "conversationMode": "ConversationMode",
+        "requestEventStream": "StartConversationRequestEventStream"
+      }
+    },
+    "StartConversationRequestEventStream": {
+      "type": "structure",
+      "members": {
+        "ConfigurationEvent": "ConfigurationEvent",
+        "AudioInputEvent": "AudioInputEvent",
+        "DTMFInputEvent": "DTMFInputEvent",
+        "TextInputEvent": "TextInputEvent",
+        "PlaybackCompletionEvent": "PlaybackCompletionEvent",
+        "DisconnectionEvent": "DisconnectionEvent"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringList": {
+      "type": "list",
+      "member": "NonEmptyString"
+    },
+    "StringMap": {
+      "type": "map",
+      "key": "NonEmptyString",
+      "value": "String"
+    },
+    "StyleType": {
+      "type": "string",
+      "enum": [
+        "Default",
+        "SpellByLetter",
+        "SpellByWord"
+      ]
+    },
+    "Text": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "TextInputEvent": {
+      "type": "structure",
+      "required": [
+        "text"
+      ],
+      "members": {
+        "text": "Text",
+        "eventId": "EventId",
+        "clientTimestampMillis": "EpochMillis"
+      }
+    },
+    "Value": {
+      "type": "structure",
+      "required": [
+        "interpretedValue"
+      ],
+      "members": {
+        "originalValue": "NonEmptyString",
+        "interpretedValue": "NonEmptyString",
+        "resolvedValues": "StringList"
+      }
+    },
+    "Values": {
+      "type": "list",
+      "member": "Slot"
+    }
+  }
+}

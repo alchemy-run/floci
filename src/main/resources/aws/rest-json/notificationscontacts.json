@@ -1,0 +1,171 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "notificationscontacts",
+ "apiVersion": "2018-05-10",
+ "operations": {
+  "ActivateEmailContact": {
+   "method": "PUT",
+   "requestUri": "/emailcontacts/{arn}/activate/{code}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     },
+     "code": {
+      "location": "uri",
+      "name": "code"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateEmailContact": {
+   "method": "POST",
+   "requestUri": "/2022-09-19/emailcontacts",
+   "responseCode": 201,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteEmailContact": {
+   "method": "DELETE",
+   "requestUri": "/emailcontacts/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetEmailContact": {
+   "method": "GET",
+   "requestUri": "/emailcontacts/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "emailContact.creationTime",
+     "emailContact.updateTime"
+    ]
+   }
+  },
+  "ListEmailContacts": {
+   "method": "GET",
+   "requestUri": "/emailcontacts",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "emailContacts[].creationTime",
+     "emailContacts[].updateTime"
+    ]
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SendActivationCode": {
+   "method": "POST",
+   "requestUri": "/2022-10-31/emailcontacts/{arn}/activate/send",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{arn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "uri",
+      "name": "arn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

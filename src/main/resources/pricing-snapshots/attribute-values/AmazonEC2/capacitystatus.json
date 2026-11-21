@@ -1,0 +1,11 @@
+[
+  {
+    "Value": "AllocatedCapacityReservation"
+  },
+  {
+    "Value": "UnusedCapacityReservation"
+  },
+  {
+    "Value": "Used"
+  }
+]

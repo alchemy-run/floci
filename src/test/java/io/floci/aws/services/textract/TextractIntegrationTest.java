@@ -2,6 +2,7 @@ package io.floci.aws.services.textract;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import static io.restassured.RestAssured.given;
@@ -14,6 +15,21 @@ import static org.hamcrest.Matchers.*;
  */
 @QuarkusTest
 class TextractIntegrationTest {
+    private static boolean documentsUploaded;
+
+    /** Textract reads an S3 document and refuses one it can't, so the objects the tests name exist. */
+    @BeforeEach
+    void uploadDocuments() {
+        if (documentsUploaded) {
+            return;
+        }
+        for (String[] object : new String[][]{{"my-bucket", "test.pdf"}, {"mock-bucket", "invoice.pdf"}}) {
+            given().when().put("/" + object[0]);
+            given().body("%PDF-1.4".getBytes()).when().put("/" + object[0] + "/" + object[1]).then().statusCode(200);
+        }
+        documentsUploaded = true;
+    }
+
     @BeforeAll
     static void configureRestAssured() {
         RestAssuredJsonUtils.configureAwsContentTypes();
@@ -58,7 +74,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.DetectDocumentText")
             .header("Authorization", AUTH_HEADER)
-            .body("{}")
+            .body("{\"Document\":{\"Bytes\":\"JVBERi0xLjQ=\"}}")
         .when()
             .post("/")
         .then()
@@ -207,7 +223,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.StartDocumentTextDetection")
             .header("Authorization", AUTH_HEADER)
-            .body("{}")
+            .body("{\"DocumentLocation\":{\"S3Object\":{\"Bucket\":\"my-bucket\",\"Name\":\"test.pdf\"}}}")
         .when()
             .post("/")
         .then()
@@ -260,7 +276,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.AnalyzeDocument")
             .header("Authorization", AUTH_HEADER)
-            .body("{}")
+            .body("{\"Document\":{\"Bytes\":\"JVBERi0xLjQ=\"}}")
         .when()
             .post("/")
         .then()
@@ -275,7 +291,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.DetectDocumentText")
             .header("Authorization", AUTH_HEADER)
-            .body("{}")
+            .body("{\"Document\":{\"Bytes\":\"JVBERi0xLjQ=\"}}")
         .when()
             .post("/")
         .then()
@@ -289,7 +305,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.DetectDocumentText")
             .header("Authorization", AUTH_HEADER)
-            .body("{}")
+            .body("{\"Document\":{\"Bytes\":\"JVBERi0xLjQ=\"}}")
         .when()
             .post("/")
         .then()
@@ -303,7 +319,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.DetectDocumentText")
             .header("Authorization", AUTH_HEADER)
-            .body("{}")
+            .body("{\"Document\":{\"Bytes\":\"JVBERi0xLjQ=\"}}")
         .when()
             .post("/")
         .then()
@@ -346,7 +362,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.StartDocumentAnalysis")
             .header("Authorization", AUTH_HEADER)
-            .body("{\"FeatureTypes\":[\"TABLES\"]}")
+            .body("{\"DocumentLocation\":{\"S3Object\":{\"Bucket\":\"my-bucket\",\"Name\":\"test.pdf\"}},\"FeatureTypes\":[\"TABLES\"]}")
         .when()
             .post("/")
         .then()
@@ -371,7 +387,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.StartDocumentTextDetection")
             .header("Authorization", AUTH_HEADER)
-            .body("{}")
+            .body("{\"DocumentLocation\":{\"S3Object\":{\"Bucket\":\"my-bucket\",\"Name\":\"test.pdf\"}}}")
         .when()
             .post("/")
         .then()
@@ -382,7 +398,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.StartDocumentTextDetection")
             .header("Authorization", AUTH_HEADER)
-            .body("{}")
+            .body("{\"DocumentLocation\":{\"S3Object\":{\"Bucket\":\"my-bucket\",\"Name\":\"test.pdf\"}}}")
         .when()
             .post("/")
         .then()
@@ -398,7 +414,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.StartDocumentAnalysis")
             .header("Authorization", AUTH_HEADER)
-            .body("{\"FeatureTypes\":[\"TABLES\"]}")
+            .body("{\"DocumentLocation\":{\"S3Object\":{\"Bucket\":\"my-bucket\",\"Name\":\"test.pdf\"}},\"FeatureTypes\":[\"TABLES\"]}")
         .when()
             .post("/")
         .then()
@@ -409,7 +425,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.StartDocumentAnalysis")
             .header("Authorization", AUTH_HEADER)
-            .body("{\"FeatureTypes\":[\"FORMS\"]}")
+            .body("{\"DocumentLocation\":{\"S3Object\":{\"Bucket\":\"my-bucket\",\"Name\":\"test.pdf\"}},\"FeatureTypes\":[\"FORMS\"]}")
         .when()
             .post("/")
         .then()
@@ -425,7 +441,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.StartDocumentTextDetection")
             .header("Authorization", AUTH_HEADER)
-            .body("{}")
+            .body("{\"DocumentLocation\":{\"S3Object\":{\"Bucket\":\"my-bucket\",\"Name\":\"test.pdf\"}}}")
         .when()
             .post("/")
         .then()
@@ -449,7 +465,7 @@ class TextractIntegrationTest {
             .contentType(CONTENT_TYPE)
             .header("X-Amz-Target", "Textract.StartDocumentAnalysis")
             .header("Authorization", AUTH_HEADER)
-            .body("{\"FeatureTypes\":[\"TABLES\"]}")
+            .body("{\"DocumentLocation\":{\"S3Object\":{\"Bucket\":\"my-bucket\",\"Name\":\"test.pdf\"}},\"FeatureTypes\":[\"TABLES\"]}")
         .when()
             .post("/")
         .then()

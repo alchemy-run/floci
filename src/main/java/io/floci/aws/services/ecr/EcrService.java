@@ -72,6 +72,12 @@ public class EcrService implements ResourceProvider {
             "[0-9]{12}\\.dkr\\.ecr\\.[a-z0-9-]+\\." + AwsPartitions.dnsSuffixRegex());
 
     private static final Logger LOG = Logger.getLogger(EcrService.class);
+
+    /**
+     * The storage Region ECR Public keeps public repositories' images under: a key no private registry Region
+     * lists, so the repositories backing them stay out of private ECR's views.
+     */
+    public static final String PUBLIC_STORAGE_REGION = "ecr-public";
     private static final Pattern REPO_NAME = Pattern.compile(
             "[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*(/[a-z0-9]+((\\.|_|__|-+)[a-z0-9]+)*)*");
     private static final Pattern PULL_THROUGH_CACHE_PREFIX = Pattern.compile(
@@ -1268,11 +1274,9 @@ public class EcrService implements ResourceProvider {
         if (size == null) {
             throw layersNotFound(layerDigest, repositoryName, repo.getRegistryId());
         }
-        // AWS always answers with a pre-signed https:// URL, and clients (Alchemy's bindings among
-        // them) check for it, so the address is reported over https even when Floci's registry
-        // endpoint serves plain HTTP.
-        String url = registryManager.blobUrl(repo.getRepositoryUri(), layerDigest);
-        return url.startsWith("http://") ? "https://" + url.substring("http://".length()) : url;
+        // AWS answers with a pre-signed https:// URL that needs no credentials. Floci's answers over
+        // the scheme its registry endpoint serves, so the URL can be fetched as it is.
+        return registryManager.blobUrl(repo.getRepositoryUri(), layerDigest);
     }
 
     /** Cancels the registry upload session of a layer upload left idle for a day. */
@@ -1763,6 +1767,17 @@ public class EcrService implements ResourceProvider {
     }
 
     /** Returns the physical registry namespace selected for an ECR repository. */
+    /**
+     * Where the Docker daemon pushes to or pulls from a repository: path style on {@code localhost}, as
+     * {@link EcrRegistryManager#rewriteImageUri} does for images, because a daemon reaches only localhost and
+     * loopback addresses over plain HTTP and takes any other name, {@code *.localhost} included, for HTTPS.
+     */
+    public String daemonRepositoryUri(String repositoryName, String region) {
+        Repository repo = requireRepo(repositoryName, null, region);
+        registryManager.ensureStarted();
+        return "localhost:" + registryManager.advertisedPort() + "/" + registryRepositoryName(repo, region);
+    }
+
     public String registryRepositoryName(String repositoryName, String registryId, String region) {
         String account = effectiveAccount(registryId);
         return repoStore.get(key(region, account, repositoryName))
@@ -1866,7 +1881,7 @@ public class EcrService implements ResourceProvider {
     @Override
     public List<ExplorerResource> getResources() {
         List<ExplorerResource> resources = new ArrayList<>();
-        for (Repository repo : repoStore.scan(k -> true)) {
+        for (Repository repo : repoStore.scan(k -> !k.startsWith(PUBLIC_STORAGE_REGION + "::"))) {
             String arn = repo.getRepositoryArn();
             if (arn == null) {
                 continue;

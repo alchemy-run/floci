@@ -789,7 +789,10 @@ public class Ec2ContainerManager {
                 .withLabels(Map.of(LABEL_OWNER, ownerIdentity()))
                 // EC2 instances expose IMDS on 169.254.169.254. Floci needs network administration
                 // privileges in the local container to attach that link-local address.
-                .withPrivileged(namespace == null)
+                // A guest behind its own network namespace is privileged too unless security groups are
+                // enforced there: Docker inside the guest (an image run by its user data) needs it, and
+                // with no firewall in the namespace there is nothing for the guest to get around.
+                .withPrivileged(namespace == null || firewallManager == null || !firewallManager.enabled())
                 .withCmd(image.systemd() ? List.of("/sbin/init") : List.of("tail", "-f", "/dev/null"));
         if (config.services().ec2().instanceResourceLimits() && instanceType != null && !instanceType.isBlank()) {
             Optional<CatalogInstanceType> catalogType = instanceTypeCatalog.find(instanceType);
@@ -1978,6 +1981,7 @@ public class Ec2ContainerManager {
     }
 
     private void executeUserData(String containerId, String instanceId, String userData, String region) {
+        writeSharedAwsConfig(containerId, instanceId);
         String logGroup = "/aws/ec2/" + instanceId;
         String logStream = logStreamer != null ? logStreamer.generateLogStreamName("user-data") : null;
 
@@ -1990,6 +1994,45 @@ public class Ec2ContainerManager {
         UserDataPipeline.executeUserData(
                 dockerClient, containerId, "EC2 instance " + instanceId, userData,
                 userDataExecutionTimeout, lineConsumer, activeUserDataCallbacks);
+    }
+
+    /**
+     * Writes the guest's AWS environment ({@link #localAwsEnvironment}) into root's shared AWS config
+     * and credentials files, so a command run with a cleared environment ({@code env -i}, a systemd
+     * unit) still reaches Floci rather than AWS. A guest's own files are left as they are.
+     */
+    private void writeSharedAwsConfig(String containerId, String instanceId) {
+        // Best effort, and never in the way of the user data that follows: a guest whose own
+        // environment is intact still reaches Floci without the files.
+        try {
+            ContainerExec.Result result = execInContainerForResult(containerId, sharedAwsConfigCommand(), 30);
+            if (result.exitCode() != 0) {
+                LOG.warnv("Could not write the shared AWS config for EC2 instance {0}: {1}",
+                        instanceId, result.summary());
+            }
+        } catch (RuntimeException e) {
+            LOG.warnv("Could not write the shared AWS config for EC2 instance {0}: {1}", instanceId, e.getMessage());
+        }
+    }
+
+    /** The guest command {@link #writeSharedAwsConfig} runs, reading the container's own AWS environment. */
+    static String[] sharedAwsConfigCommand() {
+        return new String[] {"sh", "-c",
+                "d=\"${HOME:-/root}/.aws\"; mkdir -p \"$d\" || exit 1;"
+                + "if [ ! -e \"$d/config\" ]; then {"
+                + " echo '[default]';"
+                + " if [ -n \"$AWS_REGION\" ]; then echo \"region = $AWS_REGION\"; fi;"
+                + " if [ -n \"$AWS_ENDPOINT_URL\" ]; then echo \"endpoint_url = $AWS_ENDPOINT_URL\"; fi;"
+                + " if [ -n \"$AWS_EC2_METADATA_SERVICE_ENDPOINT\" ]; then"
+                + " echo \"ec2_metadata_service_endpoint = $AWS_EC2_METADATA_SERVICE_ENDPOINT\"; fi;"
+                + " if [ -n \"$AWS_CA_BUNDLE\" ]; then echo \"ca_bundle = $AWS_CA_BUNDLE\"; fi;"
+                + " } > \"$d/config\" || exit 1; fi;"
+                + "if [ -n \"$AWS_ACCESS_KEY_ID\" ] && [ ! -e \"$d/credentials\" ]; then {"
+                + " echo '[default]';"
+                + " echo \"aws_access_key_id = $AWS_ACCESS_KEY_ID\";"
+                + " echo \"aws_secret_access_key = $AWS_SECRET_ACCESS_KEY\";"
+                + " if [ -n \"$AWS_SESSION_TOKEN\" ]; then echo \"aws_session_token = $AWS_SESSION_TOKEN\"; fi;"
+                + " } > \"$d/credentials\" || exit 1; fi"};
     }
 
     private void closeActiveUserDataCallbacks() {
@@ -2389,6 +2432,38 @@ public class Ec2ContainerManager {
                 "if command -v systemctl >/dev/null 2>&1; then",
                 "  if [ -d /run/systemd/system ] || ! systemctl --version 2>/dev/null | grep -q '^systemd '; then exit 0; fi",
                 "fi",
+                "cat > /usr/local/sbin/floci-unit-runner <<'RUNNER'",
+                "#!/bin/sh",
+                "# Runs one systemd unit as systemd's Restart=always would, where there is no systemd.",
+                "unitfile=\"$1\"",
+                "val() { sed -n \"s/^$1=//p\" \"$unitfile\"; }",
+                "wd=$(val WorkingDirectory | tail -n 1)",
+                "if [ -n \"$wd\" ]; then cd \"$wd\" || exit 1; fi",
+                "pres=$(mktemp)",
+                "while true; do",
+                "  # Every ExecStartPre, in order. A leading \"-\" ignores its failure.",
+                "  val ExecStartPre > \"$pres\"",
+                "  ok=1",
+                "  while IFS= read -r line; do",
+                "    optional=0",
+                "    case \"$line\" in -*) optional=1; line=${line#-} ;; esac",
+                "    line=${line#[@+!]}",
+                "    eval \"$line\" </dev/null || [ \"$optional\" = 1 ] || { ok=0; break; }",
+                "  done < \"$pres\"",
+                "  if [ \"$ok\" = 0 ]; then sleep 5; continue; fi",
+                "  # Every EnvironmentFile, re-read before ExecStart; \"-\" marks one that may be missing.",
+                "  for f in $(val EnvironmentFile | sed 's/^-//'); do",
+                "    if [ -f \"$f\" ]; then set -a; . \"$f\"; set +a; fi",
+                "  done",
+                "  start=$(val ExecStart | tail -n 1)",
+                "  start=${start#[-@+!]}",
+                "  # Socket activation (dockerd -H fd://) needs systemd: listen on the daemon's own socket.",
+                "  start=$(printf '%s' \"$start\" | sed 's#-H fd://#-H unix:///var/run/docker.sock#')",
+                "  if [ -n \"$start\" ]; then eval \"$start\"; fi",
+                "  sleep 5",
+                "done",
+                "RUNNER",
+                "chmod 755 /usr/local/sbin/floci-unit-runner",
                 "cat > /usr/local/sbin/systemctl <<'SHIM'",
                 "#!/bin/sh",
                 "cmd=\"${1:-}\"",
@@ -2404,12 +2479,11 @@ public class Ec2ContainerManager {
                 "    unit=\"${unit%.service}\"",
                 "    unitfile=\"/etc/systemd/system/${unit}.service\"",
                 "    [ -f \"$unitfile\" ] || unitfile=\"/lib/systemd/system/${unit}.service\"",
+                "    [ -f \"$unitfile\" ] || unitfile=\"/usr/lib/systemd/system/${unit}.service\"",
                 "    [ -f \"$unitfile\" ] || exit 0",
-                "    wd=$(sed -n 's/^WorkingDirectory=//p' \"$unitfile\" | tail -n 1)",
-                "    pre=$(sed -n 's/^ExecStartPre=//p' \"$unitfile\" | tail -n 1)",
-                "    start=$(sed -n 's/^ExecStart=//p' \"$unitfile\" | tail -n 1)",
-                "    envfile=$(sed -n 's/^EnvironmentFile=-\\{0,1\\}//p' \"$unitfile\" | tail -n 1)",
-                "    pidfile=\"/var/run/${unit}.pid\"",
+                "    # Named apart from the unit's own pidfile: dockerd writes /var/run/docker.pid and won't",
+                "    # start while it names a live process, as the runner would be.",
+                "    pidfile=\"/var/run/floci-unit-${unit}.pid\"",
                 "    # PIDs restart from 1 after a container reboot, so a stale pidfile can",
                 "    # name an unrelated live process: only trust it if it is this unit's loop.",
                 "    if [ -f \"$pidfile\" ]; then",
@@ -2419,24 +2493,18 @@ public class Ec2ContainerManager {
                 "        exit 0",
                 "      fi",
                 "    fi",
-                "    # ExecStartPre downloads EnvironmentFile (Alchemy hosted env).",
-                "    # Run it INSIDE the restart loop, like systemd Restart=always",
-                "    # does: every unit restart re-syncs the bundle and re-sources",
-                "    # the env before ExecStart.",
-                "    nohup sh -c '",
-                "      unitfile=\"$0\"",
-                "      wd=$(sed -n \"s/^WorkingDirectory=//p\" \"$unitfile\" | tail -n 1)",
-                "      pre=$(sed -n \"s/^ExecStartPre=//p\" \"$unitfile\" | tail -n 1)",
-                "      start=$(sed -n \"s/^ExecStart=//p\" \"$unitfile\" | tail -n 1)",
-                "      envfile=$(sed -n \"s/^EnvironmentFile=-\\{0,1\\}//p\" \"$unitfile\" | tail -n 1)",
-                "      if [ -n \"$wd\" ]; then cd \"$wd\" || exit 1; fi",
-                "      while true; do",
-                "        if [ -n \"$pre\" ]; then $pre || { sleep 5; continue; }; fi",
-                "        if [ -n \"$envfile\" ] && [ -f \"$envfile\" ]; then set -a; . \"$envfile\"; set +a; fi",
-                "        if [ -n \"$start\" ]; then $start; fi",
-                "        sleep 5",
-                "      done",
-                "    ' \"$unitfile\" >/var/log/${unit}.log 2>&1 &",
+                "    # The services it needs come up first, as systemd orders them (docker needs containerd).",
+                "    # The marker stops two units that want each other from starting each other forever.",
+                "    [ -e \"/var/run/floci-unit-${unit}.starting\" ] && exit 0",
+                "    : > \"/var/run/floci-unit-${unit}.starting\"",
+                "    for dep in $(sed -n 's/^\\(Requires\\|Wants\\)=//p' \"$unitfile\"); do",
+                "      case \"$dep\" in *.service) \"$0\" start \"$dep\" ;; esac",
+                "    done",
+                "    rm -f \"/var/run/floci-unit-${unit}.starting\"",
+                "    # ExecStartPre downloads EnvironmentFile (Alchemy hosted env). The runner",
+                "    # runs it INSIDE the restart loop, like systemd Restart=always does: every",
+                "    # unit restart re-syncs the bundle and re-sources the env before ExecStart.",
+                "    nohup /usr/local/sbin/floci-unit-runner \"$unitfile\" >/var/log/${unit}.log 2>&1 &",
                 "    echo $! > \"$pidfile\"",
                 "    exit 0",
                 "    ;;",

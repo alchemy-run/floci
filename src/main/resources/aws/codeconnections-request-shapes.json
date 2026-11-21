@@ -1,0 +1,574 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_codeconnections_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateConnection": "CreateConnectionInput",
+    "CreateHost": "CreateHostInput",
+    "CreateRepositoryLink": "CreateRepositoryLinkInput",
+    "CreateSyncConfiguration": "CreateSyncConfigurationInput",
+    "DeleteConnection": "DeleteConnectionInput",
+    "DeleteHost": "DeleteHostInput",
+    "DeleteRepositoryLink": "DeleteRepositoryLinkInput",
+    "DeleteSyncConfiguration": "DeleteSyncConfigurationInput",
+    "GetConnection": "GetConnectionInput",
+    "GetHost": "GetHostInput",
+    "GetRepositoryLink": "GetRepositoryLinkInput",
+    "GetRepositorySyncStatus": "GetRepositorySyncStatusInput",
+    "GetResourceSyncStatus": "GetResourceSyncStatusInput",
+    "GetSyncBlockerSummary": "GetSyncBlockerSummaryInput",
+    "GetSyncConfiguration": "GetSyncConfigurationInput",
+    "ListConnections": "ListConnectionsInput",
+    "ListHosts": "ListHostsInput",
+    "ListRepositoryLinks": "ListRepositoryLinksInput",
+    "ListRepositorySyncDefinitions": "ListRepositorySyncDefinitionsInput",
+    "ListSyncConfigurations": "ListSyncConfigurationsInput",
+    "ListTagsForResource": "ListTagsForResourceInput",
+    "TagResource": "TagResourceInput",
+    "UntagResource": "UntagResourceInput",
+    "UpdateHost": "UpdateHostInput",
+    "UpdateRepositoryLink": "UpdateRepositoryLinkInput",
+    "UpdateSyncBlocker": "UpdateSyncBlockerInput",
+    "UpdateSyncConfiguration": "UpdateSyncConfigurationInput"
+  },
+  "shapes": {
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:aws(-[\\w]+)*:.+:.+:[0-9]{12}:.+"
+    },
+    "BranchName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^.*$"
+    },
+    "ConnectionArn": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "arn:aws(-[\\w]+)*:.+:.+:[0-9]{12}:.+"
+    },
+    "ConnectionName": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "[\\s\\S]*"
+    },
+    "CreateConnectionInput": {
+      "type": "structure",
+      "required": [
+        "ConnectionName"
+      ],
+      "members": {
+        "ProviderType": "ProviderType",
+        "ConnectionName": "ConnectionName",
+        "Tags": "TagList",
+        "HostArn": "HostArn"
+      }
+    },
+    "CreateHostInput": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "ProviderType",
+        "ProviderEndpoint"
+      ],
+      "members": {
+        "Name": "HostName",
+        "ProviderType": "ProviderType",
+        "ProviderEndpoint": "Url",
+        "VpcConfiguration": "VpcConfiguration",
+        "Tags": "TagList"
+      }
+    },
+    "CreateRepositoryLinkInput": {
+      "type": "structure",
+      "required": [
+        "ConnectionArn",
+        "OwnerId",
+        "RepositoryName"
+      ],
+      "members": {
+        "ConnectionArn": "ConnectionArn",
+        "OwnerId": "OwnerId",
+        "RepositoryName": "RepositoryName",
+        "EncryptionKeyArn": "KmsKeyArn",
+        "Tags": "TagList"
+      }
+    },
+    "CreateSyncConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "Branch",
+        "ConfigFile",
+        "RepositoryLinkId",
+        "ResourceName",
+        "RoleArn",
+        "SyncType"
+      ],
+      "members": {
+        "Branch": "BranchName",
+        "ConfigFile": "DeploymentFilePath",
+        "RepositoryLinkId": "RepositoryLinkId",
+        "ResourceName": "ResourceName",
+        "RoleArn": "IamRoleArn",
+        "SyncType": "SyncConfigurationType",
+        "PublishDeploymentStatus": "PublishDeploymentStatus",
+        "TriggerResourceUpdateOn": "TriggerResourceUpdateOn",
+        "PullRequestComment": "PullRequestComment"
+      }
+    },
+    "DeleteConnectionInput": {
+      "type": "structure",
+      "required": [
+        "ConnectionArn"
+      ],
+      "members": {
+        "ConnectionArn": "ConnectionArn"
+      }
+    },
+    "DeleteHostInput": {
+      "type": "structure",
+      "required": [
+        "HostArn"
+      ],
+      "members": {
+        "HostArn": "HostArn"
+      }
+    },
+    "DeleteRepositoryLinkInput": {
+      "type": "structure",
+      "required": [
+        "RepositoryLinkId"
+      ],
+      "members": {
+        "RepositoryLinkId": "RepositoryLinkId"
+      }
+    },
+    "DeleteSyncConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "SyncType",
+        "ResourceName"
+      ],
+      "members": {
+        "SyncType": "SyncConfigurationType",
+        "ResourceName": "ResourceName"
+      }
+    },
+    "DeploymentFilePath": {
+      "type": "string"
+    },
+    "GetConnectionInput": {
+      "type": "structure",
+      "required": [
+        "ConnectionArn"
+      ],
+      "members": {
+        "ConnectionArn": "ConnectionArn"
+      }
+    },
+    "GetHostInput": {
+      "type": "structure",
+      "required": [
+        "HostArn"
+      ],
+      "members": {
+        "HostArn": "HostArn"
+      }
+    },
+    "GetRepositoryLinkInput": {
+      "type": "structure",
+      "required": [
+        "RepositoryLinkId"
+      ],
+      "members": {
+        "RepositoryLinkId": "RepositoryLinkId"
+      }
+    },
+    "GetRepositorySyncStatusInput": {
+      "type": "structure",
+      "required": [
+        "Branch",
+        "RepositoryLinkId",
+        "SyncType"
+      ],
+      "members": {
+        "Branch": "BranchName",
+        "RepositoryLinkId": "RepositoryLinkId",
+        "SyncType": "SyncConfigurationType"
+      }
+    },
+    "GetResourceSyncStatusInput": {
+      "type": "structure",
+      "required": [
+        "ResourceName",
+        "SyncType"
+      ],
+      "members": {
+        "ResourceName": "ResourceName",
+        "SyncType": "SyncConfigurationType"
+      }
+    },
+    "GetSyncBlockerSummaryInput": {
+      "type": "structure",
+      "required": [
+        "SyncType",
+        "ResourceName"
+      ],
+      "members": {
+        "SyncType": "SyncConfigurationType",
+        "ResourceName": "ResourceName"
+      }
+    },
+    "GetSyncConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "SyncType",
+        "ResourceName"
+      ],
+      "members": {
+        "SyncType": "SyncConfigurationType",
+        "ResourceName": "ResourceName"
+      }
+    },
+    "HostArn": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "arn:aws(-[\\w]+)*:(codestar-connections|codeconnections):.+:[0-9]{12}:host\\/.+"
+    },
+    "HostName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": ".*"
+    },
+    "IamRoleArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "arn:aws(-[\\w]+)*:iam::\\d{12}:role/[a-zA-Z_0-9+=,.@\\-_/]+"
+    },
+    "Id": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "arn:aws(-[\\w]+)*:kms:[a-z\\-0-9]+:\\d{12}:key/[a-zA-Z0-9\\-]+"
+    },
+    "ListConnectionsInput": {
+      "type": "structure",
+      "members": {
+        "ProviderTypeFilter": "ProviderType",
+        "HostArnFilter": "HostArn",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListHostsInput": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListRepositoryLinksInput": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "SharpNextToken"
+      }
+    },
+    "ListRepositorySyncDefinitionsInput": {
+      "type": "structure",
+      "required": [
+        "RepositoryLinkId",
+        "SyncType"
+      ],
+      "members": {
+        "RepositoryLinkId": "RepositoryLinkId",
+        "SyncType": "SyncConfigurationType"
+      }
+    },
+    "ListSyncConfigurationsInput": {
+      "type": "structure",
+      "required": [
+        "RepositoryLinkId",
+        "SyncType"
+      ],
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "SharpNextToken",
+        "RepositoryLinkId": "RepositoryLinkId",
+        "SyncType": "SyncConfigurationType"
+      }
+    },
+    "ListTagsForResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 0,
+      "max": 100
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "^.*$"
+    },
+    "OwnerId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "^.*$"
+    },
+    "ProviderType": {
+      "type": "string",
+      "enum": [
+        "Bitbucket",
+        "GitHub",
+        "GitHubEnterpriseServer",
+        "GitLab",
+        "GitLabSelfManaged",
+        "AzureDevOps"
+      ]
+    },
+    "PublishDeploymentStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "PullRequestComment": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "RepositoryLinkId": {
+      "type": "string",
+      "pattern": "^[0-9a-fA-F]{8}\\b-[0-9a-fA-F]{4}\\b-[0-9a-fA-F]{4}\\b-[0-9a-fA-F]{4}\\b-[0-9a-fA-F]{12}$"
+    },
+    "RepositoryName": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^.*$"
+    },
+    "ResolvedReason": {
+      "type": "string",
+      "min": 1,
+      "max": 250
+    },
+    "ResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "^[0-9A-Za-z]+[0-9A-Za-z_\\\\-]*$"
+    },
+    "SecurityGroupId": {
+      "type": "string",
+      "min": 11,
+      "max": 20,
+      "pattern": "sg-\\w{8}(\\w{9})?"
+    },
+    "SecurityGroupIds": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "SecurityGroupId"
+    },
+    "SharpNextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 2048,
+      "pattern": "^.*$"
+    },
+    "SubnetId": {
+      "type": "string",
+      "min": 15,
+      "max": 24,
+      "pattern": "subnet-\\w{8}(\\w{9})?"
+    },
+    "SubnetIds": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "SubnetId"
+    },
+    "SyncConfigurationType": {
+      "type": "string",
+      "enum": [
+        "CFN_STACK_SYNC"
+      ]
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": ".*"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TagResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": ".*"
+    },
+    "TlsCertificate": {
+      "type": "string",
+      "min": 1,
+      "max": 16384,
+      "pattern": "[\\s\\S]*"
+    },
+    "TriggerResourceUpdateOn": {
+      "type": "string",
+      "enum": [
+        "ANY_CHANGE",
+        "FILE_CHANGE"
+      ]
+    },
+    "UntagResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "AmazonResourceName",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateHostInput": {
+      "type": "structure",
+      "required": [
+        "HostArn"
+      ],
+      "members": {
+        "HostArn": "HostArn",
+        "ProviderEndpoint": "Url",
+        "VpcConfiguration": "VpcConfiguration"
+      }
+    },
+    "UpdateRepositoryLinkInput": {
+      "type": "structure",
+      "required": [
+        "RepositoryLinkId"
+      ],
+      "members": {
+        "ConnectionArn": "ConnectionArn",
+        "EncryptionKeyArn": "KmsKeyArn",
+        "RepositoryLinkId": "RepositoryLinkId"
+      }
+    },
+    "UpdateSyncBlockerInput": {
+      "type": "structure",
+      "required": [
+        "Id",
+        "SyncType",
+        "ResourceName",
+        "ResolvedReason"
+      ],
+      "members": {
+        "Id": "Id",
+        "SyncType": "SyncConfigurationType",
+        "ResourceName": "ResourceName",
+        "ResolvedReason": "ResolvedReason"
+      }
+    },
+    "UpdateSyncConfigurationInput": {
+      "type": "structure",
+      "required": [
+        "ResourceName",
+        "SyncType"
+      ],
+      "members": {
+        "Branch": "BranchName",
+        "ConfigFile": "DeploymentFilePath",
+        "RepositoryLinkId": "RepositoryLinkId",
+        "ResourceName": "ResourceName",
+        "RoleArn": "IamRoleArn",
+        "SyncType": "SyncConfigurationType",
+        "PublishDeploymentStatus": "PublishDeploymentStatus",
+        "TriggerResourceUpdateOn": "TriggerResourceUpdateOn",
+        "PullRequestComment": "PullRequestComment"
+      }
+    },
+    "Url": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": ".*"
+    },
+    "VpcConfiguration": {
+      "type": "structure",
+      "required": [
+        "VpcId",
+        "SubnetIds",
+        "SecurityGroupIds"
+      ],
+      "members": {
+        "VpcId": "VpcId",
+        "SubnetIds": "SubnetIds",
+        "SecurityGroupIds": "SecurityGroupIds",
+        "TlsCertificate": "TlsCertificate"
+      }
+    },
+    "VpcId": {
+      "type": "string",
+      "min": 12,
+      "max": 21,
+      "pattern": "vpc-\\w{8}(\\w{9})?"
+    }
+  }
+}

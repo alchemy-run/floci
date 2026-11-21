@@ -1,5 +1,6 @@
 package io.floci.aws.services.dms;
 
+import io.floci.aws.testing.Ec2Defaults;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
@@ -32,9 +33,9 @@ class DmsIntegrationTest {
     private static final String ACCOUNT_ID = "723679240095";
     private static final String AUTH_HEADER =
             "AWS4-HMAC-SHA256 Credential=" + ACCOUNT_ID + "/20260101/us-east-1/dms/aws4_request";
-    private static final String SUBNET_A = "subnet-default-us-east-1-a";
-    private static final String SUBNET_B = "subnet-default-us-east-1-b";
-    private static final String SUBNET_C = "subnet-default-us-east-1-c";
+    private static final String SUBNET_A = Ec2Defaults.SUBNET_A;
+    private static final String SUBNET_B = Ec2Defaults.SUBNET_B;
+    private static final String SUBNET_C = Ec2Defaults.SUBNET_C;
 
     @BeforeAll
     static void configureRestAssured() {
@@ -63,7 +64,7 @@ class DmsIntegrationTest {
                 .body("ReplicationSubnetGroups", hasSize(1))
                 .body("ReplicationSubnetGroups[0].ReplicationSubnetGroupDescription",
                         equalTo("terraform managed"))
-                .body("ReplicationSubnetGroups[0].VpcId", equalTo("vpc-default-us-east-1"))
+                .body("ReplicationSubnetGroups[0].VpcId", equalTo(Ec2Defaults.VPC))
                 .body("ReplicationSubnetGroups[0].SubnetGroupStatus", equalTo("Complete"))
                 .body("ReplicationSubnetGroups[0].Subnets.SubnetIdentifier", contains(SUBNET_A, SUBNET_B))
                 .body("ReplicationSubnetGroups[0].Subnets.find { it.SubnetIdentifier == '"
@@ -452,8 +453,8 @@ class DmsIntegrationTest {
                 .statusCode(200)
                 .body("ReplicationInstance.ReplicationInstanceStatus", equalTo("creating"))
                 .body("ReplicationInstance.ReplicationInstanceArn", containsString(":rep:"))
-                .body("ReplicationInstance.ReplicationSubnetGroup.VpcId", equalTo("vpc-default-us-east-1"))
-                .body("ReplicationInstance.VpcSecurityGroups.VpcSecurityGroupId", contains("sg-default-us-east-1"))
+                .body("ReplicationInstance.ReplicationSubnetGroup.VpcId", equalTo(Ec2Defaults.VPC))
+                .body("ReplicationInstance.VpcSecurityGroups.VpcSecurityGroupId", contains(Ec2Defaults.SECURITY_GROUP))
                 .extract().path("ReplicationInstance.ReplicationInstanceArn");
 
         dms("DescribeReplicationInstances")

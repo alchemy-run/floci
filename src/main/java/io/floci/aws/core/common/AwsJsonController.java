@@ -5,16 +5,26 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.ObjectReader;
+import io.floci.aws.services.airflowserverless.AirflowServerlessJsonHandler;
+import io.floci.aws.services.apprunner.AppRunnerJsonHandler;
+import io.floci.aws.services.b2bi.B2biJsonHandler;
 import io.floci.aws.services.bcmpricingcalculator.BcmPricingCalculatorJsonHandler;
 import io.floci.aws.services.cloudcontrol.CloudControlJsonHandler;
 import io.floci.aws.services.cloudwatch.metrics.CloudWatchMetricsJsonHandler;
+import io.floci.aws.services.codeconnections.CodeConnectionsJsonHandler;
 import io.floci.aws.services.dynamodb.DynamoDbJsonHandler;
 import io.floci.aws.services.dynamodb.DynamoDbRequestShapes;
 import io.floci.aws.services.dynamodb.DynamoDbResponses;
 import io.floci.aws.services.dynamodb.DynamoDbStreamsJsonHandler;
+import io.floci.aws.services.healthlake.HealthLakeJsonHandler;
+import io.floci.aws.services.iotfleetwise.IotFleetWiseJsonHandler;
+import io.floci.aws.services.keyspaces.KeyspacesJsonHandler;
+import io.floci.aws.services.mailmanager.MailManagerJsonHandler;
 import io.floci.aws.services.marketplace.MarketplaceJsonHandler;
 import io.floci.aws.services.networkfirewall.NetworkFirewallJsonHandler;
+import io.floci.aws.services.opensearchserverless.AossJsonHandler;
 import io.floci.aws.services.paymentcryptography.PaymentCryptographyJsonHandler;
+import io.floci.aws.services.pinpointsmsvoicev2.SmsVoiceJsonHandler;
 import io.floci.aws.services.sns.SnsJsonHandler;
 import io.floci.aws.services.sqs.SqsJsonHandler;
 import io.floci.aws.services.stepfunctions.StepFunctionsJsonHandler;
@@ -65,12 +75,23 @@ public class AwsJsonController {
     private final SwfJsonHandler swfJsonHandler;
     private final NetworkFirewallJsonHandler networkFirewallJsonHandler;
     private final PaymentCryptographyJsonHandler paymentCryptographyJsonHandler;
+    private final AppRunnerJsonHandler appRunnerJsonHandler;
+    private final B2biJsonHandler b2biJsonHandler;
+    private final CodeConnectionsJsonHandler codeConnectionsJsonHandler;
+    private final KeyspacesJsonHandler keyspacesJsonHandler;
+    private final AirflowServerlessJsonHandler airflowServerlessJsonHandler;
+    private final AossJsonHandler aossJsonHandler;
+    private final SmsVoiceJsonHandler smsVoiceJsonHandler;
     private final MarketplaceJsonHandler marketplaceJsonHandler;
     private final VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler;
     private final BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler;
     private final TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler;
+    private final HealthLakeJsonHandler healthLakeJsonHandler;
+    private final IotFleetWiseJsonHandler iotFleetWiseJsonHandler;
     @Inject
     TimestreamJsonHandler timestreamJsonHandler;
+    @Inject
+    MailManagerJsonHandler mailManagerJsonHandler;
 
     @Inject
     public AwsJsonController(ObjectMapper objectMapper, ResolvedServiceCatalog catalog,
@@ -84,10 +105,19 @@ public class AwsJsonController {
                              SwfJsonHandler swfJsonHandler,
                              NetworkFirewallJsonHandler networkFirewallJsonHandler,
                              PaymentCryptographyJsonHandler paymentCryptographyJsonHandler,
+                             AppRunnerJsonHandler appRunnerJsonHandler,
+                             B2biJsonHandler b2biJsonHandler,
+                             CodeConnectionsJsonHandler codeConnectionsJsonHandler,
+                             KeyspacesJsonHandler keyspacesJsonHandler,
+                             AirflowServerlessJsonHandler airflowServerlessJsonHandler,
+                             AossJsonHandler aossJsonHandler,
+                             SmsVoiceJsonHandler smsVoiceJsonHandler,
                              MarketplaceJsonHandler marketplaceJsonHandler,
                              VerifiedPermissionsJsonHandler verifiedPermissionsJsonHandler,
                              BcmPricingCalculatorJsonHandler bcmPricingCalculatorJsonHandler,
-                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler) {
+                             TimestreamInfluxDbJsonHandler timestreamInfluxDbJsonHandler,
+                             HealthLakeJsonHandler healthLakeJsonHandler,
+                             IotFleetWiseJsonHandler iotFleetWiseJsonHandler) {
         this.objectMapper = objectMapper;
         this.strictBodyReader = objectMapper.reader().with(DeserializationFeature.FAIL_ON_TRAILING_TOKENS);
         this.catalog = catalog;
@@ -102,10 +132,19 @@ public class AwsJsonController {
         this.swfJsonHandler = swfJsonHandler;
         this.networkFirewallJsonHandler = networkFirewallJsonHandler;
         this.paymentCryptographyJsonHandler = paymentCryptographyJsonHandler;
+        this.appRunnerJsonHandler = appRunnerJsonHandler;
+        this.b2biJsonHandler = b2biJsonHandler;
+        this.codeConnectionsJsonHandler = codeConnectionsJsonHandler;
+        this.keyspacesJsonHandler = keyspacesJsonHandler;
+        this.airflowServerlessJsonHandler = airflowServerlessJsonHandler;
+        this.aossJsonHandler = aossJsonHandler;
+        this.smsVoiceJsonHandler = smsVoiceJsonHandler;
         this.marketplaceJsonHandler = marketplaceJsonHandler;
         this.verifiedPermissionsJsonHandler = verifiedPermissionsJsonHandler;
         this.bcmPricingCalculatorJsonHandler = bcmPricingCalculatorJsonHandler;
         this.timestreamInfluxDbJsonHandler = timestreamInfluxDbJsonHandler;
+        this.healthLakeJsonHandler = healthLakeJsonHandler;
+        this.iotFleetWiseJsonHandler = iotFleetWiseJsonHandler;
     }
 
     /**
@@ -198,11 +237,22 @@ public class AwsJsonController {
                 // AWS SDK sends application/x-amz-json-1.0 and targets
                 // PaymentCryptographyControlPlane.<Operation>.
                 case "paymentcryptography" -> paymentCryptographyJsonHandler.handle(action, request, region);
+                case "apprunner" -> appRunnerJsonHandler.handle(action, request, region);
+                case "b2bi" -> b2biJsonHandler.handle(action, request, region);
+                case "codeconnections" -> codeConnectionsJsonHandler.handle(action, request, region);
+                case "keyspaces" -> keyspacesJsonHandler.handle(action, request, region);
+                case "airflow-serverless" -> airflowServerlessJsonHandler.handle(action, request, region);
+                case "aoss" -> aossJsonHandler.handle(action, request, region);
+                case "sms-voice" -> smsVoiceJsonHandler.handle(action, request, region);
+                case "keyspacesstreams" -> keyspacesJsonHandler.handleStreams(action, request, region);
                 case "marketplace" -> marketplaceJsonHandler.handle(action, request, region);
                 case "verifiedpermissions" -> verifiedPermissionsJsonHandler.handle(action, request, region);
                 case "bcm-pricing-calculator" -> bcmPricingCalculatorJsonHandler.handle(action, request, region);
                 case "timestream-influxdb" -> timestreamInfluxDbJsonHandler.handle(action, request, region);
+                case "healthlake" -> healthLakeJsonHandler.handle(action, request, region);
+                case "iotfleetwise" -> iotFleetWiseJsonHandler.handle(action, request, region);
                 case "timestream" -> timestreamJsonHandler.handle(action, request, region);
+                case "mailmanager" -> mailManagerJsonHandler.handle(action, request, region);
                 default -> null;
             };
             // catalog.matchTarget is protocol-agnostic: a JSON 1.1 target

@@ -1,0 +1,3024 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "mediatailor",
+ "apiVersion": "2018-04-23",
+ "operations": {
+  "ConfigureLogsForChannel": {
+   "method": "PUT",
+   "requestUri": "/configureLogs/channel",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "shape": "ConfigureLogsForChannelRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ConfigureLogsForChannelResponse"
+   }
+  },
+  "ConfigureLogsForPlaybackConfiguration": {
+   "method": "PUT",
+   "requestUri": "/configureLogs/playbackConfiguration",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "shape": "ConfigureLogsForPlaybackConfigurationRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ConfigureLogsForPlaybackConfigurationResponse"
+   }
+  },
+  "CreateChannel": {
+   "method": "POST",
+   "requestUri": "/channel/{ChannelName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "CreateChannelRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateChannelResponse"
+   }
+  },
+  "CreateLiveSource": {
+   "method": "POST",
+   "requestUri": "/sourceLocation/{SourceLocationName}/liveSource/{LiveSourceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "LiveSourceName": {
+      "location": "uri",
+      "name": "LiveSourceName"
+     },
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     }
+    },
+    "shape": "CreateLiveSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateLiveSourceResponse"
+   }
+  },
+  "CreatePrefetchSchedule": {
+   "method": "POST",
+   "requestUri": "/prefetchSchedule/{PlaybackConfigurationName}/{Name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "Name"
+     },
+     "PlaybackConfigurationName": {
+      "location": "uri",
+      "name": "PlaybackConfigurationName"
+     }
+    },
+    "timestamps": [
+     "Consumption.EndTime",
+     "Consumption.StartTime",
+     "Retrieval.EndTime",
+     "Retrieval.StartTime",
+     "RecurringPrefetchConfiguration.StartTime",
+     "RecurringPrefetchConfiguration.EndTime"
+    ],
+    "shape": "CreatePrefetchScheduleRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreatePrefetchScheduleResponse"
+   }
+  },
+  "CreateProgram": {
+   "method": "POST",
+   "requestUri": "/channel/{ChannelName}/program/{ProgramName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "ProgramName": {
+      "location": "uri",
+      "name": "ProgramName"
+     }
+    },
+    "shape": "CreateProgramRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateProgramResponse"
+   }
+  },
+  "CreateSourceLocation": {
+   "method": "POST",
+   "requestUri": "/sourceLocation/{SourceLocationName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     }
+    },
+    "shape": "CreateSourceLocationRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateSourceLocationResponse"
+   }
+  },
+  "CreateVodSource": {
+   "method": "POST",
+   "requestUri": "/sourceLocation/{SourceLocationName}/vodSource/{VodSourceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     },
+     "VodSourceName": {
+      "location": "uri",
+      "name": "VodSourceName"
+     }
+    },
+    "shape": "CreateVodSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateVodSourceResponse"
+   }
+  },
+  "DeleteChannel": {
+   "method": "DELETE",
+   "requestUri": "/channel/{ChannelName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "DeleteChannelRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteChannelResponse"
+   }
+  },
+  "DeleteChannelPolicy": {
+   "method": "DELETE",
+   "requestUri": "/channel/{ChannelName}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "DeleteChannelPolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteChannelPolicyResponse"
+   }
+  },
+  "DeleteFunction": {
+   "method": "DELETE",
+   "requestUri": "/function/{FunctionId}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "FunctionId": {
+      "location": "uri",
+      "name": "FunctionId"
+     }
+    },
+    "shape": "DeleteFunctionRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteFunctionResponse"
+   }
+  },
+  "DeleteLiveSource": {
+   "method": "DELETE",
+   "requestUri": "/sourceLocation/{SourceLocationName}/liveSource/{LiveSourceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "LiveSourceName": {
+      "location": "uri",
+      "name": "LiveSourceName"
+     },
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     }
+    },
+    "shape": "DeleteLiveSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteLiveSourceResponse"
+   }
+  },
+  "DeletePlaybackConfiguration": {
+   "method": "DELETE",
+   "requestUri": "/playbackConfiguration/{Name}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "Name"
+     }
+    },
+    "shape": "DeletePlaybackConfigurationRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeletePlaybackConfigurationResponse"
+   }
+  },
+  "DeletePrefetchSchedule": {
+   "method": "DELETE",
+   "requestUri": "/prefetchSchedule/{PlaybackConfigurationName}/{Name}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "Name"
+     },
+     "PlaybackConfigurationName": {
+      "location": "uri",
+      "name": "PlaybackConfigurationName"
+     }
+    },
+    "shape": "DeletePrefetchScheduleRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeletePrefetchScheduleResponse"
+   }
+  },
+  "DeleteProgram": {
+   "method": "DELETE",
+   "requestUri": "/channel/{ChannelName}/program/{ProgramName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "ProgramName": {
+      "location": "uri",
+      "name": "ProgramName"
+     }
+    },
+    "shape": "DeleteProgramRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteProgramResponse"
+   }
+  },
+  "DeleteSourceLocation": {
+   "method": "DELETE",
+   "requestUri": "/sourceLocation/{SourceLocationName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     }
+    },
+    "shape": "DeleteSourceLocationRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteSourceLocationResponse"
+   }
+  },
+  "DeleteVodSource": {
+   "method": "DELETE",
+   "requestUri": "/sourceLocation/{SourceLocationName}/vodSource/{VodSourceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     },
+     "VodSourceName": {
+      "location": "uri",
+      "name": "VodSourceName"
+     }
+    },
+    "shape": "DeleteVodSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteVodSourceResponse"
+   }
+  },
+  "DescribeChannel": {
+   "method": "GET",
+   "requestUri": "/channel/{ChannelName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "DescribeChannelRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeChannelResponse"
+   }
+  },
+  "DescribeLiveSource": {
+   "method": "GET",
+   "requestUri": "/sourceLocation/{SourceLocationName}/liveSource/{LiveSourceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "LiveSourceName": {
+      "location": "uri",
+      "name": "LiveSourceName"
+     },
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     }
+    },
+    "shape": "DescribeLiveSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeLiveSourceResponse"
+   }
+  },
+  "DescribeProgram": {
+   "method": "GET",
+   "requestUri": "/channel/{ChannelName}/program/{ProgramName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "ProgramName": {
+      "location": "uri",
+      "name": "ProgramName"
+     }
+    },
+    "shape": "DescribeProgramRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeProgramResponse"
+   }
+  },
+  "DescribeSourceLocation": {
+   "method": "GET",
+   "requestUri": "/sourceLocation/{SourceLocationName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     }
+    },
+    "shape": "DescribeSourceLocationRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeSourceLocationResponse"
+   }
+  },
+  "DescribeVodSource": {
+   "method": "GET",
+   "requestUri": "/sourceLocation/{SourceLocationName}/vodSource/{VodSourceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     },
+     "VodSourceName": {
+      "location": "uri",
+      "name": "VodSourceName"
+     }
+    },
+    "shape": "DescribeVodSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DescribeVodSourceResponse"
+   }
+  },
+  "GetChannelPolicy": {
+   "method": "GET",
+   "requestUri": "/channel/{ChannelName}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "GetChannelPolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetChannelPolicyResponse"
+   }
+  },
+  "GetChannelSchedule": {
+   "method": "GET",
+   "requestUri": "/channel/{ChannelName}/schedule",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "DurationMinutes": {
+      "location": "querystring",
+      "name": "durationMinutes"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "Audience": {
+      "location": "querystring",
+      "name": "audience"
+     }
+    },
+    "shape": "GetChannelScheduleRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetChannelScheduleResponse"
+   }
+  },
+  "GetFunction": {
+   "method": "GET",
+   "requestUri": "/function/{FunctionId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "FunctionId": {
+      "location": "uri",
+      "name": "FunctionId"
+     }
+    },
+    "shape": "GetFunctionRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetFunctionResponse"
+   }
+  },
+  "GetPlaybackConfiguration": {
+   "method": "GET",
+   "requestUri": "/playbackConfiguration/{Name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "Name"
+     }
+    },
+    "shape": "GetPlaybackConfigurationRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetPlaybackConfigurationResponse"
+   }
+  },
+  "GetPrefetchSchedule": {
+   "method": "GET",
+   "requestUri": "/prefetchSchedule/{PlaybackConfigurationName}/{Name}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Name": {
+      "location": "uri",
+      "name": "Name"
+     },
+     "PlaybackConfigurationName": {
+      "location": "uri",
+      "name": "PlaybackConfigurationName"
+     }
+    },
+    "shape": "GetPrefetchScheduleRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetPrefetchScheduleResponse"
+   }
+  },
+  "ListAlerts": {
+   "method": "GET",
+   "requestUri": "/alerts",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "ResourceArn": {
+      "location": "querystring",
+      "name": "resourceArn"
+     }
+    },
+    "shape": "ListAlertsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListAlertsResponse"
+   }
+  },
+  "ListChannels": {
+   "method": "GET",
+   "requestUri": "/channels",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListChannelsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListChannelsResponse"
+   }
+  },
+  "ListFunctions": {
+   "method": "GET",
+   "requestUri": "/functions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "MaxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     }
+    },
+    "shape": "ListFunctionsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListFunctionsResponse"
+   }
+  },
+  "ListLiveSources": {
+   "method": "GET",
+   "requestUri": "/sourceLocation/{SourceLocationName}/liveSources",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     }
+    },
+    "shape": "ListLiveSourcesRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListLiveSourcesResponse"
+   }
+  },
+  "ListPlaybackConfigurations": {
+   "method": "GET",
+   "requestUri": "/playbackConfigurations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "MaxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     }
+    },
+    "shape": "ListPlaybackConfigurationsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListPlaybackConfigurationsResponse"
+   }
+  },
+  "ListPrefetchSchedules": {
+   "method": "POST",
+   "requestUri": "/prefetchSchedule/{PlaybackConfigurationName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "PlaybackConfigurationName": {
+      "location": "uri",
+      "name": "PlaybackConfigurationName"
+     }
+    },
+    "shape": "ListPrefetchSchedulesRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListPrefetchSchedulesResponse"
+   }
+  },
+  "ListSourceLocations": {
+   "method": "GET",
+   "requestUri": "/sourceLocations",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListSourceLocationsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListSourceLocationsResponse"
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    },
+    "shape": "ListTagsForResourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListTagsForResourceResponse"
+   }
+  },
+  "ListVodSources": {
+   "method": "GET",
+   "requestUri": "/sourceLocation/{SourceLocationName}/vodSources",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     }
+    },
+    "shape": "ListVodSourcesRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListVodSourcesResponse"
+   }
+  },
+  "PutChannelPolicy": {
+   "method": "PUT",
+   "requestUri": "/channel/{ChannelName}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "PutChannelPolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "PutChannelPolicyResponse"
+   }
+  },
+  "PutFunction": {
+   "method": "PUT",
+   "requestUri": "/function/{FunctionId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "FunctionId": {
+      "location": "uri",
+      "name": "FunctionId"
+     }
+    },
+    "shape": "PutFunctionRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "PutFunctionResponse"
+   }
+  },
+  "PutPlaybackConfiguration": {
+   "method": "PUT",
+   "requestUri": "/playbackConfiguration",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "shape": "PutPlaybackConfigurationRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "PutPlaybackConfigurationResponse"
+   }
+  },
+  "StartChannel": {
+   "method": "PUT",
+   "requestUri": "/channel/{ChannelName}/start",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "StartChannelRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "StartChannelResponse"
+   }
+  },
+  "StopChannel": {
+   "method": "PUT",
+   "requestUri": "/channel/{ChannelName}/stop",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "StopChannelRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "StopChannelResponse"
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    },
+    "shape": "TagResourceRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     },
+     "TagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    },
+    "shape": "UntagResourceRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateChannel": {
+   "method": "PUT",
+   "requestUri": "/channel/{ChannelName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "UpdateChannelRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateChannelResponse"
+   }
+  },
+  "UpdateLiveSource": {
+   "method": "PUT",
+   "requestUri": "/sourceLocation/{SourceLocationName}/liveSource/{LiveSourceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "LiveSourceName": {
+      "location": "uri",
+      "name": "LiveSourceName"
+     },
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     }
+    },
+    "shape": "UpdateLiveSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateLiveSourceResponse"
+   }
+  },
+  "UpdateProgram": {
+   "method": "PUT",
+   "requestUri": "/channel/{ChannelName}/program/{ProgramName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "ProgramName": {
+      "location": "uri",
+      "name": "ProgramName"
+     }
+    },
+    "shape": "UpdateProgramRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateProgramResponse"
+   }
+  },
+  "UpdateSourceLocation": {
+   "method": "PUT",
+   "requestUri": "/sourceLocation/{SourceLocationName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     }
+    },
+    "shape": "UpdateSourceLocationRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateSourceLocationResponse"
+   }
+  },
+  "UpdateVodSource": {
+   "method": "PUT",
+   "requestUri": "/sourceLocation/{SourceLocationName}/vodSource/{VodSourceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "SourceLocationName": {
+      "location": "uri",
+      "name": "SourceLocationName"
+     },
+     "VodSourceName": {
+      "location": "uri",
+      "name": "VodSourceName"
+     }
+    },
+    "shape": "UpdateVodSourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateVodSourceResponse"
+   }
+  }
+ },
+ "shapes": {
+  "AccessConfiguration": {
+   "members": {
+    "AccessType": {},
+    "SecretsManagerAccessTokenConfiguration": {
+     "shape": "SecretsManagerAccessTokenConfiguration"
+    }
+   }
+  },
+  "AdBreak": {
+   "members": {
+    "MessageType": {},
+    "OffsetMillis": {},
+    "Slate": {
+     "shape": "SlateSource"
+    },
+    "SpliceInsertMessage": {
+     "shape": "SpliceInsertMessage"
+    },
+    "TimeSignalMessage": {
+     "shape": "TimeSignalMessage"
+    },
+    "AdBreakMetadata": {
+     "shape": "AdBreakMetadataList"
+    }
+   }
+  },
+  "AdBreakMetadataList": {
+   "list": "KeyValuePair"
+  },
+  "AdBreakOpportunities": {
+   "list": "AdBreakOpportunity"
+  },
+  "AdBreakOpportunity": {
+   "members": {
+    "OffsetMillis": {}
+   }
+  },
+  "AdConditioningConfiguration": {
+   "members": {
+    "StreamingMediaFileConditioning": {}
+   }
+  },
+  "AdDecisionServerConfiguration": {
+   "members": {
+    "HttpRequest": {
+     "shape": "HttpRequest"
+    },
+    "VastResponse": {
+     "shape": "VastResponse"
+    }
+   }
+  },
+  "AdMarkerPassthrough": {
+   "members": {
+    "Enabled": {}
+   }
+  },
+  "AdsInteractionLog": {
+   "members": {
+    "PublishOptInEventTypes": {
+     "shape": "__adsInteractionPublishOptInEventTypesList"
+    },
+    "ExcludeEventTypes": {
+     "shape": "__adsInteractionExcludeEventTypesList"
+    }
+   }
+  },
+  "AdsPersonalizationConcurrency": {
+   "members": {
+    "MaxConcurrentAdsRequests": {},
+    "EnableVodVastParallelization": {}
+   }
+  },
+  "AdsPersonalizationTimeouts": {
+   "members": {
+    "AdsRequestTimeoutMilliseconds": {},
+    "LiveMaximumAdsPersonalizationTimeMilliseconds": {},
+    "VodMaximumAdsPersonalizationTimeMilliseconds": {},
+    "PrefetchAdsRequestTimeoutMilliseconds": {},
+    "PrefetchMaximumAdsPersonalizationTimeMilliseconds": {}
+   }
+  },
+  "Alert": {
+   "members": {
+    "AlertCode": {},
+    "AlertMessage": {},
+    "LastModifiedTime": {},
+    "RelatedResourceArns": {
+     "shape": "__listOf__string"
+    },
+    "ResourceArn": {},
+    "Category": {}
+   }
+  },
+  "AlternateMedia": {
+   "members": {
+    "SourceLocationName": {},
+    "LiveSourceName": {},
+    "VodSourceName": {},
+    "ClipRange": {
+     "shape": "ClipRange"
+    },
+    "ScheduledStartTimeMillis": {},
+    "AdBreaks": {
+     "shape": "__listOfAdBreak"
+    },
+    "DurationMillis": {}
+   }
+  },
+  "AudienceMedia": {
+   "members": {
+    "Audience": {},
+    "AlternateMedia": {
+     "shape": "__listOfAlternateMedia"
+    }
+   }
+  },
+  "Audiences": {
+   "list": "String"
+  },
+  "AvailMatchingCriteria": {
+   "members": {
+    "DynamicVariable": {},
+    "Operator": {}
+   }
+  },
+  "AvailSuppression": {
+   "members": {
+    "Mode": {},
+    "Value": {},
+    "FillPolicy": {}
+   }
+  },
+  "AwsServiceRequestConfiguration": {
+   "members": {
+    "Runtime": {},
+    "Output": {
+     "shape": "__mapOf__string"
+    },
+    "MethodType": {},
+    "RequestTimeoutMilliseconds": {},
+    "Url": {},
+    "Body": {},
+    "Headers": {
+     "shape": "__mapOf__string"
+    },
+    "Cache": {
+     "shape": "HttpRequestCacheConfiguration"
+    },
+    "TargetService": {},
+    "TargetRegion": {}
+   }
+  },
+  "BadRequestException": {
+   "members": {
+    "Message": {}
+   }
+  },
+  "BeaconEventTypeList": {
+   "list": "BeaconEventType"
+  },
+  "BeaconingConfiguration": {
+   "members": {
+    "ClientSide": {
+     "shape": "ClientSideBeaconingConfiguration"
+    }
+   }
+  },
+  "Bumper": {
+   "members": {
+    "EndUrl": {},
+    "StartUrl": {}
+   }
+  },
+  "CdnConfiguration": {
+   "members": {
+    "AdSegmentUrlPrefix": {},
+    "ContentSegmentUrlPrefix": {}
+   }
+  },
+  "Channel": {
+   "members": {
+    "Arn": {},
+    "ChannelName": {},
+    "ChannelState": {},
+    "CreationTime": {},
+    "FillerSlate": {
+     "shape": "SlateSource"
+    },
+    "LastModifiedTime": {},
+    "Outputs": {
+     "shape": "ResponseOutputs"
+    },
+    "PlaybackMode": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "Tier": {},
+    "LogConfiguration": {
+     "shape": "LogConfigurationForChannel"
+    },
+    "Audiences": {
+     "shape": "Audiences"
+    }
+   }
+  },
+  "ClientSideBeaconingConfiguration": {
+   "members": {
+    "ReportingMode": {},
+    "AdditionalEventTypes": {
+     "shape": "BeaconEventTypeList"
+    }
+   }
+  },
+  "ClipRange": {
+   "members": {
+    "EndOffsetMillis": {},
+    "StartOffsetMillis": {}
+   }
+  },
+  "ConcurrentExecutorConfiguration": {
+   "members": {
+    "Runtime": {},
+    "Output": {
+     "shape": "__mapOf__string"
+    },
+    "FunctionList": {
+     "shape": "__listOfFunctionsRef"
+    },
+    "TimeoutMilliseconds": {},
+    "MaxConcurrency": {}
+   }
+  },
+  "ConfigurationAliasesRequest": {
+   "map": "__mapOf__string"
+  },
+  "ConfigurationAliasesResponse": {
+   "map": "__mapOf__string"
+  },
+  "ConfigureLogsForChannelRequest": {
+   "members": {
+    "ChannelName": {},
+    "LogTypes": {
+     "shape": "LogTypes"
+    }
+   }
+  },
+  "ConfigureLogsForChannelResponse": {
+   "members": {
+    "ChannelName": {},
+    "LogTypes": {
+     "shape": "LogTypes"
+    }
+   }
+  },
+  "ConfigureLogsForPlaybackConfigurationRequest": {
+   "members": {
+    "PercentEnabled": {},
+    "PlaybackConfigurationName": {},
+    "EnabledLoggingStrategies": {
+     "shape": "__listOfLoggingStrategies"
+    },
+    "AdsInteractionLog": {
+     "shape": "AdsInteractionLog"
+    },
+    "ManifestServiceInteractionLog": {
+     "shape": "ManifestServiceInteractionLog"
+    }
+   }
+  },
+  "ConfigureLogsForPlaybackConfigurationResponse": {
+   "members": {
+    "PercentEnabled": {},
+    "PlaybackConfigurationName": {},
+    "EnabledLoggingStrategies": {
+     "shape": "__listOfLoggingStrategies"
+    },
+    "AdsInteractionLog": {
+     "shape": "AdsInteractionLog"
+    },
+    "ManifestServiceInteractionLog": {
+     "shape": "ManifestServiceInteractionLog"
+    }
+   }
+  },
+  "CreateChannelRequest": {
+   "members": {
+    "FillerSlate": {
+     "shape": "SlateSource"
+    },
+    "Outputs": {
+     "shape": "RequestOutputs"
+    },
+    "PlaybackMode": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "Tier": {},
+    "TimeShiftConfiguration": {
+     "shape": "TimeShiftConfiguration"
+    },
+    "Audiences": {
+     "shape": "Audiences"
+    }
+   }
+  },
+  "CreateChannelResponse": {
+   "members": {
+    "Arn": {},
+    "ChannelName": {},
+    "ChannelState": {},
+    "CreationTime": {},
+    "FillerSlate": {
+     "shape": "SlateSource"
+    },
+    "LastModifiedTime": {},
+    "Outputs": {
+     "shape": "ResponseOutputs"
+    },
+    "PlaybackMode": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "Tier": {},
+    "TimeShiftConfiguration": {
+     "shape": "TimeShiftConfiguration"
+    },
+    "Audiences": {
+     "shape": "Audiences"
+    }
+   }
+  },
+  "CreateLiveSourceRequest": {
+   "members": {
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreateLiveSourceResponse": {
+   "members": {
+    "Arn": {},
+    "CreationTime": {},
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    },
+    "LastModifiedTime": {},
+    "LiveSourceName": {},
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreatePrefetchScheduleRequest": {
+   "members": {
+    "Consumption": {
+     "shape": "PrefetchConsumption"
+    },
+    "Retrieval": {
+     "shape": "PrefetchRetrieval"
+    },
+    "RecurringPrefetchConfiguration": {
+     "shape": "RecurringPrefetchConfiguration"
+    },
+    "ScheduleType": {},
+    "StreamId": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreatePrefetchScheduleResponse": {
+   "members": {
+    "Arn": {},
+    "Consumption": {
+     "shape": "PrefetchConsumption"
+    },
+    "Name": {},
+    "PlaybackConfigurationName": {},
+    "Retrieval": {
+     "shape": "PrefetchRetrieval"
+    },
+    "RecurringPrefetchConfiguration": {
+     "shape": "RecurringPrefetchConfiguration"
+    },
+    "ScheduleType": {},
+    "StreamId": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreateProgramRequest": {
+   "members": {
+    "AdBreaks": {
+     "shape": "__listOfAdBreak"
+    },
+    "LiveSourceName": {},
+    "ScheduleConfiguration": {
+     "shape": "ScheduleConfiguration"
+    },
+    "SourceLocationName": {},
+    "VodSourceName": {},
+    "AudienceMedia": {
+     "shape": "__listOfAudienceMedia"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreateProgramResponse": {
+   "members": {
+    "AdBreaks": {
+     "shape": "__listOfAdBreak"
+    },
+    "Arn": {},
+    "ChannelName": {},
+    "CreationTime": {},
+    "LiveSourceName": {},
+    "ProgramName": {},
+    "ScheduledStartTime": {},
+    "SourceLocationName": {},
+    "VodSourceName": {},
+    "ClipRange": {
+     "shape": "ClipRange"
+    },
+    "DurationMillis": {},
+    "AudienceMedia": {
+     "shape": "__listOfAudienceMedia"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreateSourceLocationRequest": {
+   "members": {
+    "AccessConfiguration": {
+     "shape": "AccessConfiguration"
+    },
+    "DefaultSegmentDeliveryConfiguration": {
+     "shape": "DefaultSegmentDeliveryConfiguration"
+    },
+    "HttpConfiguration": {
+     "shape": "HttpConfiguration"
+    },
+    "SegmentDeliveryConfigurations": {
+     "shape": "__listOfSegmentDeliveryConfiguration"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreateSourceLocationResponse": {
+   "members": {
+    "AccessConfiguration": {
+     "shape": "AccessConfiguration"
+    },
+    "Arn": {},
+    "CreationTime": {},
+    "DefaultSegmentDeliveryConfiguration": {
+     "shape": "DefaultSegmentDeliveryConfiguration"
+    },
+    "HttpConfiguration": {
+     "shape": "HttpConfiguration"
+    },
+    "LastModifiedTime": {},
+    "SegmentDeliveryConfigurations": {
+     "shape": "__listOfSegmentDeliveryConfiguration"
+    },
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreateVodSourceRequest": {
+   "members": {
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "CreateVodSourceResponse": {
+   "members": {
+    "Arn": {},
+    "CreationTime": {},
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    },
+    "LastModifiedTime": {},
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "VodSourceName": {}
+   }
+  },
+  "CustomOutputConfiguration": {
+   "members": {
+    "Runtime": {},
+    "Output": {
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "DashConfiguration": {
+   "members": {
+    "ManifestEndpointPrefix": {},
+    "DualStackManifestEndpointPrefix": {},
+    "MpdLocation": {},
+    "OriginManifestType": {}
+   }
+  },
+  "DashConfigurationForPut": {
+   "members": {
+    "MpdLocation": {},
+    "OriginManifestType": {}
+   }
+  },
+  "DashPlaylistSettings": {
+   "members": {
+    "ManifestWindowSeconds": {},
+    "MinBufferTimeSeconds": {},
+    "MinUpdatePeriodSeconds": {},
+    "SuggestedPresentationDelaySeconds": {}
+   }
+  },
+  "DefaultSegmentDeliveryConfiguration": {
+   "members": {
+    "BaseUrl": {}
+   }
+  },
+  "DeleteChannelPolicyRequest": {
+   "members": {}
+  },
+  "DeleteChannelPolicyResponse": {
+   "members": {}
+  },
+  "DeleteChannelRequest": {
+   "members": {}
+  },
+  "DeleteChannelResponse": {
+   "members": {}
+  },
+  "DeleteFunctionRequest": {
+   "members": {}
+  },
+  "DeleteFunctionResponse": {
+   "members": {}
+  },
+  "DeleteLiveSourceRequest": {
+   "members": {}
+  },
+  "DeleteLiveSourceResponse": {
+   "members": {}
+  },
+  "DeletePlaybackConfigurationRequest": {
+   "members": {}
+  },
+  "DeletePlaybackConfigurationResponse": {
+   "members": {}
+  },
+  "DeletePrefetchScheduleRequest": {
+   "members": {}
+  },
+  "DeletePrefetchScheduleResponse": {
+   "members": {}
+  },
+  "DeleteProgramRequest": {
+   "members": {}
+  },
+  "DeleteProgramResponse": {
+   "members": {}
+  },
+  "DeleteSourceLocationRequest": {
+   "members": {}
+  },
+  "DeleteSourceLocationResponse": {
+   "members": {}
+  },
+  "DeleteVodSourceRequest": {
+   "members": {}
+  },
+  "DeleteVodSourceResponse": {
+   "members": {}
+  },
+  "DescribeChannelRequest": {
+   "members": {}
+  },
+  "DescribeChannelResponse": {
+   "members": {
+    "Arn": {},
+    "ChannelName": {},
+    "ChannelState": {},
+    "CreationTime": {},
+    "FillerSlate": {
+     "shape": "SlateSource"
+    },
+    "LastModifiedTime": {},
+    "Outputs": {
+     "shape": "ResponseOutputs"
+    },
+    "PlaybackMode": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "Tier": {},
+    "LogConfiguration": {
+     "shape": "LogConfigurationForChannel"
+    },
+    "TimeShiftConfiguration": {
+     "shape": "TimeShiftConfiguration"
+    },
+    "Audiences": {
+     "shape": "Audiences"
+    }
+   }
+  },
+  "DescribeLiveSourceRequest": {
+   "members": {}
+  },
+  "DescribeLiveSourceResponse": {
+   "members": {
+    "Arn": {},
+    "CreationTime": {},
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    },
+    "LastModifiedTime": {},
+    "LiveSourceName": {},
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "DescribeProgramRequest": {
+   "members": {}
+  },
+  "DescribeProgramResponse": {
+   "members": {
+    "AdBreaks": {
+     "shape": "__listOfAdBreak"
+    },
+    "Arn": {},
+    "ChannelName": {},
+    "CreationTime": {},
+    "LiveSourceName": {},
+    "ProgramName": {},
+    "ScheduledStartTime": {},
+    "SourceLocationName": {},
+    "VodSourceName": {},
+    "ClipRange": {
+     "shape": "ClipRange"
+    },
+    "DurationMillis": {},
+    "AudienceMedia": {
+     "shape": "__listOfAudienceMedia"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "DescribeSourceLocationRequest": {
+   "members": {}
+  },
+  "DescribeSourceLocationResponse": {
+   "members": {
+    "AccessConfiguration": {
+     "shape": "AccessConfiguration"
+    },
+    "Arn": {},
+    "CreationTime": {},
+    "DefaultSegmentDeliveryConfiguration": {
+     "shape": "DefaultSegmentDeliveryConfiguration"
+    },
+    "HttpConfiguration": {
+     "shape": "HttpConfiguration"
+    },
+    "LastModifiedTime": {},
+    "SegmentDeliveryConfigurations": {
+     "shape": "__listOfSegmentDeliveryConfiguration"
+    },
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "DescribeVodSourceRequest": {
+   "members": {}
+  },
+  "DescribeVodSourceResponse": {
+   "members": {
+    "AdBreakOpportunities": {
+     "shape": "AdBreakOpportunities"
+    },
+    "Arn": {},
+    "CreationTime": {},
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    },
+    "LastModifiedTime": {},
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "VodSourceName": {}
+   }
+  },
+  "Function": {
+   "members": {
+    "FunctionId": {},
+    "FunctionType": {},
+    "Description": {},
+    "HttpRequestConfiguration": {
+     "shape": "HttpRequestConfiguration"
+    },
+    "AwsServiceRequestConfiguration": {
+     "shape": "AwsServiceRequestConfiguration"
+    },
+    "CustomOutputConfiguration": {
+     "shape": "CustomOutputConfiguration"
+    },
+    "ConcurrentExecutorConfiguration": {
+     "shape": "ConcurrentExecutorConfiguration"
+    },
+    "SequentialExecutorConfiguration": {
+     "shape": "SequentialExecutorConfiguration"
+    },
+    "VastRequestConfiguration": {
+     "shape": "VastRequestConfiguration"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "Arn": {}
+   }
+  },
+  "FunctionMapping": {
+   "map": "__string"
+  },
+  "FunctionRef": {
+   "members": {
+    "RunCondition": {},
+    "FunctionId": {},
+    "Alias": {}
+   }
+  },
+  "GetChannelPolicyRequest": {
+   "members": {}
+  },
+  "GetChannelPolicyResponse": {
+   "members": {
+    "Policy": {}
+   }
+  },
+  "GetChannelScheduleRequest": {
+   "members": {}
+  },
+  "GetChannelScheduleResponse": {
+   "members": {
+    "Items": {
+     "shape": "__listOfScheduleEntry"
+    },
+    "NextToken": {}
+   }
+  },
+  "GetFunctionRequest": {
+   "members": {}
+  },
+  "GetFunctionResponse": {
+   "members": {
+    "FunctionId": {},
+    "FunctionType": {},
+    "Description": {},
+    "HttpRequestConfiguration": {
+     "shape": "HttpRequestConfiguration"
+    },
+    "AwsServiceRequestConfiguration": {
+     "shape": "AwsServiceRequestConfiguration"
+    },
+    "CustomOutputConfiguration": {
+     "shape": "CustomOutputConfiguration"
+    },
+    "ConcurrentExecutorConfiguration": {
+     "shape": "ConcurrentExecutorConfiguration"
+    },
+    "SequentialExecutorConfiguration": {
+     "shape": "SequentialExecutorConfiguration"
+    },
+    "VastRequestConfiguration": {
+     "shape": "VastRequestConfiguration"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "Arn": {}
+   }
+  },
+  "GetPlaybackConfigurationRequest": {
+   "members": {}
+  },
+  "GetPlaybackConfigurationResponse": {
+   "members": {
+    "AdDecisionServerUrl": {},
+    "AvailSuppression": {
+     "shape": "AvailSuppression"
+    },
+    "Bumper": {
+     "shape": "Bumper"
+    },
+    "CdnConfiguration": {
+     "shape": "CdnConfiguration"
+    },
+    "ConfigurationAliases": {
+     "shape": "ConfigurationAliasesResponse"
+    },
+    "DashConfiguration": {
+     "shape": "DashConfiguration"
+    },
+    "HlsConfiguration": {
+     "shape": "HlsConfiguration"
+    },
+    "InsertionMode": {},
+    "LivePreRollConfiguration": {
+     "shape": "LivePreRollConfiguration"
+    },
+    "LogConfiguration": {
+     "shape": "LogConfiguration"
+    },
+    "ManifestProcessingRules": {
+     "shape": "ManifestProcessingRules"
+    },
+    "Name": {},
+    "PersonalizationThresholdSeconds": {},
+    "PlaybackConfigurationArn": {},
+    "PlaybackEndpointPrefix": {},
+    "DualStackPlaybackEndpointPrefix": {},
+    "SessionInitializationEndpointPrefix": {},
+    "DualStackSessionInitializationEndpointPrefix": {},
+    "SlateAdUrl": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "TranscodeProfileName": {},
+    "VideoContentSourceUrl": {},
+    "AdConditioningConfiguration": {
+     "shape": "AdConditioningConfiguration"
+    },
+    "AdDecisionServerConfiguration": {
+     "shape": "AdDecisionServerConfiguration"
+    },
+    "YieldOptimizationConfiguration": {
+     "shape": "YieldOptimizationConfiguration"
+    },
+    "FunctionMapping": {
+     "shape": "FunctionMapping"
+    },
+    "AdsPersonalizationTimeouts": {
+     "shape": "AdsPersonalizationTimeouts"
+    },
+    "AdsPersonalizationConcurrency": {
+     "shape": "AdsPersonalizationConcurrency"
+    },
+    "BeaconingConfiguration": {
+     "shape": "BeaconingConfiguration"
+    }
+   }
+  },
+  "GetPrefetchScheduleRequest": {
+   "members": {}
+  },
+  "GetPrefetchScheduleResponse": {
+   "members": {
+    "Arn": {},
+    "Consumption": {
+     "shape": "PrefetchConsumption"
+    },
+    "Name": {},
+    "PlaybackConfigurationName": {},
+    "Retrieval": {
+     "shape": "PrefetchRetrieval"
+    },
+    "ScheduleType": {},
+    "RecurringPrefetchConfiguration": {
+     "shape": "RecurringPrefetchConfiguration"
+    },
+    "StreamId": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "HlsConfiguration": {
+   "members": {
+    "ManifestEndpointPrefix": {},
+    "DualStackManifestEndpointPrefix": {}
+   }
+  },
+  "HlsPlaylistSettings": {
+   "members": {
+    "ManifestWindowSeconds": {},
+    "AdMarkupType": {
+     "shape": "adMarkupTypes"
+    }
+   }
+  },
+  "HttpConfiguration": {
+   "members": {
+    "BaseUrl": {}
+   }
+  },
+  "HttpPackageConfiguration": {
+   "members": {
+    "Path": {},
+    "SourceGroup": {},
+    "Type": {}
+   }
+  },
+  "HttpPackageConfigurations": {
+   "list": "HttpPackageConfiguration"
+  },
+  "HttpRequest": {
+   "members": {
+    "Method": {},
+    "Body": {},
+    "Headers": {
+     "shape": "StringMap"
+    },
+    "CompressRequest": {}
+   }
+  },
+  "HttpRequestCacheConfiguration": {
+   "members": {
+    "TtlMinimumSeconds": {},
+    "TtlMaximumSeconds": {},
+    "Key": {}
+   }
+  },
+  "HttpRequestConfiguration": {
+   "members": {
+    "Runtime": {},
+    "Output": {
+     "shape": "__mapOf__string"
+    },
+    "MethodType": {},
+    "RequestTimeoutMilliseconds": {},
+    "Url": {},
+    "Body": {},
+    "Headers": {
+     "shape": "__mapOf__string"
+    },
+    "Cache": {
+     "shape": "HttpRequestCacheConfiguration"
+    }
+   }
+  },
+  "KeyValuePair": {
+   "members": {
+    "Key": {},
+    "Value": {}
+   }
+  },
+  "ListAlertsRequest": {
+   "members": {}
+  },
+  "ListAlertsResponse": {
+   "members": {
+    "Items": {
+     "shape": "__listOfAlert"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListChannelsRequest": {
+   "members": {}
+  },
+  "ListChannelsResponse": {
+   "members": {
+    "Items": {
+     "shape": "__listOfChannel"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListFunctionsRequest": {
+   "members": {}
+  },
+  "ListFunctionsResponse": {
+   "members": {
+    "Items": {
+     "shape": "__listOfFunctionsResponse"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListLiveSourcesRequest": {
+   "members": {}
+  },
+  "ListLiveSourcesResponse": {
+   "members": {
+    "Items": {
+     "shape": "__listOfLiveSource"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListPlaybackConfigurationsRequest": {
+   "members": {}
+  },
+  "ListPlaybackConfigurationsResponse": {
+   "members": {
+    "Items": {
+     "shape": "__listOfPlaybackConfiguration"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListPrefetchSchedulesRequest": {
+   "members": {
+    "MaxResults": {},
+    "NextToken": {},
+    "ScheduleType": {},
+    "StreamId": {}
+   }
+  },
+  "ListPrefetchSchedulesResponse": {
+   "members": {
+    "Items": {
+     "shape": "__listOfPrefetchSchedule"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListSourceLocationsRequest": {
+   "members": {}
+  },
+  "ListSourceLocationsResponse": {
+   "members": {
+    "Items": {
+     "shape": "__listOfSourceLocation"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListTagsForResourceRequest": {
+   "members": {}
+  },
+  "ListTagsForResourceResponse": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "ListVodSourcesRequest": {
+   "members": {}
+  },
+  "ListVodSourcesResponse": {
+   "members": {
+    "Items": {
+     "shape": "__listOfVodSource"
+    },
+    "NextToken": {}
+   }
+  },
+  "LivePreRollConfiguration": {
+   "members": {
+    "AdDecisionServerUrl": {},
+    "MaxDurationSeconds": {},
+    "AdDecisionServerConfiguration": {
+     "shape": "PreRollAdDecisionServerConfiguration"
+    }
+   }
+  },
+  "LiveSource": {
+   "members": {
+    "Arn": {},
+    "CreationTime": {},
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    },
+    "LastModifiedTime": {},
+    "LiveSourceName": {},
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "LogConfiguration": {
+   "members": {
+    "PercentEnabled": {},
+    "EnabledLoggingStrategies": {
+     "shape": "__listOfLoggingStrategies"
+    },
+    "AdsInteractionLog": {
+     "shape": "AdsInteractionLog"
+    },
+    "ManifestServiceInteractionLog": {
+     "shape": "ManifestServiceInteractionLog"
+    }
+   }
+  },
+  "LogConfigurationForChannel": {
+   "members": {
+    "LogTypes": {
+     "shape": "LogTypes"
+    }
+   }
+  },
+  "LogTypes": {
+   "list": "LogType"
+  },
+  "ManifestProcessingRules": {
+   "members": {
+    "AdMarkerPassthrough": {
+     "shape": "AdMarkerPassthrough"
+    }
+   }
+  },
+  "ManifestServiceInteractionLog": {
+   "members": {
+    "PublishOptInEventTypes": {
+     "shape": "__manifestServicePublishOptInEventTypesList"
+    },
+    "ExcludeEventTypes": {
+     "shape": "__manifestServiceExcludeEventTypesList"
+    }
+   }
+  },
+  "PlaybackConfiguration": {
+   "members": {
+    "AdDecisionServerUrl": {},
+    "AvailSuppression": {
+     "shape": "AvailSuppression"
+    },
+    "Bumper": {
+     "shape": "Bumper"
+    },
+    "CdnConfiguration": {
+     "shape": "CdnConfiguration"
+    },
+    "ConfigurationAliases": {
+     "shape": "ConfigurationAliasesResponse"
+    },
+    "DashConfiguration": {
+     "shape": "DashConfiguration"
+    },
+    "HlsConfiguration": {
+     "shape": "HlsConfiguration"
+    },
+    "InsertionMode": {},
+    "LivePreRollConfiguration": {
+     "shape": "LivePreRollConfiguration"
+    },
+    "LogConfiguration": {
+     "shape": "LogConfiguration"
+    },
+    "ManifestProcessingRules": {
+     "shape": "ManifestProcessingRules"
+    },
+    "Name": {},
+    "PersonalizationThresholdSeconds": {},
+    "PlaybackConfigurationArn": {},
+    "PlaybackEndpointPrefix": {},
+    "DualStackPlaybackEndpointPrefix": {},
+    "SessionInitializationEndpointPrefix": {},
+    "DualStackSessionInitializationEndpointPrefix": {},
+    "SlateAdUrl": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "TranscodeProfileName": {},
+    "VideoContentSourceUrl": {},
+    "AdConditioningConfiguration": {
+     "shape": "AdConditioningConfiguration"
+    },
+    "AdDecisionServerConfiguration": {
+     "shape": "AdDecisionServerConfiguration"
+    },
+    "YieldOptimizationConfiguration": {
+     "shape": "YieldOptimizationConfiguration"
+    },
+    "FunctionMapping": {
+     "shape": "FunctionMapping"
+    },
+    "AdsPersonalizationTimeouts": {
+     "shape": "AdsPersonalizationTimeouts"
+    },
+    "AdsPersonalizationConcurrency": {
+     "shape": "AdsPersonalizationConcurrency"
+    },
+    "BeaconingConfiguration": {
+     "shape": "BeaconingConfiguration"
+    }
+   }
+  },
+  "PreRollAdDecisionServerConfiguration": {
+   "members": {
+    "VastResponse": {
+     "shape": "PreRollVastResponse"
+    }
+   }
+  },
+  "PreRollVastResponse": {
+   "members": {
+    "AdSequencingMode": {}
+   }
+  },
+  "PrefetchConsumption": {
+   "members": {
+    "AvailMatchingCriteria": {
+     "shape": "__listOfAvailMatchingCriteria"
+    },
+    "EndTime": {},
+    "StartTime": {}
+   }
+  },
+  "PrefetchRetrieval": {
+   "members": {
+    "DynamicVariables": {
+     "shape": "__mapOf__string"
+    },
+    "EndTime": {},
+    "StartTime": {},
+    "TrafficShapingType": {},
+    "TrafficShapingRetrievalWindow": {
+     "shape": "TrafficShapingRetrievalWindow"
+    },
+    "TrafficShapingTpsConfiguration": {
+     "shape": "TrafficShapingTpsConfiguration"
+    }
+   }
+  },
+  "PrefetchSchedule": {
+   "members": {
+    "Arn": {},
+    "Consumption": {
+     "shape": "PrefetchConsumption"
+    },
+    "Name": {},
+    "PlaybackConfigurationName": {},
+    "Retrieval": {
+     "shape": "PrefetchRetrieval"
+    },
+    "ScheduleType": {},
+    "RecurringPrefetchConfiguration": {
+     "shape": "RecurringPrefetchConfiguration"
+    },
+    "StreamId": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "PutChannelPolicyRequest": {
+   "members": {
+    "Policy": {}
+   }
+  },
+  "PutChannelPolicyResponse": {
+   "members": {}
+  },
+  "PutFunctionRequest": {
+   "members": {
+    "FunctionType": {},
+    "Description": {},
+    "HttpRequestConfiguration": {
+     "shape": "HttpRequestConfiguration"
+    },
+    "AwsServiceRequestConfiguration": {
+     "shape": "AwsServiceRequestConfiguration"
+    },
+    "CustomOutputConfiguration": {
+     "shape": "CustomOutputConfiguration"
+    },
+    "ConcurrentExecutorConfiguration": {
+     "shape": "ConcurrentExecutorConfiguration"
+    },
+    "SequentialExecutorConfiguration": {
+     "shape": "SequentialExecutorConfiguration"
+    },
+    "VastRequestConfiguration": {
+     "shape": "VastRequestConfiguration"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "PutFunctionResponse": {
+   "members": {
+    "FunctionId": {},
+    "FunctionType": {},
+    "Description": {},
+    "HttpRequestConfiguration": {
+     "shape": "HttpRequestConfiguration"
+    },
+    "AwsServiceRequestConfiguration": {
+     "shape": "AwsServiceRequestConfiguration"
+    },
+    "CustomOutputConfiguration": {
+     "shape": "CustomOutputConfiguration"
+    },
+    "ConcurrentExecutorConfiguration": {
+     "shape": "ConcurrentExecutorConfiguration"
+    },
+    "SequentialExecutorConfiguration": {
+     "shape": "SequentialExecutorConfiguration"
+    },
+    "VastRequestConfiguration": {
+     "shape": "VastRequestConfiguration"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "Arn": {}
+   }
+  },
+  "PutPlaybackConfigurationRequest": {
+   "members": {
+    "AdDecisionServerUrl": {},
+    "AvailSuppression": {
+     "shape": "AvailSuppression"
+    },
+    "Bumper": {
+     "shape": "Bumper"
+    },
+    "CdnConfiguration": {
+     "shape": "CdnConfiguration"
+    },
+    "ConfigurationAliases": {
+     "shape": "ConfigurationAliasesRequest"
+    },
+    "DashConfiguration": {
+     "shape": "DashConfigurationForPut"
+    },
+    "InsertionMode": {},
+    "LivePreRollConfiguration": {
+     "shape": "LivePreRollConfiguration"
+    },
+    "ManifestProcessingRules": {
+     "shape": "ManifestProcessingRules"
+    },
+    "Name": {},
+    "PersonalizationThresholdSeconds": {},
+    "SlateAdUrl": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "TranscodeProfileName": {},
+    "VideoContentSourceUrl": {},
+    "AdConditioningConfiguration": {
+     "shape": "AdConditioningConfiguration"
+    },
+    "AdDecisionServerConfiguration": {
+     "shape": "AdDecisionServerConfiguration"
+    },
+    "YieldOptimizationConfiguration": {
+     "shape": "YieldOptimizationConfiguration"
+    },
+    "FunctionMapping": {
+     "shape": "FunctionMapping"
+    },
+    "AdsPersonalizationTimeouts": {
+     "shape": "AdsPersonalizationTimeouts"
+    },
+    "AdsPersonalizationConcurrency": {
+     "shape": "AdsPersonalizationConcurrency"
+    },
+    "BeaconingConfiguration": {
+     "shape": "BeaconingConfiguration"
+    }
+   }
+  },
+  "PutPlaybackConfigurationResponse": {
+   "members": {
+    "AdDecisionServerUrl": {},
+    "AvailSuppression": {
+     "shape": "AvailSuppression"
+    },
+    "Bumper": {
+     "shape": "Bumper"
+    },
+    "CdnConfiguration": {
+     "shape": "CdnConfiguration"
+    },
+    "ConfigurationAliases": {
+     "shape": "ConfigurationAliasesResponse"
+    },
+    "DashConfiguration": {
+     "shape": "DashConfiguration"
+    },
+    "HlsConfiguration": {
+     "shape": "HlsConfiguration"
+    },
+    "InsertionMode": {},
+    "LivePreRollConfiguration": {
+     "shape": "LivePreRollConfiguration"
+    },
+    "LogConfiguration": {
+     "shape": "LogConfiguration"
+    },
+    "ManifestProcessingRules": {
+     "shape": "ManifestProcessingRules"
+    },
+    "Name": {},
+    "PersonalizationThresholdSeconds": {},
+    "PlaybackConfigurationArn": {},
+    "PlaybackEndpointPrefix": {},
+    "DualStackPlaybackEndpointPrefix": {},
+    "SessionInitializationEndpointPrefix": {},
+    "DualStackSessionInitializationEndpointPrefix": {},
+    "SlateAdUrl": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "TranscodeProfileName": {},
+    "VideoContentSourceUrl": {},
+    "AdConditioningConfiguration": {
+     "shape": "AdConditioningConfiguration"
+    },
+    "AdDecisionServerConfiguration": {
+     "shape": "AdDecisionServerConfiguration"
+    },
+    "YieldOptimizationConfiguration": {
+     "shape": "YieldOptimizationConfiguration"
+    },
+    "FunctionMapping": {
+     "shape": "FunctionMapping"
+    },
+    "AdsPersonalizationTimeouts": {
+     "shape": "AdsPersonalizationTimeouts"
+    },
+    "AdsPersonalizationConcurrency": {
+     "shape": "AdsPersonalizationConcurrency"
+    },
+    "BeaconingConfiguration": {
+     "shape": "BeaconingConfiguration"
+    }
+   }
+  },
+  "RecurringConsumption": {
+   "members": {
+    "RetrievedAdExpirationSeconds": {},
+    "AvailMatchingCriteria": {
+     "shape": "__listOfAvailMatchingCriteria"
+    }
+   }
+  },
+  "RecurringPrefetchConfiguration": {
+   "members": {
+    "StartTime": {},
+    "EndTime": {},
+    "RecurringConsumption": {
+     "shape": "RecurringConsumption"
+    },
+    "RecurringRetrieval": {
+     "shape": "RecurringRetrieval"
+    }
+   }
+  },
+  "RecurringRetrieval": {
+   "members": {
+    "DynamicVariables": {
+     "shape": "__mapOf__string"
+    },
+    "DelayAfterAvailEndSeconds": {},
+    "TrafficShapingType": {},
+    "TrafficShapingRetrievalWindow": {
+     "shape": "TrafficShapingRetrievalWindow"
+    },
+    "TrafficShapingTpsConfiguration": {
+     "shape": "TrafficShapingTpsConfiguration"
+    }
+   }
+  },
+  "RequestOutputItem": {
+   "members": {
+    "DashPlaylistSettings": {
+     "shape": "DashPlaylistSettings"
+    },
+    "HlsPlaylistSettings": {
+     "shape": "HlsPlaylistSettings"
+    },
+    "ManifestName": {},
+    "SourceGroup": {}
+   }
+  },
+  "RequestOutputs": {
+   "list": "RequestOutputItem"
+  },
+  "ResponseOutputItem": {
+   "members": {
+    "DashPlaylistSettings": {
+     "shape": "DashPlaylistSettings"
+    },
+    "HlsPlaylistSettings": {
+     "shape": "HlsPlaylistSettings"
+    },
+    "ManifestName": {},
+    "PlaybackUrl": {},
+    "DualStackPlaybackUrl": {},
+    "SourceGroup": {}
+   }
+  },
+  "ResponseOutputs": {
+   "list": "ResponseOutputItem"
+  },
+  "ScheduleAdBreak": {
+   "members": {
+    "ApproximateDurationSeconds": {},
+    "ApproximateStartTime": {},
+    "SourceLocationName": {},
+    "VodSourceName": {}
+   }
+  },
+  "ScheduleConfiguration": {
+   "members": {
+    "Transition": {
+     "shape": "Transition"
+    },
+    "ClipRange": {
+     "shape": "ClipRange"
+    }
+   }
+  },
+  "ScheduleEntry": {
+   "members": {
+    "ApproximateDurationSeconds": {},
+    "ApproximateStartTime": {},
+    "Arn": {},
+    "ChannelName": {},
+    "LiveSourceName": {},
+    "ProgramName": {},
+    "ScheduleAdBreaks": {
+     "shape": "__listOfScheduleAdBreak"
+    },
+    "ScheduleEntryType": {},
+    "SourceLocationName": {},
+    "VodSourceName": {},
+    "Audiences": {
+     "shape": "Audiences"
+    }
+   }
+  },
+  "SecretsManagerAccessTokenConfiguration": {
+   "members": {
+    "HeaderName": {},
+    "SecretArn": {},
+    "SecretStringKey": {}
+   }
+  },
+  "SegmentDeliveryConfiguration": {
+   "members": {
+    "BaseUrl": {},
+    "Name": {}
+   }
+  },
+  "SegmentationDescriptor": {
+   "members": {
+    "SegmentationEventId": {},
+    "SegmentationUpidType": {},
+    "SegmentationUpid": {},
+    "SegmentationTypeId": {},
+    "SegmentNum": {},
+    "SegmentsExpected": {},
+    "SubSegmentNum": {},
+    "SubSegmentsExpected": {}
+   }
+  },
+  "SegmentationDescriptorList": {
+   "list": "SegmentationDescriptor"
+  },
+  "SequentialExecutorConfiguration": {
+   "members": {
+    "Runtime": {},
+    "Output": {
+     "shape": "__mapOf__string"
+    },
+    "FunctionList": {
+     "shape": "__listOfFunctionsRef"
+    },
+    "TimeoutMilliseconds": {}
+   }
+  },
+  "SlateSource": {
+   "members": {
+    "SourceLocationName": {},
+    "VodSourceName": {}
+   }
+  },
+  "SourceLocation": {
+   "members": {
+    "AccessConfiguration": {
+     "shape": "AccessConfiguration"
+    },
+    "Arn": {},
+    "CreationTime": {},
+    "DefaultSegmentDeliveryConfiguration": {
+     "shape": "DefaultSegmentDeliveryConfiguration"
+    },
+    "HttpConfiguration": {
+     "shape": "HttpConfiguration"
+    },
+    "LastModifiedTime": {},
+    "SegmentDeliveryConfigurations": {
+     "shape": "__listOfSegmentDeliveryConfiguration"
+    },
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "SpliceInsertMessage": {
+   "members": {
+    "AvailNum": {},
+    "AvailsExpected": {},
+    "SpliceEventId": {},
+    "UniqueProgramId": {}
+   }
+  },
+  "StartChannelRequest": {
+   "members": {}
+  },
+  "StartChannelResponse": {
+   "members": {}
+  },
+  "StopChannelRequest": {
+   "members": {}
+  },
+  "StopChannelResponse": {
+   "members": {}
+  },
+  "StringMap": {
+   "map": "__string"
+  },
+  "TagResourceRequest": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "TimeShiftConfiguration": {
+   "members": {
+    "MaxTimeDelaySeconds": {}
+   }
+  },
+  "TimeSignalMessage": {
+   "members": {
+    "SegmentationDescriptors": {
+     "shape": "SegmentationDescriptorList"
+    }
+   }
+  },
+  "TrafficShapingRetrievalWindow": {
+   "members": {
+    "RetrievalWindowDurationSeconds": {}
+   }
+  },
+  "TrafficShapingTpsConfiguration": {
+   "members": {
+    "PeakTps": {},
+    "PeakConcurrentUsers": {}
+   }
+  },
+  "Transition": {
+   "members": {
+    "DurationMillis": {},
+    "RelativePosition": {},
+    "RelativeProgram": {},
+    "ScheduledStartTimeMillis": {},
+    "Type": {}
+   }
+  },
+  "UntagResourceRequest": {
+   "members": {}
+  },
+  "UpdateChannelRequest": {
+   "members": {
+    "FillerSlate": {
+     "shape": "SlateSource"
+    },
+    "Outputs": {
+     "shape": "RequestOutputs"
+    },
+    "TimeShiftConfiguration": {
+     "shape": "TimeShiftConfiguration"
+    },
+    "Audiences": {
+     "shape": "Audiences"
+    }
+   }
+  },
+  "UpdateChannelResponse": {
+   "members": {
+    "Arn": {},
+    "ChannelName": {},
+    "ChannelState": {},
+    "CreationTime": {},
+    "FillerSlate": {
+     "shape": "SlateSource"
+    },
+    "LastModifiedTime": {},
+    "Outputs": {
+     "shape": "ResponseOutputs"
+    },
+    "PlaybackMode": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "Tier": {},
+    "TimeShiftConfiguration": {
+     "shape": "TimeShiftConfiguration"
+    },
+    "Audiences": {
+     "shape": "Audiences"
+    }
+   }
+  },
+  "UpdateLiveSourceRequest": {
+   "members": {
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    }
+   }
+  },
+  "UpdateLiveSourceResponse": {
+   "members": {
+    "Arn": {},
+    "CreationTime": {},
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    },
+    "LastModifiedTime": {},
+    "LiveSourceName": {},
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "UpdateProgramRequest": {
+   "members": {
+    "AdBreaks": {
+     "shape": "__listOfAdBreak"
+    },
+    "ScheduleConfiguration": {
+     "shape": "UpdateProgramScheduleConfiguration"
+    },
+    "AudienceMedia": {
+     "shape": "__listOfAudienceMedia"
+    }
+   }
+  },
+  "UpdateProgramResponse": {
+   "members": {
+    "AdBreaks": {
+     "shape": "__listOfAdBreak"
+    },
+    "Arn": {},
+    "ChannelName": {},
+    "CreationTime": {},
+    "ProgramName": {},
+    "SourceLocationName": {},
+    "VodSourceName": {},
+    "LiveSourceName": {},
+    "ClipRange": {
+     "shape": "ClipRange"
+    },
+    "DurationMillis": {},
+    "ScheduledStartTime": {},
+    "AudienceMedia": {
+     "shape": "__listOfAudienceMedia"
+    },
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "UpdateProgramScheduleConfiguration": {
+   "members": {
+    "Transition": {
+     "shape": "UpdateProgramTransition"
+    },
+    "ClipRange": {
+     "shape": "ClipRange"
+    }
+   }
+  },
+  "UpdateProgramTransition": {
+   "members": {
+    "ScheduledStartTimeMillis": {},
+    "DurationMillis": {}
+   }
+  },
+  "UpdateSourceLocationRequest": {
+   "members": {
+    "AccessConfiguration": {
+     "shape": "AccessConfiguration"
+    },
+    "DefaultSegmentDeliveryConfiguration": {
+     "shape": "DefaultSegmentDeliveryConfiguration"
+    },
+    "HttpConfiguration": {
+     "shape": "HttpConfiguration"
+    },
+    "SegmentDeliveryConfigurations": {
+     "shape": "__listOfSegmentDeliveryConfiguration"
+    }
+   }
+  },
+  "UpdateSourceLocationResponse": {
+   "members": {
+    "AccessConfiguration": {
+     "shape": "AccessConfiguration"
+    },
+    "Arn": {},
+    "CreationTime": {},
+    "DefaultSegmentDeliveryConfiguration": {
+     "shape": "DefaultSegmentDeliveryConfiguration"
+    },
+    "HttpConfiguration": {
+     "shape": "HttpConfiguration"
+    },
+    "LastModifiedTime": {},
+    "SegmentDeliveryConfigurations": {
+     "shape": "__listOfSegmentDeliveryConfiguration"
+    },
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    }
+   }
+  },
+  "UpdateVodSourceRequest": {
+   "members": {
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    }
+   }
+  },
+  "UpdateVodSourceResponse": {
+   "members": {
+    "Arn": {},
+    "CreationTime": {},
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    },
+    "LastModifiedTime": {},
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "VodSourceName": {}
+   }
+  },
+  "VastRequestConfiguration": {
+   "members": {
+    "Runtime": {},
+    "Output": {
+     "shape": "__mapOf__string"
+    },
+    "MethodType": {},
+    "RequestTimeoutMilliseconds": {},
+    "Url": {},
+    "Body": {},
+    "Headers": {
+     "shape": "__mapOf__string"
+    },
+    "Cache": {
+     "shape": "HttpRequestCacheConfiguration"
+    }
+   }
+  },
+  "VastResponse": {
+   "members": {
+    "AdSequencingMode": {}
+   }
+  },
+  "VodSource": {
+   "members": {
+    "Arn": {},
+    "CreationTime": {},
+    "HttpPackageConfigurations": {
+     "shape": "HttpPackageConfigurations"
+    },
+    "LastModifiedTime": {},
+    "SourceLocationName": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "__mapOf__string"
+    },
+    "VodSourceName": {}
+   }
+  },
+  "YieldOptimizationConfiguration": {
+   "members": {
+    "MinimumUnfilledDuration": {},
+    "PublisherId": {},
+    "Region": {},
+    "OpenRtbTemplate": {}
+   }
+  },
+  "__adsInteractionExcludeEventTypesList": {
+   "list": "AdsInteractionExcludeEventType"
+  },
+  "__adsInteractionPublishOptInEventTypesList": {
+   "list": "AdsInteractionPublishOptInEventType"
+  },
+  "__listOfAdBreak": {
+   "list": "AdBreak"
+  },
+  "__listOfAlert": {
+   "list": "Alert"
+  },
+  "__listOfAlternateMedia": {
+   "list": "AlternateMedia"
+  },
+  "__listOfAudienceMedia": {
+   "list": "AudienceMedia"
+  },
+  "__listOfAvailMatchingCriteria": {
+   "list": "AvailMatchingCriteria"
+  },
+  "__listOfChannel": {
+   "list": "Channel"
+  },
+  "__listOfFunctionsRef": {
+   "list": "FunctionRef"
+  },
+  "__listOfFunctionsResponse": {
+   "list": "Function"
+  },
+  "__listOfLiveSource": {
+   "list": "LiveSource"
+  },
+  "__listOfLoggingStrategies": {
+   "list": "LoggingStrategy"
+  },
+  "__listOfPlaybackConfiguration": {
+   "list": "PlaybackConfiguration"
+  },
+  "__listOfPrefetchSchedule": {
+   "list": "PrefetchSchedule"
+  },
+  "__listOfScheduleAdBreak": {
+   "list": "ScheduleAdBreak"
+  },
+  "__listOfScheduleEntry": {
+   "list": "ScheduleEntry"
+  },
+  "__listOfSegmentDeliveryConfiguration": {
+   "list": "SegmentDeliveryConfiguration"
+  },
+  "__listOfSourceLocation": {
+   "list": "SourceLocation"
+  },
+  "__listOfVodSource": {
+   "list": "VodSource"
+  },
+  "__listOf__string": {
+   "list": "__string"
+  },
+  "__manifestServiceExcludeEventTypesList": {
+   "list": "ManifestServiceExcludeEventType"
+  },
+  "__manifestServicePublishOptInEventTypesList": {
+   "list": "ManifestServicePublishOptInEventType"
+  },
+  "__mapOf__string": {
+   "map": "__string"
+  },
+  "adMarkupTypes": {
+   "list": "AdMarkupType"
+  }
+ }
+}

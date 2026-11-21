@@ -199,6 +199,9 @@ class EcrImagePushApiDockerIntegrationTest {
                 .body("layerDigest", equalTo(layerDigest))
                 .extract().path("downloadUrl");
         URI uri = URI.create(url);
+        // The URL is fetched as it is, so it names the scheme the registry endpoint serves: plain HTTP here,
+        // where TLS is off. An https URL to a plain-HTTP port can't be downloaded.
+        assertEquals("http", uri.getScheme(), url);
         assertEquals("/v2/" + repo + "/blobs/" + layerDigest, uri.getPath());
 
         Fetched response = registryGet(uri.getHost(), uri.getPath(), null);

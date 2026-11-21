@@ -1,0 +1,1083 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_ivs_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateEncoderConfiguration": "CreateEncoderConfigurationRequest",
+    "CreateIngestConfiguration": "CreateIngestConfigurationRequest",
+    "CreateParticipantToken": "CreateParticipantTokenRequest",
+    "CreateStage": "CreateStageRequest",
+    "CreateStorageConfiguration": "CreateStorageConfigurationRequest",
+    "DeleteEncoderConfiguration": "DeleteEncoderConfigurationRequest",
+    "DeleteIngestConfiguration": "DeleteIngestConfigurationRequest",
+    "DeletePublicKey": "DeletePublicKeyRequest",
+    "DeleteStage": "DeleteStageRequest",
+    "DeleteStorageConfiguration": "DeleteStorageConfigurationRequest",
+    "DisconnectParticipant": "DisconnectParticipantRequest",
+    "GetComposition": "GetCompositionRequest",
+    "GetEncoderConfiguration": "GetEncoderConfigurationRequest",
+    "GetIngestConfiguration": "GetIngestConfigurationRequest",
+    "GetParticipant": "GetParticipantRequest",
+    "GetPublicKey": "GetPublicKeyRequest",
+    "GetStage": "GetStageRequest",
+    "GetStageSession": "GetStageSessionRequest",
+    "GetStorageConfiguration": "GetStorageConfigurationRequest",
+    "ImportPublicKey": "ImportPublicKeyRequest",
+    "ListCompositions": "ListCompositionsRequest",
+    "ListEncoderConfigurations": "ListEncoderConfigurationsRequest",
+    "ListIngestConfigurations": "ListIngestConfigurationsRequest",
+    "ListParticipantEvents": "ListParticipantEventsRequest",
+    "ListParticipantReplicas": "ListParticipantReplicasRequest",
+    "ListParticipants": "ListParticipantsRequest",
+    "ListPublicKeys": "ListPublicKeysRequest",
+    "ListStageSessions": "ListStageSessionsRequest",
+    "ListStages": "ListStagesRequest",
+    "ListStorageConfigurations": "ListStorageConfigurationsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "RevokeConnectionToken": "RevokeConnectionTokenRequest",
+    "StartComposition": "StartCompositionRequest",
+    "StartParticipantReplication": "StartParticipantReplicationRequest",
+    "StopComposition": "StopCompositionRequest",
+    "StopParticipantReplication": "StopParticipantReplicationRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateIngestConfiguration": "UpdateIngestConfigurationRequest",
+    "UpdateStage": "UpdateStageRequest"
+  },
+  "shapes": {
+    "AttributeKey": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "AutoParticipantRecordingConfiguration": {
+      "type": "structure",
+      "required": [
+        "storageConfigurationArn"
+      ],
+      "members": {
+        "storageConfigurationArn": "AutoParticipantRecordingStorageConfigurationArn",
+        "mediaTypes": "ParticipantRecordingMediaTypeList",
+        "thumbnailConfiguration": "ParticipantThumbnailConfiguration",
+        "recordingReconnectWindowSeconds": "ParticipantRecordingReconnectWindowSeconds",
+        "hlsConfiguration": "ParticipantRecordingHlsConfiguration",
+        "recordParticipantReplicas": "RecordParticipantReplicas"
+      }
+    },
+    "AutoParticipantRecordingStorageConfigurationArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "^$|^arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:storage-configuration/[a-zA-Z0-9-]+$"
+    },
+    "Bitrate": {
+      "type": "integer",
+      "min": 1,
+      "max": 8500000
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "ChannelArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:channel/[a-zA-Z0-9-]+"
+    },
+    "ChannelDestinationConfiguration": {
+      "type": "structure",
+      "required": [
+        "channelArn"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "encoderConfigurationArn": "EncoderConfigurationArn"
+      }
+    },
+    "CompositionArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:composition/[a-zA-Z0-9-]+"
+    },
+    "CompositionClientToken": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "CompositionRecordingHlsConfiguration": {
+      "type": "structure",
+      "members": {
+        "targetSegmentDurationSeconds": "CompositionRecordingTargetSegmentDurationSeconds"
+      }
+    },
+    "CompositionRecordingTargetSegmentDurationSeconds": {
+      "type": "integer",
+      "min": 2,
+      "max": 10
+    },
+    "CompositionThumbnailConfiguration": {
+      "type": "structure",
+      "members": {
+        "targetIntervalSeconds": "ThumbnailIntervalSeconds",
+        "storage": "ThumbnailStorageTypeList"
+      }
+    },
+    "CompositionThumbnailConfigurationList": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "CompositionThumbnailConfiguration"
+    },
+    "ConnectionTokenId": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9-_]+"
+    },
+    "CreateEncoderConfigurationRequest": {
+      "type": "structure",
+      "members": {
+        "name": "EncoderConfigurationName",
+        "video": "Video",
+        "tags": "Tags"
+      }
+    },
+    "CreateIngestConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ingestProtocol"
+      ],
+      "members": {
+        "name": "IngestConfigurationName",
+        "stageArn": "IngestConfigurationStageArn",
+        "userId": "UserId",
+        "attributes": "ParticipantAttributes",
+        "ingestProtocol": "IngestProtocol",
+        "insecureIngest": "InsecureIngest",
+        "redundantIngest": "RedundantIngest",
+        "tags": "Tags"
+      }
+    },
+    "CreateParticipantTokenRequest": {
+      "type": "structure",
+      "required": [
+        "stageArn"
+      ],
+      "members": {
+        "stageArn": "StageArn",
+        "duration": "ParticipantTokenDurationMinutes",
+        "userId": "ParticipantTokenUserId",
+        "attributes": "ParticipantTokenAttributes",
+        "capabilities": "ParticipantTokenCapabilities"
+      }
+    },
+    "CreateStageRequest": {
+      "type": "structure",
+      "members": {
+        "name": "StageName",
+        "participantTokenConfigurations": "ParticipantTokenConfigurations",
+        "tags": "Tags",
+        "autoParticipantRecordingConfiguration": "AutoParticipantRecordingConfiguration"
+      }
+    },
+    "CreateStorageConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "s3"
+      ],
+      "members": {
+        "name": "StorageConfigurationName",
+        "s3": "S3StorageConfiguration",
+        "tags": "Tags"
+      }
+    },
+    "DeleteEncoderConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "EncoderConfigurationArn"
+      }
+    },
+    "DeleteIngestConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "IngestConfigurationArn",
+        "force": "Boolean"
+      }
+    },
+    "DeletePublicKeyRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "PublicKeyArn"
+      }
+    },
+    "DeleteStageRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "StageArn"
+      }
+    },
+    "DeleteStorageConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "StorageConfigurationArn"
+      }
+    },
+    "DestinationConfiguration": {
+      "type": "structure",
+      "members": {
+        "name": "DestinationConfigurationName",
+        "channel": "ChannelDestinationConfiguration",
+        "s3": "S3DestinationConfiguration"
+      }
+    },
+    "DestinationConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "DestinationConfiguration"
+    },
+    "DestinationConfigurationName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "DisconnectParticipantReason": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "DisconnectParticipantRequest": {
+      "type": "structure",
+      "required": [
+        "stageArn",
+        "participantId"
+      ],
+      "members": {
+        "stageArn": "StageArn",
+        "participantId": "ParticipantTokenId",
+        "reason": "DisconnectParticipantReason"
+      }
+    },
+    "EncoderConfigurationArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:encoder-configuration/[a-zA-Z0-9-]+"
+    },
+    "EncoderConfigurationArnList": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "EncoderConfigurationArn"
+    },
+    "EncoderConfigurationName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "Framerate": {
+      "type": "float",
+      "min": 1,
+      "max": 60
+    },
+    "GetCompositionRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "CompositionArn"
+      }
+    },
+    "GetEncoderConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "EncoderConfigurationArn"
+      }
+    },
+    "GetIngestConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "IngestConfigurationArn"
+      }
+    },
+    "GetParticipantRequest": {
+      "type": "structure",
+      "required": [
+        "stageArn",
+        "sessionId",
+        "participantId"
+      ],
+      "members": {
+        "stageArn": "StageArn",
+        "sessionId": "StageSessionId",
+        "participantId": "ParticipantId"
+      }
+    },
+    "GetPublicKeyRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "PublicKeyArn"
+      }
+    },
+    "GetStageRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "StageArn"
+      }
+    },
+    "GetStageSessionRequest": {
+      "type": "structure",
+      "required": [
+        "stageArn",
+        "sessionId"
+      ],
+      "members": {
+        "stageArn": "StageArn",
+        "sessionId": "StageSessionId"
+      }
+    },
+    "GetStorageConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "StorageConfigurationArn"
+      }
+    },
+    "GridConfiguration": {
+      "type": "structure",
+      "members": {
+        "featuredParticipantAttribute": "AttributeKey",
+        "omitStoppedVideo": "OmitStoppedVideo",
+        "videoAspectRatio": "VideoAspectRatio",
+        "videoFillMode": "VideoFillMode",
+        "gridGap": "GridGap",
+        "participantOrderAttribute": "AttributeKey"
+      }
+    },
+    "GridGap": {
+      "type": "integer",
+      "min": 0
+    },
+    "Height": {
+      "type": "integer",
+      "min": 2,
+      "max": 1920
+    },
+    "ImportPublicKeyRequest": {
+      "type": "structure",
+      "required": [
+        "publicKeyMaterial"
+      ],
+      "members": {
+        "publicKeyMaterial": "PublicKeyMaterial",
+        "name": "PublicKeyName",
+        "tags": "Tags"
+      }
+    },
+    "IngestConfigurationArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:ingest-configuration/[a-zA-Z0-9-]+"
+    },
+    "IngestConfigurationName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "IngestConfigurationStageArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "^$|^arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:stage/[a-zA-Z0-9-]+$"
+    },
+    "IngestConfigurationState": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "INACTIVE"
+      ]
+    },
+    "IngestProtocol": {
+      "type": "string",
+      "enum": [
+        "RTMP",
+        "RTMPS"
+      ]
+    },
+    "InsecureIngest": {
+      "type": "boolean"
+    },
+    "LayoutConfiguration": {
+      "type": "structure",
+      "members": {
+        "grid": "GridConfiguration",
+        "pip": "PipConfiguration"
+      }
+    },
+    "ListCompositionsRequest": {
+      "type": "structure",
+      "members": {
+        "filterByStageArn": "StageArn",
+        "filterByEncoderConfigurationArn": "EncoderConfigurationArn",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxCompositionResults"
+      }
+    },
+    "ListEncoderConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxEncoderConfigurationResults"
+      }
+    },
+    "ListIngestConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "filterByStageArn": "StageArn",
+        "filterByState": "IngestConfigurationState",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxIngestConfigurationResults"
+      }
+    },
+    "ListParticipantEventsRequest": {
+      "type": "structure",
+      "required": [
+        "stageArn",
+        "sessionId",
+        "participantId"
+      ],
+      "members": {
+        "stageArn": "StageArn",
+        "sessionId": "StageSessionId",
+        "participantId": "ParticipantId",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxParticipantEventResults"
+      }
+    },
+    "ListParticipantReplicasRequest": {
+      "type": "structure",
+      "required": [
+        "sourceStageArn",
+        "participantId"
+      ],
+      "members": {
+        "sourceStageArn": "StageArn",
+        "participantId": "ParticipantId",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxParticipantReplicaResults"
+      }
+    },
+    "ListParticipantsRequest": {
+      "type": "structure",
+      "required": [
+        "stageArn",
+        "sessionId"
+      ],
+      "members": {
+        "stageArn": "StageArn",
+        "sessionId": "StageSessionId",
+        "filterByUserId": "UserId",
+        "filterByPublished": "Published",
+        "filterByState": "ParticipantState",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxParticipantResults",
+        "filterByRecordingState": "ParticipantRecordingFilterByRecordingState"
+      }
+    },
+    "ListPublicKeysRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxPublicKeyResults"
+      }
+    },
+    "ListStageSessionsRequest": {
+      "type": "structure",
+      "required": [
+        "stageArn"
+      ],
+      "members": {
+        "stageArn": "StageArn",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxStageSessionResults"
+      }
+    },
+    "ListStagesRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxStageResults"
+      }
+    },
+    "ListStorageConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxStorageConfigurationResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn"
+      }
+    },
+    "MaxCompositionResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxEncoderConfigurationResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxIngestConfigurationResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxParticipantEventResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxParticipantReplicaResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "MaxParticipantResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxPublicKeyResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxStageResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxStageSessionResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxStorageConfigurationResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "OmitStoppedVideo": {
+      "type": "boolean"
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 0,
+      "max": 1024,
+      "pattern": "[a-zA-Z0-9+/=_-]*"
+    },
+    "ParticipantAttributes": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "ParticipantId": {
+      "type": "string",
+      "min": 0,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "ParticipantRecordingFilterByRecordingState": {
+      "type": "string",
+      "enum": [
+        "STARTING",
+        "ACTIVE",
+        "STOPPING",
+        "STOPPED",
+        "FAILED"
+      ]
+    },
+    "ParticipantRecordingHlsConfiguration": {
+      "type": "structure",
+      "members": {
+        "targetSegmentDurationSeconds": "ParticipantRecordingTargetSegmentDurationSeconds"
+      }
+    },
+    "ParticipantRecordingMediaType": {
+      "type": "string",
+      "enum": [
+        "AUDIO_VIDEO",
+        "AUDIO_ONLY",
+        "NONE"
+      ]
+    },
+    "ParticipantRecordingMediaTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "ParticipantRecordingMediaType"
+    },
+    "ParticipantRecordingReconnectWindowSeconds": {
+      "type": "integer",
+      "min": 0,
+      "max": 300
+    },
+    "ParticipantRecordingTargetSegmentDurationSeconds": {
+      "type": "integer",
+      "min": 2,
+      "max": 10
+    },
+    "ParticipantState": {
+      "type": "string",
+      "enum": [
+        "CONNECTED",
+        "DISCONNECTED"
+      ]
+    },
+    "ParticipantThumbnailConfiguration": {
+      "type": "structure",
+      "members": {
+        "targetIntervalSeconds": "ThumbnailIntervalSeconds",
+        "storage": "ThumbnailStorageTypeList",
+        "recordingMode": "ThumbnailRecordingMode"
+      }
+    },
+    "ParticipantTokenAttributes": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "ParticipantTokenCapabilities": {
+      "type": "list",
+      "min": 0,
+      "max": 2,
+      "member": "ParticipantTokenCapability"
+    },
+    "ParticipantTokenCapability": {
+      "type": "string",
+      "enum": [
+        "PUBLISH",
+        "SUBSCRIBE"
+      ]
+    },
+    "ParticipantTokenConfiguration": {
+      "type": "structure",
+      "members": {
+        "duration": "ParticipantTokenDurationMinutes",
+        "userId": "ParticipantTokenUserId",
+        "attributes": "ParticipantTokenAttributes",
+        "capabilities": "ParticipantTokenCapabilities"
+      }
+    },
+    "ParticipantTokenConfigurations": {
+      "type": "list",
+      "min": 0,
+      "max": 12,
+      "member": "ParticipantTokenConfiguration"
+    },
+    "ParticipantTokenDurationMinutes": {
+      "type": "integer",
+      "min": 1,
+      "max": 20160
+    },
+    "ParticipantTokenId": {
+      "type": "string",
+      "min": 0,
+      "max": 64,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "ParticipantTokenUserId": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "PipBehavior": {
+      "type": "string",
+      "enum": [
+        "STATIC",
+        "DYNAMIC"
+      ]
+    },
+    "PipConfiguration": {
+      "type": "structure",
+      "members": {
+        "featuredParticipantAttribute": "AttributeKey",
+        "omitStoppedVideo": "OmitStoppedVideo",
+        "videoFillMode": "VideoFillMode",
+        "gridGap": "GridGap",
+        "pipParticipantAttribute": "AttributeKey",
+        "pipBehavior": "PipBehavior",
+        "pipOffset": "PipOffset",
+        "pipPosition": "PipPosition",
+        "pipWidth": "PipWidth",
+        "pipHeight": "PipHeight",
+        "participantOrderAttribute": "AttributeKey"
+      }
+    },
+    "PipHeight": {
+      "type": "integer",
+      "min": 1
+    },
+    "PipOffset": {
+      "type": "integer",
+      "min": 0
+    },
+    "PipPosition": {
+      "type": "string",
+      "enum": [
+        "TOP_LEFT",
+        "TOP_RIGHT",
+        "BOTTOM_LEFT",
+        "BOTTOM_RIGHT"
+      ]
+    },
+    "PipWidth": {
+      "type": "integer",
+      "min": 1
+    },
+    "PublicKeyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:public-key/[a-zA-Z0-9-]+"
+    },
+    "PublicKeyMaterial": {
+      "type": "string",
+      "pattern": ".*-----BEGIN PUBLIC KEY-----\\r?\\n([a-zA-Z0-9+/=\\r\\n]+)\\r?\\n-----END PUBLIC KEY-----(\\r?\\n)?.*"
+    },
+    "PublicKeyName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "Published": {
+      "type": "boolean"
+    },
+    "ReconnectWindowSeconds": {
+      "type": "integer",
+      "min": 0,
+      "max": 300
+    },
+    "RecordParticipantReplicas": {
+      "type": "boolean"
+    },
+    "RecordingConfiguration": {
+      "type": "structure",
+      "members": {
+        "hlsConfiguration": "CompositionRecordingHlsConfiguration",
+        "format": "RecordingConfigurationFormat"
+      }
+    },
+    "RecordingConfigurationFormat": {
+      "type": "string",
+      "enum": [
+        "HLS"
+      ]
+    },
+    "RedundantIngest": {
+      "type": "boolean"
+    },
+    "ResourceArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:[a-z-]/[a-zA-Z0-9-]+"
+    },
+    "RevokeConnectionTokenRequest": {
+      "type": "structure",
+      "required": [
+        "tokenId"
+      ],
+      "members": {
+        "tokenId": "ConnectionTokenId"
+      }
+    },
+    "S3BucketName": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "[a-z0-9-.]+"
+    },
+    "S3DestinationConfiguration": {
+      "type": "structure",
+      "required": [
+        "storageConfigurationArn",
+        "encoderConfigurationArns"
+      ],
+      "members": {
+        "storageConfigurationArn": "StorageConfigurationArn",
+        "encoderConfigurationArns": "EncoderConfigurationArnList",
+        "recordingConfiguration": "RecordingConfiguration",
+        "thumbnailConfigurations": "CompositionThumbnailConfigurationList"
+      }
+    },
+    "S3StorageConfiguration": {
+      "type": "structure",
+      "required": [
+        "bucketName"
+      ],
+      "members": {
+        "bucketName": "S3BucketName"
+      }
+    },
+    "StageArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:stage/[a-zA-Z0-9-]+"
+    },
+    "StageName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "StageSessionId": {
+      "type": "string",
+      "min": 16,
+      "max": 16,
+      "pattern": "st-[a-zA-Z0-9]+"
+    },
+    "StartCompositionRequest": {
+      "type": "structure",
+      "required": [
+        "stageArn",
+        "destinations"
+      ],
+      "members": {
+        "stageArn": "StageArn",
+        "idempotencyToken": "CompositionClientToken",
+        "layout": "LayoutConfiguration",
+        "destinations": "DestinationConfigurationList",
+        "tags": "Tags"
+      }
+    },
+    "StartParticipantReplicationRequest": {
+      "type": "structure",
+      "required": [
+        "sourceStageArn",
+        "destinationStageArn",
+        "participantId"
+      ],
+      "members": {
+        "sourceStageArn": "StageArn",
+        "destinationStageArn": "StageArn",
+        "participantId": "ParticipantId",
+        "reconnectWindowSeconds": "ReconnectWindowSeconds",
+        "attributes": "ParticipantAttributes"
+      }
+    },
+    "StopCompositionRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "CompositionArn"
+      }
+    },
+    "StopParticipantReplicationRequest": {
+      "type": "structure",
+      "required": [
+        "sourceStageArn",
+        "destinationStageArn",
+        "participantId"
+      ],
+      "members": {
+        "sourceStageArn": "StageArn",
+        "destinationStageArn": "StageArn",
+        "participantId": "ParticipantId"
+      }
+    },
+    "StorageConfigurationArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:storage-configuration/[a-zA-Z0-9-]+"
+    },
+    "StorageConfigurationName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "String": {
+      "type": "string"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn",
+        "tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "Tags": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "ThumbnailIntervalSeconds": {
+      "type": "integer",
+      "min": 1,
+      "max": 86400
+    },
+    "ThumbnailRecordingMode": {
+      "type": "string",
+      "enum": [
+        "INTERVAL",
+        "DISABLED"
+      ]
+    },
+    "ThumbnailStorageType": {
+      "type": "string",
+      "enum": [
+        "SEQUENTIAL",
+        "LATEST"
+      ]
+    },
+    "ThumbnailStorageTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 2,
+      "member": "ThumbnailStorageType"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateIngestConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "IngestConfigurationArn",
+        "stageArn": "IngestConfigurationStageArn",
+        "redundantIngest": "RedundantIngest"
+      }
+    },
+    "UpdateStageRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "StageArn",
+        "name": "StageName",
+        "autoParticipantRecordingConfiguration": "AutoParticipantRecordingConfiguration"
+      }
+    },
+    "UserId": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "Video": {
+      "type": "structure",
+      "members": {
+        "width": "Width",
+        "height": "Height",
+        "framerate": "Framerate",
+        "bitrate": "Bitrate"
+      }
+    },
+    "VideoAspectRatio": {
+      "type": "string",
+      "enum": [
+        "AUTO",
+        "VIDEO",
+        "SQUARE",
+        "PORTRAIT"
+      ]
+    },
+    "VideoFillMode": {
+      "type": "string",
+      "enum": [
+        "FILL",
+        "COVER",
+        "CONTAIN"
+      ]
+    },
+    "Width": {
+      "type": "integer",
+      "min": 2,
+      "max": 1920
+    }
+  }
+}

@@ -1,0 +1,356 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "osis",
+ "apiVersion": "2022-01-01",
+ "operations": {
+  "CreatePipeline": {
+   "method": "POST",
+   "requestUri": "/2022-01-01/osis/createPipeline",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreatePipelineEndpoint": {
+   "method": "POST",
+   "requestUri": "/2022-01-01/osis/createPipelineEndpoint",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeletePipeline": {
+   "method": "DELETE",
+   "requestUri": "/2022-01-01/osis/deletePipeline/{PipelineName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "PipelineName": {
+      "location": "uri",
+      "name": "PipelineName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeletePipelineEndpoint": {
+   "method": "DELETE",
+   "requestUri": "/2022-01-01/osis/deletePipelineEndpoint/{EndpointId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "EndpointId": {
+      "location": "uri",
+      "name": "EndpointId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteResourcePolicy": {
+   "method": "DELETE",
+   "requestUri": "/2022-01-01/osis/resourcePolicy/{ResourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetPipeline": {
+   "method": "GET",
+   "requestUri": "/2022-01-01/osis/getPipeline/{PipelineName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "PipelineName": {
+      "location": "uri",
+      "name": "PipelineName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetPipelineBlueprint": {
+   "method": "GET",
+   "requestUri": "/2022-01-01/osis/getPipelineBlueprint/{BlueprintName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "BlueprintName": {
+      "location": "uri",
+      "name": "BlueprintName"
+     },
+     "Format": {
+      "location": "querystring",
+      "name": "format"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetPipelineChangeProgress": {
+   "method": "GET",
+   "requestUri": "/2022-01-01/osis/getPipelineChangeProgress/{PipelineName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "PipelineName": {
+      "location": "uri",
+      "name": "PipelineName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetResourcePolicy": {
+   "method": "GET",
+   "requestUri": "/2022-01-01/osis/resourcePolicy/{ResourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListPipelineBlueprints": {
+   "method": "POST",
+   "requestUri": "/2022-01-01/osis/listPipelineBlueprints",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListPipelineEndpointConnections": {
+   "method": "GET",
+   "requestUri": "/2022-01-01/osis/listPipelineEndpointConnections",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListPipelineEndpoints": {
+   "method": "GET",
+   "requestUri": "/2022-01-01/osis/listPipelineEndpoints",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListPipelines": {
+   "method": "GET",
+   "requestUri": "/2022-01-01/osis/listPipelines",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/2022-01-01/osis/listTagsForResource/",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "querystring",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutResourcePolicy": {
+   "method": "PUT",
+   "requestUri": "/2022-01-01/osis/resourcePolicy/{ResourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RevokePipelineEndpointConnections": {
+   "method": "POST",
+   "requestUri": "/2022-01-01/osis/revokePipelineEndpointConnections",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartPipeline": {
+   "method": "PUT",
+   "requestUri": "/2022-01-01/osis/startPipeline/{PipelineName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "PipelineName": {
+      "location": "uri",
+      "name": "PipelineName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StopPipeline": {
+   "method": "PUT",
+   "requestUri": "/2022-01-01/osis/stopPipeline/{PipelineName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "PipelineName": {
+      "location": "uri",
+      "name": "PipelineName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/2022-01-01/osis/tagResource/",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "querystring",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "POST",
+   "requestUri": "/2022-01-01/osis/untagResource/",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Arn": {
+      "location": "querystring",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdatePipeline": {
+   "method": "PUT",
+   "requestUri": "/2022-01-01/osis/updatePipeline/{PipelineName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "PipelineName": {
+      "location": "uri",
+      "name": "PipelineName"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ValidatePipeline": {
+   "method": "POST",
+   "requestUri": "/2022-01-01/osis/validatePipeline",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

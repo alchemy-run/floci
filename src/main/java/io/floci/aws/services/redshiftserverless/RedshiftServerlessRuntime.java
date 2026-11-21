@@ -71,22 +71,32 @@ public class RedshiftServerlessRuntime {
      * the proxy; adopted containers are preserved for another recovery attempt.
      */
     public Backend start(String accountId, String region, String workgroupName, String masterUsername,
-                         String masterPassword, String dbName, Endpoint endpoint, boolean adopt,
-                         Supplier<Optional<AdminCredentials>> admin) {
+                         String masterPassword, String dbName, Endpoint endpoint, int proxyPort, boolean routed,
+                         boolean adopt, Supplier<Optional<AdminCredentials>> admin) {
         String backendId = backendId(region, workgroupName);
         try {
             RedshiftContainerHandle handle = adopt
                     ? containerManager.adoptOrStart(accountId, backendId, masterUsername, masterPassword, dbName, "serverless")
                     : containerManager.start(accountId, backendId, masterUsername, masterPassword, dbName, "serverless");
-            proxyManager.startProxy(relayKey(accountId, backendId), endpoint.getPort(),
+            proxyManager.startProxy(relayKey(accountId, backendId), proxyPort,
                     handle.getHost(), handle.getPort(), endpoint.getAddress(),
                     masterUsername, masterPassword, dbName,
                     validator(accountId, backendId, admin), List.of());
+            if (routed) {
+                proxyManager.routeEndpoint(relayKey(accountId, backendId), endpoint.getAddress(), endpoint.getPort(),
+                        proxyPort);
+            }
             return new Backend(handle.getHost(), handle.getPort());
         } catch (RuntimeException e) {
             rollback(accountId, backendId);
             throw e;
         }
+    }
+
+    /** Routes {@code endpoint} (a name and the workgroup's port) to the proxy on {@code proxyPort}. */
+    public void route(String accountId, String region, String workgroupName, Endpoint endpoint, int proxyPort) {
+        proxyManager.routeEndpoint(relayKey(accountId, backendId(region, workgroupName)), endpoint.getAddress(),
+                endpoint.getPort(), proxyPort);
     }
 
     /** Dumps the workgroup's database to {@code outputFile} with pg_dump. */
@@ -134,6 +144,12 @@ public class RedshiftServerlessRuntime {
                 LOG.warnv(e, "Could not delete the pre-restore dump {0}", safety);
             }
         }
+    }
+
+    /** Restores one table of the dump in {@code dumpFile} into the workgroup's database under a new name. */
+    public void restoreTable(String accountId, String region, String workgroupName, String masterUsername,
+                             Path dumpFile, RedshiftContainerManager.TableRestore restore) {
+        containerManager.restoreTable(accountId, backendId(region, workgroupName), masterUsername, dumpFile, restore);
     }
 
     private void rollBackRestore(String accountId, String backendId, String masterUsername, String dbName,

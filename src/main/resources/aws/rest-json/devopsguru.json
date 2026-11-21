@@ -1,0 +1,448 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "devopsguru",
+ "apiVersion": "2020-12-01",
+ "operations": {
+  "AddNotificationChannel": {
+   "method": "PUT",
+   "requestUri": "/channels",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteInsight": {
+   "method": "DELETE",
+   "requestUri": "/insights/{Id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Id": {
+      "location": "uri",
+      "name": "Id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeAccountHealth": {
+   "method": "GET",
+   "requestUri": "/accounts/health",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeAccountOverview": {
+   "method": "POST",
+   "requestUri": "/accounts/overview",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "FromTime",
+     "ToTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeAnomaly": {
+   "method": "GET",
+   "requestUri": "/anomalies/{Id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Id": {
+      "location": "uri",
+      "name": "Id"
+     },
+     "AccountId": {
+      "location": "querystring",
+      "name": "AccountId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeEventSourcesConfig": {
+   "method": "POST",
+   "requestUri": "/event-sources",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeFeedback": {
+   "method": "POST",
+   "requestUri": "/feedback",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeInsight": {
+   "method": "GET",
+   "requestUri": "/insights/{Id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Id": {
+      "location": "uri",
+      "name": "Id"
+     },
+     "AccountId": {
+      "location": "querystring",
+      "name": "AccountId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeOrganizationHealth": {
+   "method": "POST",
+   "requestUri": "/organization/health",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeOrganizationOverview": {
+   "method": "POST",
+   "requestUri": "/organization/overview",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "FromTime",
+     "ToTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeOrganizationResourceCollectionHealth": {
+   "method": "POST",
+   "requestUri": "/organization/health/resource-collection",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeResourceCollectionHealth": {
+   "method": "GET",
+   "requestUri": "/accounts/health/resource-collection/{ResourceCollectionType}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceCollectionType": {
+      "location": "uri",
+      "name": "ResourceCollectionType"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DescribeServiceIntegration": {
+   "method": "GET",
+   "requestUri": "/service-integrations",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetCostEstimation": {
+   "method": "GET",
+   "requestUri": "/cost-estimation",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetResourceCollection": {
+   "method": "GET",
+   "requestUri": "/resource-collections/{ResourceCollectionType}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceCollectionType": {
+      "location": "uri",
+      "name": "ResourceCollectionType"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "NextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListAnomaliesForInsight": {
+   "method": "POST",
+   "requestUri": "/anomalies/insight/{InsightId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "InsightId": {
+      "location": "uri",
+      "name": "InsightId"
+     }
+    },
+    "timestamps": [
+     "StartTimeRange.FromTime",
+     "StartTimeRange.ToTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListAnomalousLogGroups": {
+   "method": "POST",
+   "requestUri": "/list-log-anomalies",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListEvents": {
+   "method": "POST",
+   "requestUri": "/events",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "Filters.EventTimeRange.FromTime",
+     "Filters.EventTimeRange.ToTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListInsights": {
+   "method": "POST",
+   "requestUri": "/insights",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StatusFilter.Closed.EndTimeRange.FromTime",
+     "StatusFilter.Closed.EndTimeRange.ToTime",
+     "StatusFilter.Any.StartTimeRange.FromTime",
+     "StatusFilter.Any.StartTimeRange.ToTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListMonitoredResources": {
+   "method": "POST",
+   "requestUri": "/monitoredResources",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListNotificationChannels": {
+   "method": "POST",
+   "requestUri": "/channels",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListOrganizationInsights": {
+   "method": "POST",
+   "requestUri": "/organization/insights",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StatusFilter.Closed.EndTimeRange.FromTime",
+     "StatusFilter.Closed.EndTimeRange.ToTime",
+     "StatusFilter.Any.StartTimeRange.FromTime",
+     "StatusFilter.Any.StartTimeRange.ToTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListRecommendations": {
+   "method": "POST",
+   "requestUri": "/recommendations",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutFeedback": {
+   "method": "PUT",
+   "requestUri": "/feedback",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RemoveNotificationChannel": {
+   "method": "DELETE",
+   "requestUri": "/channels/{Id}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "Id": {
+      "location": "uri",
+      "name": "Id"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SearchInsights": {
+   "method": "POST",
+   "requestUri": "/insights/search",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StartTimeRange.FromTime",
+     "StartTimeRange.ToTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "SearchOrganizationInsights": {
+   "method": "POST",
+   "requestUri": "/organization/insights/search",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "StartTimeRange.FromTime",
+     "StartTimeRange.ToTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartCostEstimation": {
+   "method": "PUT",
+   "requestUri": "/cost-estimation",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ClientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateEventSourcesConfig": {
+   "method": "PUT",
+   "requestUri": "/event-sources",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateResourceCollection": {
+   "method": "PUT",
+   "requestUri": "/resource-collections",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateServiceIntegration": {
+   "method": "PUT",
+   "requestUri": "/service-integrations",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

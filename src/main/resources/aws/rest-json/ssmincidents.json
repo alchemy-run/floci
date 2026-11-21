@@ -1,0 +1,472 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "ssmincidents",
+ "apiVersion": "2018-05-10",
+ "operations": {
+  "BatchGetIncidentFindings": {
+   "method": "POST",
+   "requestUri": "/batchGetIncidentFindings",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateReplicationSet": {
+   "method": "POST",
+   "requestUri": "/createReplicationSet",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateResponsePlan": {
+   "method": "POST",
+   "requestUri": "/createResponsePlan",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateTimelineEvent": {
+   "method": "POST",
+   "requestUri": "/createTimelineEvent",
+   "responseCode": 201,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "eventTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteIncidentRecord": {
+   "method": "POST",
+   "requestUri": "/deleteIncidentRecord",
+   "responseCode": 204,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteReplicationSet": {
+   "method": "POST",
+   "requestUri": "/deleteReplicationSet",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "querystring",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteResourcePolicy": {
+   "method": "POST",
+   "requestUri": "/deleteResourcePolicy",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteResponsePlan": {
+   "method": "POST",
+   "requestUri": "/deleteResponsePlan",
+   "responseCode": 204,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteTimelineEvent": {
+   "method": "POST",
+   "requestUri": "/deleteTimelineEvent",
+   "responseCode": 204,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetIncidentRecord": {
+   "method": "GET",
+   "requestUri": "/getIncidentRecord",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "querystring",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetReplicationSet": {
+   "method": "GET",
+   "requestUri": "/getReplicationSet",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "querystring",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetResourcePolicies": {
+   "method": "POST",
+   "requestUri": "/getResourcePolicies",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "querystring",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetResponsePlan": {
+   "method": "GET",
+   "requestUri": "/getResponsePlan",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "arn": {
+      "location": "querystring",
+      "name": "arn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetTimelineEvent": {
+   "method": "GET",
+   "requestUri": "/getTimelineEvent",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "eventId": {
+      "location": "querystring",
+      "name": "eventId"
+     },
+     "incidentRecordArn": {
+      "location": "querystring",
+      "name": "incidentRecordArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListIncidentFindings": {
+   "method": "POST",
+   "requestUri": "/listIncidentFindings",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListIncidentRecords": {
+   "method": "POST",
+   "requestUri": "/listIncidentRecords",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "filters[].condition.after",
+     "filters[].condition.before"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListRelatedItems": {
+   "method": "POST",
+   "requestUri": "/listRelatedItems",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListReplicationSets": {
+   "method": "POST",
+   "requestUri": "/listReplicationSets",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListResponsePlans": {
+   "method": "POST",
+   "requestUri": "/listResponsePlans",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTimelineEvents": {
+   "method": "POST",
+   "requestUri": "/listTimelineEvents",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "filters[].condition.after",
+     "filters[].condition.before"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutResourcePolicy": {
+   "method": "POST",
+   "requestUri": "/putResourcePolicy",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartIncident": {
+   "method": "POST",
+   "requestUri": "/startIncident",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "triggerDetails.timestamp"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateDeletionProtection": {
+   "method": "POST",
+   "requestUri": "/updateDeletionProtection",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateIncidentRecord": {
+   "method": "POST",
+   "requestUri": "/updateIncidentRecord",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateRelatedItems": {
+   "method": "POST",
+   "requestUri": "/updateRelatedItems",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateReplicationSet": {
+   "method": "POST",
+   "requestUri": "/updateReplicationSet",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateResponsePlan": {
+   "method": "POST",
+   "requestUri": "/updateResponsePlan",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateTimelineEvent": {
+   "method": "POST",
+   "requestUri": "/updateTimelineEvent",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "eventTime"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

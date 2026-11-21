@@ -562,7 +562,7 @@ public class EmrServerlessJobRunService implements Resettable {
      * {@code sparkSubmitParameters}, split as a shell would split them, then its entry point and the
      * entry point's arguments.
      */
-    static List<String> application(JobDriver.SparkSubmit sparkSubmit) {
+    public static List<String> application(JobDriver.SparkSubmit sparkSubmit) {
         List<String> application = new ArrayList<>(
                 EmrServerlessSparkRunner.splitParameters(sparkSubmit.getSparkSubmitParameters()));
         application.add(sparkSubmit.getEntryPoint());
@@ -600,7 +600,7 @@ public class EmrServerlessJobRunService implements Resettable {
      * {@code --archives} option is {@code spark.archives}, winning over any setting of it, as
      * {@code spark-submit} has it.
      */
-    static Map<String, String> sparkProperties(Map<String, String> sparkDefaults, JobDriver.SparkSubmit sparkSubmit) {
+    public static Map<String, String> sparkProperties(Map<String, String> sparkDefaults, JobDriver.SparkSubmit sparkSubmit) {
         Map<String, String> properties = new LinkedHashMap<>(sparkDefaults);
         List<String> parameters = EmrServerlessSparkRunner.splitParameters(sparkSubmit.getSparkSubmitParameters());
         String archivesOption = null;
@@ -643,7 +643,7 @@ public class EmrServerlessJobRunService implements Resettable {
      * A run's {@code spark.archives}: a comma-separated list, of which Spark takes each entry trimmed and drops
      * the empty ones.
      */
-    static List<String> archives(Map<String, String> sparkProperties) {
+    public static List<String> archives(Map<String, String> sparkProperties) {
         String archives = sparkProperties.get(SPARK_ARCHIVES);
         if (archives == null) {
             return List.of();

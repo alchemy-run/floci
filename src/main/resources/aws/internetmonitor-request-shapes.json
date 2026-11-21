@@ -1,0 +1,417 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_internetmonitor_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateMonitor": "CreateMonitorInput",
+    "DeleteMonitor": "DeleteMonitorInput",
+    "GetHealthEvent": "GetHealthEventInput",
+    "GetInternetEvent": "GetInternetEventInput",
+    "GetMonitor": "GetMonitorInput",
+    "GetQueryResults": "GetQueryResultsInput",
+    "GetQueryStatus": "GetQueryStatusInput",
+    "ListHealthEvents": "ListHealthEventsInput",
+    "ListInternetEvents": "ListInternetEventsInput",
+    "ListMonitors": "ListMonitorsInput",
+    "ListTagsForResource": "ListTagsForResourceInput",
+    "StartQuery": "StartQueryInput",
+    "StopQuery": "StopQueryInput",
+    "TagResource": "TagResourceInput",
+    "UntagResource": "UntagResourceInput",
+    "UpdateMonitor": "UpdateMonitorInput"
+  },
+  "shapes": {
+    "AccountId": {
+      "type": "string",
+      "min": 12,
+      "max": 12
+    },
+    "Arn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:.*"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CreateMonitorInput": {
+      "type": "structure",
+      "required": [
+        "MonitorName"
+      ],
+      "members": {
+        "MonitorName": "ResourceName",
+        "Resources": "SetOfARNs",
+        "ClientToken": "String",
+        "Tags": "TagMap",
+        "MaxCityNetworksToMonitor": "MaxCityNetworksToMonitor",
+        "InternetMeasurementsLogDelivery": "InternetMeasurementsLogDelivery",
+        "TrafficPercentageToMonitor": "TrafficPercentageToMonitor",
+        "HealthEventsConfig": "HealthEventsConfig"
+      }
+    },
+    "DeleteMonitorInput": {
+      "type": "structure",
+      "required": [
+        "MonitorName"
+      ],
+      "members": {
+        "MonitorName": "ResourceName"
+      }
+    },
+    "FilterList": {
+      "type": "list",
+      "member": "String"
+    },
+    "FilterParameter": {
+      "type": "structure",
+      "members": {
+        "Field": "String",
+        "Operator": "Operator",
+        "Values": "FilterList"
+      }
+    },
+    "FilterParameters": {
+      "type": "list",
+      "member": "FilterParameter"
+    },
+    "GetHealthEventInput": {
+      "type": "structure",
+      "required": [
+        "MonitorName",
+        "EventId"
+      ],
+      "members": {
+        "MonitorName": "ResourceName",
+        "EventId": "HealthEventName",
+        "LinkedAccountId": "AccountId"
+      }
+    },
+    "GetInternetEventInput": {
+      "type": "structure",
+      "required": [
+        "EventId"
+      ],
+      "members": {
+        "EventId": "InternetEventId"
+      }
+    },
+    "GetMonitorInput": {
+      "type": "structure",
+      "required": [
+        "MonitorName"
+      ],
+      "members": {
+        "MonitorName": "ResourceName",
+        "LinkedAccountId": "AccountId"
+      }
+    },
+    "GetQueryResultsInput": {
+      "type": "structure",
+      "required": [
+        "MonitorName",
+        "QueryId"
+      ],
+      "members": {
+        "MonitorName": "ResourceName",
+        "QueryId": "String",
+        "NextToken": "String",
+        "MaxResults": "QueryMaxResults"
+      }
+    },
+    "GetQueryStatusInput": {
+      "type": "structure",
+      "required": [
+        "MonitorName",
+        "QueryId"
+      ],
+      "members": {
+        "MonitorName": "ResourceName",
+        "QueryId": "String"
+      }
+    },
+    "HealthEventName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9/_.-]+"
+    },
+    "HealthEventStatus": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "RESOLVED"
+      ]
+    },
+    "HealthEventsConfig": {
+      "type": "structure",
+      "members": {
+        "AvailabilityScoreThreshold": "Percentage",
+        "PerformanceScoreThreshold": "Percentage",
+        "AvailabilityLocalHealthEventsConfig": "LocalHealthEventsConfig",
+        "PerformanceLocalHealthEventsConfig": "LocalHealthEventsConfig"
+      }
+    },
+    "InternetEventId": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9-]+"
+    },
+    "InternetEventMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "InternetMeasurementsLogDelivery": {
+      "type": "structure",
+      "members": {
+        "S3Config": "S3Config"
+      }
+    },
+    "ListHealthEventsInput": {
+      "type": "structure",
+      "required": [
+        "MonitorName"
+      ],
+      "members": {
+        "MonitorName": "ResourceName",
+        "StartTime": "SyntheticTimestamp_date_time",
+        "EndTime": "SyntheticTimestamp_date_time",
+        "NextToken": "String",
+        "MaxResults": "MaxResults",
+        "EventStatus": "HealthEventStatus",
+        "LinkedAccountId": "AccountId"
+      }
+    },
+    "ListInternetEventsInput": {
+      "type": "structure",
+      "members": {
+        "NextToken": "String",
+        "MaxResults": "InternetEventMaxResults",
+        "StartTime": "SyntheticTimestamp_date_time",
+        "EndTime": "SyntheticTimestamp_date_time",
+        "EventStatus": "String",
+        "EventType": "String"
+      }
+    },
+    "ListMonitorsInput": {
+      "type": "structure",
+      "members": {
+        "NextToken": "String",
+        "MaxResults": "MaxResults",
+        "MonitorStatus": "String",
+        "IncludeLinkedAccounts": "Boolean"
+      }
+    },
+    "ListTagsForResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "MonitorArn"
+      }
+    },
+    "LocalHealthEventsConfig": {
+      "type": "structure",
+      "members": {
+        "Status": "LocalHealthEventsConfigStatus",
+        "HealthScoreThreshold": "Percentage",
+        "MinTrafficImpact": "Percentage"
+      }
+    },
+    "LocalHealthEventsConfigStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "LogDeliveryStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "MaxCityNetworksToMonitor": {
+      "type": "integer",
+      "min": 1,
+      "max": 500000
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 25
+    },
+    "MonitorArn": {
+      "type": "string",
+      "min": 20,
+      "max": 512,
+      "pattern": "arn:.*"
+    },
+    "MonitorConfigState": {
+      "type": "string",
+      "enum": [
+        "PENDING",
+        "ACTIVE",
+        "INACTIVE",
+        "ERROR"
+      ]
+    },
+    "Operator": {
+      "type": "string",
+      "enum": [
+        "EQUALS",
+        "NOT_EQUALS"
+      ]
+    },
+    "Percentage": {
+      "type": "double",
+      "min": 0,
+      "max": 100
+    },
+    "QueryMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "QueryType": {
+      "type": "string",
+      "enum": [
+        "MEASUREMENTS",
+        "TOP_LOCATIONS",
+        "TOP_LOCATION_DETAILS",
+        "OVERALL_TRAFFIC_SUGGESTIONS",
+        "OVERALL_TRAFFIC_SUGGESTIONS_DETAILS",
+        "ROUTING_SUGGESTIONS"
+      ]
+    },
+    "ResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[a-zA-Z0-9_.-]+"
+    },
+    "S3Config": {
+      "type": "structure",
+      "members": {
+        "BucketName": "S3ConfigBucketNameString",
+        "BucketPrefix": "String",
+        "LogDeliveryStatus": "LogDeliveryStatus"
+      }
+    },
+    "S3ConfigBucketNameString": {
+      "type": "string",
+      "min": 3
+    },
+    "SetOfARNs": {
+      "type": "list",
+      "member": "Arn"
+    },
+    "StartQueryInput": {
+      "type": "structure",
+      "required": [
+        "MonitorName",
+        "StartTime",
+        "EndTime",
+        "QueryType"
+      ],
+      "members": {
+        "MonitorName": "ResourceName",
+        "StartTime": "SyntheticTimestamp_date_time",
+        "EndTime": "SyntheticTimestamp_date_time",
+        "QueryType": "QueryType",
+        "FilterParameters": "FilterParameters",
+        "LinkedAccountId": "AccountId"
+      }
+    },
+    "StopQueryInput": {
+      "type": "structure",
+      "required": [
+        "MonitorName",
+        "QueryId"
+      ],
+      "members": {
+        "MonitorName": "ResourceName",
+        "QueryId": "String"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "SyntheticTimestamp_date_time": {
+      "type": "timestamp"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "min": 0,
+      "max": 200,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "MonitorArn",
+        "Tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TrafficPercentageToMonitor": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "UntagResourceInput": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "MonitorArn",
+        "TagKeys": "TagKeys"
+      }
+    },
+    "UpdateMonitorInput": {
+      "type": "structure",
+      "required": [
+        "MonitorName"
+      ],
+      "members": {
+        "MonitorName": "ResourceName",
+        "ResourcesToAdd": "SetOfARNs",
+        "ResourcesToRemove": "SetOfARNs",
+        "Status": "MonitorConfigState",
+        "ClientToken": "String",
+        "MaxCityNetworksToMonitor": "MaxCityNetworksToMonitor",
+        "InternetMeasurementsLogDelivery": "InternetMeasurementsLogDelivery",
+        "TrafficPercentageToMonitor": "TrafficPercentageToMonitor",
+        "HealthEventsConfig": "HealthEventsConfig"
+      }
+    }
+  }
+}

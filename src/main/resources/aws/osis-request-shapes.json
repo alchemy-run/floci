@@ -1,0 +1,452 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_osis_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreatePipeline": "CreatePipelineRequest",
+    "CreatePipelineEndpoint": "CreatePipelineEndpointRequest",
+    "DeletePipeline": "DeletePipelineRequest",
+    "DeletePipelineEndpoint": "DeletePipelineEndpointRequest",
+    "DeleteResourcePolicy": "DeleteResourcePolicyRequest",
+    "GetPipeline": "GetPipelineRequest",
+    "GetPipelineBlueprint": "GetPipelineBlueprintRequest",
+    "GetPipelineChangeProgress": "GetPipelineChangeProgressRequest",
+    "GetResourcePolicy": "GetResourcePolicyRequest",
+    "ListPipelineBlueprints": "ListPipelineBlueprintsRequest",
+    "ListPipelineEndpointConnections": "ListPipelineEndpointConnectionsRequest",
+    "ListPipelineEndpoints": "ListPipelineEndpointsRequest",
+    "ListPipelines": "ListPipelinesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutResourcePolicy": "PutResourcePolicyRequest",
+    "RevokePipelineEndpointConnections": "RevokePipelineEndpointConnectionsRequest",
+    "StartPipeline": "StartPipelineRequest",
+    "StopPipeline": "StopPipelineRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdatePipeline": "UpdatePipelineRequest",
+    "ValidatePipeline": "ValidatePipelineRequest"
+  },
+  "shapes": {
+    "BlueprintFormat": {
+      "type": "string",
+      "pattern": "(YAML|JSON)"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BufferOptions": {
+      "type": "structure",
+      "required": [
+        "PersistentBufferEnabled"
+      ],
+      "members": {
+        "PersistentBufferEnabled": "Boolean"
+      }
+    },
+    "CidrBlock": {
+      "type": "string",
+      "pattern": "^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)/24$"
+    },
+    "CloudWatchLogDestination": {
+      "type": "structure",
+      "required": [
+        "LogGroup"
+      ],
+      "members": {
+        "LogGroup": "LogGroup"
+      }
+    },
+    "CreatePipelineEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "PipelineArn",
+        "VpcOptions"
+      ],
+      "members": {
+        "PipelineArn": "PipelineArn",
+        "VpcOptions": "PipelineEndpointVpcOptions"
+      }
+    },
+    "CreatePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "PipelineName",
+        "MinUnits",
+        "MaxUnits",
+        "PipelineConfigurationBody"
+      ],
+      "members": {
+        "PipelineName": "PipelineName",
+        "MinUnits": "PipelineUnits",
+        "MaxUnits": "PipelineUnits",
+        "PipelineConfigurationBody": "PipelineConfigurationBody",
+        "LogPublishingOptions": "LogPublishingOptions",
+        "VpcOptions": "VpcOptions",
+        "BufferOptions": "BufferOptions",
+        "EncryptionAtRestOptions": "EncryptionAtRestOptions",
+        "Tags": "TagList",
+        "PipelineRoleArn": "PipelineRoleArn"
+      }
+    },
+    "DeletePipelineEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "EndpointId"
+      ],
+      "members": {
+        "EndpointId": "PipelineEndpointId"
+      }
+    },
+    "DeletePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "PipelineName"
+      ],
+      "members": {
+        "PipelineName": "PipelineName"
+      }
+    },
+    "DeleteResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "PipelineArn"
+      }
+    },
+    "EncryptionAtRestOptions": {
+      "type": "structure",
+      "required": [
+        "KmsKeyArn"
+      ],
+      "members": {
+        "KmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "GetPipelineBlueprintRequest": {
+      "type": "structure",
+      "required": [
+        "BlueprintName"
+      ],
+      "members": {
+        "BlueprintName": "String",
+        "Format": "BlueprintFormat"
+      }
+    },
+    "GetPipelineChangeProgressRequest": {
+      "type": "structure",
+      "required": [
+        "PipelineName"
+      ],
+      "members": {
+        "PipelineName": "PipelineName"
+      }
+    },
+    "GetPipelineRequest": {
+      "type": "structure",
+      "required": [
+        "PipelineName"
+      ],
+      "members": {
+        "PipelineName": "PipelineName"
+      }
+    },
+    "GetResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "PipelineArn"
+      }
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 7,
+      "max": 2048
+    },
+    "ListPipelineBlueprintsRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "ListPipelineEndpointConnectionsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListPipelineEndpointsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListPipelinesRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "PipelineArn"
+      }
+    },
+    "LogGroup": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "\\/aws\\/vendedlogs\\/[\\.\\-_/#A-Za-z0-9]+"
+    },
+    "LogPublishingOptions": {
+      "type": "structure",
+      "members": {
+        "IsLoggingEnabled": "Boolean",
+        "CloudWatchLogDestination": "CloudWatchLogDestination"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 0,
+      "max": 3000,
+      "pattern": "^([\\s\\S]*)$"
+    },
+    "PipelineArn": {
+      "type": "string",
+      "min": 46,
+      "max": 76,
+      "pattern": "^arn:(aws|aws\\-cn|aws\\-us\\-gov|aws\\-iso|aws\\-iso\\-b):osis:.+:pipeline\\/.+$"
+    },
+    "PipelineConfigurationBody": {
+      "type": "string",
+      "min": 1,
+      "max": 100000
+    },
+    "PipelineEndpointId": {
+      "type": "string",
+      "min": 3,
+      "max": 512,
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9-_]+$"
+    },
+    "PipelineEndpointIdsList": {
+      "type": "list",
+      "member": "PipelineEndpointId"
+    },
+    "PipelineEndpointVpcOptions": {
+      "type": "structure",
+      "members": {
+        "SubnetIds": "SubnetIds",
+        "SecurityGroupIds": "SecurityGroupIds"
+      }
+    },
+    "PipelineName": {
+      "type": "string",
+      "min": 3,
+      "max": 28,
+      "pattern": "[a-z][a-z0-9\\-]+"
+    },
+    "PipelineRoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "^arn:(aws|aws\\-cn|aws\\-us\\-gov|aws\\-iso|aws\\-iso\\-b|aws\\-iso\\-e|aws\\-iso\\-f):iam::[0-9]+:role\\/.*$"
+    },
+    "PipelineUnits": {
+      "type": "integer",
+      "min": 1
+    },
+    "PutResourcePolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Policy"
+      ],
+      "members": {
+        "ResourceArn": "PipelineArn",
+        "Policy": "ResourcePolicy"
+      }
+    },
+    "ResourcePolicy": {
+      "type": "string",
+      "min": 2,
+      "max": 204800
+    },
+    "RevokePipelineEndpointConnectionsRequest": {
+      "type": "structure",
+      "required": [
+        "PipelineArn",
+        "EndpointIds"
+      ],
+      "members": {
+        "PipelineArn": "PipelineArn",
+        "EndpointIds": "PipelineEndpointIdsList"
+      }
+    },
+    "SecurityGroupId": {
+      "type": "string",
+      "min": 11,
+      "max": 20,
+      "pattern": "sg-\\w{8}(\\w{9})?"
+    },
+    "SecurityGroupIds": {
+      "type": "list",
+      "min": 1,
+      "max": 12,
+      "member": "SecurityGroupId"
+    },
+    "StartPipelineRequest": {
+      "type": "structure",
+      "required": [
+        "PipelineName"
+      ],
+      "members": {
+        "PipelineName": "PipelineName"
+      }
+    },
+    "StopPipelineRequest": {
+      "type": "structure",
+      "required": [
+        "PipelineName"
+      ],
+      "members": {
+        "PipelineName": "PipelineName"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringList": {
+      "type": "list",
+      "member": "String"
+    },
+    "SubnetId": {
+      "type": "string",
+      "min": 15,
+      "max": 24,
+      "pattern": "subnet-\\w{8}(\\w{9})?"
+    },
+    "SubnetIds": {
+      "type": "list",
+      "min": 1,
+      "max": 12,
+      "member": "SubnetId"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": ".*"
+    },
+    "TagList": {
+      "type": "list",
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "Arn",
+        "Tags"
+      ],
+      "members": {
+        "Arn": "PipelineArn",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": ".*"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "Arn",
+        "TagKeys"
+      ],
+      "members": {
+        "Arn": "PipelineArn",
+        "TagKeys": "StringList"
+      }
+    },
+    "UpdatePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "PipelineName"
+      ],
+      "members": {
+        "PipelineName": "PipelineName",
+        "MinUnits": "PipelineUnits",
+        "MaxUnits": "PipelineUnits",
+        "PipelineConfigurationBody": "PipelineConfigurationBody",
+        "LogPublishingOptions": "LogPublishingOptions",
+        "BufferOptions": "BufferOptions",
+        "EncryptionAtRestOptions": "EncryptionAtRestOptions",
+        "PipelineRoleArn": "PipelineRoleArn"
+      }
+    },
+    "ValidatePipelineRequest": {
+      "type": "structure",
+      "required": [
+        "PipelineConfigurationBody"
+      ],
+      "members": {
+        "PipelineConfigurationBody": "PipelineConfigurationBody"
+      }
+    },
+    "VpcAttachmentOptions": {
+      "type": "structure",
+      "required": [
+        "AttachToVpc"
+      ],
+      "members": {
+        "AttachToVpc": "Boolean",
+        "CidrBlock": "CidrBlock"
+      }
+    },
+    "VpcEndpointManagement": {
+      "type": "string",
+      "enum": [
+        "CUSTOMER",
+        "SERVICE"
+      ]
+    },
+    "VpcOptions": {
+      "type": "structure",
+      "required": [
+        "SubnetIds"
+      ],
+      "members": {
+        "SubnetIds": "SubnetIds",
+        "SecurityGroupIds": "SecurityGroupIds",
+        "VpcAttachmentOptions": "VpcAttachmentOptions",
+        "VpcEndpointManagement": "VpcEndpointManagement"
+      }
+    }
+  }
+}

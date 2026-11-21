@@ -1,0 +1,2917 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_mediaconnect_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AddBridgeOutputs": "AddBridgeOutputsRequest",
+    "AddBridgeSources": "AddBridgeSourcesRequest",
+    "AddFlowMediaStreams": "AddFlowMediaStreamsRequest",
+    "AddFlowOutputs": "AddFlowOutputsRequest",
+    "AddFlowSources": "AddFlowSourcesRequest",
+    "AddFlowVpcInterfaces": "AddFlowVpcInterfacesRequest",
+    "BatchGetRouterInput": "BatchGetRouterInputRequest",
+    "BatchGetRouterNetworkInterface": "BatchGetRouterNetworkInterfaceRequest",
+    "BatchGetRouterOutput": "BatchGetRouterOutputRequest",
+    "CreateBridge": "CreateBridgeRequest",
+    "CreateFlow": "CreateFlowRequest",
+    "CreateGateway": "CreateGatewayRequest",
+    "CreateRouterInput": "CreateRouterInputRequest",
+    "CreateRouterNetworkInterface": "CreateRouterNetworkInterfaceRequest",
+    "CreateRouterOutput": "CreateRouterOutputRequest",
+    "DeleteBridge": "DeleteBridgeRequest",
+    "DeleteFlow": "DeleteFlowRequest",
+    "DeleteGateway": "DeleteGatewayRequest",
+    "DeleteRouterInput": "DeleteRouterInputRequest",
+    "DeleteRouterNetworkInterface": "DeleteRouterNetworkInterfaceRequest",
+    "DeleteRouterOutput": "DeleteRouterOutputRequest",
+    "DeregisterGatewayInstance": "DeregisterGatewayInstanceRequest",
+    "DescribeBridge": "DescribeBridgeRequest",
+    "DescribeFlow": "DescribeFlowRequest",
+    "DescribeFlowSourceMetadata": "DescribeFlowSourceMetadataRequest",
+    "DescribeFlowSourceThumbnail": "DescribeFlowSourceThumbnailRequest",
+    "DescribeGateway": "DescribeGatewayRequest",
+    "DescribeGatewayInstance": "DescribeGatewayInstanceRequest",
+    "DescribeOffering": "DescribeOfferingRequest",
+    "DescribeReservation": "DescribeReservationRequest",
+    "GetRouterInput": "GetRouterInputRequest",
+    "GetRouterInputSourceMetadata": "GetRouterInputSourceMetadataRequest",
+    "GetRouterInputThumbnail": "GetRouterInputThumbnailRequest",
+    "GetRouterNetworkInterface": "GetRouterNetworkInterfaceRequest",
+    "GetRouterOutput": "GetRouterOutputRequest",
+    "GrantFlowEntitlements": "GrantFlowEntitlementsRequest",
+    "ListBridges": "ListBridgesRequest",
+    "ListEntitlements": "ListEntitlementsRequest",
+    "ListFlows": "ListFlowsRequest",
+    "ListGatewayInstances": "ListGatewayInstancesRequest",
+    "ListGateways": "ListGatewaysRequest",
+    "ListOfferings": "ListOfferingsRequest",
+    "ListReservations": "ListReservationsRequest",
+    "ListRouterInputs": "ListRouterInputsRequest",
+    "ListRouterNetworkInterfaces": "ListRouterNetworkInterfacesRequest",
+    "ListRouterOutputs": "ListRouterOutputsRequest",
+    "ListTagsForGlobalResource": "ListTagsForGlobalResourceRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PurchaseOffering": "PurchaseOfferingRequest",
+    "RemoveBridgeOutput": "RemoveBridgeOutputRequest",
+    "RemoveBridgeSource": "RemoveBridgeSourceRequest",
+    "RemoveFlowMediaStream": "RemoveFlowMediaStreamRequest",
+    "RemoveFlowOutput": "RemoveFlowOutputRequest",
+    "RemoveFlowSource": "RemoveFlowSourceRequest",
+    "RemoveFlowVpcInterface": "RemoveFlowVpcInterfaceRequest",
+    "RestartRouterInput": "RestartRouterInputRequest",
+    "RestartRouterOutput": "RestartRouterOutputRequest",
+    "RevokeFlowEntitlement": "RevokeFlowEntitlementRequest",
+    "StartFlow": "StartFlowRequest",
+    "StartRouterInput": "StartRouterInputRequest",
+    "StartRouterOutput": "StartRouterOutputRequest",
+    "StopFlow": "StopFlowRequest",
+    "StopRouterInput": "StopRouterInputRequest",
+    "StopRouterOutput": "StopRouterOutputRequest",
+    "TagGlobalResource": "TagGlobalResourceRequest",
+    "TagResource": "TagResourceRequest",
+    "TakeRouterInput": "TakeRouterInputRequest",
+    "UntagGlobalResource": "UntagGlobalResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateBridge": "UpdateBridgeRequest",
+    "UpdateBridgeOutput": "UpdateBridgeOutputRequest",
+    "UpdateBridgeSource": "UpdateBridgeSourceRequest",
+    "UpdateBridgeState": "UpdateBridgeStateRequest",
+    "UpdateFlow": "UpdateFlowRequest",
+    "UpdateFlowEntitlement": "UpdateFlowEntitlementRequest",
+    "UpdateFlowMediaStream": "UpdateFlowMediaStreamRequest",
+    "UpdateFlowOutput": "UpdateFlowOutputRequest",
+    "UpdateFlowSource": "UpdateFlowSourceRequest",
+    "UpdateGatewayInstance": "UpdateGatewayInstanceRequest",
+    "UpdateRouterInput": "UpdateRouterInputRequest",
+    "UpdateRouterNetworkInterface": "UpdateRouterNetworkInterfaceRequest",
+    "UpdateRouterOutput": "UpdateRouterOutputRequest"
+  },
+  "shapes": {
+    "AddBridgeFlowSourceRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "Name"
+      ],
+      "members": {
+        "FlowArn": "AddBridgeFlowSourceRequestFlowArnString",
+        "FlowVpcInterfaceAttachment": "VpcInterfaceAttachment",
+        "Name": "String"
+      }
+    },
+    "AddBridgeFlowSourceRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "AddBridgeNetworkOutputRequest": {
+      "type": "structure",
+      "required": [
+        "IpAddress",
+        "Name",
+        "NetworkName",
+        "Port",
+        "Protocol",
+        "Ttl"
+      ],
+      "members": {
+        "IpAddress": "String",
+        "Name": "String",
+        "NetworkName": "String",
+        "Port": "Integer",
+        "Protocol": "Protocol",
+        "Ttl": "Integer"
+      }
+    },
+    "AddBridgeNetworkSourceRequest": {
+      "type": "structure",
+      "required": [
+        "MulticastIp",
+        "Name",
+        "NetworkName",
+        "Port",
+        "Protocol"
+      ],
+      "members": {
+        "MulticastIp": "String",
+        "MulticastSourceSettings": "MulticastSourceSettings",
+        "Name": "String",
+        "NetworkName": "String",
+        "Port": "Integer",
+        "Protocol": "Protocol"
+      }
+    },
+    "AddBridgeOutputRequest": {
+      "type": "structure",
+      "members": {
+        "NetworkOutput": "AddBridgeNetworkOutputRequest"
+      }
+    },
+    "AddBridgeOutputsRequest": {
+      "type": "structure",
+      "required": [
+        "BridgeArn",
+        "Outputs"
+      ],
+      "members": {
+        "BridgeArn": "AddBridgeOutputsRequestBridgeArnString",
+        "Outputs": "__listOfAddBridgeOutputRequest"
+      }
+    },
+    "AddBridgeOutputsRequestBridgeArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:bridge:.+"
+    },
+    "AddBridgeSourceRequest": {
+      "type": "structure",
+      "members": {
+        "FlowSource": "AddBridgeFlowSourceRequest",
+        "NetworkSource": "AddBridgeNetworkSourceRequest"
+      }
+    },
+    "AddBridgeSourcesRequest": {
+      "type": "structure",
+      "required": [
+        "BridgeArn",
+        "Sources"
+      ],
+      "members": {
+        "BridgeArn": "BridgeArn",
+        "Sources": "__listOfAddBridgeSourceRequest"
+      }
+    },
+    "AddEgressGatewayBridgeRequest": {
+      "type": "structure",
+      "required": [
+        "MaxBitrate"
+      ],
+      "members": {
+        "MaxBitrate": "Integer"
+      }
+    },
+    "AddFlowMediaStreamsRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "MediaStreams"
+      ],
+      "members": {
+        "FlowArn": "AddFlowMediaStreamsRequestFlowArnString",
+        "MediaStreams": "__listOfAddMediaStreamRequest"
+      }
+    },
+    "AddFlowMediaStreamsRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "AddFlowOutputsRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "Outputs"
+      ],
+      "members": {
+        "FlowArn": "AddFlowOutputsRequestFlowArnString",
+        "Outputs": "__listOfAddOutputRequest"
+      }
+    },
+    "AddFlowOutputsRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "AddFlowSourcesRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "Sources"
+      ],
+      "members": {
+        "FlowArn": "AddFlowSourcesRequestFlowArnString",
+        "Sources": "__listOfSetSourceRequest"
+      }
+    },
+    "AddFlowSourcesRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "AddFlowVpcInterfacesRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "VpcInterfaces"
+      ],
+      "members": {
+        "FlowArn": "AddFlowVpcInterfacesRequestFlowArnString",
+        "VpcInterfaces": "__listOfVpcInterfaceRequest"
+      }
+    },
+    "AddFlowVpcInterfacesRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "AddIngressGatewayBridgeRequest": {
+      "type": "structure",
+      "required": [
+        "MaxBitrate",
+        "MaxOutputs"
+      ],
+      "members": {
+        "MaxBitrate": "Integer",
+        "MaxOutputs": "Integer"
+      }
+    },
+    "AddMaintenance": {
+      "type": "structure",
+      "required": [
+        "MaintenanceDay",
+        "MaintenanceStartHour"
+      ],
+      "members": {
+        "MaintenanceDay": "MaintenanceDay",
+        "MaintenanceStartHour": "String"
+      }
+    },
+    "AddMediaStreamRequest": {
+      "type": "structure",
+      "required": [
+        "MediaStreamId",
+        "MediaStreamName",
+        "MediaStreamType"
+      ],
+      "members": {
+        "Attributes": "MediaStreamAttributesRequest",
+        "ClockRate": "Integer",
+        "Description": "String",
+        "MediaStreamId": "Integer",
+        "MediaStreamName": "String",
+        "MediaStreamType": "MediaStreamType",
+        "VideoFormat": "String",
+        "MediaStreamTags": "__mapOfString"
+      }
+    },
+    "AddOutputRequest": {
+      "type": "structure",
+      "members": {
+        "CidrAllowList": "__listOfString",
+        "Description": "String",
+        "Destination": "String",
+        "Encryption": "Encryption",
+        "MaxLatency": "Integer",
+        "MediaStreamOutputConfigurations": "__listOfMediaStreamOutputConfigurationRequest",
+        "MinLatency": "Integer",
+        "Name": "String",
+        "Port": "Integer",
+        "Protocol": "Protocol",
+        "RemoteId": "String",
+        "SenderControlPort": "Integer",
+        "SmoothingLatency": "Integer",
+        "StreamId": "String",
+        "VpcInterfaceAttachment": "VpcInterfaceAttachment",
+        "OutputStatus": "OutputStatus",
+        "NdiSpeedHqQuality": "Integer",
+        "NdiProgramName": "String",
+        "OutputTags": "__mapOfString",
+        "RouterIntegrationState": "State",
+        "RouterIntegrationTransitEncryption": "FlowTransitEncryption",
+        "NdiOutputTimecodeSource": "NdiOutputTimecodeSource",
+        "NdiAudioReferenceLevel": "NdiAudioReferenceLevel"
+      }
+    },
+    "Algorithm": {
+      "type": "string",
+      "enum": [
+        "aes128",
+        "aes192",
+        "aes256"
+      ]
+    },
+    "AudioMonitoringSetting": {
+      "type": "structure",
+      "members": {
+        "SilentAudio": "SilentAudio"
+      }
+    },
+    "AutomaticEncryptionKeyConfiguration": {
+      "type": "structure",
+      "members": {}
+    },
+    "BatchGetRouterInputRequest": {
+      "type": "structure",
+      "required": [
+        "Arns"
+      ],
+      "members": {
+        "Arns": "BatchGetRouterInputRequestArnsList"
+      }
+    },
+    "BatchGetRouterInputRequestArnsList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "RouterInputArn"
+    },
+    "BatchGetRouterNetworkInterfaceRequest": {
+      "type": "structure",
+      "required": [
+        "Arns"
+      ],
+      "members": {
+        "Arns": "BatchGetRouterNetworkInterfaceRequestArnsList"
+      }
+    },
+    "BatchGetRouterNetworkInterfaceRequestArnsList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "RouterNetworkInterfaceArn"
+    },
+    "BatchGetRouterOutputRequest": {
+      "type": "structure",
+      "required": [
+        "Arns"
+      ],
+      "members": {
+        "Arns": "BatchGetRouterOutputRequestArnsList"
+      }
+    },
+    "BatchGetRouterOutputRequestArnsList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "RouterOutputArn"
+    },
+    "BlackFrames": {
+      "type": "structure",
+      "members": {
+        "State": "State",
+        "ThresholdSeconds": "Integer"
+      }
+    },
+    "BlackFramesConfiguration": {
+      "type": "structure",
+      "required": [
+        "State",
+        "ThresholdSeconds"
+      ],
+      "members": {
+        "State": "ContentQualityAnalysisState",
+        "ThresholdSeconds": "RouterCqaThresholdSeconds"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BridgeArn": {
+      "type": "string"
+    },
+    "BridgePlacement": {
+      "type": "string",
+      "enum": [
+        "AVAILABLE",
+        "LOCKED"
+      ]
+    },
+    "ClientToken": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "[!-~]+"
+    },
+    "Colorimetry": {
+      "type": "string",
+      "enum": [
+        "BT601",
+        "BT709",
+        "BT2020",
+        "BT2100",
+        "ST2065-1",
+        "ST2065-3",
+        "XYZ"
+      ]
+    },
+    "ContentQualityAnalysisFeatureConfiguration": {
+      "type": "structure",
+      "members": {
+        "BlackFrames": "BlackFramesConfiguration",
+        "FrozenFrames": "FrozenFramesConfiguration",
+        "SilentAudio": "SilentAudioConfiguration"
+      }
+    },
+    "ContentQualityAnalysisState": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "CreateBridgeRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "PlacementArn",
+        "Sources"
+      ],
+      "members": {
+        "EgressGatewayBridge": "AddEgressGatewayBridgeRequest",
+        "IngressGatewayBridge": "AddIngressGatewayBridgeRequest",
+        "Name": "String",
+        "Outputs": "__listOfAddBridgeOutputRequest",
+        "PlacementArn": "String",
+        "SourceFailoverConfig": "FailoverConfig",
+        "Sources": "__listOfAddBridgeSourceRequest"
+      }
+    },
+    "CreateFlowRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "AvailabilityZone": "String",
+        "Entitlements": "__listOfGrantEntitlementRequest",
+        "MediaStreams": "__listOfAddMediaStreamRequest",
+        "Name": "String",
+        "Outputs": "__listOfAddOutputRequest",
+        "Source": "SetSourceRequest",
+        "SourceFailoverConfig": "FailoverConfig",
+        "Sources": "__listOfSetSourceRequest",
+        "VpcInterfaces": "__listOfVpcInterfaceRequest",
+        "Maintenance": "AddMaintenance",
+        "SourceMonitoringConfig": "MonitoringConfig",
+        "FlowSize": "FlowSize",
+        "NdiConfig": "NdiConfig",
+        "EncodingConfig": "EncodingConfig",
+        "FlowTags": "__mapOfString"
+      }
+    },
+    "CreateGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "EgressCidrBlocks",
+        "Name",
+        "Networks"
+      ],
+      "members": {
+        "EgressCidrBlocks": "__listOfString",
+        "Name": "String",
+        "Networks": "__listOfGatewayNetwork"
+      }
+    },
+    "CreateRouterInputRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Configuration",
+        "MaximumBitrate",
+        "RoutingScope",
+        "Tier"
+      ],
+      "members": {
+        "Name": "CreateRouterInputRequestNameString",
+        "Configuration": "RouterInputConfiguration",
+        "MaximumBitrate": "Long",
+        "RoutingScope": "RoutingScope",
+        "Tier": "RouterInputTier",
+        "RegionName": "String",
+        "AvailabilityZone": "String",
+        "TransitEncryption": "RouterInputTransitEncryption",
+        "MaintenanceConfiguration": "MaintenanceConfiguration",
+        "Tags": "__mapOfString",
+        "ClientToken": "ClientToken",
+        "ContentQualityAnalysisConfiguration": "RouterContentQualityAnalysisConfiguration"
+      }
+    },
+    "CreateRouterInputRequestNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "CreateRouterNetworkInterfaceRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Configuration"
+      ],
+      "members": {
+        "Name": "CreateRouterNetworkInterfaceRequestNameString",
+        "Configuration": "RouterNetworkInterfaceConfiguration",
+        "RegionName": "String",
+        "Tags": "__mapOfString",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateRouterNetworkInterfaceRequestNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9]([a-zA-Z0-9\\-_]*[a-zA-Z0-9])?"
+    },
+    "CreateRouterOutputRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Configuration",
+        "MaximumBitrate",
+        "RoutingScope",
+        "Tier"
+      ],
+      "members": {
+        "Name": "CreateRouterOutputRequestNameString",
+        "Configuration": "RouterOutputConfiguration",
+        "MaximumBitrate": "Long",
+        "RoutingScope": "RoutingScope",
+        "Tier": "RouterOutputTier",
+        "RegionName": "String",
+        "AvailabilityZone": "String",
+        "MaintenanceConfiguration": "MaintenanceConfiguration",
+        "Tags": "__mapOfString",
+        "FabricConfiguration": "FabricConfiguration",
+        "ClientToken": "ClientToken"
+      }
+    },
+    "CreateRouterOutputRequestNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "Day": {
+      "type": "string",
+      "enum": [
+        "MONDAY",
+        "TUESDAY",
+        "WEDNESDAY",
+        "THURSDAY",
+        "FRIDAY",
+        "SATURDAY",
+        "SUNDAY"
+      ]
+    },
+    "DefaultMaintenanceConfiguration": {
+      "type": "structure",
+      "members": {}
+    },
+    "DeleteBridgeRequest": {
+      "type": "structure",
+      "required": [
+        "BridgeArn"
+      ],
+      "members": {
+        "BridgeArn": "DeleteBridgeRequestBridgeArnString"
+      }
+    },
+    "DeleteBridgeRequestBridgeArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:bridge:.+"
+    },
+    "DeleteFlowRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn"
+      ],
+      "members": {
+        "FlowArn": "DeleteFlowRequestFlowArnString"
+      }
+    },
+    "DeleteFlowRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "DeleteGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "GatewayArn"
+      ],
+      "members": {
+        "GatewayArn": "DeleteGatewayRequestGatewayArnString"
+      }
+    },
+    "DeleteGatewayRequestGatewayArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:gateway:.+"
+    },
+    "DeleteRouterInputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterInputArn"
+      }
+    },
+    "DeleteRouterNetworkInterfaceRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterNetworkInterfaceArn"
+      }
+    },
+    "DeleteRouterOutputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterOutputArn"
+      }
+    },
+    "DeregisterGatewayInstanceRequest": {
+      "type": "structure",
+      "required": [
+        "GatewayInstanceArn"
+      ],
+      "members": {
+        "Force": "Boolean",
+        "GatewayInstanceArn": "DeregisterGatewayInstanceRequestGatewayInstanceArnString"
+      }
+    },
+    "DeregisterGatewayInstanceRequestGatewayInstanceArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:gateway:.+:instance:.+"
+    },
+    "DescribeBridgeRequest": {
+      "type": "structure",
+      "required": [
+        "BridgeArn"
+      ],
+      "members": {
+        "BridgeArn": "DescribeBridgeRequestBridgeArnString"
+      }
+    },
+    "DescribeBridgeRequestBridgeArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:bridge:.+"
+    },
+    "DescribeFlowRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn"
+      ],
+      "members": {
+        "FlowArn": "DescribeFlowRequestFlowArnString"
+      }
+    },
+    "DescribeFlowRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "DescribeFlowSourceMetadataRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn"
+      ],
+      "members": {
+        "FlowArn": "FlowArn"
+      }
+    },
+    "DescribeFlowSourceThumbnailRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn"
+      ],
+      "members": {
+        "FlowArn": "FlowArn"
+      }
+    },
+    "DescribeGatewayInstanceRequest": {
+      "type": "structure",
+      "required": [
+        "GatewayInstanceArn"
+      ],
+      "members": {
+        "GatewayInstanceArn": "DescribeGatewayInstanceRequestGatewayInstanceArnString"
+      }
+    },
+    "DescribeGatewayInstanceRequestGatewayInstanceArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:gateway:.+:instance:.+"
+    },
+    "DescribeGatewayRequest": {
+      "type": "structure",
+      "required": [
+        "GatewayArn"
+      ],
+      "members": {
+        "GatewayArn": "DescribeGatewayRequestGatewayArnString"
+      }
+    },
+    "DescribeGatewayRequestGatewayArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:gateway:.+"
+    },
+    "DescribeOfferingRequest": {
+      "type": "structure",
+      "required": [
+        "OfferingArn"
+      ],
+      "members": {
+        "OfferingArn": "OfferingArn"
+      }
+    },
+    "DescribeReservationRequest": {
+      "type": "structure",
+      "required": [
+        "ReservationArn"
+      ],
+      "members": {
+        "ReservationArn": "ReservationArn"
+      }
+    },
+    "DesiredState": {
+      "type": "string",
+      "enum": [
+        "ACTIVE",
+        "STANDBY",
+        "DELETED"
+      ]
+    },
+    "DestinationConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "DestinationIp",
+        "DestinationPort",
+        "Interface"
+      ],
+      "members": {
+        "DestinationIp": "String",
+        "DestinationPort": "Integer",
+        "Interface": "InterfaceRequest"
+      }
+    },
+    "Double": {
+      "type": "double"
+    },
+    "EncoderProfile": {
+      "type": "string",
+      "enum": [
+        "main",
+        "high"
+      ]
+    },
+    "EncodingConfig": {
+      "type": "structure",
+      "members": {
+        "EncodingProfile": "EncodingProfile",
+        "VideoMaxBitrate": "Integer"
+      }
+    },
+    "EncodingName": {
+      "type": "string",
+      "enum": [
+        "jxsv",
+        "raw",
+        "smpte291",
+        "pcm"
+      ]
+    },
+    "EncodingParametersRequest": {
+      "type": "structure",
+      "required": [
+        "CompressionFactor",
+        "EncoderProfile"
+      ],
+      "members": {
+        "CompressionFactor": "Double",
+        "EncoderProfile": "EncoderProfile"
+      }
+    },
+    "EncodingProfile": {
+      "type": "string",
+      "enum": [
+        "DISTRIBUTION_H264_DEFAULT",
+        "CONTRIBUTION_H264_DEFAULT"
+      ]
+    },
+    "Encryption": {
+      "type": "structure",
+      "required": [
+        "RoleArn"
+      ],
+      "members": {
+        "Algorithm": "Algorithm",
+        "ConstantInitializationVector": "String",
+        "DeviceId": "String",
+        "KeyType": "KeyType",
+        "Region": "String",
+        "ResourceId": "String",
+        "RoleArn": "String",
+        "SecretArn": "String",
+        "Url": "String"
+      }
+    },
+    "EntitlementStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "FabricConfiguration": {
+      "type": "structure",
+      "required": [
+        "RecoveryLatencyMode"
+      ],
+      "members": {
+        "RecoveryLatencyMode": "FabricLatencyMode"
+      }
+    },
+    "FabricLatencyMode": {
+      "type": "string",
+      "enum": [
+        "BALANCED",
+        "LOW_LATENCY"
+      ]
+    },
+    "FailoverConfig": {
+      "type": "structure",
+      "members": {
+        "FailoverMode": "FailoverMode",
+        "RecoveryWindow": "Integer",
+        "SourcePriority": "SourcePriority",
+        "State": "State"
+      }
+    },
+    "FailoverInputSourcePriorityMode": {
+      "type": "string",
+      "enum": [
+        "NO_PRIORITY",
+        "PRIMARY_SECONDARY"
+      ]
+    },
+    "FailoverMode": {
+      "type": "string",
+      "enum": [
+        "MERGE",
+        "FAILOVER"
+      ]
+    },
+    "FailoverRouterInputConfiguration": {
+      "type": "structure",
+      "required": [
+        "NetworkInterfaceArn",
+        "ProtocolConfigurations",
+        "SourcePriorityMode"
+      ],
+      "members": {
+        "NetworkInterfaceArn": "RouterNetworkInterfaceArn",
+        "ProtocolConfigurations": "FailoverRouterInputProtocolConfigurationList",
+        "SourcePriorityMode": "FailoverInputSourcePriorityMode",
+        "PrimarySourceIndex": "FailoverRouterInputConfigurationPrimarySourceIndexInteger"
+      }
+    },
+    "FailoverRouterInputConfigurationPrimarySourceIndexInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 1
+    },
+    "FailoverRouterInputProtocolConfiguration": {
+      "type": "structure",
+      "members": {
+        "Rist": "RistRouterInputConfiguration",
+        "SrtListener": "SrtListenerRouterInputConfiguration",
+        "SrtCaller": "SrtCallerRouterInputConfiguration",
+        "Rtp": "RtpRouterInputConfiguration"
+      }
+    },
+    "FailoverRouterInputProtocolConfigurationList": {
+      "type": "list",
+      "member": "FailoverRouterInputProtocolConfiguration"
+    },
+    "FlowArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):mediaconnect:[a-z0-9-]+:[0-9]{12}:flow:[a-zA-Z0-9-]+:[a-zA-Z0-9_-]+"
+    },
+    "FlowOutputArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):mediaconnect:[a-z0-9-]+:[0-9]{12}:output:[a-zA-Z0-9-]+:[a-zA-Z0-9_-]+"
+    },
+    "FlowSize": {
+      "type": "string",
+      "enum": [
+        "MEDIUM",
+        "LARGE",
+        "LARGE_4X"
+      ]
+    },
+    "FlowSourceArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):mediaconnect:[a-z0-9-]+:[0-9]{12}:source:[a-zA-Z0-9-]+:[a-zA-Z0-9_-]+"
+    },
+    "FlowTransitEncryption": {
+      "type": "structure",
+      "required": [
+        "EncryptionKeyConfiguration"
+      ],
+      "members": {
+        "EncryptionKeyType": "FlowTransitEncryptionKeyType",
+        "EncryptionKeyConfiguration": "FlowTransitEncryptionKeyConfiguration"
+      }
+    },
+    "FlowTransitEncryptionKeyConfiguration": {
+      "type": "structure",
+      "members": {
+        "SecretsManager": "SecretsManagerEncryptionKeyConfiguration",
+        "Automatic": "AutomaticEncryptionKeyConfiguration"
+      }
+    },
+    "FlowTransitEncryptionKeyType": {
+      "type": "string",
+      "enum": [
+        "SECRETS_MANAGER",
+        "AUTOMATIC"
+      ]
+    },
+    "FmtpRequest": {
+      "type": "structure",
+      "members": {
+        "ChannelOrder": "String",
+        "Colorimetry": "Colorimetry",
+        "ExactFramerate": "String",
+        "Par": "String",
+        "Range": "Range",
+        "ScanMode": "ScanMode",
+        "Tcs": "Tcs"
+      }
+    },
+    "ForwardErrorCorrectionState": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "FrozenFrames": {
+      "type": "structure",
+      "members": {
+        "State": "State",
+        "ThresholdSeconds": "Integer"
+      }
+    },
+    "FrozenFramesConfiguration": {
+      "type": "structure",
+      "required": [
+        "State",
+        "ThresholdSeconds"
+      ],
+      "members": {
+        "State": "ContentQualityAnalysisState",
+        "ThresholdSeconds": "RouterCqaThresholdSeconds"
+      }
+    },
+    "GatewayNetwork": {
+      "type": "structure",
+      "required": [
+        "CidrBlock",
+        "Name"
+      ],
+      "members": {
+        "CidrBlock": "String",
+        "Name": "String"
+      }
+    },
+    "GetRouterInputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterInputArn"
+      }
+    },
+    "GetRouterInputSourceMetadataRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterInputArn"
+      }
+    },
+    "GetRouterInputThumbnailRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterInputArn"
+      }
+    },
+    "GetRouterNetworkInterfaceRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterNetworkInterfaceArn"
+      }
+    },
+    "GetRouterOutputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterOutputArn"
+      }
+    },
+    "GrantEntitlementRequest": {
+      "type": "structure",
+      "required": [
+        "Subscribers"
+      ],
+      "members": {
+        "DataTransferSubscriberFeePercent": "Integer",
+        "Description": "String",
+        "Encryption": "Encryption",
+        "EntitlementStatus": "EntitlementStatus",
+        "Name": "String",
+        "Subscribers": "__listOfString",
+        "EntitlementTags": "__mapOfString"
+      }
+    },
+    "GrantFlowEntitlementsRequest": {
+      "type": "structure",
+      "required": [
+        "Entitlements",
+        "FlowArn"
+      ],
+      "members": {
+        "Entitlements": "__listOfGrantEntitlementRequest",
+        "FlowArn": "GrantFlowEntitlementsRequestFlowArnString"
+      }
+    },
+    "GrantFlowEntitlementsRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "InputConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "InputPort",
+        "Interface"
+      ],
+      "members": {
+        "InputPort": "Integer",
+        "Interface": "InterfaceRequest"
+      }
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "InterfaceRequest": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "String"
+      }
+    },
+    "KeyType": {
+      "type": "string",
+      "enum": [
+        "speke",
+        "static-key",
+        "srt-password"
+      ]
+    },
+    "ListBridgesRequest": {
+      "type": "structure",
+      "members": {
+        "FilterArn": "String",
+        "MaxResults": "MaxResults",
+        "NextToken": "String"
+      }
+    },
+    "ListEntitlementsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "String"
+      }
+    },
+    "ListFlowsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "String"
+      }
+    },
+    "ListGatewayInstancesRequest": {
+      "type": "structure",
+      "members": {
+        "FilterArn": "String",
+        "MaxResults": "MaxResults",
+        "NextToken": "String"
+      }
+    },
+    "ListGatewaysRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "String"
+      }
+    },
+    "ListOfferingsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "String"
+      }
+    },
+    "ListReservationsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "String"
+      }
+    },
+    "ListRouterInputsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "ListRouterInputsRequestMaxResultsInteger",
+        "NextToken": "String",
+        "Filters": "RouterInputFilterList"
+      }
+    },
+    "ListRouterInputsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListRouterNetworkInterfacesRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "ListRouterNetworkInterfacesRequestMaxResultsInteger",
+        "NextToken": "String",
+        "Filters": "RouterNetworkInterfaceFilterList"
+      }
+    },
+    "ListRouterNetworkInterfacesRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListRouterOutputsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "ListRouterOutputsRequestMaxResultsInteger",
+        "NextToken": "String",
+        "Filters": "RouterOutputFilterList"
+      }
+    },
+    "ListRouterOutputsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListTagsForGlobalResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "String"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "String"
+      }
+    },
+    "Long": {
+      "type": "long"
+    },
+    "MaintenanceConfiguration": {
+      "type": "structure",
+      "members": {
+        "PreferredDayTime": "PreferredDayTimeMaintenanceConfiguration",
+        "Default": "DefaultMaintenanceConfiguration"
+      }
+    },
+    "MaintenanceDay": {
+      "type": "string",
+      "enum": [
+        "Monday",
+        "Tuesday",
+        "Wednesday",
+        "Thursday",
+        "Friday",
+        "Saturday",
+        "Sunday"
+      ]
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "MediaConnectFlowRouterInputConfiguration": {
+      "type": "structure",
+      "required": [
+        "SourceTransitDecryption"
+      ],
+      "members": {
+        "FlowArn": "FlowArn",
+        "FlowOutputArn": "FlowOutputArn",
+        "SourceTransitDecryption": "FlowTransitEncryption"
+      }
+    },
+    "MediaConnectFlowRouterOutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "DestinationTransitEncryption"
+      ],
+      "members": {
+        "FlowArn": "FlowArn",
+        "FlowSourceArn": "FlowSourceArn",
+        "DestinationTransitEncryption": "FlowTransitEncryption"
+      }
+    },
+    "MediaLiveChannelArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):medialive:[a-z0-9-]+:[0-9]{12}:channel:[a-zA-Z0-9]+"
+    },
+    "MediaLiveChannelPipelineId": {
+      "type": "string",
+      "enum": [
+        "PIPELINE_0",
+        "PIPELINE_1"
+      ]
+    },
+    "MediaLiveChannelRouterInputConfiguration": {
+      "type": "structure",
+      "required": [
+        "SourceTransitDecryption"
+      ],
+      "members": {
+        "MediaLiveChannelArn": "MediaLiveChannelArn",
+        "MediaLivePipelineId": "MediaLiveChannelPipelineId",
+        "MediaLiveChannelOutputName": "String",
+        "SourceTransitDecryption": "MediaLiveTransitEncryption"
+      }
+    },
+    "MediaLiveInputArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):medialive:[a-z0-9-]+:[0-9]{12}:input:[a-zA-Z0-9]+"
+    },
+    "MediaLiveInputPipelineId": {
+      "type": "string",
+      "enum": [
+        "PIPELINE_0",
+        "PIPELINE_1"
+      ]
+    },
+    "MediaLiveInputRouterOutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "DestinationTransitEncryption"
+      ],
+      "members": {
+        "MediaLiveInputArn": "MediaLiveInputArn",
+        "MediaLivePipelineId": "MediaLiveInputPipelineId",
+        "DestinationTransitEncryption": "MediaLiveTransitEncryption"
+      }
+    },
+    "MediaLiveTransitEncryption": {
+      "type": "structure",
+      "required": [
+        "EncryptionKeyConfiguration"
+      ],
+      "members": {
+        "EncryptionKeyType": "MediaLiveTransitEncryptionKeyType",
+        "EncryptionKeyConfiguration": "MediaLiveTransitEncryptionKeyConfiguration"
+      }
+    },
+    "MediaLiveTransitEncryptionKeyConfiguration": {
+      "type": "structure",
+      "members": {
+        "SecretsManager": "SecretsManagerEncryptionKeyConfiguration",
+        "Automatic": "AutomaticEncryptionKeyConfiguration"
+      }
+    },
+    "MediaLiveTransitEncryptionKeyType": {
+      "type": "string",
+      "enum": [
+        "SECRETS_MANAGER",
+        "AUTOMATIC"
+      ]
+    },
+    "MediaStreamAttributesRequest": {
+      "type": "structure",
+      "members": {
+        "Fmtp": "FmtpRequest",
+        "Lang": "String"
+      }
+    },
+    "MediaStreamOutputConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "EncodingName",
+        "MediaStreamName"
+      ],
+      "members": {
+        "DestinationConfigurations": "__listOfDestinationConfigurationRequest",
+        "EncodingName": "EncodingName",
+        "EncodingParameters": "EncodingParametersRequest",
+        "MediaStreamName": "String"
+      }
+    },
+    "MediaStreamSourceConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "EncodingName",
+        "MediaStreamName"
+      ],
+      "members": {
+        "EncodingName": "EncodingName",
+        "InputConfigurations": "__listOfInputConfigurationRequest",
+        "MediaStreamName": "String"
+      }
+    },
+    "MediaStreamType": {
+      "type": "string",
+      "enum": [
+        "video",
+        "audio",
+        "ancillary-data"
+      ]
+    },
+    "MergeRouterInputConfiguration": {
+      "type": "structure",
+      "required": [
+        "NetworkInterfaceArn",
+        "ProtocolConfigurations",
+        "MergeRecoveryWindowMilliseconds"
+      ],
+      "members": {
+        "NetworkInterfaceArn": "RouterNetworkInterfaceArn",
+        "ProtocolConfigurations": "MergeRouterInputProtocolConfigurationList",
+        "MergeRecoveryWindowMilliseconds": "Long"
+      }
+    },
+    "MergeRouterInputProtocolConfiguration": {
+      "type": "structure",
+      "members": {
+        "Rtp": "RtpRouterInputConfiguration",
+        "Rist": "RistRouterInputConfiguration"
+      }
+    },
+    "MergeRouterInputProtocolConfigurationList": {
+      "type": "list",
+      "member": "MergeRouterInputProtocolConfiguration"
+    },
+    "MonitoringConfig": {
+      "type": "structure",
+      "members": {
+        "ThumbnailState": "ThumbnailState",
+        "AudioMonitoringSettings": "__listOfAudioMonitoringSetting",
+        "ContentQualityAnalysisState": "ContentQualityAnalysisState",
+        "VideoMonitoringSettings": "__listOfVideoMonitoringSetting"
+      }
+    },
+    "MulticastSourceSettings": {
+      "type": "structure",
+      "members": {
+        "MulticastSourceIp": "String"
+      }
+    },
+    "NdiAudioReferenceLevel": {
+      "type": "integer",
+      "min": -40,
+      "max": 0
+    },
+    "NdiConfig": {
+      "type": "structure",
+      "members": {
+        "NdiState": "NdiState",
+        "MachineName": "String",
+        "NdiDiscoveryServers": "__listOfNdiDiscoveryServerConfig"
+      }
+    },
+    "NdiDiscoveryServerConfig": {
+      "type": "structure",
+      "required": [
+        "DiscoveryServerAddress",
+        "VpcInterfaceAdapter"
+      ],
+      "members": {
+        "DiscoveryServerAddress": "String",
+        "DiscoveryServerPort": "Integer",
+        "VpcInterfaceAdapter": "String"
+      }
+    },
+    "NdiOutputTimecodeSource": {
+      "type": "string",
+      "enum": [
+        "EMBEDDED_TIMECODE",
+        "UTC_SYSTEM_TIME"
+      ]
+    },
+    "NdiSourceSettings": {
+      "type": "structure",
+      "members": {
+        "SourceName": "String",
+        "AudioReferenceLevel": "NdiAudioReferenceLevel"
+      }
+    },
+    "NdiState": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "NetworkInterfaceType": {
+      "type": "string",
+      "enum": [
+        "ena",
+        "efa"
+      ]
+    },
+    "OfferingArn": {
+      "type": "string"
+    },
+    "OutputStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "PreferredDayTimeMaintenanceConfiguration": {
+      "type": "structure",
+      "required": [
+        "Day",
+        "Time"
+      ],
+      "members": {
+        "Day": "Day",
+        "Time": "String"
+      }
+    },
+    "Protocol": {
+      "type": "string",
+      "enum": [
+        "zixi-push",
+        "rtp-fec",
+        "rtp",
+        "zixi-pull",
+        "rist",
+        "st2110-jpegxs",
+        "cdi",
+        "srt-listener",
+        "srt-caller",
+        "fujitsu-qos",
+        "udp",
+        "ndi-speed-hq"
+      ]
+    },
+    "PublicRouterNetworkInterfaceConfiguration": {
+      "type": "structure",
+      "required": [
+        "AllowRules"
+      ],
+      "members": {
+        "AllowRules": "PublicRouterNetworkInterfaceConfigurationAllowRulesList"
+      }
+    },
+    "PublicRouterNetworkInterfaceConfigurationAllowRulesList": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "PublicRouterNetworkInterfaceRule"
+    },
+    "PublicRouterNetworkInterfaceRule": {
+      "type": "structure",
+      "required": [
+        "Cidr"
+      ],
+      "members": {
+        "Cidr": "PublicRouterNetworkInterfaceRuleCidrString"
+      }
+    },
+    "PublicRouterNetworkInterfaceRuleCidrString": {
+      "type": "string",
+      "pattern": "(?:[0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])"
+    },
+    "PublicTlsEncryptionConfiguration": {
+      "type": "structure",
+      "members": {}
+    },
+    "PurchaseOfferingRequest": {
+      "type": "structure",
+      "required": [
+        "OfferingArn",
+        "ReservationName",
+        "Start"
+      ],
+      "members": {
+        "OfferingArn": "String",
+        "ReservationName": "String",
+        "Start": "String"
+      }
+    },
+    "Range": {
+      "type": "string",
+      "enum": [
+        "NARROW",
+        "FULL",
+        "FULLPROTECT"
+      ]
+    },
+    "RemoveBridgeOutputRequest": {
+      "type": "structure",
+      "required": [
+        "BridgeArn",
+        "OutputName"
+      ],
+      "members": {
+        "BridgeArn": "RemoveBridgeOutputRequestBridgeArnString",
+        "OutputName": "String"
+      }
+    },
+    "RemoveBridgeOutputRequestBridgeArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:bridge:.+"
+    },
+    "RemoveBridgeSourceRequest": {
+      "type": "structure",
+      "required": [
+        "BridgeArn",
+        "SourceName"
+      ],
+      "members": {
+        "BridgeArn": "RemoveBridgeSourceRequestBridgeArnString",
+        "SourceName": "String"
+      }
+    },
+    "RemoveBridgeSourceRequestBridgeArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:bridge:.+"
+    },
+    "RemoveFlowMediaStreamRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "MediaStreamName"
+      ],
+      "members": {
+        "FlowArn": "RemoveFlowMediaStreamRequestFlowArnString",
+        "MediaStreamName": "String"
+      }
+    },
+    "RemoveFlowMediaStreamRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "RemoveFlowOutputRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "OutputArn"
+      ],
+      "members": {
+        "FlowArn": "RemoveFlowOutputRequestFlowArnString",
+        "OutputArn": "RemoveFlowOutputRequestOutputArnString"
+      }
+    },
+    "RemoveFlowOutputRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "RemoveFlowOutputRequestOutputArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:output:.+"
+    },
+    "RemoveFlowSourceRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "SourceArn"
+      ],
+      "members": {
+        "FlowArn": "RemoveFlowSourceRequestFlowArnString",
+        "SourceArn": "RemoveFlowSourceRequestSourceArnString"
+      }
+    },
+    "RemoveFlowSourceRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "RemoveFlowSourceRequestSourceArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:source:.+"
+    },
+    "RemoveFlowVpcInterfaceRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "VpcInterfaceName"
+      ],
+      "members": {
+        "FlowArn": "RemoveFlowVpcInterfaceRequestFlowArnString",
+        "VpcInterfaceName": "String"
+      }
+    },
+    "RemoveFlowVpcInterfaceRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "ReservationArn": {
+      "type": "string"
+    },
+    "RestartRouterInputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterInputArn"
+      }
+    },
+    "RestartRouterOutputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterOutputArn"
+      }
+    },
+    "RevokeFlowEntitlementRequest": {
+      "type": "structure",
+      "required": [
+        "EntitlementArn",
+        "FlowArn"
+      ],
+      "members": {
+        "EntitlementArn": "RevokeFlowEntitlementRequestEntitlementArnString",
+        "FlowArn": "RevokeFlowEntitlementRequestFlowArnString"
+      }
+    },
+    "RevokeFlowEntitlementRequestEntitlementArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:entitlement:.+"
+    },
+    "RevokeFlowEntitlementRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "RistRouterInputConfiguration": {
+      "type": "structure",
+      "required": [
+        "Port",
+        "RecoveryLatencyMilliseconds"
+      ],
+      "members": {
+        "Port": "RistRouterInputConfigurationPortInteger",
+        "RecoveryLatencyMilliseconds": "RistRouterInputConfigurationRecoveryLatencyMillisecondsLong"
+      }
+    },
+    "RistRouterInputConfigurationPortInteger": {
+      "type": "integer",
+      "min": 3000,
+      "max": 30000
+    },
+    "RistRouterInputConfigurationRecoveryLatencyMillisecondsLong": {
+      "type": "long",
+      "min": 10,
+      "max": 10000
+    },
+    "RistRouterOutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "DestinationAddress",
+        "DestinationPort"
+      ],
+      "members": {
+        "DestinationAddress": "String",
+        "DestinationPort": "RistRouterOutputConfigurationDestinationPortInteger"
+      }
+    },
+    "RistRouterOutputConfigurationDestinationPortInteger": {
+      "type": "integer",
+      "min": 1024,
+      "max": 65535
+    },
+    "RoleArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):iam::[0-9]{12}:role/[a-zA-Z0-9_+=,.@-]+"
+    },
+    "RouterContentQualityAnalysisConfiguration": {
+      "type": "structure",
+      "members": {
+        "ContentLevel": "ContentQualityAnalysisFeatureConfiguration"
+      }
+    },
+    "RouterCqaThresholdSeconds": {
+      "type": "integer",
+      "min": 10,
+      "max": 60
+    },
+    "RouterInputArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):mediaconnect:[a-z0-9-]+:[0-9]{12}:routerInput:[a-z0-9]{12}"
+    },
+    "RouterInputArnList": {
+      "type": "list",
+      "member": "RouterInputArn"
+    },
+    "RouterInputConfiguration": {
+      "type": "structure",
+      "members": {
+        "Standard": "StandardRouterInputConfiguration",
+        "MediaLiveChannel": "MediaLiveChannelRouterInputConfiguration",
+        "Failover": "FailoverRouterInputConfiguration",
+        "MediaConnectFlow": "MediaConnectFlowRouterInputConfiguration",
+        "Merge": "MergeRouterInputConfiguration"
+      }
+    },
+    "RouterInputFilter": {
+      "type": "structure",
+      "members": {
+        "NameContains": "StringList",
+        "RegionNames": "StringList",
+        "NetworkInterfaceArns": "RouterNetworkInterfaceArnList",
+        "RoutingScopes": "RoutingScopeList",
+        "InputTypes": "RouterInputTypeList"
+      }
+    },
+    "RouterInputFilterList": {
+      "type": "list",
+      "member": "RouterInputFilter"
+    },
+    "RouterInputProtocol": {
+      "type": "string",
+      "enum": [
+        "RTP",
+        "RIST",
+        "SRT_CALLER",
+        "SRT_LISTENER"
+      ]
+    },
+    "RouterInputProtocolConfiguration": {
+      "type": "structure",
+      "members": {
+        "Rist": "RistRouterInputConfiguration",
+        "SrtListener": "SrtListenerRouterInputConfiguration",
+        "SrtCaller": "SrtCallerRouterInputConfiguration",
+        "Rtp": "RtpRouterInputConfiguration"
+      }
+    },
+    "RouterInputTier": {
+      "type": "string",
+      "enum": [
+        "INPUT_100",
+        "INPUT_50",
+        "INPUT_20",
+        "INPUT_500",
+        "INPUT_250"
+      ]
+    },
+    "RouterInputTransitEncryption": {
+      "type": "structure",
+      "required": [
+        "EncryptionKeyConfiguration"
+      ],
+      "members": {
+        "EncryptionKeyType": "RouterInputTransitEncryptionKeyType",
+        "EncryptionKeyConfiguration": "RouterInputTransitEncryptionKeyConfiguration"
+      }
+    },
+    "RouterInputTransitEncryptionKeyConfiguration": {
+      "type": "structure",
+      "members": {
+        "SecretsManager": "SecretsManagerEncryptionKeyConfiguration",
+        "Automatic": "AutomaticEncryptionKeyConfiguration"
+      }
+    },
+    "RouterInputTransitEncryptionKeyType": {
+      "type": "string",
+      "enum": [
+        "SECRETS_MANAGER",
+        "AUTOMATIC"
+      ]
+    },
+    "RouterInputType": {
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "FAILOVER",
+        "MERGE",
+        "MEDIACONNECT_FLOW",
+        "MEDIALIVE_CHANNEL"
+      ]
+    },
+    "RouterInputTypeList": {
+      "type": "list",
+      "member": "RouterInputType"
+    },
+    "RouterNetworkInterfaceArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):mediaconnect:[a-z0-9-]+:[0-9]{12}:routerNetworkInterface:[a-z0-9]{12}"
+    },
+    "RouterNetworkInterfaceArnList": {
+      "type": "list",
+      "member": "RouterNetworkInterfaceArn"
+    },
+    "RouterNetworkInterfaceConfiguration": {
+      "type": "structure",
+      "members": {
+        "Public": "PublicRouterNetworkInterfaceConfiguration",
+        "Vpc": "VpcRouterNetworkInterfaceConfiguration"
+      }
+    },
+    "RouterNetworkInterfaceFilter": {
+      "type": "structure",
+      "members": {
+        "RegionNames": "StringList",
+        "NetworkInterfaceTypes": "RouterNetworkInterfaceTypeList",
+        "NameContains": "StringList"
+      }
+    },
+    "RouterNetworkInterfaceFilterList": {
+      "type": "list",
+      "member": "RouterNetworkInterfaceFilter"
+    },
+    "RouterNetworkInterfaceType": {
+      "type": "string",
+      "enum": [
+        "PUBLIC",
+        "VPC"
+      ]
+    },
+    "RouterNetworkInterfaceTypeList": {
+      "type": "list",
+      "member": "RouterNetworkInterfaceType"
+    },
+    "RouterOutputArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):mediaconnect:[a-z0-9-]+:[0-9]{12}:routerOutput:[a-z0-9]{12}"
+    },
+    "RouterOutputConfiguration": {
+      "type": "structure",
+      "members": {
+        "Standard": "StandardRouterOutputConfiguration",
+        "MediaConnectFlow": "MediaConnectFlowRouterOutputConfiguration",
+        "MediaLiveInput": "MediaLiveInputRouterOutputConfiguration"
+      }
+    },
+    "RouterOutputFilter": {
+      "type": "structure",
+      "members": {
+        "RegionNames": "StringList",
+        "NetworkInterfaceArns": "RouterNetworkInterfaceArnList",
+        "RoutingScopes": "RoutingScopeList",
+        "OutputTypes": "RouterOutputTypeList",
+        "RoutedInputArns": "RouterInputArnList",
+        "NameContains": "StringList"
+      }
+    },
+    "RouterOutputFilterList": {
+      "type": "list",
+      "member": "RouterOutputFilter"
+    },
+    "RouterOutputProtocol": {
+      "type": "string",
+      "enum": [
+        "RTP",
+        "RIST",
+        "SRT_CALLER",
+        "SRT_LISTENER",
+        "RTMP_PUSH"
+      ]
+    },
+    "RouterOutputProtocolConfiguration": {
+      "type": "structure",
+      "members": {
+        "Rist": "RistRouterOutputConfiguration",
+        "SrtListener": "SrtListenerRouterOutputConfiguration",
+        "RtmpPush": "RtmpPushRouterOutputConfiguration",
+        "SrtCaller": "SrtCallerRouterOutputConfiguration",
+        "Rtp": "RtpRouterOutputConfiguration"
+      }
+    },
+    "RouterOutputTier": {
+      "type": "string",
+      "enum": [
+        "OUTPUT_100",
+        "OUTPUT_50",
+        "OUTPUT_20",
+        "OUTPUT_500",
+        "OUTPUT_250"
+      ]
+    },
+    "RouterOutputType": {
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "MEDIACONNECT_FLOW",
+        "MEDIALIVE_INPUT"
+      ]
+    },
+    "RouterOutputTypeList": {
+      "type": "list",
+      "member": "RouterOutputType"
+    },
+    "RoutingScope": {
+      "type": "string",
+      "enum": [
+        "REGIONAL",
+        "GLOBAL"
+      ]
+    },
+    "RoutingScopeList": {
+      "type": "list",
+      "member": "RoutingScope"
+    },
+    "RtmpPushRouterOutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "DestinationAddress",
+        "DestinationPort",
+        "ApplicationName",
+        "StreamName"
+      ],
+      "members": {
+        "DestinationAddress": "String",
+        "DestinationPort": "RtmpPushRouterOutputConfigurationDestinationPortInteger",
+        "ApplicationName": "String",
+        "StreamName": "String",
+        "TlsEncryption": "TlsEncryption"
+      }
+    },
+    "RtmpPushRouterOutputConfigurationDestinationPortInteger": {
+      "type": "integer",
+      "min": 443,
+      "max": 65535
+    },
+    "RtpRouterInputConfiguration": {
+      "type": "structure",
+      "required": [
+        "Port"
+      ],
+      "members": {
+        "Port": "RtpRouterInputConfigurationPortInteger",
+        "ForwardErrorCorrection": "ForwardErrorCorrectionState"
+      }
+    },
+    "RtpRouterInputConfigurationPortInteger": {
+      "type": "integer",
+      "min": 3000,
+      "max": 30000
+    },
+    "RtpRouterOutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "DestinationAddress",
+        "DestinationPort"
+      ],
+      "members": {
+        "DestinationAddress": "String",
+        "DestinationPort": "RtpRouterOutputConfigurationDestinationPortInteger",
+        "ForwardErrorCorrection": "ForwardErrorCorrectionState"
+      }
+    },
+    "RtpRouterOutputConfigurationDestinationPortInteger": {
+      "type": "integer",
+      "min": 1024,
+      "max": 65531
+    },
+    "ScanMode": {
+      "type": "string",
+      "enum": [
+        "progressive",
+        "interlace",
+        "progressive-segmented-frame"
+      ]
+    },
+    "SecretArn": {
+      "type": "string",
+      "pattern": "arn:(aws[a-zA-Z-]*):secretsmanager:[a-z0-9-]+:[0-9]{12}:secret:[a-zA-Z0-9/_+=.@-]+"
+    },
+    "SecretsManagerEncryptionKeyConfiguration": {
+      "type": "structure",
+      "required": [
+        "SecretArn",
+        "RoleArn"
+      ],
+      "members": {
+        "SecretArn": "SecretArn",
+        "RoleArn": "RoleArn"
+      }
+    },
+    "SetGatewayBridgeSourceRequest": {
+      "type": "structure",
+      "required": [
+        "BridgeArn"
+      ],
+      "members": {
+        "BridgeArn": "SetGatewayBridgeSourceRequestBridgeArnString",
+        "VpcInterfaceAttachment": "VpcInterfaceAttachment"
+      }
+    },
+    "SetGatewayBridgeSourceRequestBridgeArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:bridge:.+"
+    },
+    "SetSourceRequest": {
+      "type": "structure",
+      "members": {
+        "Decryption": "Encryption",
+        "Description": "String",
+        "EntitlementArn": "SetSourceRequestEntitlementArnString",
+        "IngestPort": "Integer",
+        "MaxBitrate": "Integer",
+        "MaxLatency": "Integer",
+        "MaxSyncBuffer": "Integer",
+        "MediaStreamSourceConfigurations": "__listOfMediaStreamSourceConfigurationRequest",
+        "MinLatency": "Integer",
+        "Name": "String",
+        "Protocol": "Protocol",
+        "SenderControlPort": "Integer",
+        "SenderIpAddress": "String",
+        "SourceListenerAddress": "String",
+        "SourceListenerPort": "Integer",
+        "StreamId": "String",
+        "VpcInterfaceName": "String",
+        "WhitelistCidr": "String",
+        "GatewayBridgeSource": "SetGatewayBridgeSourceRequest",
+        "NdiSourceSettings": "NdiSourceSettings",
+        "SourceTags": "__mapOfString",
+        "RouterIntegrationState": "State",
+        "RouterIntegrationTransitDecryption": "FlowTransitEncryption"
+      }
+    },
+    "SetSourceRequestEntitlementArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:entitlement:.+"
+    },
+    "SilentAudio": {
+      "type": "structure",
+      "members": {
+        "State": "State",
+        "ThresholdSeconds": "Integer"
+      }
+    },
+    "SilentAudioConfiguration": {
+      "type": "structure",
+      "required": [
+        "State",
+        "ThresholdSeconds"
+      ],
+      "members": {
+        "State": "ContentQualityAnalysisState",
+        "ThresholdSeconds": "RouterCqaThresholdSeconds"
+      }
+    },
+    "SourcePriority": {
+      "type": "structure",
+      "members": {
+        "PrimarySource": "String"
+      }
+    },
+    "SrtCallerRouterInputConfiguration": {
+      "type": "structure",
+      "required": [
+        "SourceAddress",
+        "SourcePort",
+        "MinimumLatencyMilliseconds"
+      ],
+      "members": {
+        "SourceAddress": "String",
+        "SourcePort": "SrtCallerRouterInputConfigurationSourcePortInteger",
+        "MinimumLatencyMilliseconds": "SrtCallerRouterInputConfigurationMinimumLatencyMillisecondsLong",
+        "StreamId": "String",
+        "DecryptionConfiguration": "SrtDecryptionConfiguration"
+      }
+    },
+    "SrtCallerRouterInputConfigurationMinimumLatencyMillisecondsLong": {
+      "type": "long",
+      "min": 10,
+      "max": 10000
+    },
+    "SrtCallerRouterInputConfigurationSourcePortInteger": {
+      "type": "integer",
+      "min": 1024,
+      "max": 65535
+    },
+    "SrtCallerRouterOutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "DestinationAddress",
+        "DestinationPort",
+        "MinimumLatencyMilliseconds"
+      ],
+      "members": {
+        "DestinationAddress": "String",
+        "DestinationPort": "SrtCallerRouterOutputConfigurationDestinationPortInteger",
+        "MinimumLatencyMilliseconds": "SrtCallerRouterOutputConfigurationMinimumLatencyMillisecondsLong",
+        "StreamId": "String",
+        "EncryptionConfiguration": "SrtEncryptionConfiguration"
+      }
+    },
+    "SrtCallerRouterOutputConfigurationDestinationPortInteger": {
+      "type": "integer",
+      "min": 1024,
+      "max": 65535
+    },
+    "SrtCallerRouterOutputConfigurationMinimumLatencyMillisecondsLong": {
+      "type": "long",
+      "min": 10,
+      "max": 10000
+    },
+    "SrtDecryptionConfiguration": {
+      "type": "structure",
+      "required": [
+        "EncryptionKey"
+      ],
+      "members": {
+        "EncryptionKey": "SecretsManagerEncryptionKeyConfiguration"
+      }
+    },
+    "SrtEncryptionConfiguration": {
+      "type": "structure",
+      "required": [
+        "EncryptionKey"
+      ],
+      "members": {
+        "EncryptionKey": "SecretsManagerEncryptionKeyConfiguration"
+      }
+    },
+    "SrtListenerRouterInputConfiguration": {
+      "type": "structure",
+      "required": [
+        "Port",
+        "MinimumLatencyMilliseconds"
+      ],
+      "members": {
+        "Port": "SrtListenerRouterInputConfigurationPortInteger",
+        "MinimumLatencyMilliseconds": "SrtListenerRouterInputConfigurationMinimumLatencyMillisecondsLong",
+        "DecryptionConfiguration": "SrtDecryptionConfiguration"
+      }
+    },
+    "SrtListenerRouterInputConfigurationMinimumLatencyMillisecondsLong": {
+      "type": "long",
+      "min": 10,
+      "max": 10000
+    },
+    "SrtListenerRouterInputConfigurationPortInteger": {
+      "type": "integer",
+      "min": 3000,
+      "max": 30000
+    },
+    "SrtListenerRouterOutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "Port",
+        "MinimumLatencyMilliseconds"
+      ],
+      "members": {
+        "Port": "SrtListenerRouterOutputConfigurationPortInteger",
+        "MinimumLatencyMilliseconds": "SrtListenerRouterOutputConfigurationMinimumLatencyMillisecondsLong",
+        "EncryptionConfiguration": "SrtEncryptionConfiguration"
+      }
+    },
+    "SrtListenerRouterOutputConfigurationMinimumLatencyMillisecondsLong": {
+      "type": "long",
+      "min": 10,
+      "max": 10000
+    },
+    "SrtListenerRouterOutputConfigurationPortInteger": {
+      "type": "integer",
+      "min": 3000,
+      "max": 30000
+    },
+    "StandardRouterInputConfiguration": {
+      "type": "structure",
+      "required": [
+        "NetworkInterfaceArn",
+        "ProtocolConfiguration"
+      ],
+      "members": {
+        "NetworkInterfaceArn": "RouterNetworkInterfaceArn",
+        "ProtocolConfiguration": "RouterInputProtocolConfiguration",
+        "Protocol": "RouterInputProtocol"
+      }
+    },
+    "StandardRouterOutputConfiguration": {
+      "type": "structure",
+      "required": [
+        "NetworkInterfaceArn",
+        "ProtocolConfiguration"
+      ],
+      "members": {
+        "NetworkInterfaceArn": "RouterNetworkInterfaceArn",
+        "ProtocolConfiguration": "RouterOutputProtocolConfiguration",
+        "Protocol": "RouterOutputProtocol"
+      }
+    },
+    "StartFlowRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn"
+      ],
+      "members": {
+        "FlowArn": "StartFlowRequestFlowArnString"
+      }
+    },
+    "StartFlowRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "StartRouterInputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterInputArn"
+      }
+    },
+    "StartRouterOutputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterOutputArn"
+      }
+    },
+    "State": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "StopFlowRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn"
+      ],
+      "members": {
+        "FlowArn": "StopFlowRequestFlowArnString"
+      }
+    },
+    "StopFlowRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "StopRouterInputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterInputArn"
+      }
+    },
+    "StopRouterOutputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterOutputArn"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringList": {
+      "type": "list",
+      "member": "String"
+    },
+    "TagGlobalResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "String",
+        "Tags": "__mapOfString"
+      }
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "String",
+        "Tags": "__mapOfString"
+      }
+    },
+    "TakeRouterInputRequest": {
+      "type": "structure",
+      "required": [
+        "RouterOutputArn"
+      ],
+      "members": {
+        "RouterOutputArn": "RouterOutputArn",
+        "RouterInputArn": "RouterInputArn"
+      }
+    },
+    "Tcs": {
+      "type": "string",
+      "enum": [
+        "SDR",
+        "PQ",
+        "HLG",
+        "LINEAR",
+        "BT2100LINPQ",
+        "BT2100LINHLG",
+        "ST2065-1",
+        "ST428-1",
+        "DENSITY"
+      ]
+    },
+    "ThumbnailState": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "TlsEncryption": {
+      "type": "structure",
+      "required": [
+        "EncryptionConfiguration"
+      ],
+      "members": {
+        "EncryptionType": "TlsEncryptionType",
+        "EncryptionConfiguration": "TlsEncryptionConfiguration"
+      }
+    },
+    "TlsEncryptionConfiguration": {
+      "type": "structure",
+      "members": {
+        "Public": "PublicTlsEncryptionConfiguration"
+      }
+    },
+    "TlsEncryptionType": {
+      "type": "string",
+      "enum": [
+        "PUBLIC"
+      ]
+    },
+    "UntagGlobalResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "String",
+        "TagKeys": "__listOfString"
+      }
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "String",
+        "TagKeys": "__listOfString"
+      }
+    },
+    "UpdateBridgeFlowSourceRequest": {
+      "type": "structure",
+      "members": {
+        "FlowArn": "UpdateBridgeFlowSourceRequestFlowArnString",
+        "FlowVpcInterfaceAttachment": "VpcInterfaceAttachment"
+      }
+    },
+    "UpdateBridgeFlowSourceRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "UpdateBridgeNetworkOutputRequest": {
+      "type": "structure",
+      "members": {
+        "IpAddress": "String",
+        "NetworkName": "String",
+        "Port": "Integer",
+        "Protocol": "Protocol",
+        "Ttl": "Integer"
+      }
+    },
+    "UpdateBridgeNetworkSourceRequest": {
+      "type": "structure",
+      "members": {
+        "MulticastIp": "String",
+        "MulticastSourceSettings": "MulticastSourceSettings",
+        "NetworkName": "String",
+        "Port": "Integer",
+        "Protocol": "Protocol"
+      }
+    },
+    "UpdateBridgeOutputRequest": {
+      "type": "structure",
+      "required": [
+        "BridgeArn",
+        "OutputName"
+      ],
+      "members": {
+        "BridgeArn": "UpdateBridgeOutputRequestBridgeArnString",
+        "NetworkOutput": "UpdateBridgeNetworkOutputRequest",
+        "OutputName": "String"
+      }
+    },
+    "UpdateBridgeOutputRequestBridgeArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:bridge:.+"
+    },
+    "UpdateBridgeRequest": {
+      "type": "structure",
+      "required": [
+        "BridgeArn"
+      ],
+      "members": {
+        "BridgeArn": "UpdateBridgeRequestBridgeArnString",
+        "EgressGatewayBridge": "UpdateEgressGatewayBridgeRequest",
+        "IngressGatewayBridge": "UpdateIngressGatewayBridgeRequest",
+        "SourceFailoverConfig": "UpdateFailoverConfig"
+      }
+    },
+    "UpdateBridgeRequestBridgeArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:bridge:.+"
+    },
+    "UpdateBridgeSourceRequest": {
+      "type": "structure",
+      "required": [
+        "BridgeArn",
+        "SourceName"
+      ],
+      "members": {
+        "BridgeArn": "UpdateBridgeSourceRequestBridgeArnString",
+        "FlowSource": "UpdateBridgeFlowSourceRequest",
+        "NetworkSource": "UpdateBridgeNetworkSourceRequest",
+        "SourceName": "String"
+      }
+    },
+    "UpdateBridgeSourceRequestBridgeArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:bridge:.+"
+    },
+    "UpdateBridgeStateRequest": {
+      "type": "structure",
+      "required": [
+        "BridgeArn",
+        "DesiredState"
+      ],
+      "members": {
+        "BridgeArn": "UpdateBridgeStateRequestBridgeArnString",
+        "DesiredState": "DesiredState"
+      }
+    },
+    "UpdateBridgeStateRequestBridgeArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:bridge:.+"
+    },
+    "UpdateEgressGatewayBridgeRequest": {
+      "type": "structure",
+      "members": {
+        "MaxBitrate": "Integer"
+      }
+    },
+    "UpdateEncryption": {
+      "type": "structure",
+      "members": {
+        "Algorithm": "Algorithm",
+        "ConstantInitializationVector": "String",
+        "DeviceId": "String",
+        "KeyType": "KeyType",
+        "Region": "String",
+        "ResourceId": "String",
+        "RoleArn": "String",
+        "SecretArn": "String",
+        "Url": "String"
+      }
+    },
+    "UpdateFailoverConfig": {
+      "type": "structure",
+      "members": {
+        "FailoverMode": "FailoverMode",
+        "RecoveryWindow": "Integer",
+        "SourcePriority": "SourcePriority",
+        "State": "State"
+      }
+    },
+    "UpdateFlowEntitlementRequest": {
+      "type": "structure",
+      "required": [
+        "EntitlementArn",
+        "FlowArn"
+      ],
+      "members": {
+        "Description": "String",
+        "Encryption": "UpdateEncryption",
+        "EntitlementArn": "UpdateFlowEntitlementRequestEntitlementArnString",
+        "EntitlementStatus": "EntitlementStatus",
+        "FlowArn": "UpdateFlowEntitlementRequestFlowArnString",
+        "Subscribers": "__listOfString"
+      }
+    },
+    "UpdateFlowEntitlementRequestEntitlementArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:entitlement:.+"
+    },
+    "UpdateFlowEntitlementRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "UpdateFlowMediaStreamRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "MediaStreamName"
+      ],
+      "members": {
+        "Attributes": "MediaStreamAttributesRequest",
+        "ClockRate": "Integer",
+        "Description": "String",
+        "FlowArn": "UpdateFlowMediaStreamRequestFlowArnString",
+        "MediaStreamName": "String",
+        "MediaStreamType": "MediaStreamType",
+        "VideoFormat": "String"
+      }
+    },
+    "UpdateFlowMediaStreamRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "UpdateFlowOutputRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "OutputArn"
+      ],
+      "members": {
+        "CidrAllowList": "__listOfString",
+        "Description": "String",
+        "Destination": "String",
+        "Encryption": "UpdateEncryption",
+        "FlowArn": "UpdateFlowOutputRequestFlowArnString",
+        "MaxLatency": "Integer",
+        "MediaStreamOutputConfigurations": "__listOfMediaStreamOutputConfigurationRequest",
+        "MinLatency": "Integer",
+        "OutputArn": "UpdateFlowOutputRequestOutputArnString",
+        "Port": "Integer",
+        "Protocol": "Protocol",
+        "RemoteId": "String",
+        "SenderControlPort": "Integer",
+        "SenderIpAddress": "String",
+        "SmoothingLatency": "Integer",
+        "StreamId": "String",
+        "VpcInterfaceAttachment": "VpcInterfaceAttachment",
+        "OutputStatus": "OutputStatus",
+        "NdiProgramName": "String",
+        "NdiSpeedHqQuality": "Integer",
+        "RouterIntegrationState": "State",
+        "RouterIntegrationTransitEncryption": "FlowTransitEncryption",
+        "NdiOutputTimecodeSource": "NdiOutputTimecodeSource",
+        "NdiAudioReferenceLevel": "NdiAudioReferenceLevel"
+      }
+    },
+    "UpdateFlowOutputRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "UpdateFlowOutputRequestOutputArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:output:.+"
+    },
+    "UpdateFlowRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn"
+      ],
+      "members": {
+        "FlowArn": "UpdateFlowRequestFlowArnString",
+        "SourceFailoverConfig": "UpdateFailoverConfig",
+        "Maintenance": "UpdateMaintenance",
+        "SourceMonitoringConfig": "MonitoringConfig",
+        "NdiConfig": "NdiConfig",
+        "FlowSize": "FlowSize",
+        "EncodingConfig": "EncodingConfig"
+      }
+    },
+    "UpdateFlowRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "UpdateFlowSourceRequest": {
+      "type": "structure",
+      "required": [
+        "FlowArn",
+        "SourceArn"
+      ],
+      "members": {
+        "Decryption": "UpdateEncryption",
+        "Description": "String",
+        "EntitlementArn": "UpdateFlowSourceRequestEntitlementArnString",
+        "FlowArn": "UpdateFlowSourceRequestFlowArnString",
+        "IngestPort": "Integer",
+        "MaxBitrate": "Integer",
+        "MaxLatency": "Integer",
+        "MaxSyncBuffer": "Integer",
+        "MediaStreamSourceConfigurations": "__listOfMediaStreamSourceConfigurationRequest",
+        "MinLatency": "Integer",
+        "Protocol": "Protocol",
+        "SenderControlPort": "Integer",
+        "SenderIpAddress": "String",
+        "SourceArn": "UpdateFlowSourceRequestSourceArnString",
+        "SourceListenerAddress": "String",
+        "SourceListenerPort": "Integer",
+        "StreamId": "String",
+        "VpcInterfaceName": "String",
+        "WhitelistCidr": "String",
+        "GatewayBridgeSource": "UpdateGatewayBridgeSourceRequest",
+        "NdiSourceSettings": "NdiSourceSettings",
+        "RouterIntegrationState": "State",
+        "RouterIntegrationTransitDecryption": "FlowTransitEncryption"
+      }
+    },
+    "UpdateFlowSourceRequestEntitlementArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:entitlement:.+"
+    },
+    "UpdateFlowSourceRequestFlowArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:flow:.+"
+    },
+    "UpdateFlowSourceRequestSourceArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:source:.+"
+    },
+    "UpdateGatewayBridgeSourceRequest": {
+      "type": "structure",
+      "members": {
+        "BridgeArn": "UpdateGatewayBridgeSourceRequestBridgeArnString",
+        "VpcInterfaceAttachment": "VpcInterfaceAttachment"
+      }
+    },
+    "UpdateGatewayBridgeSourceRequestBridgeArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:bridge:.+"
+    },
+    "UpdateGatewayInstanceRequest": {
+      "type": "structure",
+      "required": [
+        "GatewayInstanceArn"
+      ],
+      "members": {
+        "BridgePlacement": "BridgePlacement",
+        "GatewayInstanceArn": "UpdateGatewayInstanceRequestGatewayInstanceArnString"
+      }
+    },
+    "UpdateGatewayInstanceRequestGatewayInstanceArnString": {
+      "type": "string",
+      "pattern": "arn:.+:mediaconnect.+:gateway:.+:instance:.+"
+    },
+    "UpdateIngressGatewayBridgeRequest": {
+      "type": "structure",
+      "members": {
+        "MaxBitrate": "Integer",
+        "MaxOutputs": "Integer"
+      }
+    },
+    "UpdateMaintenance": {
+      "type": "structure",
+      "members": {
+        "MaintenanceDay": "MaintenanceDay",
+        "MaintenanceScheduledDate": "String",
+        "MaintenanceStartHour": "String"
+      }
+    },
+    "UpdateRouterInputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterInputArn",
+        "Name": "UpdateRouterInputRequestNameString",
+        "Configuration": "RouterInputConfiguration",
+        "MaximumBitrate": "Long",
+        "RoutingScope": "RoutingScope",
+        "Tier": "RouterInputTier",
+        "TransitEncryption": "RouterInputTransitEncryption",
+        "MaintenanceConfiguration": "MaintenanceConfiguration",
+        "ContentQualityAnalysisConfiguration": "RouterContentQualityAnalysisConfiguration"
+      }
+    },
+    "UpdateRouterInputRequestNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "UpdateRouterNetworkInterfaceRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterNetworkInterfaceArn",
+        "Name": "UpdateRouterNetworkInterfaceRequestNameString",
+        "Configuration": "RouterNetworkInterfaceConfiguration"
+      }
+    },
+    "UpdateRouterNetworkInterfaceRequestNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9]([a-zA-Z0-9\\-_]*[a-zA-Z0-9])?"
+    },
+    "UpdateRouterOutputRequest": {
+      "type": "structure",
+      "required": [
+        "Arn"
+      ],
+      "members": {
+        "Arn": "RouterOutputArn",
+        "Name": "UpdateRouterOutputRequestNameString",
+        "Configuration": "RouterOutputConfiguration",
+        "MaximumBitrate": "Long",
+        "RoutingScope": "RoutingScope",
+        "Tier": "RouterOutputTier",
+        "MaintenanceConfiguration": "MaintenanceConfiguration",
+        "FabricConfiguration": "FabricConfiguration"
+      }
+    },
+    "UpdateRouterOutputRequestNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "VideoMonitoringSetting": {
+      "type": "structure",
+      "members": {
+        "BlackFrames": "BlackFrames",
+        "FrozenFrames": "FrozenFrames"
+      }
+    },
+    "VpcInterfaceAttachment": {
+      "type": "structure",
+      "members": {
+        "VpcInterfaceName": "String"
+      }
+    },
+    "VpcInterfaceRequest": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "RoleArn",
+        "SecurityGroupIds",
+        "SubnetId"
+      ],
+      "members": {
+        "Name": "String",
+        "NetworkInterfaceType": "NetworkInterfaceType",
+        "RoleArn": "String",
+        "SecurityGroupIds": "__listOfString",
+        "SubnetId": "String",
+        "VpcInterfaceTags": "__mapOfString"
+      }
+    },
+    "VpcRouterNetworkInterfaceConfiguration": {
+      "type": "structure",
+      "required": [
+        "SecurityGroupIds",
+        "SubnetId"
+      ],
+      "members": {
+        "SecurityGroupIds": "VpcRouterNetworkInterfaceConfigurationSecurityGroupIdsList",
+        "SubnetId": "String"
+      }
+    },
+    "VpcRouterNetworkInterfaceConfigurationSecurityGroupIdsList": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "String"
+    },
+    "__listOfAddBridgeOutputRequest": {
+      "type": "list",
+      "member": "AddBridgeOutputRequest"
+    },
+    "__listOfAddBridgeSourceRequest": {
+      "type": "list",
+      "member": "AddBridgeSourceRequest"
+    },
+    "__listOfAddMediaStreamRequest": {
+      "type": "list",
+      "member": "AddMediaStreamRequest"
+    },
+    "__listOfAddOutputRequest": {
+      "type": "list",
+      "member": "AddOutputRequest"
+    },
+    "__listOfAudioMonitoringSetting": {
+      "type": "list",
+      "member": "AudioMonitoringSetting"
+    },
+    "__listOfDestinationConfigurationRequest": {
+      "type": "list",
+      "member": "DestinationConfigurationRequest"
+    },
+    "__listOfGatewayNetwork": {
+      "type": "list",
+      "member": "GatewayNetwork"
+    },
+    "__listOfGrantEntitlementRequest": {
+      "type": "list",
+      "member": "GrantEntitlementRequest"
+    },
+    "__listOfInputConfigurationRequest": {
+      "type": "list",
+      "member": "InputConfigurationRequest"
+    },
+    "__listOfMediaStreamOutputConfigurationRequest": {
+      "type": "list",
+      "member": "MediaStreamOutputConfigurationRequest"
+    },
+    "__listOfMediaStreamSourceConfigurationRequest": {
+      "type": "list",
+      "member": "MediaStreamSourceConfigurationRequest"
+    },
+    "__listOfNdiDiscoveryServerConfig": {
+      "type": "list",
+      "member": "NdiDiscoveryServerConfig"
+    },
+    "__listOfSetSourceRequest": {
+      "type": "list",
+      "member": "SetSourceRequest"
+    },
+    "__listOfString": {
+      "type": "list",
+      "member": "String"
+    },
+    "__listOfVideoMonitoringSetting": {
+      "type": "list",
+      "member": "VideoMonitoringSetting"
+    },
+    "__listOfVpcInterfaceRequest": {
+      "type": "list",
+      "member": "VpcInterfaceRequest"
+    },
+    "__mapOfString": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    }
+  }
+}

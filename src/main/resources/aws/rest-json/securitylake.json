@@ -1,0 +1,445 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "securitylake",
+ "apiVersion": "2018-05-10",
+ "operations": {
+  "CreateAwsLogSource": {
+   "method": "POST",
+   "requestUri": "/v1/datalake/logsources/aws",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateCustomLogSource": {
+   "method": "POST",
+   "requestUri": "/v1/datalake/logsources/custom",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateDataLake": {
+   "method": "POST",
+   "requestUri": "/v1/datalake",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateDataLakeExceptionSubscription": {
+   "method": "POST",
+   "requestUri": "/v1/datalake/exceptions/subscription",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateDataLakeOrganizationConfiguration": {
+   "method": "POST",
+   "requestUri": "/v1/datalake/organization/configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateSubscriber": {
+   "method": "POST",
+   "requestUri": "/v1/subscribers",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "subscriber.createdAt",
+     "subscriber.updatedAt"
+    ]
+   }
+  },
+  "CreateSubscriberNotification": {
+   "method": "POST",
+   "requestUri": "/v1/subscribers/{subscriberId}/notification",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "subscriberId": {
+      "location": "uri",
+      "name": "subscriberId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteAwsLogSource": {
+   "method": "POST",
+   "requestUri": "/v1/datalake/logsources/aws/delete",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteCustomLogSource": {
+   "method": "DELETE",
+   "requestUri": "/v1/datalake/logsources/custom/{sourceName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "sourceName": {
+      "location": "uri",
+      "name": "sourceName"
+     },
+     "sourceVersion": {
+      "location": "querystring",
+      "name": "sourceVersion"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDataLake": {
+   "method": "POST",
+   "requestUri": "/v1/datalake/delete",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDataLakeExceptionSubscription": {
+   "method": "DELETE",
+   "requestUri": "/v1/datalake/exceptions/subscription",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteDataLakeOrganizationConfiguration": {
+   "method": "POST",
+   "requestUri": "/v1/datalake/organization/configuration/delete",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSubscriber": {
+   "method": "DELETE",
+   "requestUri": "/v1/subscribers/{subscriberId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "subscriberId": {
+      "location": "uri",
+      "name": "subscriberId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteSubscriberNotification": {
+   "method": "DELETE",
+   "requestUri": "/v1/subscribers/{subscriberId}/notification",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "subscriberId": {
+      "location": "uri",
+      "name": "subscriberId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeregisterDataLakeDelegatedAdministrator": {
+   "method": "DELETE",
+   "requestUri": "/v1/datalake/delegate",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDataLakeExceptionSubscription": {
+   "method": "GET",
+   "requestUri": "/v1/datalake/exceptions/subscription",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDataLakeOrganizationConfiguration": {
+   "method": "GET",
+   "requestUri": "/v1/datalake/organization/configuration",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetDataLakeSources": {
+   "method": "POST",
+   "requestUri": "/v1/datalake/sources",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetSubscriber": {
+   "method": "GET",
+   "requestUri": "/v1/subscribers/{subscriberId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "subscriberId": {
+      "location": "uri",
+      "name": "subscriberId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "subscriber.createdAt",
+     "subscriber.updatedAt"
+    ]
+   }
+  },
+  "ListDataLakeExceptions": {
+   "method": "POST",
+   "requestUri": "/v1/datalake/exceptions",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "exceptions[].timestamp"
+    ]
+   }
+  },
+  "ListDataLakes": {
+   "method": "GET",
+   "requestUri": "/v1/datalakes",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "regions": {
+      "location": "querystring",
+      "name": "regions",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListLogSources": {
+   "method": "POST",
+   "requestUri": "/v1/datalake/logsources/list",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListSubscribers": {
+   "method": "GET",
+   "requestUri": "/v1/subscribers",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "subscribers[].createdAt",
+     "subscribers[].updatedAt"
+    ]
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/v1/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RegisterDataLakeDelegatedAdministrator": {
+   "method": "POST",
+   "requestUri": "/v1/datalake/delegate",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/v1/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/v1/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateDataLake": {
+   "method": "PUT",
+   "requestUri": "/v1/datalake",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateDataLakeExceptionSubscription": {
+   "method": "PUT",
+   "requestUri": "/v1/datalake/exceptions/subscription",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateSubscriber": {
+   "method": "PUT",
+   "requestUri": "/v1/subscribers/{subscriberId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "subscriberId": {
+      "location": "uri",
+      "name": "subscriberId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "subscriber.createdAt",
+     "subscriber.updatedAt"
+    ]
+   }
+  },
+  "UpdateSubscriberNotification": {
+   "method": "PUT",
+   "requestUri": "/v1/subscribers/{subscriberId}/notification",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "subscriberId": {
+      "location": "uri",
+      "name": "subscriberId"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

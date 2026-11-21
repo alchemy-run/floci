@@ -3,7 +3,7 @@
 **Protocol:** JSON 1.1
 **Header:** `X-Amz-Target: Textract.<Action>`
 
-Floci emulates the AWS Textract API with a dummy response stub. The response shape matches the real AWS Textract contracts so AWS SDK and CLI clients accept the reply without error. No real OCR or document analysis is performed: every call returns a fixed set of `Block` objects with synthetic metadata.
+Floci emulates the AWS Textract API: document analysis with AWS-shaped responses, async jobs, and custom query adapters. No OCR runs: an analysis returns a fixed set of `Block` objects with synthetic metadata, unless `AI_MOCK_CONFIG` has an answer for the document (see "Mock Responses").
 
 ## Supported Operations
 
@@ -15,8 +15,17 @@ Floci emulates the AWS Textract API with a dummy response stub. The response sha
 | `GetDocumentTextDetection` | Returns `SUCCEEDED` + stub blocks for a known `JobId` |
 | `StartDocumentAnalysis` | Returns a `JobId`; job is immediately SUCCEEDED |
 | `GetDocumentAnalysis` | Returns `SUCCEEDED` + stub blocks for a known `JobId` |
+| `AnalyzeExpense` | One expense document per page with the document's blocks; no summary fields unless mocked |
+| `AnalyzeID` | One identity document per page (1–2 pages); no fields unless mocked |
+| `StartExpenseAnalysis` / `GetExpenseAnalysis` | Async `AnalyzeExpense` |
+| `StartLendingAnalysis` / `GetLendingAnalysis` / `GetLendingAnalysisSummary` | Each page `UNCLASSIFIED`, grouped into one document |
+| `CreateAdapter` / `GetAdapter` / `UpdateAdapter` / `DeleteAdapter` / `ListAdapters` | Custom query adapters; ARNs keep Textract's `:/adapters/<id>` form |
+| `CreateAdapterVersion` / `GetAdapterVersion` / `DeleteAdapterVersion` / `ListAdapterVersions` | Reads the training manifest from S3; a version is `ACTIVE` at once and changes no analysis |
+| `TagResource` / `UntagResource` / `ListTagsForResource` | Tags on adapters and adapter versions |
 
-`Document` and `DocumentLocation` inputs (bytes or S3 references) are accepted but not parsed.
+A `Document` or `DocumentLocation` is read: an S3 object that can't be read is refused with
+`InvalidS3ObjectException`, and a request without one with `InvalidParameterException`, as Textract
+refuses them. Deleting an adapter version that doesn't exist succeeds, as it does on AWS.
 
 ### Block shape
 
@@ -61,12 +70,14 @@ call by default. To exercise application logic that reads the detected text, poi
 }
 ```
 
-The lookup key is **`"<Bucket>/<Name>"`** from `Document.S3Object`. A `Bytes`-backed
-`Document` has no such key, so mocking only applies to S3Object-based calls — a
-`Bytes`-backed request always gets the default stub. The file is re-read when its
-modification time changes, so it can be edited without restarting the emulator. A missing
-file, an unset `AI_MOCK_CONFIG`, or no matching entry all fall back to the default stub.
-The async `Start*`/`Get*` job flow does not support mocking.
+A document is looked up by each of its keys in turn: **`"<Bucket>/<Name>"`** for an S3
+document, then **`"sha256:<hex>"`** of the document's bytes, whether they were sent inline
+(`Bytes`) or read from S3. The content key answers for a document wherever it was uploaded,
+including a bucket whose name is generated at deploy time. Async jobs look their document up
+when they start. `AnalyzeDocument`, `AnalyzeExpense`, `AnalyzeID`, and lending pages fall back
+to the document's `DetectDocumentText` blocks. The file is re-read when its modification time
+changes, so it can be edited without restarting the emulator. A missing file, an unset
+`AI_MOCK_CONFIG`, or no matching entry all fall back to the default stub.
 
 ## Examples
 
@@ -115,9 +126,8 @@ print(result["JobStatus"])  # SUCCEEDED
 
 ## Out of Scope
 
-- Real OCR or document analysis (always returns a fixed stub block list).
-- `AnalyzeExpense`, `AnalyzeID`, `AnalyzeLendingDocument` and other specialized analysis operations.
-- `GetAdapterVersion`, `CreateAdapter`, `ListAdapters` (Adapter management API).
+- Real OCR or document analysis (a fixed stub block list unless mocked).
+- Adapter training: adapter versions don't change analysis.
 - `GetDocumentTextDetection` / `GetDocumentAnalysis` pagination via `NextToken`.
 - Persistent job storage across restarts.
 

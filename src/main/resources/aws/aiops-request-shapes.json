@@ -1,0 +1,264 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_aiops_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateInvestigationGroup": "CreateInvestigationGroupInput",
+    "DeleteInvestigationGroup": "DeleteInvestigationGroupRequest",
+    "DeleteInvestigationGroupPolicy": "DeleteInvestigationGroupPolicyRequest",
+    "GetInvestigationGroup": "GetInvestigationGroupRequest",
+    "GetInvestigationGroupPolicy": "GetInvestigationGroupPolicyRequest",
+    "ListInvestigationGroups": "ListInvestigationGroupsInput",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutInvestigationGroupPolicy": "PutInvestigationGroupPolicyRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateInvestigationGroup": "UpdateInvestigationGroupRequest"
+  },
+  "shapes": {
+    "Boolean": {
+      "type": "boolean"
+    },
+    "ChatConfigurationArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:.*"
+    },
+    "ChatConfigurationArns": {
+      "type": "list",
+      "min": 1,
+      "max": 5,
+      "member": "ChatConfigurationArn"
+    },
+    "ChatbotNotificationChannel": {
+      "type": "map",
+      "key": "SNSTopicArn",
+      "value": "ChatConfigurationArns"
+    },
+    "CreateInvestigationGroupInput": {
+      "type": "structure",
+      "required": [
+        "name",
+        "roleArn"
+      ],
+      "members": {
+        "name": "StringWithPatternAndLengthLimits",
+        "roleArn": "RoleArn",
+        "encryptionConfiguration": "EncryptionConfiguration",
+        "retentionInDays": "Retention",
+        "tags": "Tags",
+        "tagKeyBoundaries": "TagKeyBoundaries",
+        "chatbotNotificationChannel": "ChatbotNotificationChannel",
+        "isCloudTrailEventHistoryEnabled": "Boolean",
+        "crossAccountConfigurations": "CrossAccountConfigurations"
+      }
+    },
+    "CrossAccountConfiguration": {
+      "type": "structure",
+      "members": {
+        "sourceRoleArn": "RoleArn"
+      }
+    },
+    "CrossAccountConfigurations": {
+      "type": "list",
+      "min": 0,
+      "max": 25,
+      "member": "CrossAccountConfiguration"
+    },
+    "DeleteInvestigationGroupPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "InvestigationGroupIdentifier"
+      }
+    },
+    "DeleteInvestigationGroupRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "InvestigationGroupIdentifier"
+      }
+    },
+    "EncryptionConfiguration": {
+      "type": "structure",
+      "members": {
+        "type": "EncryptionConfigurationType",
+        "kmsKeyId": "KmsKeyId"
+      }
+    },
+    "EncryptionConfigurationType": {
+      "type": "string",
+      "enum": [
+        "AWS_OWNED_KEY",
+        "CUSTOMER_MANAGED_KMS_KEY"
+      ]
+    },
+    "GetInvestigationGroupPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "InvestigationGroupIdentifier"
+      }
+    },
+    "GetInvestigationGroupRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "InvestigationGroupIdentifier"
+      }
+    },
+    "InvestigationGroupIdentifier": {
+      "type": "string",
+      "pattern": "(?:[\\-_A-Za-z0-9]{1,512}|arn:(aws|aws-us-gov|aws-cn|aws-iso|aws-iso-b):aiops:[a-zA-Z0-9-]*:[0-9]{12}:investigation-group\\/[A-Za-z0-9]{16})"
+    },
+    "InvestigationGroupPolicyDocument": {
+      "type": "string",
+      "min": 1,
+      "max": 32768,
+      "pattern": "[\\u0009\\u000A\\u000D\\u0020-\\u00FF]+"
+    },
+    "KmsKeyId": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "arn:.*"
+    },
+    "ListInvestigationGroupsInput": {
+      "type": "structure",
+      "members": {
+        "nextToken": "SensitiveStringWithLengthLimits",
+        "maxResults": "ListInvestigationGroupsInputMaxResultsInteger"
+      }
+    },
+    "ListInvestigationGroupsInputMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "String"
+      }
+    },
+    "PutInvestigationGroupPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "identifier",
+        "policy"
+      ],
+      "members": {
+        "identifier": "InvestigationGroupIdentifier",
+        "policy": "InvestigationGroupPolicyDocument"
+      }
+    },
+    "Retention": {
+      "type": "long",
+      "min": 7,
+      "max": 90
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:.*"
+    },
+    "SNSTopicArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:.*"
+    },
+    "SensitiveStringWithLengthLimits": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringWithPatternAndLengthLimits": {
+      "type": "string",
+      "min": 1,
+      "max": 512,
+      "pattern": "[\\-_A-Za-z0-9\\[\\]\\(\\)\\{\\}\\.: ]+"
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]+)"
+    },
+    "TagKeyBoundaries": {
+      "type": "list",
+      "member": "TagKey"
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "String",
+        "tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)"
+    },
+    "Tags": {
+      "type": "map",
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "String",
+        "tagKeys": "TagKeys"
+      }
+    },
+    "UpdateInvestigationGroupRequest": {
+      "type": "structure",
+      "required": [
+        "identifier"
+      ],
+      "members": {
+        "identifier": "InvestigationGroupIdentifier",
+        "roleArn": "RoleArn",
+        "encryptionConfiguration": "EncryptionConfiguration",
+        "tagKeyBoundaries": "TagKeyBoundaries",
+        "chatbotNotificationChannel": "ChatbotNotificationChannel",
+        "isCloudTrailEventHistoryEnabled": "Boolean",
+        "crossAccountConfigurations": "CrossAccountConfigurations"
+      }
+    }
+  }
+}

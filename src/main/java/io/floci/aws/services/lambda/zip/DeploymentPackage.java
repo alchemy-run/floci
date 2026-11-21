@@ -75,6 +75,14 @@ public final class DeploymentPackage implements AutoCloseable {
         }
     }
 
+    /** The package's bytes, read from the staged copy when it isn't held in memory. */
+    public byte[] readAllBytes() throws IOException {
+        if (bytes != null) {
+            return bytes;
+        }
+        return file != null ? Files.readAllBytes(file) : new byte[0];
+    }
+
     public long size() {
         return size;
     }

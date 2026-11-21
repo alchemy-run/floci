@@ -1,0 +1,1456 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_forecast_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateAutoPredictor": "CreateAutoPredictorRequest",
+    "CreateDataset": "CreateDatasetRequest",
+    "CreateDatasetGroup": "CreateDatasetGroupRequest",
+    "CreateDatasetImportJob": "CreateDatasetImportJobRequest",
+    "CreateExplainability": "CreateExplainabilityRequest",
+    "CreateExplainabilityExport": "CreateExplainabilityExportRequest",
+    "CreateForecast": "CreateForecastRequest",
+    "CreateForecastExportJob": "CreateForecastExportJobRequest",
+    "CreateMonitor": "CreateMonitorRequest",
+    "CreatePredictor": "CreatePredictorRequest",
+    "CreatePredictorBacktestExportJob": "CreatePredictorBacktestExportJobRequest",
+    "CreateWhatIfAnalysis": "CreateWhatIfAnalysisRequest",
+    "CreateWhatIfForecast": "CreateWhatIfForecastRequest",
+    "CreateWhatIfForecastExport": "CreateWhatIfForecastExportRequest",
+    "DeleteDataset": "DeleteDatasetRequest",
+    "DeleteDatasetGroup": "DeleteDatasetGroupRequest",
+    "DeleteDatasetImportJob": "DeleteDatasetImportJobRequest",
+    "DeleteExplainability": "DeleteExplainabilityRequest",
+    "DeleteExplainabilityExport": "DeleteExplainabilityExportRequest",
+    "DeleteForecast": "DeleteForecastRequest",
+    "DeleteForecastExportJob": "DeleteForecastExportJobRequest",
+    "DeleteMonitor": "DeleteMonitorRequest",
+    "DeletePredictor": "DeletePredictorRequest",
+    "DeletePredictorBacktestExportJob": "DeletePredictorBacktestExportJobRequest",
+    "DeleteResourceTree": "DeleteResourceTreeRequest",
+    "DeleteWhatIfAnalysis": "DeleteWhatIfAnalysisRequest",
+    "DeleteWhatIfForecast": "DeleteWhatIfForecastRequest",
+    "DeleteWhatIfForecastExport": "DeleteWhatIfForecastExportRequest",
+    "DescribeAutoPredictor": "DescribeAutoPredictorRequest",
+    "DescribeDataset": "DescribeDatasetRequest",
+    "DescribeDatasetGroup": "DescribeDatasetGroupRequest",
+    "DescribeDatasetImportJob": "DescribeDatasetImportJobRequest",
+    "DescribeExplainability": "DescribeExplainabilityRequest",
+    "DescribeExplainabilityExport": "DescribeExplainabilityExportRequest",
+    "DescribeForecast": "DescribeForecastRequest",
+    "DescribeForecastExportJob": "DescribeForecastExportJobRequest",
+    "DescribeMonitor": "DescribeMonitorRequest",
+    "DescribePredictor": "DescribePredictorRequest",
+    "DescribePredictorBacktestExportJob": "DescribePredictorBacktestExportJobRequest",
+    "DescribeWhatIfAnalysis": "DescribeWhatIfAnalysisRequest",
+    "DescribeWhatIfForecast": "DescribeWhatIfForecastRequest",
+    "DescribeWhatIfForecastExport": "DescribeWhatIfForecastExportRequest",
+    "GetAccuracyMetrics": "GetAccuracyMetricsRequest",
+    "ListDatasetGroups": "ListDatasetGroupsRequest",
+    "ListDatasetImportJobs": "ListDatasetImportJobsRequest",
+    "ListDatasets": "ListDatasetsRequest",
+    "ListExplainabilities": "ListExplainabilitiesRequest",
+    "ListExplainabilityExports": "ListExplainabilityExportsRequest",
+    "ListForecastExportJobs": "ListForecastExportJobsRequest",
+    "ListForecasts": "ListForecastsRequest",
+    "ListMonitorEvaluations": "ListMonitorEvaluationsRequest",
+    "ListMonitors": "ListMonitorsRequest",
+    "ListPredictorBacktestExportJobs": "ListPredictorBacktestExportJobsRequest",
+    "ListPredictors": "ListPredictorsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListWhatIfAnalyses": "ListWhatIfAnalysesRequest",
+    "ListWhatIfForecastExports": "ListWhatIfForecastExportsRequest",
+    "ListWhatIfForecasts": "ListWhatIfForecastsRequest",
+    "ResumeResource": "ResumeResourceRequest",
+    "StopResource": "StopResourceRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateDatasetGroup": "UpdateDatasetGroupRequest"
+  },
+  "shapes": {
+    "Action": {
+      "type": "structure",
+      "required": [
+        "AttributeName",
+        "Operation",
+        "Value"
+      ],
+      "members": {
+        "AttributeName": "Name",
+        "Operation": "Operation",
+        "Value": "Double"
+      }
+    },
+    "AdditionalDataset": {
+      "type": "structure",
+      "required": [
+        "Name"
+      ],
+      "members": {
+        "Name": "Name",
+        "Configuration": "Configuration"
+      }
+    },
+    "AdditionalDatasets": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "AdditionalDataset"
+    },
+    "Arn": {
+      "type": "string",
+      "max": 256,
+      "pattern": "arn:([a-z\\d-]+):forecast:.*:.*:.+"
+    },
+    "ArnList": {
+      "type": "list",
+      "member": "Arn"
+    },
+    "AttributeConfig": {
+      "type": "structure",
+      "required": [
+        "AttributeName",
+        "Transformations"
+      ],
+      "members": {
+        "AttributeName": "Name",
+        "Transformations": "Transformations"
+      }
+    },
+    "AttributeConfigs": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "AttributeConfig"
+    },
+    "AttributeType": {
+      "type": "string",
+      "enum": [
+        "string",
+        "integer",
+        "float",
+        "timestamp",
+        "geolocation"
+      ]
+    },
+    "AttributeValue": {
+      "type": "string",
+      "max": 256,
+      "pattern": ".+"
+    },
+    "AutoMLOverrideStrategy": {
+      "type": "string",
+      "enum": [
+        "LatencyOptimized",
+        "AccuracyOptimized"
+      ]
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CategoricalParameterRange": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Values"
+      ],
+      "members": {
+        "Name": "Name",
+        "Values": "Values"
+      }
+    },
+    "CategoricalParameterRanges": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "CategoricalParameterRange"
+    },
+    "Condition": {
+      "type": "string",
+      "enum": [
+        "EQUALS",
+        "NOT_EQUALS",
+        "LESS_THAN",
+        "GREATER_THAN"
+      ]
+    },
+    "Configuration": {
+      "type": "map",
+      "key": "Name",
+      "value": "Values"
+    },
+    "ContinuousParameterRange": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "MaxValue",
+        "MinValue"
+      ],
+      "members": {
+        "Name": "Name",
+        "MaxValue": "Double",
+        "MinValue": "Double",
+        "ScalingType": "ScalingType"
+      }
+    },
+    "ContinuousParameterRanges": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "ContinuousParameterRange"
+    },
+    "CreateAutoPredictorRequest": {
+      "type": "structure",
+      "required": [
+        "PredictorName"
+      ],
+      "members": {
+        "PredictorName": "Name",
+        "ForecastHorizon": "Integer",
+        "ForecastTypes": "ForecastTypes",
+        "ForecastDimensions": "ForecastDimensions",
+        "ForecastFrequency": "Frequency",
+        "DataConfig": "DataConfig",
+        "EncryptionConfig": "EncryptionConfig",
+        "ReferencePredictorArn": "Arn",
+        "OptimizationMetric": "OptimizationMetric",
+        "ExplainPredictor": "Boolean",
+        "Tags": "Tags",
+        "MonitorConfig": "MonitorConfig",
+        "TimeAlignmentBoundary": "TimeAlignmentBoundary"
+      }
+    },
+    "CreateDatasetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetGroupName",
+        "Domain"
+      ],
+      "members": {
+        "DatasetGroupName": "Name",
+        "Domain": "Domain",
+        "DatasetArns": "ArnList",
+        "Tags": "Tags"
+      }
+    },
+    "CreateDatasetImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetImportJobName",
+        "DatasetArn",
+        "DataSource"
+      ],
+      "members": {
+        "DatasetImportJobName": "Name",
+        "DatasetArn": "Arn",
+        "DataSource": "DataSource",
+        "TimestampFormat": "TimestampFormat",
+        "TimeZone": "TimeZone",
+        "UseGeolocationForTimeZone": "UseGeolocationForTimeZone",
+        "GeolocationFormat": "GeolocationFormat",
+        "Tags": "Tags",
+        "Format": "Format",
+        "ImportMode": "ImportMode"
+      }
+    },
+    "CreateDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetName",
+        "Domain",
+        "DatasetType",
+        "Schema"
+      ],
+      "members": {
+        "DatasetName": "Name",
+        "Domain": "Domain",
+        "DatasetType": "DatasetType",
+        "DataFrequency": "Frequency",
+        "Schema": "Schema",
+        "EncryptionConfig": "EncryptionConfig",
+        "Tags": "Tags"
+      }
+    },
+    "CreateExplainabilityExportRequest": {
+      "type": "structure",
+      "required": [
+        "ExplainabilityExportName",
+        "ExplainabilityArn",
+        "Destination"
+      ],
+      "members": {
+        "ExplainabilityExportName": "Name",
+        "ExplainabilityArn": "Arn",
+        "Destination": "DataDestination",
+        "Tags": "Tags",
+        "Format": "Format"
+      }
+    },
+    "CreateExplainabilityRequest": {
+      "type": "structure",
+      "required": [
+        "ExplainabilityName",
+        "ResourceArn",
+        "ExplainabilityConfig"
+      ],
+      "members": {
+        "ExplainabilityName": "Name",
+        "ResourceArn": "Arn",
+        "ExplainabilityConfig": "ExplainabilityConfig",
+        "DataSource": "DataSource",
+        "Schema": "Schema",
+        "EnableVisualization": "Boolean",
+        "StartDateTime": "LocalDateTime",
+        "EndDateTime": "LocalDateTime",
+        "Tags": "Tags"
+      }
+    },
+    "CreateForecastExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "ForecastExportJobName",
+        "ForecastArn",
+        "Destination"
+      ],
+      "members": {
+        "ForecastExportJobName": "Name",
+        "ForecastArn": "Arn",
+        "Destination": "DataDestination",
+        "Tags": "Tags",
+        "Format": "Format"
+      }
+    },
+    "CreateForecastRequest": {
+      "type": "structure",
+      "required": [
+        "ForecastName",
+        "PredictorArn"
+      ],
+      "members": {
+        "ForecastName": "Name",
+        "PredictorArn": "Arn",
+        "ForecastTypes": "ForecastTypes",
+        "Tags": "Tags",
+        "TimeSeriesSelector": "TimeSeriesSelector"
+      }
+    },
+    "CreateMonitorRequest": {
+      "type": "structure",
+      "required": [
+        "MonitorName",
+        "ResourceArn"
+      ],
+      "members": {
+        "MonitorName": "Name",
+        "ResourceArn": "Arn",
+        "Tags": "Tags"
+      }
+    },
+    "CreatePredictorBacktestExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "PredictorBacktestExportJobName",
+        "PredictorArn",
+        "Destination"
+      ],
+      "members": {
+        "PredictorBacktestExportJobName": "Name",
+        "PredictorArn": "Arn",
+        "Destination": "DataDestination",
+        "Tags": "Tags",
+        "Format": "Format"
+      }
+    },
+    "CreatePredictorRequest": {
+      "type": "structure",
+      "required": [
+        "PredictorName",
+        "ForecastHorizon",
+        "InputDataConfig",
+        "FeaturizationConfig"
+      ],
+      "members": {
+        "PredictorName": "Name",
+        "AlgorithmArn": "Arn",
+        "ForecastHorizon": "Integer",
+        "ForecastTypes": "ForecastTypes",
+        "PerformAutoML": "Boolean",
+        "AutoMLOverrideStrategy": "AutoMLOverrideStrategy",
+        "PerformHPO": "Boolean",
+        "TrainingParameters": "TrainingParameters",
+        "EvaluationParameters": "EvaluationParameters",
+        "HPOConfig": "HyperParameterTuningJobConfig",
+        "InputDataConfig": "InputDataConfig",
+        "FeaturizationConfig": "FeaturizationConfig",
+        "EncryptionConfig": "EncryptionConfig",
+        "Tags": "Tags",
+        "OptimizationMetric": "OptimizationMetric"
+      }
+    },
+    "CreateWhatIfAnalysisRequest": {
+      "type": "structure",
+      "required": [
+        "WhatIfAnalysisName",
+        "ForecastArn"
+      ],
+      "members": {
+        "WhatIfAnalysisName": "Name",
+        "ForecastArn": "Arn",
+        "TimeSeriesSelector": "TimeSeriesSelector",
+        "Tags": "Tags"
+      }
+    },
+    "CreateWhatIfForecastExportRequest": {
+      "type": "structure",
+      "required": [
+        "WhatIfForecastExportName",
+        "WhatIfForecastArns",
+        "Destination"
+      ],
+      "members": {
+        "WhatIfForecastExportName": "Name",
+        "WhatIfForecastArns": "WhatIfForecastArnListForExport",
+        "Destination": "DataDestination",
+        "Tags": "Tags",
+        "Format": "Format"
+      }
+    },
+    "CreateWhatIfForecastRequest": {
+      "type": "structure",
+      "required": [
+        "WhatIfForecastName",
+        "WhatIfAnalysisArn"
+      ],
+      "members": {
+        "WhatIfForecastName": "Name",
+        "WhatIfAnalysisArn": "Arn",
+        "TimeSeriesTransformations": "TimeSeriesTransformations",
+        "TimeSeriesReplacementsDataSource": "TimeSeriesReplacementsDataSource",
+        "Tags": "Tags"
+      }
+    },
+    "DataConfig": {
+      "type": "structure",
+      "required": [
+        "DatasetGroupArn"
+      ],
+      "members": {
+        "DatasetGroupArn": "Arn",
+        "AttributeConfigs": "AttributeConfigs",
+        "AdditionalDatasets": "AdditionalDatasets"
+      }
+    },
+    "DataDestination": {
+      "type": "structure",
+      "required": [
+        "S3Config"
+      ],
+      "members": {
+        "S3Config": "S3Config"
+      }
+    },
+    "DataSource": {
+      "type": "structure",
+      "required": [
+        "S3Config"
+      ],
+      "members": {
+        "S3Config": "S3Config"
+      }
+    },
+    "DatasetType": {
+      "type": "string",
+      "enum": [
+        "TARGET_TIME_SERIES",
+        "RELATED_TIME_SERIES",
+        "ITEM_METADATA"
+      ]
+    },
+    "DayOfMonth": {
+      "type": "integer",
+      "min": 1,
+      "max": 28
+    },
+    "DayOfWeek": {
+      "type": "string",
+      "enum": [
+        "MONDAY",
+        "TUESDAY",
+        "WEDNESDAY",
+        "THURSDAY",
+        "FRIDAY",
+        "SATURDAY",
+        "SUNDAY"
+      ]
+    },
+    "DeleteDatasetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetGroupArn"
+      ],
+      "members": {
+        "DatasetGroupArn": "Arn"
+      }
+    },
+    "DeleteDatasetImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetImportJobArn"
+      ],
+      "members": {
+        "DatasetImportJobArn": "Arn"
+      }
+    },
+    "DeleteDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetArn"
+      ],
+      "members": {
+        "DatasetArn": "Arn"
+      }
+    },
+    "DeleteExplainabilityExportRequest": {
+      "type": "structure",
+      "required": [
+        "ExplainabilityExportArn"
+      ],
+      "members": {
+        "ExplainabilityExportArn": "Arn"
+      }
+    },
+    "DeleteExplainabilityRequest": {
+      "type": "structure",
+      "required": [
+        "ExplainabilityArn"
+      ],
+      "members": {
+        "ExplainabilityArn": "Arn"
+      }
+    },
+    "DeleteForecastExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "ForecastExportJobArn"
+      ],
+      "members": {
+        "ForecastExportJobArn": "Arn"
+      }
+    },
+    "DeleteForecastRequest": {
+      "type": "structure",
+      "required": [
+        "ForecastArn"
+      ],
+      "members": {
+        "ForecastArn": "Arn"
+      }
+    },
+    "DeleteMonitorRequest": {
+      "type": "structure",
+      "required": [
+        "MonitorArn"
+      ],
+      "members": {
+        "MonitorArn": "Arn"
+      }
+    },
+    "DeletePredictorBacktestExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "PredictorBacktestExportJobArn"
+      ],
+      "members": {
+        "PredictorBacktestExportJobArn": "Arn"
+      }
+    },
+    "DeletePredictorRequest": {
+      "type": "structure",
+      "required": [
+        "PredictorArn"
+      ],
+      "members": {
+        "PredictorArn": "Arn"
+      }
+    },
+    "DeleteResourceTreeRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "Arn"
+      }
+    },
+    "DeleteWhatIfAnalysisRequest": {
+      "type": "structure",
+      "required": [
+        "WhatIfAnalysisArn"
+      ],
+      "members": {
+        "WhatIfAnalysisArn": "Arn"
+      }
+    },
+    "DeleteWhatIfForecastExportRequest": {
+      "type": "structure",
+      "required": [
+        "WhatIfForecastExportArn"
+      ],
+      "members": {
+        "WhatIfForecastExportArn": "LongArn"
+      }
+    },
+    "DeleteWhatIfForecastRequest": {
+      "type": "structure",
+      "required": [
+        "WhatIfForecastArn"
+      ],
+      "members": {
+        "WhatIfForecastArn": "LongArn"
+      }
+    },
+    "DescribeAutoPredictorRequest": {
+      "type": "structure",
+      "required": [
+        "PredictorArn"
+      ],
+      "members": {
+        "PredictorArn": "Arn"
+      }
+    },
+    "DescribeDatasetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetGroupArn"
+      ],
+      "members": {
+        "DatasetGroupArn": "Arn"
+      }
+    },
+    "DescribeDatasetImportJobRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetImportJobArn"
+      ],
+      "members": {
+        "DatasetImportJobArn": "Arn"
+      }
+    },
+    "DescribeDatasetRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetArn"
+      ],
+      "members": {
+        "DatasetArn": "Arn"
+      }
+    },
+    "DescribeExplainabilityExportRequest": {
+      "type": "structure",
+      "required": [
+        "ExplainabilityExportArn"
+      ],
+      "members": {
+        "ExplainabilityExportArn": "Arn"
+      }
+    },
+    "DescribeExplainabilityRequest": {
+      "type": "structure",
+      "required": [
+        "ExplainabilityArn"
+      ],
+      "members": {
+        "ExplainabilityArn": "Arn"
+      }
+    },
+    "DescribeForecastExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "ForecastExportJobArn"
+      ],
+      "members": {
+        "ForecastExportJobArn": "Arn"
+      }
+    },
+    "DescribeForecastRequest": {
+      "type": "structure",
+      "required": [
+        "ForecastArn"
+      ],
+      "members": {
+        "ForecastArn": "Arn"
+      }
+    },
+    "DescribeMonitorRequest": {
+      "type": "structure",
+      "required": [
+        "MonitorArn"
+      ],
+      "members": {
+        "MonitorArn": "Arn"
+      }
+    },
+    "DescribePredictorBacktestExportJobRequest": {
+      "type": "structure",
+      "required": [
+        "PredictorBacktestExportJobArn"
+      ],
+      "members": {
+        "PredictorBacktestExportJobArn": "Arn"
+      }
+    },
+    "DescribePredictorRequest": {
+      "type": "structure",
+      "required": [
+        "PredictorArn"
+      ],
+      "members": {
+        "PredictorArn": "Arn"
+      }
+    },
+    "DescribeWhatIfAnalysisRequest": {
+      "type": "structure",
+      "required": [
+        "WhatIfAnalysisArn"
+      ],
+      "members": {
+        "WhatIfAnalysisArn": "Arn"
+      }
+    },
+    "DescribeWhatIfForecastExportRequest": {
+      "type": "structure",
+      "required": [
+        "WhatIfForecastExportArn"
+      ],
+      "members": {
+        "WhatIfForecastExportArn": "LongArn"
+      }
+    },
+    "DescribeWhatIfForecastRequest": {
+      "type": "structure",
+      "required": [
+        "WhatIfForecastArn"
+      ],
+      "members": {
+        "WhatIfForecastArn": "LongArn"
+      }
+    },
+    "Domain": {
+      "type": "string",
+      "enum": [
+        "RETAIL",
+        "CUSTOM",
+        "INVENTORY_PLANNING",
+        "EC2_CAPACITY",
+        "WORK_FORCE",
+        "WEB_TRAFFIC",
+        "METRICS"
+      ]
+    },
+    "Double": {
+      "type": "double"
+    },
+    "EncryptionConfig": {
+      "type": "structure",
+      "required": [
+        "RoleArn",
+        "KMSKeyArn"
+      ],
+      "members": {
+        "RoleArn": "Arn",
+        "KMSKeyArn": "KMSKeyArn"
+      }
+    },
+    "EvaluationParameters": {
+      "type": "structure",
+      "members": {
+        "NumberOfBacktestWindows": "Integer",
+        "BackTestWindowOffset": "Integer"
+      }
+    },
+    "ExplainabilityConfig": {
+      "type": "structure",
+      "required": [
+        "TimeSeriesGranularity",
+        "TimePointGranularity"
+      ],
+      "members": {
+        "TimeSeriesGranularity": "TimeSeriesGranularity",
+        "TimePointGranularity": "TimePointGranularity"
+      }
+    },
+    "Featurization": {
+      "type": "structure",
+      "required": [
+        "AttributeName"
+      ],
+      "members": {
+        "AttributeName": "Name",
+        "FeaturizationPipeline": "FeaturizationPipeline"
+      }
+    },
+    "FeaturizationConfig": {
+      "type": "structure",
+      "required": [
+        "ForecastFrequency"
+      ],
+      "members": {
+        "ForecastFrequency": "Frequency",
+        "ForecastDimensions": "ForecastDimensions",
+        "Featurizations": "Featurizations"
+      }
+    },
+    "FeaturizationMethod": {
+      "type": "structure",
+      "required": [
+        "FeaturizationMethodName"
+      ],
+      "members": {
+        "FeaturizationMethodName": "FeaturizationMethodName",
+        "FeaturizationMethodParameters": "FeaturizationMethodParameters"
+      }
+    },
+    "FeaturizationMethodName": {
+      "type": "string",
+      "enum": [
+        "filling"
+      ]
+    },
+    "FeaturizationMethodParameters": {
+      "type": "map",
+      "min": 1,
+      "max": 20,
+      "key": "ParameterKey",
+      "value": "ParameterValue"
+    },
+    "FeaturizationPipeline": {
+      "type": "list",
+      "min": 1,
+      "max": 1,
+      "member": "FeaturizationMethod"
+    },
+    "Featurizations": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "Featurization"
+    },
+    "Filter": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value",
+        "Condition"
+      ],
+      "members": {
+        "Key": "String",
+        "Value": "Arn",
+        "Condition": "FilterConditionString"
+      }
+    },
+    "FilterConditionString": {
+      "type": "string",
+      "enum": [
+        "IS",
+        "IS_NOT"
+      ]
+    },
+    "Filters": {
+      "type": "list",
+      "member": "Filter"
+    },
+    "ForecastDimensions": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "Name"
+    },
+    "ForecastType": {
+      "type": "string",
+      "min": 2,
+      "max": 4,
+      "pattern": "(^0?\\.\\d\\d?$|^mean$)"
+    },
+    "ForecastTypes": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "ForecastType"
+    },
+    "Format": {
+      "type": "string",
+      "max": 7,
+      "pattern": "^CSV|PARQUET$"
+    },
+    "Frequency": {
+      "type": "string",
+      "min": 1,
+      "max": 5,
+      "pattern": "^Y|M|W|D|H|30min|15min|10min|5min|1min$"
+    },
+    "GeolocationFormat": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^[a-zA-Z0-9_]+$"
+    },
+    "GetAccuracyMetricsRequest": {
+      "type": "structure",
+      "required": [
+        "PredictorArn"
+      ],
+      "members": {
+        "PredictorArn": "Arn"
+      }
+    },
+    "Hour": {
+      "type": "integer",
+      "min": 0,
+      "max": 23
+    },
+    "HyperParameterTuningJobConfig": {
+      "type": "structure",
+      "members": {
+        "ParameterRanges": "ParameterRanges"
+      }
+    },
+    "ImportMode": {
+      "type": "string",
+      "enum": [
+        "FULL",
+        "INCREMENTAL"
+      ]
+    },
+    "InputDataConfig": {
+      "type": "structure",
+      "required": [
+        "DatasetGroupArn"
+      ],
+      "members": {
+        "DatasetGroupArn": "Arn",
+        "SupplementaryFeatures": "SupplementaryFeatures"
+      }
+    },
+    "Integer": {
+      "type": "integer"
+    },
+    "IntegerParameterRange": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "MaxValue",
+        "MinValue"
+      ],
+      "members": {
+        "Name": "Name",
+        "MaxValue": "Integer",
+        "MinValue": "Integer",
+        "ScalingType": "ScalingType"
+      }
+    },
+    "IntegerParameterRanges": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "IntegerParameterRange"
+    },
+    "KMSKeyArn": {
+      "type": "string",
+      "max": 256,
+      "pattern": "arn:aws[a-z0-9-]*:kms:.*:key/.*"
+    },
+    "ListDatasetGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListDatasetImportJobsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Filters": "Filters"
+      }
+    },
+    "ListDatasetsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults"
+      }
+    },
+    "ListExplainabilitiesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Filters": "Filters"
+      }
+    },
+    "ListExplainabilityExportsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Filters": "Filters"
+      }
+    },
+    "ListForecastExportJobsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Filters": "Filters"
+      }
+    },
+    "ListForecastsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Filters": "Filters"
+      }
+    },
+    "ListMonitorEvaluationsRequest": {
+      "type": "structure",
+      "required": [
+        "MonitorArn"
+      ],
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "MonitorArn": "Arn",
+        "Filters": "Filters"
+      }
+    },
+    "ListMonitorsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Filters": "Filters"
+      }
+    },
+    "ListPredictorBacktestExportJobsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Filters": "Filters"
+      }
+    },
+    "ListPredictorsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Filters": "Filters"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "Arn"
+      }
+    },
+    "ListWhatIfAnalysesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Filters": "Filters"
+      }
+    },
+    "ListWhatIfForecastExportsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Filters": "Filters"
+      }
+    },
+    "ListWhatIfForecastsRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "NextToken",
+        "MaxResults": "MaxResults",
+        "Filters": "Filters"
+      }
+    },
+    "LocalDateTime": {
+      "type": "string",
+      "max": 19,
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}$"
+    },
+    "LongArn": {
+      "type": "string",
+      "max": 300,
+      "pattern": "arn:([a-z\\d-]+):forecast:.*:.*:.+"
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MonitorConfig": {
+      "type": "structure",
+      "required": [
+        "MonitorName"
+      ],
+      "members": {
+        "MonitorName": "Name"
+      }
+    },
+    "Month": {
+      "type": "string",
+      "enum": [
+        "JANUARY",
+        "FEBRUARY",
+        "MARCH",
+        "APRIL",
+        "MAY",
+        "JUNE",
+        "JULY",
+        "AUGUST",
+        "SEPTEMBER",
+        "OCTOBER",
+        "NOVEMBER",
+        "DECEMBER"
+      ]
+    },
+    "Name": {
+      "type": "string",
+      "min": 1,
+      "max": 63,
+      "pattern": "^[a-zA-Z][a-zA-Z0-9_]*"
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 3000,
+      "pattern": ".+"
+    },
+    "Operation": {
+      "type": "string",
+      "enum": [
+        "ADD",
+        "SUBTRACT",
+        "MULTIPLY",
+        "DIVIDE"
+      ]
+    },
+    "OptimizationMetric": {
+      "type": "string",
+      "enum": [
+        "WAPE",
+        "RMSE",
+        "AverageWeightedQuantileLoss",
+        "MASE",
+        "MAPE"
+      ]
+    },
+    "ParameterKey": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^[a-zA-Z0-9\\-\\_\\.\\/\\[\\]\\,\\\\]+$"
+    },
+    "ParameterRanges": {
+      "type": "structure",
+      "members": {
+        "CategoricalParameterRanges": "CategoricalParameterRanges",
+        "ContinuousParameterRanges": "ContinuousParameterRanges",
+        "IntegerParameterRanges": "IntegerParameterRanges"
+      }
+    },
+    "ParameterValue": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^[a-zA-Z0-9\\-\\_\\.\\/\\[\\]\\,\\\"\\\\\\s]+$"
+    },
+    "ResumeResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "Arn"
+      }
+    },
+    "S3Config": {
+      "type": "structure",
+      "required": [
+        "Path",
+        "RoleArn"
+      ],
+      "members": {
+        "Path": "S3Path",
+        "RoleArn": "Arn",
+        "KMSKeyArn": "KMSKeyArn"
+      }
+    },
+    "S3Path": {
+      "type": "string",
+      "min": 7,
+      "max": 4096,
+      "pattern": "^s3://[a-z0-9].+$"
+    },
+    "ScalingType": {
+      "type": "string",
+      "enum": [
+        "Auto",
+        "Linear",
+        "Logarithmic",
+        "ReverseLogarithmic"
+      ]
+    },
+    "Schema": {
+      "type": "structure",
+      "members": {
+        "Attributes": "SchemaAttributes"
+      }
+    },
+    "SchemaAttribute": {
+      "type": "structure",
+      "members": {
+        "AttributeName": "Name",
+        "AttributeType": "AttributeType"
+      }
+    },
+    "SchemaAttributes": {
+      "type": "list",
+      "min": 1,
+      "max": 100,
+      "member": "SchemaAttribute"
+    },
+    "StopResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "Arn"
+      }
+    },
+    "String": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^[a-zA-Z0-9\\_]+$"
+    },
+    "SupplementaryFeature": {
+      "type": "structure",
+      "required": [
+        "Name",
+        "Value"
+      ],
+      "members": {
+        "Name": "Name",
+        "Value": "Value"
+      }
+    },
+    "SupplementaryFeatures": {
+      "type": "list",
+      "min": 1,
+      "max": 2,
+      "member": "SupplementaryFeature"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "Key",
+        "Value"
+      ],
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "TagKeys": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "Arn",
+        "Tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "^([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)$"
+    },
+    "Tags": {
+      "type": "list",
+      "min": 0,
+      "max": 200,
+      "member": "Tag"
+    },
+    "TimeAlignmentBoundary": {
+      "type": "structure",
+      "members": {
+        "Month": "Month",
+        "DayOfMonth": "DayOfMonth",
+        "DayOfWeek": "DayOfWeek",
+        "Hour": "Hour"
+      }
+    },
+    "TimePointGranularity": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "SPECIFIC"
+      ]
+    },
+    "TimeSeriesCondition": {
+      "type": "structure",
+      "required": [
+        "AttributeName",
+        "AttributeValue",
+        "Condition"
+      ],
+      "members": {
+        "AttributeName": "Name",
+        "AttributeValue": "AttributeValue",
+        "Condition": "Condition"
+      }
+    },
+    "TimeSeriesConditions": {
+      "type": "list",
+      "min": 0,
+      "max": 10,
+      "member": "TimeSeriesCondition"
+    },
+    "TimeSeriesGranularity": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "SPECIFIC"
+      ]
+    },
+    "TimeSeriesIdentifiers": {
+      "type": "structure",
+      "members": {
+        "DataSource": "DataSource",
+        "Schema": "Schema",
+        "Format": "Format"
+      }
+    },
+    "TimeSeriesReplacementsDataSource": {
+      "type": "structure",
+      "required": [
+        "S3Config",
+        "Schema"
+      ],
+      "members": {
+        "S3Config": "S3Config",
+        "Schema": "Schema",
+        "Format": "Format",
+        "TimestampFormat": "TimestampFormat"
+      }
+    },
+    "TimeSeriesSelector": {
+      "type": "structure",
+      "members": {
+        "TimeSeriesIdentifiers": "TimeSeriesIdentifiers"
+      }
+    },
+    "TimeSeriesTransformation": {
+      "type": "structure",
+      "members": {
+        "Action": "Action",
+        "TimeSeriesConditions": "TimeSeriesConditions"
+      }
+    },
+    "TimeSeriesTransformations": {
+      "type": "list",
+      "min": 0,
+      "max": 30,
+      "member": "TimeSeriesTransformation"
+    },
+    "TimeZone": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^[a-zA-Z0-9\\/\\+\\-\\_]+$"
+    },
+    "TimestampFormat": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^[a-zA-Z0-9\\-\\:\\.\\,\\'\\s]+$"
+    },
+    "TrainingParameters": {
+      "type": "map",
+      "min": 0,
+      "max": 100,
+      "key": "ParameterKey",
+      "value": "ParameterValue"
+    },
+    "Transformations": {
+      "type": "map",
+      "min": 1,
+      "max": 20,
+      "key": "Name",
+      "value": "Value"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "Arn",
+        "TagKeys": "TagKeys"
+      }
+    },
+    "UpdateDatasetGroupRequest": {
+      "type": "structure",
+      "required": [
+        "DatasetGroupArn",
+        "DatasetArns"
+      ],
+      "members": {
+        "DatasetGroupArn": "Arn",
+        "DatasetArns": "ArnList"
+      }
+    },
+    "UseGeolocationForTimeZone": {
+      "type": "boolean"
+    },
+    "Value": {
+      "type": "string",
+      "max": 256,
+      "pattern": "^[a-zA-Z0-9\\_\\-]+$"
+    },
+    "Values": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "Value"
+    },
+    "WhatIfForecastArnListForExport": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "LongArn"
+    }
+  }
+}

@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.core.storage.StorageBackend;
@@ -178,6 +179,12 @@ public class SageMakerService {
         cfg.region = region;
         cfg.accountId = regionResolver.getAccountId();
         cfg.tags = tagsFromList(request.path("Tags"));
+        for (String member : ENDPOINT_CONFIG_SETTINGS) {
+            if (request.hasNonNull(member)) {
+                cfg.settings.put(member, mapper.convertValue(request.get(member), Object.class));
+            }
+        }
+        validateAsyncInferenceConfig(request.path("AsyncInferenceConfig"));
         endpointConfigStore.put(regionKey(region, name), cfg);
         ObjectNode out = mapper.createObjectNode();
         out.put("EndpointConfigArn", cfg.endpointConfigArn);
@@ -192,8 +199,36 @@ public class SageMakerService {
         out.put("EndpointConfigName", cfg.endpointConfigName);
         out.put("EndpointConfigArn", cfg.endpointConfigArn);
         out.set("ProductionVariants", mapper.valueToTree(cfg.productionVariants));
+        cfg.settings.forEach((member, value) -> out.set(member, mapper.valueToTree(value)));
         out.put("CreationTime", epoch(cfg.creationTime));
         return out;
+    }
+
+    /** The CreateEndpointConfig members besides the name, variants and tags. */
+    static final List<String> ENDPOINT_CONFIG_SETTINGS = List.of("AsyncInferenceConfig", "DataCaptureConfig",
+            "KmsKeyId", "ShadowProductionVariants", "ExplainerConfig", "ExecutionRoleArn", "VpcConfig",
+            "EnableNetworkIsolation");
+
+    /** An async endpoint needs an S3 output path, and each notification topic must be an SNS ARN. */
+    private static void validateAsyncInferenceConfig(JsonNode config) {
+        if (config.isMissingNode() || config.isNull()) {
+            return;
+        }
+        String output = config.path("OutputConfig").path("S3OutputPath").asText(null);
+        if (output == null || !output.startsWith("s3://")) {
+            throw validation("AsyncInferenceConfig.OutputConfig.S3OutputPath must be an s3:// URI.");
+        }
+        String failure = config.path("OutputConfig").path("S3FailurePath").asText(null);
+        if (failure != null && !failure.startsWith("s3://")) {
+            throw validation("AsyncInferenceConfig.OutputConfig.S3FailurePath must be an s3:// URI.");
+        }
+        JsonNode notification = config.path("OutputConfig").path("NotificationConfig");
+        for (String topic : List.of("SuccessTopic", "ErrorTopic")) {
+            String arn = notification.path(topic).asText(null);
+            if (arn != null && !AwsArnUtils.isArnFor(arn, "sns")) {
+                throw validation("AsyncInferenceConfig NotificationConfig." + topic + " must be an SNS topic ARN.");
+            }
+        }
     }
 
     public synchronized ObjectNode deleteEndpointConfig(JsonNode request, String region) {

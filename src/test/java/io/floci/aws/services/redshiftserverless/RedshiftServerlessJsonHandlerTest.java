@@ -32,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -96,11 +97,11 @@ class RedshiftServerlessJsonHandlerTest {
         when(storageFactory.create(eq("redshiftserverless"), eq("redshiftserverless-workgroups.json"),
                 any(TypeReference.class))).thenReturn((AccountAwareStorageBackend) workgroupStore);
         RedshiftServerlessEndpoints endpoints = mock(RedshiftServerlessEndpoints.class);
-        when(endpoints.allocate()).thenReturn(new Endpoint("localhost", 7100));
+        doAnswer(invocation -> { Workgroup w = invocation.getArgument(0); w.setProxyPort(7100); w.setEndpoint(new Endpoint("localhost", 7100)); return null; }).when(endpoints).allocate(any(), any(), any());
         RedshiftServerlessRuntime runtime = mock(RedshiftServerlessRuntime.class);
         when(runtime.generatePassword()).thenReturn("Generated123");
         when(runtime.start(any(String.class), any(String.class), any(String.class), any(String.class),
-                any(String.class), any(String.class), any(Endpoint.class), anyBoolean(), any()))
+                any(String.class), any(String.class), any(Endpoint.class), anyInt(), anyBoolean(), anyBoolean(), any()))
                 .thenReturn(new RedshiftServerlessRuntime.Backend("127.0.0.1", 55432));
         when(runtime.issueCredential(any(), any(), any(), any(), anyInt())).thenAnswer(invocation ->
                 new TempCredential(invocation.getArgument(3), "tempPassword1",
@@ -134,12 +135,13 @@ class RedshiftServerlessJsonHandlerTest {
                         new RedshiftServerlessSnapshotCopyService(storageFactory, regionResolver, service),
                         new RedshiftServerlessScheduledActionService(storageFactory, service,
                                 mock(RedshiftServerlessScheduledActionAuthorizer.class), regionResolver)),
-                customDomains);
+                customDomains, new RedshiftServerlessRecoveryService(storageFactory, service, Duration.ofMinutes(30)));
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})
     private static void stubAdministrationStores(StorageFactory storageFactory) {
-        for (String file : List.of("resourcepolicies", "endpointaccess", "customdomains", "snapshotcopyconfigurations", "scheduledactions")) {
+        for (String file : List.of("resourcepolicies", "endpointaccess", "customdomains", "snapshotcopyconfigurations", "scheduledactions",
+                "recovery-points", "table-restores")) {
             when(storageFactory.create(eq("redshiftserverless"), eq("redshiftserverless-" + file + ".json"),
                     any(TypeReference.class))).thenReturn((AccountAwareStorageBackend)
                     AccountAwareStorageBackend.inMemory(ACCOUNT_ID));
@@ -480,7 +482,7 @@ class RedshiftServerlessJsonHandlerTest {
 
     @Test
     void aModeledActionWithoutAnImplementationIsStillAnUnknownOperation() {
-        Response response = handler.handle("ConvertRecoveryPointToSnapshot", mapper.createObjectNode(), REGION);
+        Response response = handler.handle("UpdateLakehouseConfiguration", mapper.createObjectNode(), REGION);
 
         assertEquals(400, response.getStatus());
         assertEquals("UnknownOperationException", errorType(response));

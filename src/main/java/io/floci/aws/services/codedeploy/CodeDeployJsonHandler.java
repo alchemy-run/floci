@@ -63,6 +63,8 @@ public class CodeDeployJsonHandler {
             case "BatchGetDeployments" -> batchGetDeployments(request, region);
             case "ListDeploymentTargets" -> listDeploymentTargets(request, region);
             case "BatchGetDeploymentTargets" -> batchGetDeploymentTargets(request, region);
+            case "GetDeploymentTarget" -> Response.ok(Map.of("deploymentTarget", service.getDeploymentTarget(region,
+                    request.path("deploymentId").asText(null), request.path("targetId").asText(null)))).build();
             case "PutLifecycleEventHookExecutionStatus" -> putLifecycleEventHookExecutionStatus(request, region);
             case "RegisterOnPremisesInstance" -> registerOnPremisesInstance(request, region);
             case "DeregisterOnPremisesInstance" -> deregisterOnPremisesInstance(request, region);

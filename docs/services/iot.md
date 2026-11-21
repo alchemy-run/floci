@@ -30,7 +30,7 @@ Supported MVP 2 behavior:
 
 - Thing types: `CreateThingType`, `DescribeThingType`, `ListThingTypes`, `UpdateThingType`, `DeprecateThingType`, and `DeleteThingType` with typed `CreateThing` association and in-use delete protection. As on AWS, `DeleteThingType` accepts only a type that has been deprecated for at least five minutes, `DeprecateThingType` with `undoDeprecate` reactivates a deprecated type, and `CreateThing` rejects a deprecated type.
 - Static thing groups: `CreateThingGroup`, `DescribeThingGroup`, `ListThingGroups`, `UpdateThingGroup`, `DeleteThingGroup`, `AddThingToThingGroup`, `RemoveThingFromThingGroup`, `ListThingsInThingGroup`, and `ListThingGroupsForThing`.
-- Jobs control plane: `CreateJob`, `DescribeJob`, and `ListJobs`, including thing ARN targets and static thing group targets.
+- Jobs control plane: `CreateJob`, `DescribeJob`, `ListJobs`, `CancelJob` and `DeleteJob`, including thing ARN targets and thing group targets, an empty group among them. Cancelling a job cancels its queued executions, and its in-progress ones with `force`; deleting one still in progress needs `force`.
 - Jobs data plane: pending-job listing, `StartNextPendingJobExecution`, `DescribeJobExecution`, and `UpdateJobExecution` with version conflicts and terminal-state checks.
 - Endpoint discovery accepts `iot:Jobs` and `iot:CredentialProvider` in addition to IoT Data endpoint types.
 - MQTT clients can use QoS 1 subscribe/publish paths with broker PUBACK and delivery behavior.

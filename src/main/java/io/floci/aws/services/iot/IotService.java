@@ -50,6 +50,7 @@ import io.floci.aws.services.s3.S3Service;
 import io.floci.aws.services.sns.SnsService;
 import io.floci.aws.services.sqs.SqsService;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
@@ -133,6 +134,10 @@ public class IotService {
     private final RegionResolver regionResolver;
     private final ObjectMapper objectMapper;
     private final IotPublishEventRecorder publishEventRecorder;
+
+    /** The services reading device publishes; absent outside CDI. */
+    @Inject
+    Instance<IotTopicListener> topicListeners;
     private final IotMqttBrokerService mqttBrokerService;
     private final SqsService sqsService;
     private final SnsService snsService;
@@ -1432,7 +1437,7 @@ public class IotService {
                 thingNames.addAll(thingNamesForJobTarget(value, region));
             }
         });
-        if (thingNames.isEmpty()) {
+        if (targets.isEmpty()) {
             throw new AwsException("ResourceNotFoundException", "No job targets found", 404);
         }
         job.setTargets(targets);
@@ -1450,6 +1455,48 @@ public class IotService {
             jobExecutionStore.put(jobExecutionKey(region, thingName, jobId), execution);
         }
         return job;
+    }
+
+    /**
+     * Cancels a job: its queued executions are canceled, and with {@code force} its in-progress ones too. A job
+     * canceled already, or finished, cannot be canceled again.
+     */
+    public IotJob cancelJob(String jobId, String reasonCode, String comment, boolean force, String region) {
+        IotJob job = describeJob(jobId, region);
+        if (!"IN_PROGRESS".equals(job.getStatus())) {
+            throw new AwsException("InvalidStateTransitionException", "Job " + jobId + " is " + job.getStatus()
+                    + " and cannot be canceled.", 409);
+        }
+        Instant now = Instant.now();
+        job.setStatus("CANCELED");
+        job.setLastUpdatedAt(now);
+        jobStore.put(jobKey(region, jobId), job);
+        for (IotJobExecution execution : jobExecutions(jobId, region)) {
+            if ("QUEUED".equals(execution.getStatus()) || (force && "IN_PROGRESS".equals(execution.getStatus()))) {
+                execution.setStatus("CANCELED");
+                execution.setLastUpdatedAt(now);
+                jobExecutionStore.put(jobExecutionKey(region, execution.getThingName(), jobId), execution);
+            }
+        }
+        return job;
+    }
+
+    /** Deletes a job and its executions; one still in progress only with {@code force}. */
+    public void deleteJob(String jobId, boolean force, String region) {
+        IotJob job = describeJob(jobId, region);
+        if ("IN_PROGRESS".equals(job.getStatus()) && !force) {
+            throw new AwsException("InvalidStateTransitionException", "Job " + jobId + " is in progress; cancel it "
+                    + "or delete it with force.", 409);
+        }
+        for (IotJobExecution execution : jobExecutions(jobId, region)) {
+            jobExecutionStore.delete(jobExecutionKey(region, execution.getThingName(), jobId));
+        }
+        jobStore.delete(jobKey(region, jobId));
+    }
+
+    private List<IotJobExecution> jobExecutions(String jobId, String region) {
+        return jobExecutionStore.scan(key -> key.startsWith("job-execution:" + region + ":")
+                && key.endsWith(":" + jobId));
     }
 
     public IotJob describeJob(String jobId, String region) {
@@ -1615,6 +1662,7 @@ public class IotService {
                        Executor ruleRunner) {
         byte[] eventPayload = payload == null ? new byte[0] : payload;
         publishEventRecorder.record(topic, eventPayload);
+        notifyTopicListeners(topic, eventPayload, region);
         if (!evaluateRules) {
             return;
         }
@@ -1626,6 +1674,32 @@ public class IotService {
                 }
             }
         });
+    }
+
+    /**
+     * Runs a topic rule on a message sent to the rule itself rather than published to a topic, as IoT Wireless and
+     * other services that name a rule as their destination do: the rule's SQL runs as if the message had been
+     * published to the topic its FROM clause names, and its actions run on what the SQL selects. A disabled rule
+     * does nothing; a rule that doesn't exist is an UnauthorizedException, as GetTopicRule reports it.
+     */
+    public void invokeTopicRule(String ruleName, byte[] payload, String region) {
+        IotTopicRule rule = getTopicRule(ruleName, region);
+        if (rule.isRuleDisabled()) {
+            return;
+        }
+        RuleSql query = ruleQuery(rule);
+        String topic = query == null ? extractTopicPattern(rule.getSql()) : query.topicFilter();
+        byte[] document;
+        if (query == null) {
+            document = payload;
+        } else {
+            RuleSqlContext context = new RuleSqlContext(topic, null,
+                    AwsArnUtils.accountOrDefault(rule.getRuleArn(), config.defaultAccountId()));
+            document = ruleSqlEvaluator.evaluate(rule.getRuleName(), query, context, payload).orElse(null);
+        }
+        if (document != null) {
+            executeTopicRule(rule, topic, payload, document);
+        }
     }
 
     /**
@@ -1677,6 +1751,7 @@ public class IotService {
     void handleReservedMqttPublish(String topic, byte[] payload, Executor ruleRunner) {
         ReservedShadowTopic shadowTopic = parseReservedShadowTopic(topic);
         if (shadowTopic == null) {
+            notifyTopicListeners(topic, payload == null ? new byte[0] : payload, config.defaultRegion());
             return;
         }
         String region = config.defaultRegion();
@@ -1706,6 +1781,20 @@ public class IotService {
             LOG.warnv(e, "IoT shadow request on {0} failed", topic);
             publishShadowRejected(shadowTopic, 400, Objects.requireNonNullElse(e.getMessage(), e.getClass().getSimpleName()),
                     clientToken, region, ruleRunner);
+        }
+    }
+
+    private void notifyTopicListeners(String topic, byte[] payload, String region) {
+        if (topicListeners == null) {
+            return;
+        }
+        String effectiveRegion = region != null ? region : config.defaultRegion();
+        for (IotTopicListener listener : topicListeners) {
+            try {
+                listener.onPublish(topic, payload, effectiveRegion);
+            } catch (RuntimeException e) {
+                LOG.warnv(e, "A listener failed on the publish to {0}", topic);
+            }
         }
     }
 

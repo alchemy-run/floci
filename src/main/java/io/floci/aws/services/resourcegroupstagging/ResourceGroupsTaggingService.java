@@ -263,7 +263,7 @@ public class ResourceGroupsTaggingService implements Resettable {
         }
         String service = AwsArnUtils.parse(arn).service();
         for (TagHandler handler : tagHandlers) {
-            if (handler.serviceKey().equals(service)) {
+            if (handler.serviceKey().equals(service) && handler.handles(arn)) {
                 return handler;
             }
         }

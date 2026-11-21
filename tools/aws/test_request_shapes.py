@@ -440,3 +440,14 @@ def test_payment_cryptography_shapes_take_the_key_an_arn_only_member_names():
     assert doc["shapes"]["KeyArn"]["pattern"].endswith("key/[0-9a-zA-Z]{16,64}")
     assert "alias/" not in doc["shapes"]["KeyArn"]["pattern"]
     assert "alias/" in doc["shapes"]["KeyArnOrKeyAliasType"]["pattern"]
+
+
+def test_no_vendored_request_shapes_refuse_another_partitions_arns():
+    # Every service mints and takes ARNs in each partition it serves, so a pattern that names the
+    # commercial partition or region alone would refuse an aws-cn or aws-us-gov request.
+    for path in sorted((r.REPO_ROOT / "src/main/resources/aws").glob("*-request-shapes.json")):
+        doc = json.loads(path.read_text(encoding="utf-8"))
+        for name, shape in doc["shapes"].items():
+            pattern = shape.get("pattern", "")
+            assert r.COMMERCIAL not in pattern, f"{path.name} {name}: {pattern}"
+            assert not [s for s in r.COMMERCIAL_REGION_SPELLINGS if s in pattern], f"{path.name} {name}: {pattern}"

@@ -1,0 +1,596 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "rolesanywhere",
+ "apiVersion": "2018-05-10",
+ "operations": {
+  "CreateProfile": {
+   "method": "POST",
+   "requestUri": "/profiles",
+   "responseCode": 201,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "profile.createdAt",
+     "profile.updatedAt"
+    ]
+   }
+  },
+  "CreateTrustAnchor": {
+   "method": "POST",
+   "requestUri": "/trustanchors",
+   "responseCode": 201,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "trustAnchor.createdAt",
+     "trustAnchor.updatedAt"
+    ]
+   }
+  },
+  "DeleteAttributeMapping": {
+   "method": "DELETE",
+   "requestUri": "/profiles/{profileId}/mappings",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "profileId": {
+      "location": "uri",
+      "name": "profileId"
+     },
+     "certificateField": {
+      "location": "querystring",
+      "name": "certificateField"
+     },
+     "specifiers": {
+      "location": "querystring",
+      "name": "specifiers",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "profile.createdAt",
+     "profile.updatedAt"
+    ]
+   }
+  },
+  "DeleteCrl": {
+   "method": "DELETE",
+   "requestUri": "/crl/{crlId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "crlId": {
+      "location": "uri",
+      "name": "crlId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "crl.createdAt",
+     "crl.updatedAt"
+    ]
+   }
+  },
+  "DeleteProfile": {
+   "method": "DELETE",
+   "requestUri": "/profile/{profileId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "profileId": {
+      "location": "uri",
+      "name": "profileId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "profile.createdAt",
+     "profile.updatedAt"
+    ]
+   }
+  },
+  "DeleteTrustAnchor": {
+   "method": "DELETE",
+   "requestUri": "/trustanchor/{trustAnchorId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "trustAnchorId": {
+      "location": "uri",
+      "name": "trustAnchorId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "trustAnchor.createdAt",
+     "trustAnchor.updatedAt"
+    ]
+   }
+  },
+  "DisableCrl": {
+   "method": "POST",
+   "requestUri": "/crl/{crlId}/disable",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "crlId": {
+      "location": "uri",
+      "name": "crlId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "crl.createdAt",
+     "crl.updatedAt"
+    ]
+   }
+  },
+  "DisableProfile": {
+   "method": "POST",
+   "requestUri": "/profile/{profileId}/disable",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "profileId": {
+      "location": "uri",
+      "name": "profileId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "profile.createdAt",
+     "profile.updatedAt"
+    ]
+   }
+  },
+  "DisableTrustAnchor": {
+   "method": "POST",
+   "requestUri": "/trustanchor/{trustAnchorId}/disable",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "trustAnchorId": {
+      "location": "uri",
+      "name": "trustAnchorId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "trustAnchor.createdAt",
+     "trustAnchor.updatedAt"
+    ]
+   }
+  },
+  "EnableCrl": {
+   "method": "POST",
+   "requestUri": "/crl/{crlId}/enable",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "crlId": {
+      "location": "uri",
+      "name": "crlId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "crl.createdAt",
+     "crl.updatedAt"
+    ]
+   }
+  },
+  "EnableProfile": {
+   "method": "POST",
+   "requestUri": "/profile/{profileId}/enable",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "profileId": {
+      "location": "uri",
+      "name": "profileId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "profile.createdAt",
+     "profile.updatedAt"
+    ]
+   }
+  },
+  "EnableTrustAnchor": {
+   "method": "POST",
+   "requestUri": "/trustanchor/{trustAnchorId}/enable",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "trustAnchorId": {
+      "location": "uri",
+      "name": "trustAnchorId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "trustAnchor.createdAt",
+     "trustAnchor.updatedAt"
+    ]
+   }
+  },
+  "GetCrl": {
+   "method": "GET",
+   "requestUri": "/crl/{crlId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "crlId": {
+      "location": "uri",
+      "name": "crlId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "crl.createdAt",
+     "crl.updatedAt"
+    ]
+   }
+  },
+  "GetProfile": {
+   "method": "GET",
+   "requestUri": "/profile/{profileId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "profileId": {
+      "location": "uri",
+      "name": "profileId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "profile.createdAt",
+     "profile.updatedAt"
+    ]
+   }
+  },
+  "GetSubject": {
+   "method": "GET",
+   "requestUri": "/subject/{subjectId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "subjectId": {
+      "location": "uri",
+      "name": "subjectId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "subject.lastSeenAt",
+     "subject.createdAt",
+     "subject.updatedAt",
+     "subject.credentials[].seenAt",
+     "subject.instanceProperties[].seenAt"
+    ]
+   }
+  },
+  "GetTrustAnchor": {
+   "method": "GET",
+   "requestUri": "/trustanchor/{trustAnchorId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "trustAnchorId": {
+      "location": "uri",
+      "name": "trustAnchorId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "trustAnchor.createdAt",
+     "trustAnchor.updatedAt"
+    ]
+   }
+  },
+  "ImportCrl": {
+   "method": "POST",
+   "requestUri": "/crls",
+   "responseCode": 201,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "crl.createdAt",
+     "crl.updatedAt"
+    ]
+   }
+  },
+  "ListCrls": {
+   "method": "GET",
+   "requestUri": "/crls",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "pageSize": {
+      "location": "querystring",
+      "name": "pageSize",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "crls[].createdAt",
+     "crls[].updatedAt"
+    ]
+   }
+  },
+  "ListProfiles": {
+   "method": "GET",
+   "requestUri": "/profiles",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "pageSize": {
+      "location": "querystring",
+      "name": "pageSize",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "profiles[].createdAt",
+     "profiles[].updatedAt"
+    ]
+   }
+  },
+  "ListSubjects": {
+   "method": "GET",
+   "requestUri": "/subjects",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "pageSize": {
+      "location": "querystring",
+      "name": "pageSize",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "subjects[].lastSeenAt",
+     "subjects[].createdAt",
+     "subjects[].updatedAt"
+    ]
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/ListTagsForResource",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "querystring",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTrustAnchors": {
+   "method": "GET",
+   "requestUri": "/trustanchors",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "pageSize": {
+      "location": "querystring",
+      "name": "pageSize",
+      "type": "integer"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "trustAnchors[].createdAt",
+     "trustAnchors[].updatedAt"
+    ]
+   }
+  },
+  "PutAttributeMapping": {
+   "method": "PUT",
+   "requestUri": "/profiles/{profileId}/mappings",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "profileId": {
+      "location": "uri",
+      "name": "profileId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "profile.createdAt",
+     "profile.updatedAt"
+    ]
+   }
+  },
+  "PutNotificationSettings": {
+   "method": "PATCH",
+   "requestUri": "/put-notifications-settings",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "trustAnchor.createdAt",
+     "trustAnchor.updatedAt"
+    ]
+   }
+  },
+  "ResetNotificationSettings": {
+   "method": "PATCH",
+   "requestUri": "/reset-notifications-settings",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "trustAnchor.createdAt",
+     "trustAnchor.updatedAt"
+    ]
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/TagResource",
+   "responseCode": 201,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "POST",
+   "requestUri": "/UntagResource",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateCrl": {
+   "method": "PATCH",
+   "requestUri": "/crl/{crlId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "crlId": {
+      "location": "uri",
+      "name": "crlId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "crl.createdAt",
+     "crl.updatedAt"
+    ]
+   }
+  },
+  "UpdateProfile": {
+   "method": "PATCH",
+   "requestUri": "/profile/{profileId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "profileId": {
+      "location": "uri",
+      "name": "profileId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "profile.createdAt",
+     "profile.updatedAt"
+    ]
+   }
+  },
+  "UpdateTrustAnchor": {
+   "method": "PATCH",
+   "requestUri": "/trustanchor/{trustAnchorId}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "trustAnchorId": {
+      "location": "uri",
+      "name": "trustAnchorId"
+     }
+    }
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "trustAnchor.createdAt",
+     "trustAnchor.updatedAt"
+    ]
+   }
+  }
+ }
+}

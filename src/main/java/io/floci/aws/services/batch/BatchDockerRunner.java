@@ -9,6 +9,7 @@ import io.floci.aws.core.common.docker.ContainerBuilder;
 import io.floci.aws.core.common.docker.ContainerDetector;
 import io.floci.aws.core.common.docker.ContainerLifecycleManager;
 import io.floci.aws.core.common.docker.ContainerLogStreamer;
+import io.floci.aws.core.common.docker.ContainerReachableUrls;
 import io.floci.aws.core.common.docker.ContainerSpec;
 import io.floci.aws.core.common.docker.ContainerStorageHelper;
 import io.floci.aws.services.batch.model.BatchJob;
@@ -125,7 +126,10 @@ public class BatchDockerRunner implements ContainerTeardown {
 
             ContainerBuilder.Builder builder = containerBuilder.newContainer(imageResolver.apply(image))
                     .withName(containerName)
-                    .withEnv(env)
+                    // A URL naming the developer's machine (an OTLP collector, a dev server) points
+                    // at host.docker.internal, as in Lambda and ECS containers.
+                    .withEnv(ContainerReachableUrls.rewriteEnvEntries(env,
+                            ContainerReachableUrls.gatewayPort(config.port())))
                     .withDockerNetwork(config.services().batch().dockerNetwork())
                     .withHostDockerInternalOnLinux()
                     .withEmbeddedDns()

@@ -56,7 +56,7 @@ class RedshiftServerlessRuntimeTest {
 
     private PasswordValidator startAndCaptureValidator(RedshiftServerlessRuntime.AdminCredentials admin) {
         when(containers.start(ACCOUNT, BACKEND_ID, "root", "Secret123", "analytics", "serverless")).thenReturn(handle());
-        runtime.start(ACCOUNT, REGION, "my-wg", "root", "Secret123", "analytics", ENDPOINT, false,
+        runtime.start(ACCOUNT, REGION, "my-wg", "root", "Secret123", "analytics", ENDPOINT, ENDPOINT.getPort(), false, false,
                 () -> Optional.ofNullable(admin));
         ArgumentCaptor<PasswordValidator> validator = ArgumentCaptor.forClass(PasswordValidator.class);
         verify(proxies).startProxy(eq(RELAY_KEY), eq(7100), eq("172.17.0.5"), eq(5432), eq("localhost"),
@@ -69,7 +69,7 @@ class RedshiftServerlessRuntimeTest {
         when(containers.start(ACCOUNT, BACKEND_ID, "root", "Secret123", "analytics", "serverless")).thenReturn(handle());
 
         RedshiftServerlessRuntime.Backend backend = runtime.start(ACCOUNT, REGION, "my-wg", "root", "Secret123",
-                "analytics", ENDPOINT, false, Optional::empty);
+                "analytics", ENDPOINT, ENDPOINT.getPort(), false, false, Optional::empty);
 
         assertEquals(new RedshiftServerlessRuntime.Backend("172.17.0.5", 5432), backend);
         InOrder order = inOrder(containers, proxies);
@@ -145,7 +145,7 @@ class RedshiftServerlessRuntimeTest {
                 any(), any(), any(), any(), any(PasswordValidator.class), any());
 
         assertThrows(RuntimeException.class, () -> runtime.start(ACCOUNT, REGION, "my-wg", "root", "Secret123",
-                "analytics", ENDPOINT, true, Optional::empty));
+                "analytics", ENDPOINT, ENDPOINT.getPort(), false, true, Optional::empty));
 
         verify(proxies).stopProxy(RELAY_KEY);
         verify(containers).rollbackStartup(ACCOUNT, BACKEND_ID);
@@ -156,7 +156,7 @@ class RedshiftServerlessRuntimeTest {
     void adoptReattachesToASurvivingContainer() {
         when(containers.adoptOrStart(ACCOUNT, BACKEND_ID, "root", "Secret123", "analytics", "serverless")).thenReturn(handle());
 
-        runtime.start(ACCOUNT, REGION, "my-wg", "root", "Secret123", "analytics", ENDPOINT, true, Optional::empty);
+        runtime.start(ACCOUNT, REGION, "my-wg", "root", "Secret123", "analytics", ENDPOINT, ENDPOINT.getPort(), false, true, Optional::empty);
 
         verify(containers, never()).start(any(), any(), any(), any(), any(), any());
         verify(proxies).startProxy(eq(RELAY_KEY), eq(7100), any(), anyInt(), any(), any(), any(), any(),
@@ -171,7 +171,7 @@ class RedshiftServerlessRuntimeTest {
         broker.issue(ACCOUNT, BACKEND_ID, "IAM:alice", List.of(), 900);
 
         assertThrows(RuntimeException.class, () -> runtime.start(ACCOUNT, REGION, "my-wg", "root", "Secret123",
-                "analytics", ENDPOINT, false, Optional::empty));
+                "analytics", ENDPOINT, ENDPOINT.getPort(), false, false, Optional::empty));
 
         verify(proxies).stopProxy(RELAY_KEY);
         verify(containers).rollbackStartup(ACCOUNT, BACKEND_ID);

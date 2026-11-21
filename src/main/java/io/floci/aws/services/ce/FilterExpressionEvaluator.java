@@ -4,33 +4,41 @@ import com.fasterxml.jackson.databind.JsonNode;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.UsageLine;
 
-import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.Locale;
 import java.util.Set;
 
 /**
  * Recursive evaluator for the AWS Cost Explorer {@code Expression} filter shape:
  * {@code {And, Or, Not, Dimensions, Tags, CostCategories}}.
  * <p>
- * MatchOptions supported:
- * <ul>
- *   <li>{@code EQUALS} — exact equality (default)</li>
- *   <li>{@code CASE_SENSITIVE} — paired with EQUALS, AWS treats it as the default</li>
- *   <li>{@code CASE_INSENSITIVE} — case-insensitive equality</li>
- * </ul>
- * Other AWS match options (e.g. {@code STARTS_WITH}, {@code GREATER_THAN_OR_EQUAL})
- * are accepted in the request but treated as EQUALS for now; full coverage can land
- * in a follow-up PR.
+ * MatchOptions follow the AWS semantics: {@code EQUALS} (the default), {@code ABSENT} (the key has no value on the
+ * line), {@code STARTS_WITH}, {@code ENDS_WITH} and {@code CONTAINS}, each combinable with {@code CASE_SENSITIVE}
+ * (the default) or {@code CASE_INSENSITIVE}. {@code CostCategories} expressions are evaluated through a
+ * {@link CategoryResolver} that applies the account's cost category rules to the line.
  */
 final class FilterExpressionEvaluator {
 
+    /** Resolves the value a cost category assigns to a usage line, or {@code null} when it assigns none. */
+    @FunctionalInterface
+    interface CategoryResolver {
+        CategoryResolver NONE = (category, line) -> null;
+
+        String value(String category, UsageLine line);
+    }
+
     static boolean matches(JsonNode expression, UsageLine line) {
+        return matches(expression, line, CategoryResolver.NONE);
+    }
+
+    static boolean matches(JsonNode expression, UsageLine line, CategoryResolver categories) {
         if (expression == null || expression.isNull() || expression.isMissingNode()) {
             return true;
         }
         JsonNode and = expression.path("And");
         if (and.isArray() && !and.isEmpty()) {
             for (JsonNode child : and) {
-                if (!matches(child, line)) {
+                if (!matches(child, line, categories)) {
                     return false;
                 }
             }
@@ -39,7 +47,7 @@ final class FilterExpressionEvaluator {
         JsonNode or = expression.path("Or");
         if (or.isArray() && !or.isEmpty()) {
             for (JsonNode child : or) {
-                if (matches(child, line)) {
+                if (matches(child, line, categories)) {
                     return true;
                 }
             }
@@ -47,66 +55,71 @@ final class FilterExpressionEvaluator {
         }
         JsonNode not = expression.path("Not");
         if (not.isObject() && !not.isEmpty()) {
-            return !matches(not, line);
+            return !matches(not, line, categories);
         }
         JsonNode dimensions = expression.path("Dimensions");
         if (dimensions.isObject() && !dimensions.isEmpty()) {
-            return matchDimensions(dimensions, line);
+            String key = key(dimensions, "Dimensions");
+            return valueMatches(dimensionValue(key, line), dimensions);
         }
         JsonNode tags = expression.path("Tags");
         if (tags.isObject() && !tags.isEmpty()) {
-            return matchTags(tags, line);
+            String key = key(tags, "Tags");
+            return valueMatches(line.tags() == null ? null : line.tags().get(key), tags);
         }
         JsonNode costCategories = expression.path("CostCategories");
         if (costCategories.isObject() && !costCategories.isEmpty()) {
-            // No cost categories defined — never matches.
-            return false;
+            String key = key(costCategories, "CostCategories");
+            return valueMatches(categories.value(key, line), costCategories);
         }
         return true;
     }
 
-    private static boolean matchDimensions(JsonNode node, UsageLine line) {
+    private static String key(JsonNode node, String operator) {
         String key = node.path("Key").asText(null);
         if (key == null || key.isEmpty()) {
-            throw new AwsException("ValidationException",
-                    "Dimensions filter requires a Key.", 400);
+            throw new AwsException("ValidationException", operator + " filter requires a Key.", 400);
         }
-        Set<String> values = readValues(node.path("Values"));
-        Set<String> matchOptions = readValues(node.path("MatchOptions"));
-        boolean caseInsensitive = matchOptions.contains("CASE_INSENSITIVE");
-        String actual = dimensionValue(key, line);
-        return valueMatches(actual, values, caseInsensitive);
+        return key;
     }
 
-    private static boolean matchTags(JsonNode node, UsageLine line) {
-        String key = node.path("Key").asText(null);
-        if (key == null || key.isEmpty()) {
-            throw new AwsException("ValidationException",
-                    "Tags filter requires a Key.", 400);
-        }
+    private static boolean valueMatches(String actual, JsonNode node) {
         Set<String> values = readValues(node.path("Values"));
-        Set<String> matchOptions = readValues(node.path("MatchOptions"));
-        boolean caseInsensitive = matchOptions.contains("CASE_INSENSITIVE");
-        String actual = line.tags() == null ? null : line.tags().get(key);
-        return valueMatches(actual, values, caseInsensitive);
-    }
-
-    private static boolean valueMatches(String actual, Set<String> values, boolean caseInsensitive) {
-        if (values.isEmpty()) {
-            return actual != null;
-        }
-        if (actual == null) {
-            return false;
-        }
-        if (caseInsensitive) {
-            for (String v : values) {
-                if (v.equalsIgnoreCase(actual)) {
-                    return true;
-                }
+        Set<String> options = readValues(node.path("MatchOptions"));
+        String present = actual == null || actual.isEmpty() ? null : actual;
+        if (options.contains("ABSENT")) {
+            if (present == null) {
+                return true;
             }
+            if (values.isEmpty()) {
+                return false;
+            }
+        }
+        if (present == null) {
             return false;
         }
-        return values.contains(actual);
+        if (values.isEmpty()) {
+            return true;
+        }
+        boolean insensitive = options.contains("CASE_INSENSITIVE");
+        String subject = insensitive ? present.toLowerCase(Locale.ROOT) : present;
+        for (String value : values) {
+            String candidate = insensitive ? value.toLowerCase(Locale.ROOT) : value;
+            boolean matched;
+            if (options.contains("STARTS_WITH")) {
+                matched = subject.startsWith(candidate);
+            } else if (options.contains("ENDS_WITH")) {
+                matched = subject.endsWith(candidate);
+            } else if (options.contains("CONTAINS")) {
+                matched = subject.contains(candidate);
+            } else {
+                matched = subject.equals(candidate);
+            }
+            if (matched) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Maps a Cost Explorer dimension name to the equivalent {@link UsageLine} field. */
@@ -115,16 +128,35 @@ final class FilterExpressionEvaluator {
             case "SERVICE", "SERVICE_CODE" -> line.service();
             case "REGION" -> line.region();
             case "USAGE_TYPE" -> line.usageType();
+            case "USAGE_TYPE_GROUP" -> usageTypeGroup(line);
             case "OPERATION" -> line.operation();
             case "RECORD_TYPE" -> line.recordType();
             case "LINKED_ACCOUNT", "PAYER_ACCOUNT", "LINKED_ACCOUNT_NAME" -> line.linkedAccountId();
             case "RESOURCE_ID" -> line.resourceId();
+            case "INSTANCE_TYPE" -> line.usageType() != null && line.usageType().startsWith("BoxUsage:")
+                    ? line.usageType().substring("BoxUsage:".length()) : null;
+            case "PURCHASE_TYPE" -> UsageLine.RECORD_TYPE_USAGE.equals(line.recordType()) ? "On Demand Instances" : null;
+            default -> null;
+        };
+    }
+
+    /** The AWS usage type group a line's usage type belongs to, for the services Floci prices. */
+    private static String usageTypeGroup(UsageLine line) {
+        String usageType = line.usageType();
+        if (usageType == null) {
+            return null;
+        }
+        return switch (line.service() == null ? "" : line.service()) {
+            case "AmazonEC2" -> usageType.startsWith("BoxUsage") ? "EC2: Running Hours" : null;
+            case "AWSLambda" -> usageType.contains("Request") ? "Lambda: Requests" : "Lambda: Duration";
+            case "AmazonS3" -> usageType.contains("TimedStorage") ? "S3: Storage - Standard"
+                    : usageType.contains("Requests") ? "S3: API Requests - Standard" : null;
             default -> null;
         };
     }
 
     private static Set<String> readValues(JsonNode arr) {
-        Set<String> out = new HashSet<>();
+        Set<String> out = new LinkedHashSet<>();
         if (arr.isArray()) {
             for (JsonNode v : arr) {
                 if (!v.isNull() && !v.asText().isEmpty()) {

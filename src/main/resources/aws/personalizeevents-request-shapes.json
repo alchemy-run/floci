@@ -1,0 +1,258 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_personalize_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "PutActionInteractions": "PutActionInteractionsRequest",
+    "PutActions": "PutActionsRequest",
+    "PutEvents": "PutEventsRequest",
+    "PutItems": "PutItemsRequest",
+    "PutUsers": "PutUsersRequest"
+  },
+  "shapes": {
+    "Action": {
+      "type": "structure",
+      "required": [
+        "actionId"
+      ],
+      "members": {
+        "actionId": "StringType",
+        "properties": "ActionProperties"
+      }
+    },
+    "ActionId": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "ActionImpression": {
+      "type": "list",
+      "min": 1,
+      "max": 25,
+      "member": "ActionId"
+    },
+    "ActionInteraction": {
+      "type": "structure",
+      "required": [
+        "actionId",
+        "sessionId",
+        "timestamp",
+        "eventType"
+      ],
+      "members": {
+        "actionId": "ActionId",
+        "userId": "UserId",
+        "sessionId": "StringType",
+        "timestamp": "Date",
+        "eventType": "StringType",
+        "eventId": "StringType",
+        "recommendationId": "RecommendationId",
+        "impression": "ActionImpression",
+        "properties": "ActionInteractionProperties"
+      }
+    },
+    "ActionInteractionProperties": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "ActionInteractionsList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "ActionInteraction"
+    },
+    "ActionList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "Action"
+    },
+    "ActionProperties": {
+      "type": "string",
+      "min": 1,
+      "max": 32000
+    },
+    "Arn": {
+      "type": "string",
+      "max": 256,
+      "pattern": "arn:([a-z\\d-]+):personalize:.*:.*:.+"
+    },
+    "Date": {
+      "type": "timestamp"
+    },
+    "Event": {
+      "type": "structure",
+      "required": [
+        "eventType",
+        "sentAt"
+      ],
+      "members": {
+        "eventId": "StringType",
+        "eventType": "StringType",
+        "eventValue": "FloatType",
+        "itemId": "ItemId",
+        "properties": "EventPropertiesJSON",
+        "sentAt": "Date",
+        "recommendationId": "RecommendationId",
+        "impression": "Impression",
+        "metricAttribution": "MetricAttribution"
+      }
+    },
+    "EventAttributionSource": {
+      "type": "string",
+      "max": 1024,
+      "pattern": "^[\\x20-\\x7E]*[\\x21-\\x7E]+[\\x20-\\x7E]*$"
+    },
+    "EventList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "Event"
+    },
+    "EventPropertiesJSON": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "FloatType": {
+      "type": "float"
+    },
+    "Impression": {
+      "type": "list",
+      "min": 1,
+      "max": 25,
+      "member": "ItemId"
+    },
+    "Item": {
+      "type": "structure",
+      "required": [
+        "itemId"
+      ],
+      "members": {
+        "itemId": "StringType",
+        "properties": "ItemProperties"
+      }
+    },
+    "ItemId": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "ItemList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "Item"
+    },
+    "ItemProperties": {
+      "type": "string",
+      "min": 1,
+      "max": 32000
+    },
+    "MetricAttribution": {
+      "type": "structure",
+      "required": [
+        "eventAttributionSource"
+      ],
+      "members": {
+        "eventAttributionSource": "EventAttributionSource"
+      }
+    },
+    "PutActionInteractionsRequest": {
+      "type": "structure",
+      "required": [
+        "trackingId",
+        "actionInteractions"
+      ],
+      "members": {
+        "trackingId": "StringType",
+        "actionInteractions": "ActionInteractionsList"
+      }
+    },
+    "PutActionsRequest": {
+      "type": "structure",
+      "required": [
+        "datasetArn",
+        "actions"
+      ],
+      "members": {
+        "datasetArn": "Arn",
+        "actions": "ActionList"
+      }
+    },
+    "PutEventsRequest": {
+      "type": "structure",
+      "required": [
+        "trackingId",
+        "sessionId",
+        "eventList"
+      ],
+      "members": {
+        "trackingId": "StringType",
+        "userId": "UserId",
+        "sessionId": "StringType",
+        "eventList": "EventList"
+      }
+    },
+    "PutItemsRequest": {
+      "type": "structure",
+      "required": [
+        "datasetArn",
+        "items"
+      ],
+      "members": {
+        "datasetArn": "Arn",
+        "items": "ItemList"
+      }
+    },
+    "PutUsersRequest": {
+      "type": "structure",
+      "required": [
+        "datasetArn",
+        "users"
+      ],
+      "members": {
+        "datasetArn": "Arn",
+        "users": "UserList"
+      }
+    },
+    "RecommendationId": {
+      "type": "string",
+      "min": 1,
+      "max": 40
+    },
+    "StringType": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "User": {
+      "type": "structure",
+      "required": [
+        "userId"
+      ],
+      "members": {
+        "userId": "StringType",
+        "properties": "UserProperties"
+      }
+    },
+    "UserId": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "UserList": {
+      "type": "list",
+      "min": 1,
+      "max": 10,
+      "member": "User"
+    },
+    "UserProperties": {
+      "type": "string",
+      "min": 1,
+      "max": 24000
+    }
+  }
+}

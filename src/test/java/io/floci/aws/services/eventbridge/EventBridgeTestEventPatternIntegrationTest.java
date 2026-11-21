@@ -2,8 +2,12 @@ package io.floci.aws.services.eventbridge;
 
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
+import io.vertx.core.json.Json;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
+import java.util.Map;
 
 import static io.restassured.RestAssured.given;
 import static org.hamcrest.Matchers.equalTo;
@@ -35,6 +39,29 @@ class EventBridgeTestEventPatternIntegrationTest {
         .then()
             .statusCode(200)
             .body("Result", equalTo(true));
+    }
+
+    /** A field that holds an array in the event matches when any of its values does. */
+    @Test
+    void anArrayFieldMatchesWhenAnyOfItsValuesDoes() {
+        testPattern(Map.of("detail", Map.of("tags", List.of("blue"))), true);
+        testPattern(Map.of("detail", Map.of("tags", List.of(Map.of("prefix", "bl")))), true);
+        testPattern(Map.of("detail", Map.of("tags", List.of("green"))), false);
+        testPattern(Map.of("detail", Map.of("tags", List.of(Map.of("exists", true)))), true);
+    }
+
+    private static void testPattern(Map<String, Object> pattern, boolean matches) {
+        Map<String, Object> event = Map.of("source", "com.myapp", "detail-type", "Tagged",
+                "detail", Map.of("tags", List.of("red", "blue")));
+        given()
+            .contentType(EVENT_BRIDGE_CONTENT_TYPE)
+            .header("X-Amz-Target", TARGET)
+            .body(Json.encode(Map.of("EventPattern", Json.encode(pattern), "Event", Json.encode(event))))
+        .when()
+            .post("/")
+        .then()
+            .statusCode(200)
+            .body("Result", equalTo(matches));
     }
 
     @Test

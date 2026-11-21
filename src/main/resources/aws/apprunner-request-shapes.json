@@ -1,0 +1,895 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_apprunner_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateCustomDomain": "AssociateCustomDomainRequest",
+    "CreateAutoScalingConfiguration": "CreateAutoScalingConfigurationRequest",
+    "CreateConnection": "CreateConnectionRequest",
+    "CreateObservabilityConfiguration": "CreateObservabilityConfigurationRequest",
+    "CreateService": "CreateServiceRequest",
+    "CreateVpcConnector": "CreateVpcConnectorRequest",
+    "CreateVpcIngressConnection": "CreateVpcIngressConnectionRequest",
+    "DeleteAutoScalingConfiguration": "DeleteAutoScalingConfigurationRequest",
+    "DeleteConnection": "DeleteConnectionRequest",
+    "DeleteObservabilityConfiguration": "DeleteObservabilityConfigurationRequest",
+    "DeleteService": "DeleteServiceRequest",
+    "DeleteVpcConnector": "DeleteVpcConnectorRequest",
+    "DeleteVpcIngressConnection": "DeleteVpcIngressConnectionRequest",
+    "DescribeAutoScalingConfiguration": "DescribeAutoScalingConfigurationRequest",
+    "DescribeCustomDomains": "DescribeCustomDomainsRequest",
+    "DescribeObservabilityConfiguration": "DescribeObservabilityConfigurationRequest",
+    "DescribeService": "DescribeServiceRequest",
+    "DescribeVpcConnector": "DescribeVpcConnectorRequest",
+    "DescribeVpcIngressConnection": "DescribeVpcIngressConnectionRequest",
+    "DisassociateCustomDomain": "DisassociateCustomDomainRequest",
+    "ListAutoScalingConfigurations": "ListAutoScalingConfigurationsRequest",
+    "ListConnections": "ListConnectionsRequest",
+    "ListObservabilityConfigurations": "ListObservabilityConfigurationsRequest",
+    "ListOperations": "ListOperationsRequest",
+    "ListServices": "ListServicesRequest",
+    "ListServicesForAutoScalingConfiguration": "ListServicesForAutoScalingConfigurationRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListVpcConnectors": "ListVpcConnectorsRequest",
+    "ListVpcIngressConnections": "ListVpcIngressConnectionsRequest",
+    "PauseService": "PauseServiceRequest",
+    "ResumeService": "ResumeServiceRequest",
+    "StartDeployment": "StartDeploymentRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateDefaultAutoScalingConfiguration": "UpdateDefaultAutoScalingConfigurationRequest",
+    "UpdateService": "UpdateServiceRequest",
+    "UpdateVpcIngressConnection": "UpdateVpcIngressConnectionRequest"
+  },
+  "shapes": {
+    "ASConfigMaxConcurrency": {
+      "type": "integer",
+      "min": 1,
+      "max": 200
+    },
+    "ASConfigMaxSize": {
+      "type": "integer",
+      "min": 1
+    },
+    "ASConfigMinSize": {
+      "type": "integer",
+      "min": 1,
+      "max": 25
+    },
+    "AppRunnerResourceArn": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "arn:aws(-[\\w]+)*:[a-z0-9-\\\\.]{0,63}:[a-z0-9-\\\\.]{0,63}:[0-9]{12}:(\\w|\\/|-){1,1011}"
+    },
+    "AssociateCustomDomainRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceArn",
+        "DomainName"
+      ],
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn",
+        "DomainName": "DomainName",
+        "EnableWWWSubdomain": "NullableBoolean"
+      }
+    },
+    "AuthenticationConfiguration": {
+      "type": "structure",
+      "members": {
+        "ConnectionArn": "AppRunnerResourceArn",
+        "AccessRoleArn": "RoleArn"
+      }
+    },
+    "AutoScalingConfigurationName": {
+      "type": "string",
+      "min": 4,
+      "max": 32,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9\\-_]{3,31}"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BuildCommand": {
+      "type": "string",
+      "pattern": "[^\\x0a\\x0d]+"
+    },
+    "CodeConfiguration": {
+      "type": "structure",
+      "required": [
+        "ConfigurationSource"
+      ],
+      "members": {
+        "ConfigurationSource": "ConfigurationSource",
+        "CodeConfigurationValues": "CodeConfigurationValues"
+      }
+    },
+    "CodeConfigurationValues": {
+      "type": "structure",
+      "required": [
+        "Runtime"
+      ],
+      "members": {
+        "Runtime": "Runtime",
+        "BuildCommand": "BuildCommand",
+        "StartCommand": "StartCommand",
+        "Port": "String",
+        "RuntimeEnvironmentVariables": "RuntimeEnvironmentVariables",
+        "RuntimeEnvironmentSecrets": "RuntimeEnvironmentSecrets"
+      }
+    },
+    "CodeRepository": {
+      "type": "structure",
+      "required": [
+        "RepositoryUrl",
+        "SourceCodeVersion"
+      ],
+      "members": {
+        "RepositoryUrl": "String",
+        "SourceCodeVersion": "SourceCodeVersion",
+        "CodeConfiguration": "CodeConfiguration",
+        "SourceDirectory": "SourceDirectory"
+      }
+    },
+    "ConfigurationSource": {
+      "type": "string",
+      "enum": [
+        "REPOSITORY",
+        "API"
+      ]
+    },
+    "ConnectionName": {
+      "type": "string",
+      "min": 4,
+      "max": 32,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9\\-_]{3,31}"
+    },
+    "Cpu": {
+      "type": "string",
+      "min": 3,
+      "max": 9,
+      "pattern": "256|512|1024|2048|4096|(0.25|0.5|1|2|4) vCPU"
+    },
+    "CreateAutoScalingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "AutoScalingConfigurationName"
+      ],
+      "members": {
+        "AutoScalingConfigurationName": "AutoScalingConfigurationName",
+        "MaxConcurrency": "ASConfigMaxConcurrency",
+        "MinSize": "ASConfigMinSize",
+        "MaxSize": "ASConfigMaxSize",
+        "Tags": "TagList"
+      }
+    },
+    "CreateConnectionRequest": {
+      "type": "structure",
+      "required": [
+        "ConnectionName",
+        "ProviderType"
+      ],
+      "members": {
+        "ConnectionName": "ConnectionName",
+        "ProviderType": "ProviderType",
+        "Tags": "TagList"
+      }
+    },
+    "CreateObservabilityConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ObservabilityConfigurationName"
+      ],
+      "members": {
+        "ObservabilityConfigurationName": "ObservabilityConfigurationName",
+        "TraceConfiguration": "TraceConfiguration",
+        "Tags": "TagList"
+      }
+    },
+    "CreateServiceRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceName",
+        "SourceConfiguration"
+      ],
+      "members": {
+        "ServiceName": "ServiceName",
+        "SourceConfiguration": "SourceConfiguration",
+        "InstanceConfiguration": "InstanceConfiguration",
+        "Tags": "TagList",
+        "EncryptionConfiguration": "EncryptionConfiguration",
+        "HealthCheckConfiguration": "HealthCheckConfiguration",
+        "AutoScalingConfigurationArn": "AppRunnerResourceArn",
+        "NetworkConfiguration": "NetworkConfiguration",
+        "ObservabilityConfiguration": "ServiceObservabilityConfiguration"
+      }
+    },
+    "CreateVpcConnectorRequest": {
+      "type": "structure",
+      "required": [
+        "VpcConnectorName",
+        "Subnets"
+      ],
+      "members": {
+        "VpcConnectorName": "VpcConnectorName",
+        "Subnets": "StringList",
+        "SecurityGroups": "StringList",
+        "Tags": "TagList"
+      }
+    },
+    "CreateVpcIngressConnectionRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceArn",
+        "VpcIngressConnectionName",
+        "IngressVpcConfiguration"
+      ],
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn",
+        "VpcIngressConnectionName": "VpcIngressConnectionName",
+        "IngressVpcConfiguration": "IngressVpcConfiguration",
+        "Tags": "TagList"
+      }
+    },
+    "DeleteAutoScalingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "AutoScalingConfigurationArn"
+      ],
+      "members": {
+        "AutoScalingConfigurationArn": "AppRunnerResourceArn",
+        "DeleteAllRevisions": "Boolean"
+      }
+    },
+    "DeleteConnectionRequest": {
+      "type": "structure",
+      "required": [
+        "ConnectionArn"
+      ],
+      "members": {
+        "ConnectionArn": "AppRunnerResourceArn"
+      }
+    },
+    "DeleteObservabilityConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ObservabilityConfigurationArn"
+      ],
+      "members": {
+        "ObservabilityConfigurationArn": "AppRunnerResourceArn"
+      }
+    },
+    "DeleteServiceRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceArn"
+      ],
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn"
+      }
+    },
+    "DeleteVpcConnectorRequest": {
+      "type": "structure",
+      "required": [
+        "VpcConnectorArn"
+      ],
+      "members": {
+        "VpcConnectorArn": "AppRunnerResourceArn"
+      }
+    },
+    "DeleteVpcIngressConnectionRequest": {
+      "type": "structure",
+      "required": [
+        "VpcIngressConnectionArn"
+      ],
+      "members": {
+        "VpcIngressConnectionArn": "AppRunnerResourceArn"
+      }
+    },
+    "DescribeAutoScalingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "AutoScalingConfigurationArn"
+      ],
+      "members": {
+        "AutoScalingConfigurationArn": "AppRunnerResourceArn"
+      }
+    },
+    "DescribeCustomDomainsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 5
+    },
+    "DescribeCustomDomainsRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceArn"
+      ],
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn",
+        "NextToken": "String",
+        "MaxResults": "DescribeCustomDomainsMaxResults"
+      }
+    },
+    "DescribeObservabilityConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "ObservabilityConfigurationArn"
+      ],
+      "members": {
+        "ObservabilityConfigurationArn": "AppRunnerResourceArn"
+      }
+    },
+    "DescribeServiceRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceArn"
+      ],
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn"
+      }
+    },
+    "DescribeVpcConnectorRequest": {
+      "type": "structure",
+      "required": [
+        "VpcConnectorArn"
+      ],
+      "members": {
+        "VpcConnectorArn": "AppRunnerResourceArn"
+      }
+    },
+    "DescribeVpcIngressConnectionRequest": {
+      "type": "structure",
+      "required": [
+        "VpcIngressConnectionArn"
+      ],
+      "members": {
+        "VpcIngressConnectionArn": "AppRunnerResourceArn"
+      }
+    },
+    "DisassociateCustomDomainRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceArn",
+        "DomainName"
+      ],
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn",
+        "DomainName": "DomainName"
+      }
+    },
+    "DomainName": {
+      "type": "string",
+      "min": 1,
+      "max": 255,
+      "pattern": "[A-Za-z0-9*.-]{1,255}"
+    },
+    "EgressConfiguration": {
+      "type": "structure",
+      "members": {
+        "EgressType": "EgressType",
+        "VpcConnectorArn": "AppRunnerResourceArn"
+      }
+    },
+    "EgressType": {
+      "type": "string",
+      "enum": [
+        "DEFAULT",
+        "VPC"
+      ]
+    },
+    "EncryptionConfiguration": {
+      "type": "structure",
+      "required": [
+        "KmsKey"
+      ],
+      "members": {
+        "KmsKey": "KmsKeyArn"
+      }
+    },
+    "HealthCheckConfiguration": {
+      "type": "structure",
+      "members": {
+        "Protocol": "HealthCheckProtocol",
+        "Path": "HealthCheckPath",
+        "Interval": "HealthCheckInterval",
+        "Timeout": "HealthCheckTimeout",
+        "HealthyThreshold": "HealthCheckHealthyThreshold",
+        "UnhealthyThreshold": "HealthCheckUnhealthyThreshold"
+      }
+    },
+    "HealthCheckHealthyThreshold": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "HealthCheckInterval": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "HealthCheckPath": {
+      "type": "string",
+      "min": 1
+    },
+    "HealthCheckProtocol": {
+      "type": "string",
+      "enum": [
+        "TCP",
+        "HTTP"
+      ]
+    },
+    "HealthCheckTimeout": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "HealthCheckUnhealthyThreshold": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "ImageConfiguration": {
+      "type": "structure",
+      "members": {
+        "RuntimeEnvironmentVariables": "RuntimeEnvironmentVariables",
+        "StartCommand": "StartCommand",
+        "Port": "String",
+        "RuntimeEnvironmentSecrets": "RuntimeEnvironmentSecrets"
+      }
+    },
+    "ImageIdentifier": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "([0-9]{12}.dkr.ecr.[a-z\\-]+-[0-9]{1}.amazonaws.com\\/((?:[a-z0-9]+(?:[._-][a-z0-9]+)*\\/)*[a-z0-9]+(?:[._-][a-z0-9]+)*)(:([\\w\\d+\\-=._:\\/@])+|@([\\w\\d\\:]+))?)|(^public\\.ecr\\.aws\\/.+\\/((?:[a-z0-9]+(?:[._-][a-z0-9]+)*\\/)*[a-z0-9]+(?:[._-][a-z0-9]+)*)(:([\\w\\d+\\-=._:\\/@])+|@([\\w\\d\\:]+))?)"
+    },
+    "ImageRepository": {
+      "type": "structure",
+      "required": [
+        "ImageIdentifier",
+        "ImageRepositoryType"
+      ],
+      "members": {
+        "ImageIdentifier": "ImageIdentifier",
+        "ImageConfiguration": "ImageConfiguration",
+        "ImageRepositoryType": "ImageRepositoryType"
+      }
+    },
+    "ImageRepositoryType": {
+      "type": "string",
+      "enum": [
+        "ECR",
+        "ECR_PUBLIC"
+      ]
+    },
+    "IngressConfiguration": {
+      "type": "structure",
+      "members": {
+        "IsPubliclyAccessible": "Boolean"
+      }
+    },
+    "IngressVpcConfiguration": {
+      "type": "structure",
+      "members": {
+        "VpcId": "String",
+        "VpcEndpointId": "String"
+      }
+    },
+    "InstanceConfiguration": {
+      "type": "structure",
+      "members": {
+        "Cpu": "Cpu",
+        "Memory": "Memory",
+        "InstanceRoleArn": "RoleArn"
+      }
+    },
+    "IpAddressType": {
+      "type": "string",
+      "enum": [
+        "IPV4",
+        "DUAL_STACK"
+      ]
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "arn:aws(-[\\w]+)*:kms:[a-z\\-]+-[0-9]{1}:[0-9]{12}:key\\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    },
+    "ListAutoScalingConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "AutoScalingConfigurationName": "AutoScalingConfigurationName",
+        "LatestOnly": "Boolean",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListConnectionsRequest": {
+      "type": "structure",
+      "members": {
+        "ConnectionName": "ConnectionName",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListObservabilityConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "ObservabilityConfigurationName": "ObservabilityConfigurationName",
+        "LatestOnly": "Boolean",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListOperationsMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "ListOperationsRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceArn"
+      ],
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn",
+        "NextToken": "String",
+        "MaxResults": "ListOperationsMaxResults"
+      }
+    },
+    "ListServicesForAutoScalingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "AutoScalingConfigurationArn"
+      ],
+      "members": {
+        "AutoScalingConfigurationArn": "AppRunnerResourceArn",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListServicesRequest": {
+      "type": "structure",
+      "members": {
+        "NextToken": "String",
+        "MaxResults": "ServiceMaxResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "AppRunnerResourceArn"
+      }
+    },
+    "ListVpcConnectorsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "ListVpcIngressConnectionsFilter": {
+      "type": "structure",
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn",
+        "VpcEndpointId": "String"
+      }
+    },
+    "ListVpcIngressConnectionsRequest": {
+      "type": "structure",
+      "members": {
+        "Filter": "ListVpcIngressConnectionsFilter",
+        "MaxResults": "MaxResults",
+        "NextToken": "NextToken"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "Memory": {
+      "type": "string",
+      "min": 3,
+      "max": 6,
+      "pattern": "512|1024|2048|3072|4096|6144|8192|10240|12288|(0.5|1|2|3|4|6|8|10|12) GB"
+    },
+    "NetworkConfiguration": {
+      "type": "structure",
+      "members": {
+        "EgressConfiguration": "EgressConfiguration",
+        "IngressConfiguration": "IngressConfiguration",
+        "IpAddressType": "IpAddressType"
+      }
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": ".*"
+    },
+    "NullableBoolean": {
+      "type": "boolean"
+    },
+    "ObservabilityConfigurationName": {
+      "type": "string",
+      "min": 4,
+      "max": 32,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9\\-_]{3,31}"
+    },
+    "PauseServiceRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceArn"
+      ],
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn"
+      }
+    },
+    "ProviderType": {
+      "type": "string",
+      "enum": [
+        "GITHUB",
+        "BITBUCKET"
+      ]
+    },
+    "ResumeServiceRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceArn"
+      ],
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn"
+      }
+    },
+    "RoleArn": {
+      "type": "string",
+      "min": 29,
+      "max": 1024,
+      "pattern": "arn:(aws|aws-us-gov|aws-cn|aws-iso|aws-iso-b):iam::[0-9]{12}:(role|role\\/service-role)\\/[\\w+=,.@\\-/]{1,1000}"
+    },
+    "Runtime": {
+      "type": "string",
+      "enum": [
+        "PYTHON_3",
+        "NODEJS_12",
+        "NODEJS_14",
+        "CORRETTO_8",
+        "CORRETTO_11",
+        "NODEJS_16",
+        "GO_1",
+        "DOTNET_6",
+        "PHP_81",
+        "RUBY_31",
+        "PYTHON_311",
+        "NODEJS_18",
+        "NODEJS_22"
+      ]
+    },
+    "RuntimeEnvironmentSecrets": {
+      "type": "map",
+      "key": "RuntimeEnvironmentSecretsName",
+      "value": "RuntimeEnvironmentSecretsValue"
+    },
+    "RuntimeEnvironmentSecretsName": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "RuntimeEnvironmentSecretsValue": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "RuntimeEnvironmentVariables": {
+      "type": "map",
+      "key": "RuntimeEnvironmentVariablesKey",
+      "value": "RuntimeEnvironmentVariablesValue"
+    },
+    "RuntimeEnvironmentVariablesKey": {
+      "type": "string",
+      "min": 1,
+      "max": 51200,
+      "pattern": ".*"
+    },
+    "RuntimeEnvironmentVariablesValue": {
+      "type": "string",
+      "min": 0,
+      "max": 51200,
+      "pattern": ".*"
+    },
+    "ServiceMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 20
+    },
+    "ServiceName": {
+      "type": "string",
+      "min": 4,
+      "max": 40,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9-_]{3,39}"
+    },
+    "ServiceObservabilityConfiguration": {
+      "type": "structure",
+      "required": [
+        "ObservabilityEnabled"
+      ],
+      "members": {
+        "ObservabilityEnabled": "Boolean",
+        "ObservabilityConfigurationArn": "AppRunnerResourceArn"
+      }
+    },
+    "SourceCodeVersion": {
+      "type": "structure",
+      "required": [
+        "Type",
+        "Value"
+      ],
+      "members": {
+        "Type": "SourceCodeVersionType",
+        "Value": "String"
+      }
+    },
+    "SourceCodeVersionType": {
+      "type": "string",
+      "enum": [
+        "BRANCH"
+      ]
+    },
+    "SourceConfiguration": {
+      "type": "structure",
+      "members": {
+        "CodeRepository": "CodeRepository",
+        "ImageRepository": "ImageRepository",
+        "AutoDeploymentsEnabled": "NullableBoolean",
+        "AuthenticationConfiguration": "AuthenticationConfiguration"
+      }
+    },
+    "SourceDirectory": {
+      "type": "string",
+      "min": 1,
+      "max": 4096,
+      "pattern": "[^\\x00]+"
+    },
+    "StartCommand": {
+      "type": "string",
+      "pattern": "[^\\x0a\\x0d]+"
+    },
+    "StartDeploymentRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceArn"
+      ],
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn"
+      }
+    },
+    "String": {
+      "type": "string",
+      "min": 0,
+      "max": 51200,
+      "pattern": ".*"
+    },
+    "StringList": {
+      "type": "list",
+      "member": "String"
+    },
+    "Tag": {
+      "type": "structure",
+      "members": {
+        "Key": "TagKey",
+        "Value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "^(?!aws:).+"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "AppRunnerResourceArn",
+        "Tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": ".*"
+    },
+    "TraceConfiguration": {
+      "type": "structure",
+      "required": [
+        "Vendor"
+      ],
+      "members": {
+        "Vendor": "TracingVendor"
+      }
+    },
+    "TracingVendor": {
+      "type": "string",
+      "enum": [
+        "AWSXRAY"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "AppRunnerResourceArn",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateDefaultAutoScalingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "AutoScalingConfigurationArn"
+      ],
+      "members": {
+        "AutoScalingConfigurationArn": "AppRunnerResourceArn"
+      }
+    },
+    "UpdateServiceRequest": {
+      "type": "structure",
+      "required": [
+        "ServiceArn"
+      ],
+      "members": {
+        "ServiceArn": "AppRunnerResourceArn",
+        "SourceConfiguration": "SourceConfiguration",
+        "InstanceConfiguration": "InstanceConfiguration",
+        "AutoScalingConfigurationArn": "AppRunnerResourceArn",
+        "HealthCheckConfiguration": "HealthCheckConfiguration",
+        "NetworkConfiguration": "NetworkConfiguration",
+        "ObservabilityConfiguration": "ServiceObservabilityConfiguration"
+      }
+    },
+    "UpdateVpcIngressConnectionRequest": {
+      "type": "structure",
+      "required": [
+        "VpcIngressConnectionArn",
+        "IngressVpcConfiguration"
+      ],
+      "members": {
+        "VpcIngressConnectionArn": "AppRunnerResourceArn",
+        "IngressVpcConfiguration": "IngressVpcConfiguration"
+      }
+    },
+    "VpcConnectorName": {
+      "type": "string",
+      "min": 4,
+      "max": 40,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9\\-_]{3,39}"
+    },
+    "VpcIngressConnectionName": {
+      "type": "string",
+      "min": 4,
+      "max": 40,
+      "pattern": "[A-Za-z0-9][A-Za-z0-9\\-_]{3,39}"
+    }
+  }
+}

@@ -5,6 +5,7 @@ import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.config.FlociCertificateAuthority;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
+import io.floci.aws.core.common.CertificateMaterialException;
 import io.floci.aws.core.common.Digests;
 import io.floci.aws.core.common.DomainNames;
 import io.floci.aws.core.common.Pem;
@@ -25,14 +26,25 @@ import io.floci.aws.services.acm.model.ListResult;
 import io.floci.aws.services.acm.model.ResourceRecord;
 import io.floci.aws.services.acm.model.RevocationReason;
 import io.floci.aws.services.acm.model.ValidationMethod;
+import io.floci.aws.services.acmpca.AcmPcaService;
 import io.floci.aws.services.route53.Route53Service;
 import io.floci.aws.services.route53.model.HostedZone;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.ExtensionsGenerator;
+import org.bouncycastle.asn1.x509.GeneralName;
+import org.bouncycastle.asn1.x509.GeneralNames;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.pkcs.PKCS10CertificationRequest;
+import org.bouncycastle.pkcs.jcajce.JcaPKCS10CertificationRequestBuilder;
 import org.jboss.logging.Logger;
 
 import java.nio.charset.StandardCharsets;
+import java.security.KeyPair;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.cert.X509Certificate;
@@ -214,9 +226,24 @@ public class AcmService implements ResourceProvider {
         }
 
         // A server leaf signed by the local CA, so Certificate plus CertificateChain from
-        // GetCertificate validate the way an ACM certificate and its chain do on AWS.
-        CertificateGenerator.GeneratedCertificate generated = certificateAuthority.issueServerCertificate(
-            domainName, sans, alg, null);
+        // GetCertificate validate the way an ACM certificate and its chain do on AWS. A private
+        // certificate is signed by the AWS Private CA it names instead, or fails as ACM reports it.
+        CertificateGenerator.GeneratedCertificate generated = null;
+        String privateChain = null;
+        String failureReason = null;
+        if (type == CertificateType.PRIVATE && privateCertificateAuthorities != null
+                && privateCertificateAuthorities.isResolvable()) {
+            try {
+                PrivateMaterial material = privateMaterial(certAuthorityArn, domainName, sans, alg);
+                generated = material.generated();
+                privateChain = material.chain();
+            } catch (AcmPcaService.AcmFailure failure) {
+                status = CertificateStatus.FAILED;
+                failureReason = failure.reason();
+            }
+        } else {
+            generated = certificateAuthority.issueServerCertificate(domainName, sans, alg, null);
+        }
 
         Instant now = Instant.now();
 
@@ -237,7 +264,15 @@ public class AcmService implements ResourceProvider {
         cert.setValidationMethod(method);
         cert.setCreatedAt(now);
         cert.setIssuedAt(status == CertificateStatus.ISSUED ? now : null);
-        applyIssuedMaterial(cert, alg, generated);
+        if (generated != null) {
+            applyIssuedMaterial(cert, alg, generated);
+        } else {
+            cert.setKeyAlgorithm(alg);
+        }
+        if (privateChain != null) {
+            cert.setCertificateChain(privateChain);
+        }
+        cert.setFailureReason(failureReason);
         cert.setCertOptions(resolveRequestOptions(options));
         cert.setCertAuthorityArn(certAuthorityArn);
         cert.setIdempotencyToken(idempotencyToken);
@@ -690,8 +725,22 @@ public class AcmService implements ResourceProvider {
                     }
                 }
             }
-            CertificateGenerator.GeneratedCertificate generated = certificateAuthority.issueServerCertificate(
-                cert.getDomainName(), sans, alg, null);
+            CertificateGenerator.GeneratedCertificate generated;
+            String privateChain = null;
+            if (cert.getCertAuthorityArn() != null && privateCertificateAuthorities != null
+                    && privateCertificateAuthorities.isResolvable()) {
+                try {
+                    PrivateMaterial material = privateMaterial(cert.getCertAuthorityArn(), cert.getDomainName(), sans,
+                            alg);
+                    generated = material.generated();
+                    privateChain = material.chain();
+                } catch (AcmPcaService.AcmFailure failure) {
+                    throw new AwsException("RequestFailedException", "The private CA could not renew the "
+                            + "certificate: " + failure.getMessage(), 400);
+                }
+            } else {
+                generated = certificateAuthority.issueServerCertificate(cert.getDomainName(), sans, alg, null);
+            }
 
             renewed = new Certificate();
             renewed.setArn(cert.getArn());
@@ -704,6 +753,9 @@ public class AcmService implements ResourceProvider {
             renewed.setImportedAt(cert.getImportedAt());
             renewed.setIssuedAt(Instant.now());
             applyIssuedMaterial(renewed, alg, generated);
+            if (privateChain != null) {
+                renewed.setCertificateChain(privateChain);
+            }
             renewed.setCertOptions(cert.getCertOptions());
             renewed.setCertAuthorityArn(cert.getCertAuthorityArn());
             renewed.setIdempotencyToken(cert.getIdempotencyToken());
@@ -716,6 +768,42 @@ public class AcmService implements ResourceProvider {
         notifyCertificateReimported(renewed.getArn(), region);
         LOG.infov("Renewed certificate: {0}", renewed.getArn());
         return renewed;
+    }
+
+    /** A private certificate's material and the chain of the Private CA that signed it. */
+    private record PrivateMaterial(CertificateGenerator.GeneratedCertificate generated, String chain) {}
+
+    /**
+     * Has the AWS Private CA {@code caArn} sign a new key's certificate for the domain and its
+     * alternative names, valid for 13 months as ACM's private certificates are.
+     */
+    private PrivateMaterial privateMaterial(String caArn, String domainName, List<String> sans, KeyAlgorithm alg) {
+        KeyPair keys = certificateGenerator.newKeyPair(alg);
+        try {
+            JcaPKCS10CertificationRequestBuilder builder = new JcaPKCS10CertificationRequestBuilder(
+                    new X500Name("CN=" + domainName), keys.getPublic());
+            List<GeneralName> names = new ArrayList<>();
+            names.add(new GeneralName(GeneralName.dNSName, domainName));
+            if (sans != null) {
+                sans.stream().filter(san -> !san.equals(domainName))
+                        .forEach(san -> names.add(new GeneralName(GeneralName.dNSName, san)));
+            }
+            ExtensionsGenerator extensions = new ExtensionsGenerator();
+            extensions.addExtension(Extension.subjectAlternativeName, false,
+                    new GeneralNames(names.toArray(new GeneralName[0])));
+            builder.addAttribute(PKCSObjectIdentifiers.pkcs_9_at_extensionRequest, extensions.generate());
+            String signature = "EC".equals(alg.getAlgorithm()) ? "SHA256withECDSA" : "SHA256withRSA";
+            PKCS10CertificationRequest csr = builder.build(new JcaContentSignerBuilder(signature)
+                    .build(keys.getPrivate()));
+            String[] issued = privateCertificateAuthorities.get().issueForAcm(caArn, csr, 395);
+            X509Certificate certificate = Pem.parseCertificate(issued[0]);
+            return new PrivateMaterial(certificateGenerator.describeIssued(certificate, keys.getPrivate()),
+                    issued[1]);
+        } catch (AcmPcaService.AcmFailure failure) {
+            throw failure;
+        } catch (Exception e) {
+            throw new CertificateMaterialException("Private certificate request failed: " + e.getMessage(), e);
+        }
     }
 
     /** The validity, identity and key material of a leaf issued by the local CA. */
@@ -1147,6 +1235,10 @@ public class AcmService implements ResourceProvider {
 
     @Inject
     Route53Service route53Service;
+
+    /** The AWS Private CAs that sign private certificates; unset in unit tests. */
+    @Inject
+    Instance<AcmPcaService> privateCertificateAuthorities;
 
     /** Finds validation records kept outside floci's Route 53; unset in unit tests. */
     @Inject

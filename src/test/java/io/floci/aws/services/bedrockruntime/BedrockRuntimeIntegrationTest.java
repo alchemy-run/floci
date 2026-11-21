@@ -204,20 +204,25 @@ class BedrockRuntimeIntegrationTest {
             .post("/model/meta.llama3-8b-instruct-v1:0/invoke")
         .then()
             .statusCode(200)
-            .body("outputs[0].text", notNullValue());
+            .body("generation", notNullValue())
+            .body("stop_reason", notNullValue());
     }
 
     @Test
-    void invokeModelWithResponseStream_returns501() {
-        given()
+    void invokeModelWithResponseStream_streamsChunks() {
+        String stream = given()
             .contentType("application/json")
             .header("Authorization", AUTH_HEADER)
-            .body("{}")
+            .body("{\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"max_tokens\":64}")
         .when()
             .post("/model/anthropic.claude-3-haiku-20240307-v1:0/invoke-with-response-stream")
         .then()
-            .statusCode(501)
-            .body("__type", equalTo("UnsupportedOperationException"));
+            .statusCode(200)
+            .header("Content-Type", containsString("application/vnd.amazon.eventstream"))
+            .header("X-Amzn-Bedrock-Content-Type", equalTo("application/json"))
+            .extract().asString();
+        assertThat(stream, containsString(":event-type"));
+        assertThat(stream, containsString("chunk"));
     }
 
     @Test

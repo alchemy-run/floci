@@ -283,11 +283,13 @@ class ElbClassicServiceTest {
             });
             Future<Integer> scanner = pool.submit(() -> {
                 start.await();
+                // At least one scan, and more for as long as the writer runs: a writer scheduled first can finish
+                // its loop before this thread starts.
                 int scans = 0;
-                while (writing.get()) {
+                do {
                     service.serverCertificateReferences();
                     scans++;
-                }
+                } while (writing.get());
                 return scans;
             });
             start.countDown();

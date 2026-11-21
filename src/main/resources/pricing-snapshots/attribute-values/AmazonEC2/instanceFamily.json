@@ -1,0 +1,20 @@
+[
+  {
+    "Value": "Compute optimized"
+  },
+  {
+    "Value": "GPU instance"
+  },
+  {
+    "Value": "General purpose"
+  },
+  {
+    "Value": "Machine Learning ASIC Instances"
+  },
+  {
+    "Value": "Memory optimized"
+  },
+  {
+    "Value": "Storage optimized"
+  }
+]

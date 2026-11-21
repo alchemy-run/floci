@@ -43,6 +43,7 @@ SERVICES: dict[str, tuple[str, ...]] = {
     "ec2": ("ec2",),
     "elasticache": ("elasticache",),
     "elasticbeanstalk": ("elasticbeanstalk",),
+    "sdb": ("sdb",),
     "elasticloadbalancing": ("elbv2", "elb"),
     "email": ("ses",),
     "iam": ("iam",),

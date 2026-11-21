@@ -1,0 +1,2111 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "mediapackagev2",
+ "apiVersion": "2022-12-25",
+ "operations": {
+  "CancelHarvestJob": {
+   "method": "PUT",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint/{OriginEndpointName}/harvestJob/{HarvestJobName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "OriginEndpointName": {
+      "location": "uri",
+      "name": "OriginEndpointName"
+     },
+     "HarvestJobName": {
+      "location": "uri",
+      "name": "HarvestJobName"
+     },
+     "ETag": {
+      "location": "header",
+      "name": "x-amzn-update-if-match"
+     }
+    },
+    "shape": "CancelHarvestJobRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CancelHarvestJobResponse"
+   }
+  },
+  "CreateChannel": {
+   "method": "POST",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ClientToken": {
+      "location": "header",
+      "name": "x-amzn-client-token",
+      "idempotencyToken": true
+     }
+    },
+    "shape": "CreateChannelRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateChannelResponse"
+   }
+  },
+  "CreateChannelGroup": {
+   "method": "POST",
+   "requestUri": "/channelGroup",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ClientToken": {
+      "location": "header",
+      "name": "x-amzn-client-token",
+      "idempotencyToken": true
+     }
+    },
+    "shape": "CreateChannelGroupRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateChannelGroupResponse"
+   }
+  },
+  "CreateHarvestJob": {
+   "method": "POST",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint/{OriginEndpointName}/harvestJob",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "OriginEndpointName": {
+      "location": "uri",
+      "name": "OriginEndpointName"
+     },
+     "ClientToken": {
+      "location": "header",
+      "name": "x-amzn-client-token",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "ScheduleConfiguration.StartTime",
+     "ScheduleConfiguration.EndTime"
+    ],
+    "shape": "CreateHarvestJobRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "CreateHarvestJobResponse"
+   }
+  },
+  "CreateOriginEndpoint": {
+   "method": "POST",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "ClientToken": {
+      "location": "header",
+      "name": "x-amzn-client-token",
+      "idempotencyToken": true
+     }
+    },
+    "timestamps": [
+     "HlsManifests[].FilterConfiguration.Start",
+     "HlsManifests[].FilterConfiguration.End",
+     "HlsManifests[].FilterConfiguration.ClipStartTime",
+     "LowLatencyHlsManifests[].FilterConfiguration.Start",
+     "LowLatencyHlsManifests[].FilterConfiguration.End",
+     "LowLatencyHlsManifests[].FilterConfiguration.ClipStartTime",
+     "DashManifests[].FilterConfiguration.Start",
+     "DashManifests[].FilterConfiguration.End",
+     "DashManifests[].FilterConfiguration.ClipStartTime",
+     "DashManifests[].AvailabilityStartTimeConfiguration.FixedAvailabilityStartTime",
+     "MssManifests[].FilterConfiguration.Start",
+     "MssManifests[].FilterConfiguration.End",
+     "MssManifests[].FilterConfiguration.ClipStartTime"
+    ],
+    "shape": "CreateOriginEndpointRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "DashManifests[].AvailabilityStartTimeConfiguration.FixedAvailabilityStartTime"
+    ],
+    "shape": "CreateOriginEndpointResponse"
+   }
+  },
+  "DeleteChannel": {
+   "method": "DELETE",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "DeleteChannelRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteChannelResponse"
+   }
+  },
+  "DeleteChannelGroup": {
+   "method": "DELETE",
+   "requestUri": "/channelGroup/{ChannelGroupName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     }
+    },
+    "shape": "DeleteChannelGroupRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteChannelGroupResponse"
+   }
+  },
+  "DeleteChannelPolicy": {
+   "method": "DELETE",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "DeleteChannelPolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteChannelPolicyResponse"
+   }
+  },
+  "DeleteOriginEndpoint": {
+   "method": "DELETE",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint/{OriginEndpointName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "OriginEndpointName": {
+      "location": "uri",
+      "name": "OriginEndpointName"
+     }
+    },
+    "shape": "DeleteOriginEndpointRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteOriginEndpointResponse"
+   }
+  },
+  "DeleteOriginEndpointPolicy": {
+   "method": "DELETE",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint/{OriginEndpointName}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "OriginEndpointName": {
+      "location": "uri",
+      "name": "OriginEndpointName"
+     }
+    },
+    "shape": "DeleteOriginEndpointPolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "DeleteOriginEndpointPolicyResponse"
+   }
+  },
+  "GetChannel": {
+   "method": "GET",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "GetChannelRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetChannelResponse"
+   }
+  },
+  "GetChannelGroup": {
+   "method": "GET",
+   "requestUri": "/channelGroup/{ChannelGroupName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     }
+    },
+    "shape": "GetChannelGroupRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetChannelGroupResponse"
+   }
+  },
+  "GetChannelPolicy": {
+   "method": "GET",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "GetChannelPolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetChannelPolicyResponse"
+   }
+  },
+  "GetHarvestJob": {
+   "method": "GET",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint/{OriginEndpointName}/harvestJob/{HarvestJobName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "OriginEndpointName": {
+      "location": "uri",
+      "name": "OriginEndpointName"
+     },
+     "HarvestJobName": {
+      "location": "uri",
+      "name": "HarvestJobName"
+     }
+    },
+    "shape": "GetHarvestJobRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetHarvestJobResponse"
+   }
+  },
+  "GetOriginEndpoint": {
+   "method": "GET",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint/{OriginEndpointName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "OriginEndpointName": {
+      "location": "uri",
+      "name": "OriginEndpointName"
+     }
+    },
+    "shape": "GetOriginEndpointRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "DashManifests[].AvailabilityStartTimeConfiguration.FixedAvailabilityStartTime"
+    ],
+    "shape": "GetOriginEndpointResponse"
+   }
+  },
+  "GetOriginEndpointPolicy": {
+   "method": "GET",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint/{OriginEndpointName}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "OriginEndpointName": {
+      "location": "uri",
+      "name": "OriginEndpointName"
+     }
+    },
+    "shape": "GetOriginEndpointPolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "GetOriginEndpointPolicyResponse"
+   }
+  },
+  "ListChannelGroups": {
+   "method": "GET",
+   "requestUri": "/channelGroup",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListChannelGroupsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListChannelGroupsResponse"
+   }
+  },
+  "ListChannels": {
+   "method": "GET",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListChannelsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListChannelsResponse"
+   }
+  },
+  "ListHarvestJobs": {
+   "method": "GET",
+   "requestUri": "/channelGroup/{ChannelGroupName}/harvestJob",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "querystring",
+      "name": "channelName"
+     },
+     "OriginEndpointName": {
+      "location": "querystring",
+      "name": "originEndpointName"
+     },
+     "Status": {
+      "location": "querystring",
+      "name": "includeStatus"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListHarvestJobsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListHarvestJobsResponse"
+   }
+  },
+  "ListOriginEndpoints": {
+   "method": "GET",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "MaxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "NextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    },
+    "shape": "ListOriginEndpointsRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListOriginEndpointsResponse"
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    },
+    "shape": "ListTagsForResourceRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ListTagsForResourceResponse"
+   }
+  },
+  "PutChannelPolicy": {
+   "method": "PUT",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "PutChannelPolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "PutChannelPolicyResponse"
+   }
+  },
+  "PutOriginEndpointPolicy": {
+   "method": "POST",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint/{OriginEndpointName}/policy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "OriginEndpointName": {
+      "location": "uri",
+      "name": "OriginEndpointName"
+     }
+    },
+    "shape": "PutOriginEndpointPolicyRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "PutOriginEndpointPolicyResponse"
+   }
+  },
+  "ResetChannelState": {
+   "method": "POST",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/reset",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     }
+    },
+    "shape": "ResetChannelStateRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ResetChannelStateResponse"
+   }
+  },
+  "ResetOriginEndpointState": {
+   "method": "POST",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint/{OriginEndpointName}/reset",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "OriginEndpointName": {
+      "location": "uri",
+      "name": "OriginEndpointName"
+     }
+    },
+    "shape": "ResetOriginEndpointStateRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "ResetOriginEndpointStateResponse"
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     }
+    },
+    "shape": "TagResourceRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{ResourceArn}",
+   "responseCode": 204,
+   "input": {
+    "members": {
+     "ResourceArn": {
+      "location": "uri",
+      "name": "ResourceArn"
+     },
+     "TagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    },
+    "shape": "UntagResourceRequest"
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateChannel": {
+   "method": "PUT",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "ETag": {
+      "location": "header",
+      "name": "x-amzn-update-if-match"
+     }
+    },
+    "shape": "UpdateChannelRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateChannelResponse"
+   }
+  },
+  "UpdateChannelGroup": {
+   "method": "PUT",
+   "requestUri": "/channelGroup/{ChannelGroupName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ETag": {
+      "location": "header",
+      "name": "x-amzn-update-if-match"
+     }
+    },
+    "shape": "UpdateChannelGroupRequest"
+   },
+   "output": {
+    "members": {},
+    "shape": "UpdateChannelGroupResponse"
+   }
+  },
+  "UpdateOriginEndpoint": {
+   "method": "PUT",
+   "requestUri": "/channelGroup/{ChannelGroupName}/channel/{ChannelName}/originEndpoint/{OriginEndpointName}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "ChannelGroupName": {
+      "location": "uri",
+      "name": "ChannelGroupName"
+     },
+     "ChannelName": {
+      "location": "uri",
+      "name": "ChannelName"
+     },
+     "OriginEndpointName": {
+      "location": "uri",
+      "name": "OriginEndpointName"
+     },
+     "ETag": {
+      "location": "header",
+      "name": "x-amzn-update-if-match"
+     }
+    },
+    "timestamps": [
+     "HlsManifests[].FilterConfiguration.Start",
+     "HlsManifests[].FilterConfiguration.End",
+     "HlsManifests[].FilterConfiguration.ClipStartTime",
+     "LowLatencyHlsManifests[].FilterConfiguration.Start",
+     "LowLatencyHlsManifests[].FilterConfiguration.End",
+     "LowLatencyHlsManifests[].FilterConfiguration.ClipStartTime",
+     "DashManifests[].FilterConfiguration.Start",
+     "DashManifests[].FilterConfiguration.End",
+     "DashManifests[].FilterConfiguration.ClipStartTime",
+     "DashManifests[].AvailabilityStartTimeConfiguration.FixedAvailabilityStartTime",
+     "MssManifests[].FilterConfiguration.Start",
+     "MssManifests[].FilterConfiguration.End",
+     "MssManifests[].FilterConfiguration.ClipStartTime"
+    ],
+    "shape": "UpdateOriginEndpointRequest"
+   },
+   "output": {
+    "members": {},
+    "timestamps": [
+     "DashManifests[].AvailabilityStartTimeConfiguration.FixedAvailabilityStartTime"
+    ],
+    "shape": "UpdateOriginEndpointResponse"
+   }
+  }
+ },
+ "shapes": {
+  "AccessDeniedException": {
+   "members": {
+    "Message": {}
+   }
+  },
+  "AttachedMultiviewChannelList": {
+   "list": "ResourceName"
+  },
+  "CancelHarvestJobRequest": {
+   "members": {}
+  },
+  "CancelHarvestJobResponse": {
+   "members": {}
+  },
+  "CdnAuthConfiguration": {
+   "members": {
+    "CdnIdentifierSecretArns": {
+     "shape": "CdnAuthConfigurationCdnIdentifierSecretArnsList"
+    },
+    "SecretsRoleArn": {}
+   }
+  },
+  "CdnAuthConfigurationCdnIdentifierSecretArnsList": {
+   "list": "CdnIdentifierSecretArn"
+  },
+  "ChannelGroupListConfiguration": {
+   "members": {
+    "ChannelGroupName": {},
+    "Arn": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "Description": {}
+   }
+  },
+  "ChannelGroupsList": {
+   "list": "ChannelGroupListConfiguration"
+  },
+  "ChannelList": {
+   "list": "ChannelListConfiguration"
+  },
+  "ChannelListConfiguration": {
+   "members": {
+    "Arn": {},
+    "ChannelName": {},
+    "ChannelGroupName": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "Description": {},
+    "InputType": {},
+    "OutputLockingMode": {},
+    "MultiviewConfiguration": {
+     "shape": "MultiviewConfiguration"
+    },
+    "AttachedMultiviewChannels": {
+     "shape": "AttachedMultiviewChannelList"
+    }
+   }
+  },
+  "ConflictException": {
+   "members": {
+    "Message": {},
+    "ConflictExceptionType": {}
+   }
+  },
+  "ContentKeyPeriodConfiguration": {
+   "members": {
+    "ContentKeyPeriodTiming": {}
+   }
+  },
+  "CreateChannelGroupRequest": {
+   "members": {
+    "ChannelGroupName": {},
+    "Description": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "TagMap"
+    }
+   }
+  },
+  "CreateChannelGroupResponse": {
+   "members": {
+    "ChannelGroupName": {},
+    "Arn": {},
+    "EgressDomain": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "ETag": {},
+    "Description": {},
+    "Tags": {
+     "shape": "TagMap"
+    }
+   }
+  },
+  "CreateChannelRequest": {
+   "members": {
+    "ChannelName": {},
+    "InputType": {},
+    "Description": {},
+    "InputSwitchConfiguration": {
+     "shape": "InputSwitchConfiguration"
+    },
+    "OutputHeaderConfiguration": {
+     "shape": "OutputHeaderConfiguration"
+    },
+    "MultiviewConfiguration": {
+     "shape": "MultiviewConfiguration"
+    },
+    "OutputLockingMode": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "TagMap"
+    }
+   }
+  },
+  "CreateChannelResponse": {
+   "members": {
+    "MultiviewConfiguration": {
+     "shape": "MultiviewConfiguration"
+    },
+    "AttachedMultiviewChannels": {
+     "shape": "AttachedMultiviewChannelList"
+    },
+    "Arn": {},
+    "ChannelName": {},
+    "ChannelGroupName": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "Description": {},
+    "IngestEndpoints": {
+     "shape": "IngestEndpointList"
+    },
+    "InputType": {},
+    "ETag": {},
+    "Tags": {
+     "shape": "TagMap"
+    },
+    "InputSwitchConfiguration": {
+     "shape": "InputSwitchConfiguration"
+    },
+    "OutputHeaderConfiguration": {
+     "shape": "OutputHeaderConfiguration"
+    },
+    "OutputLockingMode": {}
+   }
+  },
+  "CreateDashManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "ManifestWindowSeconds": {},
+    "FilterConfiguration": {
+     "shape": "FilterConfiguration"
+    },
+    "MinUpdatePeriodSeconds": {},
+    "MinBufferTimeSeconds": {},
+    "SuggestedPresentationDelaySeconds": {},
+    "SegmentTemplateFormat": {},
+    "PeriodTriggers": {
+     "shape": "DashPeriodTriggers"
+    },
+    "ScteDash": {
+     "shape": "ScteDash"
+    },
+    "DrmSignaling": {},
+    "UtcTiming": {
+     "shape": "DashUtcTiming"
+    },
+    "Profiles": {
+     "shape": "DashProfiles"
+    },
+    "BaseUrls": {
+     "shape": "DashBaseUrls"
+    },
+    "ProgramInformation": {
+     "shape": "DashProgramInformation"
+    },
+    "DvbSettings": {
+     "shape": "DashDvbSettings"
+    },
+    "Compactness": {},
+    "AudioTimelinePattern": {},
+    "SubtitleConfiguration": {
+     "shape": "DashSubtitleConfiguration"
+    },
+    "UriPathType": {},
+    "AvailabilityStartTimeConfiguration": {
+     "shape": "DashAvailabilityStartTimeConfiguration"
+    }
+   }
+  },
+  "CreateDashManifests": {
+   "list": "CreateDashManifestConfiguration"
+  },
+  "CreateHarvestJobRequest": {
+   "members": {
+    "Description": {},
+    "HarvestedManifests": {
+     "shape": "HarvestedManifests"
+    },
+    "ScheduleConfiguration": {
+     "shape": "HarvesterScheduleConfiguration"
+    },
+    "Destination": {
+     "shape": "Destination"
+    },
+    "HarvestJobName": {},
+    "Tags": {
+     "shape": "TagMap"
+    }
+   }
+  },
+  "CreateHarvestJobResponse": {
+   "members": {
+    "ChannelGroupName": {},
+    "ChannelName": {},
+    "OriginEndpointName": {},
+    "Destination": {
+     "shape": "Destination"
+    },
+    "HarvestJobName": {},
+    "HarvestedManifests": {
+     "shape": "HarvestedManifests"
+    },
+    "Description": {},
+    "ScheduleConfiguration": {
+     "shape": "HarvesterScheduleConfiguration"
+    },
+    "Arn": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "Status": {},
+    "ErrorMessage": {},
+    "ETag": {},
+    "Tags": {
+     "shape": "TagMap"
+    }
+   }
+  },
+  "CreateHlsManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "ChildManifestName": {},
+    "ScteHls": {
+     "shape": "ScteHls"
+    },
+    "StartTag": {
+     "shape": "StartTag"
+    },
+    "ManifestWindowSeconds": {},
+    "ProgramDateTimeIntervalSeconds": {},
+    "FilterConfiguration": {
+     "shape": "FilterConfiguration"
+    },
+    "UrlEncodeChildManifest": {},
+    "UriPathType": {}
+   }
+  },
+  "CreateHlsManifests": {
+   "list": "CreateHlsManifestConfiguration"
+  },
+  "CreateLowLatencyHlsManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "ChildManifestName": {},
+    "ScteHls": {
+     "shape": "ScteHls"
+    },
+    "StartTag": {
+     "shape": "StartTag"
+    },
+    "ManifestWindowSeconds": {},
+    "ProgramDateTimeIntervalSeconds": {},
+    "FilterConfiguration": {
+     "shape": "FilterConfiguration"
+    },
+    "UrlEncodeChildManifest": {},
+    "UriPathType": {}
+   }
+  },
+  "CreateLowLatencyHlsManifests": {
+   "list": "CreateLowLatencyHlsManifestConfiguration"
+  },
+  "CreateMssManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "ManifestWindowSeconds": {},
+    "FilterConfiguration": {
+     "shape": "FilterConfiguration"
+    },
+    "ManifestLayout": {}
+   }
+  },
+  "CreateMssManifests": {
+   "list": "CreateMssManifestConfiguration"
+  },
+  "CreateOriginEndpointRequest": {
+   "members": {
+    "OriginEndpointName": {},
+    "ContainerType": {},
+    "Segment": {
+     "shape": "Segment"
+    },
+    "Description": {},
+    "StartoverWindowSeconds": {},
+    "HlsManifests": {
+     "shape": "CreateHlsManifests"
+    },
+    "LowLatencyHlsManifests": {
+     "shape": "CreateLowLatencyHlsManifests"
+    },
+    "DashManifests": {
+     "shape": "CreateDashManifests"
+    },
+    "MssManifests": {
+     "shape": "CreateMssManifests"
+    },
+    "ForceEndpointErrorConfiguration": {
+     "shape": "ForceEndpointErrorConfiguration"
+    },
+    "UriSeparator": {},
+    "StreamNameOutputMode": {},
+    "Tags": {
+     "shape": "TagMap"
+    }
+   }
+  },
+  "CreateOriginEndpointResponse": {
+   "members": {
+    "Arn": {},
+    "ChannelGroupName": {},
+    "ChannelName": {},
+    "OriginEndpointName": {},
+    "ContainerType": {},
+    "Segment": {
+     "shape": "Segment"
+    },
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "Description": {},
+    "StartoverWindowSeconds": {},
+    "HlsManifests": {
+     "shape": "GetHlsManifests"
+    },
+    "LowLatencyHlsManifests": {
+     "shape": "GetLowLatencyHlsManifests"
+    },
+    "DashManifests": {
+     "shape": "GetDashManifests"
+    },
+    "MssManifests": {
+     "shape": "GetMssManifests"
+    },
+    "ForceEndpointErrorConfiguration": {
+     "shape": "ForceEndpointErrorConfiguration"
+    },
+    "UriSeparator": {},
+    "StreamNameOutputMode": {},
+    "ETag": {},
+    "Tags": {
+     "shape": "TagMap"
+    }
+   }
+  },
+  "CustomAdTypeList": {
+   "list": "CustomAdType"
+  },
+  "DashAvailabilityStartTimeConfiguration": {
+   "members": {
+    "FixedAvailabilityStartTime": {}
+   }
+  },
+  "DashBaseUrl": {
+   "members": {
+    "Url": {},
+    "ServiceLocation": {},
+    "DvbPriority": {},
+    "DvbWeight": {}
+   }
+  },
+  "DashBaseUrls": {
+   "list": "DashBaseUrl"
+  },
+  "DashDvbErrorMetrics": {
+   "list": "DashDvbMetricsReporting"
+  },
+  "DashDvbFontDownload": {
+   "members": {
+    "Url": {},
+    "MimeType": {},
+    "FontFamily": {}
+   }
+  },
+  "DashDvbMetricsReporting": {
+   "members": {
+    "ReportingUrl": {},
+    "Probability": {}
+   }
+  },
+  "DashDvbSettings": {
+   "members": {
+    "FontDownload": {
+     "shape": "DashDvbFontDownload"
+    },
+    "ErrorMetrics": {
+     "shape": "DashDvbErrorMetrics"
+    }
+   }
+  },
+  "DashPeriodTriggers": {
+   "list": "DashPeriodTrigger"
+  },
+  "DashProfiles": {
+   "list": "DashProfile"
+  },
+  "DashProgramInformation": {
+   "members": {
+    "Title": {},
+    "Source": {},
+    "Copyright": {},
+    "LanguageCode": {},
+    "MoreInformationUrl": {}
+   }
+  },
+  "DashSubtitleConfiguration": {
+   "members": {
+    "TtmlConfiguration": {
+     "shape": "DashTtmlConfiguration"
+    }
+   }
+  },
+  "DashTtmlConfiguration": {
+   "members": {
+    "TtmlProfile": {}
+   }
+  },
+  "DashUtcTiming": {
+   "members": {
+    "TimingMode": {},
+    "TimingSource": {}
+   }
+  },
+  "DeleteChannelGroupRequest": {
+   "members": {}
+  },
+  "DeleteChannelGroupResponse": {
+   "members": {}
+  },
+  "DeleteChannelPolicyRequest": {
+   "members": {}
+  },
+  "DeleteChannelPolicyResponse": {
+   "members": {}
+  },
+  "DeleteChannelRequest": {
+   "members": {}
+  },
+  "DeleteChannelResponse": {
+   "members": {}
+  },
+  "DeleteOriginEndpointPolicyRequest": {
+   "members": {}
+  },
+  "DeleteOriginEndpointPolicyResponse": {
+   "members": {}
+  },
+  "DeleteOriginEndpointRequest": {
+   "members": {}
+  },
+  "DeleteOriginEndpointResponse": {
+   "members": {}
+  },
+  "Destination": {
+   "members": {
+    "S3Destination": {
+     "shape": "S3DestinationConfig"
+    }
+   }
+  },
+  "Encryption": {
+   "members": {
+    "ConstantInitializationVector": {},
+    "EncryptionMethod": {
+     "shape": "EncryptionMethod"
+    },
+    "KeyRotationIntervalSeconds": {},
+    "CmafExcludeSegmentDrmMetadata": {},
+    "SpekeKeyProvider": {
+     "shape": "SpekeKeyProvider"
+    }
+   }
+  },
+  "EncryptionContractConfiguration": {
+   "members": {
+    "PresetSpeke20Audio": {},
+    "PresetSpeke20Video": {}
+   }
+  },
+  "EncryptionMethod": {
+   "members": {
+    "TsEncryptionMethod": {},
+    "CmafEncryptionMethod": {},
+    "IsmEncryptionMethod": {}
+   }
+  },
+  "EndpointErrorConditions": {
+   "list": "EndpointErrorCondition"
+  },
+  "FilterConfiguration": {
+   "members": {
+    "ManifestFilter": {},
+    "DrmSettings": {},
+    "Start": {},
+    "End": {},
+    "TimeDelaySeconds": {},
+    "ClipStartTime": {},
+    "Multiview": {
+     "shape": "MultiviewFilterConfiguration"
+    }
+   }
+  },
+  "ForceEndpointErrorConfiguration": {
+   "members": {
+    "EndpointErrorConditions": {
+     "shape": "EndpointErrorConditions"
+    }
+   }
+  },
+  "GetChannelGroupRequest": {
+   "members": {}
+  },
+  "GetChannelGroupResponse": {
+   "members": {
+    "ChannelGroupName": {},
+    "Arn": {},
+    "EgressDomain": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "Description": {},
+    "ETag": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "TagMap"
+    }
+   }
+  },
+  "GetChannelPolicyRequest": {
+   "members": {}
+  },
+  "GetChannelPolicyResponse": {
+   "members": {
+    "ChannelGroupName": {},
+    "ChannelName": {},
+    "Policy": {}
+   }
+  },
+  "GetChannelRequest": {
+   "members": {}
+  },
+  "GetChannelResponse": {
+   "members": {
+    "MultiviewConfiguration": {
+     "shape": "MultiviewConfiguration"
+    },
+    "AttachedMultiviewChannels": {
+     "shape": "AttachedMultiviewChannelList"
+    },
+    "Arn": {},
+    "ChannelName": {},
+    "ChannelGroupName": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "ResetAt": {},
+    "Description": {},
+    "IngestEndpoints": {
+     "shape": "IngestEndpointList"
+    },
+    "InputType": {},
+    "ETag": {},
+    "Tags": {
+     "shape": "TagMap"
+    },
+    "InputSwitchConfiguration": {
+     "shape": "InputSwitchConfiguration"
+    },
+    "OutputHeaderConfiguration": {
+     "shape": "OutputHeaderConfiguration"
+    },
+    "OutputLockingMode": {}
+   }
+  },
+  "GetDashManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "Url": {},
+    "ManifestWindowSeconds": {},
+    "FilterConfiguration": {
+     "shape": "FilterConfiguration"
+    },
+    "MinUpdatePeriodSeconds": {},
+    "MinBufferTimeSeconds": {},
+    "SuggestedPresentationDelaySeconds": {},
+    "SegmentTemplateFormat": {},
+    "PeriodTriggers": {
+     "shape": "DashPeriodTriggers"
+    },
+    "ScteDash": {
+     "shape": "ScteDash"
+    },
+    "DrmSignaling": {},
+    "UtcTiming": {
+     "shape": "DashUtcTiming"
+    },
+    "Profiles": {
+     "shape": "DashProfiles"
+    },
+    "BaseUrls": {
+     "shape": "DashBaseUrls"
+    },
+    "ProgramInformation": {
+     "shape": "DashProgramInformation"
+    },
+    "DvbSettings": {
+     "shape": "DashDvbSettings"
+    },
+    "Compactness": {},
+    "AudioTimelinePattern": {},
+    "SubtitleConfiguration": {
+     "shape": "DashSubtitleConfiguration"
+    },
+    "UriPathType": {},
+    "AvailabilityStartTimeConfiguration": {
+     "shape": "DashAvailabilityStartTimeConfiguration"
+    }
+   }
+  },
+  "GetDashManifests": {
+   "list": "GetDashManifestConfiguration"
+  },
+  "GetHarvestJobRequest": {
+   "members": {}
+  },
+  "GetHarvestJobResponse": {
+   "members": {
+    "ChannelGroupName": {},
+    "ChannelName": {},
+    "OriginEndpointName": {},
+    "Destination": {
+     "shape": "Destination"
+    },
+    "HarvestJobName": {},
+    "HarvestedManifests": {
+     "shape": "HarvestedManifests"
+    },
+    "Description": {},
+    "ScheduleConfiguration": {
+     "shape": "HarvesterScheduleConfiguration"
+    },
+    "Arn": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "Status": {},
+    "ErrorMessage": {},
+    "ETag": {},
+    "Tags": {
+     "shape": "TagMap"
+    }
+   }
+  },
+  "GetHlsManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "Url": {},
+    "ChildManifestName": {},
+    "ManifestWindowSeconds": {},
+    "ProgramDateTimeIntervalSeconds": {},
+    "ScteHls": {
+     "shape": "ScteHls"
+    },
+    "FilterConfiguration": {
+     "shape": "FilterConfiguration"
+    },
+    "StartTag": {
+     "shape": "StartTag"
+    },
+    "UrlEncodeChildManifest": {},
+    "UriPathType": {}
+   }
+  },
+  "GetHlsManifests": {
+   "list": "GetHlsManifestConfiguration"
+  },
+  "GetLowLatencyHlsManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "Url": {},
+    "ChildManifestName": {},
+    "ManifestWindowSeconds": {},
+    "ProgramDateTimeIntervalSeconds": {},
+    "ScteHls": {
+     "shape": "ScteHls"
+    },
+    "FilterConfiguration": {
+     "shape": "FilterConfiguration"
+    },
+    "StartTag": {
+     "shape": "StartTag"
+    },
+    "UrlEncodeChildManifest": {},
+    "UriPathType": {}
+   }
+  },
+  "GetLowLatencyHlsManifests": {
+   "list": "GetLowLatencyHlsManifestConfiguration"
+  },
+  "GetMssManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "Url": {},
+    "FilterConfiguration": {
+     "shape": "FilterConfiguration"
+    },
+    "ManifestWindowSeconds": {},
+    "ManifestLayout": {}
+   }
+  },
+  "GetMssManifests": {
+   "list": "GetMssManifestConfiguration"
+  },
+  "GetOriginEndpointPolicyRequest": {
+   "members": {}
+  },
+  "GetOriginEndpointPolicyResponse": {
+   "members": {
+    "ChannelGroupName": {},
+    "ChannelName": {},
+    "OriginEndpointName": {},
+    "Policy": {},
+    "CdnAuthConfiguration": {
+     "shape": "CdnAuthConfiguration"
+    }
+   }
+  },
+  "GetOriginEndpointRequest": {
+   "members": {}
+  },
+  "GetOriginEndpointResponse": {
+   "members": {
+    "Arn": {},
+    "ChannelGroupName": {},
+    "ChannelName": {},
+    "OriginEndpointName": {},
+    "ContainerType": {},
+    "Segment": {
+     "shape": "Segment"
+    },
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "ResetAt": {},
+    "Description": {},
+    "StartoverWindowSeconds": {},
+    "HlsManifests": {
+     "shape": "GetHlsManifests"
+    },
+    "LowLatencyHlsManifests": {
+     "shape": "GetLowLatencyHlsManifests"
+    },
+    "DashManifests": {
+     "shape": "GetDashManifests"
+    },
+    "MssManifests": {
+     "shape": "GetMssManifests"
+    },
+    "ForceEndpointErrorConfiguration": {
+     "shape": "ForceEndpointErrorConfiguration"
+    },
+    "UriSeparator": {},
+    "StreamNameOutputMode": {},
+    "ETag": {},
+    "Tags": {
+     "shape": "TagMap"
+    }
+   }
+  },
+  "HarvestJob": {
+   "members": {
+    "ChannelGroupName": {},
+    "ChannelName": {},
+    "OriginEndpointName": {},
+    "Destination": {
+     "shape": "Destination"
+    },
+    "HarvestJobName": {},
+    "HarvestedManifests": {
+     "shape": "HarvestedManifests"
+    },
+    "Description": {},
+    "ScheduleConfiguration": {
+     "shape": "HarvesterScheduleConfiguration"
+    },
+    "Arn": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "Status": {},
+    "ErrorMessage": {},
+    "ETag": {}
+   }
+  },
+  "HarvestJobsList": {
+   "list": "HarvestJob"
+  },
+  "HarvestedDashManifest": {
+   "members": {
+    "ManifestName": {}
+   }
+  },
+  "HarvestedDashManifestsList": {
+   "list": "HarvestedDashManifest"
+  },
+  "HarvestedHlsManifest": {
+   "members": {
+    "ManifestName": {}
+   }
+  },
+  "HarvestedHlsManifestsList": {
+   "list": "HarvestedHlsManifest"
+  },
+  "HarvestedLowLatencyHlsManifest": {
+   "members": {
+    "ManifestName": {}
+   }
+  },
+  "HarvestedLowLatencyHlsManifestsList": {
+   "list": "HarvestedLowLatencyHlsManifest"
+  },
+  "HarvestedManifests": {
+   "members": {
+    "HlsManifests": {
+     "shape": "HarvestedHlsManifestsList"
+    },
+    "DashManifests": {
+     "shape": "HarvestedDashManifestsList"
+    },
+    "LowLatencyHlsManifests": {
+     "shape": "HarvestedLowLatencyHlsManifestsList"
+    }
+   }
+  },
+  "HarvesterScheduleConfiguration": {
+   "members": {
+    "StartTime": {},
+    "EndTime": {}
+   }
+  },
+  "IngestEndpoint": {
+   "members": {
+    "Id": {},
+    "Url": {}
+   }
+  },
+  "IngestEndpointList": {
+   "list": "IngestEndpoint"
+  },
+  "InputSwitchConfiguration": {
+   "members": {
+    "MQCSInputSwitching": {},
+    "PreferredInput": {}
+   }
+  },
+  "InternalServerException": {
+   "members": {
+    "Message": {}
+   }
+  },
+  "ListChannelGroupsRequest": {
+   "members": {}
+  },
+  "ListChannelGroupsResponse": {
+   "members": {
+    "Items": {
+     "shape": "ChannelGroupsList"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListChannelsRequest": {
+   "members": {}
+  },
+  "ListChannelsResponse": {
+   "members": {
+    "Items": {
+     "shape": "ChannelList"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListDashManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "Url": {}
+   }
+  },
+  "ListDashManifests": {
+   "list": "ListDashManifestConfiguration"
+  },
+  "ListHarvestJobsRequest": {
+   "members": {}
+  },
+  "ListHarvestJobsResponse": {
+   "members": {
+    "Items": {
+     "shape": "HarvestJobsList"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListHlsManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "ChildManifestName": {},
+    "Url": {}
+   }
+  },
+  "ListHlsManifests": {
+   "list": "ListHlsManifestConfiguration"
+  },
+  "ListLowLatencyHlsManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "ChildManifestName": {},
+    "Url": {}
+   }
+  },
+  "ListLowLatencyHlsManifests": {
+   "list": "ListLowLatencyHlsManifestConfiguration"
+  },
+  "ListMssManifestConfiguration": {
+   "members": {
+    "ManifestName": {},
+    "Url": {}
+   }
+  },
+  "ListMssManifests": {
+   "list": "ListMssManifestConfiguration"
+  },
+  "ListOriginEndpointsRequest": {
+   "members": {}
+  },
+  "ListOriginEndpointsResponse": {
+   "members": {
+    "Items": {
+     "shape": "OriginEndpointsList"
+    },
+    "NextToken": {}
+   }
+  },
+  "ListTagsForResourceRequest": {
+   "members": {}
+  },
+  "ListTagsForResourceResponse": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "TagMap"
+    }
+   }
+  },
+  "MultiviewConfiguration": {
+   "members": {
+    "AvailableSources": {
+     "shape": "MultiviewSourceList"
+    },
+    "AvailableLayouts": {
+     "shape": "MultiviewLayoutList"
+    }
+   }
+  },
+  "MultiviewFilterConfiguration": {
+   "members": {
+    "Layout": {},
+    "Sources": {
+     "shape": "MultiviewSourceList"
+    }
+   }
+  },
+  "MultiviewLayoutList": {
+   "list": "MultiviewLayoutType"
+  },
+  "MultiviewSourceList": {
+   "list": "ResourceName"
+  },
+  "OriginEndpointListConfiguration": {
+   "members": {
+    "Arn": {},
+    "ChannelGroupName": {},
+    "ChannelName": {},
+    "OriginEndpointName": {},
+    "ContainerType": {},
+    "Description": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "HlsManifests": {
+     "shape": "ListHlsManifests"
+    },
+    "LowLatencyHlsManifests": {
+     "shape": "ListLowLatencyHlsManifests"
+    },
+    "DashManifests": {
+     "shape": "ListDashManifests"
+    },
+    "MssManifests": {
+     "shape": "ListMssManifests"
+    },
+    "ForceEndpointErrorConfiguration": {
+     "shape": "ForceEndpointErrorConfiguration"
+    },
+    "UriSeparator": {},
+    "StreamNameOutputMode": {}
+   }
+  },
+  "OriginEndpointsList": {
+   "list": "OriginEndpointListConfiguration"
+  },
+  "OutputHeaderConfiguration": {
+   "members": {
+    "PublishMQCS": {}
+   }
+  },
+  "PutChannelPolicyRequest": {
+   "members": {
+    "Policy": {}
+   }
+  },
+  "PutChannelPolicyResponse": {
+   "members": {}
+  },
+  "PutOriginEndpointPolicyRequest": {
+   "members": {
+    "Policy": {},
+    "CdnAuthConfiguration": {
+     "shape": "CdnAuthConfiguration"
+    }
+   }
+  },
+  "PutOriginEndpointPolicyResponse": {
+   "members": {}
+  },
+  "ResetChannelStateRequest": {
+   "members": {}
+  },
+  "ResetChannelStateResponse": {
+   "members": {
+    "ChannelGroupName": {},
+    "ChannelName": {},
+    "Arn": {},
+    "ResetAt": {}
+   }
+  },
+  "ResetOriginEndpointStateRequest": {
+   "members": {}
+  },
+  "ResetOriginEndpointStateResponse": {
+   "members": {
+    "ChannelGroupName": {},
+    "ChannelName": {},
+    "OriginEndpointName": {},
+    "Arn": {},
+    "ResetAt": {}
+   }
+  },
+  "ResourceNotFoundException": {
+   "members": {
+    "Message": {},
+    "ResourceTypeNotFound": {}
+   }
+  },
+  "S3DestinationConfig": {
+   "members": {
+    "BucketName": {},
+    "DestinationPath": {}
+   }
+  },
+  "Scte": {
+   "members": {
+    "ScteFilter": {
+     "shape": "ScteFilterList"
+    },
+    "ScteInSegments": {},
+    "CustomAdTypes": {
+     "shape": "CustomAdTypeList"
+    }
+   }
+  },
+  "ScteDash": {
+   "members": {
+    "AdMarkerDash": {},
+    "ScteInManifests": {}
+   }
+  },
+  "ScteFilterList": {
+   "list": "ScteFilter"
+  },
+  "ScteHls": {
+   "members": {
+    "AdMarkerHls": {},
+    "ScteInManifests": {}
+   }
+  },
+  "Segment": {
+   "members": {
+    "SegmentDurationSeconds": {},
+    "SegmentName": {},
+    "TsUseAudioRenditionGroup": {},
+    "IncludeIframeOnlyStreams": {},
+    "TsIncludeDvbSubtitles": {},
+    "Scte": {
+     "shape": "Scte"
+    },
+    "Encryption": {
+     "shape": "Encryption"
+    },
+    "OutputTimestampMode": {}
+   }
+  },
+  "ServiceQuotaExceededException": {
+   "members": {
+    "Message": {}
+   }
+  },
+  "SpekeKeyProvider": {
+   "members": {
+    "EncryptionContractConfiguration": {
+     "shape": "EncryptionContractConfiguration"
+    },
+    "ResourceId": {},
+    "DrmSystems": {
+     "shape": "SpekeKeyProviderDrmSystemsList"
+    },
+    "RoleArn": {},
+    "Url": {},
+    "CertificateArn": {},
+    "SpekeVersion": {},
+    "ContentKeyPeriodConfiguration": {
+     "shape": "ContentKeyPeriodConfiguration"
+    }
+   }
+  },
+  "SpekeKeyProviderDrmSystemsList": {
+   "list": "DrmSystem"
+  },
+  "StartTag": {
+   "members": {
+    "TimeOffset": {},
+    "Precise": {}
+   }
+  },
+  "TagKeyList": {
+   "list": "TagKey"
+  },
+  "TagMap": {
+   "map": "TagValue"
+  },
+  "TagResourceRequest": {
+   "members": {
+    "Tags": {
+     "name": "tags",
+     "shape": "TagMap"
+    }
+   }
+  },
+  "ThrottlingException": {
+   "members": {
+    "Message": {}
+   }
+  },
+  "UntagResourceRequest": {
+   "members": {}
+  },
+  "UpdateChannelGroupRequest": {
+   "members": {
+    "Description": {}
+   }
+  },
+  "UpdateChannelGroupResponse": {
+   "members": {
+    "ChannelGroupName": {},
+    "Arn": {},
+    "EgressDomain": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "Description": {},
+    "ETag": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "TagMap"
+    }
+   }
+  },
+  "UpdateChannelRequest": {
+   "members": {
+    "Description": {},
+    "InputSwitchConfiguration": {
+     "shape": "InputSwitchConfiguration"
+    },
+    "OutputHeaderConfiguration": {
+     "shape": "OutputHeaderConfiguration"
+    },
+    "MultiviewConfiguration": {
+     "shape": "MultiviewConfiguration"
+    }
+   }
+  },
+  "UpdateChannelResponse": {
+   "members": {
+    "MultiviewConfiguration": {
+     "shape": "MultiviewConfiguration"
+    },
+    "AttachedMultiviewChannels": {
+     "shape": "AttachedMultiviewChannelList"
+    },
+    "Arn": {},
+    "ChannelName": {},
+    "ChannelGroupName": {},
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "Description": {},
+    "IngestEndpoints": {
+     "shape": "IngestEndpointList"
+    },
+    "InputType": {},
+    "ETag": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "TagMap"
+    },
+    "InputSwitchConfiguration": {
+     "shape": "InputSwitchConfiguration"
+    },
+    "OutputHeaderConfiguration": {
+     "shape": "OutputHeaderConfiguration"
+    },
+    "OutputLockingMode": {}
+   }
+  },
+  "UpdateOriginEndpointRequest": {
+   "members": {
+    "ContainerType": {},
+    "Segment": {
+     "shape": "Segment"
+    },
+    "Description": {},
+    "StartoverWindowSeconds": {},
+    "HlsManifests": {
+     "shape": "CreateHlsManifests"
+    },
+    "LowLatencyHlsManifests": {
+     "shape": "CreateLowLatencyHlsManifests"
+    },
+    "DashManifests": {
+     "shape": "CreateDashManifests"
+    },
+    "MssManifests": {
+     "shape": "CreateMssManifests"
+    },
+    "ForceEndpointErrorConfiguration": {
+     "shape": "ForceEndpointErrorConfiguration"
+    },
+    "UriSeparator": {},
+    "StreamNameOutputMode": {}
+   }
+  },
+  "UpdateOriginEndpointResponse": {
+   "members": {
+    "Arn": {},
+    "ChannelGroupName": {},
+    "ChannelName": {},
+    "OriginEndpointName": {},
+    "ContainerType": {},
+    "Segment": {
+     "shape": "Segment"
+    },
+    "CreatedAt": {},
+    "ModifiedAt": {},
+    "Description": {},
+    "StartoverWindowSeconds": {},
+    "HlsManifests": {
+     "shape": "GetHlsManifests"
+    },
+    "LowLatencyHlsManifests": {
+     "shape": "GetLowLatencyHlsManifests"
+    },
+    "MssManifests": {
+     "shape": "GetMssManifests"
+    },
+    "ForceEndpointErrorConfiguration": {
+     "shape": "ForceEndpointErrorConfiguration"
+    },
+    "UriSeparator": {},
+    "StreamNameOutputMode": {},
+    "ETag": {},
+    "Tags": {
+     "name": "tags",
+     "shape": "TagMap"
+    },
+    "DashManifests": {
+     "shape": "GetDashManifests"
+    }
+   }
+  },
+  "ValidationException": {
+   "members": {
+    "Message": {},
+    "ValidationExceptionType": {}
+   }
+  }
+ }
+}

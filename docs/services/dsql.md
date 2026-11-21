@@ -22,9 +22,13 @@ dialect and limits. The answers, messages and SQLSTATEs below were measured on A
 | `PutClusterPolicy` | Sets the cluster's resource policy once it passes DSQL's checks, with optimistic versioning |
 | `GetClusterPolicy` | Returns the resource policy in DSQL's form, and its version |
 | `DeleteClusterPolicy` | Removes the resource policy, answering the version removed |
+| `CreateStream` | Create a change data capture stream into Kinesis |
+| `ListStreams` | List a cluster's streams |
+| `GetStream` | Get a stream with its target and tags |
+| `DeleteStream` | Delete a stream |
 <!-- floci:actions:end -->
 
-`TagResource`, `UntagResource` and `ListTagsForResource` work on cluster ARNs. As on AWS, an ARN
+`TagResource`, `UntagResource` and `ListTagsForResource` work on cluster and stream ARNs. As on AWS, an ARN
 that is not a well-formed cluster ARN is refused with `AccessDeniedException`, one of another
 Region with `BadRequestException`, and one of no cluster with `NotFoundException`. Cluster
 identifiers are 26 characters of lowercase base32, as DSQL's are, and invalid ones are refused with
@@ -35,6 +39,14 @@ Once it and each peer it is updated with name one another, all of them are `ACTI
 where this takes about two minutes; a cluster whose database has not answered yet is `CREATING`
 until it does. Each has a database of its own; nothing is replicated between
 them. A customer-managed KMS key is recorded and reported; nothing is encrypted with it.
+
+## Change data capture streams
+
+`CreateStream` checks what DSQL checks: the cluster exists and is `ACTIVE`, the target Kinesis stream
+exists, `ordering` is `UNORDERED`, and `format` is `JSON`. A stream is `ACTIVE` at once (`CREATING` in
+the create response), is tagged by its ARN (`…:cluster/<id>/stream/<id>`) on `/tags/{resourceArn}`, and
+is gone once deleted or once its cluster is. Floci captures no changes: no records reach the Kinesis
+stream.
 
 ## Connecting
 

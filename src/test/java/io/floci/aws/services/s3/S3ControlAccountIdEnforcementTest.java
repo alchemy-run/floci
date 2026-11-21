@@ -1,6 +1,7 @@
 package io.floci.aws.services.s3;
 
 import io.floci.aws.config.EmulatorConfig;
+import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.core.common.RequestContext;
 import io.floci.aws.core.storage.InMemoryStorage;
 import jakarta.enterprise.inject.Instance;
@@ -147,6 +148,7 @@ class S3ControlAccountIdEnforcementTest {
         EmulatorConfig config = mock(EmulatorConfig.class);
         when(config.defaultAccountId()).thenReturn(DEFAULT_ACCOUNT);
 
-        return new S3ControlController(service, contextInstance, config);
+        return new S3ControlController(service, mock(S3ControlDispatcher.class), mock(RegionResolver.class),
+                contextInstance, config);
     }
 }

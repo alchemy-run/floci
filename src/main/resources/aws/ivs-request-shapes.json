@@ -1,0 +1,898 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_ivs_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "BatchGetChannel": "BatchGetChannelRequest",
+    "BatchGetStreamKey": "BatchGetStreamKeyRequest",
+    "BatchStartViewerSessionRevocation": "BatchStartViewerSessionRevocationRequest",
+    "CreateAdConfiguration": "CreateAdConfigurationRequest",
+    "CreateChannel": "CreateChannelRequest",
+    "CreatePlaybackRestrictionPolicy": "CreatePlaybackRestrictionPolicyRequest",
+    "CreateRecordingConfiguration": "CreateRecordingConfigurationRequest",
+    "CreateStreamKey": "CreateStreamKeyRequest",
+    "DeleteAdConfiguration": "DeleteAdConfigurationRequest",
+    "DeleteChannel": "DeleteChannelRequest",
+    "DeletePlaybackKeyPair": "DeletePlaybackKeyPairRequest",
+    "DeletePlaybackRestrictionPolicy": "DeletePlaybackRestrictionPolicyRequest",
+    "DeleteRecordingConfiguration": "DeleteRecordingConfigurationRequest",
+    "DeleteStreamKey": "DeleteStreamKeyRequest",
+    "GetAdConfiguration": "GetAdConfigurationRequest",
+    "GetChannel": "GetChannelRequest",
+    "GetPlaybackKeyPair": "GetPlaybackKeyPairRequest",
+    "GetPlaybackRestrictionPolicy": "GetPlaybackRestrictionPolicyRequest",
+    "GetRecordingConfiguration": "GetRecordingConfigurationRequest",
+    "GetStream": "GetStreamRequest",
+    "GetStreamKey": "GetStreamKeyRequest",
+    "GetStreamSession": "GetStreamSessionRequest",
+    "ImportPlaybackKeyPair": "ImportPlaybackKeyPairRequest",
+    "InsertAdBreak": "InsertAdBreakRequest",
+    "ListAdConfigurations": "ListAdConfigurationsRequest",
+    "ListChannels": "ListChannelsRequest",
+    "ListPlaybackKeyPairs": "ListPlaybackKeyPairsRequest",
+    "ListPlaybackRestrictionPolicies": "ListPlaybackRestrictionPoliciesRequest",
+    "ListRecordingConfigurations": "ListRecordingConfigurationsRequest",
+    "ListStreamKeys": "ListStreamKeysRequest",
+    "ListStreamSessions": "ListStreamSessionsRequest",
+    "ListStreams": "ListStreamsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutMetadata": "PutMetadataRequest",
+    "StartViewerSessionRevocation": "StartViewerSessionRevocationRequest",
+    "StopStream": "StopStreamRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateAdConfiguration": "UpdateAdConfigurationRequest",
+    "UpdateChannel": "UpdateChannelRequest",
+    "UpdatePlaybackRestrictionPolicy": "UpdatePlaybackRestrictionPolicyRequest"
+  },
+  "shapes": {
+    "AdConfigurationArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:ad-configuration/[a-zA-Z0-9-]+"
+    },
+    "AdConfigurationName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "AdDurationSeconds": {
+      "type": "integer",
+      "min": 1,
+      "max": 300
+    },
+    "BatchGetChannelRequest": {
+      "type": "structure",
+      "required": [
+        "arns"
+      ],
+      "members": {
+        "arns": "ChannelArnList"
+      }
+    },
+    "BatchGetStreamKeyRequest": {
+      "type": "structure",
+      "required": [
+        "arns"
+      ],
+      "members": {
+        "arns": "StreamKeyArnList"
+      }
+    },
+    "BatchStartViewerSessionRevocationRequest": {
+      "type": "structure",
+      "required": [
+        "viewerSessions"
+      ],
+      "members": {
+        "viewerSessions": "BatchStartViewerSessionRevocationViewerSessionList"
+      }
+    },
+    "BatchStartViewerSessionRevocationViewerSession": {
+      "type": "structure",
+      "required": [
+        "channelArn",
+        "viewerId"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "viewerId": "ViewerId",
+        "viewerSessionVersionsLessThanOrEqualTo": "ViewerSessionVersion"
+      }
+    },
+    "BatchStartViewerSessionRevocationViewerSessionList": {
+      "type": "list",
+      "min": 1,
+      "max": 20,
+      "member": "BatchStartViewerSessionRevocationViewerSession"
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "ChannelAdConfigurationArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "^$|^arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:ad-configuration/[a-zA-Z0-9-]+$"
+    },
+    "ChannelArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:channel/[a-zA-Z0-9-]+"
+    },
+    "ChannelArnList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "ChannelArn"
+    },
+    "ChannelLatencyMode": {
+      "type": "string",
+      "enum": [
+        "NORMAL",
+        "LOW"
+      ]
+    },
+    "ChannelName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "ChannelPlaybackRestrictionPolicyArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "^$|^arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:playback-restriction-policy/[a-zA-Z0-9-]+$"
+    },
+    "ChannelRecordingConfigurationArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "^$|^arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:recording-configuration/[a-zA-Z0-9-]+$"
+    },
+    "ChannelType": {
+      "type": "string",
+      "enum": [
+        "BASIC",
+        "STANDARD",
+        "ADVANCED_SD",
+        "ADVANCED_HD"
+      ]
+    },
+    "ContainerFormat": {
+      "type": "string",
+      "enum": [
+        "TS",
+        "FRAGMENTED_MP4"
+      ]
+    },
+    "CreateAdConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "mediaTailorPlaybackConfigurations"
+      ],
+      "members": {
+        "name": "AdConfigurationName",
+        "mediaTailorPlaybackConfigurations": "MediaTailorPlaybackConfigurationsList",
+        "postRollConfiguration": "PostRollConfiguration",
+        "tags": "Tags"
+      }
+    },
+    "CreateChannelRequest": {
+      "type": "structure",
+      "members": {
+        "name": "ChannelName",
+        "latencyMode": "ChannelLatencyMode",
+        "type": "ChannelType",
+        "authorized": "Boolean",
+        "recordingConfigurationArn": "ChannelRecordingConfigurationArn",
+        "tags": "Tags",
+        "insecureIngest": "Boolean",
+        "preset": "TranscodePreset",
+        "playbackRestrictionPolicyArn": "ChannelPlaybackRestrictionPolicyArn",
+        "multitrackInputConfiguration": "MultitrackInputConfiguration",
+        "containerFormat": "ContainerFormat",
+        "adConfigurationArn": "ChannelAdConfigurationArn"
+      }
+    },
+    "CreatePlaybackRestrictionPolicyRequest": {
+      "type": "structure",
+      "members": {
+        "allowedCountries": "PlaybackRestrictionPolicyAllowedCountryList",
+        "allowedOrigins": "PlaybackRestrictionPolicyAllowedOriginList",
+        "enableStrictOriginEnforcement": "PlaybackRestrictionPolicyEnableStrictOriginEnforcement",
+        "name": "PlaybackRestrictionPolicyName",
+        "tags": "Tags"
+      }
+    },
+    "CreateRecordingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "destinationConfiguration"
+      ],
+      "members": {
+        "name": "RecordingConfigurationName",
+        "destinationConfiguration": "DestinationConfiguration",
+        "tags": "Tags",
+        "thumbnailConfiguration": "ThumbnailConfiguration",
+        "recordingReconnectWindowSeconds": "RecordingReconnectWindowSeconds",
+        "renditionConfiguration": "RenditionConfiguration"
+      }
+    },
+    "CreateStreamKeyRequest": {
+      "type": "structure",
+      "required": [
+        "channelArn"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "tags": "Tags"
+      }
+    },
+    "DeleteAdConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "AdConfigurationArn"
+      }
+    },
+    "DeleteChannelRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "ChannelArn"
+      }
+    },
+    "DeletePlaybackKeyPairRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "PlaybackKeyPairArn"
+      }
+    },
+    "DeletePlaybackRestrictionPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "PlaybackRestrictionPolicyArn"
+      }
+    },
+    "DeleteRecordingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "RecordingConfigurationArn"
+      }
+    },
+    "DeleteStreamKeyRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "StreamKeyArn"
+      }
+    },
+    "DestinationConfiguration": {
+      "type": "structure",
+      "members": {
+        "s3": "S3DestinationConfiguration"
+      }
+    },
+    "GetAdConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "AdConfigurationArn"
+      }
+    },
+    "GetChannelRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "ChannelArn"
+      }
+    },
+    "GetPlaybackKeyPairRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "PlaybackKeyPairArn"
+      }
+    },
+    "GetPlaybackRestrictionPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "PlaybackRestrictionPolicyArn"
+      }
+    },
+    "GetRecordingConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "RecordingConfigurationArn"
+      }
+    },
+    "GetStreamKeyRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "StreamKeyArn"
+      }
+    },
+    "GetStreamRequest": {
+      "type": "structure",
+      "required": [
+        "channelArn"
+      ],
+      "members": {
+        "channelArn": "ChannelArn"
+      }
+    },
+    "GetStreamSessionRequest": {
+      "type": "structure",
+      "required": [
+        "channelArn"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "streamId": "StreamId"
+      }
+    },
+    "ImportPlaybackKeyPairRequest": {
+      "type": "structure",
+      "required": [
+        "publicKeyMaterial"
+      ],
+      "members": {
+        "publicKeyMaterial": "PlaybackPublicKeyMaterial",
+        "name": "PlaybackKeyPairName",
+        "tags": "Tags"
+      }
+    },
+    "InsertAdBreakRequest": {
+      "type": "structure",
+      "required": [
+        "channelArn",
+        "durationSeconds"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "durationSeconds": "AdDurationSeconds"
+      }
+    },
+    "IsMultitrackInputEnabled": {
+      "type": "boolean"
+    },
+    "ListAdConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxAdConfigurationResults"
+      }
+    },
+    "ListChannelsRequest": {
+      "type": "structure",
+      "members": {
+        "filterByName": "ChannelName",
+        "filterByRecordingConfigurationArn": "ChannelRecordingConfigurationArn",
+        "filterByPlaybackRestrictionPolicyArn": "ChannelPlaybackRestrictionPolicyArn",
+        "filterByAdConfigurationArn": "ChannelAdConfigurationArn",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxChannelResults"
+      }
+    },
+    "ListPlaybackKeyPairsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxPlaybackKeyPairResults"
+      }
+    },
+    "ListPlaybackRestrictionPoliciesRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxPlaybackRestrictionPolicyResults"
+      }
+    },
+    "ListRecordingConfigurationsRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxRecordingConfigurationResults"
+      }
+    },
+    "ListStreamKeysRequest": {
+      "type": "structure",
+      "required": [
+        "channelArn"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxStreamKeyResults"
+      }
+    },
+    "ListStreamSessionsRequest": {
+      "type": "structure",
+      "required": [
+        "channelArn"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxStreamResults"
+      }
+    },
+    "ListStreamsRequest": {
+      "type": "structure",
+      "members": {
+        "filterBy": "StreamFilters",
+        "nextToken": "PaginationToken",
+        "maxResults": "MaxStreamResults"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn"
+      }
+    },
+    "MaxAdConfigurationResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxChannelResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxPlaybackKeyPairResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxPlaybackRestrictionPolicyResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxRecordingConfigurationResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MaxStreamKeyResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 50
+    },
+    "MaxStreamResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MediaTailorPlaybackConfiguration": {
+      "type": "structure",
+      "members": {
+        "playbackConfigurationArn": "MediaTailorPlaybackConfigurationArn"
+      }
+    },
+    "MediaTailorPlaybackConfigurationArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:mediatailor:[a-z0-9-]+:[0-9]+:playbackConfiguration/[a-zA-Z0-9-]+"
+    },
+    "MediaTailorPlaybackConfigurationsList": {
+      "type": "list",
+      "min": 1,
+      "max": 3,
+      "member": "MediaTailorPlaybackConfiguration"
+    },
+    "MultitrackInputConfiguration": {
+      "type": "structure",
+      "members": {
+        "enabled": "IsMultitrackInputEnabled",
+        "policy": "MultitrackPolicy",
+        "maximumResolution": "MultitrackMaximumResolution"
+      }
+    },
+    "MultitrackMaximumResolution": {
+      "type": "string",
+      "enum": [
+        "SD",
+        "HD",
+        "FULL_HD"
+      ]
+    },
+    "MultitrackPolicy": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "REQUIRE"
+      ]
+    },
+    "PaginationToken": {
+      "type": "string",
+      "min": 0,
+      "max": 1024,
+      "pattern": "[a-zA-Z0-9+/=_-]*"
+    },
+    "PlaybackKeyPairArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:playback-key/[a-zA-Z0-9-]+"
+    },
+    "PlaybackKeyPairName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "PlaybackPublicKeyMaterial": {
+      "type": "string"
+    },
+    "PlaybackRestrictionPolicyAllowedCountry": {
+      "type": "string",
+      "min": 2,
+      "max": 2
+    },
+    "PlaybackRestrictionPolicyAllowedCountryList": {
+      "type": "list",
+      "member": "PlaybackRestrictionPolicyAllowedCountry"
+    },
+    "PlaybackRestrictionPolicyAllowedOrigin": {
+      "type": "string",
+      "min": 0,
+      "max": 128
+    },
+    "PlaybackRestrictionPolicyAllowedOriginList": {
+      "type": "list",
+      "member": "PlaybackRestrictionPolicyAllowedOrigin"
+    },
+    "PlaybackRestrictionPolicyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:playback-restriction-policy/[a-zA-Z0-9-]+"
+    },
+    "PlaybackRestrictionPolicyEnableStrictOriginEnforcement": {
+      "type": "boolean"
+    },
+    "PlaybackRestrictionPolicyName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "PostRollConfiguration": {
+      "type": "structure",
+      "required": [
+        "durationSeconds",
+        "enabled"
+      ],
+      "members": {
+        "durationSeconds": "AdDurationSeconds",
+        "enabled": "Boolean"
+      }
+    },
+    "PutMetadataRequest": {
+      "type": "structure",
+      "required": [
+        "channelArn",
+        "metadata"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "metadata": "StreamMetadata"
+      }
+    },
+    "RecordingConfigurationArn": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:recording-configuration/[a-zA-Z0-9-]+"
+    },
+    "RecordingConfigurationName": {
+      "type": "string",
+      "min": 0,
+      "max": 128,
+      "pattern": "[a-zA-Z0-9-_]*"
+    },
+    "RecordingMode": {
+      "type": "string",
+      "enum": [
+        "DISABLED",
+        "INTERVAL"
+      ]
+    },
+    "RecordingReconnectWindowSeconds": {
+      "type": "integer",
+      "min": 0,
+      "max": 300
+    },
+    "RenditionConfiguration": {
+      "type": "structure",
+      "members": {
+        "renditionSelection": "RenditionConfigurationRenditionSelection",
+        "renditions": "RenditionConfigurationRenditionList"
+      }
+    },
+    "RenditionConfigurationRendition": {
+      "type": "string",
+      "enum": [
+        "SD",
+        "HD",
+        "FULL_HD",
+        "LOWEST_RESOLUTION"
+      ]
+    },
+    "RenditionConfigurationRenditionList": {
+      "type": "list",
+      "member": "RenditionConfigurationRendition"
+    },
+    "RenditionConfigurationRenditionSelection": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "NONE",
+        "CUSTOM"
+      ]
+    },
+    "ResourceArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:[a-z-]/[a-zA-Z0-9-]+"
+    },
+    "S3DestinationBucketName": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "[a-z0-9-.]+"
+    },
+    "S3DestinationConfiguration": {
+      "type": "structure",
+      "required": [
+        "bucketName"
+      ],
+      "members": {
+        "bucketName": "S3DestinationBucketName"
+      }
+    },
+    "StartViewerSessionRevocationRequest": {
+      "type": "structure",
+      "required": [
+        "channelArn",
+        "viewerId"
+      ],
+      "members": {
+        "channelArn": "ChannelArn",
+        "viewerId": "ViewerId",
+        "viewerSessionVersionsLessThanOrEqualTo": "ViewerSessionVersion"
+      }
+    },
+    "StopStreamRequest": {
+      "type": "structure",
+      "required": [
+        "channelArn"
+      ],
+      "members": {
+        "channelArn": "ChannelArn"
+      }
+    },
+    "StreamFilters": {
+      "type": "structure",
+      "members": {
+        "health": "StreamHealth"
+      }
+    },
+    "StreamHealth": {
+      "type": "string",
+      "enum": [
+        "HEALTHY",
+        "STARVING",
+        "UNKNOWN"
+      ]
+    },
+    "StreamId": {
+      "type": "string",
+      "min": 26,
+      "max": 26,
+      "pattern": "st-[a-zA-Z0-9]+"
+    },
+    "StreamKeyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "arn:aws[a-z0-9-]*:ivs:[a-z0-9-]+:[0-9]+:stream-key/[a-zA-Z0-9-]+"
+    },
+    "StreamKeyArnList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "StreamKeyArn"
+    },
+    "StreamMetadata": {
+      "type": "string",
+      "min": 1
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]+)"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn",
+        "tags": "Tags"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256,
+      "pattern": "([\\p{L}\\p{Z}\\p{N}_.:/=+\\-@]*)"
+    },
+    "Tags": {
+      "type": "map",
+      "min": 0,
+      "max": 50,
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TargetIntervalSeconds": {
+      "type": "long",
+      "min": 1,
+      "max": 60
+    },
+    "ThumbnailConfiguration": {
+      "type": "structure",
+      "members": {
+        "recordingMode": "RecordingMode",
+        "targetIntervalSeconds": "TargetIntervalSeconds",
+        "resolution": "ThumbnailConfigurationResolution",
+        "storage": "ThumbnailConfigurationStorageList"
+      }
+    },
+    "ThumbnailConfigurationResolution": {
+      "type": "string",
+      "enum": [
+        "SD",
+        "HD",
+        "FULL_HD",
+        "LOWEST_RESOLUTION"
+      ]
+    },
+    "ThumbnailConfigurationStorage": {
+      "type": "string",
+      "enum": [
+        "SEQUENTIAL",
+        "LATEST"
+      ]
+    },
+    "ThumbnailConfigurationStorageList": {
+      "type": "list",
+      "member": "ThumbnailConfigurationStorage"
+    },
+    "TranscodePreset": {
+      "type": "string",
+      "enum": [
+        "HIGHER_BANDWIDTH_DELIVERY",
+        "CONSTRAINED_BANDWIDTH_DELIVERY"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "ResourceArn",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateAdConfigurationRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "AdConfigurationArn",
+        "name": "AdConfigurationName",
+        "mediaTailorPlaybackConfigurations": "MediaTailorPlaybackConfigurationsList",
+        "postRollConfiguration": "PostRollConfiguration"
+      }
+    },
+    "UpdateChannelRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "ChannelArn",
+        "name": "ChannelName",
+        "latencyMode": "ChannelLatencyMode",
+        "type": "ChannelType",
+        "authorized": "Boolean",
+        "recordingConfigurationArn": "ChannelRecordingConfigurationArn",
+        "insecureIngest": "Boolean",
+        "preset": "TranscodePreset",
+        "playbackRestrictionPolicyArn": "ChannelPlaybackRestrictionPolicyArn",
+        "multitrackInputConfiguration": "MultitrackInputConfiguration",
+        "containerFormat": "ContainerFormat",
+        "adConfigurationArn": "ChannelAdConfigurationArn"
+      }
+    },
+    "UpdatePlaybackRestrictionPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "arn"
+      ],
+      "members": {
+        "arn": "PlaybackRestrictionPolicyArn",
+        "allowedCountries": "PlaybackRestrictionPolicyAllowedCountryList",
+        "allowedOrigins": "PlaybackRestrictionPolicyAllowedOriginList",
+        "enableStrictOriginEnforcement": "PlaybackRestrictionPolicyEnableStrictOriginEnforcement",
+        "name": "PlaybackRestrictionPolicyName"
+      }
+    },
+    "ViewerId": {
+      "type": "string",
+      "min": 1,
+      "max": 40
+    },
+    "ViewerSessionVersion": {
+      "type": "integer",
+      "min": 0
+    }
+  }
+}

@@ -1,0 +1,71 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "personalizeevents",
+ "apiVersion": "2018-03-22",
+ "operations": {
+  "PutActionInteractions": {
+   "method": "POST",
+   "requestUri": "/action-interactions",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "actionInteractions[].timestamp"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutActions": {
+   "method": "POST",
+   "requestUri": "/actions",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutEvents": {
+   "method": "POST",
+   "requestUri": "/events",
+   "responseCode": 200,
+   "input": {
+    "members": {},
+    "timestamps": [
+     "eventList[].sentAt"
+    ]
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutItems": {
+   "method": "POST",
+   "requestUri": "/items",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "PutUsers": {
+   "method": "POST",
+   "requestUri": "/users",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

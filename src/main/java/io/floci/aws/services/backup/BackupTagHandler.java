@@ -1,6 +1,7 @@
 package io.floci.aws.services.backup;
 
 import io.floci.aws.core.common.TagHandler;
+import io.floci.aws.services.backupsearch.BackupSearchService;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -20,6 +21,12 @@ public class BackupTagHandler implements TagHandler {
     @Override
     public String serviceKey() {
         return "backup";
+    }
+
+    /** Search and export job ARNs are AWS Backup Search's ({@code BackupSearchTagHandler}). */
+    @Override
+    public boolean handles(String arn) {
+        return !BackupSearchService.owns(arn);
     }
 
     @Override

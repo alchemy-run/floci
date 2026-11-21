@@ -28,11 +28,13 @@ import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.core.Context;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
+import jakarta.ws.rs.core.MultivaluedMap;
 import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -454,7 +456,11 @@ public class BackupController {
                 ? objectMapper.treeToValue(req.path("Lifecycle"), Lifecycle.class)
                 : null;
 
-        BackupJob job = service.startBackupJob(vaultName, resourceArn, iamRoleArn, lifecycle, region);
+        String index = req.path("Index").asText(null);
+        Map<String, String> recoveryPointTags = req.has("RecoveryPointTags")
+                ? readStringMap(req, "RecoveryPointTags") : null;
+        BackupJob job = service.startBackupJob(vaultName, resourceArn, iamRoleArn, lifecycle, index,
+                recoveryPointTags, region);
 
         ObjectNode out = objectMapper.createObjectNode();
         out.put("BackupJobId", job.getBackupJobId());
@@ -492,7 +498,70 @@ public class BackupController {
     private ObjectNode jobJson(BackupJob job) {
         ObjectNode node = objectMapper.valueToTree(job);
         node.remove(BackupVault.VAULT_ID_FIELD);
+        node.remove(BackupJob.INDEX_FIELD);
+        node.remove(BackupJob.RECOVERY_POINT_TAGS_FIELD);
         return node;
+    }
+
+    // ── Backup indexes ─────────────────────────────────────────────────────────
+
+    @POST
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}/index")
+    public Response updateRecoveryPointIndexSettings(@Context HttpHeaders headers,
+                                                     @PathParam("backupVaultName") String vaultName,
+                                                     @PathParam("recoveryPointArn") String recoveryPointArn,
+                                                     String body) throws IOException {
+        String region = regionResolver.resolveRegion(headers);
+        JsonNode req = body == null || body.isBlank() ? objectMapper.createObjectNode() : objectMapper.readTree(body);
+        String index = req.path("Index").asText("");
+        if (!List.of("ENABLED", "DISABLED").contains(index)) {
+            throw new AwsException("InvalidParameterValueException", "Index must be ENABLED or DISABLED.", 400);
+        }
+        String status = service.updateRecoveryPointIndex(vaultName, recoveryPointArn, index, region);
+        ObjectNode out = objectMapper.createObjectNode();
+        out.put("BackupVaultName", vaultName);
+        out.put("RecoveryPointArn", recoveryPointArn);
+        out.put("IndexStatus", status);
+        out.put("Index", index);
+        return Response.ok(out).build();
+    }
+
+    @GET
+    @Path("/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn: .+}/index")
+    public Response getRecoveryPointIndexDetails(@Context HttpHeaders headers,
+                                                 @PathParam("backupVaultName") String vaultName,
+                                                 @PathParam("recoveryPointArn") String recoveryPointArn) {
+        return Response.ok(service.recoveryPointIndex(vaultName, recoveryPointArn,
+                regionResolver.resolveRegion(headers))).build();
+    }
+
+    @GET
+    @Path("/indexes/recovery-point/")
+    public Response listIndexedRecoveryPoints(@Context HttpHeaders headers, @Context UriInfo uriInfo) {
+        String region = regionResolver.resolveRegion(headers);
+        MultivaluedMap<String, String> query = uriInfo.getQueryParameters();
+        List<ObjectNode> points = service.listIndexedRecoveryPoints(query.getFirst("sourceResourceArn"),
+                epochOrNull(query.getFirst("createdBefore")), epochOrNull(query.getFirst("createdAfter")),
+                query.getFirst("resourceType"), query.getFirst("indexStatus"), region);
+        Map<String, String> paging = new HashMap<>();
+        if (query.getFirst("nextToken") != null) {
+            paging.put("nextToken", query.getFirst("nextToken"));
+        }
+        if (query.getFirst("maxResults") != null) {
+            paging.put("maxResults", query.getFirst("maxResults"));
+        }
+        return Response.ok(service.page("IndexedRecoveryPoints", points, paging, region)).build();
+    }
+
+    private static Long epochOrNull(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return (long) Double.parseDouble(value);
+        } catch (NumberFormatException e) {
+            return Instant.parse(value).getEpochSecond();
+        }
     }
 
     // ── Recovery Point ─────────────────────────────────────────────────────────

@@ -4750,6 +4750,12 @@ public class CognitoService implements ResourceProvider {
         return overrideId;
     }
 
+    /** The pool's signing key by its key id, as its JWKS publishes it. */
+    public Map<String, RSAPublicKey> signingKeys(String poolId) {
+        UserPool pool = describeUserPool(poolId);
+        return Map.of(getSigningKeyId(pool), getSigningPublicKey(pool));
+    }
+
     public String getJwksUri(String poolId) {
         return baseUrl + "/" + poolId + "/.well-known/jwks.json";
     }

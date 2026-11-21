@@ -126,6 +126,8 @@ class ContainerLauncherTest {
         EmulatorConfig.EfsSharingConfig efs = mock(EmulatorConfig.EfsSharingConfig.class);
 
         when(config.services()).thenReturn(services);
+        // X-Ray is off, so the launcher adds no tracing environment.
+        lenient().when(services.xray()).thenReturn(mock(EmulatorConfig.XRayServiceConfig.class));
         when(services.lambda()).thenReturn(lambda);
         when(lambda.dockerNetwork()).thenReturn(Optional.empty());
         lenient().when(lambda.extraHosts()).thenReturn(Optional.empty());

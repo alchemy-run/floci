@@ -942,6 +942,25 @@ public class CodeDeployService {
                 .collect(Collectors.toList());
     }
 
+    /** One target of a deployment, as GetDeploymentTarget returns it. */
+    public Map<String, Object> getDeploymentTarget(String region, String deploymentId, String targetId) {
+        if (deploymentId == null || deploymentId.isBlank()) {
+            throw new AwsException("DeploymentIdRequiredException", "A deployment ID must be specified.", 400);
+        }
+        if (targetId == null || targetId.isBlank()) {
+            throw new AwsException("DeploymentTargetIdRequiredException", "A deployment target ID must be specified.",
+                    400);
+        }
+        getDeployment(region, deploymentId);
+        Map<String, Map<String, Object>> targets = deploymentTargetsFor(region).get(deploymentId);
+        Map<String, Object> target = targets == null ? null : targets.get(targetId);
+        if (target == null) {
+            throw new AwsException("DeploymentTargetDoesNotExistException",
+                    "The deployment target " + targetId + " does not exist in deployment " + deploymentId + ".", 400);
+        }
+        return target;
+    }
+
     public void continueDeployment(String region, String deploymentId, String waitType) {
         Deployment deployment = getDeployment(region, deploymentId);
         if (waitType != null && !List.of("READY_WAIT", "TERMINATION_WAIT").contains(waitType)) {

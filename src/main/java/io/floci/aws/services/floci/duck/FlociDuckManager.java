@@ -34,7 +34,6 @@ public class FlociDuckManager {
     private static final Logger LOG = Logger.getLogger(FlociDuckManager.class);
     private static final String CONTAINER_NAME = "duck";
     private static final int DUCK_PORT = 3000;
-    private static final int HEALTH_POLL_MAX_MS = 30_000;
     private static final int HEALTH_POLL_INTERVAL_MS = 500;
 
     private final ContainerBuilder containerBuilder;
@@ -141,7 +140,8 @@ public class FlociDuckManager {
 
     private void waitForHealth(String baseUrl) {
         String healthUrl = baseUrl + "/health";
-        long deadline = System.currentTimeMillis() + HEALTH_POLL_MAX_MS;
+        long timeout = config.services().duck().startupTimeoutSeconds() * 1000L;
+        long deadline = System.currentTimeMillis() + timeout;
 
         while (System.currentTimeMillis() < deadline) {
             try {
@@ -160,7 +160,7 @@ public class FlociDuckManager {
                 throw new RuntimeException("Interrupted while waiting for floci-duck", e);
             }
         }
-        throw new RuntimeException("floci-duck did not become healthy within " + HEALTH_POLL_MAX_MS + " ms");
+        throw new RuntimeException("floci-duck did not become healthy within " + timeout + " ms");
     }
 
     void onStop(@Observes ShutdownEvent event) {

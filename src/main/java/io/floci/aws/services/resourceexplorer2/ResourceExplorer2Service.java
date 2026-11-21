@@ -25,6 +25,7 @@ import io.floci.aws.services.resourceexplorer2.model.View;
 import io.floci.aws.services.resourceexplorer2.query.ParsedQuery;
 import io.floci.aws.services.resourceexplorer2.query.QueryParser;
 import io.floci.aws.services.resourceexplorer2.query.ResourceFilter;
+import io.quarkus.arc.Arc;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -651,18 +652,41 @@ public class ResourceExplorer2Service {
     //
     // These describe resources only AWS itself creates: views a trusted service registers
     // (managed and service views), streaming grants it holds, and indexes belonging to other
-    // accounts in an organization. floci models neither trusted services nor Organizations, so
-    // each answers with the wire-accurate empty result rather than an error — a caller
-    // enumerating them completes, and one asking for a specific ARN gets the same
-    // ResourceNotFoundException a live account with no such view would return.
+    // accounts in an organization. Managed views come from the Floci services that own them
+    // ({@link ManagedViewSource}); the rest answer with the wire-accurate empty result rather
+    // than an error — a caller enumerating them completes, and one asking for a specific ARN gets
+    // the same ResourceNotFoundException a live account with no such view would return.
+
+    private List<ObjectNode> managedViews() {
+        String account = regionResolver.getAccountId();
+        String region = regionResolver.getRegion();
+        List<ObjectNode> views = new ArrayList<>();
+        for (ManagedViewSource source : Arc.container().select(ManagedViewSource.class)) {
+            views.addAll(source.managedViews(account, region));
+        }
+        return views;
+    }
 
     public ObjectNode listManagedViews(Integer maxResults, String nextToken) {
-        return emptyList("ManagedViews", maxResults, nextToken);
+        List<String> arns = managedViews().stream().map(view -> view.path("ManagedViewArn").asText()).toList();
+        Paginated<String> page = paginate(arns, maxResults, nextToken, 50);
+        ObjectNode result = objectMapper.createObjectNode();
+        ArrayNode list = result.putArray("ManagedViews");
+        page.items().forEach(list::add);
+        if (page.nextToken() != null) {
+            result.put("NextToken", page.nextToken());
+        }
+        return result;
     }
 
     public ObjectNode getManagedView(String managedViewArn) {
-        throw new AwsException("ResourceNotFoundException",
-                "Managed view not found: " + managedViewArn, 404);
+        ObjectNode view = managedViews().stream()
+                .filter(candidate -> managedViewArn.equals(candidate.path("ManagedViewArn").asText()))
+                .findFirst().orElseThrow(() -> new AwsException("ResourceNotFoundException",
+                        "Managed view not found: " + managedViewArn, 404));
+        ObjectNode result = objectMapper.createObjectNode();
+        result.set("ManagedView", view.deepCopy());
+        return result;
     }
 
     public ObjectNode listServiceViews(Integer maxResults, String nextToken) {

@@ -8,6 +8,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -45,10 +46,16 @@ public final class RequestConstraintCheck {
     private final JsonNode model;
     private final Map<String, Pattern> patterns = new HashMap<>();
     private final Messages messages;
+    private final Set<String> lenient;
 
     private RequestConstraintCheck(JsonNode model, Messages messages) {
+        this(model, messages, Set.of());
+    }
+
+    private RequestConstraintCheck(JsonNode model, Messages messages, Set<String> lenient) {
         this.model = model;
         this.messages = messages;
+        this.lenient = Set.copyOf(lenient);
         for (Map.Entry<String, JsonNode> shape : model.path("shapes").properties()) {
             if (shape.getValue().has("pattern")) {
                 patterns.put(shape.getKey(), VendoredPatterns.compile(shape.getValue().get("pattern").asText()));
@@ -66,8 +73,23 @@ public final class RequestConstraintCheck {
         return new RequestConstraintCheck(model, messages);
     }
 
-    /** Checks {@code request}, the body of {@code operation}, against the operation's input shape. */
+    /**
+     * This check, with the length and pattern constraints of the named shapes left out: a service that takes the
+     * ids of resources another service owns accepts any id that service knows (Floci's default subnets, {@code
+     * subnet-default-us-east-1-a}, are longer than an AWS subnet id), and checks it against that service instead.
+     */
+    public RequestConstraintCheck withLenientShapes(Set<String> names) {
+        return new RequestConstraintCheck(model, messages, names);
+    }
+
+    /**
+     * Checks {@code request}, the body of {@code operation}, against the operation's input shape; an operation the
+     * model doesn't have is left to the handler to refuse as unknown.
+     */
     public void check(String operation, JsonNode request) {
+        if (!model.path("operations").has(operation)) {
+            return;
+        }
         checkValue(model.path("operations").path(operation).asText(), request, operation);
     }
 
@@ -80,10 +102,28 @@ public final class RequestConstraintCheck {
             case "string" -> value.isTextual();
             case "boolean" -> value.isBoolean();
             case "integer", "long" -> value.isIntegralNumber() && value.canConvertToLong();
+            case "double", "float" -> value.isNumber();
+            case "timestamp" -> value.isTextual() || value.isNumber();
+            case "blob" -> value.isTextual();
+            // a Smithy document holds any JSON value
+            case "document" -> true;
             default -> false;
         };
         if (!validType) {
             throw messages.type(path, type);
+        }
+        if ("double".equals(type) || "float".equals(type)) {
+            double number = value.doubleValue();
+            Double low = shape.has("min") ? shape.get("min").asDouble() : null;
+            Double high = shape.has("max") ? shape.get("max").asDouble() : null;
+            if (low != null && number < low || high != null && number > high) {
+                throw messages.bounds(path, type, low == null ? null : (long) Math.ceil(low),
+                        high == null ? null : (long) Math.floor(high), (long) number);
+            }
+            return;
+        }
+        if ("timestamp".equals(type) || "blob".equals(type)) {
+            return;
         }
         long size = switch (type) {
             case "string" -> value.textValue().codePointCount(0, value.textValue().length());
@@ -92,10 +132,11 @@ public final class RequestConstraintCheck {
         };
         Long min = shape.has("min") ? shape.get("min").asLong() : null;
         Long max = shape.has("max") ? shape.get("max").asLong() : null;
-        if (min != null && size < min || max != null && size > max) {
+        boolean strict = !lenient.contains(name);
+        if (strict && (min != null && size < min || max != null && size > max)) {
             throw messages.bounds(path, type, min, max, size);
         }
-        if (patterns.containsKey(name) && !patterns.get(name).matcher(value.asText()).matches()) {
+        if (strict && patterns.containsKey(name) && !patterns.get(name).matcher(value.asText()).matches()) {
             throw messages.pattern(path, VendoredPatterns.quoted(shape));
         }
         if (shape.has("enum")) {

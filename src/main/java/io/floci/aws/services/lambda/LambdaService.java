@@ -31,6 +31,7 @@ import io.floci.aws.services.lambda.durable.DurableWire;
 import io.floci.aws.services.lambda.durable.model.DurableErrorObject;
 import io.floci.aws.services.lambda.durable.model.DurableExecution;
 import io.floci.aws.services.lambda.durable.model.DurableExecutionStatus;
+import io.floci.aws.services.lambda.model.CodeSigningConfig;
 import io.floci.aws.services.lambda.model.EventSourceMapping;
 import io.floci.aws.services.lambda.model.FunctionEventInvokeConfig;
 import io.floci.aws.services.lambda.model.InvocationType;
@@ -3750,6 +3751,7 @@ public class LambdaService implements ResourceProvider {
     }
 
     private void extractZipCodePackage(LambdaFunction fn, DeploymentPackage zip, String region) {
+        verifyCodeSignature(fn, zip, region);
         Path codePath = codeStore.getCodePath(ownerAccount(fn), region, fn.getFunctionName());
         try {
             zip.extractTo(zipExtractor, codePath, configuredZipMaxEntries(),
@@ -4554,6 +4556,43 @@ public class LambdaService implements ResourceProvider {
 
 
 
+
+    /** Checks code signatures for functions with a code signing configuration; absent outside CDI. */
+    @Inject
+    Instance<CodeSignatureVerifier> codeSignatureVerifiers;
+
+    /**
+     * A function with a code signing configuration takes only packages signed by one of its allowed profile
+     * versions: an untrusted package fails the deploy under the Enforce policy and is logged under Warn.
+     */
+    private void verifyCodeSignature(LambdaFunction fn, DeploymentPackage zip, String region) {
+        if (fn.getCodeSigningConfigArn() == null || codeSigningConfigService == null
+                || codeSignatureVerifiers == null || codeSignatureVerifiers.isUnsatisfied()) {
+            return;
+        }
+        CodeSigningConfig config = codeSigningConfigService.get(region, fn.getCodeSigningConfigArn());
+        List<String> allowed = config.getAllowedPublishers() == null ? List.of()
+                : config.getAllowedPublishers().getSigningProfileVersionArns();
+        byte[] bytes;
+        try {
+            bytes = zip.readAllBytes();
+        } catch (IOException e) {
+            throw new AwsException("InvalidParameterValueException", "Failed to read deployment package: "
+                    + e.getMessage(), 400);
+        }
+        for (CodeSignatureVerifier verifier : codeSignatureVerifiers) {
+            Optional<String> rejection = verifier.rejection(bytes, allowed == null ? List.of() : allowed);
+            if (rejection.isPresent()) {
+                String policy = config.getCodeSigningPolicies() == null ? "Warn"
+                        : config.getCodeSigningPolicies().getUntrustedArtifactOnDeployment();
+                if ("Enforce".equals(policy)) {
+                    throw new AwsException("CodeVerificationFailedException", "Lambda cannot deploy the function. "
+                            + rejection.get(), 400);
+                }
+                LOG.warnv("Deploying untrusted code to {0}: {1}", fn.getFunctionName(), rejection.get());
+            }
+        }
+    }
 
     /** Optional ECR digest resolution for image functions; unit tests assign it via {@link #setImageDigestResolver}. */
     @Inject

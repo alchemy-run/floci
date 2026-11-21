@@ -4,6 +4,7 @@ import io.floci.aws.config.EmulatorConfig;
 import io.floci.aws.core.common.AwsArnUtils;
 import io.floci.aws.core.common.AwsException;
 import io.floci.aws.core.common.AwsNamespaces;
+import io.floci.aws.core.common.RegionResolver;
 import io.floci.aws.core.common.RequestContext;
 import io.floci.aws.core.common.XmlBuilder;
 import io.floci.aws.core.common.XmlParser;
@@ -14,19 +15,24 @@ import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.HeaderParam;
+import jakarta.ws.rs.PATCH;
 import jakarta.ws.rs.POST;
 import jakarta.ws.rs.PUT;
 import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 import jakarta.ws.rs.Produces;
 import jakarta.ws.rs.QueryParam;
+import jakarta.ws.rs.core.Context;
+import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
+import jakarta.ws.rs.core.UriInfo;
 import org.jboss.logging.Logger;
 import org.jboss.resteasy.reactive.server.ServerExceptionMapper;
 
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -50,16 +56,98 @@ public class S3ControlController {
     private static final String AMZ_ID_2 = "x-amz-id-2";
 
     private final S3Service s3Service;
+    private final S3ControlDispatcher dispatcher;
+    private final RegionResolver regionResolver;
     private final Instance<RequestContext> requestContextInstance;
     private final String defaultAccountId;
 
     @Inject
     public S3ControlController(S3Service s3Service,
+                               S3ControlDispatcher dispatcher,
+                               RegionResolver regionResolver,
                                Instance<RequestContext> requestContextInstance,
                                EmulatorConfig config) {
         this.s3Service = s3Service;
+        this.dispatcher = dispatcher;
+        this.regionResolver = regionResolver;
         this.requestContextInstance = requestContextInstance;
         this.defaultAccountId = config.defaultAccountId();
+    }
+
+    // ── Modeled operations ─────────────────────────────────────────────────
+
+    @GET
+    @Path("/{path: .*}")
+    public Response getOperation(@Context UriInfo uriInfo, @Context HttpHeaders headers) {
+        return dispatch("GET", uriInfo, headers, null);
+    }
+
+    @PUT
+    @Path("/{path: .*}")
+    @Consumes(MediaType.WILDCARD)
+    public Response putOperation(@Context UriInfo uriInfo, @Context HttpHeaders headers, String body) {
+        return dispatch("PUT", uriInfo, headers, body);
+    }
+
+    @POST
+    @Path("/{path: .*}")
+    @Consumes(MediaType.WILDCARD)
+    public Response postOperation(@Context UriInfo uriInfo, @Context HttpHeaders headers, String body) {
+        return dispatch("POST", uriInfo, headers, body);
+    }
+
+    @PATCH
+    @Path("/{path: .*}")
+    @Consumes(MediaType.WILDCARD)
+    public Response patchOperation(@Context UriInfo uriInfo, @Context HttpHeaders headers, String body) {
+        return dispatch("PATCH", uriInfo, headers, body);
+    }
+
+    @DELETE
+    @Path("/{path: .*}")
+    public Response deleteOperation(@Context UriInfo uriInfo, @Context HttpHeaders headers) {
+        return dispatch("DELETE", uriInfo, headers, null);
+    }
+
+    /**
+     * Serves a modeled S3 Control operation: Multi-Region Access Point control requests in the
+     * Region AWS serves them from, everything else in the request's signing Region.
+     */
+    private Response dispatch(String method, UriInfo uriInfo, HttpHeaders headers, String body) {
+        try {
+            requireCallerMayActOnAccount(headers.getHeaderString("x-amz-account-id"));
+            String path = uriInfo.getRequestUri().getRawPath();
+            Map<String, List<String>> query = new LinkedHashMap<>();
+            uriInfo.getQueryParameters(true).forEach(query::put);
+            Map<String, List<String>> requestHeaders = new LinkedHashMap<>();
+            headers.getRequestHeaders().forEach(requestHeaders::put);
+            String region = regionResolver.resolveRegion(headers);
+            S3ControlDispatcher.Result result = dispatcher.dispatch(method, path, body, query, requestHeaders,
+                    region);
+            Response.ResponseBuilder response = Response.status(result.status());
+            result.headers().forEach(response::header);
+            if (result.body() != null) {
+                response.entity(result.body()).type(MediaType.APPLICATION_XML);
+            }
+            String requestId = UUID.randomUUID().toString();
+            return response.header(AMZ_REQUEST_ID, requestId).header(AMZN_REQUEST_ID, requestId)
+                    .header(AMZ_ID_2, requestId).build();
+        } catch (AwsException e) {
+            return xmlErrorResponse(e);
+        }
+    }
+
+    /**
+     * Whether a tagging route is this controller's own: a bucket ARN, or a path naming no valid ARN,
+     * which the bucket handler answers {@code InvalidRequest}. Every other ARN is an S3 Control
+     * resource the dispatcher tags.
+     */
+    private static boolean namesBucket(String resourceArn) {
+        try {
+            return S3ControlArnUtils.parse(resourceArn).map(S3ControlArnUtils::namesBucket).orElse(true);
+        } catch (IllegalArgumentException e) {
+            return true;
+        }
     }
 
     /**
@@ -73,8 +161,12 @@ public class S3ControlController {
     @Path("/tags/{resourceArn: .+}")
     public Response listTagsForResource(
             @PathParam("resourceArn") String resourceArn,
-            @HeaderParam("x-amz-account-id") String accountId) {
+            @HeaderParam("x-amz-account-id") String accountId,
+            @Context UriInfo uriInfo, @Context HttpHeaders headers) {
 
+        if (!namesBucket(resourceArn)) {
+            return dispatch("GET", uriInfo, headers, null);
+        }
         try {
             AwsArnUtils.Arn arn = taggedBucketArn(resourceArn);
             Map<String, String> tags = s3Service.getBucketTaggingForAccount(arn.accountId(),
@@ -91,40 +183,6 @@ public class S3ControlController {
         } catch (AwsException e) {
             return xmlErrorResponse(e);
         }
-    }
-
-    /**
-     * ListAccessPoints — returns the account's S3 access points.
-     *
-     * <p>The emulator has no access-point store. Per the S3 Control API, the only success
-     * response for ListAccessPoints is HTTP 200 with a {@code <ListAccessPointsResult>}
-     * carrying an {@code <AccessPointList>} — empty when the account has none — and an
-     * optional {@code <NextToken>}. 404 is not a documented outcome for this operation, so
-     * without this route an AWS SDK client cannot map the response to the expected result
-     * or to a known error and the read fails (and, depending on the client's retry config,
-     * may burn its retry budget on the unexpected status first). We therefore return the
-     * documented empty list: an {@code <AccessPointList/>} with no {@code <NextToken>},
-     * which ends pagination immediately.
-     *
-     * GET /v20180820/accesspoint
-     * Header: x-amz-account-id
-     */
-    @GET
-    @Path("/accesspoint")
-    public Response listAccessPoints(
-            @HeaderParam("x-amz-account-id") String accountId,
-            @QueryParam("bucket") String bucket,
-            @QueryParam("maxResults") String maxResults,
-            @QueryParam("nextToken") String nextToken) {
-
-        String xml = new XmlBuilder()
-                .raw("<?xml version=\"1.0\" encoding=\"UTF-8\"?>")
-                .start("ListAccessPointsResult", AwsNamespaces.S3_CONTROL)
-                .start("AccessPointList")
-                .end("AccessPointList")
-                .end("ListAccessPointsResult")
-                .build();
-        return Response.ok(xml).build();
     }
 
     /**
@@ -277,8 +335,12 @@ public class S3ControlController {
     public Response tagResource(
             @PathParam("resourceArn") String resourceArn,
             @HeaderParam("x-amz-account-id") String accountId,
+            @Context UriInfo uriInfo, @Context HttpHeaders headers,
             byte[] body) {
 
+        if (!namesBucket(resourceArn)) {
+            return dispatch("POST", uriInfo, headers, new String(body, StandardCharsets.UTF_8));
+        }
         try {
             AwsArnUtils.Arn arn = taggedBucketArn(resourceArn);
             String xml = new String(body, StandardCharsets.UTF_8);
@@ -301,8 +363,12 @@ public class S3ControlController {
     public Response untagResource(
             @PathParam("resourceArn") String resourceArn,
             @HeaderParam("x-amz-account-id") String accountId,
-            @QueryParam("tagKeys") List<String> tagKeys) {
+            @QueryParam("tagKeys") List<String> tagKeys,
+            @Context UriInfo uriInfo, @Context HttpHeaders headers) {
 
+        if (!namesBucket(resourceArn)) {
+            return dispatch("DELETE", uriInfo, headers, null);
+        }
         try {
             AwsArnUtils.Arn arn = taggedBucketArn(resourceArn);
             String bucketName = S3ControlArnUtils.bucketName(arn);

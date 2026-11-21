@@ -13,6 +13,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -76,6 +77,17 @@ public class TranslateService {
      * Response shape: https://docs.aws.amazon.com/translate/latest/APIReference/API_TranslateText.html
      */
     public Response translateText(String text, String sourceLanguageCode, String targetLanguageCode) {
+        return translateText(text, sourceLanguageCode, targetLanguageCode, List.of(), null, null);
+    }
+
+    /**
+     * TranslateText with custom terminologies: after the echo (or mock), each
+     * named terminology's source terms found in the text become their target
+     * terms, and {@code AppliedTerminologies} lists the terms that matched.
+     */
+    public Response translateText(String text, String sourceLanguageCode, String targetLanguageCode,
+                                  List<String> terminologyNames, TranslateResourceService resources,
+                                  String region) {
         requireField(text, "Text");
         // length() (chars) is a lower bound on UTF-8 byte count, so the cheap check
         // short-circuits before getBytes() allocates for a pathologically large Text.
@@ -88,13 +100,20 @@ public class TranslateService {
         String resolvedSource = validateSourceLanguage(sourceLanguageCode);
         validateTargetLanguage(targetLanguageCode);
         Optional<JsonNode> mock = mockConfigLoader.lookup(SERVICE_KEY, text, "TranslateText");
-        if (mock.isPresent()) {
-            return Response.ok(mock.get()).build();
+        ObjectNode root = mock.filter(JsonNode::isObject).map(node -> (ObjectNode) node.deepCopy())
+                .orElseGet(() -> {
+                    ObjectNode echo = objectMapper.createObjectNode();
+                    echo.put("TranslatedText", text);
+                    echo.put("SourceLanguageCode", resolvedSource);
+                    echo.put("TargetLanguageCode", targetLanguageCode);
+                    return echo;
+                });
+        if (terminologyNames != null && !terminologyNames.isEmpty() && resources != null) {
+            TranslateResourceService.Applied applied = resources.applyTerminologies(terminologyNames,
+                    root.path("TranslatedText").asText(text), resolvedSource, targetLanguageCode, region);
+            root.put("TranslatedText", applied.text());
+            root.set("AppliedTerminologies", applied.terminologies());
         }
-        ObjectNode root = objectMapper.createObjectNode();
-        root.put("TranslatedText", text);
-        root.put("SourceLanguageCode", resolvedSource);
-        root.put("TargetLanguageCode", targetLanguageCode);
         return Response.ok(root).build();
     }
     /**
@@ -139,8 +158,18 @@ public class TranslateService {
                             + "supported size of " + MAX_DOCUMENT_BYTES + " bytes.", 400);
         }
         ObjectNode root = objectMapper.createObjectNode();
-        // json-1.1 marshals a blob as its base64 string; echo the caller's bytes verbatim.
-        root.putObject("TranslatedDocument").put("Content", content);
+        // json-1.1 marshals a blob as its base64 string; echo the caller's bytes verbatim,
+        // unless a text document's decoded text has a TranslateText mock.
+        String translated = content;
+        if (!contentType.startsWith("application/")) {
+            String documentText = new String(decoded, StandardCharsets.UTF_8);
+            Optional<JsonNode> mock = mockConfigLoader.lookup(SERVICE_KEY, documentText, "TranslateText");
+            if (mock.isPresent() && mock.get().hasNonNull("TranslatedText")) {
+                translated = Base64.getEncoder().encodeToString(
+                        mock.get().get("TranslatedText").asText().getBytes(StandardCharsets.UTF_8));
+            }
+        }
+        root.putObject("TranslatedDocument").put("Content", translated);
         root.put("SourceLanguageCode", resolvedSource);
         root.put("TargetLanguageCode", targetLanguageCode);
         return Response.ok(root).build();
@@ -167,6 +196,17 @@ public class TranslateService {
         root.put("DisplayLanguageCode", display);
         return Response.ok(root).build();
     }
+    /**
+     * The text a batch job writes for {@code text}: its TranslateText mock when
+     * one is configured, otherwise the text itself.
+     */
+    public String echoTranslation(String text) {
+        return mockConfigLoader.lookup(SERVICE_KEY, text, "TranslateText")
+                .filter(mock -> mock.hasNonNull("TranslatedText"))
+                .map(mock -> mock.get("TranslatedText").asText())
+                .orElse(text);
+    }
+
     // Private helpers
     private void requireField(String value, String fieldName) {
         if (value == null || value.isEmpty()) {

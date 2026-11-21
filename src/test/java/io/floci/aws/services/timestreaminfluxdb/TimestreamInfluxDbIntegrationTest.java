@@ -1,5 +1,6 @@
 package io.floci.aws.services.timestreaminfluxdb;
 
+import io.floci.aws.testing.Ec2Defaults;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.ValidatableResponse;
@@ -49,8 +50,8 @@ class TimestreamInfluxDbIntegrationTest {
                 .body("dbStorageType", equalTo("InfluxIOIncludedT1"))
                 .body("publiclyAccessible", equalTo(false))
                 .body("availabilityZone", equalTo("us-east-1a"))
-                .body("vpcSubnetIds", contains("subnet-default-us-east-1-a"))
-                .body("vpcSecurityGroupIds", contains("sg-default-us-east-1"))
+                .body("vpcSubnetIds", contains(Ec2Defaults.SUBNET_A))
+                .body("vpcSecurityGroupIds", contains(Ec2Defaults.SECURITY_GROUP))
                 .body("influxAuthParametersSecretArn", nullValue())
                 .extract().path("id");
 
@@ -117,8 +118,8 @@ class TimestreamInfluxDbIntegrationTest {
     void createInstanceRejectsInputOutsideTheModelConstraints() {
         call("CreateDbInstance", """
                 {"name":"no-password","dbInstanceType":"db.influx.medium","allocatedStorage":20,
-                 "vpcSubnetIds":["subnet-default-us-east-1-a"],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
-                """)
+                 "vpcSubnetIds":["%s"],"vpcSecurityGroupIds":["%s"]}
+                """.formatted(Ec2Defaults.SUBNET_A, Ec2Defaults.SECURITY_GROUP))
                 .statusCode(400)
                 .body("__type", equalTo("ValidationException"))
                 .body("reason", equalTo("FIELD_VALIDATION_FAILED"));
@@ -129,8 +130,8 @@ class TimestreamInfluxDbIntegrationTest {
         assertValidation(instanceBody("reserved-port", "db.influx.medium", 20, "8090"));
         assertValidation("""
                 {"name":"no-subnets","password":"password123","dbInstanceType":"db.influx.medium","allocatedStorage":20,
-                 "vpcSubnetIds":[],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
-                """);
+                 "vpcSubnetIds":[],"vpcSecurityGroupIds":["%s"]}
+                """.formatted(Ec2Defaults.SECURITY_GROUP));
     }
 
     @Test
@@ -206,8 +207,8 @@ class TimestreamInfluxDbIntegrationTest {
     void clusterLifecycleManagesItsMemberInstances() {
         String clusterId = call("CreateDbCluster", """
                 {"name":"lifecycle-cluster","password":"password123","dbInstanceType":"db.influx.large",
-                 "allocatedStorage":40,"vpcSubnetIds":["subnet-default-us-east-1-a","subnet-default-us-east-1-b"],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
-                """)
+                 "allocatedStorage":40,"vpcSubnetIds":["%s","%s"],"vpcSecurityGroupIds":["%s"]}
+                """.formatted(Ec2Defaults.SUBNET_A, Ec2Defaults.SUBNET_B, Ec2Defaults.SECURITY_GROUP))
                 .statusCode(200)
                 .body("dbClusterId", matchesPattern(ID_PATTERN))
                 .body("dbClusterStatus", equalTo("CREATING"))
@@ -285,8 +286,8 @@ class TimestreamInfluxDbIntegrationTest {
 
         String clusterId = call("CreateDbCluster", """
                 {"name":"enterprise-cluster","dbInstanceType":"db.influx.large","dbParameterGroupIdentifier":"%s",
-                 "vpcSubnetIds":["subnet-default-us-east-1-a"],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
-                """.formatted(groupId))
+                 "vpcSubnetIds":["%s"],"vpcSecurityGroupIds":["%s"]}
+                """.formatted(groupId, Ec2Defaults.SUBNET_A, Ec2Defaults.SECURITY_GROUP))
                 .statusCode(200)
                 .extract().path("dbClusterId");
 
@@ -450,7 +451,7 @@ class TimestreamInfluxDbIntegrationTest {
                 .body("networkType", equalTo("IPV4"))
                 .body("deploymentType", equalTo("SINGLE_AZ"))
                 .body("publiclyAccessible", equalTo(false))
-                .body("vpcSubnetIds", contains("subnet-default-us-east-1-a"));
+                .body("vpcSubnetIds", contains(Ec2Defaults.SUBNET_A));
 
         call("RestoreFromDbBackup", replaceBase + "}")
                 .statusCode(200)
@@ -464,15 +465,15 @@ class TimestreamInfluxDbIntegrationTest {
     private static ValidatableResponse createInstance(String name, String extraFields) {
         return call("CreateDbInstance", """
                 {"name":"%s","password":"password123","dbInstanceType":"db.influx.medium","allocatedStorage":20,
-                 "vpcSubnetIds":["subnet-default-us-east-1-a"],"vpcSecurityGroupIds":["sg-default-us-east-1"]%s}
-                """.formatted(name, extraFields));
+                 "vpcSubnetIds":["%s"],"vpcSecurityGroupIds":["%s"]%s}
+                """.formatted(name, Ec2Defaults.SUBNET_A, Ec2Defaults.SECURITY_GROUP, extraFields));
     }
 
     private static String instanceBody(String name, String instanceType, int storage, String port) {
         return """
                 {"name":"%s","password":"password123","dbInstanceType":"%s","allocatedStorage":%d,"port":%s,
-                 "vpcSubnetIds":["subnet-default-us-east-1-a"],"vpcSecurityGroupIds":["sg-default-us-east-1"]}
-                """.formatted(name, instanceType, storage, port);
+                 "vpcSubnetIds":["%s"],"vpcSecurityGroupIds":["%s"]}
+                """.formatted(name, instanceType, storage, port, Ec2Defaults.SUBNET_A, Ec2Defaults.SECURITY_GROUP);
     }
 
     private static void assertValidation(String body) {

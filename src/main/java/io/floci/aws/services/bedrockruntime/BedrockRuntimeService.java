@@ -1,10 +1,13 @@
 package io.floci.aws.services.bedrockruntime;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.floci.aws.config.EmulatorConfig;
+import io.floci.aws.core.common.AwsException;
 import io.floci.aws.services.bedrockruntime.backend.BedrockBackend;
 import io.floci.aws.services.bedrockruntime.backend.ProxyBackend;
 import io.floci.aws.services.bedrockruntime.backend.StubBackend;
+import io.floci.aws.services.bedrockruntime.backend.StubModel;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -42,6 +45,26 @@ public class BedrockRuntimeService {
 
     public Consumer<OutputStream> buildConverseStreamResponse(String modelId, ObjectNode bedrockRequest) {
         return backend().converseStream(modelId, bedrockRequest);
+    }
+
+    public Consumer<OutputStream> buildInvokeModelStreamResponse(String modelId, byte[] body) {
+        return backend().invokeModelWithResponseStream(modelId, body);
+    }
+
+    /**
+     * CountTokens: the tokens of a Converse input (system, messages, tools) or of an
+     * InvokeModel body, counted the way the stub backend counts its replies, as words
+     * and punctuation marks. Bedrock counts with the model's own tokenizer, so real
+     * counts differ; the count is stable and grows with the input.
+     */
+    public int countTokens(JsonNode input) {
+        if (input.has("converse")) {
+            return Math.max(1, StubModel.countConverseTokens(input.get("converse")));
+        }
+        if (input.has("invokeModel")) {
+            return Math.max(1, StubModel.countTokens(input.get("invokeModel").path("body").asText("")));
+        }
+        throw new AwsException("ValidationException", "input must contain converse or invokeModel.", 400);
     }
 
     private BedrockBackend backend() {

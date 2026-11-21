@@ -25,12 +25,19 @@ public class Route53ResolverJsonHandler {
     private static final Logger LOG = Logger.getLogger(Route53ResolverJsonHandler.class);
 
     private final Route53ResolverService service;
+    private final Route53ResolverFirewallRuleGroups ruleGroups;
     private final ObjectMapper objectMapper;
 
     @Inject
-    public Route53ResolverJsonHandler(Route53ResolverService service, ObjectMapper objectMapper) {
+    public Route53ResolverJsonHandler(Route53ResolverService service, Route53ResolverFirewallRuleGroups ruleGroups,
+                                      ObjectMapper objectMapper) {
         this.service = service;
+        this.ruleGroups = ruleGroups;
         this.objectMapper = objectMapper;
+    }
+
+    private Response wrap(String field, ObjectNode value) {
+        return Response.ok(objectMapper.createObjectNode().set(field, value)).build();
     }
 
     public Response handle(String action, JsonNode request, String region, String accountId) {
@@ -45,6 +52,15 @@ public class Route53ResolverJsonHandler {
                 case "DeleteFirewallDomainList" -> firewallDomainListResponse(
                         service.deleteFirewallDomainList(text(request, "FirewallDomainListId")));
 
+                case "CreateFirewallRuleGroup" -> wrap("FirewallRuleGroup",
+                        ruleGroups.create(request, region, accountId));
+                case "GetFirewallRuleGroup" -> wrap("FirewallRuleGroup", ruleGroups.get(request, region));
+                case "ListFirewallRuleGroups" -> Response.ok(ruleGroups.list(request, region)).build();
+                case "DeleteFirewallRuleGroup" -> wrap("FirewallRuleGroup", ruleGroups.delete(request, region));
+                case "CreateFirewallRule" -> wrap("FirewallRule", ruleGroups.createRule(request, region));
+                case "UpdateFirewallRule" -> wrap("FirewallRule", ruleGroups.updateRule(request, region));
+                case "DeleteFirewallRule" -> wrap("FirewallRule", ruleGroups.deleteRule(request, region));
+                case "ListFirewallRules" -> Response.ok(ruleGroups.listRules(request, region)).build();
                 case "CreateResolverEndpoint" -> resolverEndpointResponse(
                         service.createResolverEndpoint(request, region, accountId));
                 case "DeleteResolverEndpoint" -> resolverEndpointResponse(

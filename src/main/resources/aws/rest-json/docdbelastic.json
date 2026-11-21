@@ -1,0 +1,336 @@
+{
+ "_source": {
+  "generator": "tools/aws/regen_rest_json_bindings.py",
+  "botocore": "botocore 1.43.118 (installed package)"
+ },
+ "service": "docdbelastic",
+ "apiVersion": "2022-11-28",
+ "operations": {
+  "ApplyPendingMaintenanceAction": {
+   "method": "POST",
+   "requestUri": "/pending-action",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CopyClusterSnapshot": {
+   "method": "POST",
+   "requestUri": "/cluster-snapshot/{snapshotArn}/copy",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "snapshotArn": {
+      "location": "uri",
+      "name": "snapshotArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateCluster": {
+   "method": "POST",
+   "requestUri": "/cluster",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "CreateClusterSnapshot": {
+   "method": "POST",
+   "requestUri": "/cluster-snapshot",
+   "responseCode": 200,
+   "input": {
+    "members": {}
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteCluster": {
+   "method": "DELETE",
+   "requestUri": "/cluster/{clusterArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clusterArn": {
+      "location": "uri",
+      "name": "clusterArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "DeleteClusterSnapshot": {
+   "method": "DELETE",
+   "requestUri": "/cluster-snapshot/{snapshotArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "snapshotArn": {
+      "location": "uri",
+      "name": "snapshotArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetCluster": {
+   "method": "GET",
+   "requestUri": "/cluster/{clusterArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clusterArn": {
+      "location": "uri",
+      "name": "clusterArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetClusterSnapshot": {
+   "method": "GET",
+   "requestUri": "/cluster-snapshot/{snapshotArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "snapshotArn": {
+      "location": "uri",
+      "name": "snapshotArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "GetPendingMaintenanceAction": {
+   "method": "GET",
+   "requestUri": "/pending-action/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListClusterSnapshots": {
+   "method": "GET",
+   "requestUri": "/cluster-snapshots",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clusterArn": {
+      "location": "querystring",
+      "name": "clusterArn"
+     },
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     },
+     "snapshotType": {
+      "location": "querystring",
+      "name": "snapshotType"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListClusters": {
+   "method": "GET",
+   "requestUri": "/clusters",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListPendingMaintenanceActions": {
+   "method": "GET",
+   "requestUri": "/pending-actions",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "maxResults": {
+      "location": "querystring",
+      "name": "maxResults",
+      "type": "integer"
+     },
+     "nextToken": {
+      "location": "querystring",
+      "name": "nextToken"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "ListTagsForResource": {
+   "method": "GET",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "RestoreClusterFromSnapshot": {
+   "method": "POST",
+   "requestUri": "/cluster-snapshot/{snapshotArn}/restore",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "snapshotArn": {
+      "location": "uri",
+      "name": "snapshotArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StartCluster": {
+   "method": "POST",
+   "requestUri": "/cluster/{clusterArn}/start",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clusterArn": {
+      "location": "uri",
+      "name": "clusterArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "StopCluster": {
+   "method": "POST",
+   "requestUri": "/cluster/{clusterArn}/stop",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clusterArn": {
+      "location": "uri",
+      "name": "clusterArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "TagResource": {
+   "method": "POST",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UntagResource": {
+   "method": "DELETE",
+   "requestUri": "/tags/{resourceArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "resourceArn": {
+      "location": "uri",
+      "name": "resourceArn"
+     },
+     "tagKeys": {
+      "location": "querystring",
+      "name": "tagKeys",
+      "type": "list"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  },
+  "UpdateCluster": {
+   "method": "PUT",
+   "requestUri": "/cluster/{clusterArn}",
+   "responseCode": 200,
+   "input": {
+    "members": {
+     "clientToken": {
+      "location": "body",
+      "idempotencyToken": true
+     },
+     "clusterArn": {
+      "location": "uri",
+      "name": "clusterArn"
+     }
+    }
+   },
+   "output": {
+    "members": {}
+   }
+  }
+ }
+}

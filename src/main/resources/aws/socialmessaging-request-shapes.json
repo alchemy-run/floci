@@ -1,0 +1,1077 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_socialmessaging_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "AssociateWhatsAppBusinessAccount": "AssociateWhatsAppBusinessAccountInput",
+    "CreateWhatsAppDataset": "CreateWhatsAppDatasetInput",
+    "CreateWhatsAppFlow": "CreateWhatsAppFlowInput",
+    "CreateWhatsAppMessageTemplate": "CreateWhatsAppMessageTemplateInput",
+    "CreateWhatsAppMessageTemplateFromLibrary": "CreateWhatsAppMessageTemplateFromLibraryInput",
+    "CreateWhatsAppMessageTemplateMedia": "CreateWhatsAppMessageTemplateMediaInput",
+    "DeleteWhatsAppFlow": "DeleteWhatsAppFlowInput",
+    "DeleteWhatsAppMessageMedia": "DeleteWhatsAppMessageMediaInput",
+    "DeleteWhatsAppMessageTemplate": "DeleteWhatsAppMessageTemplateInput",
+    "DeprecateWhatsAppFlow": "DeprecateWhatsAppFlowInput",
+    "DisassociateWhatsAppBusinessAccount": "DisassociateWhatsAppBusinessAccountInput",
+    "GetLinkedWhatsAppBusinessAccount": "GetLinkedWhatsAppBusinessAccountInput",
+    "GetLinkedWhatsAppBusinessAccountPhoneNumber": "GetLinkedWhatsAppBusinessAccountPhoneNumberInput",
+    "GetWhatsAppBusinessPublicKey": "GetWhatsAppBusinessPublicKeyInput",
+    "GetWhatsAppCallPermission": "GetWhatsAppCallPermissionInput",
+    "GetWhatsAppFlow": "GetWhatsAppFlowInput",
+    "GetWhatsAppFlowPreview": "GetWhatsAppFlowPreviewInput",
+    "GetWhatsAppMessageMedia": "GetWhatsAppMessageMediaInput",
+    "GetWhatsAppMessageTemplate": "GetWhatsAppMessageTemplateInput",
+    "ListLinkedWhatsAppBusinessAccounts": "ListLinkedWhatsAppBusinessAccountsInput",
+    "ListTagsForResource": "ListTagsForResourceInput",
+    "ListWhatsAppFlowAssets": "ListWhatsAppFlowAssetsInput",
+    "ListWhatsAppFlows": "ListWhatsAppFlowsInput",
+    "ListWhatsAppMessageTemplates": "ListWhatsAppMessageTemplatesInput",
+    "ListWhatsAppTemplateLibrary": "ListWhatsAppTemplateLibraryInput",
+    "PostWhatsAppMessageMedia": "PostWhatsAppMessageMediaInput",
+    "PublishWhatsAppFlow": "PublishWhatsAppFlowInput",
+    "PutWhatsAppBusinessAccountEventDestinations": "PutWhatsAppBusinessAccountEventDestinationsInput",
+    "PutWhatsAppBusinessPublicKey": "PutWhatsAppBusinessPublicKeyInput",
+    "SendWhatsAppCallEvent": "SendWhatsAppCallEventInput",
+    "SendWhatsAppConversionEvent": "SendWhatsAppConversionEventInput",
+    "SendWhatsAppMessage": "SendWhatsAppMessageInput",
+    "TagResource": "TagResourceInput",
+    "UntagResource": "UntagResourceInput",
+    "UpdateLinkedWhatsAppBusinessAccountPhoneNumber": "UpdateLinkedWhatsAppBusinessAccountPhoneNumberInput",
+    "UpdateWhatsAppFlow": "UpdateWhatsAppFlowInput",
+    "UpdateWhatsAppFlowAssets": "UpdateWhatsAppFlowAssetsInput",
+    "UpdateWhatsAppMessageTemplate": "UpdateWhatsAppMessageTemplateInput"
+  },
+  "shapes": {
+    "AddContactNumber": {
+      "type": "boolean"
+    },
+    "AddLearnMoreLink": {
+      "type": "boolean"
+    },
+    "AddSecurityRecommendation": {
+      "type": "boolean"
+    },
+    "AddTrackPackageLink": {
+      "type": "boolean"
+    },
+    "Arn": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "arn:.*"
+    },
+    "AssociateInProgressToken": {
+      "type": "string",
+      "min": 0,
+      "max": 50
+    },
+    "AssociateWhatsAppBusinessAccountInput": {
+      "type": "structure",
+      "members": {
+        "signupCallback": "WhatsAppSignupCallback",
+        "setupFinalization": "WhatsAppSetupFinalization"
+      }
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "BusinessPublicKeyPem": {
+      "type": "string",
+      "min": 1,
+      "max": 8192
+    },
+    "ButtonType": {
+      "type": "string",
+      "min": 1,
+      "max": 25
+    },
+    "CodeExpirationMinutes": {
+      "type": "integer"
+    },
+    "CreateWhatsAppDatasetInput": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId"
+      }
+    },
+    "CreateWhatsAppFlowInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "flowName",
+        "categories"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "flowName": "MetaFlowName",
+        "categories": "MetaFlowCategoryList",
+        "flowJson": "MetaFlowJsonBlob",
+        "publish": "Boolean",
+        "cloneFlowId": "MetaFlowId",
+        "endpointUri": "MetaFlowEndpointUri"
+      }
+    },
+    "CreateWhatsAppMessageTemplateFromLibraryInput": {
+      "type": "structure",
+      "required": [
+        "metaLibraryTemplate",
+        "id"
+      ],
+      "members": {
+        "metaLibraryTemplate": "MetaLibraryTemplate",
+        "id": "LinkedWhatsAppBusinessAccountId"
+      }
+    },
+    "CreateWhatsAppMessageTemplateInput": {
+      "type": "structure",
+      "required": [
+        "templateDefinition",
+        "id"
+      ],
+      "members": {
+        "templateDefinition": "MetaTemplateDefinition",
+        "id": "LinkedWhatsAppBusinessAccountId"
+      }
+    },
+    "CreateWhatsAppMessageTemplateMediaInput": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "sourceS3File": "S3File"
+      }
+    },
+    "DeleteAllLanguages": {
+      "type": "boolean"
+    },
+    "DeleteWhatsAppFlowInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "flowId"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "flowId": "MetaFlowId"
+      }
+    },
+    "DeleteWhatsAppMessageMediaInput": {
+      "type": "structure",
+      "required": [
+        "mediaId",
+        "originationPhoneNumberId"
+      ],
+      "members": {
+        "mediaId": "WhatsAppMediaId",
+        "originationPhoneNumberId": "WhatsAppPhoneNumberId"
+      }
+    },
+    "DeleteWhatsAppMessageTemplateInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "templateName"
+      ],
+      "members": {
+        "metaTemplateId": "MetaTemplateId",
+        "deleteAllLanguages": "DeleteAllLanguages",
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "templateName": "MetaTemplateName"
+      }
+    },
+    "DeprecateWhatsAppFlowInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "flowId"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "flowId": "MetaFlowId"
+      }
+    },
+    "DisassociateWhatsAppBusinessAccountInput": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId"
+      }
+    },
+    "EventDestinationArn": {
+      "type": "string",
+      "min": 0,
+      "max": 2048,
+      "pattern": "arn:.*:[a-z-]+([/:](.*))?"
+    },
+    "Filter": {
+      "type": "map",
+      "min": 0,
+      "max": 10,
+      "key": "FilterKeyString",
+      "value": "FilterValueString"
+    },
+    "FilterKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "FilterValueString": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "GetLinkedWhatsAppBusinessAccountInput": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId"
+      }
+    },
+    "GetLinkedWhatsAppBusinessAccountPhoneNumberInput": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "WhatsAppPhoneNumberId"
+      }
+    },
+    "GetWhatsAppBusinessPublicKeyInput": {
+      "type": "structure",
+      "required": [
+        "originationPhoneNumberId"
+      ],
+      "members": {
+        "originationPhoneNumberId": "WhatsAppPhoneNumberId"
+      }
+    },
+    "GetWhatsAppCallPermissionInput": {
+      "type": "structure",
+      "required": [
+        "originationPhoneNumberId"
+      ],
+      "members": {
+        "originationPhoneNumberId": "WhatsAppPhoneNumberId",
+        "destinationPhoneNumber": "WhatsAppDestinationPhoneNumber",
+        "endUserBsuid": "WhatsAppBusinessScopedUserId"
+      }
+    },
+    "GetWhatsAppFlowInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "flowId"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "flowId": "MetaFlowId"
+      }
+    },
+    "GetWhatsAppFlowPreviewInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "flowId"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "flowId": "MetaFlowId",
+        "invalidate": "Boolean"
+      }
+    },
+    "GetWhatsAppMessageMediaInput": {
+      "type": "structure",
+      "required": [
+        "mediaId",
+        "originationPhoneNumberId"
+      ],
+      "members": {
+        "mediaId": "WhatsAppMediaId",
+        "originationPhoneNumberId": "WhatsAppPhoneNumberId",
+        "metadataOnly": "Boolean",
+        "destinationS3PresignedUrl": "S3PresignedUrl",
+        "destinationS3File": "S3File"
+      }
+    },
+    "GetWhatsAppMessageTemplateInput": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "metaTemplateId": "MetaTemplateId",
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "templateName": "MetaTemplateName",
+        "templateLanguageCode": "MetaTemplateLanguage"
+      }
+    },
+    "Headers": {
+      "type": "map",
+      "key": "String",
+      "value": "String"
+    },
+    "IanaTimezone": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "IsoCountryCode": {
+      "type": "string",
+      "pattern": "[A-Z]{2}"
+    },
+    "KmsKeyArn": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "arn:aws[a-z-]*:kms:[a-z0-9-]+:[0-9]{12}:(key/.+|alias/.+)"
+    },
+    "LibraryTemplateBodyInputs": {
+      "type": "structure",
+      "members": {
+        "addContactNumber": "AddContactNumber",
+        "addLearnMoreLink": "AddLearnMoreLink",
+        "addSecurityRecommendation": "AddSecurityRecommendation",
+        "addTrackPackageLink": "AddTrackPackageLink",
+        "codeExpirationMinutes": "CodeExpirationMinutes"
+      }
+    },
+    "LibraryTemplateButtonInput": {
+      "type": "structure",
+      "members": {
+        "type": "ButtonType",
+        "phoneNumber": "PhoneNumber",
+        "url": "MetaUrlWithSuffixExample",
+        "otpType": "OtpType",
+        "zeroTapTermsAccepted": "ZeroTapTermsAccepted",
+        "supportedApps": "SupportedApps"
+      }
+    },
+    "LinkedWhatsAppBusinessAccountId": {
+      "type": "string",
+      "min": 1,
+      "max": 115,
+      "pattern": ".*(^waba-.*$)|(^arn:.*:waba/[0-9a-zA-Z]+$).*"
+    },
+    "ListLinkedWhatsAppBusinessAccountsInput": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListTagsForResourceInput": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "Arn"
+      }
+    },
+    "ListWhatsAppFlowAssetsInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "flowId"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "flowId": "MetaFlowId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListWhatsAppFlowsInput": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListWhatsAppMessageTemplatesInput": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListWhatsAppTemplateLibraryInput": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "filters": "Filter"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "MetaFlowApplicationId": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "MetaFlowCategory": {
+      "type": "string",
+      "enum": [
+        "SIGN_UP",
+        "SIGN_IN",
+        "APPOINTMENT_BOOKING",
+        "LEAD_GENERATION",
+        "SHOPPING",
+        "CONTACT_US",
+        "CUSTOMER_SUPPORT",
+        "SURVEY",
+        "OTHER"
+      ]
+    },
+    "MetaFlowCategoryList": {
+      "type": "list",
+      "min": 1,
+      "max": 9,
+      "member": "MetaFlowCategory"
+    },
+    "MetaFlowEndpointUri": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "MetaFlowId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[0-9]+"
+    },
+    "MetaFlowJsonBlob": {
+      "type": "blob",
+      "min": 1,
+      "max": 10485760
+    },
+    "MetaFlowName": {
+      "type": "string",
+      "min": 1,
+      "max": 200
+    },
+    "MetaLibraryTemplate": {
+      "type": "structure",
+      "required": [
+        "templateName",
+        "libraryTemplateName",
+        "templateCategory",
+        "templateLanguage"
+      ],
+      "members": {
+        "templateName": "MetaTemplateName",
+        "libraryTemplateName": "MetaTemplateName",
+        "templateCategory": "MetaTemplateCategory",
+        "templateLanguage": "MetaTemplateLanguage",
+        "libraryTemplateButtonInputs": "MetaLibraryTemplateButtonInputs",
+        "libraryTemplateBodyInputs": "LibraryTemplateBodyInputs"
+      }
+    },
+    "MetaLibraryTemplateButtonInputs": {
+      "type": "list",
+      "member": "LibraryTemplateButtonInput"
+    },
+    "MetaParameterFormat": {
+      "type": "string",
+      "min": 1,
+      "max": 15
+    },
+    "MetaTemplateCategory": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "MetaTemplateComponents": {
+      "type": "blob",
+      "min": 1,
+      "max": 3000
+    },
+    "MetaTemplateCtaLinkTrackingOptedOut": {
+      "type": "boolean"
+    },
+    "MetaTemplateDefinition": {
+      "type": "blob",
+      "min": 1,
+      "max": 6000
+    },
+    "MetaTemplateId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[0-9]+"
+    },
+    "MetaTemplateLanguage": {
+      "type": "string",
+      "min": 1,
+      "max": 6
+    },
+    "MetaTemplateName": {
+      "type": "string",
+      "min": 1,
+      "max": 512
+    },
+    "MetaUrlWithSuffixExample": {
+      "type": "map",
+      "min": 0,
+      "max": 10,
+      "key": "MetaUrlWithSuffixExampleKeyString",
+      "value": "MetaUrlWithSuffixExampleValueString"
+    },
+    "MetaUrlWithSuffixExampleKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 30
+    },
+    "MetaUrlWithSuffixExampleValueString": {
+      "type": "string",
+      "min": 1,
+      "max": 400
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 600
+    },
+    "OtpType": {
+      "type": "string",
+      "min": 1,
+      "max": 25
+    },
+    "PhoneNumber": {
+      "type": "string",
+      "min": 1,
+      "max": 20
+    },
+    "PostWhatsAppMessageMediaInput": {
+      "type": "structure",
+      "required": [
+        "originationPhoneNumberId"
+      ],
+      "members": {
+        "originationPhoneNumberId": "WhatsAppPhoneNumberId",
+        "sourceS3PresignedUrl": "S3PresignedUrl",
+        "sourceS3File": "S3File"
+      }
+    },
+    "PublishWhatsAppFlowInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "flowId"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "flowId": "MetaFlowId"
+      }
+    },
+    "PutWhatsAppBusinessAccountEventDestinationsInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "eventDestinations"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "eventDestinations": "WhatsAppBusinessAccountEventDestinations"
+      }
+    },
+    "PutWhatsAppBusinessPublicKeyInput": {
+      "type": "structure",
+      "required": [
+        "originationPhoneNumberId"
+      ],
+      "members": {
+        "originationPhoneNumberId": "WhatsAppPhoneNumberId",
+        "businessPublicKey": "BusinessPublicKeyPem",
+        "kmsKeyArn": "KmsKeyArn"
+      }
+    },
+    "RoleArn": {
+      "type": "string",
+      "pattern": "arn:.*:iam::\\d{12}:role\\/[a-zA-Z0-9+=,.@\\-_]+"
+    },
+    "S3File": {
+      "type": "structure",
+      "required": [
+        "bucketName",
+        "key"
+      ],
+      "members": {
+        "bucketName": "S3FileBucketNameString",
+        "key": "S3FileKeyString"
+      }
+    },
+    "S3FileBucketNameString": {
+      "type": "string",
+      "min": 3,
+      "max": 63,
+      "pattern": "[a-z0-9][a-z0-9.-]*[a-z0-9]"
+    },
+    "S3FileKeyString": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "S3PresignedUrl": {
+      "type": "structure",
+      "required": [
+        "url",
+        "headers"
+      ],
+      "members": {
+        "url": "S3PresignedUrlUrlString",
+        "headers": "Headers"
+      }
+    },
+    "S3PresignedUrlUrlString": {
+      "type": "string",
+      "min": 1,
+      "max": 2000,
+      "pattern": "https://(.*)s3(.*).amazonaws.com/(.*)"
+    },
+    "SendWhatsAppCallEventInput": {
+      "type": "structure",
+      "required": [
+        "originationPhoneNumberId",
+        "metaApiVersion",
+        "callEvent"
+      ],
+      "members": {
+        "originationPhoneNumberId": "WhatsAppPhoneNumberId",
+        "metaApiVersion": "String",
+        "callEvent": "WhatsAppCallEventBlob"
+      }
+    },
+    "SendWhatsAppConversionEventInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "datasetId",
+        "eventData"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "datasetId": "WhatsAppDatasetId",
+        "eventData": "WhatsAppConversionEventBlob"
+      }
+    },
+    "SendWhatsAppMessageInput": {
+      "type": "structure",
+      "required": [
+        "originationPhoneNumberId",
+        "message",
+        "metaApiVersion"
+      ],
+      "members": {
+        "originationPhoneNumberId": "WhatsAppPhoneNumberId",
+        "message": "WhatsAppMessageBlob",
+        "metaApiVersion": "String"
+      }
+    },
+    "String": {
+      "type": "string"
+    },
+    "StringList": {
+      "type": "list",
+      "member": "String"
+    },
+    "SupportedApp": {
+      "type": "map",
+      "min": 0,
+      "max": 10,
+      "key": "SupportedAppKeyString",
+      "value": "SupportedAppValueString"
+    },
+    "SupportedAppKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 30
+    },
+    "SupportedAppValueString": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "SupportedApps": {
+      "type": "list",
+      "member": "SupportedApp"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "key"
+      ],
+      "members": {
+        "key": "TagKeyString",
+        "value": "TagValueString"
+      }
+    },
+    "TagKeyString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagList": {
+      "type": "list",
+      "member": "Tag"
+    },
+    "TagResourceInput": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tags": "TagList"
+      }
+    },
+    "TagValueString": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "TwoFactorPin": {
+      "type": "string",
+      "min": 1,
+      "max": 6
+    },
+    "UntagResourceInput": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "Arn",
+        "tagKeys": "StringList"
+      }
+    },
+    "UpdateLinkedWhatsAppBusinessAccountPhoneNumberInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "callSettings"
+      ],
+      "members": {
+        "id": "WhatsAppPhoneNumberId",
+        "callSettings": "WhatsAppCallSettings"
+      }
+    },
+    "UpdateWhatsAppFlowAssetsInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "flowId",
+        "flowJson"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "flowId": "MetaFlowId",
+        "flowJson": "MetaFlowJsonBlob"
+      }
+    },
+    "UpdateWhatsAppFlowInput": {
+      "type": "structure",
+      "required": [
+        "id",
+        "flowId"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "flowId": "MetaFlowId",
+        "flowName": "MetaFlowName",
+        "categories": "MetaFlowCategoryList",
+        "endpointUri": "MetaFlowEndpointUri",
+        "metaAppId": "MetaFlowApplicationId"
+      }
+    },
+    "UpdateWhatsAppMessageTemplateInput": {
+      "type": "structure",
+      "required": [
+        "id"
+      ],
+      "members": {
+        "id": "LinkedWhatsAppBusinessAccountId",
+        "metaTemplateId": "MetaTemplateId",
+        "templateName": "MetaTemplateName",
+        "templateLanguageCode": "MetaTemplateLanguage",
+        "parameterFormat": "MetaParameterFormat",
+        "templateCategory": "MetaTemplateCategory",
+        "templateComponents": "MetaTemplateComponents",
+        "ctaUrlLinkTrackingOptedOut": "MetaTemplateCtaLinkTrackingOptedOut"
+      }
+    },
+    "WabaPhoneNumberSetupFinalization": {
+      "type": "structure",
+      "required": [
+        "id",
+        "twoFactorPin"
+      ],
+      "members": {
+        "id": "WhatsAppPhoneNumber",
+        "twoFactorPin": "TwoFactorPin",
+        "dataLocalizationRegion": "IsoCountryCode",
+        "tags": "TagList"
+      }
+    },
+    "WabaPhoneNumberSetupFinalizationList": {
+      "type": "list",
+      "member": "WabaPhoneNumberSetupFinalization"
+    },
+    "WabaSetupFinalization": {
+      "type": "structure",
+      "members": {
+        "id": "WhatsAppBusinessAccountId",
+        "eventDestinations": "WhatsAppBusinessAccountEventDestinations",
+        "tags": "TagList"
+      }
+    },
+    "WhatsAppBusinessAccountEventDestination": {
+      "type": "structure",
+      "required": [
+        "eventDestinationArn"
+      ],
+      "members": {
+        "eventDestinationArn": "EventDestinationArn",
+        "roleArn": "RoleArn"
+      }
+    },
+    "WhatsAppBusinessAccountEventDestinations": {
+      "type": "list",
+      "min": 0,
+      "max": 1,
+      "member": "WhatsAppBusinessAccountEventDestination"
+    },
+    "WhatsAppBusinessAccountId": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "WhatsAppBusinessScopedUserId": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "WhatsAppCallEventBlob": {
+      "type": "blob",
+      "min": 1,
+      "max": 2048000
+    },
+    "WhatsAppCallHours": {
+      "type": "structure",
+      "required": [
+        "enabled",
+        "timezone",
+        "weeklyOperatingHours"
+      ],
+      "members": {
+        "enabled": "Boolean",
+        "timezone": "IanaTimezone",
+        "weeklyOperatingHours": "WhatsAppWeeklyOperatingHoursList",
+        "holidaySchedule": "WhatsAppHolidayScheduleList"
+      }
+    },
+    "WhatsAppCallIconVisibility": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "WhatsAppCallSettings": {
+      "type": "structure",
+      "required": [
+        "callEnabled"
+      ],
+      "members": {
+        "callEnabled": "Boolean",
+        "callHours": "WhatsAppCallHours",
+        "callIconVisibility": "WhatsAppCallIconVisibility",
+        "callbackPermissionStatus": "WhatsAppCallbackPermissionStatus"
+      }
+    },
+    "WhatsAppCallbackPermissionStatus": {
+      "type": "string",
+      "min": 1,
+      "max": 50
+    },
+    "WhatsAppConversionEventBlob": {
+      "type": "blob",
+      "min": 1,
+      "max": 1024000
+    },
+    "WhatsAppDatasetId": {
+      "type": "string",
+      "min": 10,
+      "max": 20,
+      "pattern": "[0-9]+"
+    },
+    "WhatsAppDate": {
+      "type": "string",
+      "min": 10,
+      "max": 10,
+      "pattern": "[0-9]{4}-[0-9]{2}-[0-9]{2}"
+    },
+    "WhatsAppDayOfWeek": {
+      "type": "string",
+      "enum": [
+        "MONDAY",
+        "TUESDAY",
+        "WEDNESDAY",
+        "THURSDAY",
+        "FRIDAY",
+        "SATURDAY",
+        "SUNDAY"
+      ]
+    },
+    "WhatsAppDestinationPhoneNumber": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "pattern": "\\+[1-9]\\d{1,14}"
+    },
+    "WhatsAppHolidayScheduleEntry": {
+      "type": "structure",
+      "required": [
+        "date",
+        "startTime",
+        "endTime"
+      ],
+      "members": {
+        "date": "WhatsAppDate",
+        "startTime": "WhatsAppTimeOfDay",
+        "endTime": "WhatsAppTimeOfDay"
+      }
+    },
+    "WhatsAppHolidayScheduleList": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "WhatsAppHolidayScheduleEntry"
+    },
+    "WhatsAppMediaId": {
+      "type": "string",
+      "min": 1,
+      "max": 100,
+      "pattern": "[A-Za-z0-9]+"
+    },
+    "WhatsAppMessageBlob": {
+      "type": "blob",
+      "min": 1,
+      "max": 2048000
+    },
+    "WhatsAppPhoneNumber": {
+      "type": "string",
+      "min": 1,
+      "max": 100
+    },
+    "WhatsAppPhoneNumberId": {
+      "type": "string",
+      "min": 1,
+      "max": 115,
+      "pattern": ".*(^phone-number-id-.*$)|(^arn:.*:phone-number-id/[0-9a-zA-Z]+$).*"
+    },
+    "WhatsAppSetupFinalization": {
+      "type": "structure",
+      "required": [
+        "associateInProgressToken",
+        "phoneNumbers"
+      ],
+      "members": {
+        "associateInProgressToken": "AssociateInProgressToken",
+        "phoneNumbers": "WabaPhoneNumberSetupFinalizationList",
+        "phoneNumberParent": "LinkedWhatsAppBusinessAccountId",
+        "waba": "WabaSetupFinalization"
+      }
+    },
+    "WhatsAppSignupCallback": {
+      "type": "structure",
+      "required": [
+        "accessToken"
+      ],
+      "members": {
+        "accessToken": "WhatsAppSignupCallbackAccessTokenString",
+        "callbackUrl": "WhatsAppSignupCallbackCallbackUrlString"
+      }
+    },
+    "WhatsAppSignupCallbackAccessTokenString": {
+      "type": "string",
+      "min": 0,
+      "max": 1000
+    },
+    "WhatsAppSignupCallbackCallbackUrlString": {
+      "type": "string",
+      "min": 0,
+      "max": 100
+    },
+    "WhatsAppTimeOfDay": {
+      "type": "structure",
+      "required": [
+        "hours",
+        "minutes"
+      ],
+      "members": {
+        "hours": "WhatsAppTimeOfDayHoursInteger",
+        "minutes": "WhatsAppTimeOfDayMinutesInteger"
+      }
+    },
+    "WhatsAppTimeOfDayHoursInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 23
+    },
+    "WhatsAppTimeOfDayMinutesInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 59
+    },
+    "WhatsAppWeeklyOperatingHoursEntry": {
+      "type": "structure",
+      "required": [
+        "dayOfWeek",
+        "openTime",
+        "closeTime"
+      ],
+      "members": {
+        "dayOfWeek": "WhatsAppDayOfWeek",
+        "openTime": "WhatsAppTimeOfDay",
+        "closeTime": "WhatsAppTimeOfDay"
+      }
+    },
+    "WhatsAppWeeklyOperatingHoursList": {
+      "type": "list",
+      "min": 0,
+      "max": 14,
+      "member": "WhatsAppWeeklyOperatingHoursEntry"
+    },
+    "ZeroTapTermsAccepted": {
+      "type": "boolean"
+    }
+  }
+}

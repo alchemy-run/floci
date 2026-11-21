@@ -1,5 +1,6 @@
 package io.floci.aws.services.ecs;
 
+import io.floci.aws.testing.Ec2Defaults;
 import io.floci.aws.testing.RestAssuredJsonUtils;
 import io.quarkus.test.junit.QuarkusTest;
 import io.restassured.response.Response;
@@ -30,7 +31,7 @@ class EcsManagedInstancesIntegrationTest {
     private static final String CT = "application/x-amz-json-1.1";
     private static final String EC2_AUTH =
             "AWS4-HMAC-SHA256 Credential=test/20260205/us-east-1/ec2/aws4_request";
-    private static final String SUBNET = "subnet-default-us-east-1-a";
+    private static final String SUBNET = Ec2Defaults.SUBNET_A;
     private static final String NETWORK =
             "\"networkConfiguration\":{\"awsvpcConfiguration\":{\"subnets\":[\"" + SUBNET + "\"]}}";
 

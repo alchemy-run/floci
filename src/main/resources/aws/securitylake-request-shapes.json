@@ -1,0 +1,709 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_securitylake_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateAwsLogSource": "CreateAwsLogSourceRequest",
+    "CreateCustomLogSource": "CreateCustomLogSourceRequest",
+    "CreateDataLake": "CreateDataLakeRequest",
+    "CreateDataLakeExceptionSubscription": "CreateDataLakeExceptionSubscriptionRequest",
+    "CreateDataLakeOrganizationConfiguration": "CreateDataLakeOrganizationConfigurationRequest",
+    "CreateSubscriber": "CreateSubscriberRequest",
+    "CreateSubscriberNotification": "CreateSubscriberNotificationRequest",
+    "DeleteAwsLogSource": "DeleteAwsLogSourceRequest",
+    "DeleteCustomLogSource": "DeleteCustomLogSourceRequest",
+    "DeleteDataLake": "DeleteDataLakeRequest",
+    "DeleteDataLakeExceptionSubscription": "DeleteDataLakeExceptionSubscriptionRequest",
+    "DeleteDataLakeOrganizationConfiguration": "DeleteDataLakeOrganizationConfigurationRequest",
+    "DeleteSubscriber": "DeleteSubscriberRequest",
+    "DeleteSubscriberNotification": "DeleteSubscriberNotificationRequest",
+    "DeregisterDataLakeDelegatedAdministrator": "DeregisterDataLakeDelegatedAdministratorRequest",
+    "GetDataLakeExceptionSubscription": "GetDataLakeExceptionSubscriptionRequest",
+    "GetDataLakeOrganizationConfiguration": "GetDataLakeOrganizationConfigurationRequest",
+    "GetDataLakeSources": "GetDataLakeSourcesRequest",
+    "GetSubscriber": "GetSubscriberRequest",
+    "ListDataLakeExceptions": "ListDataLakeExceptionsRequest",
+    "ListDataLakes": "ListDataLakesRequest",
+    "ListLogSources": "ListLogSourcesRequest",
+    "ListSubscribers": "ListSubscribersRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "RegisterDataLakeDelegatedAdministrator": "RegisterDataLakeDelegatedAdministratorRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateDataLake": "UpdateDataLakeRequest",
+    "UpdateDataLakeExceptionSubscription": "UpdateDataLakeExceptionSubscriptionRequest",
+    "UpdateSubscriber": "UpdateSubscriberRequest",
+    "UpdateSubscriberNotification": "UpdateSubscriberNotificationRequest"
+  },
+  "shapes": {
+    "AccessType": {
+      "type": "string",
+      "enum": [
+        "LAKEFORMATION",
+        "S3"
+      ]
+    },
+    "AccessTypeList": {
+      "type": "list",
+      "member": "AccessType"
+    },
+    "AccountList": {
+      "type": "list",
+      "member": "AwsAccountId"
+    },
+    "AmazonResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 1011,
+      "pattern": "^arn:(aws|aws-us-gov|aws-cn):securitylake:[A-Za-z0-9_/.\\-]{0,63}:[A-Za-z0-9_/.\\-]{0,63}:[A-Za-z0-9][A-Za-z0-9_/.\\-]{0,127}$"
+    },
+    "AwsAccountId": {
+      "type": "string",
+      "min": 12,
+      "max": 12,
+      "pattern": "^[0-9]{12}$"
+    },
+    "AwsIdentity": {
+      "type": "structure",
+      "required": [
+        "externalId",
+        "principal"
+      ],
+      "members": {
+        "externalId": "ExternalId",
+        "principal": "AwsPrincipal"
+      }
+    },
+    "AwsLogSourceConfiguration": {
+      "type": "structure",
+      "required": [
+        "regions",
+        "sourceName"
+      ],
+      "members": {
+        "accounts": "AccountList",
+        "regions": "RegionList",
+        "sourceName": "AwsLogSourceName",
+        "sourceVersion": "AwsLogSourceVersion"
+      }
+    },
+    "AwsLogSourceConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "AwsLogSourceConfiguration"
+    },
+    "AwsLogSourceName": {
+      "type": "string",
+      "enum": [
+        "ROUTE53",
+        "VPC_FLOW",
+        "SH_FINDINGS",
+        "CLOUD_TRAIL_MGMT",
+        "LAMBDA_EXECUTION",
+        "S3_DATA",
+        "EKS_AUDIT",
+        "WAF"
+      ]
+    },
+    "AwsLogSourceResource": {
+      "type": "structure",
+      "members": {
+        "sourceName": "AwsLogSourceName",
+        "sourceVersion": "AwsLogSourceVersion"
+      }
+    },
+    "AwsLogSourceResourceList": {
+      "type": "list",
+      "min": 1,
+      "member": "AwsLogSourceResource"
+    },
+    "AwsLogSourceVersion": {
+      "type": "string",
+      "pattern": "^(latest|[0-9]\\.[0-9])$"
+    },
+    "AwsPrincipal": {
+      "type": "string",
+      "pattern": "^([0-9]{12}|[a-z0-9\\.\\-]*\\.(amazonaws|amazon)\\.com)$"
+    },
+    "CreateAwsLogSourceRequest": {
+      "type": "structure",
+      "required": [
+        "sources"
+      ],
+      "members": {
+        "sources": "AwsLogSourceConfigurationList"
+      }
+    },
+    "CreateCustomLogSourceRequest": {
+      "type": "structure",
+      "required": [
+        "configuration",
+        "sourceName"
+      ],
+      "members": {
+        "configuration": "CustomLogSourceConfiguration",
+        "eventClasses": "OcsfEventClassList",
+        "sourceName": "CustomLogSourceName",
+        "sourceVersion": "CustomLogSourceVersion"
+      }
+    },
+    "CreateDataLakeExceptionSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "notificationEndpoint",
+        "subscriptionProtocol"
+      ],
+      "members": {
+        "exceptionTimeToLive": "CreateDataLakeExceptionSubscriptionRequestExceptionTimeToLiveLong",
+        "notificationEndpoint": "SafeString",
+        "subscriptionProtocol": "SubscriptionProtocol"
+      }
+    },
+    "CreateDataLakeExceptionSubscriptionRequestExceptionTimeToLiveLong": {
+      "type": "long",
+      "min": 1
+    },
+    "CreateDataLakeOrganizationConfigurationRequest": {
+      "type": "structure",
+      "members": {
+        "autoEnableNewAccount": "DataLakeAutoEnableNewAccountConfigurationList"
+      }
+    },
+    "CreateDataLakeRequest": {
+      "type": "structure",
+      "required": [
+        "configurations",
+        "metaStoreManagerRoleArn"
+      ],
+      "members": {
+        "configurations": "DataLakeConfigurationList",
+        "metaStoreManagerRoleArn": "RoleArn",
+        "tags": "TagList"
+      }
+    },
+    "CreateSubscriberNotificationRequest": {
+      "type": "structure",
+      "required": [
+        "configuration",
+        "subscriberId"
+      ],
+      "members": {
+        "configuration": "NotificationConfiguration",
+        "subscriberId": "UUID"
+      }
+    },
+    "CreateSubscriberRequest": {
+      "type": "structure",
+      "required": [
+        "sources",
+        "subscriberIdentity",
+        "subscriberName"
+      ],
+      "members": {
+        "accessTypes": "AccessTypeList",
+        "sources": "LogSourceResourceList",
+        "subscriberDescription": "DescriptionString",
+        "subscriberIdentity": "AwsIdentity",
+        "subscriberName": "CreateSubscriberRequestSubscriberNameString",
+        "tags": "TagList"
+      }
+    },
+    "CreateSubscriberRequestSubscriberNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 64
+    },
+    "CustomLogSourceAttributes": {
+      "type": "structure",
+      "members": {
+        "crawlerArn": "AmazonResourceName",
+        "databaseArn": "AmazonResourceName",
+        "tableArn": "AmazonResourceName"
+      }
+    },
+    "CustomLogSourceConfiguration": {
+      "type": "structure",
+      "required": [
+        "crawlerConfiguration",
+        "providerIdentity"
+      ],
+      "members": {
+        "crawlerConfiguration": "CustomLogSourceCrawlerConfiguration",
+        "providerIdentity": "AwsIdentity"
+      }
+    },
+    "CustomLogSourceCrawlerConfiguration": {
+      "type": "structure",
+      "required": [
+        "roleArn"
+      ],
+      "members": {
+        "roleArn": "RoleArn"
+      }
+    },
+    "CustomLogSourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 64,
+      "pattern": "^[\\w\\-\\_\\:\\.]*$"
+    },
+    "CustomLogSourceProvider": {
+      "type": "structure",
+      "members": {
+        "location": "S3URI",
+        "roleArn": "RoleArn"
+      }
+    },
+    "CustomLogSourceResource": {
+      "type": "structure",
+      "members": {
+        "attributes": "CustomLogSourceAttributes",
+        "provider": "CustomLogSourceProvider",
+        "sourceName": "CustomLogSourceName",
+        "sourceVersion": "CustomLogSourceVersion"
+      }
+    },
+    "CustomLogSourceVersion": {
+      "type": "string",
+      "min": 1,
+      "max": 32,
+      "pattern": "^[A-Za-z0-9\\-\\.\\_]*$"
+    },
+    "DataLakeAutoEnableNewAccountConfiguration": {
+      "type": "structure",
+      "required": [
+        "region",
+        "sources"
+      ],
+      "members": {
+        "region": "Region",
+        "sources": "AwsLogSourceResourceList"
+      }
+    },
+    "DataLakeAutoEnableNewAccountConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "member": "DataLakeAutoEnableNewAccountConfiguration"
+    },
+    "DataLakeConfiguration": {
+      "type": "structure",
+      "required": [
+        "region"
+      ],
+      "members": {
+        "encryptionConfiguration": "DataLakeEncryptionConfiguration",
+        "lifecycleConfiguration": "DataLakeLifecycleConfiguration",
+        "region": "Region",
+        "replicationConfiguration": "DataLakeReplicationConfiguration"
+      }
+    },
+    "DataLakeConfigurationList": {
+      "type": "list",
+      "min": 1,
+      "member": "DataLakeConfiguration"
+    },
+    "DataLakeEncryptionConfiguration": {
+      "type": "structure",
+      "members": {
+        "kmsKeyId": "String"
+      }
+    },
+    "DataLakeLifecycleConfiguration": {
+      "type": "structure",
+      "members": {
+        "expiration": "DataLakeLifecycleExpiration",
+        "transitions": "DataLakeLifecycleTransitionList"
+      }
+    },
+    "DataLakeLifecycleExpiration": {
+      "type": "structure",
+      "members": {
+        "days": "DataLakeLifecycleExpirationDaysInteger"
+      }
+    },
+    "DataLakeLifecycleExpirationDaysInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "DataLakeLifecycleTransition": {
+      "type": "structure",
+      "members": {
+        "days": "DataLakeLifecycleTransitionDaysInteger",
+        "storageClass": "DataLakeStorageClass"
+      }
+    },
+    "DataLakeLifecycleTransitionDaysInteger": {
+      "type": "integer",
+      "min": 1
+    },
+    "DataLakeLifecycleTransitionList": {
+      "type": "list",
+      "member": "DataLakeLifecycleTransition"
+    },
+    "DataLakeReplicationConfiguration": {
+      "type": "structure",
+      "members": {
+        "regions": "RegionList",
+        "roleArn": "RoleArn"
+      }
+    },
+    "DataLakeStorageClass": {
+      "type": "string"
+    },
+    "DeleteAwsLogSourceRequest": {
+      "type": "structure",
+      "required": [
+        "sources"
+      ],
+      "members": {
+        "sources": "AwsLogSourceConfigurationList"
+      }
+    },
+    "DeleteCustomLogSourceRequest": {
+      "type": "structure",
+      "required": [
+        "sourceName"
+      ],
+      "members": {
+        "sourceName": "CustomLogSourceName",
+        "sourceVersion": "CustomLogSourceVersion"
+      }
+    },
+    "DeleteDataLakeExceptionSubscriptionRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DeleteDataLakeOrganizationConfigurationRequest": {
+      "type": "structure",
+      "members": {
+        "autoEnableNewAccount": "DataLakeAutoEnableNewAccountConfigurationList"
+      }
+    },
+    "DeleteDataLakeRequest": {
+      "type": "structure",
+      "required": [
+        "regions"
+      ],
+      "members": {
+        "regions": "RegionList"
+      }
+    },
+    "DeleteSubscriberNotificationRequest": {
+      "type": "structure",
+      "required": [
+        "subscriberId"
+      ],
+      "members": {
+        "subscriberId": "UUID"
+      }
+    },
+    "DeleteSubscriberRequest": {
+      "type": "structure",
+      "required": [
+        "subscriberId"
+      ],
+      "members": {
+        "subscriberId": "UUID"
+      }
+    },
+    "DeregisterDataLakeDelegatedAdministratorRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "DescriptionString": {
+      "type": "string",
+      "pattern": "^[\\\\\\w\\s\\-_:/,.@=+]*$"
+    },
+    "ExternalId": {
+      "type": "string",
+      "min": 2,
+      "max": 1224,
+      "pattern": "^[\\w+=,.@:\\/-]*$"
+    },
+    "GetDataLakeExceptionSubscriptionRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetDataLakeOrganizationConfigurationRequest": {
+      "type": "structure",
+      "members": {}
+    },
+    "GetDataLakeSourcesRequest": {
+      "type": "structure",
+      "members": {
+        "accounts": "AccountList",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "GetSubscriberRequest": {
+      "type": "structure",
+      "required": [
+        "subscriberId"
+      ],
+      "members": {
+        "subscriberId": "UUID"
+      }
+    },
+    "HttpMethod": {
+      "type": "string",
+      "enum": [
+        "POST",
+        "PUT"
+      ]
+    },
+    "HttpsNotificationConfiguration": {
+      "type": "structure",
+      "required": [
+        "endpoint",
+        "targetRoleArn"
+      ],
+      "members": {
+        "authorizationApiKeyName": "String",
+        "authorizationApiKeyValue": "String",
+        "endpoint": "HttpsNotificationConfigurationEndpointString",
+        "httpMethod": "HttpMethod",
+        "targetRoleArn": "RoleArn"
+      }
+    },
+    "HttpsNotificationConfigurationEndpointString": {
+      "type": "string",
+      "pattern": "^https?://.+$"
+    },
+    "ListDataLakeExceptionsRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "regions": "RegionList"
+      }
+    },
+    "ListDataLakesRequest": {
+      "type": "structure",
+      "members": {
+        "regions": "RegionList"
+      }
+    },
+    "ListLogSourcesRequest": {
+      "type": "structure",
+      "members": {
+        "accounts": "AccountList",
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken",
+        "regions": "RegionList",
+        "sources": "LogSourceResourceList"
+      }
+    },
+    "ListSubscribersRequest": {
+      "type": "structure",
+      "members": {
+        "maxResults": "MaxResults",
+        "nextToken": "NextToken"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName"
+      }
+    },
+    "LogSourceResource": {
+      "type": "structure",
+      "members": {
+        "awsLogSource": "AwsLogSourceResource",
+        "customLogSource": "CustomLogSourceResource"
+      }
+    },
+    "LogSourceResourceList": {
+      "type": "list",
+      "member": "LogSourceResource"
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 0,
+      "max": 2048
+    },
+    "NotificationConfiguration": {
+      "type": "structure",
+      "members": {
+        "httpsNotificationConfiguration": "HttpsNotificationConfiguration",
+        "sqsNotificationConfiguration": "SqsNotificationConfiguration"
+      }
+    },
+    "OcsfEventClass": {
+      "type": "string",
+      "pattern": "^[A-Z\\_0-9]*$"
+    },
+    "OcsfEventClassList": {
+      "type": "list",
+      "member": "OcsfEventClass"
+    },
+    "Region": {
+      "type": "string",
+      "pattern": "^(us(-gov)?|af|ap|ca|eu|me|sa)-(central|north|(north(?:east|west))|south|south(?:east|west)|east|west)-\\d+$"
+    },
+    "RegionList": {
+      "type": "list",
+      "member": "Region"
+    },
+    "RegisterDataLakeDelegatedAdministratorRequest": {
+      "type": "structure",
+      "required": [
+        "accountId"
+      ],
+      "members": {
+        "accountId": "SafeString"
+      }
+    },
+    "RoleArn": {
+      "type": "string",
+      "pattern": "^arn:(aws[a-zA-Z-]*)?:iam::\\d{12}:role/?[a-zA-Z_0-9+=,.@\\-_/]+$"
+    },
+    "S3URI": {
+      "type": "string",
+      "min": 0,
+      "max": 1024,
+      "pattern": "^s3[an]?://[a-z0-9][\\.\\-a-z0-9]{1,61}[a-z0-9](/[^/].*)+$"
+    },
+    "SafeString": {
+      "type": "string",
+      "pattern": "^[\\\\\\w\\-_:/.@=+]*$"
+    },
+    "SqsNotificationConfiguration": {
+      "type": "structure",
+      "members": {}
+    },
+    "String": {
+      "type": "string"
+    },
+    "SubscriptionProtocol": {
+      "type": "string",
+      "pattern": "^[a-z\\-]*$"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "key",
+        "value"
+      ],
+      "members": {
+        "key": "TagKey",
+        "value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagKeyList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "TagKey"
+    },
+    "TagList": {
+      "type": "list",
+      "min": 0,
+      "max": 50,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName",
+        "tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 0,
+      "max": 256
+    },
+    "UUID": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$"
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tagKeys"
+      ],
+      "members": {
+        "resourceArn": "AmazonResourceName",
+        "tagKeys": "TagKeyList"
+      }
+    },
+    "UpdateDataLakeExceptionSubscriptionRequest": {
+      "type": "structure",
+      "required": [
+        "notificationEndpoint",
+        "subscriptionProtocol"
+      ],
+      "members": {
+        "exceptionTimeToLive": "UpdateDataLakeExceptionSubscriptionRequestExceptionTimeToLiveLong",
+        "notificationEndpoint": "SafeString",
+        "subscriptionProtocol": "SubscriptionProtocol"
+      }
+    },
+    "UpdateDataLakeExceptionSubscriptionRequestExceptionTimeToLiveLong": {
+      "type": "long",
+      "min": 1
+    },
+    "UpdateDataLakeRequest": {
+      "type": "structure",
+      "required": [
+        "configurations"
+      ],
+      "members": {
+        "configurations": "DataLakeConfigurationList",
+        "metaStoreManagerRoleArn": "RoleArn"
+      }
+    },
+    "UpdateSubscriberNotificationRequest": {
+      "type": "structure",
+      "required": [
+        "configuration",
+        "subscriberId"
+      ],
+      "members": {
+        "configuration": "NotificationConfiguration",
+        "subscriberId": "UUID"
+      }
+    },
+    "UpdateSubscriberRequest": {
+      "type": "structure",
+      "required": [
+        "subscriberId"
+      ],
+      "members": {
+        "sources": "LogSourceResourceList",
+        "subscriberDescription": "DescriptionString",
+        "subscriberId": "UUID",
+        "subscriberIdentity": "AwsIdentity",
+        "subscriberName": "UpdateSubscriberRequestSubscriberNameString"
+      }
+    },
+    "UpdateSubscriberRequestSubscriberNameString": {
+      "type": "string",
+      "min": 0,
+      "max": 64,
+      "pattern": "^[\\\\\\w\\-_:/.@=+]*$"
+    }
+  }
+}

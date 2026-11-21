@@ -1,0 +1,681 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_keyspaces_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CreateKeyspace": "CreateKeyspaceRequest",
+    "CreateTable": "CreateTableRequest",
+    "CreateType": "CreateTypeRequest",
+    "DeleteKeyspace": "DeleteKeyspaceRequest",
+    "DeleteTable": "DeleteTableRequest",
+    "DeleteType": "DeleteTypeRequest",
+    "GetKeyspace": "GetKeyspaceRequest",
+    "GetTable": "GetTableRequest",
+    "GetTableAutoScalingSettings": "GetTableAutoScalingSettingsRequest",
+    "GetType": "GetTypeRequest",
+    "ListKeyspaces": "ListKeyspacesRequest",
+    "ListTables": "ListTablesRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "ListTypes": "ListTypesRequest",
+    "RestoreTable": "RestoreTableRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateKeyspace": "UpdateKeyspaceRequest",
+    "UpdateTable": "UpdateTableRequest"
+  },
+  "shapes": {
+    "ARN": {
+      "type": "string",
+      "min": 20,
+      "max": 1000,
+      "pattern": "arn:(aws[a-zA-Z0-9-]*):cassandra:.+.*"
+    },
+    "AutoScalingPolicy": {
+      "type": "structure",
+      "members": {
+        "targetTrackingScalingPolicyConfiguration": "TargetTrackingScalingPolicyConfiguration"
+      }
+    },
+    "AutoScalingSettings": {
+      "type": "structure",
+      "members": {
+        "autoScalingDisabled": "BooleanObject",
+        "minimumUnits": "CapacityUnits",
+        "maximumUnits": "CapacityUnits",
+        "scalingPolicy": "AutoScalingPolicy"
+      }
+    },
+    "AutoScalingSpecification": {
+      "type": "structure",
+      "members": {
+        "writeCapacityAutoScaling": "AutoScalingSettings",
+        "readCapacityAutoScaling": "AutoScalingSettings"
+      }
+    },
+    "BooleanObject": {
+      "type": "boolean"
+    },
+    "CapacitySpecification": {
+      "type": "structure",
+      "required": [
+        "throughputMode"
+      ],
+      "members": {
+        "throughputMode": "ThroughputMode",
+        "readCapacityUnits": "CapacityUnits",
+        "writeCapacityUnits": "CapacityUnits"
+      }
+    },
+    "CapacityUnits": {
+      "type": "long",
+      "min": 1
+    },
+    "CdcPropagateTags": {
+      "type": "string",
+      "enum": [
+        "TABLE",
+        "NONE"
+      ]
+    },
+    "CdcSpecification": {
+      "type": "structure",
+      "required": [
+        "status"
+      ],
+      "members": {
+        "status": "CdcStatus",
+        "viewType": "ViewType",
+        "tags": "TagList",
+        "propagateTags": "CdcPropagateTags"
+      }
+    },
+    "CdcStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "ENABLING",
+        "DISABLED",
+        "DISABLING"
+      ]
+    },
+    "ClientSideTimestamps": {
+      "type": "structure",
+      "required": [
+        "status"
+      ],
+      "members": {
+        "status": "ClientSideTimestampsStatus"
+      }
+    },
+    "ClientSideTimestampsStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED"
+      ]
+    },
+    "ClusteringKey": {
+      "type": "structure",
+      "required": [
+        "name",
+        "orderBy"
+      ],
+      "members": {
+        "name": "GenericString",
+        "orderBy": "SortOrder"
+      }
+    },
+    "ClusteringKeyList": {
+      "type": "list",
+      "member": "ClusteringKey"
+    },
+    "ColumnDefinition": {
+      "type": "structure",
+      "required": [
+        "name",
+        "type"
+      ],
+      "members": {
+        "name": "GenericString",
+        "type": "GenericString"
+      }
+    },
+    "ColumnDefinitionList": {
+      "type": "list",
+      "min": 1,
+      "member": "ColumnDefinition"
+    },
+    "Comment": {
+      "type": "structure",
+      "required": [
+        "message"
+      ],
+      "members": {
+        "message": "String"
+      }
+    },
+    "CreateKeyspaceRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName",
+        "tags": "TagList",
+        "replicationSpecification": "ReplicationSpecification"
+      }
+    },
+    "CreateTableRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName",
+        "tableName",
+        "schemaDefinition"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName",
+        "tableName": "TableName",
+        "schemaDefinition": "SchemaDefinition",
+        "comment": "Comment",
+        "capacitySpecification": "CapacitySpecification",
+        "encryptionSpecification": "EncryptionSpecification",
+        "pointInTimeRecovery": "PointInTimeRecovery",
+        "ttl": "TimeToLive",
+        "defaultTimeToLive": "DefaultTimeToLive",
+        "tags": "TagList",
+        "clientSideTimestamps": "ClientSideTimestamps",
+        "autoScalingSpecification": "AutoScalingSpecification",
+        "replicaSpecifications": "ReplicaSpecificationList",
+        "cdcSpecification": "CdcSpecification",
+        "warmThroughputSpecification": "WarmThroughputSpecification"
+      }
+    },
+    "CreateTypeRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName",
+        "typeName",
+        "fieldDefinitions"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName",
+        "typeName": "TypeName",
+        "fieldDefinitions": "FieldList"
+      }
+    },
+    "DefaultTimeToLive": {
+      "type": "integer",
+      "min": 0,
+      "max": 630720000
+    },
+    "DeleteKeyspaceRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName"
+      }
+    },
+    "DeleteTableRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName",
+        "tableName"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName",
+        "tableName": "TableName"
+      }
+    },
+    "DeleteTypeRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName",
+        "typeName"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName",
+        "typeName": "TypeName"
+      }
+    },
+    "DoubleObject": {
+      "type": "double"
+    },
+    "EncryptionSpecification": {
+      "type": "structure",
+      "required": [
+        "type"
+      ],
+      "members": {
+        "type": "EncryptionType",
+        "kmsKeyIdentifier": "kmsKeyARN"
+      }
+    },
+    "EncryptionType": {
+      "type": "string",
+      "enum": [
+        "CUSTOMER_MANAGED_KMS_KEY",
+        "AWS_OWNED_KMS_KEY"
+      ]
+    },
+    "FieldDefinition": {
+      "type": "structure",
+      "required": [
+        "name",
+        "type"
+      ],
+      "members": {
+        "name": "FieldDefinitionNameString",
+        "type": "GenericString"
+      }
+    },
+    "FieldDefinitionNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "FieldList": {
+      "type": "list",
+      "min": 1,
+      "member": "FieldDefinition"
+    },
+    "GenericString": {
+      "type": "string"
+    },
+    "GetKeyspaceRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName"
+      }
+    },
+    "GetTableAutoScalingSettingsRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName",
+        "tableName"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName",
+        "tableName": "TableName"
+      }
+    },
+    "GetTableRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName",
+        "tableName"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName",
+        "tableName": "TableName"
+      }
+    },
+    "GetTypeRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName",
+        "typeName"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName",
+        "typeName": "TypeName"
+      }
+    },
+    "IntegerObject": {
+      "type": "integer"
+    },
+    "KeyspaceName": {
+      "type": "string",
+      "min": 1,
+      "max": 48,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_]{0,47}"
+    },
+    "ListKeyspacesRequest": {
+      "type": "structure",
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListTablesRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName"
+      ],
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "keyspaceName": "KeyspaceName"
+      }
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn"
+      ],
+      "members": {
+        "resourceArn": "ARN",
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults"
+      }
+    },
+    "ListTypesRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName"
+      ],
+      "members": {
+        "nextToken": "NextToken",
+        "maxResults": "MaxResults",
+        "keyspaceName": "KeyspaceName"
+      }
+    },
+    "MaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "NextToken": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "PartitionKey": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "GenericString"
+      }
+    },
+    "PartitionKeyList": {
+      "type": "list",
+      "min": 1,
+      "member": "PartitionKey"
+    },
+    "PointInTimeRecovery": {
+      "type": "structure",
+      "required": [
+        "status"
+      ],
+      "members": {
+        "status": "PointInTimeRecoveryStatus"
+      }
+    },
+    "PointInTimeRecoveryStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED",
+        "DISABLED"
+      ]
+    },
+    "RegionList": {
+      "type": "list",
+      "min": 2,
+      "member": "region"
+    },
+    "ReplicaSpecification": {
+      "type": "structure",
+      "required": [
+        "region"
+      ],
+      "members": {
+        "region": "region",
+        "readCapacityUnits": "CapacityUnits",
+        "readCapacityAutoScaling": "AutoScalingSettings"
+      }
+    },
+    "ReplicaSpecificationList": {
+      "type": "list",
+      "min": 1,
+      "member": "ReplicaSpecification"
+    },
+    "ReplicationSpecification": {
+      "type": "structure",
+      "required": [
+        "replicationStrategy"
+      ],
+      "members": {
+        "replicationStrategy": "rs",
+        "regionList": "RegionList"
+      }
+    },
+    "RestoreTableRequest": {
+      "type": "structure",
+      "required": [
+        "sourceKeyspaceName",
+        "sourceTableName",
+        "targetKeyspaceName",
+        "targetTableName"
+      ],
+      "members": {
+        "sourceKeyspaceName": "KeyspaceName",
+        "sourceTableName": "TableName",
+        "targetKeyspaceName": "KeyspaceName",
+        "targetTableName": "TableName",
+        "restoreTimestamp": "Timestamp",
+        "capacitySpecificationOverride": "CapacitySpecification",
+        "encryptionSpecificationOverride": "EncryptionSpecification",
+        "pointInTimeRecoveryOverride": "PointInTimeRecovery",
+        "tagsOverride": "TagList",
+        "autoScalingSpecification": "AutoScalingSpecification",
+        "replicaSpecifications": "ReplicaSpecificationList"
+      }
+    },
+    "SchemaDefinition": {
+      "type": "structure",
+      "required": [
+        "allColumns",
+        "partitionKeys"
+      ],
+      "members": {
+        "allColumns": "ColumnDefinitionList",
+        "partitionKeys": "PartitionKeyList",
+        "clusteringKeys": "ClusteringKeyList",
+        "staticColumns": "StaticColumnList"
+      }
+    },
+    "SortOrder": {
+      "type": "string",
+      "enum": [
+        "ASC",
+        "DESC"
+      ]
+    },
+    "StaticColumn": {
+      "type": "structure",
+      "required": [
+        "name"
+      ],
+      "members": {
+        "name": "GenericString"
+      }
+    },
+    "StaticColumnList": {
+      "type": "list",
+      "member": "StaticColumn"
+    },
+    "String": {
+      "type": "string"
+    },
+    "TableName": {
+      "type": "string",
+      "min": 1,
+      "max": 48,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_]{0,47}"
+    },
+    "Tag": {
+      "type": "structure",
+      "required": [
+        "key",
+        "value"
+      ],
+      "members": {
+        "key": "TagKey",
+        "value": "TagValue"
+      }
+    },
+    "TagKey": {
+      "type": "string",
+      "min": 1,
+      "max": 128
+    },
+    "TagList": {
+      "type": "list",
+      "min": 1,
+      "max": 60,
+      "member": "Tag"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "ARN",
+        "tags": "TagList"
+      }
+    },
+    "TagValue": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "TargetTrackingScalingPolicyConfiguration": {
+      "type": "structure",
+      "required": [
+        "targetValue"
+      ],
+      "members": {
+        "disableScaleIn": "BooleanObject",
+        "scaleInCooldown": "IntegerObject",
+        "scaleOutCooldown": "IntegerObject",
+        "targetValue": "DoubleObject"
+      }
+    },
+    "ThroughputMode": {
+      "type": "string",
+      "enum": [
+        "PAY_PER_REQUEST",
+        "PROVISIONED"
+      ]
+    },
+    "TimeToLive": {
+      "type": "structure",
+      "required": [
+        "status"
+      ],
+      "members": {
+        "status": "TimeToLiveStatus"
+      }
+    },
+    "TimeToLiveStatus": {
+      "type": "string",
+      "enum": [
+        "ENABLED"
+      ]
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "TypeName": {
+      "type": "string",
+      "min": 1,
+      "max": 48
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "resourceArn",
+        "tags"
+      ],
+      "members": {
+        "resourceArn": "ARN",
+        "tags": "TagList"
+      }
+    },
+    "UpdateKeyspaceRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName",
+        "replicationSpecification"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName",
+        "replicationSpecification": "ReplicationSpecification",
+        "clientSideTimestamps": "ClientSideTimestamps"
+      }
+    },
+    "UpdateTableRequest": {
+      "type": "structure",
+      "required": [
+        "keyspaceName",
+        "tableName"
+      ],
+      "members": {
+        "keyspaceName": "KeyspaceName",
+        "tableName": "TableName",
+        "addColumns": "ColumnDefinitionList",
+        "capacitySpecification": "CapacitySpecification",
+        "encryptionSpecification": "EncryptionSpecification",
+        "pointInTimeRecovery": "PointInTimeRecovery",
+        "ttl": "TimeToLive",
+        "defaultTimeToLive": "DefaultTimeToLive",
+        "clientSideTimestamps": "ClientSideTimestamps",
+        "autoScalingSpecification": "AutoScalingSpecification",
+        "replicaSpecifications": "ReplicaSpecificationList",
+        "cdcSpecification": "CdcSpecification",
+        "warmThroughputSpecification": "WarmThroughputSpecification"
+      }
+    },
+    "ViewType": {
+      "type": "string",
+      "enum": [
+        "NEW_IMAGE",
+        "OLD_IMAGE",
+        "KEYS_ONLY",
+        "NEW_AND_OLD_IMAGES"
+      ]
+    },
+    "WarmThroughputSpecification": {
+      "type": "structure",
+      "members": {
+        "readUnitsPerSecond": "WarmThroughputSpecificationReadUnitsPerSecondLong",
+        "writeUnitsPerSecond": "WarmThroughputSpecificationWriteUnitsPerSecondLong"
+      }
+    },
+    "WarmThroughputSpecificationReadUnitsPerSecondLong": {
+      "type": "long",
+      "min": 1
+    },
+    "WarmThroughputSpecificationWriteUnitsPerSecondLong": {
+      "type": "long",
+      "min": 1
+    },
+    "kmsKeyARN": {
+      "type": "string",
+      "min": 1,
+      "max": 5096
+    },
+    "region": {
+      "type": "string",
+      "min": 2,
+      "max": 25
+    },
+    "rs": {
+      "type": "string",
+      "min": 1,
+      "max": 20,
+      "enum": [
+        "SINGLE_REGION",
+        "MULTI_REGION"
+      ]
+    }
+  }
+}

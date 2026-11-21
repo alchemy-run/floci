@@ -1,0 +1,1504 @@
+{
+  "_source": {
+    "generator": "tools/aws/regen_mediapackagev2_shapes.py",
+    "botocore": "botocore 1.43.118 (installed package)"
+  },
+  "operations": {
+    "CancelHarvestJob": "CancelHarvestJobRequest",
+    "CreateChannel": "CreateChannelRequest",
+    "CreateChannelGroup": "CreateChannelGroupRequest",
+    "CreateHarvestJob": "CreateHarvestJobRequest",
+    "CreateOriginEndpoint": "CreateOriginEndpointRequest",
+    "DeleteChannel": "DeleteChannelRequest",
+    "DeleteChannelGroup": "DeleteChannelGroupRequest",
+    "DeleteChannelPolicy": "DeleteChannelPolicyRequest",
+    "DeleteOriginEndpoint": "DeleteOriginEndpointRequest",
+    "DeleteOriginEndpointPolicy": "DeleteOriginEndpointPolicyRequest",
+    "GetChannel": "GetChannelRequest",
+    "GetChannelGroup": "GetChannelGroupRequest",
+    "GetChannelPolicy": "GetChannelPolicyRequest",
+    "GetHarvestJob": "GetHarvestJobRequest",
+    "GetOriginEndpoint": "GetOriginEndpointRequest",
+    "GetOriginEndpointPolicy": "GetOriginEndpointPolicyRequest",
+    "ListChannelGroups": "ListChannelGroupsRequest",
+    "ListChannels": "ListChannelsRequest",
+    "ListHarvestJobs": "ListHarvestJobsRequest",
+    "ListOriginEndpoints": "ListOriginEndpointsRequest",
+    "ListTagsForResource": "ListTagsForResourceRequest",
+    "PutChannelPolicy": "PutChannelPolicyRequest",
+    "PutOriginEndpointPolicy": "PutOriginEndpointPolicyRequest",
+    "ResetChannelState": "ResetChannelStateRequest",
+    "ResetOriginEndpointState": "ResetOriginEndpointStateRequest",
+    "TagResource": "TagResourceRequest",
+    "UntagResource": "UntagResourceRequest",
+    "UpdateChannel": "UpdateChannelRequest",
+    "UpdateChannelGroup": "UpdateChannelGroupRequest",
+    "UpdateOriginEndpoint": "UpdateOriginEndpointRequest"
+  },
+  "shapes": {
+    "AdMarkerDash": {
+      "type": "string",
+      "enum": [
+        "BINARY",
+        "XML"
+      ]
+    },
+    "AdMarkerHls": {
+      "type": "string",
+      "enum": [
+        "DATERANGE",
+        "SCTE35_ENHANCED"
+      ]
+    },
+    "Boolean": {
+      "type": "boolean"
+    },
+    "CancelHarvestJobRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "OriginEndpointName",
+        "HarvestJobName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "OriginEndpointName": "ResourceName",
+        "HarvestJobName": "ResourceName",
+        "ETag": "EntityTag"
+      }
+    },
+    "CdnAuthConfiguration": {
+      "type": "structure",
+      "required": [
+        "CdnIdentifierSecretArns",
+        "SecretsRoleArn"
+      ],
+      "members": {
+        "CdnIdentifierSecretArns": "CdnAuthConfigurationCdnIdentifierSecretArnsList",
+        "SecretsRoleArn": "CdnAuthConfigurationSecretsRoleArnString"
+      }
+    },
+    "CdnAuthConfigurationCdnIdentifierSecretArnsList": {
+      "type": "list",
+      "min": 1,
+      "member": "CdnIdentifierSecretArn"
+    },
+    "CdnAuthConfigurationSecretsRoleArnString": {
+      "type": "string",
+      "min": 20,
+      "max": 2048
+    },
+    "CdnIdentifierSecretArn": {
+      "type": "string",
+      "min": 20,
+      "max": 2048
+    },
+    "CmafEncryptionMethod": {
+      "type": "string",
+      "enum": [
+        "CENC",
+        "CBCS"
+      ]
+    },
+    "ContainerType": {
+      "type": "string",
+      "enum": [
+        "TS",
+        "CMAF",
+        "ISM"
+      ]
+    },
+    "ContentKeyPeriodConfiguration": {
+      "type": "structure",
+      "members": {
+        "ContentKeyPeriodTiming": "ContentKeyPeriodTiming"
+      }
+    },
+    "ContentKeyPeriodTiming": {
+      "type": "string",
+      "enum": [
+        "INDEX_ONLY",
+        "START_END_ONLY",
+        "INDEX_WITH_START_END"
+      ]
+    },
+    "CreateChannelGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ClientToken": "IdempotencyToken",
+        "Description": "ResourceDescription",
+        "Tags": "TagMap"
+      }
+    },
+    "CreateChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "ClientToken": "IdempotencyToken",
+        "InputType": "InputType",
+        "Description": "ResourceDescription",
+        "InputSwitchConfiguration": "InputSwitchConfiguration",
+        "OutputHeaderConfiguration": "OutputHeaderConfiguration",
+        "MultiviewConfiguration": "MultiviewConfiguration",
+        "OutputLockingMode": "OutputLockingMode",
+        "Tags": "TagMap"
+      }
+    },
+    "CreateDashManifestConfiguration": {
+      "type": "structure",
+      "required": [
+        "ManifestName"
+      ],
+      "members": {
+        "ManifestName": "ManifestName",
+        "ManifestWindowSeconds": "CreateDashManifestConfigurationManifestWindowSecondsInteger",
+        "FilterConfiguration": "FilterConfiguration",
+        "MinUpdatePeriodSeconds": "CreateDashManifestConfigurationMinUpdatePeriodSecondsInteger",
+        "MinBufferTimeSeconds": "CreateDashManifestConfigurationMinBufferTimeSecondsInteger",
+        "SuggestedPresentationDelaySeconds": "CreateDashManifestConfigurationSuggestedPresentationDelaySecondsInteger",
+        "SegmentTemplateFormat": "DashSegmentTemplateFormat",
+        "PeriodTriggers": "DashPeriodTriggers",
+        "ScteDash": "ScteDash",
+        "DrmSignaling": "DashDrmSignaling",
+        "UtcTiming": "DashUtcTiming",
+        "Profiles": "DashProfiles",
+        "BaseUrls": "DashBaseUrls",
+        "ProgramInformation": "DashProgramInformation",
+        "DvbSettings": "DashDvbSettings",
+        "Compactness": "DashCompactness",
+        "AudioTimelinePattern": "DashAudioTimelinePattern",
+        "SubtitleConfiguration": "DashSubtitleConfiguration",
+        "UriPathType": "UriPathType",
+        "AvailabilityStartTimeConfiguration": "DashAvailabilityStartTimeConfiguration"
+      }
+    },
+    "CreateDashManifestConfigurationManifestWindowSecondsInteger": {
+      "type": "integer",
+      "min": 30
+    },
+    "CreateDashManifestConfigurationMinBufferTimeSecondsInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 3600
+    },
+    "CreateDashManifestConfigurationMinUpdatePeriodSecondsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 3600
+    },
+    "CreateDashManifestConfigurationSuggestedPresentationDelaySecondsInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 3600
+    },
+    "CreateDashManifests": {
+      "type": "list",
+      "member": "CreateDashManifestConfiguration"
+    },
+    "CreateHarvestJobRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "OriginEndpointName",
+        "HarvestedManifests",
+        "ScheduleConfiguration",
+        "Destination"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "OriginEndpointName": "ResourceName",
+        "Description": "ResourceDescription",
+        "HarvestedManifests": "HarvestedManifests",
+        "ScheduleConfiguration": "HarvesterScheduleConfiguration",
+        "Destination": "Destination",
+        "ClientToken": "IdempotencyToken",
+        "HarvestJobName": "ResourceName",
+        "Tags": "TagMap"
+      }
+    },
+    "CreateHlsManifestConfiguration": {
+      "type": "structure",
+      "required": [
+        "ManifestName"
+      ],
+      "members": {
+        "ManifestName": "ManifestName",
+        "ChildManifestName": "ManifestName",
+        "ScteHls": "ScteHls",
+        "StartTag": "StartTag",
+        "ManifestWindowSeconds": "CreateHlsManifestConfigurationManifestWindowSecondsInteger",
+        "ProgramDateTimeIntervalSeconds": "CreateHlsManifestConfigurationProgramDateTimeIntervalSecondsInteger",
+        "FilterConfiguration": "FilterConfiguration",
+        "UrlEncodeChildManifest": "Boolean",
+        "UriPathType": "UriPathType"
+      }
+    },
+    "CreateHlsManifestConfigurationManifestWindowSecondsInteger": {
+      "type": "integer",
+      "min": 30
+    },
+    "CreateHlsManifestConfigurationProgramDateTimeIntervalSecondsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1209600
+    },
+    "CreateHlsManifests": {
+      "type": "list",
+      "member": "CreateHlsManifestConfiguration"
+    },
+    "CreateLowLatencyHlsManifestConfiguration": {
+      "type": "structure",
+      "required": [
+        "ManifestName"
+      ],
+      "members": {
+        "ManifestName": "ManifestName",
+        "ChildManifestName": "ManifestName",
+        "ScteHls": "ScteHls",
+        "StartTag": "StartTag",
+        "ManifestWindowSeconds": "CreateLowLatencyHlsManifestConfigurationManifestWindowSecondsInteger",
+        "ProgramDateTimeIntervalSeconds": "CreateLowLatencyHlsManifestConfigurationProgramDateTimeIntervalSecondsInteger",
+        "FilterConfiguration": "FilterConfiguration",
+        "UrlEncodeChildManifest": "Boolean",
+        "UriPathType": "UriPathType"
+      }
+    },
+    "CreateLowLatencyHlsManifestConfigurationManifestWindowSecondsInteger": {
+      "type": "integer",
+      "min": 30
+    },
+    "CreateLowLatencyHlsManifestConfigurationProgramDateTimeIntervalSecondsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1209600
+    },
+    "CreateLowLatencyHlsManifests": {
+      "type": "list",
+      "member": "CreateLowLatencyHlsManifestConfiguration"
+    },
+    "CreateMssManifestConfiguration": {
+      "type": "structure",
+      "required": [
+        "ManifestName"
+      ],
+      "members": {
+        "ManifestName": "ManifestName",
+        "ManifestWindowSeconds": "CreateMssManifestConfigurationManifestWindowSecondsInteger",
+        "FilterConfiguration": "FilterConfiguration",
+        "ManifestLayout": "MssManifestLayout"
+      }
+    },
+    "CreateMssManifestConfigurationManifestWindowSecondsInteger": {
+      "type": "integer",
+      "min": 30
+    },
+    "CreateMssManifests": {
+      "type": "list",
+      "member": "CreateMssManifestConfiguration"
+    },
+    "CreateOriginEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "OriginEndpointName",
+        "ContainerType"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "OriginEndpointName": "ResourceName",
+        "ContainerType": "ContainerType",
+        "Segment": "Segment",
+        "ClientToken": "IdempotencyToken",
+        "Description": "ResourceDescription",
+        "StartoverWindowSeconds": "CreateOriginEndpointRequestStartoverWindowSecondsInteger",
+        "HlsManifests": "CreateHlsManifests",
+        "LowLatencyHlsManifests": "CreateLowLatencyHlsManifests",
+        "DashManifests": "CreateDashManifests",
+        "MssManifests": "CreateMssManifests",
+        "ForceEndpointErrorConfiguration": "ForceEndpointErrorConfiguration",
+        "UriSeparator": "UriSeparator",
+        "StreamNameOutputMode": "StreamNameOutputMode",
+        "Tags": "TagMap"
+      }
+    },
+    "CreateOriginEndpointRequestStartoverWindowSecondsInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 1209600
+    },
+    "CustomAdType": {
+      "type": "string",
+      "enum": [
+        "PROGRAM",
+        "CHAPTER",
+        "UNSCHEDULED_EVENT",
+        "ALTERNATE_CONTENT_OPPORTUNITY",
+        "NETWORK"
+      ]
+    },
+    "CustomAdTypeList": {
+      "type": "list",
+      "min": 0,
+      "max": 25,
+      "member": "CustomAdType"
+    },
+    "DashAudioTimelinePattern": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "PATTERNED"
+      ]
+    },
+    "DashAvailabilityStartTimeConfiguration": {
+      "type": "structure",
+      "members": {
+        "FixedAvailabilityStartTime": "SyntheticTimestamp_date_time"
+      }
+    },
+    "DashBaseUrl": {
+      "type": "structure",
+      "required": [
+        "Url"
+      ],
+      "members": {
+        "Url": "DashBaseUrlUrlString",
+        "ServiceLocation": "DashBaseUrlServiceLocationString",
+        "DvbPriority": "DashBaseUrlDvbPriorityInteger",
+        "DvbWeight": "DashBaseUrlDvbWeightInteger"
+      }
+    },
+    "DashBaseUrlDvbPriorityInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 15000
+    },
+    "DashBaseUrlDvbWeightInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 15000
+    },
+    "DashBaseUrlServiceLocationString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "DashBaseUrlUrlString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "DashBaseUrls": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "DashBaseUrl"
+    },
+    "DashCompactness": {
+      "type": "string",
+      "enum": [
+        "STANDARD",
+        "NONE"
+      ]
+    },
+    "DashDrmSignaling": {
+      "type": "string",
+      "enum": [
+        "INDIVIDUAL",
+        "REFERENCED"
+      ]
+    },
+    "DashDvbErrorMetrics": {
+      "type": "list",
+      "min": 0,
+      "max": 20,
+      "member": "DashDvbMetricsReporting"
+    },
+    "DashDvbFontDownload": {
+      "type": "structure",
+      "members": {
+        "Url": "DashDvbFontDownloadUrlString",
+        "MimeType": "DashDvbFontDownloadMimeTypeString",
+        "FontFamily": "DashDvbFontDownloadFontFamilyString"
+      }
+    },
+    "DashDvbFontDownloadFontFamilyString": {
+      "type": "string",
+      "min": 1,
+      "max": 256
+    },
+    "DashDvbFontDownloadMimeTypeString": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_/-]*[a-zA-Z0-9]"
+    },
+    "DashDvbFontDownloadUrlString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "DashDvbMetricsReporting": {
+      "type": "structure",
+      "required": [
+        "ReportingUrl"
+      ],
+      "members": {
+        "ReportingUrl": "DashDvbMetricsReportingReportingUrlString",
+        "Probability": "DashDvbMetricsReportingProbabilityInteger"
+      }
+    },
+    "DashDvbMetricsReportingProbabilityInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 1000
+    },
+    "DashDvbMetricsReportingReportingUrlString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "DashDvbSettings": {
+      "type": "structure",
+      "members": {
+        "FontDownload": "DashDvbFontDownload",
+        "ErrorMetrics": "DashDvbErrorMetrics"
+      }
+    },
+    "DashPeriodTrigger": {
+      "type": "string",
+      "enum": [
+        "AVAILS",
+        "DRM_KEY_ROTATION",
+        "SOURCE_CHANGES",
+        "SOURCE_DISRUPTIONS",
+        "NONE"
+      ]
+    },
+    "DashPeriodTriggers": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "DashPeriodTrigger"
+    },
+    "DashProfile": {
+      "type": "string",
+      "enum": [
+        "DVB_DASH"
+      ]
+    },
+    "DashProfiles": {
+      "type": "list",
+      "min": 0,
+      "max": 5,
+      "member": "DashProfile"
+    },
+    "DashProgramInformation": {
+      "type": "structure",
+      "members": {
+        "Title": "DashProgramInformationTitleString",
+        "Source": "DashProgramInformationSourceString",
+        "Copyright": "DashProgramInformationCopyrightString",
+        "LanguageCode": "DashProgramInformationLanguageCodeString",
+        "MoreInformationUrl": "DashProgramInformationMoreInformationUrlString"
+      }
+    },
+    "DashProgramInformationCopyrightString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "DashProgramInformationLanguageCodeString": {
+      "type": "string",
+      "min": 2,
+      "max": 5,
+      "pattern": "[a-zA-Z0-9][a-zA-Z0-9_-]*[a-zA-Z0-9]"
+    },
+    "DashProgramInformationMoreInformationUrlString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "DashProgramInformationSourceString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "DashProgramInformationTitleString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "DashSegmentTemplateFormat": {
+      "type": "string",
+      "enum": [
+        "NUMBER_WITH_TIMELINE"
+      ]
+    },
+    "DashSubtitleConfiguration": {
+      "type": "structure",
+      "members": {
+        "TtmlConfiguration": "DashTtmlConfiguration"
+      }
+    },
+    "DashTtmlConfiguration": {
+      "type": "structure",
+      "required": [
+        "TtmlProfile"
+      ],
+      "members": {
+        "TtmlProfile": "DashTtmlProfile"
+      }
+    },
+    "DashTtmlProfile": {
+      "type": "string",
+      "enum": [
+        "IMSC_1",
+        "EBU_TT_D_101"
+      ]
+    },
+    "DashUtcTiming": {
+      "type": "structure",
+      "members": {
+        "TimingMode": "DashUtcTimingMode",
+        "TimingSource": "DashUtcTimingTimingSourceString"
+      }
+    },
+    "DashUtcTimingMode": {
+      "type": "string",
+      "enum": [
+        "HTTP_HEAD",
+        "HTTP_ISO",
+        "HTTP_XSDATE",
+        "UTC_DIRECT"
+      ]
+    },
+    "DashUtcTimingTimingSourceString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "DeleteChannelGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName"
+      }
+    },
+    "DeleteChannelPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName"
+      }
+    },
+    "DeleteChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName"
+      }
+    },
+    "DeleteOriginEndpointPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "OriginEndpointName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "OriginEndpointName": "ResourceName"
+      }
+    },
+    "DeleteOriginEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "OriginEndpointName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "OriginEndpointName": "ResourceName"
+      }
+    },
+    "Destination": {
+      "type": "structure",
+      "required": [
+        "S3Destination"
+      ],
+      "members": {
+        "S3Destination": "S3DestinationConfig"
+      }
+    },
+    "DrmSystem": {
+      "type": "string",
+      "enum": [
+        "CLEAR_KEY_AES_128",
+        "FAIRPLAY",
+        "PLAYREADY",
+        "WIDEVINE",
+        "IRDETO"
+      ]
+    },
+    "Encryption": {
+      "type": "structure",
+      "required": [
+        "EncryptionMethod",
+        "SpekeKeyProvider"
+      ],
+      "members": {
+        "ConstantInitializationVector": "EncryptionConstantInitializationVectorString",
+        "EncryptionMethod": "EncryptionMethod",
+        "KeyRotationIntervalSeconds": "EncryptionKeyRotationIntervalSecondsInteger",
+        "CmafExcludeSegmentDrmMetadata": "Boolean",
+        "SpekeKeyProvider": "SpekeKeyProvider"
+      }
+    },
+    "EncryptionConstantInitializationVectorString": {
+      "type": "string",
+      "min": 32,
+      "max": 32,
+      "pattern": "[0-9a-fA-F]+"
+    },
+    "EncryptionContractConfiguration": {
+      "type": "structure",
+      "required": [
+        "PresetSpeke20Audio",
+        "PresetSpeke20Video"
+      ],
+      "members": {
+        "PresetSpeke20Audio": "PresetSpeke20Audio",
+        "PresetSpeke20Video": "PresetSpeke20Video"
+      }
+    },
+    "EncryptionKeyRotationIntervalSecondsInteger": {
+      "type": "integer",
+      "min": 300,
+      "max": 31536000
+    },
+    "EncryptionMethod": {
+      "type": "structure",
+      "members": {
+        "TsEncryptionMethod": "TsEncryptionMethod",
+        "CmafEncryptionMethod": "CmafEncryptionMethod",
+        "IsmEncryptionMethod": "IsmEncryptionMethod"
+      }
+    },
+    "EndpointErrorCondition": {
+      "type": "string",
+      "enum": [
+        "STALE_MANIFEST",
+        "INCOMPLETE_MANIFEST",
+        "MISSING_DRM_KEY",
+        "SLATE_INPUT"
+      ]
+    },
+    "EndpointErrorConditions": {
+      "type": "list",
+      "member": "EndpointErrorCondition"
+    },
+    "EntityTag": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\S]+"
+    },
+    "FilterConfiguration": {
+      "type": "structure",
+      "members": {
+        "ManifestFilter": "FilterConfigurationManifestFilterString",
+        "DrmSettings": "FilterConfigurationDrmSettingsString",
+        "Start": "Timestamp",
+        "End": "Timestamp",
+        "TimeDelaySeconds": "FilterConfigurationTimeDelaySecondsInteger",
+        "ClipStartTime": "Timestamp",
+        "Multiview": "MultiviewFilterConfiguration"
+      }
+    },
+    "FilterConfigurationDrmSettingsString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "FilterConfigurationManifestFilterString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "FilterConfigurationTimeDelaySecondsInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 1209600
+    },
+    "Float": {
+      "type": "float"
+    },
+    "ForceEndpointErrorConfiguration": {
+      "type": "structure",
+      "members": {
+        "EndpointErrorConditions": "EndpointErrorConditions"
+      }
+    },
+    "GetChannelGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName"
+      }
+    },
+    "GetChannelPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName"
+      }
+    },
+    "GetChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName"
+      }
+    },
+    "GetHarvestJobRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "OriginEndpointName",
+        "HarvestJobName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "OriginEndpointName": "ResourceName",
+        "HarvestJobName": "ResourceName"
+      }
+    },
+    "GetOriginEndpointPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "OriginEndpointName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "OriginEndpointName": "ResourceName"
+      }
+    },
+    "GetOriginEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "OriginEndpointName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "OriginEndpointName": "ResourceName"
+      }
+    },
+    "HarvestJobStatus": {
+      "type": "string",
+      "enum": [
+        "QUEUED",
+        "IN_PROGRESS",
+        "CANCELLED",
+        "COMPLETED",
+        "FAILED"
+      ]
+    },
+    "HarvestedDashManifest": {
+      "type": "structure",
+      "required": [
+        "ManifestName"
+      ],
+      "members": {
+        "ManifestName": "ResourceName"
+      }
+    },
+    "HarvestedDashManifestsList": {
+      "type": "list",
+      "member": "HarvestedDashManifest"
+    },
+    "HarvestedHlsManifest": {
+      "type": "structure",
+      "required": [
+        "ManifestName"
+      ],
+      "members": {
+        "ManifestName": "ResourceName"
+      }
+    },
+    "HarvestedHlsManifestsList": {
+      "type": "list",
+      "member": "HarvestedHlsManifest"
+    },
+    "HarvestedLowLatencyHlsManifest": {
+      "type": "structure",
+      "required": [
+        "ManifestName"
+      ],
+      "members": {
+        "ManifestName": "ResourceName"
+      }
+    },
+    "HarvestedLowLatencyHlsManifestsList": {
+      "type": "list",
+      "member": "HarvestedLowLatencyHlsManifest"
+    },
+    "HarvestedManifests": {
+      "type": "structure",
+      "members": {
+        "HlsManifests": "HarvestedHlsManifestsList",
+        "DashManifests": "HarvestedDashManifestsList",
+        "LowLatencyHlsManifests": "HarvestedLowLatencyHlsManifestsList"
+      }
+    },
+    "HarvesterScheduleConfiguration": {
+      "type": "structure",
+      "required": [
+        "StartTime",
+        "EndTime"
+      ],
+      "members": {
+        "StartTime": "Timestamp",
+        "EndTime": "Timestamp"
+      }
+    },
+    "IdempotencyToken": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[\\S]+"
+    },
+    "InputSwitchConfiguration": {
+      "type": "structure",
+      "members": {
+        "MQCSInputSwitching": "Boolean",
+        "PreferredInput": "InputSwitchConfigurationPreferredInputInteger"
+      }
+    },
+    "InputSwitchConfigurationPreferredInputInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 2
+    },
+    "InputType": {
+      "type": "string",
+      "enum": [
+        "HLS",
+        "CMAF",
+        "MULTIVIEW"
+      ]
+    },
+    "IsmEncryptionMethod": {
+      "type": "string",
+      "enum": [
+        "CENC"
+      ]
+    },
+    "ListChannelGroupsRequest": {
+      "type": "structure",
+      "members": {
+        "MaxResults": "ListResourceMaxResults",
+        "NextToken": "String"
+      }
+    },
+    "ListChannelsRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "MaxResults": "ListResourceMaxResults",
+        "NextToken": "String"
+      }
+    },
+    "ListHarvestJobsRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ListHarvestJobsRequestChannelNameString",
+        "OriginEndpointName": "ListHarvestJobsRequestOriginEndpointNameString",
+        "Status": "HarvestJobStatus",
+        "MaxResults": "ListHarvestJobsRequestMaxResultsInteger",
+        "NextToken": "String"
+      }
+    },
+    "ListHarvestJobsRequestChannelNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "ListHarvestJobsRequestMaxResultsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListHarvestJobsRequestOriginEndpointNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "ListOriginEndpointsRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "MaxResults": "ListResourceMaxResults",
+        "NextToken": "String"
+      }
+    },
+    "ListResourceMaxResults": {
+      "type": "integer",
+      "min": 1,
+      "max": 100
+    },
+    "ListTagsForResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn"
+      ],
+      "members": {
+        "ResourceArn": "TagArn"
+      }
+    },
+    "ManifestName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9-]+"
+    },
+    "MssManifestLayout": {
+      "type": "string",
+      "enum": [
+        "FULL",
+        "COMPACT"
+      ]
+    },
+    "MultiviewConfiguration": {
+      "type": "structure",
+      "required": [
+        "AvailableSources",
+        "AvailableLayouts"
+      ],
+      "members": {
+        "AvailableSources": "MultiviewSourceList",
+        "AvailableLayouts": "MultiviewLayoutList"
+      }
+    },
+    "MultiviewFilterConfiguration": {
+      "type": "structure",
+      "required": [
+        "Layout",
+        "Sources"
+      ],
+      "members": {
+        "Layout": "MultiviewLayoutType",
+        "Sources": "MultiviewSourceList"
+      }
+    },
+    "MultiviewLayoutList": {
+      "type": "list",
+      "min": 1,
+      "max": 6,
+      "member": "MultiviewLayoutType"
+    },
+    "MultiviewLayoutType": {
+      "type": "string",
+      "enum": [
+        "LAYOUT_2EH",
+        "LAYOUT_2PL",
+        "LAYOUT_3EL",
+        "LAYOUT_3PL",
+        "LAYOUT_4E",
+        "LAYOUT_4PL"
+      ]
+    },
+    "MultiviewSourceList": {
+      "type": "list",
+      "min": 1,
+      "max": 50,
+      "member": "ResourceName"
+    },
+    "OutputHeaderConfiguration": {
+      "type": "structure",
+      "members": {
+        "PublishMQCS": "Boolean"
+      }
+    },
+    "OutputLockingMode": {
+      "type": "string",
+      "enum": [
+        "EPOCH_LOCKED",
+        "NON_EPOCH_LOCKED"
+      ]
+    },
+    "OutputTimestampMode": {
+      "type": "string",
+      "enum": [
+        "PASSTHROUGH",
+        "REBASED_TO_CHANNEL_START"
+      ]
+    },
+    "PolicyText": {
+      "type": "string",
+      "min": 0,
+      "max": 6144
+    },
+    "PresetSpeke20Audio": {
+      "type": "string",
+      "enum": [
+        "PRESET_AUDIO_1",
+        "PRESET_AUDIO_2",
+        "PRESET_AUDIO_3",
+        "SHARED",
+        "UNENCRYPTED"
+      ]
+    },
+    "PresetSpeke20Video": {
+      "type": "string",
+      "enum": [
+        "PRESET_VIDEO_1",
+        "PRESET_VIDEO_2",
+        "PRESET_VIDEO_3",
+        "PRESET_VIDEO_4",
+        "PRESET_VIDEO_5",
+        "PRESET_VIDEO_6",
+        "PRESET_VIDEO_7",
+        "PRESET_VIDEO_8",
+        "SHARED",
+        "UNENCRYPTED"
+      ]
+    },
+    "PutChannelPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "Policy"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "Policy": "PolicyText"
+      }
+    },
+    "PutOriginEndpointPolicyRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "OriginEndpointName",
+        "Policy"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "OriginEndpointName": "ResourceName",
+        "Policy": "PolicyText",
+        "CdnAuthConfiguration": "CdnAuthConfiguration"
+      }
+    },
+    "ResetChannelStateRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName"
+      }
+    },
+    "ResetOriginEndpointStateRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "OriginEndpointName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "OriginEndpointName": "ResourceName"
+      }
+    },
+    "ResourceDescription": {
+      "type": "string",
+      "min": 0,
+      "max": 1024
+    },
+    "ResourceName": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "S3BucketName": {
+      "type": "string",
+      "min": 3,
+      "max": 63
+    },
+    "S3DestinationConfig": {
+      "type": "structure",
+      "required": [
+        "BucketName",
+        "DestinationPath"
+      ],
+      "members": {
+        "BucketName": "S3BucketName",
+        "DestinationPath": "S3DestinationPath"
+      }
+    },
+    "S3DestinationPath": {
+      "type": "string",
+      "min": 1,
+      "max": 1024,
+      "pattern": "[\\S]+"
+    },
+    "Scte": {
+      "type": "structure",
+      "members": {
+        "ScteFilter": "ScteFilterList",
+        "ScteInSegments": "ScteInSegments",
+        "CustomAdTypes": "CustomAdTypeList"
+      }
+    },
+    "ScteDash": {
+      "type": "structure",
+      "members": {
+        "AdMarkerDash": "AdMarkerDash",
+        "ScteInManifests": "ScteInManifests"
+      }
+    },
+    "ScteFilter": {
+      "type": "string",
+      "enum": [
+        "SPLICE_INSERT",
+        "BREAK",
+        "PROVIDER_ADVERTISEMENT",
+        "DISTRIBUTOR_ADVERTISEMENT",
+        "PROVIDER_PLACEMENT_OPPORTUNITY",
+        "DISTRIBUTOR_PLACEMENT_OPPORTUNITY",
+        "PROVIDER_OVERLAY_PLACEMENT_OPPORTUNITY",
+        "DISTRIBUTOR_OVERLAY_PLACEMENT_OPPORTUNITY",
+        "PROGRAM",
+        "CHAPTER",
+        "UNSCHEDULED_EVENT",
+        "ALTERNATE_CONTENT_OPPORTUNITY",
+        "NETWORK",
+        "PROVIDER_PROMO",
+        "DISTRIBUTOR_PROMO",
+        "PROVIDER_AD_BLOCK",
+        "DISTRIBUTOR_AD_BLOCK",
+        "CONTENT_IDENTIFICATION",
+        "CALL_AD_SERVER"
+      ]
+    },
+    "ScteFilterList": {
+      "type": "list",
+      "min": 0,
+      "max": 100,
+      "member": "ScteFilter"
+    },
+    "ScteHls": {
+      "type": "structure",
+      "members": {
+        "AdMarkerHls": "AdMarkerHls",
+        "ScteInManifests": "ScteInManifests"
+      }
+    },
+    "ScteInManifests": {
+      "type": "string",
+      "enum": [
+        "ALL",
+        "MATCHES_FILTER"
+      ]
+    },
+    "ScteInSegments": {
+      "type": "string",
+      "enum": [
+        "NONE",
+        "ALL",
+        "MATCHES_FILTER"
+      ]
+    },
+    "Segment": {
+      "type": "structure",
+      "members": {
+        "SegmentDurationSeconds": "SegmentSegmentDurationSecondsInteger",
+        "SegmentName": "SegmentSegmentNameString",
+        "TsUseAudioRenditionGroup": "Boolean",
+        "IncludeIframeOnlyStreams": "Boolean",
+        "TsIncludeDvbSubtitles": "Boolean",
+        "Scte": "Scte",
+        "Encryption": "Encryption",
+        "OutputTimestampMode": "OutputTimestampMode"
+      }
+    },
+    "SegmentSegmentDurationSecondsInteger": {
+      "type": "integer",
+      "min": 1,
+      "max": 30
+    },
+    "SegmentSegmentNameString": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[a-zA-Z0-9_-]+"
+    },
+    "SpekeKeyProvider": {
+      "type": "structure",
+      "required": [
+        "EncryptionContractConfiguration",
+        "ResourceId",
+        "DrmSystems",
+        "RoleArn",
+        "Url"
+      ],
+      "members": {
+        "EncryptionContractConfiguration": "EncryptionContractConfiguration",
+        "ResourceId": "SpekeKeyProviderResourceIdString",
+        "DrmSystems": "SpekeKeyProviderDrmSystemsList",
+        "RoleArn": "SpekeKeyProviderRoleArnString",
+        "Url": "SpekeKeyProviderUrlString",
+        "CertificateArn": "SpekeKeyProviderCertificateArnString",
+        "SpekeVersion": "SpekeVersion",
+        "ContentKeyPeriodConfiguration": "ContentKeyPeriodConfiguration"
+      }
+    },
+    "SpekeKeyProviderCertificateArnString": {
+      "type": "string",
+      "min": 20,
+      "max": 2048,
+      "pattern": "arn:([^:\\n]+):acm:([^:\\n]+):([0-9]+):certificate/[a-zA-Z0-9-_]+"
+    },
+    "SpekeKeyProviderDrmSystemsList": {
+      "type": "list",
+      "min": 1,
+      "max": 4,
+      "member": "DrmSystem"
+    },
+    "SpekeKeyProviderResourceIdString": {
+      "type": "string",
+      "min": 1,
+      "max": 256,
+      "pattern": "[0-9a-zA-Z_-]+"
+    },
+    "SpekeKeyProviderRoleArnString": {
+      "type": "string",
+      "min": 1,
+      "max": 2048
+    },
+    "SpekeKeyProviderUrlString": {
+      "type": "string",
+      "min": 1,
+      "max": 1024
+    },
+    "SpekeVersion": {
+      "type": "string",
+      "enum": [
+        "V2_0",
+        "V2_1"
+      ]
+    },
+    "StartTag": {
+      "type": "structure",
+      "required": [
+        "TimeOffset"
+      ],
+      "members": {
+        "TimeOffset": "Float",
+        "Precise": "Boolean"
+      }
+    },
+    "StreamNameOutputMode": {
+      "type": "string",
+      "enum": [
+        "INDEX",
+        "PASSTHROUGH_NAME"
+      ]
+    },
+    "String": {
+      "type": "string"
+    },
+    "SyntheticTimestamp_date_time": {
+      "type": "timestamp"
+    },
+    "TagArn": {
+      "type": "string"
+    },
+    "TagKey": {
+      "type": "string"
+    },
+    "TagKeyList": {
+      "type": "list",
+      "member": "TagKey"
+    },
+    "TagMap": {
+      "type": "map",
+      "key": "TagKey",
+      "value": "TagValue"
+    },
+    "TagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "Tags"
+      ],
+      "members": {
+        "ResourceArn": "TagArn",
+        "Tags": "TagMap"
+      }
+    },
+    "TagValue": {
+      "type": "string"
+    },
+    "Timestamp": {
+      "type": "timestamp"
+    },
+    "TsEncryptionMethod": {
+      "type": "string",
+      "enum": [
+        "AES_128",
+        "SAMPLE_AES"
+      ]
+    },
+    "UntagResourceRequest": {
+      "type": "structure",
+      "required": [
+        "ResourceArn",
+        "TagKeys"
+      ],
+      "members": {
+        "ResourceArn": "TagArn",
+        "TagKeys": "TagKeyList"
+      }
+    },
+    "UpdateChannelGroupRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ETag": "EntityTag",
+        "Description": "ResourceDescription"
+      }
+    },
+    "UpdateChannelRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "ETag": "EntityTag",
+        "Description": "ResourceDescription",
+        "InputSwitchConfiguration": "InputSwitchConfiguration",
+        "OutputHeaderConfiguration": "OutputHeaderConfiguration",
+        "MultiviewConfiguration": "MultiviewConfiguration"
+      }
+    },
+    "UpdateOriginEndpointRequest": {
+      "type": "structure",
+      "required": [
+        "ChannelGroupName",
+        "ChannelName",
+        "OriginEndpointName",
+        "ContainerType"
+      ],
+      "members": {
+        "ChannelGroupName": "ResourceName",
+        "ChannelName": "ResourceName",
+        "OriginEndpointName": "ResourceName",
+        "ContainerType": "ContainerType",
+        "Segment": "Segment",
+        "Description": "ResourceDescription",
+        "StartoverWindowSeconds": "UpdateOriginEndpointRequestStartoverWindowSecondsInteger",
+        "HlsManifests": "CreateHlsManifests",
+        "LowLatencyHlsManifests": "CreateLowLatencyHlsManifests",
+        "DashManifests": "CreateDashManifests",
+        "MssManifests": "CreateMssManifests",
+        "ForceEndpointErrorConfiguration": "ForceEndpointErrorConfiguration",
+        "UriSeparator": "UriSeparator",
+        "StreamNameOutputMode": "StreamNameOutputMode",
+        "ETag": "EntityTag"
+      }
+    },
+    "UpdateOriginEndpointRequestStartoverWindowSecondsInteger": {
+      "type": "integer",
+      "min": 0,
+      "max": 1209600
+    },
+    "UriPathType": {
+      "type": "string",
+      "enum": [
+        "LEAF",
+        "ROOT"
+      ]
+    },
+    "UriSeparator": {
+      "type": "string",
+      "enum": [
+        "UNDERSCORE",
+        "HYPHEN"
+      ]
+    }
+  }
+}

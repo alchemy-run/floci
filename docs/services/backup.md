@@ -75,6 +75,14 @@
 | `ListRecoveryPointsByBackupVault` | `GET` | `/backup-vaults/{backupVaultName}/recovery-points/` | List recovery points in a vault |
 | `DeleteRecoveryPoint` | `DELETE` | `/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}` | Delete a recovery point |
 
+### Backup Indexes
+
+| Action | Method | Path | Description |
+|---|---|---|---|
+| `UpdateRecoveryPointIndexSettings` | `POST` | `/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}/index` | Build (`ENABLED`) or delete (`DISABLED`) a recovery point's backup index |
+| `GetRecoveryPointIndexDetails` | `GET` | `/backup-vaults/{backupVaultName}/recovery-points/{recoveryPointArn}/index` | Describe a recovery point's backup index |
+| `ListIndexedRecoveryPoints` | `GET` | `/indexes/recovery-point/` | List indexed recovery points, by source resource, type, status and creation time |
+
 ### Tagging
 
 | Action | Method | Path | Description |
@@ -138,6 +146,12 @@ fills a missing job id from the currently resolved vault. The internal identity 
 in persisted JSON but is omitted from `DescribeBackupJob` and `ListBackupJobs` responses.
 Successful resumed completions use the existing SNS notification path and event filter;
 publish failures do not undo the job or recovery point.
+
+## Backup Indexes
+
+A backup index records what a recovery point holds, so [AWS Backup Search](backupsearch.md) can search it. `StartBackupJob` with `Index: ENABLED` indexes the job's recovery point when the job completes. `UpdateRecoveryPointIndexSettings` indexes a completed recovery point later, or deletes its index. Only S3 and EBS backups can be indexed; any other resource type fails with `InvalidParameterValueException`.
+
+An S3 recovery point's index lists the bucket's objects at the time of indexing: every version of a versioned bucket, each with its key, size, ETag, version ID and creation time. An EBS recovery point's index has no files, as Floci's volumes hold none. The index then reports `ACTIVE`, or `FAILED` when the bucket can't be read. The recovery point carries the same `IndexStatus`, and deleting the recovery point deletes its index. The job's `RecoveryPointTags` are what a search's `BackupResourceTags` scope matches. `IndexActions` on a backup plan rule are stored and returned.
 
 ## Supported Resource Types
 
