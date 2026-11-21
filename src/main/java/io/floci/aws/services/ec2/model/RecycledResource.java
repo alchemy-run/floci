@@ -1,10 +1,13 @@
 package io.floci.aws.services.ec2.model;
 
+import io.quarkus.runtime.annotations.RegisterForReflection;
+
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 
 /** A deleted snapshot, AMI or volume kept in the Recycle Bin, with its tags and when it entered and leaves. */
+@RegisterForReflection
 public class RecycledResource {
     private String resourceType;
     private String resourceId;
