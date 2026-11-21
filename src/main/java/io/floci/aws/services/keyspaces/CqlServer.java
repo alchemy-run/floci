@@ -85,9 +85,15 @@ public class CqlServer {
         if (config.tls().enabled() && tlsRegistry.isResolvable()) {
             TlsConfiguration tls = tlsRegistry.get().getDefault().orElse(null);
             if (tls != null) {
-                ReloadingKeyManager manager = new ReloadingKeyManager(ReloadingKeyManager.keyManagerOf(vertx,
-                        tls.getKeyStoreOptions()));
-                options.setSsl(true).setKeyCertOptions(KeyCertOptions.wrap(manager));
+                // A TLS setup the CQL endpoint can't use (no key store) leaves it on plain CQL rather
+                // than stopping Floci from starting.
+                try {
+                    ReloadingKeyManager manager = new ReloadingKeyManager(ReloadingKeyManager.keyManagerOf(vertx,
+                            tls.getKeyStoreOptions()));
+                    options.setSsl(true).setKeyCertOptions(KeyCertOptions.wrap(manager));
+                } catch (IllegalStateException e) {
+                    LOG.warnv("Keyspaces CQL endpoint serves plain CQL: {0}", e.getMessage());
+                }
             }
         }
         server = vertx.createNetServer(options);
