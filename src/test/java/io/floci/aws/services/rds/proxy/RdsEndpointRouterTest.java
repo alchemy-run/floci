@@ -47,20 +47,6 @@ class RdsEndpointRouterTest {
         }
     }
 
-    /** MySQL speaks first, so a second MySQL resource can't share a port the router already serves one on. */
-    @Test
-    void aPortServingMySqlServesAServerFirstEngine() throws Exception {
-        int port = freePort();
-        assertFalse(router.servesServerFirst(port));
-        router.register("pg", port, List.of("pg.rds.localhost.floci.io"), freePort(), DatabaseEngine.POSTGRES);
-        assertFalse(router.servesServerFirst(port));
-        router.register("mysql", port, List.of("my.rds.localhost.floci.io"), freePort(), DatabaseEngine.MYSQL);
-        assertTrue(router.servesServerFirst(port));
-        router.unregister("mysql");
-        assertFalse(router.servesServerFirst(port));
-        router.unregister("pg");
-    }
-
     @Test
     void aPortWithOneResourceRelaysTheConnectionUntouched() throws Exception {
         ServerSocket backend = backend();

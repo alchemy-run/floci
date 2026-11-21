@@ -875,10 +875,8 @@ public class RdsService implements Resettable, ResourceProvider {
         DbEndpoint endpoint;
         DbInstance instance;
         try {
-            int listenerPort = requestedPort == null && publicationCluster != null
-                    && publicationCluster.getListenerPort() > 0
-                    ? publicationCluster.getListenerPort()
-                    : unsharedListenerPort(requestedPort, engine, proxyPort);
+            int listenerPort = listenerPort(requestedPort,
+                    publicationCluster != null ? publicationCluster.getListenerPort() : 0, engine);
             endpoint = mock ? new DbEndpoint("localhost", proxyPort)
                     : routedEndpoints()
                     ? new DbEndpoint(routedHost(id, "", currentAccountId(), effectiveRegion), listenerPort)
@@ -5747,7 +5745,7 @@ public class RdsService implements Resettable, ResourceProvider {
         if (manageMasterUserPassword && (masterPassword == null || masterPassword.isBlank())) {
             masterPassword = generatedMasterPassword();
         }
-        int clusterListenerPort = unsharedListenerPort(requestedPort, engine, proxyPort);
+        int clusterListenerPort = listenerPort(requestedPort, 0, engine);
         boolean routed = !mock && routedEndpoints();
         DbEndpoint endpoint = mock ? new DbEndpoint("localhost", proxyPort)
                 : routed ? new DbEndpoint(routedHost(id, "cluster-", currentAccountId(), effectiveRegion),
@@ -9340,19 +9338,6 @@ public class RdsService implements Resettable, ResourceProvider {
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 unavailable", e);
         }
-    }
-
-    /**
-     * The requested port, else the engine's, unless a MySQL or MariaDB resource already listens on the
-     * engine's port: those engines speak first, so the router can't tell two of them apart on one port,
-     * and the new one listens on its own proxy port, which its endpoint advertises.
-     */
-    private int unsharedListenerPort(Integer requestedPort, DatabaseEngine engine, int proxyPort) {
-        int port = listenerPort(requestedPort, 0, engine);
-        boolean serverFirst = engine == DatabaseEngine.MYSQL || engine == DatabaseEngine.MARIADB;
-        boolean routed = !config.services().rds().mock() && routedEndpoints();
-        return requestedPort == null && serverFirst && routed && proxyManager.servesServerFirst(port)
-                ? proxyPort : port;
     }
 
     /** CreateDBInstance/CreateDBCluster Port, else a member's cluster port, else the engine's. */

@@ -119,15 +119,6 @@ final class RdsEndpointRouter {
         return true;
     }
 
-    /**
-     * Whether a MySQL or MariaDB resource already listens on {@code port}. Those engines speak first, so a
-     * connection names no host before the router must pick a backend: two of them can't share a port.
-     */
-    public synchronized boolean servesServerFirst(int port) {
-        Listener listener = listeners.get(port);
-        return listener != null && listener.routes.values().stream().anyMatch(route -> isServerFirst(route.engine()));
-    }
-
     synchronized void unregister(String key) {
         Integer port = portByKey.remove(key);
         if (port == null) {
