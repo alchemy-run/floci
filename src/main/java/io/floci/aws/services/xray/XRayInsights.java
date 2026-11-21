@@ -50,6 +50,8 @@ public class XRayInsights {
     private final EmulatorConfig config;
     private final Provider<EventBridgeService> events;
     private final Map<String, Deque<double[]>> baselines = new ConcurrentHashMap<>();
+    /** Faults of a window too few to judge, added to the next window's. */
+    private final Map<String, long[]> carry = new ConcurrentHashMap<>();
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "xray-insights");
         thread.setDaemon(true);
@@ -138,14 +140,24 @@ public class XRayInsights {
             for (Map.Entry<String, long[]> service : byService.entrySet()) {
                 long faults = service.getValue()[0];
                 long total = service.getValue()[1];
+                String baselineKey = xray.account() + "/" + groupArn + "/" + service.getKey();
+                // A spike split across two evaluations is still one spike: faults too few to judge on their own
+                // are carried into the next window instead of becoming the baseline the rest is judged against.
+                long[] carried = carry.remove(baselineKey);
+                if (carried != null) {
+                    faults += carried[0];
+                    total += carried[1];
+                }
                 double rate = total == 0 ? 0 : faults / (double) total;
-                Deque<double[]> history = baselines.computeIfAbsent(xray.account() + "/" + groupArn + "/"
-                        + service.getKey(), k -> new ArrayDeque<>());
+                Deque<double[]> history = baselines.computeIfAbsent(baselineKey, k -> new ArrayDeque<>());
                 double baseline = history.stream().mapToDouble(h -> h[0]).sum()
                         / Math.max(1, history.stream().mapToDouble(h -> h[1]).sum());
                 if (faults >= MIN_FAULTS && rate >= MIN_RATE && rate > 3 * baseline) {
                     anomalous.add(service.getKey());
                     open(region, group, sample.get(service.getKey()), faults, total - faults, clientFaults, clientOk);
+                } else if (faults > 0 && faults < MIN_FAULTS && rate >= MIN_RATE && rate > 3 * baseline) {
+                    carry.put(baselineKey, new long[]{faults, total});
+                    continue;
                 }
                 history.addLast(new double[]{faults, total});
                 while (history.size() > BASELINE_WINDOWS) {
