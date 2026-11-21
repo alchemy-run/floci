@@ -138,6 +138,8 @@ public class IvsMediaServer implements ContainerTeardown {
         ContainerBuilder.Builder builder = containerBuilder.newContainer(serviceConfig.image())
                 .withName(CONTAINER)
                 .withDockerNetwork(serviceConfig.dockerNetwork())
+                // Reaches Floci at host.docker.internal, which Docker on Linux doesn't define by itself.
+                .withHostDockerInternalOnLinux()
                 .withLogRotation()
                 .withLabels(ContainerStorageHelper.resourceIdentityLabels(SERVICE, "media", "", ""))
                 .withPortBinding(API_PORT, apiPort)
