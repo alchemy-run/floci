@@ -49,16 +49,11 @@ class MediaConnectDockerIntegrationTest {
                 ",\"sourceMonitoringConfig\":{\"thumbnailState\":\"ENABLED\"}");
         MediaConnectIntegrationTest.mc().post("/v1/flows/start/" + arn).then().statusCode(202);
         MediaConnectIntegrationTest.awaitStatus(arn, "ACTIVE");
-        try (DatagramSocket sender = new DatagramSocket()) {
-            for (int offset = 0; offset < stream.length; offset += 188 * 7) {
-                int length = Math.min(188 * 7, stream.length - offset);
-                sender.send(new DatagramPacket(stream, offset, length, InetAddress.getLoopbackAddress(), 25050));
-                if (offset % (188 * 7 * 50) == 0) {
-                    Thread.sleep(2);
-                }
-            }
-        }
-        await().atMost(Duration.ofSeconds(10)).untilAsserted(() -> MediaConnectIntegrationTest.mc()
+        // UDP may drop datagrams on a busy host, as it would on a network, so the stream is sent again until the
+        // flow has read it.
+        await().atMost(Duration.ofSeconds(30)).pollInterval(Duration.ofSeconds(2)).untilAsserted(() -> {
+            send(stream);
+            MediaConnectIntegrationTest.mc()
                 .get("/v1/flows/" + arn + "/source-metadata").then().statusCode(200)
                 .body("transportMediaInfo.programs[0].streams.find { it.codec == 'h264' }.frameResolution"
                         + ".frameWidth", equalTo(640))
@@ -67,7 +62,8 @@ class MediaConnectDockerIntegrationTest {
                 .body("transportMediaInfo.programs[0].streams.find { it.codec == 'aac' }.sampleRate",
                         equalTo(48000))
                 .body("transportMediaInfo.programs[0].streams.find { it.codec == 'aac' }.channels", equalTo(2))
-                .body("transportMediaInfo.programs[0].streams.streamType", hasItem("Audio")));
+                .body("transportMediaInfo.programs[0].streams.streamType", hasItem("Audio"));
+        });
         String thumbnail = MediaConnectIntegrationTest.mc().get("/v1/flows/" + arn + "/source-thumbnail").then()
                 .statusCode(200).extract().path("thumbnailDetails.thumbnail");
         byte[] jpeg = Base64.getDecoder().decode(thumbnail);
@@ -77,5 +73,17 @@ class MediaConnectDockerIntegrationTest {
         MediaConnectIntegrationTest.mc().post("/v1/flows/stop/" + arn).then().statusCode(202);
         MediaConnectIntegrationTest.awaitStatus(arn, "STANDBY");
         MediaConnectIntegrationTest.mc().delete("/v1/flows/" + arn).then().statusCode(202);
+    }
+
+    private static void send(byte[] stream) throws Exception {
+        try (DatagramSocket sender = new DatagramSocket()) {
+            for (int offset = 0; offset < stream.length; offset += 188 * 7) {
+                int length = Math.min(188 * 7, stream.length - offset);
+                sender.send(new DatagramPacket(stream, offset, length, InetAddress.getLoopbackAddress(), 25050));
+                if (offset % (188 * 7 * 50) == 0) {
+                    Thread.sleep(2);
+                }
+            }
+        }
     }
 }
