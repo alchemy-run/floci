@@ -133,6 +133,23 @@ class IvsRealtimeDockerIntegrationTest {
         return ffmpeg(output, seconds, wait, null);
     }
 
+    /** The media server container's log so far. */
+    private String mediaServerLog() {
+        StringBuilder out = new StringBuilder();
+        try {
+            docker.logContainerCmd(IvsMediaServer.CONTAINER).withStdOut(true).withStdErr(true)
+                    .exec(new ResultCallback.Adapter<Frame>() {
+                        @Override
+                        public void onNext(Frame frame) {
+                            out.append(new String(frame.getPayload(), StandardCharsets.UTF_8));
+                        }
+                    }).awaitCompletion(10, TimeUnit.SECONDS);
+        } catch (InterruptedException | RuntimeException e) {
+            return "";
+        }
+        return out.toString();
+    }
+
     /** The media server's log and each background publisher's output, for a failure's message. */
     private String diagnostics() {
         StringBuilder out = new StringBuilder();
@@ -236,6 +253,12 @@ class IvsRealtimeDockerIntegrationTest {
 
         await("the media server", 90, () -> docker.listContainersCmd().withNameFilter(List.of(
                 IvsMediaServer.CONTAINER)).exec().isEmpty() ? null : Boolean.TRUE);
+        // The container is up a moment before its listeners are; a publisher that connects in between is refused.
+        await("the media server's listeners", 60, () -> {
+            String log = mediaServerLog();
+            return log.contains("[RTMP] started") && log.contains("[RTMPS] started") && log.contains("[WebRTC] started")
+                    ? Boolean.TRUE : null;
+        });
         // An RTMPS-only key refuses plain RTMP; it publishes over RTMPS.
         assertTrue(await("a refused plain RTMP publish", 60, () -> {
             try {
