@@ -79,14 +79,19 @@ public class XRayInsights {
         executor.shutdownNow();
     }
 
-    /** When the last evaluation looked, so each one counts every segment since, however late it runs. */
-    private volatile double evaluatedUntil = Double.NaN;
+    /**
+     * How far back an evaluation looks. Segments arrive after they end, sometimes well after, so an evaluation reads
+     * every segment from this long ago and counts each one once, when it first sees it.
+     */
+    private static final double LOOKBACK_SECONDS = 60;
+
+    /** Segments already counted, by trace and segment id, with when they ended, so they are counted only once. */
+    private final Map<String, Double> counted = new ConcurrentHashMap<>();
 
     private void evaluate() {
         double now = XRayService.now();
-        double since = Double.isNaN(evaluatedUntil)
-                ? now - config.services().xray().insightsIntervalMillis() / 1000.0 : evaluatedUntil;
-        evaluatedUntil = now;
+        double since = now - LOOKBACK_SECONDS;
+        counted.values().removeIf(end -> end < since);
         try {
             Set<String> scopes = new HashSet<>();
             for (AccountAwareStorageBackend.AccountEntry<ObjectNode> entry : xray.allStateEntries("group/")) {
@@ -115,7 +120,8 @@ public class XRayInsights {
                     continue;
                 }
                 XRayTraces.Node root = trace.root();
-                if (root != null) {
+                String countedPrefix = xray.account() + "/" + groupArnOf(group) + "/" + trace.id + "/";
+                if (root != null && !counted.containsKey(countedPrefix + root.id)) {
                     if (root.fault) {
                         clientFaults++;
                     } else {
@@ -123,7 +129,7 @@ public class XRayInsights {
                     }
                 }
                 for (XRayTraces.Node segment : trace.segments) {
-                    if (segment.end < since) {
+                    if (segment.end < since || counted.putIfAbsent(countedPrefix + segment.id, segment.end) != null) {
                         continue;
                     }
                     String key = segment.name + "|" + XRayTraces.type(segment);
@@ -184,6 +190,10 @@ public class XRayInsights {
                 xray.saveInsight(region, insight);
             }
         }
+    }
+
+    private static String groupArnOf(ObjectNode group) {
+        return group.path("GroupARN").asText();
     }
 
     private void open(String region, ObjectNode group, XRayTraces.Node service, long faults, long ok,

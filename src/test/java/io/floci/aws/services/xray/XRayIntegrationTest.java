@@ -302,8 +302,10 @@ class XRayIntegrationTest {
                         + ":" + rule + "\"}]}").post("/").then().statusCode(200);
         post("/CreateGroup", "{\"GroupName\":\"" + service + "\",\"FilterExpression\":\"service(\\\"" + service + "\\\")\","
                 + "\"InsightsConfiguration\":{\"InsightsEnabled\":true,\"NotificationsEnabled\":true}}").statusCode(200);
+        // Segments arrive after they end: these ended three seconds ago, several evaluation intervals back, and
+        // still count.
         for (int i = 0; i < 5; i++) {
-            double start = now() - 0.2;
+            double start = now() - 3.2;
             put("{\"name\":\"" + service + "\",\"id\":\"" + hex(16) + "\",\"trace_id\":\"" + traceId() + "\",\"start_time\":"
                     + start + ",\"end_time\":" + (start + 0.1) + ",\"fault\":true}");
         }
