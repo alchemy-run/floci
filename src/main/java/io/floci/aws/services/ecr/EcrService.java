@@ -1767,6 +1767,17 @@ public class EcrService implements ResourceProvider {
     }
 
     /** Returns the physical registry namespace selected for an ECR repository. */
+    /**
+     * Where the Docker daemon pushes to or pulls from a repository: path style on {@code localhost}, as
+     * {@link EcrRegistryManager#rewriteImageUri} does for images, because a daemon reaches only localhost and
+     * loopback addresses over plain HTTP and takes any other name, {@code *.localhost} included, for HTTPS.
+     */
+    public String daemonRepositoryUri(String repositoryName, String region) {
+        Repository repo = requireRepo(repositoryName, null, region);
+        registryManager.ensureStarted();
+        return "localhost:" + registryManager.advertisedPort() + "/" + registryRepositoryName(repo, region);
+    }
+
     public String registryRepositoryName(String repositoryName, String registryId, String region) {
         String account = effectiveAccount(registryId);
         return repoStore.get(key(region, account, repositoryName))

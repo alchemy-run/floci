@@ -681,8 +681,12 @@ public class ImageBuilderActions {
                 tags.add(version);
             }
             ArrayNode uris = store.mapper().createArrayNode();
+            // The daemon pushes to the registry at the address it reaches over plain HTTP; the image reports the
+            // repository URI ECR hands out.
+            String pushTo = RequestScopes.callAs(build.account, region, () -> ecr.get()
+                    .daemonRepositoryUri(repositoryName, region));
             for (String tag : tags) {
-                toe.push(local, uri, tag, token);
+                toe.push(local, pushTo, tag, token);
                 uris.add(uri + ":" + tag);
             }
             containers.addObject().put("region", region).set("imageUris", uris);
