@@ -154,6 +154,7 @@ quarkus:
       - --initialize-at-run-time=io.floci.aws.config.TlsConfigSource
       - --initialize-at-run-time=io.floci.aws.services.cognito.CognitoSrpHelper
       - --initialize-at-run-time=io.floci.aws.core.common.Totp
+      - --initialize-at-run-time=io.floci.aws.services.apprunner.AppRunnerProxyController
       - --initialize-at-run-time=io.floci.aws.services.route53.Route53Service
       - --initialize-at-run-time=io.floci.aws.services.kms.KmsService
       - --initialize-at-run-time=io.floci.aws.services.bedrockagentcore.BedrockAgentCoreEventService
