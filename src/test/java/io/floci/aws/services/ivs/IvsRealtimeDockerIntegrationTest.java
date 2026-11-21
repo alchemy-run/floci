@@ -230,7 +230,8 @@ class IvsRealtimeDockerIntegrationTest {
         String viewerToken = call("CreateParticipantToken", "{\"stageArn\":\"" + stage + "\",\"userId\":\"viewer\","
                 + "\"capabilities\":[\"SUBSCRIBE\"]}").path("participantToken").path("token").asText();
         given().header("Authorization", "Bearer " + viewerToken).contentType("application/sdp")
-                .body("v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 106\r\na=rtpmap:106 H264/90000\r\n")
+                .body("v=0\r\nm=video 9 UDP/TLS/RTP/SAVPF 106\r\na=rtpmap:106 H264/90000\r\n"
+                        .getBytes(StandardCharsets.UTF_8))
                 .post(IvsRealtimeWhip.PATH).then().statusCode(403);
 
         await("the media server", 90, () -> docker.listContainersCmd().withNameFilter(List.of(
