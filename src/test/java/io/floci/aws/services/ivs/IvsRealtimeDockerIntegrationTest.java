@@ -138,7 +138,7 @@ class IvsRealtimeDockerIntegrationTest {
         StringBuilder out = new StringBuilder();
         try {
             ExecCreateCmdResponse exec = docker.execCreateCmd(IvsMediaServer.CONTAINER).withAttachStdout(true)
-                    .withAttachStderr(true).withCmd("sh", "-c", "tail -n 20 /tmp/pub-*.log").exec();
+                    .withAttachStderr(true).withCmd("sh", "-c", "grep -h 'candidate' /tmp/pub-*.log; tail -n 40 /tmp/pub-*.log; ip -brief addr").exec();
             docker.execStartCmd(exec.getId()).exec(new ResultCallback.Adapter<Frame>() {
                 @Override
                 public void onNext(Frame frame) {
