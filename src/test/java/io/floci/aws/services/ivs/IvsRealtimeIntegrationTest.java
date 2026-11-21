@@ -15,8 +15,8 @@ import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.security.KeyPair;
 import java.security.Signature;
-import java.time.Instant;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.Base64;
 
 import static io.floci.aws.services.ivs.IvsIntegrationTest.ivs;
