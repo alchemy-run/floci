@@ -77,7 +77,14 @@ public class XRayInsights {
         executor.shutdownNow();
     }
 
+    /** When the last evaluation looked, so each one counts every segment since, however late it runs. */
+    private volatile double evaluatedUntil = Double.NaN;
+
     private void evaluate() {
+        double now = XRayService.now();
+        double since = Double.isNaN(evaluatedUntil)
+                ? now - config.services().xray().insightsIntervalMillis() / 1000.0 : evaluatedUntil;
+        evaluatedUntil = now;
         try {
             Set<String> scopes = new HashSet<>();
             for (AccountAwareStorageBackend.AccountEntry<ObjectNode> entry : xray.allStateEntries("group/")) {
@@ -86,17 +93,15 @@ public class XRayInsights {
             for (String scope : scopes) {
                 String account = scope.substring(0, scope.indexOf('|'));
                 String region = scope.substring(scope.indexOf('|') + 1);
-                RequestScopes.runAs(account, region, () -> evaluate(region));
+                RequestScopes.runAs(account, region, () -> evaluate(region, since, now));
             }
         } catch (RuntimeException e) {
             LOG.debugv(e, "X-Ray insight evaluation failed");
         }
     }
 
-    private void evaluate(String region) {
-        double now = XRayService.now();
-        double window = config.services().xray().insightsIntervalMillis() / 1000.0;
-        List<XRayTraces.Trace> recent = xray.tracesBetween(region, now - window, now);
+    private void evaluate(String region, double since, double now) {
+        List<XRayTraces.Trace> recent = xray.tracesBetween(region, since, now);
         for (ObjectNode group : xray.insightGroups(region)) {
             Predicate<XRayTraces.Scope> filter = xray.groupFilter(region, group);
             Map<String, long[]> byService = new LinkedHashMap<>();
@@ -116,7 +121,7 @@ public class XRayInsights {
                     }
                 }
                 for (XRayTraces.Node segment : trace.segments) {
-                    if (segment.end < now - window) {
+                    if (segment.end < since) {
                         continue;
                     }
                     String key = segment.name + "|" + XRayTraces.type(segment);
