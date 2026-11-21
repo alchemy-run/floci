@@ -61,8 +61,11 @@ class BedrockRuntimeConverseStreamTest {
                     .map(ContentBlockDeltaEvent::delta)
                     .map(ContentBlockDelta::text)
                     .toList();
-            assertThat(text)
-                    .containsExactly("Floci stub response", " for model=", MODEL_ID);
+            // The stub streams its answer in pieces, naming the model and the prompt it answers.
+            assertThat(text).hasSizeGreaterThan(1);
+            assertThat(String.join("", text))
+                    .startsWith("Floci stub response for model=" + MODEL_ID)
+                    .contains("\"hi\"");
 
             assertThat(received).anyMatch(MessageStopEvent.class::isInstance);
         }

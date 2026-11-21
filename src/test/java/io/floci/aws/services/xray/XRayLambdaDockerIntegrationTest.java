@@ -100,6 +100,12 @@ class XRayLambdaDockerIntegrationTest {
 
     @Test
     void tracedInvocationsRecordTheirSegments() throws Exception {
+        // The default rule samples one request a second and 5% beyond it, so the second of two invocations made
+        // within a second is usually not traced. A rule of its own traces every invocation of these functions.
+        xray("/CreateSamplingRule", "{\"SamplingRule\":{\"RuleName\":\"xray-lambda-test\",\"Priority\":1,"
+                + "\"FixedRate\":1.0,\"ReservoirSize\":0,\"ServiceName\":\"xray-*\",\"ServiceType\":\"*\","
+                + "\"Host\":\"*\",\"HTTPMethod\":\"*\",\"URLPath\":\"*\",\"ResourceARN\":\"*\","
+                + "\"Version\":1}}").statusCode(200);
         function("xray-traced", TRACED);
         function("xray-failing", FAILING);
         try {
@@ -132,6 +138,7 @@ class XRayLambdaDockerIntegrationTest {
         } finally {
             given().delete("/2015-03-31/functions/xray-traced").then().statusCode(204);
             given().delete("/2015-03-31/functions/xray-failing").then().statusCode(204);
+            xray("/DeleteSamplingRule", "{\"RuleName\":\"xray-lambda-test\"}").statusCode(200);
         }
     }
 }
