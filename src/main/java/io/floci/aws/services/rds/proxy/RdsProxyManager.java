@@ -61,6 +61,11 @@ public class RdsProxyManager {
      *
      * @return false when the port could not be bound on this host
      */
+    /** Whether a MySQL or MariaDB resource already listens on {@code port}; see {@link RdsEndpointRouter#servesServerFirst}. */
+    public synchronized boolean servesServerFirst(int port) {
+        return router.servesServerFirst(port);
+    }
+
     public synchronized boolean advertise(String instanceId, List<String> hostnames, int port) {
         ProxyTarget target = targets.get(instanceId);
         if (target == null || hostnames == null || hostnames.isEmpty()) {
