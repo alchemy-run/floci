@@ -230,6 +230,93 @@ nav:
     - Cost and Usage Reports: services/cur.md
     - BCM Pricing Calculator: services/bcm-pricing-calculator.md
     - BCM Data Exports: services/bcm-data-exports.md
+    - AWS Private Certificate Authority: services/acmpca.md
+    - Amazon CloudWatch Investigations (AIOps): services/aiops.md
+    - Amazon MWAA Serverless: services/airflowserverless.md
+    - AWS Amplify Hosting: services/amplify.md
+    - Amazon AppFlow: services/appflow.md
+    - Application Signals: services/applicationsignals.md
+    - AWS Service Catalog AppRegistry: services/appregistry.md
+    - AWS App Runner: services/apprunner.md
+    - AWS Audit Manager: services/auditmanager.md
+    - AWS B2B Data Interchange: services/b2bi.md
+    - AWS Backup Search: services/backupsearch.md
+    - Agents for Amazon Bedrock: services/bedrock-agent.md
+    - Amazon Bedrock Data Automation: services/bedrock-data-automation.md
+    - AWS Chatbot: services/chatbot.md
+    - AWS CodeConnections: services/codeconnections.md
+    - Amazon Comprehend Medical: services/comprehendmedical.md
+    - AWS Glue DataBrew: services/databrew.md
+    - AWS Data Exchange: services/dataexchange.md
+    - Amazon DataZone: services/datazone.md
+    - Amazon DynamoDB Accelerator (DAX): services/dax.md
+    - AWS Deadline Cloud: services/deadline.md
+    - Amazon DevOps Guru: services/devopsguru.md
+    - Amazon DocumentDB Elastic Clusters: services/docdbelastic.md
+    - AWS Directory Service: services/ds.md
+    - Amazon ECR Public: services/ecrpublic.md
+    - Amazon EMR on EKS: services/emrcontainers.md
+    - AWS Entity Resolution: services/entityresolution.md
+    - Amazon FinSpace (end of support): services/finspace.md
+    - AWS Firewall Manager: services/fms.md
+    - Amazon Forecast: services/forecast.md
+    - Fraud Detector: services/frauddetector.md
+    - Amazon FSx: services/fsx.md
+    - Amazon Glacier: services/glacier.md
+    - Amazon Managed Grafana: services/grafana.md
+    - AWS IoT Greengrass V2: services/greengrassv2.md
+    - AWS HealthLake: services/healthlake.md
+    - EC2 Image Builder: services/imagebuilder.md
+    - Amazon CloudWatch Internet Monitor: services/internetmonitor.md
+    - AWS IoT FleetWise: services/iotfleetwise.md
+    - Managed integrations for AWS IoT Device Management: services/iotmanagedintegrations.md
+    - AWS IoT SiteWise: services/iotsitewise.md
+    - AWS IoT Wireless: services/iotwireless.md
+    - Amazon IVS (Low-Latency Streaming): services/ivs.md
+    - Amazon IVS Chat: services/ivschat.md
+    - Amazon Kendra: services/kendra.md
+    - Amazon Keyspaces: services/keyspaces.md
+    - Amazon Kinesis Video Streams: services/kinesisvideo.md
+    - Amazon Lex V2: services/lexv2.md
+    - AWS License Manager: services/licensemanager.md
+    - Amazon Location Service: services/location.md
+    - Amazon SES Mail Manager: services/mailmanager.md
+    - AWS Elemental MediaConnect: services/mediaconnect.md
+    - AWS Elemental MediaConvert: services/mediaconvert.md
+    - AWS Elemental MediaLive: services/medialive.md
+    - AWS Elemental MediaPackage v2: services/mediapackagev2.md
+    - AWS Elemental MediaTailor: services/mediatailor.md
+    - AWS HealthImaging: services/medicalimaging.md
+    - Amazon Neptune Analytics: services/neptunegraph.md
+    - AWS User Notifications: services/notifications.md
+    - AWS User Notifications Contacts: services/notificationscontacts.md
+    - CloudWatch Observability Admin: services/observabilityadmin.md
+    - AWS HealthOmics: services/omics.md
+    - Amazon OpenSearch Serverless: services/opensearchserverless.md
+    - Amazon OpenSearch Ingestion: services/osis.md
+    - Amazon Personalize: services/personalize.md
+    - AWS End User Messaging SMS and Voice (v2): services/pinpointsmsvoicev2.md
+    - Amazon Polly: services/polly.md
+    - Amazon Q Apps: services/qapps.md
+    - Amazon Q Business: services/qbusiness.md
+    - Recycle Bin: services/rbin.md
+    - "AWS re:Post Private": services/repostspace.md
+    - IAM Roles Anywhere: services/rolesanywhere.md
+    - Amazon Route 53 Domains: services/route53domains.md
+    - Route 53 Profiles: services/route53profiles.md
+    - Amazon S3 Control: services/s3control.md
+    - S3 Files: services/s3files.md
+    - EventBridge Schemas: services/schemas.md
+    - SimpleDB: services/sdb.md
+    - Security Lake: services/securitylake.md
+    - Shield: services/shield.md
+    - Signer: services/signer.md
+    - End User Messaging Social: services/socialmessaging.md
+    - SSM Contacts: services/ssm-contacts.md
+    - Incident Manager: services/ssm-incidents.md
+    - CloudWatch Synthetics: services/synthetics.md
+    - VPC Lattice: services/vpclattice.md
+    - X-Ray: services/xray.md
   - Web Console:
     - Overview: ui/index.md
     - Console Contract v1: ui/console-contract.md
