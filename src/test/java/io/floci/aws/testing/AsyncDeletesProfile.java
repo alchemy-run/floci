@@ -16,7 +16,7 @@ public class AsyncDeletesProfile implements QuarkusTestProfile {
     @Override
     public Map<String, String> getConfigOverrides() {
         return Map.of(
-                "floci.services.async-delete-millis", String.valueOf(DELETING_MILLIS),
+                "floci.async-delete-millis", String.valueOf(DELETING_MILLIS),
                 "floci.services.rds.mock", "true",
                 "floci.services.docdb.mock", "true");
     }

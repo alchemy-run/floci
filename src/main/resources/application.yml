@@ -205,6 +205,9 @@ floci:
                    # partition (CloudFront in aws-us-gov, Lightsail in aws-cn). Env: FLOCI_PARTITIONS_STRICT
     allow-unknown-regions: false  # true accepts a SigV4 scope region no partition publishes or admits by its
                                   # region pattern, giving it its own namespace. Env: FLOCI_PARTITIONS_ALLOW_UNKNOWN_REGIONS
+  # How long a DB cluster/instance, cache cluster or table reads back as deleting before it is gone.
+  # 0 removes it at once. Env: FLOCI_ASYNC_DELETE_MILLIS
+  async-delete-millis: 8000
   # Shared mock-response config for Textract/Comprehend/Rekognition/Translate. See AiMockConfigLoader.
   ai-mock-config-file: ${AI_MOCK_CONFIG:}
   storage:
@@ -426,9 +429,6 @@ floci:
     #     value: dev
 
   services:
-    # How long a DB cluster/instance, cache cluster or table reads back as deleting before it is gone. 0 = at once.
-    # Env: FLOCI_SERVICES_ASYNC_DELETE_MILLIS
-    async-delete-millis: 8000
     ssm:
       enabled: true
       max-parameter-history: 5

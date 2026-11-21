@@ -21,6 +21,7 @@ floci:
   partitions:
     strict: false
     allow-unknown-regions: false
+  async-delete-millis: 0
   ai-mock-config-file: ${AI_MOCK_CONFIG:src/test/resources/fixtures/ai-mock-config.json}
   storage:
     mode: memory
@@ -129,7 +130,6 @@ floci:
     resource-namespace: ""
 
   services:
-    async-delete-millis: 0
     ssm:
       enabled: true
       max-parameter-history: 5

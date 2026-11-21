@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit;
 
 /**
  * Finishes a delete AWS runs in the background. The resource reads back in its deleting state until
- * {@code services.async-delete-millis} has passed, then {@code removal} runs in the account and Region
+ * {@code async-delete-millis} has passed, then {@code removal} runs in the account and Region
  * of the request that deleted it. A second delete in that window meets a delete already under way, as
  * it does on AWS. At 0 the removal runs at once, inside the request.
  */
@@ -44,7 +44,7 @@ public class DeferredRemovals {
      * A removal that fails leaves the resource as the service left it, so a later delete can retry it.
      */
     public void afterDeleting(String key, Runnable removal) {
-        long millis = config.services().asyncDeleteMillis();
+        long millis = config.asyncDeleteMillis();
         if (millis <= 0) {
             removal.run();
             return;
