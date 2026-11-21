@@ -121,9 +121,10 @@ public interface EmulatorConfig {
     /**
      * How long a resource AWS deletes in the background (an RDS, DocumentDB or Neptune cluster or
      * instance, an RDS cluster endpoint, an ElastiCache cache cluster, a DynamoDB table, a Timestream
-     * for InfluxDB instance) reads back in its deleting state before it is gone. 0 removes it at once.
+     * for InfluxDB instance) reads back in its deleting state before it is gone, as on AWS, where such
+     * a delete runs in the background. 0, the default, removes it at once.
      */
-    @WithDefault("8000")
+    @WithDefault("0")
     long asyncDeleteMillis();
 
     DockerConfig docker();
