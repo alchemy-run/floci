@@ -136,7 +136,8 @@ public class FraudDetectorService implements Resettable {
     }
 
     private static AccountAwareStorageBackend<ObjectNode> store(StorageFactory factory, String name) {
-        return factory.create("frauddetector", name + ".json", new TypeReference<Map<String, ObjectNode>>() {});
+        return factory.create("frauddetector", "frauddetector-" + name + ".json",
+                new TypeReference<Map<String, ObjectNode>>() {});
     }
 
     @PreDestroy
